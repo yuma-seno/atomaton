@@ -1,0 +1,38 @@
+[
+  {
+    "path": "sessions/issue-1/orchestrator.json",
+    "agent": "orchestrator",
+    "messages": 121,
+    "calls": 99,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "project/conventions",
+      "research/web-search"
+    ],
+    "reported": false,
+    "tools": {
+      "github__get_issue": 1,
+      "github__get_issue_comments": 1,
+      "list": 25,
+      "read": 51,
+      "atoma_builtin__load_skill": 2,
+      "search__search_issues": 1,
+      "web__fetch": 6,
+      "grep": 2,
+      "glob": 9,
+      "atomaton__request_close_issue": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-09-22T08:20:17Z",
+        "ended_because": "completed",
+        "iterations": 17,
+        "messages": 121,
+        "seconds": 737,
+        "started": "2026-09-22T08:08:00Z"
+      }
+    ]
+  }
+]
