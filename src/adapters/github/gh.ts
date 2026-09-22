@@ -1,0 +1,290 @@
+/**
+ * gh.ts — thin wrappers around the `gh` CLI and `git`. The one canonical
+ * copy shared by every script and MCP server in this repo (workflow-invoked
+ * `src/entrypoints/machinery/**` and Atomaton-tool-invoked `src/entrypoints/tools/**`
+ * alike) -- see build-dist.ts for how this stays true in the deployed
+ * output despite living in one shared place at dev time.
+ */
+
+export interface RunResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+function run(cmd: string[]): RunResult {
+  const proc = Bun.spawnSync({
+    cmd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : "",
+  };
+}
+
+/**
+ * What to invoke for `gh`, as an argv prefix.
+ *
+ * `gh` everywhere except a test, which points this at its fake. It is an env var
+ * rather than a directory on PATH because PATH does not work for this on Windows: a
+ * bare command resolves through PATHEXT, so the fake has to carry an extension, and
+ * the only extensions Windows will run are a compiled `.exe` or a `.cmd` — which
+ * Bun and Node refuse to pass arguments containing `"` or `|` to, on purpose, since
+ * cmd.exe would re-parse them. Half this repository's `gh` calls carry a jq
+ * expression, so a `.cmd` shim rejects them.
+ *
+ * The fake was on PATH, and on Windows it was silently never used: what ran was the
+ * real `gh`, with the developer's own credentials, against this repository. This
+ * removes the resolution step that made that possible rather than fixing it, because
+ * the failure mode of getting it wrong is writing to a live repository.
+ *
+ * Named for what it is. This is a test seam and nothing else: it takes a script, run by
+ * the runtime already running, so it cannot be mistaken for configuration naming where
+ * a real installation keeps its CLI.
+ */
+function ghCommand(): string[] {
+  const fake = (process.env.ATOMATON_FAKE_GH ?? "").trim();
+  // `process.execPath`, not `"bun"`. Resolving the name has the same problem one layer
+  // down: a Bun installed through npm is reached by `bun.cmd`, so spawning `bun` hits
+  // the same refusal for the same arguments. The absolute path of the runtime already
+  // running this cannot be a shim.
+  return fake ? [process.execPath, fake] : ["gh"];
+}
+
+/** Run the `gh` CLI. Inherits GH_TOKEN from the parent environment. */
+export function gh(...args: string[]): RunResult {
+  return run([...ghCommand(), ...args]);
+}
+
+/**
+ * Run a READ through `gh`, treating an upstream failure as no answer rather than as
+ * an answer of "no".
+ *
+ * GitHub returned `HTTP 504` for one `gh api repos/.../pulls/427` call and the run
+ * died on it: the reviewer never started, and the pull request carried a red check
+ * for a defect in neither the code nor the machinery. There is nothing to learn from
+ * a 504 and nothing for an agent to do about it.
+ *
+ * Reads only, which is the whole reason this is a separate function rather than a
+ * change to `gh` itself. A mutation that returns 502 may well have been applied, and
+ * the invariants here are the kind a second attempt breaks -- one comment per run,
+ * one dispatch per handoff. So the retry has to be asked for, by a caller that knows
+ * its call changes nothing.
+ *
+ * Three attempts, widening, because the point is to outlast a blip rather than to
+ * sit out an outage: a run holds a runner while it sleeps.
+ */
+export function ghRead(...args: string[]): RunResult {
+  let result = gh(...args);
+  for (const delay of [2_000, 6_000]) {
+    if (result.code === 0 || !looksTransient(result)) return result;
+    console.error(
+      `::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`,
+    );
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+
+/**
+ * Whether a failure came from the far end rather than from the request.
+ *
+ * A 404 is an answer; a 504 is the absence of one. 429 belongs here as well: it is a
+ * request to wait, and waiting is what a retry does.
+ */
+export function looksTransient(result: RunResult): boolean {
+  const text = `${result.stderr} ${result.stdout}`;
+  // Character classes rather than shorthand: this line has lost a backslash to
+  // tooling twice, and `5dd` compiles just as happily as the version that works.
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text)) return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
+
+/**
+ * Run `gh` and keep its stdout as bytes.
+ *
+ * `gh` above decodes stdout as UTF-8 and trims it, which is right for JSON and
+ * ruinous for anything else: a PNG through that comes out as replacement
+ * characters with its ends shaved off. Anything binary — an attached image, a
+ * downloaded asset — has to come through here instead.
+ */
+export function ghBytes(...args: string[]): { code: number; bytes: Uint8Array } {
+  const proc = Bun.spawnSync({ cmd: [...ghCommand(), ...args], stdout: "pipe", stderr: "pipe" });
+  return { code: proc.exitCode ?? 1, bytes: proc.stdout ?? new Uint8Array() };
+}
+
+/**
+ * Run `gh` and parse its stdout as JSON. Throws on non-zero exit.
+ *
+ * `T | null`, because empty stdout produces `null` and the signature used to say
+ * `T`. `null as T` is a cast that makes the type system agree with a claim that
+ * is not true: the one production caller defends with `?? []`, and the next one
+ * would have had no reason to.
+ */
+export function ghJson<T = unknown>(...args: string[]): T | null {
+  const { code, stdout, stderr } = gh(...args);
+  if (code !== 0) {
+    throw new Error(`gh ${args.join(" ")}: ${stderr || stdout}`);
+  }
+  return stdout ? (JSON.parse(stdout) as T) : null;
+}
+
+/** The argv both GraphQL entry points build, so the two cannot drift. */
+function graphqlArgs(query: string, variables: Record<string, string | number>): string[] {
+  const args = ["api", "graphql", "-f", `query=${query}`];
+  for (const [key, value] of Object.entries(variables)) {
+    args.push("-F", `${key}=${value}`);
+  }
+  return args;
+}
+
+/** What `gh api graphql` returned, or the reason it is not an answer. */
+function graphqlResult<T>({ code, stdout, stderr }: RunResult): T {
+  if (code !== 0) {
+    throw new Error(`GraphQL query failed: ${stderr || stdout.slice(0, 200)}`);
+  }
+  const result = JSON.parse(stdout) as { data?: T; errors?: unknown };
+  if (result.errors) {
+    throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
+  }
+  return result.data as T;
+}
+
+/**
+ * Run a GraphQL MUTATION via `gh api graphql`. One attempt.
+ *
+ * Deliberately not retried, which is the whole reason there are two of these rather
+ * than one with a flag. A retried mutation can apply twice, and a caller reaching for
+ * the only function there is would get that for free.
+ */
+export function ghGraphql<T = unknown>(
+  query: string,
+  variables: Record<string, string | number> = {},
+): T {
+  return graphqlResult<T>(gh(...graphqlArgs(query, variables)));
+}
+
+/**
+ * Run a GraphQL QUERY via `gh api graphql`, retrying a transient failure.
+ *
+ * The same argument `target-state.ts` makes for reading an issue's state through
+ * `ghRead`: a failure here refuses to answer, which is right for "there is no parent"
+ * and wrong for "GitHub returned 504", and the two are indistinguishable at this
+ * level. Without the retry a blip stalls a chain that had nothing wrong with it.
+ *
+ * It matters more since GitHub's own sub-issue link became the only record of which
+ * issue a sub-issue is under: the tag that used to be the fallback is gone, so this
+ * query IS the answer.
+ */
+export function ghGraphqlRead<T = unknown>(
+  query: string,
+  variables: Record<string, string | number> = {},
+): T {
+  return graphqlResult<T>(ghRead(...graphqlArgs(query, variables)));
+}
+
+/**
+ * Whether a failed `git commit` failed because there was nothing to commit.
+ *
+ * Separated from the caller so it can be tested without a repository, and named
+ * after what it means rather than what it matches: this is not an error to report,
+ * it is the answer "no changes", and a caller that treats it as a failure abandons
+ * the steps that came after the commit.
+ */
+export function nothingToCommit(result: RunResult): boolean {
+  return /nothing to commit|no changes added to commit/i.test(`${result.stdout} ${result.stderr}`);
+}
+
+/** Run a `git` command. */
+export function gitRun(...args: string[]): RunResult {
+  return run(["git", ...args]);
+}
+
+/**
+ * Splits a string of one or more back-to-back, complete top-level JSON
+ * values (objects or arrays, no separator between them) into an array of
+ * parsed values -- what `gh api ... --paginate` (without `--jq`) actually
+ * emits on stdout: each page's whole response body written in sequence, not
+ * a single valid JSON document.
+ */
+function splitConcatenatedJson(text: string): unknown[] {
+  const results: unknown[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === "{" || c === "[") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        results.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Run `gh api <path> --paginate` and flatten the concatenated per-page JSON
+ * arrays into a single array -- the TS equivalent of the common
+ * `gh api ... --paginate | jq -s 'add // []'` bash idiom. Throws on
+ * non-zero exit.
+ */
+export function ghPaginated<T = unknown>(...args: string[]): T[] {
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code !== 0) {
+    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
+  }
+  if (!stdout.trim()) return [];
+  const flat: T[] = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+    if (Array.isArray(page)) flat.push(...(page as T[]));
+  }
+  return flat;
+}
+
+/**
+ * Fire a `workflow_dispatch`, with the one error shape every caller wants.
+ *
+ * Four call sites had grown their own copy of this: run `gh workflow run`, log a
+ * WARN with the combined stderr/stdout on failure, log the success otherwise,
+ * return whether it took. The duplication mattered because a dispatch failing
+ * quietly is how an agent chain stops without anyone noticing, so the reporting
+ * is the substance here, not boilerplate.
+ *
+ * `context` prefixes both messages so a log line still says who was dispatching.
+ */
+export function dispatchWorkflow(
+  context: string,
+  workflow: string,
+  args: string[] = [],
+  log: (message: string) => void = (m) => console.error(m),
+): boolean {
+  const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
+  if (code) {
+    log(`${context}: WARN failed to dispatch ${workflow}: ${stderr || stdout}`);
+    return false;
+  }
+  log(`${context}: dispatched ${workflow}`);
+  return true;
+}

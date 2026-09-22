@@ -1,0 +1,27 @@
+{
+  "name": "atomaton",
+  "private": true,
+  "type": "module",
+  "version": "0.1.162",
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "scripts": {
+    "synth": "bun run src/synth-workflows.ts && bun run src/build-dist.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./tests/contract ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks",
+    "test:e2e": "bun test ./tests/e2e",
+    "lint": "bun run typecheck && bun run synth"
+  },
+  "devDependencies": {
+    "@github-actions-workflow-ts/actions": "^2.5.0",
+    "@github-actions-workflow-ts/cli": "^2.5.0",
+    "@github-actions-workflow-ts/lib": "^2.5.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@octokit/webhooks-types": "^7.6.1",
+    "@types/bun": "^1.2.14",
+    "typescript": "^5.6.3",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.2"
+  }
+}

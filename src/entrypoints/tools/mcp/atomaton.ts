@@ -1,0 +1,372 @@
+#!/usr/bin/env bun
+/**
+ * atoma.ts — MCP server exposing Atomaton orchestration tools.
+ *
+ * Transport: stdio, via the official @modelcontextprotocol/sdk.
+ *
+ * Tools:
+ *   - launch_sub_agent: Launch Atomaton agents on sub-issues and end the
+ *     orchestrator session.
+ *   - request_close_issue: Conclude work on the current issue.
+ *   - reload_environment: Re-run the project's setup as a workflow step and start
+ *     a new run, for the things an agent cannot do to its own environment.
+ *
+ * Both tool responses include `_meta.session_ends: true` so the Atoma core
+ * can detect that the session should terminate.
+ *
+ * IMPORTANT: this process's `process.stdout` IS the JSON-RPC transport --
+ * never `console.log()` anywhere in this file or in anything it calls
+ * in-process (dispatchSubAgent/concludeIssue and whatever they import);
+ * always `console.error()` (stderr) for logging.
+ */
+import { gh } from "../../../adapters/github/gh.ts";
+import { dispatchSubAgent } from "../lib/dispatch_sub_agent.ts";
+import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
+import { concludeIssue, type ConcludeIssueResult } from "../lib/conclude_issue.ts";
+import { describeGateResult, needsAttention } from "../../../app/aggregation.ts";
+import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
+import { hardenCredentialHolder } from "../lib/harden.ts";
+import { dispatchRunner } from "../../../adapters/actions/dispatch.ts";
+import { getReloadLimit } from "../../../adapters/runner/config.ts";
+import {
+  reloadAccepted,
+  reloadRefusal,
+  reloadsSoFar,
+  resolveReloadLimit,
+} from "../../../domain/work/environment-reload.ts";
+
+function log(msg: string): void {
+  console.error(`[atomaton-mcp] ${msg}`);
+}
+
+// Same OS user as every other tool server, including the one that runs arbitrary
+// commands -- so this process makes itself unreadable to its peers and drops
+// writable directories from its PATH. See `../lib/harden.ts` for what that closes,
+// what it costs, and what it deliberately leaves open.
+hardenCredentialHolder(log);
+
+const LAUNCH_SUB_AGENT_SCHEMA = z.object({
+  tasks: z
+    .array(
+      z.object({
+        // `positiveInt`, not a bare `z.number()`. This was the only numeric
+        // argument in the tool tree skipping the helper whose docstring records
+        // the production failures that motivated it — models sending `"185"` for
+        // 185. Once per orchestrator run is where an avoidable rejection costs
+        // the most, since the whole plan is in that one call.
+        issue: positiveInt("The sub-issue number."),
+        agent: z.string().min(1).describe("The agent to dispatch (e.g., 'engineer')."),
+      }),
+    )
+    .min(1, "tasks must be a non-empty list of {issue, agent} objects")
+    .describe("List of {issue, agent} pairs to dispatch."),
+  /**
+   * Where the report goes for the one exit that had nowhere to put it.
+   *
+   * Four calls end a session. `create_pr` carries the report in `body`,
+   * `request_close_issue` in `summary`, `reload_environment` in `reason` -- and
+   * this one carried nothing, while being the orchestrator's most frequent exit.
+   * The session stops the moment it returns, so there is no later turn to write
+   * in: a run that meant to report after dispatching never reports at all, and
+   * the comment this tool already posted is tagged to be excluded from the next
+   * run's context, so it cannot stand in for one.
+   *
+   * Optional rather than required, and deliberately so: a partial dispatch leaves
+   * the session OPEN (see `handleLaunchSubAgent`), and on that path the closing
+   * text is still the report. Required here would make the failure path demand
+   * the report twice.
+   *
+   * Same shape as `REQUEST_CLOSE_ISSUE_SCHEMA.summary` below, because it is the
+   * same fact -- what this run concluded -- reaching the thread the same way.
+   */
+  summary: z
+    .string()
+    .optional()
+    .describe(
+      "Your report for this run, posted as a comment on the issue you are on. This call ends " +
+        "your session when every dispatch succeeds, so there is no turn after it to write one in.",
+    ),
+});
+
+const REQUEST_CLOSE_ISSUE_SCHEMA = z.object({
+  reason: z.string().min(1).describe("Why this issue's work is considered complete."),
+  summary: z.string().optional().describe("Final summary to include in the posted comment (e.g. an aggregation report)."),
+});
+
+function mcpFail(message: string): never {
+  throw new Error(message);
+}
+
+function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): McpToolResult {
+  const validTasks = args.tasks;
+
+  log(`Dispatching ${validTasks.length} sub-issue(s): ${JSON.stringify(validTasks)}`);
+
+  // The orchestrator's OWN current issue (the parent, from the sub-issues'
+  // point of view).
+  const parentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
+  const notify = process.env.ISSUE_NOTIFY ?? "";
+
+  const dispatched: string[] = [];
+  const errors: string[] = [];
+
+  for (const { issue, agent } of validTasks) {
+    try {
+      dispatchSubAgent(issue, agent, notify);
+      dispatched.push(`#${issue}→${agent}`);
+    } catch (e) {
+      const message = (e as Error).message ?? String(e);
+      log(`dispatchSubAgent failed for #${issue}: ${message}`);
+      errors.push(`#${issue}/${agent}: ${message}`);
+    }
+  }
+
+  // Best-effort comment on the PARENT issue so a human reading the parent's
+  // thread has a full audit trail of what was dispatched.
+  if (dispatched.length && parentIssue) {
+    const bodyLines = [LLM_CONTEXT_TAG.write("exclude"), "Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`)];
+    gh("issue", "comment", parentIssue, "--body", bodyLines.join("\n"));
+  }
+
+  // The report, as its own comment and WITHOUT the exclude tag.
+  //
+  // Separate from the audit comment above because they are different facts with
+  // different readers: that one is the machine's list of what it dispatched, kept
+  // out of the next run's context on purpose, and this one is what the run
+  // concluded -- the thing the next run on this issue is handed as context, and
+  // the only thing that outlives the session this call is about to end.
+  //
+  // Posted even on a partial dispatch: the session stays open there, but a report
+  // the agent has already written is not worth discarding for that.
+  const summary = (args.summary ?? "").trim();
+  if (summary && parentIssue) {
+    gh("issue", "comment", parentIssue, "--body", summary);
+  }
+
+  if (errors.length && !dispatched.length) {
+    mcpFail(`All dispatches failed: ${errors.join("; ")}`);
+  }
+
+  // The session ends only when every task was dispatched.
+  //
+  // A partial failure used to end it too, mentioning the failures in prose. By
+  // this tool's own contract the orchestrator is re-invoked when ALL sub-issues
+  // are closed — and a sub-issue nobody was dispatched onto is never closed, so
+  // the parent waited forever. The orchestrator is the one caller that can still
+  // fix a partial dispatch, and it was the one being told to stop.
+  const complete = errors.length === 0;
+
+  // Structured, because the prose was wrong in both directions. "Agents will be
+  // dispatched automatically" described neither group: the successful ones were
+  // dispatched synchronously, in the loop above, and the failed ones never will
+  // be. "Dispatch comments posted for N sub-issue(s)" described the comment
+  // rather than the dispatch, which is the part the reader cares about.
+  return {
+    text: JSON.stringify({
+      dispatched,
+      failed: errors,
+      complete,
+      note: complete
+        ? "Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed."
+        : "Some sub-agents were NOT dispatched, and nothing will retry them. This session stays open: " +
+          "re-dispatch the failures with atomaton__launch_sub_agent, or the parent waits forever for sub-issues " +
+          "nobody is working on.",
+    }),
+    meta: complete ? { session_ends: true } : {},
+  };
+}
+
+async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_SCHEMA>): Promise<McpToolResult> {
+  const reason = args.reason.trim();
+  const summary = (args.summary ?? "").trim();
+
+  if (!reason) mcpFail("reason must be a non-empty string");
+
+  const issueNumberRaw = (process.env.ISSUE_NUMBER ?? "").trim();
+  if (!issueNumberRaw) mcpFail("ISSUE_NUMBER is not set in the environment");
+  const issueNumber = Number(issueNumberRaw);
+
+  log(`Concluding issue #${issueNumber}: reason=${JSON.stringify(reason)}`);
+
+  // The module's own type, not a copy of its shape. The copy had already fallen
+  // behind: `concludeIssue` gained the aggregation outcome and this annotation
+  // hid it.
+  let result: ConcludeIssueResult;
+  try {
+    result = await concludeIssue(issueNumber, reason, summary);
+  } catch (e) {
+    const message = (e as Error).message ?? String(e);
+    log(`concludeIssue failed for #${issueNumber}: ${message}`);
+    mcpFail(`Failed to conclude issue #${issueNumber}: ${message}`);
+  }
+
+  // One sentence for both outcomes, because the difference between them is not
+  // the agent's to act on or to relay. The human-authored branch used to answer
+  // "it has NOT been closed automatically", and the agent — handed that as the
+  // last thing it heard before ending — wrote it into its report, so a person
+  // asking for work got a paragraph about which tool declined to do what (#933).
+  // Who may close the issue is decided here; what the reader sees is the comment.
+  const concluded = `Issue #${issueNumber} is concluded: your reason and summary are on the issue.`;
+
+  if (result.outcome !== "closed") {
+    return { text: `${concluded} Nothing else is yours to do here.`, meta: { session_ends: true } };
+  }
+
+  // What the aggregation gate actually did, not merely that it ran. The old
+  // wording -- "Phase-gating/aggregation for its parent has been checked" -- was
+  // true of all six outcomes, including the two where nothing was dispatched and
+  // nothing will retry.
+  const aggregation = result.aggregation;
+  const stalled = aggregation !== undefined && needsAttention(aggregation);
+
+  return {
+    text: [
+      concluded,
+      aggregation ? describeGateResult(aggregation, issueNumber) : "",
+      stalled
+        ? "This session is staying open because you are the last thing able to act on that: report it on the parent issue so a person sees it."
+        : "Nothing else is yours to do here.",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    // Ends only when something is going to happen next, matching create_pr and
+    // launch_sub_agent.
+    meta: stalled ? {} : { session_ends: true },
+  };
+}
+
+const RELOAD_ENVIRONMENT_SCHEMA = z.object({
+  reason: z
+    .string()
+    .min(1)
+    .describe(
+      "What you need the environment to have that it does not, in one sentence. Recorded on the issue so a " +
+        "person reading it later can see why the run restarted.",
+    ),
+});
+
+/**
+ * Re-run the project's setup and start a new run.
+ *
+ * The decision half is `domain/work/environment-reload.ts`. Here is the I/O: read the
+ * tally this run arrived with, refuse or dispatch, and say which on the issue.
+ *
+ * Refusing is a tool ERROR rather than a session end, and that is the point. The
+ * agent keeps its turn and can switch to reporting what it found, which is the
+ * useful thing left to do. A run that died here would take the reason with it.
+ */
+function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>): McpToolResult {
+  const number = (process.env.ISSUE_NUMBER ?? "").trim();
+  const agent = (process.env.AGENT ?? "").trim();
+  if (!number || !agent) {
+    mcpFail("Cannot reload: this run does not know its own issue number or agent name.");
+  }
+
+  const limit = resolveReloadLimit(getReloadLimit());
+  const soFar = reloadsSoFar(process.env.ATOMATON_RELOAD_COUNT);
+  const refusal = reloadRefusal(soFar, limit);
+  if (refusal) {
+    log(`reload refused: ${soFar}/${limit}`);
+    // `mcpFail` throws, and the wrapper turns that into `isError: true` -- which is
+    // what keeps the agent's turn. Returning text would read as a successful
+    // reload, and returning `session_ends` would end the run with the reason inside
+    // it. Neither leaves the agent able to report.
+    mcpFail(refusal);
+  }
+
+  const next = soFar + 1;
+  // Posted before the dispatch, and excluded from the model's context: it is a
+  // record for a person reading the issue later, and the agent about to be started
+  // is told the same thing by the tool result.
+  gh(
+    "issue", "comment", number,
+    "--body",
+    `${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: rebuilding the environment and restarting \`${agent}\` ` +
+      `(reload ${next} of ${limit}). Reason: ${args.reason}`,
+  );
+
+  const outcome = dispatchRunner({
+    context: `${agent} was to be restarted on #${number} after an environment rebuild`,
+    agent,
+    type: (process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr" ? "pr" : "issue",
+    number,
+    notify: (process.env.ISSUE_NOTIFY ?? "").trim(),
+    reloadCount: next,
+    log,
+  });
+  if (outcome === "refused-closed") {
+    // Closed underneath this run -- merged, or closed by a person while it worked.
+    // A rebuild is not worth restarting into, and the agent is told why rather than
+    // being sent to read a workflow log that contains no error.
+    mcpFail(
+      `#${number} is no longer open, so the environment was not rebuilt and nothing was restarted. ` +
+        "Report what you found rather than retrying.",
+    );
+  }
+  if (outcome !== "dispatched") {
+    // The comment above is already posted, so saying nothing here would leave an
+    // issue claiming a restart that never happened. An error keeps the turn.
+    mcpFail(
+      "Could not dispatch the new run; the environment was not rebuilt. See the workflow log. " +
+        "Report what you found rather than retrying.",
+    );
+  }
+
+  return { text: reloadAccepted(next, limit), meta: { session_ends: true } };
+}
+
+const { tools: TOOLS, dispatch } = buildMcpTools([
+  defineMcpTool({
+    name: "launch_sub_agent",
+    description:
+      "Dispatch Atomaton agents onto sub-issues and immediately end the orchestrator session. " +
+      "Call this ONCE after creating all sub-issues via GitHub MCP. " +
+      "Each sub-issue can be assigned a different agent. " +
+      "Put your report in `summary`: the orchestrator session ends immediately after this call " +
+      "returns, so there is no turn afterwards in which to write one. " +
+      "The orchestrator will be automatically re-invoked when ALL sub-issues are closed.",
+    schema: LAUNCH_SUB_AGENT_SCHEMA,
+    handler: handleLaunchSubAgent,
+  }),
+  defineMcpTool({
+    name: "request_close_issue",
+    description:
+      "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " +
+      "correct way for the orchestrator to finish an issue -- do NOT call " +
+      "github__close_issue yourself, and do NOT just stop responding without calling " +
+      "this. Your reason and summary are posted to the issue, and phase-gating/" +
+      "aggregation is triggered for its parent when this is a sub-issue. Whether the " +
+      "close happens now or the issue's author is asked to make it is this tool's " +
+      "decision and not yours -- it is the same call either way, and your session " +
+      "ends when it returns.",
+    schema: REQUEST_CLOSE_ISSUE_SCHEMA,
+    handler: handleRequestCloseIssue,
+  }),
+  defineMcpTool({
+    name: "reload_environment",
+    description:
+      "Rebuild this project's environment and restart your run. Use it when something you need is missing " +
+      "and you cannot install it yourself: a system package (you have no sudo), a globally installed CLI, or " +
+      "a work tree you broke. YOUR SESSION ENDS IMMEDIATELY and a new run starts, so finish anything you were " +
+      "part-way through first -- commit what is worth keeping and leave notes in /tmp/atomaton-workspace, which " +
+      "survives into the next run. " +
+      "What it does: re-runs `environment.setup_commands` as a privileged workflow step, against the CURRENT " +
+      "work tree. So a dependency you added to package.json, Cargo.toml or requirements.txt gets installed by " +
+      "the project's own trusted command -- you do not edit that command, and cannot. " +
+      "What it does NOT do: install a system package the setup does not already ask for. Those commands come " +
+      "from the default branch, so a package you decided you need is not in them yet; add it to " +
+      "`environment.setup_commands` in .github/atomaton/config.yaml, say so in your report, and a person merges " +
+      "it. Reloading first will hand you the same environment back and cost a run. " +
+      "There is a limit on how many times one piece of work may do this, because each reload starts a new run " +
+      "and resets the run's time budget. The tool tells you where you stand.",
+    schema: RELOAD_ENVIRONMENT_SCHEMA,
+    handler: handleReloadEnvironment,
+  }),
+]);
+
+async function main(): Promise<void> {
+  log("Starting atomaton-mcp-server (stdio transport)");
+  await serveMcpServer({ name: "atomaton-mcp-server", version: "1.0.0", tools: TOOLS, dispatch, log });
+}
+
+if (import.meta.main) void main();

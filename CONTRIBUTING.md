@@ -1,0 +1,292 @@
+# Contributing
+
+## Source-of-truth map
+
+Everything here divides into two kinds: **the deliverable**, which adopters
+receive, and **this repository's own tooling**, which they must never see.
+
+The deliverable:
+
+- `src/`: hand-authored source for the template — agent definitions, skills, MCP
+  servers, workflow definitions. Adopter-agnostic by rule: no reference to this
+  repository's build pipeline, no incident history, no PR numbers.
+- `dist/.github/`: generated from `src/` by `bun run synth`. This is what adopters
+  receive. **Not tracked in git** — it is a pure function of `src/`, and the
+  release deployment publishes it as a release asset rather than committing it.
+- `scripts/`: this project's own pipeline. `tag-release.sh` is what `deploy.on_merge`
+  names, and they are the reason there are no hand-written workflows left.
+  Governed, like `.github/`. The secret scan used to live here too and now ships to
+  every adopter as `.github/atomaton-runtime/scripts/scan_secrets.ts`; this repository
+  runs the shipped one, so a defect in it fails here before it reaches anybody else.
+
+This repository's own:
+
+- `self/`: the four files that are this repository's rather than the template's,
+  laid out to mirror `.github/`. Nothing else in `.github/` is ours. See
+  [Applying a release](#applying-a-release-to-this-repository).
+- top-level `.github/`: this repository's adoption of the deliverable. Exactly two
+  sources, and nothing kept alive by remembering: a release archive, with `self/`
+  copied over it. Upgraded deliberately rather than on merge — that lag is what
+  stops a change to `src/` from reconfiguring the live agents the moment it
+  merges. Adopters upgrade as a git-mediated merge instead, since they have tuned
+  files to lose; see [docs/runtime/tasks/move-to-a-newer-release.md](docs/runtime/tasks/move-to-a-newer-release.md), "Move to a newer release".
+- `tests/`: tests of the build-and-deploy machinery. Tests of *shipped behaviour*
+  live beside the shipped code instead.
+- `docs/`: adopter-facing documentation.
+
+Nothing this repository needs for itself belongs under `src/`. That includes
+tests of the pipeline, operational scripts, and any rule phrased in terms of
+`dist/`, `synth`, or this repository's CI — adopters have none of those.
+
+When changing template behavior, treat `src/` as canonical.
+
+## Branch protection
+
+What may reach `main` is declared in `.github/atomaton/rulesets/main.json`: no direct
+pushes, no force-pushes, no branch deletion, and a pull request that cannot merge
+until the `atomaton-check` job passes.
+
+How an adopter applies that file, and the two settings they must get right, are in
+[make a branch ruleset work with agents](docs/github/tasks/make-a-branch-ruleset-work-with-agents.md) — it is their work, not
+a contributor's. What follows is this repository's own, and the reasoning behind
+what the shipped file contains.
+
+**The required context is a string, matched by hand.** `atomaton-check` is the job name
+in `atomaton-check.yml`, and the two are joined by nothing else.
+`generated-workflows.test.ts` holds the shipped pair together; this repository's copy
+of the ruleset is applied by hand, so renaming either side means applying it again:
+
+```bash
+gh api -X PUT repos/{owner}/{repo}/rulesets/{id} --input .github/atomaton/rulesets/main.json
+```
+
+**Nothing needs a bypass.** No workflow writes to `main` — the release deployment
+attaches the deliverable to a release instead, which is why `dist/` is no longer
+tracked. An agent merging a pull request needs no bypass either: it satisfies the
+rules like anyone else.
+
+That is deliberate, and it is what keeps the ruleset file self-contained. Granting a
+bypass would mean naming either a GitHub App's ID or a deploy key — values that only
+exist after manual setup elsewhere, so the reviewed declaration would stop describing
+the whole configuration.
+
+`bypass_actors` is present and empty rather than absent, so that the intent reads as
+a decision rather than an omission. It once named the built-in GitHub Actions app,
+which is not an app installable on a repository and therefore not a valid
+`Integration` actor — the import failed with `The ruleset you are importing contains
+an invalid actor`, and the entry was never applied at all.
+
+**There is deliberately no workflow checking that the ruleset is in place.** A check
+could only report, never enforce: if the ruleset were missing then `atomaton-check`
+would no longer be a required context either, so a failing check would block nothing
+— a permanently red mark that stops nobody, which is worse than no mark at all.
+
+Nothing detects a ruleset edited in the UI without a matching change to the file, so
+keeping the two together is a discipline rather than something enforced.
+
+## Cutting a release
+
+Bump `version` in `package.json` and merge it. That is the whole procedure.
+
+The version is the single declaration, and `self/atomaton/scripts/tag-release.sh` derives the
+tag from it, so there is no tag to push and nothing that can disagree. Releasing is
+an ordinary reviewed change rather than a separate act of remembering.
+
+It happens in two halves, and the second is triggered by the first:
+
+1. **`deploy.on_merge` → `self/atomaton/scripts/tag-release.sh`.** Runs after every merge and is
+   idempotent: it reads the declared version, finds a release already exists for
+   it, and stops. Only a merge that changes the version creates the tag.
+2. **`deploy.on_tag` → `self/atomaton/scripts/publish-release.sh`.** Runs off that tag. It
+   builds, runs the live tool check, packages `dist/` as `atomaton-delivery.zip`
+   with `.github/` at the archive root, and creates the release.
+
+**Why two, when one script did both.** A tag used to be only an output here, so
+this repository shipped `on_tag` and never once used it — and the path that carries
+a tag into a deployment had no traffic on it to show it was broken. Now every
+release goes through it, and a human pushing `v1.2.3` at a commit on `main` gets
+the same publish.
+
+The cost is a window: between the tag and a successful publish, a tag exists with
+no release. `tag-release.sh` will not create it twice, so that state is reported
+rather than papered over, and the publish is idempotent:
+
+```sh
+gh workflow run atomaton-deploy.yml --ref v1.2.3 -f target=publish
+```
+
+Nothing writes to main, so none of this needs a ruleset bypass.
+
+**`publish-release.sh` also runs `self/atomaton/scripts/check-live-tools.sh`**, between building `dist/`
+and creating the release. That script starts every tool server the artifact would
+ship and asks `atoma validate --with-live-tools` what each server actually
+advertises — which is what says whether a `tool_allowlist` pattern still names a
+tool that exists, and whether any server has stopped starting. Nothing else here
+asks either question: `probe-tool-servers.ts` reads the tool list out of the
+model's request, which proves a server registered something but not that a pattern
+still matches it.
+
+It runs here, on the default branch and against `dist/`, and deliberately not on
+the pull request: it starts processes, and `tools.servers` lets a pull request name
+any `command`. `validate_deliverable.ts` reads a pull request's `.github/atomaton/`
+as data and runs nothing under `--root`, and that guarantee is not tradeable. The
+cost is that a guard which has stopped guarding is found after the merge that broke
+it rather than as a red check on its pull request.
+
+Both kinds of merge reach it, by different routes. Yours fires `push` on the
+default branch, which `atomaton-deploy.yml` listens for. An agent's fires nothing —
+GitHub starts no workflow run for events its own token triggers — so `mergePr`
+dispatches the workflow explicitly.
+
+To publish by hand, or to retry a failed run:
+
+```bash
+gh workflow run atomaton-deploy.yml --ref main -f target=release
+```
+
+## Applying a release to this repository
+
+A release does not change how this repository's own agents run. `.github/` has to
+be rebuilt from it, which is a second, deliberate step.
+
+```bash
+gh workflow run atomaton-self-deploy.yml --ref main -f version=latest
+```
+
+Or press **Run workflow** on **Atomaton Self Deploy** in the Actions tab. It opens a
+pull request and merges nothing: `.github/**` is in `merge.governed_paths`, so a person
+reviews it.
+
+What the job does, in three lines:
+
+```bash
+rm -rf .github            # a file the release DELETED is gone, not orphaned
+unzip atomaton-delivery.zip  # the deliverable
+cp -r self/. .github/     # this repository's own, at the same paths
+```
+
+The `rm -rf` is the point. `unzip -o` overwrites and never removes, so before
+`self/` existed a file the template had dropped stayed in the tree with no diff to
+notice it by — the old procedure told you to go looking for orphans yourself.
+Deleting first makes an upstream removal ordinary.
+
+### The token, and why it is a PAT
+
+`GITHUB_TOKEN` cannot write `.github/workflows/**`. Not by path rule and not by
+branch: the push is refused on **identity**, measured here. This deploy replaces
+those files, so no arrangement of paths avoids it.
+
+So the workflow needs `SELF_DEPLOY_TOKEN` — a fine-grained or classic PAT
+with the `workflow` scope, set as an Actions secret in this repository:
+
+```bash
+gh secret set SELF_DEPLOY_TOKEN
+```
+
+**No agent can reach it.** It is named in `self/workflows/atomaton-self-deploy.yml`
+and nowhere else; `atomaton-runner.yml` does not mention it, and `atoma` hands a tool
+server only the credentials that server's own `env` declares. The workflow also
+refuses a bot as `triggering_actor`, because the agent runner's token carries
+`actions: write` and could therefore dispatch a workflow in principle —
+an agent has no route to it today (`gh` and `curl` are both refused by the shell
+guard, and no MCP tool dispatches anything), but that is a denylist, and this token
+can rewrite workflows.
+
+A PAT is acceptable here and not inside Atomaton because what holds it is a person
+pressing a button. The line in #353 — a pull request may not decide its own
+execution environment — is not crossed: nothing an agent produces reaches it.
+
+### Changing something in `self/`
+
+An overlay entry is a copy, not a build, so it needs no release. Change `self/X`
+and `.github/X` in the **same pull request**, identically.
+
+`tests/contract/self-overlay.test.ts` requires them byte-identical, in both
+directions, which is what stops a change from being half-applied.
+
+Editing `.github/X` alone is worse than not editing it: the next self-deploy
+overwrites it from `self/` and the change disappears without a diff.
+
+Nothing checks that every file in `.github/` is accounted for, and nothing needs
+to. The deploy runs `rm -rf .github` first, so a file the release stopped shipping
+is not recreated. A file ADDED to `.github/` with no counterpart in `self/` would
+be silently removed by the next deploy — but `.github/**` is in `merge.governed_paths`,
+so any pull request touching it carries the blocker "this pull request changes how
+agents themselves run" and no agent can merge it. A person is already reading it.
+
+## Setup (Bun)
+
+```bash
+bun install
+```
+
+Required engine in this repository is Bun `>=1.2.0`.
+
+## Validation commands
+
+```bash
+bun run typecheck
+bun run synth
+bun run test
+bun run test:e2e
+```
+
+What each command proves:
+
+- `typecheck`: static type contract for scripts/workflows/shared libs.
+- `synth`: workflow generation and deliverable build to `dist/.github`.
+- `test`: unit-level behavior across `src/domain`, `src/shared`, `src/adapters`, `src/app`, `src/entrypoints/machinery`, and the MCP servers and hooks.
+- `test:e2e`: end-to-end checks in `tests/e2e`.
+
+`test:e2e` runs against the built tree, so `bun run synth` has to come first — it
+reads `dist/.github/atomaton-runtime/tools/mcp/*.ts`, which an untracked `dist/` does
+not have until you build it.
+
+### Green does not mean it ran
+
+`bun test <path that does not exist>` does not fail: it runs the paths it finds,
+reports them, and exits 0. So a `test` script that names a directory which has
+moved runs a smaller suite than it says it does, CI stays green, and nothing
+compares the count against anything — nobody knows what the number should be.
+`tests/contract/test-script.test.ts` is the guard: it asserts that every path the
+`test` scripts name actually exists, which is the check that has an answer. If you
+move test files, update the `test` script in the same change.
+
+### What `synth` reads
+
+Workflow generation reads `src/workflows/` and nothing else on the disk, which is
+`src/synth-workflows.ts`'s only reason to exist. The
+`github-actions-workflow-ts` CLI finds its input by globbing the whole working
+directory for `*.wac.ts`, dotfiles included, with no setting that narrows it —
+so a sibling agent worktree under `.claude/worktrees/` was another branch's copy
+of every workflow, writing over `dist/.github/workflows/` with no error and no
+warning. `tests/contract/workflow-sources.test.ts` holds the bound.
+
+This is also why `bun run synth` works on Windows: nothing spawns `node` through
+a shell any more.
+
+## Generated-file discipline
+
+- **`dist/` is gitignored.** There is nothing generated to commit, and nothing to
+  keep in sync with `src/`. Change `src/*` and let a release build it.
+- Run `bun run synth` locally whenever you want to inspect what adopters will
+  receive. CI runs it on every pull request, before `test`, to prove the
+  deliverable still builds.
+- `dist/.github/*` is generated: never hand-edit it.
+- `.github/*` is *deployed*, not generated on merge. It is a release plus `self/`
+  copied over it, rebuilt by [Atomaton Self Deploy](#applying-a-release-to-this-repository).
+  So a change under `src/` does not reach the live agents until someone
+  dispatches that, and CI does not reject a diff that touches `.github/`.
+- What is genuinely yours to edit lives in `self/`, not in `.github/`. Edit both,
+  identically, in one pull request — `tests/contract/self-overlay.test.ts` requires
+  it. Editing `.github/` alone is worse than not editing it: the next self-deploy
+  reverts it, silently.
+
+## PR checklist
+
+- Describe behavior changes from an adopter perspective.
+- Include exact commands you ran and outcomes.
+- Do not include `.github/atomaton`; it is upgraded deliberately, not per pull
+  request. `dist/` cannot appear at all — it is gitignored.
+- Avoid unrelated refactors in the same PR.
+- If you changed workflow dispatch semantics, call out backward compatibility impact explicitly.

@@ -1,0 +1,1376 @@
+import { describe, expect, test } from "bun:test";
+
+const NEWLINE = String.fromCharCode(10);
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { toolDefaults } from "../../src/domain/machinery/shipped-servers.ts";
+import { SCRIPTS_DIR } from "../../src/domain/machinery/machinery-layout.ts";
+import type { Session } from "../../src/domain/work/session.ts";
+import {
+  SECRET_NAMES_VAR,
+  SECRET_SLOT_PREFIX,
+  SECRET_SLOTS,
+} from "../../src/domain/delivery/declared-secrets.ts";
+import { CHECK_JOB_NAME } from "../../src/workflows/atomaton-check.wac.ts";
+import { MODEL_CACHE_DIR } from "../../src/domain/machinery/model-cache.ts";
+
+describe("generated workflows", () => {
+  /**
+   * The model cache has to be the same directory in three places that cannot see
+   * each other: the environment the search server reads (`XDG_CACHE_HOME`), the
+   * path `actions/cache` keeps, and the ACLs that decide who may write it.
+   *
+   * A disagreement between any two of them is silent. The weights download again
+   * every run, or fail to and reranking falls back to a first-stage order that
+   * looks exactly like a good answer, and it went unnoticed for
+   * two releases.
+   *
+   * `MODEL_CACHE_DIR` is imported rather than typed out here, so this test cannot
+   * agree with a stale copy of the name.
+   */
+  test("the reranker cache is one directory, reachable by both users", () => {
+    type WorkflowStep = { name?: string; run?: string; with?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8"),
+    ) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+
+    const cache = steps.find((step) => step.name === "Cache the reranker model");
+    expect(cache, "the runner must keep the model between runs").toBeDefined();
+    const cached = cache?.with?.path ?? "";
+    expect(cached, "cached path names the shared directory").toContain(MODEL_CACHE_DIR);
+    // An action input is not a shell: `${RUNNER_TEMP}` there is a directory of that
+    // literal name, and the cache would keep an empty one.
+    expect(cached, "an action input cannot read a shell variable").not.toContain("${RUNNER_TEMP}");
+    expect(cached).toContain("runner.temp");
+
+    // The other end: what the server is told to use. Same base, same name.
+    const agent = steps.find((step) => (step.run ?? "").includes("XDG_CACHE_HOME="));
+    const xdg = /XDG_CACHE_HOME="([^"]+)"/.exec(agent?.run ?? "")?.[1] ?? "";
+    expect(xdg, "the server's cache base").toBeTruthy();
+    const base = xdg.replace("${RUNNER_TEMP}", "").replace(/^\//, "");
+    expect(
+      cached.includes(base),
+      `cache path ${cached} must cover the server's ${xdg}/${MODEL_CACHE_DIR}`,
+    ).toBe(true);
+
+    // And both users, or one of them has half of it: the restore happens as the
+    // runner, the load as the tool user, the save as the runner again.
+    const acl = steps.find(
+      (step) => (step.run ?? "").includes("setfacl") && (step.run ?? "").includes("atomaton-tool-cache"),
+    );
+    const run = acl?.run ?? "";
+    // The user is read out of the workspace ACL in the same step rather than typed
+    // in: the name is a synth-time constant, and renaming it must not break this
+    // test into a false failure.
+    const user = /setfacl -R -m "u:([^:]+):rwX" "\$GITHUB_WORKSPACE"/.exec(run)?.[1] ?? "";
+    expect(user, "the tool user, as the workspace ACL names it").toBeTruthy();
+
+    const cacheDir = "${RUNNER_TEMP}/atomaton-tool-cache";
+    for (const [who, why] of [
+      [`u:${user}`, "the tool user must be able to write what the runner restored"],
+      ["u:$(id -un)", "the runner must be able to read back what the tool user downloaded"],
+    ]) {
+      expect(run, why).toContain(`setfacl -R -m "${who}:rwX" "${cacheDir}"`);
+      // The default as well as the recursive pass: the weights that matter do not
+      // exist yet when these run.
+      expect(run, `${why} -- including files created later`).toContain(
+        `setfacl -R -d -m "${who}:rwX" "${cacheDir}"`,
+      );
+    }
+  });
+
+  test("routes recover mode and reports invalid command syntax", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = {
+      on?: { workflow_call?: { inputs?: Record<string, unknown> } };
+      jobs?: Record<string, { outputs?: Record<string, string>; with?: Record<string, string>; steps?: WorkflowStep[] }>;
+    };
+
+    const manual = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-manual-comment.yml", "utf8")) as WorkflowDocument;
+    expect(manual.jobs?.parse?.outputs?.session_mode).toContain("session_mode");
+    expect(manual.jobs?.run?.with?.session_mode).toContain("session_mode");
+    expect(manual.jobs?.parse?.steps?.some((step) => step.name === "Report invalid slash command")).toBe(true);
+
+    const runner = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    expect(runner.on?.workflow_call?.inputs?.session_mode).toBeDefined();
+    const restore = runner.jobs?.run?.steps?.find((step) => step.name === "Restore agent session from atomaton-data");
+    expect(restore?.run).toContain('--session-mode "${{ inputs.session_mode }}"');
+  });
+
+  /**
+   * The same rule, on the other side of the line, and stated the way it actually is.
+   *
+   * The test above reads the generated workflow and can only see a notice posted by
+   * workflow bash. Every notice this repository adds now goes into a script instead,
+   * where the tag is one import away from being forgotten -- and it was, twice:
+   * `guard_comment_during_run.ts` had gone untagged since it was written, and
+   * `resolve_resume_agent.ts` arrived untagged with `/resume`.
+   *
+   * What is required is a DECISION, not a particular one. `validate_pull_request.ts`
+   * writes `include` on purpose: a CI failure is the one comment the engineer has to
+   * read. The bug is a comment with no tag at all, because that is included by
+   * omission -- nobody chose it, and the choice is invisible to the next reader.
+   *
+   * It is not cosmetic. An untagged notice becomes part of what the next run reads,
+   * and the cost was measured: three failed runs left a 425-message session, and the
+   * fourth spent 348k prompt tokens and then abandoned its instructions. The same
+   * instructions on a fresh issue took 61k.
+   */
+  test("every script that posts a comment says whether the agent should read it", () => {
+    const dir = "src/entrypoints/machinery";
+    const scripts = readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
+
+    // `post_result_comment.ts` is the one comment that IS the agent's own output. It
+    // is the thing the next run is supposed to read.
+    const exempt = new Set(["post_result_comment.ts"]);
+
+    const posters: string[] = [];
+    for (const file of scripts) {
+      if (exempt.has(file)) continue;
+      const source = readFileSync(`${dir}/${file}`, "utf8");
+      // Whitespace-normalised, because these calls are written both on one line and
+      // across five, and a test that only matched one formatting would pass by
+      // missing the file rather than by checking it.
+      const flat = source.replace(/\s+/g, " ");
+      if (!/gh\( ?"issue", ?"comment"/.test(flat)) continue;
+      posters.push(file);
+      expect(
+        /LLM_CONTEXT_TAG\.write\("(include|exclude)"\)/.test(source),
+        `${file} posts a comment with no llm-context tag, so it joins the next run's ` +
+          "context because nobody said otherwise. Write exclude for a notice addressed " +
+          "to a person, or include for something the agent has to read",
+      ).toBe(true);
+    }
+
+    expect(posters.length, "scripts that post a comment").toBeGreaterThan(0);
+  });
+
+  /**
+   * A stop has to cross a boundary nothing else does.
+   *
+   * The person deciding is outside the job; atoma is inside it and busy. Three things
+   * have to line up, and any one of them missing makes `/stop` a command that posts a
+   * notice and stops nothing:
+   *
+   *   1. the watcher starts BEFORE the agent -- a stop typed while the agent was
+   *      already running would otherwise never be looked for
+   *   2. atoma is told the same path the watcher writes
+   *   3. the watcher's token is not in the agent step's own environment, which that
+   *      step keeps free of credentials on purpose
+   */
+  test("the stop watcher runs before the agent and writes where atoma is looking", () => {
+    type WorkflowStep = { name?: string; run?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const watcher = steps.findIndex((s) => s.name === "Watch for a stop request");
+    const agent = steps.findIndex((s) => s.name === "Run agent");
+
+    expect(watcher, "the stop watcher step").toBeGreaterThan(-1);
+    expect(agent, "the agent step").toBeGreaterThan(-1);
+    expect(watcher, "the watcher has to be looking before there is anything to stop").toBeLessThan(agent);
+
+    const stopFile = "${RUNNER_TEMP}/atomaton-run/stop-requested";
+    expect(steps[watcher]?.run).toContain(`--stop-file "${stopFile}"`);
+    expect(steps[agent]?.run).toContain(`--stop-file "${stopFile}"`);
+
+    expect(Object.keys(steps[agent]?.env ?? {})).not.toContain("GH_TOKEN");
+  });
+
+  // The runner may resume a branch but must never create one: a run that only
+  // reports or closes something would otherwise leave a branch behind, which is
+  // how the repository accumulated 72 of them. Creation belongs to the first
+  // commit, in `commit_and_push`.
+  //
+  // A `pr` run is the one case that is not "resuming" and is still not creating:
+  // the branch it is put on already exists on `origin` -- it is the pull request's
+  // head branch -- and the step re-labels the commit the run already has with that
+  // name. Nothing new reaches the remote, and `checkout -B` (which this tolerates)
+  // is what says so; `-b`/`-c` would be a branch appearing from nowhere.
+  test("checks out the branch a run starts from without creating one", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const step = steps.find((candidate) => candidate.name === "Check out the branch this run starts from");
+    expect(step, "atomaton-runner issue branch step").toBeDefined();
+    expect(step?.run).toContain("refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}");
+    expect(step?.run).toContain('git checkout -B "${BRANCH_NAME}" "refs/remotes/origin/${BRANCH_NAME}"');
+    // Falls back to the adopter's configured base branch, not to a new branch.
+    expect(step?.run).toContain("base_branch");
+    expect(steps.some((candidate) => /git (checkout|switch) -[bc]\b/.test(candidate.run ?? ""))).toBe(false);
+  });
+
+  /**
+   * A `pr` run has to end up on the pull request's head branch, or its tools have
+   * nothing to push to.
+   *
+   * `actions/checkout` checks `refs/pull/N/head` out DETACHED -- the ref is not a
+   * branch, so `git rev-parse --abbrev-ref HEAD` answers `HEAD` -- and the step
+   * that used to sit here wrote exactly that into `BRANCH`. `commit_and_push` then
+   * built a refspec out of git's description of the state and died on
+   * `fatal: invalid refspec '(HEAD detached at pull/802/head)'`, so the run
+   * `atomaton-validate-pr.yml` dispatches to fix red CI was the one that could not
+   * push its fix. Observed twice: #247, #803.
+   *
+   * Four things have to hold in the generated YAML, and each is asserted here
+   * because each is a way for the step to look right and not be: it runs only for
+   * `pr` (an issue run's branch is decided by the step above it), it asks the
+   * pull request for its head branch rather than reading git, it re-labels the
+   * commit the run already has rather than moving HEAD, and it names that branch
+   * in `BRANCH` for `resolveBranch()`'s first route to answer with.
+   */
+  test("a pr run is put on the pull request's head branch", () => {
+    type WorkflowStep = { name?: string; run?: string; if?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+
+    const resolve = steps.find((candidate) => candidate.name === "Resolve the pull request's head branch");
+    expect(resolve, "the step that names the pull request's head branch").toBeDefined();
+    expect(resolve?.if, "an issue run's branch is decided by its own step").toBe("inputs.type == 'pr'");
+    expect(resolve?.run).toContain("resolve_pr_branch.ts");
+    expect(resolve?.run).toContain('--number "${{ inputs.number }}"');
+    // The credential the neighbouring steps already carry, and no other.
+    expect(resolve?.env).toEqual({ GH_TOKEN: "${{ github.token }}" });
+
+    const checkout = steps.find((candidate) => candidate.name === "Check out the pull request's head branch");
+    expect(checkout, "the step that puts the run on that branch").toBeDefined();
+    expect(checkout?.if).toBe("inputs.type == 'pr'");
+    // Fed by the resolution, not by git -- and unset means stay detached.
+    expect(checkout?.env?.BRANCH_NAME).toContain("steps.pr-branch.outputs.branch");
+    expect(checkout?.run).toContain("refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}");
+    // The re-labelling: HEAD, never GITHUB_SHA. The run is dispatched with no
+    // `--ref`, so GITHUB_SHA is the default branch's tip while the checkout is the
+    // pull request's head -- and a shallow checkout of a pull request need not
+    // even contain that commit. Comments are stripped first, because the step's own
+    // comment explains exactly this and would otherwise trip the check.
+    expect(checkout?.run).toContain('git checkout -B "${BRANCH_NAME}" HEAD');
+    const checkoutCommands = (checkout?.run ?? "")
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+    expect(checkoutCommands).not.toContain("GITHUB_SHA");
+    expect(checkout?.run).toContain('echo "BRANCH=${BRANCH_NAME}" >> $GITHUB_ENV');
+    // Every path that cannot resolve exits 0: the run stays detached and says so
+    // rather than stopping before the agent has reported anything.
+    expect(checkout?.run).toContain("exit 0");
+
+    // And the whole point: it runs BEFORE the agent, or the agent's tools would
+    // resolve BRANCH from the environment that was set without it.
+    const resolveAt = steps.findIndex((candidate) => candidate.name === "Resolve the pull request's head branch");
+    const checkoutAt = steps.findIndex((candidate) => candidate.name === "Check out the pull request's head branch");
+    const agentAt = steps.findIndex((candidate) => candidate.name === "Run agent");
+    expect(agentAt, "the agent step").toBeGreaterThanOrEqual(0);
+    expect(resolveAt).toBeLessThan(checkoutAt);
+    expect(checkoutAt).toBeLessThan(agentAt);
+
+    // Nothing anywhere still writes git's answer for a detached checkout into
+    // BRANCH -- `git rev-parse --abbrev-ref HEAD` is `HEAD` on a `pr` run, which
+    // is the value `resolveBranch()` must never be handed.
+    expect(
+      steps.some((candidate) => (candidate.run ?? "").includes("rev-parse --abbrev-ref HEAD")),
+      "no step may set BRANCH from git's description of a detached HEAD",
+    ).toBe(false);
+  });
+
+  // Guards a failure that is otherwise silent until a tool call is denied: Atoma
+  // spawns a `before_tool` hook as a program, and a repository committed from a
+  // filesystem without a POSIX exec bit records it as non-executable. The hook is
+  // fail-closed, so losing the bit disables the tool entirely rather than
+  // degrading it.
+  test("makes tool hooks executable before the agent runs", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const chmod = steps.findIndex((candidate) => candidate.name === "Make tool hooks executable");
+    expect(chmod, "atomaton-runner hook chmod step").toBeGreaterThanOrEqual(0);
+    expect(steps[chmod]?.run).toContain("chmod +x");
+
+    const agent = steps.findIndex((candidate) => candidate.name === "Run agent");
+    expect(agent, "atomaton-runner agent step").toBeGreaterThanOrEqual(0);
+    expect(chmod, "hooks must be executable before the agent can call a tool").toBeLessThan(agent);
+  });
+
+  /**
+   * The deliverable's own consistency is checked on every validation run.
+   *
+   * Three properties, and each one is a way the check could be present and useless.
+   *
+   * It must be unconditional. The validation has to run independently of
+   * `config.yaml`'s `checks.pull_request_runs.commands` — an adopter's `atomaton-check.yml` runs nothing
+   * at all until they configure it, and whatever they put there is their pipeline.
+   * An `if:` on this step would put our own integrity check back under their
+   * control.
+   *
+   * It must read the PULL REQUEST's tree. This job runs on the default branch, so
+   * its first checkout is the machinery; a second checkout brings the content being
+   * judged. Validating the first one would pass every time, by construction.
+   *
+   * And `validate_pull_request.ts` must be given the report. Without it that script
+   * refuses to run at all — an absent report is "we did not check", which must never
+   * be able to look like "there was nothing wrong".
+   */
+  test("every validation run checks the deliverable the pull request would merge", () => {
+    type WorkflowStep = { name?: string; run?: string; if?: string; uses?: string; with?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-validate-pr.yml", "utf8"),
+    ) as WorkflowDocument;
+    const steps = workflow.jobs?.validate?.steps ?? [];
+
+    const check = steps.find((step) => step.run?.includes("validate_deliverable.ts"));
+    expect(check, "no step runs validate_deliverable.ts").toBeDefined();
+    expect(check?.if, "the deliverable check must not be conditional").toBeUndefined();
+
+    const headCheckout = steps.find(
+      (step) => step.uses?.startsWith("actions/checkout@") && step.with?.ref !== undefined,
+    );
+    expect(headCheckout, "the pull request's own tree is never checked out").toBeDefined();
+    expect(headCheckout?.with?.ref).toContain("inputs.branch");
+    expect(check?.run, "the check must read the pull request's tree").toContain(`--root "${headCheckout?.with?.path}"`);
+
+    const validate = steps.find((step) => step.run?.includes("validate_pull_request.ts"));
+    expect(validate?.run, "the verdict never reaches the script that acts on it").toContain("--deliverable-report");
+  });
+
+  /**
+   * Everything a tool server reads from the environment is passed to it.
+   *
+   * This is the test a review asked for, because the change it reviewed
+   * had exactly this bug. `sudo` resets the environment, so the agent step now
+   * enumerates what to pass — and the first version of that list was assembled from
+   * the step's own `env:` block rather than from what the servers read.
+   * `GITHUB_REPOSITORY` was missing, which makes every `search__*` call answer
+   * "there is no repository to search" and stops `atomaton__request_close_issue`
+   * outright; `GITHUB_RUN_ID` was present while nothing read it. Both mistakes are
+   * invisible until an agent runs.
+   *
+   * The servers inherit atoma's environment, so "passed to atoma" is the same
+   * question as "reachable by a server".
+   */
+  test("every environment variable a tool server reads is passed to the agent", () => {
+    const roots = ["src/entrypoints/tools", "src/adapters", "src/app", "src/domain", "src/shared"];
+    const files: string[] = [];
+    const walk = (directory: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) files.push(path);
+      }
+    };
+    for (const root of roots) walk(root);
+    expect(files.length, "the walk found no sources").toBeGreaterThan(20);
+
+    const read = new Set<string>();
+    for (const file of files) {
+      const source = readFileSync(file, "utf8");
+      for (const match of source.matchAll(/process\.env\.([A-Za-z_][A-Za-z0-9_]*)/g)) read.add(match[1]!);
+      for (const match of source.matchAll(/process\.env\["([A-Za-z_][A-Za-z0-9_]*)"\]/g)) read.add(match[1]!);
+    }
+    expect(read.size, "no environment reads found, so this test checks nothing").toBeGreaterThan(3);
+
+    /**
+     * Names a server may read that the runner deliberately does not set.
+     *
+     * Each needs a reason, because the default for anything a server reads is that
+     * it must be passed — an entry here is a claim that the code works without it.
+     */
+    const NOT_PASSED = new Map([
+      ["ATOMATON_DISPATCH_WORKFLOW", "an override nothing sets; the reader has a default"],
+      [
+        // A test seam, and the one variable whose absence in a run is the point. Set, it
+        // sends every `gh` call to a fake; that is what a test wants and what a run must
+        // never have. Passing it would put the means of silently faking GitHub into the
+        // environment the agent's own tools read.
+        "ATOMATON_FAKE_GH",
+        "the fake-gh seam; a run must never have it set, so it is deliberately not carried",
+      ],
+    ]);
+
+    const runner = readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8");
+    const start = runner.indexOf("AGENT_ENV=(");
+    expect(start, "the agent step no longer builds an environment list").toBeGreaterThan(-1);
+    const list = runner.slice(start, runner.indexOf("atoma run", start));
+
+    for (const name of [...read].sort()) {
+      if (NOT_PASSED.has(name)) continue;
+      expect(
+        list.includes(`${name}=`),
+        `a tool server reads ${name} and the agent step does not pass it. ` +
+          `sudo resets the environment, so it arrives as unset — add it to AGENT_ENV, ` +
+          `or to NOT_PASSED in this test with the reason it is safe to omit.`,
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * Closing the world-writable PATH directories has to come after everything that
+   * installs into one.
+   *
+   * It did not, and the run failed:
+   *
+   *     curl: (23) Failure writing output to destination
+   *
+   * That was "Install Atoma CLI" writing to `/usr/local/bin`, which this step had
+   * just made unwritable. No agent could start -- v0.1.62 shipped that way and
+   * v0.1.63 existed only to undo it.
+   *
+   * The ordering is load-bearing in both directions and neither is obvious from
+   * reading either step: the chmod must be late enough that the installs are done,
+   * and early enough that the agent has not started. So it is pinned here rather
+   * than left to whoever next reorders the file.
+   */
+  test("world-writable PATH directories are closed after every install, before the agent", () => {
+    type WorkflowStep = { name?: string; run?: string; uses?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+
+    const closer = steps.findIndex((step) => (step.run ?? "").includes("chmod go-w"));
+    expect(closer, "the step that closes world-writable PATH entries").toBeGreaterThanOrEqual(0);
+
+    // Anything that writes a program somewhere on PATH. Matched on what the step
+    // does rather than on its name, so a renamed or newly added installer is still
+    // covered -- the failure this guards against came from a step nobody thought
+    // of as an installer at the time.
+    const installs = steps
+      .map((step, index) => ({ step, index }))
+      .filter(({ step }) => {
+        const run = step.run ?? "";
+        return (
+          /\/usr\/local\/bin|\/usr\/bin/.test(run) ||
+          (step.uses ?? "").startsWith("oven-sh/setup-bun") ||
+          /\b(apt-get install|npm install -g|bun add -g|pipx install)\b/.test(run)
+        );
+      })
+      .filter(({ index }) => index !== closer);
+
+    expect(installs.length, "at least one install step should be recognised").toBeGreaterThan(0);
+    for (const { step, index } of installs) {
+      expect(
+        index,
+        `"${step.name ?? step.uses}" writes onto PATH, so it must run BEFORE the directories are closed -- ` +
+          `closing them first is what broke v0.1.62 with "curl: (23) Failure writing output to destination"`,
+      ).toBeLessThan(closer);
+    }
+
+    const agent = steps.findIndex((step) => step.name === "Run agent");
+    expect(agent, "the agent step").toBeGreaterThanOrEqual(0);
+    expect(closer, "the directories must be closed before any tool server starts").toBeLessThan(agent);
+  });
+
+  /**
+   * The run's own files stay out of the work tree.
+   *
+   * The session, the fetched events, the ops log and the agent's stdout and stderr
+   * used to be written to the repository root. That cost an adopter five
+   * `.gitignore` lines as a precondition -- skip them and the engineer's
+   * `git add -A` committed the session and logs, then `create_pr` refused for a
+   * dirty worktree, every time, with nothing naming the cause.
+   *
+   * A bare relative path in a step is what puts a file back there. It is a few
+   * characters from the correct form and reads the same, so this asks the GENERATED
+   * workflow rather than trusting the source.
+   */
+  test("the run's own files are written outside the work tree", () => {
+    type WorkflowStep = { name?: string; run?: string; env?: Record<string, string>; if?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    expect(steps.length, "atomaton-runner has steps").toBeGreaterThan(0);
+
+    const names = ["session.json", "events.json", "atomaton_ops.log", "atomaton_output.txt", "atomaton_logs.txt"];
+    for (const step of steps) {
+      const lines = [step.run ?? "", ...Object.values(step.env ?? {}), step.if ?? ""]
+        .join("\n")
+        .split("\n")
+        // Shell comments are prose, and prose about where a file USED to live is
+        // worth being able to write. Only what the shell executes can put a file
+        // back in the work tree.
+        .filter((line) => !line.trimStart().startsWith("#"));
+      const text = lines.join("\n");
+      for (const name of names) {
+        for (const match of text.matchAll(new RegExp(`(.{0,24})${name.replace(".", "\.")}`, "g"))) {
+          const before = match[1] ?? "";
+          expect(
+            /RUNNER_TEMP|atomaton-run\//.test(before),
+            `"${step.name ?? "?"}" mentions ${name} at "...${before}${name}" with no directory before it. ` +
+              `A bare name lands in the repository root, where git add -A commits it and create_pr then ` +
+              `refuses for a dirty worktree`,
+          ).toBe(true);
+        }
+      }
+    }
+  });
+
+  /**
+   * The directory has to exist before the first write, and be shared with the tool
+   * user before the agent runs. Those are two different steps and cannot be one:
+   * three steps write into it before that user exists.
+   */
+  test("the run directory is created before anything writes to it, and shared before the agent runs", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+
+    const created = steps.findIndex((step) => /mkdir -p "\$\{RUNNER_TEMP\}\/atomaton-run"/.test(step.run ?? ""));
+    expect(created, "the step that creates the run directory").toBeGreaterThanOrEqual(0);
+
+    const firstWriter = steps.findIndex((step) => /atomaton-run\/(events|session)\.json/.test(step.run ?? ""));
+    expect(firstWriter, "a step that writes into it").toBeGreaterThanOrEqual(0);
+    expect(created, "the directory must exist before the first write").toBeLessThan(firstWriter);
+
+    const shared = steps.findIndex((step) => /setfacl[^\n]*atomaton-run/.test(step.run ?? ""));
+    expect(shared, "the step that gives the tool user access").toBeGreaterThanOrEqual(0);
+
+    const agent = steps.findIndex((step) => step.name === "Run agent");
+    expect(agent, "the agent step").toBeGreaterThanOrEqual(0);
+    expect(shared, "the tool user needs access before it writes the session").toBeLessThan(agent);
+  });
+
+  /**
+   * No script opens one of the run's own files by a bare relative name.
+   *
+   * The companion to the test above, and the one that was missing when it counted.
+   * That one reads the generated workflow, so a path hardcoded inside a SCRIPT is
+   * invisible to it -- and `post_result_comment.ts` had three:
+   *
+   *     existsSync("atomaton_output.txt")
+   *     readFileSync("atomaton_logs.txt", "utf8")
+   *
+   * Correct only while the run's files sat in the repository root. They moved
+   * to `$RUNNER_TEMP/atomaton-run`, so `existsSync` went false -- and the branch it
+   * falls into reports "session ended via a tool call", which reads like a normal
+   * outcome. **Two releases went out where no agent's report reached anyone.** The
+   * step said success, the agent wrote 3,914 characters, and nobody received them.
+   *
+   * A relative path is the failure. Whether it is in a workflow or a script is an
+   * implementation detail, so both are checked, and the message says to pass it in
+   * rather than to fix the string.
+   */
+  test("no script opens the run's own files by a bare name", () => {
+    const names = ["session.json", "events.json", "atomaton_ops.log", "atomaton_output.txt", "atomaton_logs.txt"];
+    const CALLS = ["existsSync", "readFileSync", "writeFileSync", "appendFileSync", "unlinkSync", "statSync"];
+    const scripts = readdirSync("src/entrypoints/machinery", { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts"))
+      .map((entry) => join("src/entrypoints/machinery", entry.name));
+    expect(scripts.length, "there should be scripts to check").toBeGreaterThan(5);
+
+    for (const file of scripts) {
+      // Comments stripped first. Prose may name the file freely -- and has to,
+      // since the header of `post_result_comment.ts` explains this very defect by
+      // quoting the call that caused it. A test that could not tell the two apart
+      // would forbid writing down what went wrong.
+      const text = readFileSync(file, "utf8")
+        .split("\n")
+        .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+        .join("\n");
+      for (const name of names) {
+        // Built without a regular expression, because a regular expression here has
+        // to survive being written into a template literal -- and it did not: `\s`
+        // and `\(` lost a backslash on the way in, leaving `s*(s*` and an
+        // unbalanced group. The test failed to compile rather than failing to find
+        // anything, which is the better direction, but only by luck.
+        //
+        // `indexOf` on a fixed string cannot be mis-escaped. It costs one loop over
+        // six function names and reads as what it checks.
+        const opened = `("${name}"`;
+        const bare = CALLS.some((call) => text.includes(`${call}${opened}`) || text.includes(`${call} ${opened}`));
+        expect(
+          bare,
+          `${file} opens "${name}" by a bare name. The run's files live outside the ` +
+            `work tree, so a relative path resolves to nothing -- take the path as an argument instead`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  /**
+   * The machinery checkout does not stay in the work tree.
+   *
+   * `actions/checkout` can only write under `GITHUB_WORKSPACE`, so it lands there
+   * and has to be moved out. While it stayed, `git status` was never clean --
+   * `?? atomaton-machinery/` -- which meant `git add -A` committing it as a dangling
+   * gitlink with no `.gitmodules`, and `create_pr` refusing for a dirty worktree.
+   *
+   * `.gitignore` in this repository already carries `atoma-src/` with a comment
+   * describing exactly that failure. Same shape, found once, and
+   * `atomaton-machinery/` was never added beside it -- and an adopter has neither
+   * line, so it happened to every one of them.
+   *
+   * Found by a verification run, which is the point: the agent was told
+   * the work tree would be clean, found it was not, and spent its whole iteration
+   * budget working out why.
+   */
+  test("the machinery ends up outside the work tree, before anything reads it", () => {
+    type WorkflowStep = { name?: string; run?: string; with?: Record<string, unknown> };
+    type WorkflowDocument = { jobs?: Record<string, { env?: Record<string, string>; steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const job = workflow.jobs?.run;
+    const steps = job?.steps ?? [];
+
+    // One source for the value. A job-level `env:` plus a `$GITHUB_ENV` write means
+    // relying on the env file winning, and a run where it did not would break every
+    // path in every step at once -- looking like a bad release rather than a
+    // precedence question.
+    expect(job?.env?.ATOMATON_MACHINERY_ROOT, "must not also be a job-level env").toBeUndefined();
+
+    const setter = steps.findIndex((step) => /ATOMATON_MACHINERY_ROOT=[^\n]*>>\s*"?\$GITHUB_ENV/.test(step.run ?? ""));
+    expect(setter, "the step that sets ATOMATON_MACHINERY_ROOT").toBeGreaterThanOrEqual(0);
+
+    const assignment = /ATOMATON_MACHINERY_ROOT=([^\s"]+)/.exec(steps[setter]?.run ?? "");
+    const value = assignment?.[1] ?? "";
+    expect(value, "an absolute path outside the work tree, not a relative one").toMatch(/^\$\{RUNNER_TEMP\}\//);
+
+    // Nothing may read it before it is set. A step that did would get the empty
+    // string and look in the repository root, which is where the machinery is not.
+    for (const [index, step] of steps.entries()) {
+      if (index >= setter) continue;
+      expect(
+        /\$\{?ATOMATON_MACHINERY_ROOT/.test(step.run ?? ""),
+        `"${step.name ?? "?"}" reads ATOMATON_MACHINERY_ROOT before step ${setter} sets it`,
+      ).toBe(false);
+    }
+
+    const checkout = steps.findIndex((step) => step.with?.path === "atomaton-machinery");
+    expect(checkout, "the machinery checkout").toBeGreaterThanOrEqual(0);
+    expect(checkout, "the move comes straight after the checkout").toBeLessThan(setter);
+  });
+
+  /**
+   * The runner decides whether a run changed anything by grepping the ops log for
+   * op names, and the ops log is written somewhere else entirely. That is the exact
+   * shape `adapters/runner/ops-log.ts` exists to protect against -- its own comment records the
+   * time a refactor changed a log message's wording and a grep silently stopped
+   * matching.
+   *
+   * Silently is the word. If `commit_and_push` were renamed, every run would report
+   * changing nothing, the no-progress limit would fire on work that was going fine,
+   * and nothing anywhere would fail.
+   */
+  test("every op the runner treats as progress is one something actually writes", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8"),
+    ) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const grep = steps
+      .map((step) => step.run ?? "")
+      .find((run) => run.includes('"op":"(commit_and_push'));
+    expect(grep, "the runner must read what the run changed out of the ops log").toBeDefined();
+
+    const ops = /"op":"\(([a-z_|]+)\)"/.exec(grep ?? "")?.[1]?.split("|") ?? [];
+    expect(ops.length, "and must name at least one op").toBeGreaterThan(0);
+
+    const github = readFileSync("src/entrypoints/tools/mcp/github.ts", "utf8");
+    for (const op of ops) {
+      expect(github, `nothing writes an ops-log entry for "${op}"`).toContain(`logOp("${op}"`);
+    }
+  });
+
+  /**
+   * An operational notice does not become the next run's context.
+   *
+   * `reconcile_github_session` drops a comment only when it is bot-authored AND
+   * carries `llm-context=exclude`. Three notices had the first and not the second:
+   * the failure warning, the loop-limit notice and the limit-reached notice. All
+   * three are addressed to a person -- each names one and tells them how to resume
+   * -- and the next run can do nothing with them but carry them.
+   *
+   * Carrying them is not free, and the direction is the wrong one: failing appends
+   * a notice, a longer context fails more, and a failure appends another notice.
+   * Measured -- three failed runs, a 425-message session, and a fourth run
+   * that spent 348k prompt tokens over four iterations and then abandoned its
+   * instructions. The same instructions on a fresh issue: 61k, completed.
+   *
+   * The failure notice is the worst of the three, because it carries a log excerpt,
+   * and the excerpt is usually about the infrastructure -- "MCP server closed
+   * connection", "Unexpected while resolving package" -- which no agent can act on.
+   */
+  test("operational notices are excluded from the next run's context", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+
+    // Every step that posts a comment, found by what it does rather than by name:
+    // a notice added later under a name nobody predicted still has to carry the tag.
+    //
+    // Shell comments stripped first, for the third time in this file. "Put the tool
+    // servers on a user without sudo" explains itself by mentioning
+    // `gh issue comment`, and matching that made a step that posts nothing look
+    // like one that posts untagged.
+    const executed = (step: WorkflowStep): string =>
+      (step.run ?? "")
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("#"))
+        .join("\n");
+
+    const posters = steps.filter((step) => /gh issue comment/.test(executed(step)));
+    // A floor, not a census. Notices keep moving out of workflow bash and into
+    // scripts, where this cannot see them -- "every script that posts a comment tags
+    // it" covers that half, and lives beside this one. Zero here would mean the
+    // filter had stopped matching anything, which is the failure worth catching.
+    expect(posters.length, "steps that post a comment inline").toBeGreaterThan(0);
+
+    for (const step of posters) {
+      const run = executed(step);
+      // `post_result_comment.ts` is the one comment that IS the agent's own output,
+      // and it is invoked as a script rather than through `gh issue comment`, so it
+      // does not appear here. Everything that does is operational.
+      expect(
+        run.includes("llm-context=exclude"),
+        `"${step.name ?? "?"}" posts a comment with no llm-context=exclude tag, so it becomes ` +
+          `part of the next run's context. Operational notices are for people`,
+      ).toBe(true);
+    }
+  });
+
+  test("checkout the repository before running repository scripts", () => {
+
+    type WorkflowStep = { uses?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const directory = "dist/.github/workflows";
+    for (const name of readdirSync(directory).filter((entry) => entry.endsWith(".yml"))) {
+      const workflow = Bun.YAML.parse(readFileSync(join(directory, name), "utf8")) as WorkflowDocument;
+      for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+        const steps = job.steps ?? [];
+        const firstScript = steps.findIndex((step) => step.run?.includes(".github/atomaton-runtime/scripts/"));
+        if (firstScript === -1) continue;
+
+        const checkout = steps.findIndex((step) => step.uses?.startsWith("actions/checkout@"));
+        expect(checkout, `${name}:${jobName} must checkout before running repository scripts`).toBeGreaterThanOrEqual(0);
+        expect(checkout, `${name}:${jobName} checkout order`).toBeLessThan(firstScript);
+      }
+    }
+  });
+
+  // Both halves of this guard a measured fact about GitHub, not a preference.
+  //
+  // `toJSON(secrets)` is refused by the malicious-workflow detector: a run whose
+  // workflow contains it never starts, it queues for approval instead, and the
+  // block is per FILE rather than per job. Reintroducing it anywhere would take
+  // every adopter's automation offline, and the symptom (`action_required`, zero
+  // seconds elapsed) looks nothing like a code change.
+  //
+  // A computed key is allowed, and is the whole reason a project can declare a
+  // tool credential in config.yaml without editing generated YAML. If the slots
+  // ever stopped being keyed off the resolve step, credentials would silently
+  // stop arriving and only the tool needing one would fail.
+  test("reaches declared credentials by a computed key, never by dumping the secrets context", () => {
+    type WorkflowStep = { name?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const directory = "dist/.github/workflows";
+    for (const name of readdirSync(directory).filter((entry) => entry.endsWith(".yml"))) {
+      expect(readFileSync(join(directory, name), "utf8"), `${name} must not dump the secrets context`).not.toContain(
+        "toJSON(secrets)",
+      );
+    }
+
+    // The agent's own list: `tools.secrets` belongs to the whole workflow, so a step
+    // resolves it and the slots key off that step's output. The carrier is the step
+    // that WRITES the credentials file, not the one that runs the agent -- see the
+    // test below for why that distinction is the whole point.
+    {
+      const workflow = Bun.YAML.parse(readFileSync(join(directory, "atomaton-runner.yml"), "utf8")) as WorkflowDocument;
+      const steps = workflow.jobs?.run?.steps ?? [];
+      const resolve = steps.findIndex((step) => step.name === "Resolve which repository secrets may reach this run");
+      const consumer = steps.findIndex((step) => step.name === "Collect this run's credentials into a file");
+      expect(resolve, "atomaton-runner.yml secret-names step").toBeGreaterThanOrEqual(0);
+      expect(consumer, "atomaton-runner.yml credentials step").toBeGreaterThanOrEqual(0);
+      expect(resolve, "names must resolve before the step whose env they key").toBeLessThan(consumer);
+
+      const env = steps[consumer]?.env ?? {};
+      for (let slot = 0; slot < SECRET_SLOTS; slot++) {
+        expect(env[`${SECRET_SLOT_PREFIX}${slot}`], `slot ${slot}`).toBe(
+          `\${{ secrets[fromJSON(steps.secret-names.outputs.names || '[]')[${slot}]] }}`,
+        );
+      }
+      expect(env[SECRET_NAMES_VAR]).toBe("${{ steps.secret-names.outputs.names }}");
+    }
+
+    // A check or a deployment declares its credentials per entry, so the slots key
+    // off the matrix instead -- the same computed-key mechanism, one step closer to
+    // the thing that named them. Both are generated from `matrixSecretEnv()`, so the
+    // point of checking both is that neither quietly stops using it.
+    const matrixCarriers = [
+      { file: "atomaton-check.yml", job: "default-branch-checks", step: "Run this check's commands" },
+      { file: "atomaton-deploy.yml", job: "deploy", step: "Run this deployment's commands" },
+    ];
+    for (const carrier of matrixCarriers) {
+      const workflow = Bun.YAML.parse(readFileSync(join(directory, carrier.file), "utf8")) as WorkflowDocument;
+      const step = (workflow.jobs?.[carrier.job]?.steps ?? []).find((candidate) => candidate.name === carrier.step);
+      expect(step, `${carrier.file} ${carrier.step}`).toBeDefined();
+
+      const env = step?.env ?? {};
+      for (let slot = 0; slot < SECRET_SLOTS; slot++) {
+        expect(env[`${SECRET_SLOT_PREFIX}${slot}`], `${carrier.file} slot ${slot}`).toBe(
+          `\${{ secrets[matrix.secrets[${slot}]] }}`,
+        );
+      }
+      expect(env[SECRET_NAMES_VAR], carrier.file).toBe("${{ toJSON(matrix.secrets) }}");
+    }
+  });
+
+  // On a pull request run the checkout is `refs/pull/N/head`, so a declaration
+  // read from the working tree would let a pull request choose which of the
+  // repository's secrets it is handed. `merge.governed_paths` does not cover it: that
+  // blocks the merge, and the run happens first. The declaration therefore comes
+  // from the default branch, and this pins that in the generated YAML -- the
+  // failure mode of losing it is silent.
+  test("resolves the credential declaration from the default branch, not the checkout", () => {
+    type WorkflowStep = { id?: string; run?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const directory = "dist/.github/workflows";
+    // The runner alone: it is the only workflow whose credentials are declared in a
+    // whole-workflow list, so it is the only one that fetches the declaration itself.
+    // A check or a deployment gets the same guarantee from the job that PLANS it,
+    // which checks the default branch out -- pinned separately below.
+    for (const file of ["atomaton-runner.yml"]) {
+      const workflow = Bun.YAML.parse(readFileSync(join(directory, file), "utf8")) as WorkflowDocument;
+      const step = Object.values(workflow.jobs ?? {})
+        .flatMap((job) => job.steps ?? [])
+        .find((candidate) => candidate.id === "secret-names");
+      expect(step, `${file} secret-names step`).toBeDefined();
+
+      expect(step?.env?.ATOMATON_DEFAULT_BRANCH, file).toBe("${{ github.event.repository.default_branch }}");
+
+      // Read back from a ref this step fetched itself, and never from FETCH_HEAD.
+      //
+      // This assertion used to require FETCH_HEAD, which is how the hole stayed
+      // open: `actions/checkout` writes a FETCH_HEAD for the pull request's own
+      // ref before this step runs, so a failed fetch left that in place and the
+      // step read the declaration out of the branch under review -- succeeding,
+      // so the fall-back-to-nothing branch never ran and no warning printed. The
+      // test pinned the broken shape rather than the property, so it is the
+      // property that is pinned now.
+      expect(step?.run, `${file} must not read the declaration from FETCH_HEAD`).not.toContain("FETCH_HEAD:");
+      expect(step?.run, `${file} must read the declaration from a ref it fetched`).toContain(
+        'git show "refs/atomaton/trusted-config:.github/atomaton/config.yaml"',
+      );
+      // Outside the workspace, so the checkout cannot have brought the file.
+      expect(step?.run, `${file} must not trust a path the checkout controls`).toContain(
+        "$RUNNER_TEMP/atomaton-declared-secrets.yaml",
+      );
+    }
+  });
+
+  /**
+   * The jobs that decide which credentials a matrix entry gets read the DEFAULT
+   * BRANCH, not the ref that started the run.
+   *
+   * For a check, the ref that started it is the pull request being judged. For a
+   * deployment it is whichever branch or tag was pushed — and since `atomaton-deploy`
+   * now starts for every ref, that is any branch a collaborator can push. Either
+   * would be the thing under review choosing its own credentials.
+   *
+   * Pinned in the generated YAML because losing it is silent: the run still works,
+   * and the declaration simply comes from somewhere else.
+   */
+  test("the jobs that plan a matrix read the default branch", () => {
+    type WorkflowStep = { name?: string; uses?: string; with?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const planners = [
+      { file: "atomaton-check.yml", job: "plan-default-branch-checks" },
+      { file: "atomaton-deploy.yml", job: "plan-deploy" },
+    ];
+    for (const { file, job } of planners) {
+      const workflow = Bun.YAML.parse(readFileSync(`dist/.github/workflows/${file}`, "utf8")) as WorkflowDocument;
+      const checkout = (workflow.jobs?.[job]?.steps ?? []).find((step) => step.uses?.startsWith("actions/checkout"));
+      expect(checkout, `${file} has no checkout in ${job}`).toBeDefined();
+      expect(checkout?.with?.ref, `${job} must plan from the default branch`).toBe(
+        "${{ github.event.repository.default_branch }}",
+      );
+    }
+  });
+
+  // Both of these were gaps found by trying to move this repository's own
+  // pipeline onto the shipped workflows, and both fail silently rather than
+  // loudly, which is why they are pinned rather than left to review.
+  test("the shipped workflows cover the paths a project's pipeline needs", () => {
+    type WorkflowDocument = {
+      on?: { pull_request?: unknown; push?: { branches?: string[]; tags?: string[] } };
+      permissions?: Record<string, string>;
+      jobs?: Record<string, { if?: string; permissions?: Record<string, string>; steps?: { name?: string; env?: Record<string, string> }[] }>;
+    };
+
+    const check = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-check.yml", "utf8")) as WorkflowDocument;
+
+    // Without this a person's pull request gets no check at all: an agent's is
+    // dispatched, and `pull_request` never fires for a GITHUB_TOKEN-opened one.
+    // Since this is what `checks.your_workflow` defaults to, the merge is then refused
+    // for a required check that nothing ever ran.
+    expect(check.on?.pull_request, "atomaton-check must fire for a person's pull request").toBeDefined();
+
+    // A check that cannot talk to GitHub is the only thing in the system that
+    // cannot, and the failure reads as a broken command rather than no token.
+    const runChecks = check.jobs?.["pull-request-checks"]?.steps?.find((s) => s.name === "Run this check's commands");
+    expect(runChecks?.env?.GH_TOKEN).toBe("${{ github.token }}");
+
+    const deploy = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-deploy.yml", "utf8")) as WorkflowDocument;
+
+    // Cutting a release is a deployment. Read-only would push every project that
+    // ships that way into keeping a personal access token instead.
+    expect(deploy.jobs?.deploy?.permissions?.contents).toBe("write");
+
+    // And the token to spend it with. `contents: write` alone is a permission
+    // nothing can reach, which fails as "gh: not authenticated" -- nowhere near
+    // the missing piece.
+    const runDeploy = deploy.jobs?.deploy?.steps?.find((s) => s.name === "Run this deployment's commands");
+    expect(runDeploy?.env?.GH_TOKEN).toBe("${{ github.token }}");
+
+    // `on_merge` has to mean a person's merge too, into whichever branch the entry
+    // named. `on:` cannot say "the default branch" and cannot read a `branches:` out
+    // of configuration either, so the workflow listens for every ref and the planning
+    // job decides. `main` and `master` were listed literally before, which is why
+    // `branches: [develop]` could not have worked: nothing started a run.
+    expect(deploy.on?.push?.branches, "atomaton-deploy must listen on every branch").toEqual(["**"]);
+    expect(deploy.on?.push?.tags, "and every tag").toEqual(["**"]);
+  });
+
+  // The step that runs the agent lives for the whole of `atoma run`, so anything
+  // in its `env:` sits in `/proc/<pid>/environ` for minutes, readable by every
+  // tool server the agent starts -- and `unsetenv` cannot take it back, because
+  // that file reflects what was on the stack at exec. Measured on a runner.
+  //
+  // So no credential may appear there. Losing this is silent: the run works, the
+  // confinement is simply gone, and nothing says so.
+  test("the agent step carries no credentials", () => {
+    type WorkflowStep = { name?: string; env?: Record<string, string>; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+
+    const writer = steps.findIndex((step) => step.name === "Collect this run's credentials into a file");
+    const agent = steps.findIndex((step) => step.name === "Run agent");
+    expect(writer, "the credentials writer step").toBeGreaterThanOrEqual(0);
+    expect(writer, "credentials must be written before the agent runs").toBeLessThan(agent);
+
+    const agentEnv = steps[agent]?.env ?? {};
+    for (const [name, value] of Object.entries(agentEnv)) {
+      expect(value, `${name} in the agent step must not reference a secret`).not.toContain("secrets.");
+      expect(name, `${name} must not be a credential slot`).not.toStartWith(SECRET_SLOT_PREFIX);
+    }
+    // `github.token` counts too: it is the credential three tool servers use.
+    expect(JSON.stringify(agentEnv)).not.toContain("github.token");
+
+    // And the agent is told where to read them from instead.
+    expect(steps[agent]?.run).toContain("--credentials-file");
+  });
+
+  // A pull request run checks out the pull request, so anything this job reads
+  // from the workspace is the pull request's own -- which let a pull request
+  // decide how the agent reviewing it behaves: which agent, which iteration
+  // budget, which commands, which credentials. That was closed for the
+  // credential declaration alone.
+  //
+  // The split is between the work and the machinery. Losing it is silent: runs
+  // keep working, and a pull request quietly regains control of its own review.
+  test("the runner reads its machinery from the default branch, not the checkout", () => {
+    type WorkflowStep = { name?: string; run?: string; with?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { env?: Record<string, string>; steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const job = workflow.jobs?.run;
+    const steps = job?.steps ?? [];
+
+    // One step says where the machinery is, and every later step reads it from the
+    // environment. It was a job-level `env:` until the machinery moved out of the
+    // work tree -- see "the machinery ends up outside the work tree" below for why
+    // there is now exactly one source rather than a job default plus an override.
+    const setter = steps.find((step) => /ATOMATON_MACHINERY_ROOT=[^\n]*>>\s*"?\$GITHUB_ENV/.test(step.run ?? ""));
+    expect(setter, "one step must set the machinery root").toBeDefined();
+    expect(job?.env?.ATOMATON_MACHINERY_ROOT, "and it must not also be a job default").toBeUndefined();
+
+    // And what it points at is a checkout of the default branch, not of the pull
+    // request. The checkout still lands in the work tree -- `actions/checkout`
+    // cannot write anywhere else -- and the setter step is what moves it out.
+    const machineryCheckout = steps.find((step) => step.with?.path === "atomaton-machinery");
+    expect(machineryCheckout, "a checkout into atomaton-machinery").toBeDefined();
+    expect(machineryCheckout?.with?.ref).toContain("default_branch");
+    expect(setter?.run, "the setter must be what moves that checkout").toContain("mv \"atomaton-machinery\"");
+
+    // Nothing runs a script from the workspace. A bare `.github/atomaton-runtime/scripts/` would
+    // be the pull request's copy.
+    for (const step of steps) {
+      const run = step.run ?? "";
+      const bare = run.match(/(?<![\w/$}])\.github\/scripts\//g);
+      expect(bare, `${step.name}: scripts must be read from the machinery root`).toBeNull();
+    }
+
+    // Nor does the agent get its definition, prompt, skills or tools from there.
+    const agent = steps.find((step) => step.name === "Run agent");
+    for (const flag of ["--agent-def", "--template", "--skills-dir"]) {
+      const line = (agent?.run ?? "").split("\n").find((l) => l.includes(flag)) ?? "";
+      expect(line, `${flag} must resolve inside the machinery root`).toContain("ATOMATON_MACHINERY_ROOT");
+    }
+  });
+
+  // The tool servers are machinery too, and were the last part still read from
+  // the workspace: a pull request could replace the code of the very tools that
+  // review it. The filesystem servers are the deliberate exception -- their `.`
+  // argument IS the workspace, which is what they exist to read.
+  test("the tool servers are read from the machinery, and the workspace only where intended", () => {
+    // From the shipped set. These arguments were in `config.yaml` while the eight
+    // servers lived there; they are machinery, they moved to `shipped-servers.ts`, and
+    // the generated tools file is written per run into the runner's temp directory. So
+    // the constant is where a server's argv is declared and the only place to check it.
+    const servers = Object.entries(toolDefaults().servers);
+    expect(servers.length, "Atomaton must ship some servers").toBeGreaterThan(0);
+
+    for (const [name, server] of servers) {
+      for (const arg of Array.isArray(server.args) ? server.args : []) {
+        if (typeof arg === "string" && arg.includes("tools/scripts/")) {
+          expect(arg, `${name}: a server shipped here must be read from the machinery root`).toContain(
+            "ATOMATON_MACHINERY_ROOT",
+          );
+        }
+      }
+    }
+
+    // And the package list and the hook chmod, which decide what gets installed
+    // and whether the fail-closed guard can run at all.
+    const workflow = readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8");
+    // The deployed path, not the bare filename: the install step also names the
+    // file in prose when it is absent, and a message is not a read.
+    for (const path of [".github/atomaton-runtime/tools/packages.json", ".github/atomaton-runtime/tools/hooks"]) {
+      const reads = workflow.split(/\r?\n/).filter((l) => l.includes(path));
+      expect(reads.length, `${path} must still be referenced at all`).toBeGreaterThan(0);
+      for (const line of reads) {
+        expect(line, `${path} must be read from the machinery root`).toMatch(
+          /ATOMATON_MACHINERY_ROOT|atomaton-machinery/,
+        );
+      }
+    }
+  });
+
+  // The two files are joined by a string and nothing else. A ruleset requires a
+  // status check by `context`, which for an Actions job is the job's name -- so
+  // renaming the job leaves the ruleset waiting for a check that will never
+  // report again, and every pull request sits at "expected" forever. It does not
+  // fail, it hangs, and an agent reads that as CI still running.
+  test("the shipped ruleset requires exactly the check the shipped workflow produces", () => {
+    type Ruleset = {
+      rules?: { type?: string; parameters?: { required_status_checks?: { context?: string }[] } }[];
+    };
+    type WorkflowDocument = { jobs?: Record<string, unknown> };
+
+    const ruleset = JSON.parse(readFileSync("dist/.github/atomaton/rulesets/main.json", "utf8")) as Ruleset;
+    const contexts = (ruleset.rules ?? [])
+      .filter((rule) => rule.type === "required_status_checks")
+      .flatMap((rule) => rule.parameters?.required_status_checks ?? [])
+      .map((entry) => entry.context)
+      .filter((context): context is string => typeof context === "string");
+    expect(contexts, "the shipped ruleset must require a check").not.toEqual([]);
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-check.yml", "utf8")) as WorkflowDocument;
+    const jobNames = Object.keys(workflow.jobs ?? {});
+
+    expect(jobNames).toContain(CHECK_JOB_NAME);
+    for (const context of contexts) {
+      expect(jobNames, `ruleset requires "${context}", which no job in atomaton-check.yml produces`).toContain(context);
+    }
+
+    // No strategy on the job whose name the ruleset requires.
+    //
+    // A matrix renames the check run: `atomaton-check` becomes
+    // `atomaton-check (ubuntu-latest)`, and the bare name stops existing. Measured on
+    // a throwaway branch -- `gh api.../check-runs` listed
+    // `probe-check (macos-latest)` and `probe-check (ubuntu-latest)` and no
+    // `probe-check`. So the required context would refer to nothing, and every pull
+    // request would wait forever on a check that never reports.
+    //
+    // `runs_on` is configurable without one: it is a job OUTPUT read through
+    // `fromJSON`, one runner with however many labels. The temptation is to reach
+    // for a matrix the moment somebody wants two runners, and doing that here is
+    // the failure -- it needs a third job to carry this name instead.
+    const jobs = (workflow.jobs ?? {}) as Record<string, { strategy?: unknown }>;
+    for (const context of [...contexts, CHECK_JOB_NAME]) {
+      expect(
+        jobs[context]?.strategy,
+        `"${context}" is the context the ruleset requires, so it must not have a matrix: ` +
+          `a matrix renames its check run to "${context} (label)" and the required context stops existing`,
+      ).toBeUndefined();
+    }
+  });
+
+  /**
+   * Every job that runs a project's own commands takes its runner from
+   * `config.yaml`, and the job that reads the configuration does not.
+   *
+   * `runs-on` accepts no expression that can read a file, so the value has to be a
+   * job output before the real job starts. That is why a job goes first, and why it
+   * is pinned to `ubuntu-latest`: it is the job that finds out what the configured
+   * runner is, so it cannot itself be on it.
+   *
+   * Every one answers the same way now: the runner rides in the matrix entry beside
+   * the commands it belongs to. A deployment used to share one `pick-runner` job
+   * with every other deployment, which is what made a release and a cloud rollout
+   * the same machine.
+   *
+   * This was once `ubuntu-latest` hardcoded in eleven files, unreachable from
+   * `config.yaml` -- and unfixable by an agent, because the fix is in
+   * `.github/workflows/**`, the one place `GITHUB_TOKEN` cannot write.
+   */
+  test("every job that runs a project's commands takes its runner from configuration", () => {
+    type WorkflowDocument = { jobs?: Record<string, { "runs-on"?: unknown; needs?: unknown }> };
+    const read = (file: string) =>
+      (Bun.YAML.parse(readFileSync(`dist/.github/workflows/${file}.yml`, "utf8")) as WorkflowDocument).jobs ?? {};
+
+    // `fromJSON` always, so one label and a self-hosted runner's several are
+    // consumed the same way.
+    for (const [file, workJob, planJob] of [
+      ["atomaton-check", "pull-request-checks", "plan-pull-request-checks"],
+      ["atomaton-check", "default-branch-checks", "plan-default-branch-checks"],
+      ["atomaton-deploy", "deploy", "plan-deploy"],
+    ] as const) {
+      const jobs = read(file);
+      const work = jobs[workJob];
+      expect(work, `${file}.yml must have a ${workJob} job`).toBeDefined();
+      expect(String(work?.["runs-on"] ?? ""), `${workJob} takes the runner its entry declared`).toBe(
+        "${{ fromJSON(matrix.runs_on) }}",
+      );
+      expect(work?.needs, `${workJob} must wait for the job that read the configuration`).toEqual([planJob]);
+      expect(jobs[planJob]?.["runs-on"], `${planJob} finds out what the runner is, so it cannot be on it`).toBe(
+        "ubuntu-latest",
+      );
+    }
+  });
+
+  /**
+   * A deployment that cuts a release tags with GITHUB_TOKEN, and GitHub starts no
+   * workflow run for its own token's events — so `on_tag` never fired for a project's
+   * own release tags. The run that made the tag dispatches for it.
+   *
+   * Dispatching needs `actions: write`, and the job that runs a project's deployment
+   * commands must not have it: those commands are the project's own, and `actions:
+   * write` would let one start any workflow in the repository. Pinned here because
+   * that separation is the whole reason there are two jobs, and merging them would
+   * look like a simplification.
+   */
+  test("only the job that runs nothing a project wrote may dispatch a workflow", () => {
+    type WorkflowDocument = { jobs?: Record<string, { permissions?: Record<string, string> }> };
+    const deploy = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-deploy.yml", "utf8")) as WorkflowDocument;
+
+    expect(deploy.jobs?.["dispatch-new-tags"]?.permissions?.actions, "the dispatching job needs it").toBe("write");
+    expect(
+      deploy.jobs?.deploy?.permissions?.actions,
+      "the job running a project's commands must not be able to start workflows",
+    ).toBeUndefined();
+    expect(deploy.jobs?.["plan-deploy"]?.permissions?.actions).toBeUndefined();
+  });
+
+  /**
+   * Deployments run one at a time, in declared order, and stop at the first failure.
+   *
+   * What the single job provided by running them in a bash loop, and the one thing a
+   * matrix takes away by default. Losing it is silent and expensive: two deployments
+   * racing, or the rest of an estate shipped after one of them broke.
+   */
+  test("the deploy matrix keeps the order and the stop the loop used to give", () => {
+    type WorkflowDocument = {
+      jobs?: Record<string, { strategy?: { "fail-fast"?: boolean; "max-parallel"?: number } }>;
+    };
+    const deploy = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-deploy.yml", "utf8")) as WorkflowDocument;
+    expect(deploy.jobs?.deploy?.strategy?.["max-parallel"], "one deployment at a time").toBe(1);
+    expect(deploy.jobs?.deploy?.strategy?.["fail-fast"], "and none after one fails").toBe(true);
+  });
+
+  test("authenticate the result-comment GitHub CLI call", () => {
+    type WorkflowStep = { id?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const step = workflow.jobs?.run?.steps?.find((candidate) => candidate.id === "post-result");
+    expect(step, "atomaton-runner post-result step").toBeDefined();
+    expect(step?.env?.GH_TOKEN).toBe("${{ github.token }}");
+  });
+
+  /**
+   * A shell variable in an `env:` mapping is six literal characters.
+   *
+   * Actions substitutes `${{ }}` there and nothing else, so `ATOMATON_OPS_LOG:
+   * ${RUNNER_TEMP}/atomaton-run/atomaton_ops.log` set the variable to that text. Every tool
+   * that logged an operation then tried to write into a directory literally named
+   * `${RUNNER_TEMP}`, failed with ENOENT, and wrote nothing -- for every run between the
+   * commit that introduced it and the one that added this test.
+   *
+   * Nothing failed. Two signals are read back out of that log, whether the chain is
+   * still dispatching and whether the run changed anything, and both simply read false
+   * forever. A guard that cannot fire looks exactly like a guard with nothing to do.
+   *
+   * Checked across every workflow rather than on the one value, because the mistake is
+   * available anywhere an `env:` block is written and reads correctly in both places.
+   */
+  test("no env: value expects a shell to expand it", () => {
+    const offenders: string[] = [];
+    for (const file of readdirSync("dist/.github/workflows")) {
+      if (!file.endsWith(".yml")) continue;
+      const lines = readFileSync(join("dist/.github/workflows", file), "utf8").split(/\r?\n/);
+      let envIndent: number | undefined;
+      lines.forEach((line, index) => {
+        const opens = /^(\s*)env:\s*$/.exec(line);
+        if (opens) {
+          envIndent = opens[1]!.length;
+          return;
+        }
+        if (envIndent === undefined || line.trim() === "") return;
+        const indent = (/^(\s*)/.exec(line) ?? ["", ""])[1]!.length;
+        if (indent <= envIndent) {
+          envIndent = undefined;
+          return;
+        }
+        // `${{ ... }}` is the Actions form and is fine. `${NAME}` is not.
+        const withoutExpressions = line.replace(/\$\{\{[^}]*\}\}/g, "");
+        if (/\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(withoutExpressions)) {
+          offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+        }
+      });
+    }
+    expect(offenders, "env: values that only a shell would expand").toEqual([]);
+  });
+  /**
+   * Every script a workflow runs is where the build puts it.
+   *
+   * `script-ref.ts` held its own copy of the deployed scripts directory, so when the
+   * scripts moved under `.github/atomaton-runtime/` the build wrote them to the new path
+   * and the eight generated workflows went on naming the old one. Deployed, the first
+   * script a run tried was not there -- and the deploy diff had shown the files being
+   * renamed, beside workflows that did not follow them.
+   *
+   * Two literals of one fact, again. This holds the generated YAML to the constant.
+   */
+  test("every script a workflow runs is under the deployed scripts directory", () => {
+    const workflows = readdirSync("dist/.github/workflows").filter((f) => f.endsWith(".yml"));
+    expect(workflows.length, "there are workflows to check").toBeGreaterThan(0);
+
+    let named = 0;
+    for (const file of workflows) {
+      // Comment lines are skipped. A generated workflow carries the reasoning that
+      // was written beside the step, and that prose names scripts by their short
+      // path on purpose -- `scripts/write_tools_file.ts` reads better in a sentence
+      // than the deployed path does, and it is not an invocation.
+      const yaml = readFileSync(`dist/.github/workflows/${file}`, "utf8")
+        .split(/\r?\n/)
+        .filter((line) => !line.trim().startsWith("#"))
+        .join("\n");
+      for (const match of yaml.matchAll(/[\w./${}:-]*\/([a-z_]+\.ts)/g)) {
+        const path = match[0];
+        // Only the scripts this repository ships as workflow glue. A tool server or a
+        // hook is named from the tools file, not from here.
+        if (!existsSync(`src/entrypoints/machinery/${match[1]}`)) continue;
+        named += 1;
+        expect(path, `${file} runs ${match[1]} from outside ${SCRIPTS_DIR}/`).toContain(`${SCRIPTS_DIR}/`);
+      }
+    }
+    expect(named, "the workflows name some scripts at all").toBeGreaterThan(0);
+  });
+
+  /**
+   * A person closing an issue an agent is working on has to reach the run.
+   *
+   * #803 was closed by hand while its run held the in-progress label; the run went
+   * on for five more minutes and opened a pull request. The job below is what makes
+   * the gesture mean what it looks like, and its condition is the whole of the
+   * subtlety: an agent closing its own issue is a normal path, so only a person's
+   * close stops anything.
+   */
+  test("a person closing an issue stops the run on it, and an agent closing one does not", () => {
+    type WorkflowDocument = { jobs?: Record<string, { if?: string; steps?: { run?: string }[] }> };
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-sub-issue-closed.yml", "utf8"),
+    ) as WorkflowDocument;
+
+    const job = workflow.jobs?.["stop-run"];
+    expect(job, "closing an issue must be able to stop the run on it").toBeDefined();
+    expect(job?.if ?? "", "an agent closing its own issue is how it finishes").toContain("sender.type != 'Bot'");
+    expect(job?.steps?.map((s) => s.run ?? "").join(NEWLINE)).toContain("stop_on_close.ts");
+
+    // It depends on nothing: the aggregation half of this workflow is gated on the
+    // issue being a tracked sub-issue, and a run is just as live on one that is not.
+    expect(job).not.toHaveProperty("needs");
+  });
+
+  /**
+   * A slash command on a closed issue does not start an agent -- and the three ways
+   * that guard could fire where it should not are all in its condition.
+   *
+   * Without the parsed-command clause it would answer ordinary comments on every
+   * closed issue in the repository. Without the `/stop` exemption it would take away
+   * the only way to stop a run whose agent closed its own issue. Without the
+   * in-progress clause a person would get two notices for one comment.
+   */
+  test("a command on a closed issue is refused, except the one that stops a run", () => {
+    type Step = { id?: string; if?: string; run?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: Step[] }> };
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-manual-comment.yml", "utf8"),
+    ) as WorkflowDocument;
+    const steps = workflow.jobs?.parse?.steps ?? [];
+
+    const guard = steps.find((s) => s.id === "closed-guard");
+    expect(guard, "a command on a closed issue must be refused").toBeDefined();
+    const condition = guard?.if ?? "";
+    expect(condition, "an ordinary comment on a closed issue is just a comment").toContain(
+      "steps.command.outputs.agent != '' || steps.command.outputs.control != ''",
+    );
+    expect(condition, "/stop is the one command a closed issue still needs").toContain(
+      "steps.command.outputs.control != 'stop'",
+    );
+    expect(condition, "one comment earns one notice").toContain("steps.guard.outputs.blocked != 'true'");
+
+    // The refusal has to reach the dispatch, which is the thing it suppresses -- the
+    // in-progress guard learned the same lesson and is read at the same place.
+    const dispatch = steps.find((s) => s.id === "dispatch");
+    expect(dispatch?.env?.CLOSED ?? "", "the guard must reach the dispatch").toContain("closed-guard");
+    expect(dispatch?.run ?? "").toContain('"$CLOSED" = "true"');
+  });
+  /**
+   * A matrix job says which entry it is, and nothing else.
+   *
+   * Without an explicit `name`, GitHub builds one from EVERY field of the matrix
+   * entry. Measured on the first run of this shape:
+   *
+   *     pull-request-checks (verify, ["ubuntu-latest"], bun run src/entrypoints/machinery/scan_…
+   *
+   * — truncated by the UI, with the one part a person needs buried among the commands
+   * and the runner. That string is also what a failing check reports itself as, so it
+   * is the whole of what somebody sees when they are looking for what went wrong.
+   */
+  test("a matrix check names itself by its entry, not by everything in it", () => {
+    type WorkflowDocument = { jobs?: Record<string, { name?: string }> };
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-check.yml", "utf8"),
+    ) as WorkflowDocument;
+
+    for (const job of ["pull-request-checks", "default-branch-checks"]) {
+      expect(
+        workflow.jobs?.[job]?.name,
+        `${job} must name itself, or GitHub names it after every field of the entry`,
+      ).toBe(`${job} (\${{ matrix.name }})`);
+    }
+  });
+});

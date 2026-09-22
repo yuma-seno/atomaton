@@ -1,0 +1,29 @@
+/**
+ * permissions.ts — Shared `GITHUB_TOKEN` permission set used across nearly
+ * every Atomaton workflow file. `atomaton-entry`, `atoma-auto-trigger`,
+ * `atomaton-manual-comment`, `atoma-pr-review`, `atomaton-runner`, and
+ * `atomaton-sub-issue-closed` all need the identical full set (they may create
+ * branches, manage labels, post comments, and dispatch follow-up runs) --
+ * before this existed, that was 6 independently hand-copied object literals
+ * with no compiler link between them, free to silently drift apart (e.g. one
+ * file's permissions getting tightened/loosened without the others noticing).
+ * `atomaton-pr-merged` is the one legitimate exception (`pull-requests: "read"`,
+ * it only ever reads PR metadata) -- spread `ATOMATON_WORKFLOW_PERMISSIONS` and
+ * override just that key there, rather than duplicating the whole object.
+ */
+import type { GeneratedWorkflowTypes as GWT } from "@github-actions-workflow-ts/lib";
+
+export const ATOMATON_WORKFLOW_PERMISSIONS: GWT.PermissionsEvent = {
+  actions: "write",
+  issues: "write",
+  "pull-requests": "write",
+  contents: "write",
+  // Read-only, and added because `github__check_merge_readiness` reads the check runs on
+  // a head commit to say which one is failing. Declaring any permission sets every other
+  // one to `none`, and on a PUBLIC repository that still worked -- the data is public, so
+  // the endpoint served it anyway. On a private repository it does not: the reviewer got
+  // `Resource not accessible by integration` on the first run after this repository went
+  // private, having succeeded 220 times before it. A template meant to be adopted cannot
+  // depend on its own repository being public.
+  checks: "read",
+};
