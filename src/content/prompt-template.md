@@ -146,8 +146,8 @@ of the four have a ceiling, and a ceiling is a limit rather than a target.
 
 **What you concluded.** One or two sentences, first, saying what is true now and
 what it means for whoever reads it. Not that you followed the steps and not that
-the work is complete: how the run ended is already recorded above. Two sentences
-is the ceiling, not the opening move of a longer one.
+the work is complete: how the run ended is already recorded above.
+Two sentences is the ceiling, not the opening move of a longer one.
 
 **How you know.** Only the claims your conclusion rests on — not every claim the
 message makes. Each of those anchored to something the reader can check without

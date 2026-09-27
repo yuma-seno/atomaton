@@ -228,6 +228,15 @@ describe("agent prompt contracts", () => {
    * because they were taken from the source measurement, which named the part the
    * way the replacement block did rather than the way the template writes it.
    *
+   * And one sentence is wrapped differently from that block. Its wrap put
+   * `Two sentences` at the end of one line and `is the ceiling` at the start of the
+   * next, so the phrase `Two sentences is the ceiling` -- which the same
+   * specification names as something `main` must contain -- was split across a line
+   * and could not be found as a substring. Wrapping is prose rather than contract,
+   * the specification allows changing it when the pinned fragments stay on one line,
+   * and both fragments here do. So the sentence begins its own line and nothing else
+   * moved.
+   *
    * Pinned as single-line fragments, because these files are wrapped prose and a
    * phrase spanning a line break also picks up whatever indentation wraps it.
    */
@@ -239,6 +248,12 @@ describe("agent prompt contracts", () => {
     ).toContain("not one of the parts");
     expect(prompt, "a ceiling is a limit, and the conclusion's is two sentences").toContain(
       "is the ceiling, not the opening move",
+    );
+    // The exact phrase is pinned as well as the sentence around it, because the
+    // wrap is what decides whether it is a phrase at all -- it was split across a
+    // line break when this was written, and a later rewrap could split it again.
+    expect(prompt, "the conclusion's ceiling must stay on one line").toContain(
+      "Two sentences is the ceiling",
     );
     expect(prompt, "How you know carries only the claims the conclusion rests on").toContain(
       "Five items at most.",
