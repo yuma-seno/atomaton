@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SCRIPTS_DIR, parseGithubOutput } from "./testing/harness.ts";
+import { SCRIPTS_DIR, hermeticEnv, parseGithubOutput } from "./testing/harness.ts";
 
 describe("extract_notify_tag.ts", () => {
   test("extracts the notify tag from a PR body", async () => {
@@ -12,7 +12,7 @@ describe("extract_notify_tag.ts", () => {
     writeFileSync(outputFile, "");
     const r = spawnSync("bun", ["run", `${SCRIPTS_DIR}/extract_notify_tag.ts`], {
       encoding: "utf8",
-      env: { ...process.env, PR_BODY: "<!-- atomaton:notify=octocat -->\nsome body", GITHUB_OUTPUT: outputFile },
+      env: { ...hermeticEnv(), PR_BODY: "<!-- atomaton:notify=octocat -->\nsome body", GITHUB_OUTPUT: outputFile },
     });
     expect(r.status).toBe(0);
     const out = parseGithubOutput(await Bun.file(outputFile).text());
@@ -26,7 +26,7 @@ describe("extract_notify_tag.ts", () => {
     writeFileSync(outputFile, "");
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/extract_notify_tag.ts`], {
       encoding: "utf8",
-      env: { ...process.env, PR_BODY: "no tag here", GITHUB_OUTPUT: outputFile },
+      env: { ...hermeticEnv(), PR_BODY: "no tag here", GITHUB_OUTPUT: outputFile },
     });
     const out = parseGithubOutput(await Bun.file(outputFile).text());
     expect(out.notify).toBe("");

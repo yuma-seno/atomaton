@@ -4,15 +4,26 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MAX_SEARCHES_WITHOUT_OPENING } from "../../../domain/work/search-streak.ts";
+import { hermeticEnv } from "../../machinery/testing/harness.ts";
 
 const SCRIPT = "src/entrypoints/tools/hooks/shell_guard.ts";
 
-/** Run the guard the way the `before_tool` hook does: JSON on stdin. */
+/**
+ * Run the guard the way the `before_tool` hook does: JSON on stdin.
+ *
+ * The ambient environment is not passed through. Inside an Atomaton run it carries
+ * `ATOMATON_OPS_LOG`, which points at the RUN's own directory -- so a guard spawned
+ * with it reads and writes the run's live search streak instead of a fresh one. That
+ * makes which of these tests pass depend on how much searching the agent had already
+ * done (measured: with the run's streak at 18, "a path that merely contains a routed
+ * name is not the program" fails), and it advances the agent's own streak from inside
+ * the suite. See `hermeticEnv`; CI is unaffected because the variable is unset there.
+ */
 function guard(args: Record<string, unknown>, env?: Record<string, string>): string {
   return spawnSync("bun", ["run", SCRIPT], {
     input: JSON.stringify({ arguments: args }),
     encoding: "utf8",
-    env: env ? { ...process.env, ...env } : process.env,
+    env: { ...hermeticEnv(), ...env },
   }).stdout;
 }
 
@@ -325,7 +336,7 @@ describe("shell_guard.ts", () => {
   });
 
   test("unparseable input is refused", () => {
-    const out = spawnSync("bun", ["run", SCRIPT], { input: "not json", encoding: "utf8" }).stdout;
+    const out = spawnSync("bun", ["run", SCRIPT], { input: "not json", encoding: "utf8", env: hermeticEnv() }).stdout;
     expect(out).toContain('"allow":false');
   });
 });
