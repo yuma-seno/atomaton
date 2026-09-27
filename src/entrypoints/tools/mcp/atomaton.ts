@@ -89,7 +89,13 @@ const LAUNCH_SUB_AGENT_SCHEMA = z.object({
 });
 
 const REQUEST_CLOSE_ISSUE_SCHEMA = z.object({
-  reason: z.string().min(1).describe("Why this issue's work is considered complete."),
+  reason: z
+    .string()
+    .min(1)
+    .describe(
+      "Why this issue's work is considered complete — one sentence. It is printed directly " +
+        "above `summary`, so anything longer is the same judgement written twice.",
+    ),
   summary: z.string().optional().describe("Final summary to include in the posted comment (e.g. an aggregation report)."),
 });
 
