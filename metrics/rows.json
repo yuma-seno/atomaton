@@ -93,6 +93,53 @@
     ]
   },
   {
+    "path": "sessions/issue-17/atomaton.json",
+    "agent": "atomaton",
+    "messages": 152,
+    "calls": 96,
+    "failed": 4,
+    "refused": 1,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "github__get_issue": 6,
+      "github__get_pr": 4,
+      "github__get_check_runs": 2,
+      "read": 15,
+      "github__get_pr_diff": 1,
+      "github__get_issue_comments": 3,
+      "shell__shell_execute": 49,
+      "github__check_merge_readiness": 1,
+      "github__get_branch": 3,
+      "github__list_pr_review_comments": 1,
+      "github__list_prs": 1,
+      "github__get_pr_reviews": 1,
+      "search__search_issues": 1,
+      "search__search_code": 1,
+      "list": 1,
+      "glob": 1,
+      "grep": 4,
+      "web__fetch": 1
+    },
+    "acts": {
+      "other": 40,
+      "verify": 1,
+      "edit": 4,
+      "open": 2,
+      "search": 2
+    },
+    "runs": [
+      {
+        "ended": "2026-09-27T19:09:38Z",
+        "ended_because": "completed",
+        "iterations": 47,
+        "messages": 152,
+        "seconds": 2856,
+        "started": "2026-09-27T18:22:02Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-17/engineer.json",
     "agent": "engineer",
     "messages": 383,
