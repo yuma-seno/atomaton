@@ -2,8 +2,8 @@
   {
     "path": "sessions/issue-1/atomaton.json",
     "agent": "atomaton",
-    "messages": 99,
-    "calls": 71,
+    "messages": 151,
+    "calls": 103,
     "failed": 2,
     "refused": 0,
     "skills": [
@@ -11,18 +11,25 @@
     ],
     "reported": false,
     "tools": {
-      "github__get_issue": 1,
+      "github__get_issue": 7,
       "list": 21,
-      "read": 27,
-      "grep": 14,
+      "read": 29,
+      "grep": 17,
       "render</｜｜DSML｜｜ parameter>\n<｜｜DSML｜｜ parameter name=": 1,
       "atoma_builtin__load_skill": 1,
-      "github__list_issues": 1,
-      "web__fetch": 1,
-      "github__create_issue": 3,
-      "atomaton__launch_sub_agent": 1
+      "github__list_issues": 2,
+      "web__fetch": 4,
+      "github__create_issue": 4,
+      "atomaton__launch_sub_agent": 1,
+      "github__get_issue_comments": 6,
+      "github__list_prs": 1,
+      "shell__shell_execute": 6,
+      "search__search_issues": 2,
+      "atomaton__request_close_issue": 1
     },
-    "acts": {},
+    "acts": {
+      "other": 6
+    },
     "runs": [
       {
         "ended": "2026-09-27T13:49:25Z",
@@ -31,6 +38,14 @@
         "messages": 99,
         "seconds": 237,
         "started": "2026-09-27T13:45:28Z"
+      },
+      {
+        "ended": "2026-09-27T14:17:40Z",
+        "ended_because": "completed",
+        "iterations": 16,
+        "messages": 151,
+        "seconds": 351,
+        "started": "2026-09-27T14:11:49Z"
       }
     ]
   },
