@@ -95,30 +95,42 @@
   {
     "path": "sessions/issue-17/engineer.json",
     "agent": "engineer",
-    "messages": 120,
-    "calls": 66,
-    "failed": 1,
+    "messages": 383,
+    "calls": 229,
+    "failed": 6,
     "refused": 0,
     "skills": [
-      "project/conventions"
+      "project/conventions",
+      "engineering/environment",
+      "delivery/pipeline-setup"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
-      "read": 15,
-      "atoma_builtin__load_skill": 1,
-      "edit": 14,
-      "shell__shell_execute": 24,
-      "grep": 7,
-      "github__get_issue_comments": 1,
-      "write": 1,
-      "github__commit_and_push": 1,
-      "github__create_pr": 2
+      "read": 37,
+      "atoma_builtin__load_skill": 3,
+      "edit": 19,
+      "shell__shell_execute": 107,
+      "grep": 15,
+      "github__get_issue_comments": 6,
+      "write": 3,
+      "github__commit_and_push": 3,
+      "github__create_pr": 2,
+      "search__search_issues": 6,
+      "github__list_prs": 1,
+      "github__list_issues": 2,
+      "github__get_issue": 2,
+      "github__check_merge_readiness": 4,
+      "github__get_check_runs": 12,
+      "github__get_pr": 2,
+      "github__get_pr_reviews": 1,
+      "github__list_pr_review_comments": 3,
+      "github__create_issue": 1
     },
     "acts": {
       "verify": 6,
-      "other": 12,
+      "other": 93,
       "search": 2,
-      "edit": 4
+      "edit": 6
     },
     "runs": [
       {
@@ -128,6 +140,14 @@
         "messages": 120,
         "seconds": 542,
         "started": "2026-09-27T17:27:05Z"
+      },
+      {
+        "ended": "2026-09-27T18:21:26Z",
+        "ended_because": "completed",
+        "iterations": 96,
+        "messages": 383,
+        "seconds": 2685,
+        "started": "2026-09-27T17:36:41Z"
       }
     ]
   },
