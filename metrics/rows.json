@@ -416,6 +416,52 @@
     ]
   },
   {
+    "path": "sessions/issue-23/reviewer.json",
+    "agent": "reviewer",
+    "messages": 223,
+    "calls": 170,
+    "failed": 5,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "read": 33,
+      "github__get_pr": 4,
+      "github__list_pr_review_comments": 1,
+      "github__get_pr_reviews": 1,
+      "github__get_issue_comments": 2,
+      "grep": 78,
+      "github__get_pr_diff": 1,
+      "glob": 6,
+      "github__get_check_runs": 2,
+      "github__get_branch": 5,
+      "github__get_issue": 3,
+      "list": 4,
+      "github__check_merge_readiness": 1,
+      "delegate_readonly__run": 2,
+      "web__fetch": 18,
+      "atoma_builtin__load_skill": 1,
+      "github__list_prs": 1,
+      "github__search_code": 1,
+      "github__merge_pr": 1,
+      "search__search_issues": 3,
+      "github__create_issue": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-09-27T23:25:41Z",
+        "ended_because": "completed",
+        "iterations": 41,
+        "messages": 223,
+        "seconds": 3338,
+        "started": "2026-09-27T22:30:03Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-3/atomaton.json",
     "agent": "atomaton",
     "messages": 100,
