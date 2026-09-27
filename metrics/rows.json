@@ -1,0 +1,37 @@
+[
+  {
+    "path": "sessions/issue-1/atomaton.json",
+    "agent": "atomaton",
+    "messages": 99,
+    "calls": 71,
+    "failed": 2,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "github__get_issue": 1,
+      "list": 21,
+      "read": 27,
+      "grep": 14,
+      "render</｜｜DSML｜｜ parameter>\n<｜｜DSML｜｜ parameter name=": 1,
+      "atoma_builtin__load_skill": 1,
+      "github__list_issues": 1,
+      "web__fetch": 1,
+      "github__create_issue": 3,
+      "atomaton__launch_sub_agent": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-09-27T13:49:25Z",
+        "ended_because": "completed",
+        "iterations": 26,
+        "messages": 99,
+        "seconds": 237,
+        "started": "2026-09-27T13:45:28Z"
+      }
+    ]
+  }
+]
