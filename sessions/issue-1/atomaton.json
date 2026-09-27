@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #1: Explain this repository, in English, Japanese and Chinese\n\n/atomaton\n\nRead the repository and write an explanation of it covering five points:\n\n- what it is\n- the thinking behind it\n- what is technically interesting about it\n- what to read first, and why, to start using it\n- what to read first, and why, to contribute to it\n\n**Cover Atoma core as well as this repository.** This one is the delivery template —\nthe workflows, the agent definitions, the tools and the rules that decide what an agent\nmay do. Atoma is the engine it embeds: the CLI that runs the inference loop, speaks MCP\nto the tool servers, and saves the session. A reader who does not know where the line\nfalls cannot tell which project a given behaviour belongs to, so say where it falls.\nAtoma does not need the same five points — enough that a reader knows what it is, what\nit owns, and why the two are separate.\n\n## Decompose this into three sub-issues, one per language\n\n**Do not write the explanation here.** Create three sub-issues, one for each language,\nand assign each to `engineer`:\n\n1. English\n2. 日本語\n3. 中文\n\nEach sub-issue's body is written **in its own language**, and asks for the explanation\n**in that language only**. The five points above are the same in all three; the language\nof the request and the language of the deliverable are the same, so an engineer reading\nthe Japanese sub-issue is asked in Japanese and answers in Japanese.\n\nThe three are independent — none depends on another — so launch all three in one\n`atomaton__launch_sub_agent` call.\n\n## Form of each deliverable\n\n**The deliverable is a comment on the sub-issue, not a file.** It does not go in `docs/`.\n\nOne comment, in the sub-issue's language, covering the five points.\n\n## What to read\n\n`README.md`, `CONTRIBUTING.md`, `docs/`, `.github/atomaton/`, `config.yaml`, the layout\nof `src/`, and `tests/contract/`. The contract tests are the fastest way to see what is\nactually fixed as a contract here rather than merely true today — they are what turns\nred when the documentation and the implementation drift apart.\n",
+      "content": "Issue #1: Explain this repository, in English, Japanese and Chinese\n**Labels:** atomaton/in-progress, atomaton/launched\n\n/atomaton\n\nRead the repository and write an explanation of it covering five points:\n\n- what it is\n- the thinking behind it\n- what is technically interesting about it\n- what to read first, and why, to start using it\n- what to read first, and why, to contribute to it\n\n**Cover Atoma core as well as this repository.** This one is the delivery template —\nthe workflows, the agent definitions, the tools and the rules that decide what an agent\nmay do. Atoma is the engine it embeds: the CLI that runs the inference loop, speaks MCP\nto the tool servers, and saves the session. A reader who does not know where the line\nfalls cannot tell which project a given behaviour belongs to, so say where it falls.\nAtoma does not need the same five points — enough that a reader knows what it is, what\nit owns, and why the two are separate.\n\n## Decompose this into three sub-issues, one per language\n\n**Do not write the explanation here.** Create three sub-issues, one for each language,\nand assign each to `engineer`:\n\n1. English\n2. 日本語\n3. 中文\n\nEach sub-issue's body is written **in its own language**, and asks for the explanation\n**in that language only**. The five points above are the same in all three; the language\nof the request and the language of the deliverable are the same, so an engineer reading\nthe Japanese sub-issue is asked in Japanese and answers in Japanese.\n\nThe three are independent — none depends on another — so launch all three in one\n`atomaton__launch_sub_agent` call.\n\n## Form of each deliverable\n\n**The deliverable is a comment on the sub-issue, not a file.** It does not go in `docs/`.\n\nOne comment, in the sub-issue's language, covering the five points.\n\n## What to read\n\n`README.md`, `CONTRIBUTING.md`, `docs/`, `.github/atomaton/`, `config.yaml`, the layout\nof `src/`, and `tests/contract/`. The contract tests are the fastest way to see what is\nactually fixed as a contract here rather than merely true today — they are what turns\nred when the documentation and the implementation drift apart.\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-09-27T13:44:47Z",
@@ -1068,13 +1068,549 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#2→engineer\",\"#3→engineer\",\"#4→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_00_f1awwkwta09pd6k7rk28gbpw"
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: Launched sub-agent(s):\n- #2→engineer\n- #3→engineer\n- #4→engineer\n\n<details><summary>Report</summary>\n\nRead the repository and split this into three independent language sub-issues, one per language, as asked — no explanation written here.\n\n- #2 English — https://github.com/yuma-seno/atomaton/issues/2\n- #3 日本語 — https://github.com/yuma-seno/atomaton/issues/3\n- #4 中文 — https://github.com/yuma-seno/atomaton/issues/4\n\nEach body is written in its own language and asks for the deliverable in that language only: one comment on the sub-issue covering the five points (what it is, the thinking behind it, what is technically interesting, what to read first to use it, what to read first to contribute), plus a section on Atoma core — the Rust CLI in `yuma-seno/atoma` that runs the inference loop, speaks MCP over stdio and saves the session — and where the line falls between it and this template. No file, no pull request, no commit.\n\nThe three share no dependency, so all three were launched in one dispatch. Next: each engineer comments its explanation on its own sub-issue; when all three close, this issue is re-invoked to aggregate.\n\n</details>",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-09-27T13:49:25Z",
+        "event_type": "issue_comment",
+        "id": 5856431095,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #3). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-09-27T14:11:11Z",
+        "event_type": "issue_comment",
+        "id": 5856594134,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: Agent `atomaton` dispatched by `atomaton` to work on this sub-task.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-09-27T14:11:26Z",
+        "event_type": "issue_comment",
+        "id": 5856595983,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "This run was started by the `atomaton` agent, which is waiting on your result. When you finish, report back to it: end your response with a line holding nothing but `/atomaton`, followed by what you concluded and what it should do next. Do not end with a plain comment and no such line -- the agent that started you would never be told the work is done."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ngjlirqxyjeev799k0h7hocy",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue",
+            "arguments": "{\"issue_number\": 2}"
+          }
+        },
+        {
+          "id": "call_01_qo13mit7cvas8yg75k3x2opn",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue",
+            "arguments": "{\"issue_number\": 3}"
+          }
+        },
+        {
+          "id": "call_02_a9ruv4hcqultmn683v90z978",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue",
+            "arguments": "{\"issue_number\": 4}"
+          }
+        },
+        {
+          "id": "call_03_48iyeranbzgi2z931o5vfb1g",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue",
+            "arguments": "{\"issue_number\": 1}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":\"2026-09-27T14:02:56Z\",\"createdAt\":\"2026-09-27T13:48:53Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":2,\"state\":\"CLOSED\",\"title\":\"Explain this repository in English (delivery template + Atoma core)\",\"body\":\"## Deliverable\\n\\n**One comment on this issue, written in English.** Not a file, not a pull request, nothing under `docs/`, no commit. Your final message *is* the comment — the machinery posts it — so write the explanation there and nowhere else.\\n\\nRead this repository and explain it, **in English only**, covering five points:\\n\\n- **what it is**\\n- **the thinking behind it**\\n- **what is technically interesting about it**\\n- **what to read first, and why, to start using it**\\n- **what to read first, a\n\n[386 characters dropped from the middle; 4000 shown]\n\nch tool server, how many runs a chain gets.\\n\\n**Atoma core** is the engine this repository embeds: the Rust CLI in the separate repository [`yuma-seno/atoma`](https://github.com/yuma-seno/atoma). It runs the inference loop, speaks MCP to the tool servers over stdio, and saves the session. It owns no layout at all — every path it uses arrives as a command-line argument (`--agent-def`, `--template`, `--skills-dir`, `--tools-file`, `--credentials-file`, `--in-session` / `--out-session`, `--stop-file`, `--max-runtime-secs`, `--loop-retries`) — which is why the layout is settled here and not there. It is installed on the runner as a release asset at `/usr/local/bin/atoma`, or built from a checkout of `main` with `cargo` when the dispatch asks for `atoma_version: source`.\\n\\nSay plainly **where the line falls** between the two, so a reader who knows neither can tell which project a given behaviour belongs to. A reader who knows only one of them cannot tell whether \\\"the merge gate\\\", \\\"the 60-minute cap\\\", \\\"the tool output cap\\\" or \\\"session persistence\\\" is a property of the template or of the engine.\\n\\nAtoma core does not need the same five points. Enough that a reader knows what it is, what it owns, and why the two are separate.\\n\\nAnchors worth reading for the seam specifically:\\n\\n- `docs/template/architecture.md` — \\\"Where the deployed tree splits, and why\\\", and \\\"The core has a cap of its own\\\" under Open questions\\n- `.github/atomaton/README.md` — \\\"Why the core is configurable and this is not\\\"\\n- `src/workflows/actions/atoma-cli.ts` — the pinned version, and the record of every coupling between a core version and a declaration made here\\n- `src/workflows/atomaton-runner.wac.ts` — the `atoma run` invocation itself\\n\\n## What to read\\n\\n`README.md`, `CONTRIBUTING.md`, `docs/` (start at `docs/README.md`), `.github/atomaton/` (especially `README.md` and `config.yaml`), the layout of `src/`, and `tests/contract/`. The contract tests are the fastest way to see what is actually fixed as a contract here rather than merely true today — they are what turns red when the documentation and the implementation drift apart.\\n\\n## Constraints\\n\\n- Do not create, edit or commit any file in the repository. The deliverable is the comment only.\\n- Do not open a pull request.\\n- English only. Do not also answer in Japanese or Chinese — two sibling issues carry those.\\n\\n## Close condition\\n\\nThis issue is closed when one comment on it carries the explanation, in English, covering all five points and the Atoma core section — that comment is the evidence, and the atomaton that reads this issue closes it on that basis. Nothing has to be committed or merged for this to be done. End your response with `/atomaton` on its own line so that agent is told the work is done.\",\"total_comments\":3,\"parent\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[]}",
+      "tool_call_id": "call_00_ngjlirqxyjeev799k0h7hocy"
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":\"2026-09-27T14:11:08Z\",\"createdAt\":\"2026-09-27T13:48:58Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":3,\"state\":\"CLOSED\",\"title\":\"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\"body\":\"## 成果物\\n\\n**この issue へのコメント 1 件を、日本語で。** ファイルではありません。`docs/` にも書きません。プルリクエストも開きません。コミットも不要です。あなたの最後のメッセージがそのままコメントとして投稿されるので、説明はそこに書いてください。\\n\\nこのリポジトリを読み、**日本語のみ**で次の五つの観点から説明してください。\\n\\n- これは何か\\n- その背後にある考え方\\n- 技術的に面白い点\\n- 使い始めるために最初に読むべきもの、そしてその理由\\n- コントリビュートするために最初に読むべきもの、そしてその理由\\n\\n## 本リポジトリと Atoma コアの両方を扱うこと\\n\\n本リポジトリは**デリバリーテンプレート**です。GitHub Actions のワークフロー、エージェント定義、プロンプトテンプレート、スキル、MCP ツールサーバーとそのフック、そして「エージェントが何をしてよいか」を決めるルール一式 —— プルリクエストが何に対して検査されるか、何がマージできるか、どの資格情報がどのツールサーバーに届くか、1 本のチェーンに何回の実行が許されるか —— をここが持ちます。\\n\\n**Atoma コア**は、本リポジトリが組み込んでいるエンジンです。別リポジトリ [`yuma-seno/atoma`](https://github.com/yuma-seno/atoma) にある Rust 製 CLI で、推論ループを回し、ツールサーバーと stdio で MCP を話し、セッションを保存します。レイアウトは一切持ちません。使うパスはすべてコマンドライン引数として渡されます(`--agent-def`、`--template`、`--skills-dir`、`--tools-file`、`--credentials-file`、`--in-session` / `--out-session`、`--stop-file`、`--max-runtime-secs`、`--loop-retries`)。だからレイアウトはコアではなくこちら側で決まります。ランナーにはリリース資産として `/usr/local/bin/atoma` に入るか、`atoma_version: source` が指定されたときは `main` のチェックアウトから `cargo` でビルドされます。\\n\\n**境界がどこにあるかを明記してください。** どちらも知らない読者が、「マージゲート」「60 分の上限」「ツール出力の上限」「セッションの永続化」がテンプレート側の性質なのかエンジン側の性質なのかを判別できるようにするのが目的です。\\n\\nAtoma コアについては五つの観点は不要です。読者が「それが何か」「何を所有するか」「なぜ二つが分かれているか」を知れるだけの分量で十分です。\\n\\n境界そのものを読むための手がかり:\\n\\n- `docs/template/architecture.md` — \\\"Where the deployed tree splits, and why\\\"、および Open questions の \\\"The core has a cap of its own\\\"\\n- `.github/atomaton/README.md` — \\\"Why the core is configurable and this is not\\\"\\n- `src/workflows/actions/atoma-cli.ts` — 固定されているバージョンと、コアのバージョンとこちら側の宣言が連動する箇所の記録\\n- `src/workflows/atomaton-runner.wac.ts` — `atoma run` の実際の起動行\\n\\n## まず読むもの\\n\\n`README.md`、`CONTRIBUTING.md`、`docs/`(`docs/README.md` から)、`.github/atomaton/`(とくに `README.md` と `config.yaml`)、`src/` の配置、`tests/contract/`。コントラクトテストは、「単に今そうなっている」ではなく「ここで契約として固定されている」ものが何かをもっとも速く見せてくれます。ドキュメントと実装がずれたときに赤くなるのがこれらです。\\n\\n## 制約\\n\\n- リポジトリ内にファイルを作成・編集・コミットしないこと。成果物はコメントだけです。\\n- プルリクエストを開かないこと。\\n- 日本語のみ。英語や中国語でも併記しないこと —— それらは兄弟の issue が担当します。\\n\\n## 完了条件\\n\\nこの issue に、五つの観点と Atoma コアの節をすべて含む日本語のコメントが 1 件付いた時点で完了です。そのコメントが根拠であり、この issue を読む atomaton がそれを確認して close します。コミットやマージは必要ありません。応答の最後に `/atomaton` を単独行で置き、作業が終わったことをそのエージェントに伝えてください。\",\"total_comments\":4,\"parent\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[]}",
+      "tool_call_id": "call_01_qo13mit7cvas8yg75k3x2opn"
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":\"2026-09-27T14:04:25Z\",\"createdAt\":\"2026-09-27T13:49:02Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":4,\"state\":\"CLOSED\",\"title\":\"用中文解释本仓库(交付模板与 Atoma 核心)\",\"body\":\"## 交付物\\n\\n**本 issue 上的一条评论,用中文撰写。** 不是文件,不写入 `docs/`,不打开 pull request,也不需要提交。你的最后一条消息就是被发布出来的那条评论,说明请写在里面。\\n\\n阅读本仓库,并**只用中文**解释它,覆盖以下五点:\\n\\n- 它是什么\\n- 它背后的思路\\n- 它在技术上有什么值得关注之处\\n- 要开始使用它,应当先读什么,以及为什么\\n- 要参与贡献,应当先读什么,以及为什么\\n\\n## 同时覆盖本仓库与 Atoma 核心\\n\\n本仓库是**交付模板**:GitHub Actions 工作流、代理定义、提示词模板、技能、MCP 工具服务器及其钩子,以及决定「代理允许做什么」的一整套规则 —— pull request 会被拿去检查什么、什么可以合并、哪个凭据能到达哪个工具服务器、一条链允许跑多少次。\\n\\n**Atoma 核心**是本仓库内嵌的引擎:另一个仓库 [`yuma-seno/atoma`](https://github.com/yuma-seno/atoma) 中的 Rust CLI。它负责运行推理循环、通过 stdio 与工具服务器说 MCP、并保存会话。它自己不带任何目录布局 —— 它用到的每个路径都以命令行参数传入(`--agent-def`、`--template`、`--skills-dir`、`--tools-file`、`--credentials-file`、`--in-session` / `--out-session`、`--stop-file`、`--max-runtime-secs`、`--loop-retries`),所以布局是在这一侧定下来的,而不是在核心那边。在 runner 上它作为 release 资产被安装到 `/usr/local/bin/atoma`,或在指定 `atoma_version: source` 时用 `cargo` 从 `main` 的检出构建。\\n\\n**请明确说出分界线在哪里**,让同时不了解两者的读者也能判断某个行为属于哪个项目。只知道其中一个的人,无法分辨「合并闸门」「60 分钟上限」「工具输出上限」或「会话持久化」究竟属于模板还是引擎。\\n\\nAtoma 核心不需要同样的五点。只需让读者知道它是什么、它拥有什么、以及两者为什么分开即可。\\n\\n关于这条分界线本身,值得一读的锚点:\\n\\n- `docs/template/architecture.md` —— \\\"Where the deployed tree splits, and why\\\",以及 Open questions 下的 \\\"The core has a cap of its own\\\"\\n- `.github/atomaton/README.md` —— \\\"Why the core is configurable and this is not\\\"\\n- `src/workflows/actions/atoma-cli.ts` —— 被钉住的版本,以及核心版本与这一侧声明之间每一处耦合的记录\\n- `src/workflows/atomaton-runner.wac.ts` —— `atoma run` 的调用行本身\\n\\n## 首先读什么\\n\\n`README.md`、`CONTRIBUTING.md`、`docs/`(从 `docs/README.md` 开始)、`.github/atomaton/`(尤其是 `README.md` 与 `config.yaml`)、`src/` 的布局,以及 `tests/contract/`。契约测试是最快看出「什么是被真正固定为契约」而非「今天恰好如此」的地方 —— 当文档与实现漂移时,变红的就是它们。\\n\\n## 约束\\n\\n- 不要创建、修改或提交仓库中的任何文件。交付物只有那条评论。\\n- 不要打开 pull request。\\n- 只用中文。不要同时用英文或日文作答 —— 那由兄弟 issue 负责。\\n\\n## 关闭条件\\n\\n当本 issue 上出现一条中文评论,完整覆盖上述五点以及 Atoma 核心那一节时,本 issue 即为完成。那条评论就是证据,阅读本 issue 的 atomaton 据此关闭它。为此不需要任何提交或合并。请在回复的最后单独一行写 `/atomaton`,以便该代理知道工作已完成。\",\"total_comments\":3,\"parent\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[]}",
+      "tool_call_id": "call_02_a9ruv4hcqultmn683v90z978"
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":null,\"createdAt\":\"2026-09-27T13:44:47Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":1,\"state\":\"OPEN\",\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"body\":\"/atomaton\\n\\nRead the repository and write an explanation of it covering five points:\\n\\n- what it is\\n- the thinking behind it\\n- what is technically interesting about it\\n- what to read first, and why, to start using it\\n- what to read first, and why, to contribute to it\\n\\n**Cover Atoma core as well as this repository.** This one is the delivery template —\\nthe workflows, the agent definitions, the tools and the rules that decide what an agent\\nmay do. Atoma is the engine it embeds: the CLI that runs the inference loop, speaks MCP\\nto the tool servers, and saves the session. A reader who does not know where the line\\nfalls cannot tell which project a given behaviour belongs to, so say where it falls.\\nAtoma does not need the same five points — enough that a reader knows what it is, what\\nit owns, and why the two are separate.\\n\\n## Decompose this into three sub-issues, one per language\\n\\n**Do not write the explanation here.** Create three sub-issues, one for each language,\\nand assign each to `engineer`:\\n\\n1. English\\n2. 日本語\\n3. 中文\\n\\nEach sub-issue's body is written **in its own language**, and asks for the explanation\\n**in that language only**. The five points above are the same in all three; the language\\nof the request and the language of the deliverable are the same, so an engineer reading\\nthe Japanese sub-issue is asked in Japanese and answers in Japanese.\\n\\nThe three are independent — none depends on another — so launch all three in one\\n`atomaton__launch_sub_agent` call.\\n\\n## Form of each deliverable\\n\\n**The deliverable is a comment on the sub-issue, not a file.** It does not go in `docs/`.\\n\\nOne comment, in the sub-issue's language, covering the five points.\\n\\n## What to read\\n\\n`README.md`, `CONTRIBUTING.md`, `docs/`, `.github/atomaton/`, `config.yaml`, the layout\\nof `src/`, and `tests/contract/`. The contract tests are the fastest way to see what is\\nactually fixed as a contract here rather than merely true today — they are what turns\\nred when the documentation and the implementation drift apart.\\n\",\"total_comments\":3,\"children\":[{\"number\":2,\"title\":\"Explain this repository in English (delivery template + Atoma core)\",\"state\":\"done\"},{\"number\":3,\"title\":\"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\"state\":\"done\"},{\"number\":4,\"title\":\"用中文解释本仓库(交付模板与 Atoma 核心)\",\"state\":\"done\"}],\"pull_requests\":[]}",
+      "tool_call_id": "call_03_48iyeranbzgi2z931o5vfb1g"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_02_5n9c2l46rwxa1uljms2ew7qh",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue_comments",
+            "arguments": "{\"issue_number\": 4, \"from\": 1, \"to\": 3}"
+          }
+        },
+        {
+          "id": "call_00_swpoc1aycgycwi1nhwdsfcsz",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue_comments",
+            "arguments": "{\"issue_number\": 2, \"from\": 1, \"to\": 3}"
+          }
+        },
+        {
+          "id": "call_01_o3ao9ec34pwppktzfeu1acrr",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue_comments",
+            "arguments": "{\"issue_number\": 3, \"from\": 1, \"to\": 4}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":4,\"title\":\"用中文解释本仓库(交付模板与 Atoma 核心)\",\"state\":\"CLOSED\",\"total_comments\":3,\"parent\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[]},\"showing\":\"all 3 comment(s)\",\"comments\":[{\"index\":1,\"id\":\"IC_kwDOUudl8s8AAAABXRII9A\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"Atomaton: Agent `engineer` dispatched by `atomaton` to work on this sub-task.\",\"createdAt\":\"2026-09-27T13:49:20Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/4#issuecomment-5856430324\",\"viewerDidAuthor\":true},{\"index\":2,\"id\":\"IC_kwDOUudl8s8AAAABXROVWQ\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"# 本仓库(Atomaton 交付模板)与 Atoma 核心:一份中文说明\\n\\n## 一、它是什么\\n\\n**Atomaton 是一个「可以整份复制走」的 GitHub Actions 交付系统,它本身不是 Atoma 核心。** `README.md:3-4` 就是这么开头的:\\n\\n> Atomaton is a copyable GitHub \n\n[10470 characters dropped from the middle; 4000 shown]\n\na 核心:它是什么、它拥有什么、以及分界线在哪里」,后者含一张把「合并闸门 / 运行时长上限 / 工具输出上限 / 会话持久化」四处行为逐个落到模板侧或核心侧的分界线表格。约束也满足:仓库内没有任何文件被创建、修改或提交,也没有 PR。关闭条件据此成立,不需要任何提交或合并。\\n\\n抽样复核(回到仓库实际内容,不照抄评论):`ls tests/contract | wc -l` → 29;`src/workflows/actions/atoma-cli.ts:190` = `export const ATOMA_DEFAULT_VERSION = \\\"v0.1.0\\\";`;`src/shared/tool-output.ts:50` = `export const TOOL_OUTPUT_BUDGET = 50_000;`;`src/domain/work/session-size.ts:81` = `export const TOOL_RESULT_CAP = 4_000;`;`src/workflows/atomaton-runner.wac.ts:583-584` = `const JOB_TIMEOUT_MINUTES = 240;` 与 `const RESERVED_FOR_WHAT_FOLLOWS_SECS = 300;`,其 `:873-886` 即评论引用的 `atoma run` 调用行(每个路径都是 `--` 参数);`.github/atomaton/config.yaml` 的 `merge:`(governed_paths 为 `.github/**`、`self/**`,外加 gates)与 `chain:` 计数器都在评论标注的行区间内。逐项吻合。\\n\\n未能确定:评论第七节自己记录了两处它判断不了的漂移——(a)`docs/work/boundaries.md:25-27` 的「60-minute job」与实现的 240 分钟不一致,是常数该回到 60 还是文档该改成 240 无法从只有一次提交的历史(`37f1c44 InitialCommit`)判断,该处已开为 #5;(b)`yuma-seno/atoma` 的 tag 与 `atoma-cli.ts` 注释记到 v0.1.46 的版本史不符,评论只报告观察、未据此改动。两者都不影响本 issue 的关闭条件。\\n\\n接下来:本条请求关闭 #4。工作树保持原样(`git status --porcelain` 为空,分支 `main`,无提交、无 PR),本 issue 没有需要交付的代码,也没有需要派发的后续工作。\\n\\n本 issue 的交付物已存在并已核对完毕,可以关闭。\\n\\n## 结论\\n\\nissue #4 的第 2 条评论是一份完整的中文说明,覆盖了关闭条件要求的内容:五点(它是什么 / 背后的思路 / 技术上值得关注之处 / 开始使用先读什么 / 参与贡献先读什么)与单独的 Atoma 核心一节(它是什么、拥有什么,以及「合并闸门 / 运行时长上限 / 工具输出上限 / 会话持久化」四处行为落在模板侧还是核心侧的分界线表格)。仓库内没有创建、修改或提交任何文件,也没有 PR——这正是本 issue 的约束。因此那条评论本身即是证据,本 issue 完成。\\n\\n## 依据\\n\\n- 评论存在:issue #4 comment 2(comment id `5856531801`,2026-09-27T14:02:18Z)即为交付物;comment 1 只是派发说明。\\n- 抽样复核(回到仓库实际内容,不照抄评论文本):`ls tests/contract | wc -l` → `29`;`src/workflows/actions/atoma-cli.ts:190` = `export const ATOMA_DEFAULT_VERSION = \\\"v0.1.0\\\";`;`src/shared/tool-output.ts:50` = `export const TOOL_OUTPUT_BUDGET = 50_000;`;`src/domain/work/session-size.ts:81` = `export const TOOL_RESULT_CAP = 4_000;`;`src/workflows/atomaton-runner.wac.ts:583-584` = `const JOB_TIMEOUT_MINUTES = 240;` / `const RESERVED_FOR_WHAT_FOLLOWS_SECS = 300;`,其 `:873-886` 即评论引用的 `atoma run --agent-def … --max-runtime-secs … --stop-file … --loop-retries … --credentials-file …`(每个路径都是参数,核心不硬编码布局);`.github/atomaton/config.yaml` 的 `merge:`(`.github/**`、`self/**` 与 gates)与 `chain:` 计数器都在评论标注的行区间内。\\n- 约束满足:`git status --porcelain` 为空(分支 `main`,`37f1c44 InitialCommit`),无提交、无 PR。\\n\\n## 未能确定\\n\\n评论第七节自己记录了两处作者判断不了的漂移,我也无法判定:(a)`docs/work/boundaries.md:25-27` 的「60-minute job」与实现的 240 分钟不一致(是常数该回到 60,还是文档该改成 240),在只有一次提交的历史里看不出 60 的来处——该漂移已开为 #5,内容与评论描述一致;(b)`yuma-seno/atoma` 的 tag 与 `atoma-cli.ts` 注释记到 v0.1.46 的版本史不符,评论只报告观察、未据此改动。两者都不影响本 issue 的关闭条件。\\n\\n## 接下来\\n\\n关闭本 issue。没有需要交付的代码,也没有需要派发的后续工作;仓库与工作树保持原样。\\n\\n(附注:本条请求第一次提交时我多传了一个 `issue_number` 参数,工具以 `Unrecognized key(s) in object: 'issue_number'` 拒绝,去掉该参数后成功——该字段不属于本工具签名。)\",\"createdAt\":\"2026-09-27T14:04:24Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/4#issuecomment-5856546576\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_02_5n9c2l46rwxa1uljms2ew7qh"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":2,\"title\":\"Explain this repository in English (delivery template + Atoma core)\",\"state\":\"CLOSED\",\"total_comments\":3,\"parent\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[]},\"showing\":\"all 3 comment(s)\",\"comments\":[{\"index\":1,\"id\":\"IC_kwDOUudl8s8AAAABXRIDSQ\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"Atomaton: Agent `engineer` dispatched by `atomaton` to work on this sub-task.\",\"createdAt\":\"2026-09-27T13:49:11Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/2#issuecomment-5856428873\",\"viewerDidAuthor\":true},{\"index\":2,\"id\":\"IC_kwDOUudl8s8AAAABXRNThg\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"## What I concluded\\n\\nThis repository is **the delivery template** — the GitHub-side half of an agent delivery system: the workflows,\n\n[13799 characters dropped from the middle; 4000 shown]\n\nparaphrased.\\n- **The constraints held.** `git status --short` returned empty and `git log --oneline -3` returned the single commit `37f1c44 InitialCommit`; `github__list_prs(state=\\\"all\\\")` returned `[]`; `github__get_issue(2)` shows `\\\"pull_requests\\\": []` and `\\\"children\\\": []`. The comment is the only artifact and no repository file was touched.\\n- **Sibling state.** `github__get_issue_comments(3)` and `(4)` each return one comment, the dispatch notice, so neither sibling has delivered its explanation yet.\\n\\n## What I could not establish\\n\\n- **Whether the version numbers in this snapshot are historical.** I confirmed the comment's own caveat rather than resolving it: the pin at `src/workflows/actions/atoma-cli.ts:190` is `v0.1.0` while the comment above it records couplings through v0.1.46, and the checkout has one commit. Nothing in this repository decides whether that is deliberate, so the comment describes the mechanism and flags the literal as not-history, which is the honest treatment.\\n- **The `docs/work/boundaries.md` drift the comment reports is real and is now tracked.** I verified it: `docs/work/boundaries.md:25-27` says \\\"whatever is left of the 60-minute job it runs inside, minus five minutes\\\", while `src/workflows/atomaton-runner.wac.ts:583` sets `JOB_TIMEOUT_MINUTES = 240` and the generated job carries `timeout-minutes: 240`. The comment said it did not open an issue; two standalone issues now carry it — #6 (\\\"docs/work/boundaries.md says the job is 60 minutes; the runner's own job timeout is 240\\\") and #5 (its Chinese counterpart) — and neither is a child of this issue, so nothing here depends on them.\\n- **I did not re-verify the Atoma core claims against its Rust source.** My check is that the comment's core statements trace to what this repository records — `atoma-cli.ts`'s coupling comment, the runner's `atoma run` invocation at `src/workflows/atomaton-runner.wac.ts:873-885` — and to the installed binary's help output that the previous run reported. I did not read `yuma-seno/atoma`, so a claim about the core's internals rests on those two sources and not on that source tree.\\n\\n## What happens next\\n\\nNothing runs for #2: the close condition is met by an artifact already on the thread, and this call concludes it and triggers aggregation for parent #1. #1 remains open with #3 and #4 undelivered; when they land, the aggregator on #1 will have all three explanation comments to read. The one open follow-up in the tree is the job-timeout documentation drift, already owned by #6 (English) and #5 (Chinese); if it is to be fixed, that is a pull request against `docs/work/boundaries.md` and `docs/template/architecture.md:59`, and neither is this issue's to make.\",\"createdAt\":\"2026-09-27T14:02:56Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/2#issuecomment-5856536403\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_00_swpoc1aycgycwi1nhwdsfcsz"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":3,\"title\":\"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\"state\":\"CLOSED\",\"total_comments\":4,\"parent\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[]},\"showing\":\"all 4 comment(s)\",\"comments\":[{\"index\":1,\"id\":\"IC_kwDOUudl8s8AAAABXRIGdw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"Atomaton: Agent `engineer` dispatched by `atomaton` to work on this sub-task.\",\"createdAt\":\"2026-09-27T13:49:15Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/3#issuecomment-5856429687\",\"viewerDidAuthor\":true},{\"index\":2,\"id\":\"IC_kwDOUudl8s8AAAABXROjTQ\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"私は成果物がコメント 1 件(コード変更なし)のタスクなので、リポジトリを読み終えた内容をそのまま報告本文として書きます。\\n\\n---\\n\\n# Atomaton — デリバリーテンプレートと Atoma コアの説明\\n\\n## 1. これは何か\\n\\nAtomaton は「コピーして使う GitHub Actions のデ\n\n[11468 characters dropped from the middle; 4000 shown]\n\n = 300;`、`:873-885` がコメントが引用する `atoma run … --max-runtime-secs \\\"$BUDGET\\\" … --loop-retries …` の呼び出し行そのもの(各パスが `--` 引数)。`src/shared/tool-output.ts:50` = `50_000`、`:93` = `TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2`(=`100_000`)。`src/domain/work/session-size.ts:81` = `TOOL_RESULT_CAP = 4_000`。`.github/atomaton-runtime/tools/defaults.yaml:82/113/175` = `3600`/`300`/`660`。`.github/atomaton/config.yaml` は 136 行で `merge:`(governed_paths + gates)と `chain:`(5 / 2)を含む。`docs/template/architecture.md:234-243` = \\\"The core has a cap of its own\\\"。`tests/contract/*.ts` は 29 ファイル。\\n- コメントが報告したドリフトは事実:`docs/work/boundaries.md:25-27` は \\\"the 60-minute job\\\" と書く一方、`.github/workflows/atomaton-runner.yml:102` は `timeout-minutes: 240`。上流 `yuma-seno/atoma` の releases API が返したのは `v0.1.0`(資産 `atoma-linux-x86_64` あり)のみで、`atoma-cli.ts:15-189` のコメントは `v0.1.46` まで言及している — コメントの記述どおり。\\n\\n## 確かめられなかったこと / コメントの精度について\\n\\n- 「`tests/contract/` には 29 個のテスト」は正確には「29 ファイル」です。`grep -c \\\"^\\\\s*test(\\\"` の合計は 178 で、各ファイル冒頭の経緯コメントという主張自体はファイル単位で成り立ちます。実質的な誤りではありませんが、数え方として 1 点だけ不正確です。\\n- `src/entrypoints/machinery/read_run_ending.ts:6` の `ended_because` は `completed`, `iterations`, `runtime`, `stopped`, `loop`, `failed` の 6 語で、コメントの列挙は `loop` を落としています。`--loop-retries` を使う以上この語は実際に出るので、後で読む人が同じ列挙を探すと 1 語足りません。\\n- 上流コアのソースは読んでいません(README と `docs/runtime.md`、releases API のみ)。したがって「コア側にもう一つ出力上限がある」は本リポジトリの `docs/template/architecture.md:234-243` を根拠にした記述です。\\n- 私のツールでは既存コメントを編集できないため、上記 2 点はコメント本文としては直せません。issue の完了条件(五観点 + コアの節 + 境界の明記)には影響しません。\\n\\n## 次に何が起きるか\\n\\n- 本 issue #3 を閉じます。親 #1 の子は #2(closed)、#4(closed)、#3(本件)で、これで全部が閉じるため、親 #1 の集約が起きます。\\n- 起票済みの未修正のドリフトが 2 件 open です:#5(`docs/work/boundaries.md` が 60 分、runner は 240 分 — 中国語側の実行が起票)と #6(同じドリフト、本スレッドを書いた実行が起票)。同じ問題が言語ごとに二重起票されており、どちらもラベル・親なしの open です。修正するか、runner の上限を下げるかは別の判断なので、ここでは触れません。\\n- この issue に必要なコード・PR はありません。作業は完了です。\",\"createdAt\":\"2026-09-27T14:11:07Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/3#issuecomment-5856593761\",\"viewerDidAuthor\":true},{\"index\":4,\"id\":\"IC_kwDOUudl8s8AAAABXRSSNw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"Atomaton: Launched sub-agent(s):\\n- #1→atomaton\\n\\n<details><summary>Report</summary>\\n\\n子 #3 の完了で親 #1 の自動集約が起きましたが、その dispatch が失敗しました(「Issue #3 is concluded… All sub-tasks of the parent issue complete, but the dispatch FAILED. The aggregation marker is already written, so no other caller will retry」)。集約マーカーは既に書かれているため自動再試行はなく、親 #1 の集約はこの手動 dispatch が唯一の経路です。親 #1 の子は #2(closed)、#4(closed)、#3(closed)で全部閉じており、#1 は open、PR は 0 件(`github__list_prs(state=all)` が `[]`)。集約して #1 を閉じる判断をここで行ってください。\\n\\n</details>\",\"createdAt\":\"2026-09-27T14:11:30Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/3#issuecomment-5856596535\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_01_o3ao9ec34pwppktzfeu1acrr"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_8s9kltadvsf4xtn9yb40m0fi",
+          "type": "function",
+          "function": {
+            "name": "github__list_issues",
+            "arguments": "{\"limit\": 20, \"state\": \"all\"}"
+          }
+        },
+        {
+          "id": "call_01_m7xhs5xkvuias7wi6yfa7o6u",
+          "type": "function",
+          "function": {
+            "name": "github__list_prs",
+            "arguments": "{\"limit\": 20, \"state\": \"all\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[{\"labels\":[],\"number\":6,\"state\":\"OPEN\",\"title\":\"docs/work/boundaries.md says the job is 60 minutes; the runner's own job timeout is 240\"},{\"labels\":[],\"number\":5,\"state\":\"OPEN\",\"title\":\"docs/work/boundaries.md 说 job 上限是 60 分钟,runner 里声明的是 240 分钟\"},{\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":4,\"state\":\"CLOSED\",\"title\":\"用中文解释本仓库(交付模板与 Atoma 核心)\"},{\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":3,\"state\":\"CLOSED\",\"title\":\"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\"},{\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":2,\"state\":\"CLOSED\",\"title\":\"Explain this repository in English (delivery template + Atoma core)\"},{\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":1,\"state\":\"OPEN\",\"title\":\"Explain this repository, in English, Japanese and Chinese\"}]",
+      "tool_call_id": "call_00_8s9kltadvsf4xtn9yb40m0fi"
+    },
+    {
+      "role": "tool",
+      "content": "[]",
+      "tool_call_id": "call_01_m7xhs5xkvuias7wi6yfa7o6u"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_a57qmmraixlj70zn1252fcgf",
+          "type": "function",
+          "function": {
+            "name": "shell__shell_execute",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --porcelain && echo \\\"---branch---\\\" && git rev-parse --abbrev-ref HEAD && git log --oneline -3\"}"
+          }
+        },
+        {
+          "id": "call_01_tz1c03zb8nysr17sbu0ygju6",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 3, \"max_matches\": 6, \"path\": \"src/workflows/atomaton-runner.wac.ts\", \"pattern\": \"JOB_TIMEOUT_MINUTES|RESERVED_FOR_WHAT_FOLLOWS_SECS|MIN_AGENT_BUDGET_SECS\"}"
+          }
+        },
+        {
+          "id": "call_02_izt53mphxcmd8xxhtvtbqta4",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 6, \"offset\": 23, \"path\": \"docs/work/boundaries.md\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"---branch---\\nmain\\n37f1c44 InitialCommit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":231}",
+      "tool_call_id": "call_00_a57qmmraixlj70zn1252fcgf"
+    },
+    {
+      "role": "tool",
+      "content": "6 line(s), match and context, under src/workflows/atomaton-runner.wac.ts:\n\n580- * maximum is six hours; this leaves room under it for the reserve and for the\n581- * queueing that happens before the job starts.\n582- */\n583:const JOB_TIMEOUT_MINUTES = 240;\n584:const RESERVED_FOR_WHAT_FOLLOWS_SECS = 300;\n585-\n\n[28 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_01_tz1c03zb8nysr17sbu0ygju6"
+    },
+    {
+      "role": "tool",
+      "content": "docs/work/boundaries.md lines 23-28 of 59\n\n23\t## What bounds a run\n24\t\n25\tNot configurable, on purpose. The runner gives an agent whatever is left of the\n26\t60-minute job it runs inside, minus five minutes for what follows it — saving the\n27\tsession, posting the result, dispatching whatever comes next. A run that stops on\n28\tthat budget saves its session and can be continued with `/<agent>`; a run killed by\n\n[31 more lines. Read again with offset: 29.]",
+      "tool_call_id": "call_02_izt53mphxcmd8xxhtvtbqta4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_xjnii29f1hme2fvgj8c8m7mb",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue",
+            "arguments": "{\"issue_number\": 5}"
+          }
+        },
+        {
+          "id": "call_01_i853ofwka387fsdhxt50xuqp",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue",
+            "arguments": "{\"issue_number\": 6}"
+          }
+        },
+        {
+          "id": "call_02_y60cwrqo2538yppp6c32p2qs",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 12, \"offset\": 575, \"path\": \"src/workflows/atomaton-runner.wac.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":null,\"createdAt\":\"2026-09-27T13:57:30Z\",\"labels\":[],\"number\":5,\"state\":\"OPEN\",\"title\":\"docs/work/boundaries.md 说 job 上限是 60 分钟,runner 里声明的是 240 分钟\",\"body\":\"发现于一次只读的仓库解释任务(issue #4),该任务被要求不得修改任何文件,因此记录而不是就地修。\\n\\n## 事实\\n\\n`docs/work/boundaries.md:25-30` 写的是:\\n\\n> Not configurable, on purpose. The runner gives an agent whatever is left of the\\n> 60-minute job it runs inside, minus five minutes for what follows it — saving the\\n> session, posting the result, dispatching whatever comes next.\\n\\n同一段里的「minus five minutes」与实现一致(`RESERVED_FOR_WHAT_FOLLOWS_SECS = 300`),但 60 分钟不是:\\n\\n- `src/workflows/atomaton-runner.wac.ts:583` — `const JOB_TIMEOUT_MINUTES = 240;`\\n- `src/workflows/atomaton-runner.wac.ts:1362` — `\\\"timeout-minutes\\\": JOB_TIMEOUT_MINUTES`\\n- `.github/workflows/atomaton-runner.yml:102` — `timeout-minutes: 240`\\n- `src/workflows/atomaton-runner.wac.ts:576-581` 的注释自己说 `Four hours, and the number is a ceiling rather than a target`\\n\\n同处还有一处相关表述:`docs/template/architecture.md:59` 把 \\\"the 60-minute cap\\\" 举为\\n`adapters/` 里的 GitHub mechanism 例子。\\n\\n## 未确定\\n\\n哪一侧才是意图中的数字——是常量该回到 60,还是文档该改成 240——不是我能判定的;本仓库只有一个\\ncommit(`37f1c44 InitialCommit`),所以无法从历史看出 60 是何时以及为何留下的。`docs/template/architecture.md:59`\\n那一处是否指同一件事也需要一起确认。\\n\\n## 为什么值得修\\n\\n`docs/work/boundaries.md` 正是「一次运行受什么限制」这个问题的答案页,而 60 与 240 的差别是用户\\n可以据此规划的程度(agent 拿到的是 deadline 减去 300 秒,见 `src/workflows/atomaton-runner.wac.ts:604-612`、\\n`858-870`)。文档与实现漂移在这棵树上通常由 `tests/contract/` 变红来发现,而这一处没有被任何契约测试\\n覆盖(仓库内没有断言该文档数字的测试)。\\n\",\"total_comments\":0,\"children\":[],\"pull_requests\":[]}",
+      "tool_call_id": "call_00_xjnii29f1hme2fvgj8c8m7mb"
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":null,\"createdAt\":\"2026-09-27T14:00:17Z\",\"labels\":[],\"number\":6,\"state\":\"OPEN\",\"title\":\"docs/work/boundaries.md says the job is 60 minutes; the runner's own job timeout is 240\",\"body\":\"## What the documentation says\\n\\n`docs/work/boundaries.md:25-27`:\\n\\n> Not configurable, on purpose. The runner gives an agent whatever is left of the\\n> 60-minute job it runs inside, minus five minutes for what follows it — saving the\\n> session, posting the result, dispatching whatever comes next.\\n\\n`docs/template/architecture.md:59` repeats the figure, listing \\\"the 60-minute cap\\\" as an example of a GitHub mechanism.\\n\\n## What the code says\\n\\n- `src/workflows/atomaton-runner.wac.ts:583` — `const JOB_TIMEOUT_MINUTES = 240;`, with the comment above it at 576-581 reading \\\"Four hours, and the number is a ceiling rather than a target\\\".\\n- `src/workflows/atomaton-runner.wac.ts:584` — `const RESERVED_FOR_WHAT_FOLLOWS_SECS = 300;`, which is the five minutes the sentence above gets right.\\n- `.github/workflows/atomaton-runner.yml:102` — `timeout-minutes: 240`, the generated job.\\n\\nSo the agent's budget is computed as 240 minutes minus five, passed to the core as `--max-runtime-secs` (`src/workflows/atomaton-runner.wac.ts:873-885`), and the sentence an adopter reads states a quarter of that.\\n\\n## Why nothing reports it\\n\\nNo test reads that sentence. `tests/contract/doc-links.test.ts` checks that relative links and anchors resolve, not that a number in the prose matches the code, and nothing else in `tests/contract/` names the job timeout.\\n\\n## Suggested fix\\n\\nThe number that belongs in adopter-facing documentation is the runner's declared one, so the sentence in `docs/work/boundaries.md` is what should move to four hours; `docs/template/architecture.md:59` uses the figure only as an example of a mechanism and can follow. Whether the runner's ceiling should instead be lowered is a separate question, and the comment at 576-581 argues for keeping it high.\\n\\nFound while writing the Japanese explanation comment on #3, where \\\"the 60-minute cap\\\" is one of the four things the comment has to attribute to the template or to the engine.\",\"total_comments\":0,\"children\":[],\"pull_requests\":[]}",
+      "tool_call_id": "call_01_i853ofwka387fsdhxt50xuqp"
+    },
+    {
+      "role": "tool",
+      "content": "src/workflows/atomaton-runner.wac.ts lines 575-586 of 2103\n\n575\t *\n576\t * Four hours, and the number is a ceiling rather than a target: a run that needs\n577\t * it is one doing real work -- a large refactor, a build from cold, a test suite\n578\t * that takes minutes per attempt -- and the alternative to a long ceiling is not\n579\t * a shorter run but a run killed mid-call with its session unsaved. GitHub's own\n580\t * maximum is six hours; this leaves room under it for the reserve and for the\n581\t * queueing that happens before the job starts.\n582\t */\n583\tconst JOB_TIMEOUT_MINUTES = 240;\n584\tconst RESERVED_FOR_WHAT_FOLLOWS_SECS = 300;\n585\t\n586\t/**\n\n[1517 more lines. Read again with offset: 587.]",
+      "tool_call_id": "call_02_y60cwrqo2538yppp6c32p2qs"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_woddscqh2r54ara2v62lkkol",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue_comments",
+            "arguments": "{\"from\": 2, \"issue_number\": 1, \"to\": 3}"
+          }
+        },
+        {
+          "id": "call_01_j4lknsktx7d8uv5xclq5gyw3",
+          "type": "function",
+          "function": {
+            "name": "shell__shell_execute",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --porcelain; echo \\\"exit=$?\\\"\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"OPEN\",\"total_comments\":3,\"children\":[{\"number\":2,\"title\":\"Explain this repository in English (delivery template + Atoma core)\",\"state\":\"done\"},{\"number\":3,\"title\":\"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\"state\":\"done\"},{\"number\":4,\"title\":\"用中文解释本仓库(交付模板与 Atoma 核心)\",\"state\":\"done\"}],\"pull_requests\":[]},\"showing\":\"comment(s) 2-3 of 3; pass from/to to read the rest\",\"comments\":[{\"index\":2,\"id\":\"IC_kwDOUudl8s8AAAABXRSI1g\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"Atomaton: All sub-tasks completed (last: #3). Re-invoking the parent's agent for aggregation.\",\"createdAt\":\"2026-09-27T14:11:11Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/1#issuecomment-5856594134\",\"viewerDidAuthor\":true},{\"index\":3,\"id\":\"IC_kwDOUudl8s8AAAABXRSQDw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"Atomaton: Agent `atomaton` dispatched by `atomaton` to work on this sub-task.\",\"createdAt\":\"2026-09-27T14:11:26Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/1#issuecomment-5856595983\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_00_woddscqh2r54ara2v62lkkol"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"exit=0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":104}",
+      "tool_call_id": "call_01_j4lknsktx7d8uv5xclq5gyw3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_01_oruw8s9g67lsf3kw71i81ud2",
+          "type": "function",
+          "function": {
+            "name": "web__fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/comments/5856535373\"}"
+          }
+        },
+        {
+          "id": "call_00_pn4xf0wlybsqx0lvr1f7sq55",
+          "type": "function",
+          "function": {
+            "name": "web__fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/comments/5856514950\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/comments/5856535373\",\n  \"html_url\": \"https://github.com/yuma-seno/atomaton/issues/3#issuecomment-5856535373\",\n  \"issue_url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/3\",\n  \"id\": 5856535373,\n  \"node_id\": \"IC_kwDOUudl8s8AAAABXROjTQ\",\n  \"user\": {\n    \"login\": \"github-actions[bot]\",\n    \"id\": 41898282,\n    \"node_id\": \"MDM6Qm90NDE4OTgyODI=\",\n    \"avatar_url\": \"https://avatars.githubusercontent.com/in/15368?v=4\",\n    \"gravatar_id\": \"\",\n    \"url\": \"https://api.github.com/users/github-actions%5Bbot%5D\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"followers_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/followers\",\n    \"following_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}\",\n    \"gists_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}\",\n    \"starred_url\": \"https://api.github.com/users/github-actions%5Bbo\n\n[14012 characters dropped from the middle; 4000 shown]\n\nt\": 0,\n    \"rocket\": 0,\n    \"eyes\": 0\n  },\n  \"performed_via_github_app\": {\n    \"id\": 15368,\n    \"slug\": \"github-actions\",\n    \"node_id\": \"MDM6QXBwMTUzNjg=\",\n    \"owner\": {\n      \"login\": \"github\",\n      \"id\": 9919,\n      \"node_id\": \"MDEyOk9yZ2FuaXphdGlvbjk5MTk=\",\n      \"avatar_url\": \"https://avatars.githubusercontent.com/u/9919?v=4\",\n      \"gravatar_id\": \"\",\n      \"url\": \"https://api.github.com/users/github\",\n      \"html_url\": \"https://github.com/github\",\n      \"followers_url\": \"https://api.github.com/users/github/followers\",\n      \"following_url\": \"https://api.github.com/users/github/following{/other_user}\",\n      \"gists_url\": \"https://api.github.com/users/github/gists{/gist_id}\",\n      \"starred_url\": \"https://api.github.com/users/github/starred{/owner}{/repo}\",\n      \"subscriptions_url\": \"https://api.github.com/users/github/subscriptions\",\n      \"organizations_url\": \"https://api.github.com/users/github/orgs\",\n      \"repos_url\": \"https://api.github.com/users/github/repos\",\n      \"events_url\": \"https://api.github.com/users/github/events{/privacy}\",\n      \"received_events_url\": \"https://api.github.com/users/github/received_events\",\n      \"type\": \"Organization\",\n      \"user_view_type\": \"public\",\n      \"site_admin\": false\n    },\n    \"name\": \"GitHub Actions\",\n    \"description\": \"Automate your workflow from idea to production\",\n    \"external_url\": \"https://help.github.com/en/actions\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"created_at\": \"2018-07-30T09:30:17Z\",\n    \"updated_at\": \"2026-06-18T16:17:48Z\",\n    \"permissions\": {\n      \"actions\": \"write\",\n      \"administration\": \"read\",\n      \"artifact_metadata\": \"write\",\n      \"attestations\": \"write\",\n      \"checks\": \"write\",\n      \"code_quality\": \"write\",\n      \"contents\": \"write\",\n      \"copilot_requests\": \"write\",\n      \"deployments\": \"write\",\n      \"discussions\": \"write\",\n      \"drives\": \"write\",\n      \"issues\": \"write\",\n      \"merge_queues\": \"write\",\n      \"metadata\": \"read\",\n      \"models\": \"read\",\n      \"packages\": \"write\",\n      \"pages\": \"write\",\n      \"pull_requests\": \"write\",\n      \"repository_hooks\": \"write\",\n      \"repository_projects\": \"write\",\n      \"security_events\": \"write\",\n      \"statuses\": \"write\",\n      \"vulnerability_alerts\": \"read\"\n    },\n    \"events\": [\n      \"branch_protection_rule\",\n      \"check_run\",\n      \"check_suite\",\n      \"create\",\n      \"delete\",\n      \"deployment\",\n      \"deployment_status\",\n      \"discussion\",\n      \"discussion_comment\",\n      \"fork\",\n      \"gollum\",\n      \"issues\",\n      \"issue_comment\",\n      \"label\",\n      \"merge_group\",\n      \"milestone\",\n      \"page_build\",\n      \"public\",\n      \"pull_request\",\n      \"pull_request_review\",\n      \"pull_request_review_comment\",\n      \"push\",\n      \"registry_package\",\n      \"release\",\n      \"repository\",\n      \"repository_dispatch\",\n      \"status\",\n      \"watch\",\n      \"workflow_dispatch\",\n      \"workflow_run\"\n    ]\n  },\n  \"minimized\": null,\n  \"pin\": null\n}\n",
+      "tool_call_id": "call_01_oruw8s9g67lsf3kw71i81ud2"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/comments/5856514950\",\n  \"html_url\": \"https://github.com/yuma-seno/atomaton/issues/2#issuecomment-5856514950\",\n  \"issue_url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/2\",\n  \"id\": 5856514950,\n  \"node_id\": \"IC_kwDOUudl8s8AAAABXRNThg\",\n  \"user\": {\n    \"login\": \"github-actions[bot]\",\n    \"id\": 41898282,\n    \"node_id\": \"MDM6Qm90NDE4OTgyODI=\",\n    \"avatar_url\": \"https://avatars.githubusercontent.com/in/15368?v=4\",\n    \"gravatar_id\": \"\",\n    \"url\": \"https://api.github.com/users/github-actions%5Bbot%5D\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"followers_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/followers\",\n    \"following_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}\",\n    \"gists_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}\",\n    \"starred_url\": \"https://api.github.com/users/github-actions%5Bbo\n\n[25346 characters dropped from the middle; 4000 shown]\n\nt\": 0,\n    \"rocket\": 0,\n    \"eyes\": 0\n  },\n  \"performed_via_github_app\": {\n    \"id\": 15368,\n    \"slug\": \"github-actions\",\n    \"node_id\": \"MDM6QXBwMTUzNjg=\",\n    \"owner\": {\n      \"login\": \"github\",\n      \"id\": 9919,\n      \"node_id\": \"MDEyOk9yZ2FuaXphdGlvbjk5MTk=\",\n      \"avatar_url\": \"https://avatars.githubusercontent.com/u/9919?v=4\",\n      \"gravatar_id\": \"\",\n      \"url\": \"https://api.github.com/users/github\",\n      \"html_url\": \"https://github.com/github\",\n      \"followers_url\": \"https://api.github.com/users/github/followers\",\n      \"following_url\": \"https://api.github.com/users/github/following{/other_user}\",\n      \"gists_url\": \"https://api.github.com/users/github/gists{/gist_id}\",\n      \"starred_url\": \"https://api.github.com/users/github/starred{/owner}{/repo}\",\n      \"subscriptions_url\": \"https://api.github.com/users/github/subscriptions\",\n      \"organizations_url\": \"https://api.github.com/users/github/orgs\",\n      \"repos_url\": \"https://api.github.com/users/github/repos\",\n      \"events_url\": \"https://api.github.com/users/github/events{/privacy}\",\n      \"received_events_url\": \"https://api.github.com/users/github/received_events\",\n      \"type\": \"Organization\",\n      \"user_view_type\": \"public\",\n      \"site_admin\": false\n    },\n    \"name\": \"GitHub Actions\",\n    \"description\": \"Automate your workflow from idea to production\",\n    \"external_url\": \"https://help.github.com/en/actions\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"created_at\": \"2018-07-30T09:30:17Z\",\n    \"updated_at\": \"2026-06-18T16:17:48Z\",\n    \"permissions\": {\n      \"actions\": \"write\",\n      \"administration\": \"read\",\n      \"artifact_metadata\": \"write\",\n      \"attestations\": \"write\",\n      \"checks\": \"write\",\n      \"code_quality\": \"write\",\n      \"contents\": \"write\",\n      \"copilot_requests\": \"write\",\n      \"deployments\": \"write\",\n      \"discussions\": \"write\",\n      \"drives\": \"write\",\n      \"issues\": \"write\",\n      \"merge_queues\": \"write\",\n      \"metadata\": \"read\",\n      \"models\": \"read\",\n      \"packages\": \"write\",\n      \"pages\": \"write\",\n      \"pull_requests\": \"write\",\n      \"repository_hooks\": \"write\",\n      \"repository_projects\": \"write\",\n      \"security_events\": \"write\",\n      \"statuses\": \"write\",\n      \"vulnerability_alerts\": \"read\"\n    },\n    \"events\": [\n      \"branch_protection_rule\",\n      \"check_run\",\n      \"check_suite\",\n      \"create\",\n      \"delete\",\n      \"deployment\",\n      \"deployment_status\",\n      \"discussion\",\n      \"discussion_comment\",\n      \"fork\",\n      \"gollum\",\n      \"issues\",\n      \"issue_comment\",\n      \"label\",\n      \"merge_group\",\n      \"milestone\",\n      \"page_build\",\n      \"public\",\n      \"pull_request\",\n      \"pull_request_review\",\n      \"pull_request_review_comment\",\n      \"push\",\n      \"registry_package\",\n      \"release\",\n      \"repository\",\n      \"repository_dispatch\",\n      \"status\",\n      \"watch\",\n      \"workflow_dispatch\",\n      \"workflow_run\"\n    ]\n  },\n  \"minimized\": null,\n  \"pin\": null\n}\n",
+      "tool_call_id": "call_00_pn4xf0wlybsqx0lvr1f7sq55"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ot840z04cftswo9zdoen8wvt",
+          "type": "function",
+          "function": {
+            "name": "web__fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/comments/5856531801\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/comments/5856531801\",\n  \"html_url\": \"https://github.com/yuma-seno/atomaton/issues/4#issuecomment-5856531801\",\n  \"issue_url\": \"https://api.github.com/repos/yuma-seno/atomaton/issues/4\",\n  \"id\": 5856531801,\n  \"node_id\": \"IC_kwDOUudl8s8AAAABXROVWQ\",\n  \"user\": {\n    \"login\": \"github-actions[bot]\",\n    \"id\": 41898282,\n    \"node_id\": \"MDM6Qm90NDE4OTgyODI=\",\n    \"avatar_url\": \"https://avatars.githubusercontent.com/in/15368?v=4\",\n    \"gravatar_id\": \"\",\n    \"url\": \"https://api.github.com/users/github-actions%5Bbot%5D\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"followers_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/followers\",\n    \"following_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}\",\n    \"gists_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}\",\n    \"starred_url\": \"https://api.github.com/users/github-actions%5Bbo\n\n[12636 characters dropped from the middle; 4000 shown]\n\nt\": 0,\n    \"rocket\": 0,\n    \"eyes\": 0\n  },\n  \"performed_via_github_app\": {\n    \"id\": 15368,\n    \"slug\": \"github-actions\",\n    \"node_id\": \"MDM6QXBwMTUzNjg=\",\n    \"owner\": {\n      \"login\": \"github\",\n      \"id\": 9919,\n      \"node_id\": \"MDEyOk9yZ2FuaXphdGlvbjk5MTk=\",\n      \"avatar_url\": \"https://avatars.githubusercontent.com/u/9919?v=4\",\n      \"gravatar_id\": \"\",\n      \"url\": \"https://api.github.com/users/github\",\n      \"html_url\": \"https://github.com/github\",\n      \"followers_url\": \"https://api.github.com/users/github/followers\",\n      \"following_url\": \"https://api.github.com/users/github/following{/other_user}\",\n      \"gists_url\": \"https://api.github.com/users/github/gists{/gist_id}\",\n      \"starred_url\": \"https://api.github.com/users/github/starred{/owner}{/repo}\",\n      \"subscriptions_url\": \"https://api.github.com/users/github/subscriptions\",\n      \"organizations_url\": \"https://api.github.com/users/github/orgs\",\n      \"repos_url\": \"https://api.github.com/users/github/repos\",\n      \"events_url\": \"https://api.github.com/users/github/events{/privacy}\",\n      \"received_events_url\": \"https://api.github.com/users/github/received_events\",\n      \"type\": \"Organization\",\n      \"user_view_type\": \"public\",\n      \"site_admin\": false\n    },\n    \"name\": \"GitHub Actions\",\n    \"description\": \"Automate your workflow from idea to production\",\n    \"external_url\": \"https://help.github.com/en/actions\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"created_at\": \"2018-07-30T09:30:17Z\",\n    \"updated_at\": \"2026-06-18T16:17:48Z\",\n    \"permissions\": {\n      \"actions\": \"write\",\n      \"administration\": \"read\",\n      \"artifact_metadata\": \"write\",\n      \"attestations\": \"write\",\n      \"checks\": \"write\",\n      \"code_quality\": \"write\",\n      \"contents\": \"write\",\n      \"copilot_requests\": \"write\",\n      \"deployments\": \"write\",\n      \"discussions\": \"write\",\n      \"drives\": \"write\",\n      \"issues\": \"write\",\n      \"merge_queues\": \"write\",\n      \"metadata\": \"read\",\n      \"models\": \"read\",\n      \"packages\": \"write\",\n      \"pages\": \"write\",\n      \"pull_requests\": \"write\",\n      \"repository_hooks\": \"write\",\n      \"repository_projects\": \"write\",\n      \"security_events\": \"write\",\n      \"statuses\": \"write\",\n      \"vulnerability_alerts\": \"read\"\n    },\n    \"events\": [\n      \"branch_protection_rule\",\n      \"check_run\",\n      \"check_suite\",\n      \"create\",\n      \"delete\",\n      \"deployment\",\n      \"deployment_status\",\n      \"discussion\",\n      \"discussion_comment\",\n      \"fork\",\n      \"gollum\",\n      \"issues\",\n      \"issue_comment\",\n      \"label\",\n      \"merge_group\",\n      \"milestone\",\n      \"page_build\",\n      \"public\",\n      \"pull_request\",\n      \"pull_request_review\",\n      \"pull_request_review_comment\",\n      \"push\",\n      \"registry_package\",\n      \"release\",\n      \"repository\",\n      \"repository_dispatch\",\n      \"status\",\n      \"watch\",\n      \"workflow_dispatch\",\n      \"workflow_run\"\n    ]\n  },\n  \"minimized\": null,\n  \"pin\": null\n}\n",
+      "tool_call_id": "call_00_ot840z04cftswo9zdoen8wvt"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_fsnkay8oi0ge7bh4bgz85ma5",
+          "type": "function",
+          "function": {
+            "name": "shell__shell_execute",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && ls tests/contract | wc -l && grep -rn \\\"60-minute\\\\|60 minute\\\" docs src tests self 2>/dev/null | head -20 && echo \\\"---arch59---\\\" && sed -n '55,62p' docs/template/architecture.md\"}"
+          }
+        },
+        {
+          "id": "call_01_c4k6watcfpxdvlws5ln1rn8c",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"glob\": \"*.ts\", \"max_matches\": 10, \"path\": \"tests\", \"pattern\": \"timeout-minutes|JOB_TIMEOUT_MINUTES\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"29\\ndocs/template/architecture.md:59:| **Mechanism** — how GitHub happens to implement something | `adapters/` | label, check run, `workflow_dispatch`, GraphQL fields, orphan branches, the 60-minute cap |\\ndocs/work/boundaries.md:26:60-minute job it runs inside, minus five minutes for what follows it — saving the\\n---arch59---\\n\\n| | Where it lives | Examples |\\n| --- | --- | --- |\\n| **Borrowed vocabulary** — concepts GitHub *chose*, which we adopt on purpose | `domain/`, keeping GitHub's own names | issue, pull request, review, merge, the tree, the thread |\\n| **Mechanism** — how GitHub happens to implement something | `adapters/` | label, check run, `workflow_dispatch`, GraphQL fields, orphan branches, the 60-minute cap |\\n| **Defect** — where GitHub does not do what it appears to | one table, in `adapters/github/` | `closingIssuesReferences` dropped, search tokenisation, no workflow run for our own token's events |\\n\\nRenaming `Issue` to `WorkItem` is not on the list. It is a generalisation nobody\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":111}",
+      "tool_call_id": "call_00_fsnkay8oi0ge7bh4bgz85ma5"
+    },
+    {
+      "role": "tool",
+      "content": "No match for timeout-minutes|JOB_TIMEOUT_MINUTES in *.ts files under tests.",
+      "tool_call_id": "call_01_c4k6watcfpxdvlws5ln1rn8c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_cjtrleynk1gf0t5hyutmv892",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue_comments",
+            "arguments": "{\"from\": 1, \"issue_number\": 1, \"to\": 1}"
+          }
+        },
+        {
+          "id": "call_01_5buqq8094esh7liar5scedy0",
+          "type": "function",
+          "function": {
+            "name": "github__get_issue_comments",
+            "arguments": "{\"from\": 2, \"issue_number\": 3, \"to\": 2}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"OPEN\",\"total_comments\":3,\"children\":[{\"number\":2,\"title\":\"Explain this repository in English (delivery template + Atoma core)\",\"state\":\"done\"},{\"number\":3,\"title\":\"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\"state\":\"done\"},{\"number\":4,\"title\":\"用中文解释本仓库(交付模板与 Atoma 核心)\",\"state\":\"done\"}],\"pull_requests\":[]},\"showing\":\"comment(s) 1-1 of 3; pass from/to to read the rest\",\"comments\":[{\"index\":1,\"id\":\"IC_kwDOUudl8s8AAAABXRIL9w\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"Atomaton: Launched sub-agent(s):\\n- #2→engineer\\n- #3→engineer\\n- #4→engineer\\n\\n<details><summary>Report</summary>\\n\\nRead the repository and split this into three independent language sub-issues, one per language, as asked — no explanation written here.\\n\\n- #2 English — https://github.com/yuma-seno/atomaton/issues/2\\n- #3 日本語 — https://github.com/yuma-seno/atomaton/issues/3\\n- #4 中文 — https://github.com/yuma-seno/atomaton/issues/4\\n\\nEach body is written in its own language and asks for the deliverable in that language only: one comment on the sub-issue covering the five points (what it is, the thinking behind it, what is technically interesting, what to read first to use it, what to read first to contribute), plus a section on Atoma core — the Rust CLI in `yuma-seno/atoma` that runs the inference loop, speaks MCP over stdio and saves the session — and where the line falls between it and this template. No file, no pull request, no commit.\\n\\nThe three share no dependency, so all three were launched in one dispatch. Next: each engineer comments its explanation on its own sub-issue; when all three close, this issue is re-invoked to aggregate.\\n\\n</details>\",\"createdAt\":\"2026-09-27T13:49:25Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/1#issuecomment-5856431095\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_00_cjtrleynk1gf0t5hyutmv892"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":3,\"title\":\"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\"state\":\"CLOSED\",\"total_comments\":4,\"parent\":{\"number\":1,\"title\":\"Explain this repository, in English, Japanese and Chinese\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[]},\"showing\":\"comment(s) 2-2 of 4; pass from/to to read the rest\",\"comments\":[{\"index\":2,\"id\":\"IC_kwDOUudl8s8AAAABXROjTQ\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"NONE\",\"body\":\"私は成果物がコメント 1 件(コード変更なし)のタスクなので、リポジトリを読み終えた内容をそのまま報告本文として書きます。\\n\\n---\\n\\n# Atomaton — デリバリーテンプレートと Atoma コアの説明\\n\\n## 1. これは何か\\n\\nAtomaton は「コピーして使う GitHub Actions のデリバリーシステム」であり、Atoma コアそのものではありません(`README.md:3-4`)。配布物はリリース資産 `atomaton-delivery.zip` で、リポジトリのルートで展開すると `.github/` 以下が所定の位置に入ります(`README.md:26-35`)。\\n\\n展開後に起きること: リポジトリのメンバーが issue やコメントでエージェント名を明示的に呼び出したときだけ実行が始まります(`README.md:6-8`)。外の人が issue を開いても PR を出しても、それだけでは 1 回も起動せず、モデルの費用も使われません。始まった実行は、そのエージェントのセッションを復元し、設定されたエージェント・ツール・スキルで Atoma を走らせ、結果を issue にコメントで書き戻し、必要なら次のエージェントを起動します\n\n[6759 characters dropped from the middle; 4000 shown]\n\nled`)だけがそれを言い分けます。テンプレート側はその語を読む側で、`read_run_ending.ts` は「終了コードと stop ファイルから推測する」旧実装が 2 つの上限を 1 つに潰し、さらに停止ファイルを書く監視役と競合していたと記録しています(`src/entrypoints/machinery/read_run_ending.ts:1-45`)。\\n\\n**所有しないもの。** レイアウト、GitHub の概念、マージ、issue と実行の対応、どの資格情報がどのサーバーに届くか。これらはすべてこちら側です。\\n\\n**なぜ二つに分かれているか。** コアは「プロジェクトを持たない」からです。レイアウトを渡され、渡されたとおりに動く。本リポジトリはそのレイアウトそのものです。したがって `--agent-def` / `--template` / `--skills-dir` / `--tools-file` / `--credentials-file` / `--in-session` / `--out-session` / `--stop-file` / `--max-runtime-secs` / `--loop-retries` がすべて引数として渡り、コアは 1 つもパスをハードコードしません(`.github/atomaton/README.md:171-183`)。パスを設定にしないのは、名前が「それが何か」を読者に伝える手段だからです。`agent-definitions/` というディレクトリ名は中身を語りますが、`definitions_dir` は「誰かがそう選んだ」としか言いません(`.github/atomaton/README.md:142-169`)。\\n\\n**実際の起動行。** `src/workflows/atomaton-runner.wac.ts:873-885` がその seam の実物です。\\n\\n```\\nsudo -n -u \\\"${TOOL_USER}\\\" env \\\"${AGENT_ENV[@]}\\\" \\\\\\n  atoma run \\\\\\n  --agent-def \\\"${MACHINERY}/${AGENT_DEF_DIR}/${AGENT}.md\\\" \\\\\\n  --in-session \\\"${RUN_DIR}/session.json\\\" \\\\\\n  --out-session \\\"${RUN_DIR}/session.json\\\" \\\\\\n  --template \\\"${MACHINERY}/${PROMPT_TEMPLATE}\\\" \\\\\\n  --skills-dir \\\"${MACHINERY}/${SKILLS_DIR}\\\" \\\\\\n  --max-runtime-secs \\\"$BUDGET\\\" \\\\\\n  --stop-file \\\"${STOP_FILE}\\\" \\\\\\n  --loop-retries \\\\\\n  --credentials-file \\\"${CREDENTIALS_FILE}\\\" \\\\\\n  ${TOOLS_ARG} \\\\\\n```\\n\\n`BUDGET` はジョブの締切から現在時刻を引いた残り時間で、下限 300 秒が付きます(`:594`、`:865-869`)。`--stop-file` を書くのは監視役で、人が `/stop` と言った意思が仕事の外から中へ届く唯一の通路です(`:313-324`)。資格情報は環境変数ではなくファイルで渡し、コアがどのサーバーも起動する前にそのファイルを消します(`:646-687`)。\\n\\n**入れ方と固定。** ランナーにはリリース資産として `/usr/local/bin/atoma` に入り、`atoma_version: source` のときだけ `main` のチェックアウトから `cargo install` でビルドされます(`src/workflows/actions/atoma-cli.ts:202-237`)。既定値は `v0.1.0` で、`atomaton-runner` と `atomaton-validate-pr` と `atomaton-check` が同じ 1 か所から同じ値を使います(`src/workflows/actions/atoma-cli.ts:190`、`:1-11`)。この値とこちら側の宣言が連動することは上のコメントに列挙されており、`tools.servers` の `env` の `${NAME}` 展開、`args` の展開、プロバイダごとの資格情報名、`agent-definitions/*.md` の `provider`、`request_timeout_secs` の解釈、`max_output_chars`、`--max-runtime-secs` と `--stop-file` と `--loop-retries` の受け入れがすべて対応づけられています。\\n\\n## 7. 境界の早見表\\n\\n| 挙動 | どちら側の性質か | 根拠 |\\n| --- | --- | --- |\\n| **マージゲート** | テンプレート側のみ | `merge.governed_paths` と `merge.policy` は `config.yaml` の設定で、判定は `src/domain/delivery/merge-readiness.ts`。GitHub 側の強制は `.github/atomaton/rulesets/main.json`。コアはマージという概念を持たない(`.github/atomaton/config.yaml:84-101`、`docs/pull-requests/boundaries.md:1-36`) |\\n| **実行時間の上限** | 数値を決めるのはテンプレート、止めるのはコア | ランナーが残り時間を計算して `--max-runtime-secs \\\"$BUDGET\\\"` で渡す(`src/workflows/atomaton-runner.wac.ts:583-615`、`:865-885`)。コアは渡された秒数でターン境界に止まり `ended_because: ru\\n\\n[3000 characters dropped from the end; 10000 shown]\",\"createdAt\":\"2026-09-27T14:02:47Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/3#issuecomment-5856535373\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_01_5buqq8094esh7liar5scedy0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_9f8gx9zujscxeo7wk50jhtxo",
+          "type": "function",
+          "function": {
+            "name": "shell__shell_execute",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && echo \\\"--- status ---\\\" && git status --porcelain && echo \\\"--- branch/log ---\\\" && git rev-parse --abbrev-ref HEAD && git log --oneline -3 && echo \\\"--- contract files ---\\\" && ls tests/contract | wc -l\"}"
+          }
+        },
+        {
+          "id": "call_01_bdarc4nj8nqnwxpdixr8m8go",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"glob\": \"*.md\", \"max_matches\": 5, \"path\": \"docs\", \"pattern\": \"60-minute|the job is 60\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"--- status ---\\n--- branch/log ---\\nmain\\n37f1c44 InitialCommit\\n--- contract files ---\\n29\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":110}",
+      "tool_call_id": "call_00_9f8gx9zujscxeo7wk50jhtxo"
+    },
+    {
+      "role": "tool",
+      "content": "2 matching line(s) under docs:\n\ndocs/template/architecture.md:59:| **Mechanism** — how GitHub happens to implement something | `adapters/` | label, check run, `workflow_dispatch`, GraphQL fields, orphan branches, the 60-minute cap |\ndocs/work/boundaries.md:26:60-minute job it runs inside, minus five minutes for what follows it — saving the",
+      "tool_call_id": "call_01_bdarc4nj8nqnwxpdixr8m8go"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_fokgjjmtu8eaeram4rgks62f",
+          "type": "function",
+          "function": {
+            "name": "shell__shell_execute",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '100,104p' .github/workflows/atomaton-runner.yml && echo \\\"--- grep tests ---\\\" && grep -rn \\\"JOB_TIMEOUT_MINUTES\\\\|timeout-minutes\\\" tests | head -5; echo \\\"grep-exit=$?\\\"\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"  run:\\n    runs-on: ubuntu-latest\\n    timeout-minutes: 240\\n    concurrency:\\n      group: atomaton-${{ inputs.type }}-${{ inputs.number }}\\n--- grep tests ---\\ngrep-exit=0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":103}",
+      "tool_call_id": "call_00_fokgjjmtu8eaeram4rgks62f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_6jsl9p7o0j9dspnwieuz1hek",
+          "type": "function",
+          "function": {
+            "name": "shell__shell_execute",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rln \\\"JOB_TIMEOUT_MINUTES\\\" tests; echo \\\"tests-grep-exit=$?\\\"; grep -c \\\"timeout-minutes\\\" .github/workflows/atomaton-runner.yml; ls tests/contract | wc -l; git status --porcelain | wc -l\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"tests-grep-exit=1\\n1\\n29\\n0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":109}",
+      "tool_call_id": "call_00_6jsl9p7o0j9dspnwieuz1hek"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_r1un7589a0lz6gaa1ab5h92d",
+          "type": "function",
+          "function": {
+            "name": "github__create_issue",
+            "arguments": "{\"body\": \"## What is recorded\\n\\nWhen the last sub-issue of a parent closes, the parent is re-invoked for aggregation. On this issue's thread, the machinery's own dispatch comment reports that automatic re-invocation **failing**, and that the failure is not retried.\\n\\nIssue #3, comment 4 (https://github.com/yuma-seno/atomaton/issues/3#issuecomment-5856596535), body verbatim:\\n\\n> Atomaton: Launched sub-agent(s):\\n> - #1→atomaton\\n>\\n> <details><summary>Report</summary>\\n>\\n> 子 #3 の完了で親 #1 の自動集約が起きましたが、その dispatch が失敗しました(「Issue #3 is concluded… All sub-tasks of the parent issue complete, but the dispatch FAILED. The aggregation marker is already written, so no other caller will retry」)。集約マーカーは既に書かれているため自動再試行はなく、親 #1 の集約はこの手動 dispatch が唯一の経路です。親 #1 の子は #2(closed)、#4(closed)、#3(closed)で全部閉じており、#1 は open、PR は 0 件(`github__list_prs(state=all)` が `[]`)。集約して #1 を閉じる判断をここで行ってください。\\n>\\n> </details>\\n\\nSo the sequence the machinery itself describes is: aggregation marker written → dispatch of the parent's agent attempted → dispatch failed → no retry, because the marker is already there. The parent's aggregation then depended on a manually triggered dispatch that happens to appear on the same thread (and which did start, per the later \\\"Agent `atomaton` dispatched by `atomaton`\\\" notice).\\n\\n## Why this looks like a defect rather than a transient\\n\\nA single failed API call is not interesting. What is interesting is where the failure lands: the marker that suppresses duplicate aggregation is written *before* the dispatch it is meant to deduplicate, so a failure at that point leaves the work unreachable by the normal path and reachable only by a manual dispatch. If no such dispatch is ever triggered, the parent stays open with all its children closed and nothing says so on the parent.\\n\\n## What I could not establish\\n\\n- The failing run's logs, or which call failed. The only record I have is the quoted comment; I could not read the workflow run behind it (`github__get_check_runs` takes a ref, not a run id).\\n- Whether the failure was the GitHub API call itself, or something in the dispatch step around it.\\n- How often this happens. I have one instance, on one parent.\\n\\n## Not claimed\\n\\nThis issue does not claim the design is wrong. Writing the marker first is defensible if the dispatch is retried elsewhere; the report above says no other caller retries. Which of the two is the thing to change is a decision, and it is not mine to make from one comment.\", \"sub_issue\": false, \"title\": \"Parent aggregation can be lost: the marker is written before the dispatch, and a failed dispatch is not retried\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":7,\"url\":\"https://github.com/yuma-seno/atomaton/issues/7\",\"parent\":null}",
+      "tool_call_id": "call_00_r1un7589a0lz6gaa1ab5h92d"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_01_2u78nhtj5d0u13irqn0yp57z",
+          "type": "function",
+          "function": {
+            "name": "search__search_issues",
+            "arguments": "{\"limit\": 5, \"query\": \"is it known that docs/work/boundaries.md says the job is 60 minutes while the runner declares 240\"}"
+          }
+        },
+        {
+          "id": "call_00_x1u79ihmuzjzfboj8htuf4jg",
+          "type": "function",
+          "function": {
+            "name": "search__search_issues",
+            "arguments": "{\"limit\": 5, \"query\": \"親 issue の集約 dispatch が失敗し、マーカーが先に書かれているため再試行されない問題は既知か\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[\n  {\n    \"number\": 5,\n    \"title\": \"docs/work/boundaries.md 说 job 上限是 60 分钟,runner 里声明的是 240 分钟\",\n    \"state\": \"open\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/5\",\n    \"matched_in\": \"body\",\n    \"excerpt\": \"> Not configurable, on purpose. The runner gives an agent whatever is left of the\\n> 60-minute job it runs inside, minus five minutes for what follows it — saving the\\n> session, posting the result, dispatching whatever comes next.\"\n  },\n  {\n    \"number\": 6,\n    \"title\": \"docs/work/boundaries.md says the job is 60 minutes; the runner's own job timeout is 240\",\n    \"state\": \"open\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/6\",\n    \"matched_in\": \"title\",\n    \"excerpt\": \"docs/work/boundaries.md says the job is 60 minutes; the runner's own job timeout is 240\"\n  },\n  {\n    \"number\": 4,\n    \"title\": \"用中文解释本仓库(交付模板与 Atoma 核心)\",\n    \"state\": \"closed\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/4\",\n    \"matched_in\": \"comment 3\",\n    \"comment\": 3,\n    \"excerpt\": \"未能确定:评论第七节自己记录了两处它判断不了的漂移——(a)`docs/work/boundaries.md:25-27` 的「60-minute job」与实现的 240 分钟不一致,是常数该回到 60 还是文档该改成 240 无法从只有一次提交的历史(`37f1c44 InitialCommit`)判断,该处已开为 #5;(b)`yuma-seno/atoma` 的 tag 与 `atoma-cli.ts` 注释记到 v0.1.46 的版本史不符,评论只报告观察、未据此改动。两者都不影响本 issue 的关闭条件。\"\n  },\n  {\n    \"number\": 3,\n    \"title\": \"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\n    \"state\": \"closed\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/3\",\n    \"matched_in\": \"comment 3\",\n    \"comment\": 3,\n    \"excerpt\": \"60-minute job\\\" と書く一方、`.github/workflows/atomaton-runner.yml:102` は `timeout-minutes: 240`。上流 `yuma-seno/atoma` の releases API が返したのは `v0.1.0`(資産 `atoma-linux-x86_64` あり)のみで、`atoma-cli.ts:15-189` のコメントは `v0.1.46` まで言及している — コメントの記述どおり。\"\n  },\n  {\n    \"number\": 2,\n    \"title\": \"Explain this repository in English (delivery template + Atoma core)\",\n    \"state\": \"closed\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/2\",\n    \"matched_in\": \"comment 2\",\n    \"comment\": 2,\n    \"excerpt\": \"**Environment-Driven Development.** `docs/method/edd.md` is \\\"the idea the rest of this is an argument for\\\". Its centre is that the environment an agent runs in is itself a development target, improved from what it recorded about its own runs: \\\"The information needed to improve the environment stays inside the environment; the environment is changed on the basis of that information; and the change takes effect on the next run\\\" (`docs/method/edd.md:43-47`). The method's failure list is a list of ways the loop opens — a reason not kept, a fix applied to the run instead of to the environment, a change that does not reach execution.\"\n  }\n]",
+      "tool_call_id": "call_01_2u78nhtj5d0u13irqn0yp57z"
+    },
+    {
+      "role": "tool",
+      "content": "[\n  {\n    \"number\": 7,\n    \"title\": \"Parent aggregation can be lost: the marker is written before the dispatch, and a failed dispatch is not retried\",\n    \"state\": \"open\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/7\",\n    \"matched_in\": \"body\",\n    \"excerpt\": \"> Atomaton: Launched sub-agent(s):\\n> - #1→atomaton\\n>\\n> <details><summary>Report</summary>\\n>\\n> 子 #3 の完了で親 #1 の自動集約が起きましたが、その dispatch が失敗しました(「Issue #3 is concluded… All sub-tasks of the parent issue complete, but the dispatch FAILED. The aggregation marker is already written, so no other caller will retry」)。集約マーカーは既に書かれているため自動再試行はなく、親 #1 の集約はこの手動 dispatch が唯一の経路です。親 #1 の子は #2(closed)、#4(closed)、#3(closed)で全部閉じており、#1 は open、PR は 0 件(`github__list_prs(state=all)` が `[]`)。集約して #1 を閉じる判断をここで行ってください。\\n>\\n> </details>\"\n  },\n  {\n    \"number\": 3,\n    \"title\": \"リポジトリを日本語で説明する(デリバリーテンプレートと Atoma コア)\",\n    \"state\": \"closed\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/3\",\n    \"matched_in\": \"comment 4\",\n    \"comment\": 4,\n    \"excerpt\": \"Atomaton: Launched sub-agent(s):\\n- #1→atomaton\\n\\n<details><summary>Report</summary>\\n\\n子 #3 の完了で親 #1 の自動集約が起きましたが、その dispatch が失敗しました(「Issue #3 is concluded… All sub-tasks of the parent issue complete, but the dispatch FAILED. The aggregation marker is already written, so no other caller will retry」)。集約マーカーは既に書かれているため自動再試行はなく、親 #1 の集約はこの手動 dispatch が唯一の経路です。親 #1 の子は #2(closed)、#4(closed)、#3(closed)で全部閉じており、#1 は open、PR は 0 件(`github__list_prs(state=all)` が `[]`)。集約して #1 を閉じる判断をここで行ってください。\\n\\n</details>\"\n  },\n  {\n    \"number\": 2,\n    \"title\": \"Explain this repository in English (delivery template + Atoma core)\",\n    \"state\": \"closed\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/2\",\n    \"matched_in\": \"comment 3\",\n    \"comment\": 3,\n    \"excerpt\": \"Issue #2's deliverable exists and satisfies its own close condition, so this sub-issue is concluded now. The evidence is comment 2 on this issue — https://github.com/yuma-seno/atomaton/issues/2#issuecomment-5856514950 — a ~24,000-character English explanation whose section headings are exactly the five required points plus `## Atoma core, and where the line falls`. Nothing was committed, nothing was opened as a pull request, and nothing needs to be: the issue's close condition is \\\"one comment on it carries the explanation\\\". The parent, #1, still has siblings #3 (Japanese) and #4 (Chinese) open with only their dispatch comments, so its aggregation has nothing from them yet.\"\n  },\n  {\n    \"number\": 4,\n    \"title\": \"用中文解释本仓库(交付模板与 Atoma 核心)\",\n    \"state\": \"closed\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/4\",\n    \"matched_in\": \"comment 1\",\n    \"comment\": 1,\n    \"excerpt\": \"Atomaton: Agent `engineer` dispatched by `atomaton` to work on this sub-task.\"\n  },\n  {\n    \"number\": 5,\n    \"title\": \"docs/work/boundaries.md 说 job 上限是 60 分钟,runner 里声明的是 240 分钟\",\n    \"state\": \"open\",\n    \"url\": \"https://github.com/yuma-seno/atomaton/issues/5\",\n    \"matched_in\": \"body\",\n    \"excerpt\": \"> Not configurable, on purpose. The runner gives an agent whatever is left of the\\n> 60-minute job it runs inside, minus five minutes for what follows it — saving the\\n> session, posting the result, dispatching whatever comes next.\"\n  }\n]",
+      "tool_call_id": "call_00_x1u79ihmuzjzfboj8htuf4jg"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_45gxrt61azsvjhgp0w279f1i",
+          "type": "function",
+          "function": {
+            "name": "atomaton__request_close_issue",
+            "arguments": "{\"reason\": \"All three sub-issues (#2 English, #3 日本語, #4 中文) are closed with their deliverable comment on them, and the parent's own instruction — \\\"Do not write the explanation here\\\" and \\\"The deliverable is a comment on the sub-issue, not a file\\\" — is satisfied: no child produced code, the work tree is clean (`git status --porcelain` empty, branch `main`, single commit `37f1c44`), and `github__list_prs(state=\\\"all\\\")` returns `[]`, so there is nothing to deliver as a pull request. Each sub-issue's close condition was \\\"one comment on it carries the explanation in that language, covering the five points and the Atoma core section\\\", and each comment exists and was checked against the repository.\", \"summary\": \"## What was asked, and what exists now\\n\\nIssue #1 asked for the repository (and Atoma core) to be explained in three languages, by decomposing into three sub-issues — one per language, each body written in its own language, each asking for the deliverable in that language only — and launching all three in one dispatch. It explicitly said **not** to write the explanation on #1, and that the deliverable is **a comment on the sub-issue, not a file**.\\n\\nAll three children are closed, each with its explanation as a comment:\\n\\n| Sub-issue | Language | Deliverable |\\n| --- | --- | --- |\\n| [#2](https://github.com/yuma-seno/atomaton/issues/2) | English | comment 2 — https://github.com/yuma-seno/atomaton/issues/2#issuecomment-5856514950 |\\n| [#3](https://github.com/yuma-seno/atomaton/issues/3) | 日本語 | comment 2 — https://github.com/yuma-seno/atomaton/issues/3#issuecomment-5856535373 |\\n| [#4](https://github.com/yuma-seno/atomaton/issues/4) | 中文 | comment 2 — https://github.com/yuma-seno/atomaton/issues/4#issuecomment-5856531801 |\\n\\n## How the five points and the seam are covered — checked, not assumed\\n\\nI read each comment's headings against the five required points. Every one carries them, in its own language, plus a separate Atoma core section stating where the line falls between the template and the engine:\\n\\n- **#2**: `## 1. What it is` / `## 2. The thinking behind it` / `## 3. What is technically interesting` / `## 4. What to read first to start using it` / `## 5. What to read first to contribute to it` / `## Atoma core, and where the line falls`, with a table placing the merge gate, the job's time cap, the tool output caps, session persistence and chain length on one side or the other.\\n- **#3**: `## 1. これは何か` … `## 5. コントリビュートするために最初に読むもの` / `## 6. Atoma コアとは何か、何を所有し、なぜ分かれているか` / `## 7. 境界の早見表`.\\n- **#4**: `## 一、它是什么` … `## 五、要参与贡献,应当先读什么,以及为什么` / `## 六、Atoma 核心:它是什么、它拥有什么、以及分界线在哪里`, with a per-behaviour ownership table.\\n\\nSample spot-checks I ran against the checked-out tree rather than taking from the comments: `src/workflows/actions/atoma-cli.ts:190` = `export const ATOMA_DEFAULT_VERSION = \\\"v0.1.0\\\";`; `src/workflows/atomaton-runner.wac.ts:583-584` = `const JOB_TIMEOUT_MINUTES = 240;` / `const RESERVED_FOR_WHAT_FOLLOWS_SECS = 300;`, with the `atoma run` invocation at `:873-885` passing every path as an argument; `ls tests/contract | wc -l` → `29`; `docs/work/boundaries.md:26` and `docs/template/architecture.md:59` both still say \\\"60-minute\\\".\\n\\n## Form of the deliverable — also checked\\n\\nNo file was created, edited or committed anywhere: `git status --porcelain` is empty, the branch is `main` at `37f1c44 InitialCommit`, and `github__list_prs(state=\\\"all\\\")` → `[]`. Issue #1 itself carries no explanation — only the dispatch notice (comment 1), the aggregation notice (comment 2) and this run's dispatch (comment 3). Opening a pull request here would be wrong: nothing produced code, and the issue says the deliverable is a comment.\\n\\n## What I could not establish\\n\\n- **The automatic parent re-invocation failed, and that is recorded separately.** #3's closing notice reports the aggregation dispatch failing with \\\"the dispatch FAILED. The aggregation marker is already written, so no other caller will retry\\\". I could not read the failing run's logs — `github__get_check_runs` takes a ref, not a run id — so the cause is unknown. Filed as **#7** (`sub_issue: false`), with the notice quoted verbatim.\\n- **A documentation drift found by all three children, reported twice.** `docs/work/boundaries.md:26` says \\\"the 60-minute job it runs inside\\\" while `src/workflows/atomaton-runner.wac.ts:583` sets `JOB_TIMEOUT_MINUTES = 240` and `.github/workflows/atomaton-runner.yml:102` carries `timeout-minutes: 240`; no test in `tests/contract/` reads that sentence (`grep -rln \\\"JOB_TIMEOUT_MINUTES\\\" tests` → exit 1). Two unparented, unlabelled issues now carry it — **#6** (English) and **#5** 中文 — opened independently by the English and Chinese runs for the same defect. Which side is intended (fix the doc or lower the ceiling) is a decision neither comment could make; #6 argues the number that belongs in adopter-facing documentation is the runner's declared one, and the comment at `atomaton-runner.wac.ts:576-581` argues for keeping the ceiling high.\\n- **The pinned version does not match the history its own comment records.** `ATOMA_DEFAULT_VERSION = \\\"v0.1.0\\\"` while the comment above it (`atoma-cli.ts:15-189`) records couplings through v0.1.46, and the installed binary reports `0.1.0` yet accepts `--loop-retries` and `--stop-file`. With a single-commit history this cannot be resolved from here; the comments describe the mechanism and flag the literal rather than asserting it as history.\\n- **Atoma core's internals were not read by me.** Its claims rest on its public README, its `--help` output and this repository's own record of the couplings; I did not read the Rust source tree.\\n\\n## What happens next\\n\\nNothing more is required for #1: its three deliverables exist on their children and its own instruction against writing the explanation here was honoured. Closing it ends this work.\\n\\nTwo things a person may want to pick up, neither of which is #1's to do:\\n\\n- **#5 and #6 are duplicates** of one drift in two languages. One should be kept and the other closed; a single English fix against `docs/work/boundaries.md` and `docs/template/architecture.md:59` resolves both.\\n- **#7** is the aggregation-marker defect and is independent of this issue.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Issue #1 is concluded: your reason and summary are on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "call_00_45gxrt61azsvjhgp0w279f1i"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 1,
-      "snapshot_hash": "b8a4c1f858fc8719a803a20cc0341e3bd59fcb84b31bc3fe9c1c8f975446a9a3",
+      "event_count": 4,
+      "snapshot_hash": "17685fc7d33aad52f9668f332ff88a2fc2b37223759609303e056552bed17443",
       "version": 1
     }
   },
@@ -1086,6 +1622,14 @@
       "messages": 99,
       "seconds": 237,
       "started": "2026-09-27T13:45:28Z"
+    },
+    {
+      "ended": "2026-09-27T14:17:40Z",
+      "ended_because": "completed",
+      "iterations": 16,
+      "messages": 151,
+      "seconds": 351,
+      "started": "2026-09-27T14:11:49Z"
     }
   ]
 }
