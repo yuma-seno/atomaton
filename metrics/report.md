@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 7 | 0% | 489 | 785 | 26 | 19.2 |
-| Last 30 days | 7 | 0% | 489 | 785 | 26 | 19.2 |
-| Last year | 7 | 0% | 489 | 785 | 26 | 19.2 |
-| All time | 7 | 0% | 489 | 785 | 26 | 19.2 |
+| Last 7 days | 8 | 0% | 489 | 785 | 26 | 21.8 |
+| Last 30 days | 8 | 0% | 489 | 785 | 26 | 21.8 |
+| Last year | 8 | 0% | 489 | 785 | 26 | 21.8 |
+| All time | 8 | 0% | 489 | 785 | 26 | 21.8 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 7 |
+| `completed` | 8 |
 
 ## Last 7 days
 
@@ -36,7 +36,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 3,080,188 | 4,068,104 | 4,068,104 | 4,068,104 | 10,101,450 |
-| messages per session | 100 | 157 | 157 | 157 | 655 |
+| messages per session | 120 | 157 | 157 | 157 | 707 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -47,19 +47,19 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 170 | 0 | 0 | 0% |
-| `shell__shell_execute` | 131 | 1 | 0 | 0.8% |
-| `grep` | 61 | 2 | 0 | 3.3% |
+| `read` | 172 | 0 | 0 | 0% |
+| `shell__shell_execute` | 137 | 1 | 0 | 0.7% |
+| `grep` | 64 | 2 | 0 | 3.1% |
 | `list` | 29 | 0 | 0 | 0% |
-| `web__fetch` | 16 | 0 | 0 | 0% |
-| `github__get_issue` | 10 | 0 | 0 | 0% |
-| `github__get_issue_comments` | 8 | 0 | 0 | 0% |
+| `web__fetch` | 19 | 0 | 0 | 0% |
+| `github__get_issue` | 16 | 0 | 0 | 0% |
+| `github__get_issue_comments` | 14 | 0 | 0 | 0% |
+| `github__create_issue` | 6 | 0 | 0 | 0% |
+| `search__search_issues` | 6 | 0 | 0 | 0% |
 | `atoma_builtin__load_skill` | 5 | 0 | 0 | 0% |
-| `github__create_issue` | 5 | 0 | 0 | 0% |
-| `atomaton__request_close_issue` | 4 | 1 | 0 | 25% |
-| `search__search_issues` | 4 | 0 | 0 | 0% |
-| `github__list_issues` | 3 | 0 | 0 | 0% |
-| `github__list_prs` | 3 | 0 | 0 | 0% |
+| `atomaton__request_close_issue` | 5 | 1 | 0 | 20% |
+| `github__list_issues` | 4 | 0 | 0 | 0% |
+| `github__list_prs` | 4 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 2 | 0 | 0 | 0% |
 | `glob` | 1 | 0 | 0 | 0% |
 | `render</｜｜DSML｜｜ parameter>
@@ -69,9 +69,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 75 | 57.3% |
-| `search` | 42 | 32.1% |
-| `open` | 14 | 10.7% |
+| `other` | 81 | 59.1% |
+| `search` | 42 | 30.7% |
+| `open` | 14 | 10.2% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
@@ -91,7 +91,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 3,080,188 | 4,068,104 | 4,068,104 | 4,068,104 | 10,101,450 |
-| messages per session | 100 | 157 | 157 | 157 | 655 |
+| messages per session | 120 | 157 | 157 | 157 | 707 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -102,19 +102,19 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 170 | 0 | 0 | 0% |
-| `shell__shell_execute` | 131 | 1 | 0 | 0.8% |
-| `grep` | 61 | 2 | 0 | 3.3% |
+| `read` | 172 | 0 | 0 | 0% |
+| `shell__shell_execute` | 137 | 1 | 0 | 0.7% |
+| `grep` | 64 | 2 | 0 | 3.1% |
 | `list` | 29 | 0 | 0 | 0% |
-| `web__fetch` | 16 | 0 | 0 | 0% |
-| `github__get_issue` | 10 | 0 | 0 | 0% |
-| `github__get_issue_comments` | 8 | 0 | 0 | 0% |
+| `web__fetch` | 19 | 0 | 0 | 0% |
+| `github__get_issue` | 16 | 0 | 0 | 0% |
+| `github__get_issue_comments` | 14 | 0 | 0 | 0% |
+| `github__create_issue` | 6 | 0 | 0 | 0% |
+| `search__search_issues` | 6 | 0 | 0 | 0% |
 | `atoma_builtin__load_skill` | 5 | 0 | 0 | 0% |
-| `github__create_issue` | 5 | 0 | 0 | 0% |
-| `atomaton__request_close_issue` | 4 | 1 | 0 | 25% |
-| `search__search_issues` | 4 | 0 | 0 | 0% |
-| `github__list_issues` | 3 | 0 | 0 | 0% |
-| `github__list_prs` | 3 | 0 | 0 | 0% |
+| `atomaton__request_close_issue` | 5 | 1 | 0 | 20% |
+| `github__list_issues` | 4 | 0 | 0 | 0% |
+| `github__list_prs` | 4 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 2 | 0 | 0 | 0% |
 | `glob` | 1 | 0 | 0 | 0% |
 | `render</｜｜DSML｜｜ parameter>
@@ -124,9 +124,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 75 | 57.3% |
-| `search` | 42 | 32.1% |
-| `open` | 14 | 10.7% |
+| `other` | 81 | 59.1% |
+| `search` | 42 | 30.7% |
+| `open` | 14 | 10.2% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
@@ -146,7 +146,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 3,080,188 | 4,068,104 | 4,068,104 | 4,068,104 | 10,101,450 |
-| messages per session | 100 | 157 | 157 | 157 | 655 |
+| messages per session | 120 | 157 | 157 | 157 | 707 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -157,19 +157,19 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 170 | 0 | 0 | 0% |
-| `shell__shell_execute` | 131 | 1 | 0 | 0.8% |
-| `grep` | 61 | 2 | 0 | 3.3% |
+| `read` | 172 | 0 | 0 | 0% |
+| `shell__shell_execute` | 137 | 1 | 0 | 0.7% |
+| `grep` | 64 | 2 | 0 | 3.1% |
 | `list` | 29 | 0 | 0 | 0% |
-| `web__fetch` | 16 | 0 | 0 | 0% |
-| `github__get_issue` | 10 | 0 | 0 | 0% |
-| `github__get_issue_comments` | 8 | 0 | 0 | 0% |
+| `web__fetch` | 19 | 0 | 0 | 0% |
+| `github__get_issue` | 16 | 0 | 0 | 0% |
+| `github__get_issue_comments` | 14 | 0 | 0 | 0% |
+| `github__create_issue` | 6 | 0 | 0 | 0% |
+| `search__search_issues` | 6 | 0 | 0 | 0% |
 | `atoma_builtin__load_skill` | 5 | 0 | 0 | 0% |
-| `github__create_issue` | 5 | 0 | 0 | 0% |
-| `atomaton__request_close_issue` | 4 | 1 | 0 | 25% |
-| `search__search_issues` | 4 | 0 | 0 | 0% |
-| `github__list_issues` | 3 | 0 | 0 | 0% |
-| `github__list_prs` | 3 | 0 | 0 | 0% |
+| `atomaton__request_close_issue` | 5 | 1 | 0 | 20% |
+| `github__list_issues` | 4 | 0 | 0 | 0% |
+| `github__list_prs` | 4 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 2 | 0 | 0 | 0% |
 | `glob` | 1 | 0 | 0 | 0% |
 | `render</｜｜DSML｜｜ parameter>
@@ -179,9 +179,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 75 | 57.3% |
-| `search` | 42 | 32.1% |
-| `open` | 14 | 10.7% |
+| `other` | 81 | 59.1% |
+| `search` | 42 | 30.7% |
+| `open` | 14 | 10.2% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
@@ -201,7 +201,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 3,080,188 | 4,068,104 | 4,068,104 | 4,068,104 | 10,101,450 |
-| messages per session | 100 | 157 | 157 | 157 | 655 |
+| messages per session | 120 | 157 | 157 | 157 | 707 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -212,19 +212,19 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 170 | 0 | 0 | 0% |
-| `shell__shell_execute` | 131 | 1 | 0 | 0.8% |
-| `grep` | 61 | 2 | 0 | 3.3% |
+| `read` | 172 | 0 | 0 | 0% |
+| `shell__shell_execute` | 137 | 1 | 0 | 0.7% |
+| `grep` | 64 | 2 | 0 | 3.1% |
 | `list` | 29 | 0 | 0 | 0% |
-| `web__fetch` | 16 | 0 | 0 | 0% |
-| `github__get_issue` | 10 | 0 | 0 | 0% |
-| `github__get_issue_comments` | 8 | 0 | 0 | 0% |
+| `web__fetch` | 19 | 0 | 0 | 0% |
+| `github__get_issue` | 16 | 0 | 0 | 0% |
+| `github__get_issue_comments` | 14 | 0 | 0 | 0% |
+| `github__create_issue` | 6 | 0 | 0 | 0% |
+| `search__search_issues` | 6 | 0 | 0 | 0% |
 | `atoma_builtin__load_skill` | 5 | 0 | 0 | 0% |
-| `github__create_issue` | 5 | 0 | 0 | 0% |
-| `atomaton__request_close_issue` | 4 | 1 | 0 | 25% |
-| `search__search_issues` | 4 | 0 | 0 | 0% |
-| `github__list_issues` | 3 | 0 | 0 | 0% |
-| `github__list_prs` | 3 | 0 | 0 | 0% |
+| `atomaton__request_close_issue` | 5 | 1 | 0 | 20% |
+| `github__list_issues` | 4 | 0 | 0 | 0% |
+| `github__list_prs` | 4 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 2 | 0 | 0 | 0% |
 | `glob` | 1 | 0 | 0 | 0% |
 | `render</｜｜DSML｜｜ parameter>
@@ -234,9 +234,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 75 | 57.3% |
-| `search` | 42 | 32.1% |
-| `open` | 14 | 10.7% |
+| `other` | 81 | 59.1% |
+| `search` | 42 | 30.7% |
+| `open` | 14 | 10.2% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
