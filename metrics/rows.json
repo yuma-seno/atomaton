@@ -66,5 +66,43 @@
         "started": "2026-09-27T13:49:52Z"
       }
     ]
+  },
+  {
+    "path": "sessions/issue-4/engineer.json",
+    "agent": "engineer",
+    "messages": 132,
+    "calls": 89,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "delivery/pipeline-setup",
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "atoma_builtin__load_skill": 2,
+      "list": 3,
+      "read": 25,
+      "grep": 6,
+      "shell__shell_execute": 48,
+      "search__search_issues": 1,
+      "github__create_issue": 1,
+      "web__fetch": 3
+    },
+    "acts": {
+      "search": 23,
+      "other": 14,
+      "open": 11
+    },
+    "runs": [
+      {
+        "ended": "2026-09-27T14:02:16Z",
+        "ended_because": "completed",
+        "iterations": 39,
+        "messages": 132,
+        "seconds": 749,
+        "started": "2026-09-27T13:49:47Z"
+      }
+    ]
   }
 ]
