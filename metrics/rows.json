@@ -50,6 +50,49 @@
     ]
   },
   {
+    "path": "sessions/issue-16/atomaton.json",
+    "agent": "atomaton",
+    "messages": 171,
+    "calls": 113,
+    "failed": 2,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "list": 1,
+      "shell__shell_execute": 71,
+      "atoma_builtin__load_skill": 1,
+      "github__get_issue": 3,
+      "github__list_issues": 1,
+      "github__get_issue_comments": 4,
+      "read": 16,
+      "grep": 2,
+      "web__fetch": 2,
+      "write": 4,
+      "search__search_issues": 3,
+      "github__create_issue": 3,
+      "github__close_issue": 1,
+      "atomaton__launch_sub_agent": 1
+    },
+    "acts": {
+      "other": 66,
+      "open": 1,
+      "edit": 4
+    },
+    "runs": [
+      {
+        "ended": "2026-09-27T17:26:43Z",
+        "ended_because": "completed",
+        "iterations": 55,
+        "messages": 171,
+        "seconds": 3923,
+        "started": "2026-09-27T16:21:20Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-2/atomaton.json",
     "agent": "atomaton",
     "messages": 27,
