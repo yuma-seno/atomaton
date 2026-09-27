@@ -1,0 +1,70 @@
+#!/usr/bin/env bun
+/**
+ * fake `gh` CLI, driven entirely by env vars so one fixture works for every
+ * script under test. Shared by two consumers:
+ *   - src/scripts/*.test.ts: its directory is prepended to PATH (as
+ *     literally "gh") by testing/harness.ts's `runWithFakeGh`.
+ *   - tests/e2e/*.e2e.test.ts: via tests/e2e/fake-gh.ts, prepended to PATH
+ *     for the top-level `atoma` binary's own spawn env so every spawned MCP
+ *     server (and every script THEY spawn in turn) resolves `gh` to this
+ *     file instead of the real CLI.
+ *
+ *   FAKE_GH_RESPONSES = JSON array of { match: string[]; stdout?: string; code?: number }.
+ *     A rule matches a real invocation when EVERY string in `match` is a
+ *     substring of at least one argv element (order-independent, and works
+ *     for combined tokens like "repos/owner/repo/issues/5"). The first
+ *     matching rule (in array order) wins -- list more specific rules
+ *     first when multiple calls could otherwise collide.
+ *   FAKE_GH_LOG = path this appends one JSON line (the full argv array) to
+ *     per invocation, so tests can assert on exact commands issued (e.g.
+ *     the body of a posted comment), not just the script's own stdout.
+ *
+ * A rule may also carry `attempt: N`, meaning it applies only the Nth time a call
+ * matching THAT rule is made -- not the Nth `gh` invocation overall. Counting per
+ * rule rather than globally is what keeps such a test from breaking when unrelated
+ * `gh` traffic appears before it. That is what makes a retry testable: attempt 1
+ * returns the rate limit and the next returns the answer. The count comes from
+ * FAKE_GH_LOG, so a test using `attempt` must set it -- each invocation is its own
+ * process and the log is the only state they share.
+ */
+const args = process.argv.slice(2);
+
+const logPath = process.env.FAKE_GH_LOG;
+let history: string[][] = [];
+if (logPath) {
+  const { appendFileSync, readFileSync } = await import("node:fs");
+  appendFileSync(logPath, JSON.stringify(args) + "\n");
+  // Every invocation so far, this one included -- so the first call sees length 1.
+  history = readFileSync(logPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as string[]);
+}
+
+interface Rule {
+  match: string[];
+  stdout?: string;
+  code?: number;
+  attempt?: number;
+}
+
+const rules: Rule[] = process.env.FAKE_GH_RESPONSES ? JSON.parse(process.env.FAKE_GH_RESPONSES) : [];
+
+function argvMatches(rule: Rule, argv: string[]): boolean {
+  return rule.match.every((needle) => argv.some((a) => a.includes(needle)));
+}
+
+function matches(rule: Rule): boolean {
+  if (!argvMatches(rule, args)) return false;
+  if (rule.attempt === undefined) return true;
+  return rule.attempt === history.filter((argv) => argvMatches(rule, argv)).length;
+}
+
+const found = rules.find(matches);
+if (found) {
+  console.log(found.stdout ?? "");
+  process.exit(found.code ?? 0);
+}
+
+console.error(`fake gh: no matching rule for: gh ${args.join(" ")}`);
+process.exit(1);

@@ -1,0 +1,58 @@
+fix: サブIssueの起動・報告・再開を直す
+
+サブIssueを起票してエージェントを起動したときの3つの不具合を直した。
+
+## サブIssueクローズで親が再開しない
+
+`atomaton-sub-issue-closed.wac.ts` の `check` ジョブが
+`isRepositoryMember(github.event.issue.author_association)` でガードされていた。
+これは「サブIssueの作成者」の association を見ており、サブIssueは
+`github-actions[bot]` が作るので常に `NONE` になる。条件は毎回 false で、
+このジョブは一度も動いていなかった。親が再開しないのはこれが原因。
+
+ガード自体が不要だった。このワークフローは `issues: closed` で起動し、
+GitHub は自分のトークンが起こしたイベントではワークフローを起動しない。
+エージェントのクローズ（GITHUB_TOKEN）はここに届かず、届くのは人の
+クローズだけ。サブIssueを閉じられるのは作成者か triage 権限持ちだけで、
+作成者は bot なので、ここに来るのは必ずリポジトリメンバーになる。
+`stop-run` の `sender.type != "Bot"` も同じ理由で冗長だが、無害なので残す。
+
+## 起動元エージェントに報告しない
+
+engineer は完了時に自分のサブIssueへ通常コメントを書いて終わっていた。
+起動元の atomaton には何も届かず、待ち続けることになる。
+
+起動元の名前を dispatch 経路に載せた。`dispatchRunner` に `dispatchedBy` を
+足し、runner の入力 `dispatched_by` から環境変数 `ATOMATON_DISPATCHED_BY`
+として渡す。`inject_dispatcher_notice.ts` がセッションに `role: "user"` の
+メッセージを注入し、「終わったら `/<起動元>` で報告せよ」と伝える。
+
+システムプロンプトのプレースホルダは atoma コアの語彙なので増やさない。
+起動元はこの配信システムの事実であり、セッションへの注入は
+`inject_uncommitted_notice.ts` と同じ手段。
+
+- `dispatch.ts`: `RunnerDispatch.dispatchedBy` を追加
+- `dispatch_sub_agent.ts`: 現在のエージェント名を既定にして渡す
+- `atomaton-runner.wac.ts`: 入力・環境変数・注入ステップを追加
+- `declared-secrets.ts`: `ATOMATON_DISPATCHED_BY` を予約名に追加
+- `inject_dispatcher_notice.ts`: 新規。起動元が空なら何もしない
+
+## レポートが詳細すぎてスレッドを埋める
+
+`launch_sub_agent` の `summary` が独立コメントとして投稿され、4部構成の
+長文がスレッドを占めていた。監査コメント（`Launched sub-agent(s)`）の
+末尾に `<details>` で折りたたんで入れる。スキーマの説明も「短く書く」に
+変えた。レポートはツール呼び出しの引数としてもセッションに残るので、
+折りたたんでも次の run は読める。
+
+## クローズ基準と報告先の指示
+
+- `atomaton.md`: サブIssue本文に「クローズ条件」を書く指示を追加
+- `prompt-template.md`: 「自分を起動した相手に報告する」原則を追加
+- `engineer.md`: コード以外の成果物は `/atomaton` で報告する outcome を追加
+
+## 検証
+
+- `bun run typecheck` — clean
+- `bun test` — 1446 pass（既存の環境依存 15 件を除く）
+- `bun run synth` — 生成物を更新

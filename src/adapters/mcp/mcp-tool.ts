@@ -1,0 +1,365 @@
+/**
+ * mcp-tool.ts — the one place a tool is defined, and the one place a server is
+ * run.
+ *
+ * Two halves of the same idea. `defineMcpTool` makes a tool's arguments have a
+ * single definition; `serveMcpServer` makes a tool's *result* have one. Both
+ * exist because the alternative was five files each writing out its own version
+ * and drifting.
+ *
+ * ## The argument half
+ *
+ * Before this, every MCP tool in mcp/github.ts and mcp/atomaton.ts had TWO
+ * independent, hand-written descriptions of its own arguments: a JSON
+ * Schema literal (the `inputSchema` sent to the LLM) and a handler body
+ * full of unchecked `a.title as string` casts on a bare
+ * `Record<string, unknown>`. Nothing linked the two — a schema change and
+ * a handler change could silently drift apart, and a malformed argument
+ * from the LLM was only ever caught (if at all) deep inside a `gh` call.
+ *
+ * `defineMcpTool` closes that gap: a single Zod schema is both (a) compiled
+ * to the JSON Schema advertised to the LLM, and (b) used to validate +
+ * parse incoming arguments into a properly-typed object before the handler
+ * ever runs. A malformed call is now rejected up front with a readable
+ * "field: reason" message, and the handler's argument type is inferred
+ * directly from the schema — no casts possible.
+ *
+ * NOTE: imports from "zod/v3", not "zod". zod-to-json-schema (as installed)
+ * only recognizes schemas built from the classic v3 constructor internals;
+ * schemas built via the bare "zod" entrypoint round-trip fine through
+ * `.parse()`/`.safeParse()` but silently produce an empty `{}` JSON Schema
+ * when passed to `zodToJsonSchema()`. Confirmed by direct probing during
+ * implementation — always import `z` from "zod/v3" in files that build
+ * MCP tool schemas.
+ *
+ * ## The result half
+ *
+ * See `serveMcpServer` at the bottom. In short: every server hand-wrote the
+ * ~10-line `CallToolRequestSchema` handler that maps a result into MCP content,
+ * and each dropped a different field of it.
+ */
+import { z } from "zod/v3";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { attachReportChannel } from "./mcp-report.ts";
+import { withoutTags } from "../../adapters/github/tags.ts";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { CallToolRequestSchema, ListToolsRequestSchema, type Tool } from "@modelcontextprotocol/sdk/types.js";
+
+export { z };
+
+/**
+ * A positive integer that also accepts its own decimal string form.
+ *
+ * Weaker models routinely send `"185"` where the advertised JSON Schema says
+ * `number` -- observed repeatedly in production against `get_issue`,
+ * `get_issue_comments`, and the `limit` filters, each failure costing a whole
+ * inference iteration to relay back a message the model then ignored. The
+ * schema shown to the model is unchanged (`z.coerce.number()` still emits
+ * `{"type":"number"}`); only the runtime becomes forgiving. Genuinely
+ * non-numeric input still fails: `"abc"` coerces to `NaN` and is rejected by
+ * `.int()`, and `""`/`"0"` are rejected by `.positive()`.
+ */
+export function positiveInt(description: string) {
+  return z.coerce.number().int().positive().describe(description);
+}
+
+/**
+ * An array of strings that also accepts a single bare string.
+ *
+ * Same rationale as [`positiveInt`]: models send `labels: "atomaton/sub-issue"`
+ * for a one-element list. `z.preprocess` keeps the advertised schema an array,
+ * so the model is still told the correct shape.
+ */
+export function stringArray(description: string) {
+  return z
+    .preprocess(
+      (value) => (typeof value === "string" ? [value] : value),
+      z.array(z.string()),
+    )
+    .describe(description);
+}
+
+// `ALIASES`, `declaredKeys` and `acceptAliases` were here: a table folding four
+// synonyms into `number` and one into `branch`, applied before the strict schema
+// could see the call.
+//
+// It was the wrong half of the repair. Only ONE of the five was ever observed --
+// `issue_number`, three times in one run -- and the other four were speculative,
+// which this file's own comment forbade in the same breath as adding them: "a
+// speculative synonym is indistinguishable from a typo, and quietly accepting a
+// typo is the defect strictness exists to prevent". Worse, `branch: ["name"]` was
+// added by the very commit that renamed `get_branch`'s argument to `branch`, so
+// there was never an older deployed shape to be compatible with; and because
+// `sync_branch`'s `branch` is OPTIONAL, `sync_branch({name: ...})` was not refused
+// but silently understood as a branch to synchronise.
+//
+// The cause was diagnosed and fixed elsewhere while the tolerance stayed: the
+// Responses adapter had been sending no MCP schemas at all, so the model was
+// inferring argument shapes from names in the system prompt -- exactly the shape of
+// these failures. See `src/workflows/actions/atoma-cli.ts`.
+//
+// So the tools name their arguments the way a model reaches for them --
+// `issue_number` on an issue tool, `pull_number` on a pull request one, `branch` on
+// both branch tools -- and there are no synonyms. `refuseUnknownKeys` is the whole
+// mechanism now, which is what it was written to be.
+
+/** An image in MCP's own content-block shape, which the Atoma core maps per provider. */
+export interface McpImageBlock {
+  type: "image";
+  data: string;
+  mimeType: string;
+}
+
+/**
+ * A handler may return plain text, or an object when the response needs more
+ * than text: `meta` for extra `_meta` fields (e.g. `session_ends: true`), and
+ * `images` for pictures a vision-capable model should see rather than read.
+ */
+export type McpToolResult =
+  | string
+  | { text: string; meta?: Record<string, unknown>; images?: McpImageBlock[] };
+
+function normalizeResult(result: McpToolResult): McpToolPayload {
+  return typeof result === "string" ? { text: result } : result;
+}
+
+export interface McpToolSpec<S extends z.ZodTypeAny> {
+  name: string;
+  description: string;
+  schema: S;
+  handler: (args: z.infer<S>) => McpToolResult | Promise<McpToolResult>;
+  /**
+   * A better message for arguments this tool can diagnose but the schema cannot.
+   *
+   * The schema knows `number` is missing. Only the tool knows that this run is
+   * reviewing pull request #305, and that naming it is the difference between a
+   * refusal an agent can act on and one it can only retry. Measured three times in
+   * this project: a refusal that says what to do next is followed, and one that only
+   * states a rule is not.
+   *
+   * Returning `undefined` keeps the schema's own message, which is right whenever
+   * the tool has nothing more specific to add.
+   */
+  guidance?: (args: Record<string, unknown>) => string | undefined;
+}
+
+/**
+ * A handler's result, normalised: always a text part, optionally the other two.
+ *
+ * Named because it is the contract between a tool and whatever serves it, and it
+ * was written out inline four times in this file and destructured differently in
+ * each of the five servers — three of which dropped a field the type says can be
+ * there. `serveMcpServer` below is now the one place that maps it.
+ */
+export interface McpToolPayload {
+  text: string;
+  meta?: Record<string, unknown>;
+  images?: McpImageBlock[];
+}
+
+/** A tool ready to be listed (`.tool`) and invoked (`.call`) by an MCP server. */
+export interface BuiltMcpTool {
+  readonly tool: Tool;
+  call(args: Record<string, unknown>): Promise<McpToolPayload>;
+}
+
+/**
+ * The tool's schema, with unknown keys refused instead of dropped.
+ *
+ * Zod's default is to strip what it does not recognise, which turns a misspelled
+ * argument into a different call that succeeds. `get_issue_comments({number: 42,
+ * form: 3})` -- `from` mistyped -- silently returned the default last five
+ * comments, and the agent read that as the three it asked for. `create_issue`
+ * with `label` instead of `labels` created an issue with no labels and reported
+ * success.
+ *
+ * Strict makes the same call an error naming the key, which the agent can act on.
+ * It also puts `additionalProperties: false` in the advertised JSON Schema, so
+ * the constraint reaches the model before the call rather than after.
+ *
+ * `merge.gates` already made this decision for configuration: an unrecognised key
+ * is an error there, because a silently-dropped one is indistinguishable from a
+ * setting nobody needed. The same argument holds for a tool call.
+ *
+ * The cast is safe in the direction that matters: `.strict()` narrows what is
+ * accepted and leaves the parsed output type untouched.
+ */
+function refuseUnknownKeys<S extends z.ZodTypeAny>(schema: S): S {
+  return (schema instanceof z.ZodObject ? schema.strict() : schema) as S;
+}
+
+export function defineMcpTool<S extends z.ZodTypeAny>(spec: McpToolSpec<S>): BuiltMcpTool {
+  const schema = refuseUnknownKeys(spec.schema);
+  const { $schema: _drop, ...jsonSchema } = zodToJsonSchema(schema, {
+    target: "jsonSchema7",
+    $refStrategy: "none",
+  }) as Record<string, unknown>;
+  return {
+    tool: { name: spec.name, description: spec.description, inputSchema: jsonSchema as Tool["inputSchema"] },
+    async call(args: Record<string, unknown>): Promise<McpToolPayload> {
+      const result = schema.safeParse(args);
+      if (!result.success) {
+        const better = spec.guidance?.(args);
+        if (better !== undefined) throw new Error(better);
+        const message = result.error.issues
+          .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+          .join("; ");
+        throw new Error(`Invalid arguments for ${spec.name}: ${message}`);
+      }
+      return normalizeResult(await spec.handler(result.data));
+    },
+  };
+}
+
+/** Routes one `tools/call` to the tool that owns the name. */
+export type McpDispatch = (name: string, args: Record<string, unknown>) => Promise<McpToolPayload>;
+
+/**
+ * A dispatch that strips Atomaton's bookkeeping tags from the named tools' results.
+ *
+ * Atomaton keeps state between workflow runs in HTML comments inside issue and pull
+ * request bodies, so a tool that hands one of those back hands the markers along
+ * with it, and an agent reads its own delivery machinery's notes as part of the
+ * answer it asked for. `fetch_events.ts` strips them out of the context built before
+ * a run; this is the other way the same text arrives, during one.
+ *
+ * Named tools rather than a whole server, and this is the correction of a first
+ * version that took the server: a diff and a code excerpt are not GitHub's prose,
+ * they are the text being reviewed, and a tag-shaped literal inside one is part of
+ * the change. Wrapping `get_pr_diff` handed a reviewer a diff that was not the diff.
+ *
+ * A tool left off this list keeps its markers, which is what every result did before
+ * any of this and which nothing broke. A tool wrongly on it has its content edited
+ * under a reader who cannot tell. So the list is written out, and the default is to
+ * show what came back.
+ */
+export function withoutBookkeeping(dispatch: McpDispatch, tools: readonly string[]): McpDispatch {
+  const strip = new Set(tools);
+  return async (name, args) => {
+    const payload = await dispatch(name, args);
+    if (!strip.has(name)) return payload;
+    return { ...payload, text: withoutTags(payload.text) };
+  };
+}
+
+/** Builds an MCP server's `tools/list` array and a single `name -> call` dispatch function from a list of tool specs. */
+export function buildMcpTools(specs: BuiltMcpTool[]): { tools: Tool[]; dispatch: McpDispatch } {
+  const byName = new Map(specs.map((s) => [s.tool.name, s]));
+  return {
+    tools: specs.map((s) => s.tool),
+    async dispatch(name, args) {
+      const spec = byName.get(name);
+      if (!spec) throw new Error(unknownToolMessage(name, [...byName.keys()]));
+      return spec.call(args);
+    },
+  };
+}
+
+/**
+ * What to say when a name does not exist here.
+ *
+ * It used to say `Unknown: execute` and stop. Measured: an agent called
+ * `shell__execute` -- the real name is `shell__shell_execute` -- and, told only that
+ * it was unknown, **made the same mistake three times.** The one place that knows the
+ * right answer is the map two lines up, and it was not being asked.
+ *
+ * So the list goes in the message. It is short (one server has between one and
+ * nineteen tools), and this is the same bargain `defineMcpTool`'s argument errors
+ * already make: name the field and the reason, so the next call can be right rather
+ * than merely different.
+ *
+ * The near-miss first, when there is one. A caller that wrote `execute` where
+ * `shell_execute` was meant is not choosing between nineteen options, it is one
+ * token out -- and putting the likely answer in front of the list is what makes the
+ * message readable at a glance.
+ */
+export function unknownToolMessage(name: string, available: readonly string[]): string {
+  const near = available.filter(
+    (candidate) => candidate.includes(name) || name.includes(candidate),
+  );
+  const suggestion = near.length > 0 ? ` Did you mean ${near.map((n) => `'${n}'`).join(" or ")}?` : "";
+  return `Unknown tool '${name}' on this server.${suggestion} Available: ${available.join(", ")}.`;
+}
+
+/**
+ * Run an MCP server over stdio: list these tools, dispatch calls to them, and map
+ * every result the way `McpToolPayload` says it can be shaped.
+ *
+ * Each of the five servers used to write this out itself — about ten lines,
+ * near-identical — and each dropped a different part of the result:
+ *
+ *   `github`, `atoma`   kept `meta`,   dropped `images`
+ *   `web`               kept `images`, dropped `meta`
+ *   `shell`, `search`   dropped both
+ *
+ * Nothing said so, and nothing would have caught it. The type declares all
+ * three, so a `github` tool that started returning an image — `adapters/github/issue-images.ts`
+ * already exists, and `web` already uses it — or a `web` tool that set
+ * `session_ends` would have been silently truncated, with no type error, because
+ * each handler destructured only the subset it happened to need. That is
+ * duplication of the exact thing this file exists to remove.
+ *
+ * `log` stays per-server rather than becoming shared: the prefixes are what
+ * identify which server a line came from, in a run log that interleaves all five.
+ *
+ * ## The logging capability
+ *
+ * Declaring it is what makes `adapters/mcp/mcp-report.ts` work, and the SDK then does the
+ * rest of the protocol itself: it registers the `logging/setLevel` handler,
+ * remembers the level the client asked for, and drops anything below it inside
+ * `sendLoggingMessage`. atoma asks for `warning`, which is everything `report`
+ * sends, so nothing is filtered in practice -- but a client that asked for
+ * `error` would get only errors without a line of code here.
+ */
+export async function serveMcpServer(options: {
+  /** Server name reported in the MCP handshake, e.g. `atomaton-web-mcp`. */
+  name: string;
+  version: string;
+  tools: Tool[];
+  dispatch: McpDispatch;
+  /** Where this server's diagnostics go. Never stdout: that is the transport. */
+  log: (message: string) => void;
+}): Promise<void> {
+  const server = new Server(
+    { name: options.name, version: options.version },
+    { capabilities: { tools: {}, logging: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: options.tools }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args = {} } = request.params;
+    try {
+      const { text, meta, images } = await options.dispatch(name, args);
+      return {
+        content: [{ type: "text", text }, ...(images ?? [])],
+        isError: false,
+        ...(meta ? { _meta: meta } : {}),
+      };
+    } catch (error) {
+      const message = (error as Error).message ?? String(error);
+      options.log(`Tool error for ${name}: ${message}`);
+      return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
+    }
+  });
+
+  // When the client says the session is live, not when the socket comes up. A
+  // notification sent before `initialize` has completed is outside what the protocol
+  // allows a server to do, and a client is entitled to drop it -- which would make a
+  // report raised during startup the one report that never arrives, and startup is
+  // exactly when that happened. Everything said before this moment was held; it goes
+  // out here, in order.
+  //
+  // No `logger` field: atoma names the server that produced a result when it
+  // attaches the report, so putting the name in as well says it twice.
+  server.oninitialized = () => {
+    attachReportChannel((level, message) => {
+      void server.sendLoggingMessage({ level, data: message }).catch((error) => {
+        options.log(`could not report (${(error as Error).message}): ${message}`);
+      });
+    });
+  };
+
+  await server.connect(new StdioServerTransport());
+}

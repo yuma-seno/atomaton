@@ -1,0 +1,155 @@
+/**
+ * notify.ts — Resolve who to notify (a GitHub login) for a given issue or
+ * PR. The one canonical implementation, used directly (no more subprocess
+ * spawn) by every caller: mcp/github.ts, concludeIssue,
+ * the aggregation gate (lib/aggregation.ts), and
+ * src/entrypoints/machinery/resolve_notify.ts's thin CLI wrapper (kept because
+ * atomaton-runner.wac.ts invokes it as a workflow step, via `scriptCommand`).
+ *
+ * # This is the fallback, not the rule
+ *
+ * Who gets notified is decided where a run starts, and every live path already
+ * answers the question this module answers badly. A run started by a comment
+ * notifies whoever typed it (`comment.user.login`); a run started by an issue
+ * notifies whoever opened it (`sender.login`); a run one agent hands to another
+ * carries the same login onward, so a chain notifies whoever began it. That is the
+ * rule -- **the person who asked for this run**, not the person who owns the thread.
+ *
+ * This module exists for when that plumbing delivers nothing: a caller that forgot
+ * to pass it, a dispatch path added later, a body whose tag was lost. The runner
+ * calls it only when `inputs.notify` arrives empty. Read what follows as recovery,
+ * and do not extend it as though it were the policy -- if a new trigger needs a
+ * notify, it decides one at the trigger, where it knows who acted.
+ *
+ * # What recovery does
+ *
+ * Looks for an `<!-- atomaton:notify=LOGIN -->` tag in the body -- embedded by
+ * mcp/github.ts at creation time, carrying the requester the creating run knew.
+ *
+ * Falls back to the issue/PR's own author when no tag is present and the author is
+ * a human. If neither is available, walks up one edge -- GitHub's own sub-issue link
+ * for an issue, the `atomaton:parent-issue` tag for a pull request -- and retries on
+ * the parent. Measured over all 255 issues in this repository,
+ * no issue would need that walk: every one resolves by its own tag or its own
+ * author. It is kept for a repository whose history is not this one.
+ *
+ * Last, the repository owner, so that a failure reaches somebody rather than
+ * nobody. That is a weaker claim than the others -- the owner did not ask for this
+ * run and may not know what it was -- so the comment that mentions them says why
+ * they are being told.
+ *
+ * Never throws for missing data -- callers treat an empty result as
+ * "nobody to notify".
+ */
+import { gh } from "./gh.ts";
+import { NOTIFY_TAG, PARENT_ISSUE_TAG } from "./tags.ts";
+import { parentIssueOf } from "./parent-issue.ts";
+
+function log(message: string): void {
+  console.error(`[atomaton-notify] ${message}`);
+}
+
+const MAX_HOPS = 10;
+
+interface IssueLookup {
+  body?: string;
+  login?: string;
+  type?: string;
+  /** Whether this number is a pull request rather than an issue. */
+  is_pr?: boolean;
+}
+
+/**
+ * The repository's owner, or `""` if it cannot be read.
+ *
+ * The last resort, and the one place here that names somebody who did not ask for
+ * the run. It is still better than the alternative: before this, a run whose notify
+ * plumbing delivered nothing ended with a comment that mentioned no one, so a
+ * failure sat on an issue until somebody happened to look. Nobody being told is not
+ * a safer default than the wrong person being told -- it is the same failure with
+ * no one able to notice it.
+ *
+ * An organisation-owned repository resolves to the organisation, which GitHub does
+ * not notify. That is a worse answer than a person and a better one than silence,
+ * and it is visible in the comment either way.
+ */
+function repositoryOwner(repo: string): string {
+  const owner = repo.split("/")[0]?.trim() ?? "";
+  if (!owner) log(`WARN could not read an owner out of ${JSON.stringify(repo)}; nobody will be mentioned`);
+  return owner;
+}
+
+/**
+ * Read the fields a mention is resolved from, or `{}` if they cannot be read.
+ *
+ * Not throwing is deliberate — this module's stance is that a dispatch is never
+ * failed over a mention. But a failure here is indistinguishable to
+ * `resolveNotify` from an issue that genuinely has no tag, no login and no
+ * parent, and the visible result is a completion or escalation comment that
+ * mentions nobody: the person who asked for the work is simply never pinged.
+ *
+ * So it says so. Every other I/O module here logs a WARN on this class of
+ * failure; this was the one that produced no trace at all, which made a silent
+ * degradation impossible to find afterwards.
+ */
+function fetchIssueLookup(repo: string, number: number): IssueLookup {
+  const { code, stderr, stdout } = gh(
+    "api", `repos/${repo}/issues/${number}`,
+    // `is_pr` decides which way the walk goes up, and this endpoint answers for both
+    // kinds, which is why it is asked here rather than guessed from the number.
+    "--jq", "{body: .body, login: .user.login, type: .user.type, is_pr: (.pull_request != null)}",
+  );
+  if (code !== 0 || !stdout.trim()) {
+    log(`WARN could not read issue #${number} to resolve a mention: ${stderr.trim() || `gh exited ${code}`}`);
+    return {};
+  }
+  try {
+    return JSON.parse(stdout) as IssueLookup;
+  } catch {
+    log(`WARN issue #${number} lookup was not valid JSON; no mention will be resolved from it`);
+    return {};
+  }
+}
+
+/**
+ * The issue this one is under, or undefined — including when nobody could tell.
+ *
+ * The walk stops either way, which is this module's stance everywhere: a dispatch is
+ * never failed over a mention, and `parentIssueOf` has already logged the reason.
+ */
+function nativeParentOf(repo: string, issue: number): number | undefined {
+  const found = parentIssueOf(repo, issue);
+  return found.known && found.parent ? found.parent : undefined;
+}
+
+export function resolveNotify(repo: string, number: number): string {
+  const visited = new Set<number>();
+  let current = number;
+  for (let i = 0; i < MAX_HOPS; i++) {
+    if (visited.has(current)) break; // cycle guard
+    visited.add(current);
+
+    const d = fetchIssueLookup(repo, current);
+    const body = d.body ?? "";
+
+    const tagged = NOTIFY_TAG.read(body);
+    if (tagged) return tagged;
+
+    if ((d.type ?? "").toLowerCase() === "user" && d.login) {
+      return d.login;
+    }
+
+    // Up one edge, and which edge depends on what this is. A pull request's link to
+    // its issue is `atomaton:parent-issue`, which has no native equivalent that
+    // survives — measured, and written down in `adapters/github/tags.ts`. An issue's link to its
+    // parent is GitHub's own, and the tag that used to answer here is gone.
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    if (parent === undefined) break;
+    current = parent;
+  }
+  // Nothing in the thread said who to tell, so the owner is told. See
+  // `repositoryOwner` for why that beats telling nobody.
+  const owner = repositoryOwner(repo);
+  if (owner) log(`no requester found for #${number}; falling back to the repository owner @${owner}`);
+  return owner;
+}
