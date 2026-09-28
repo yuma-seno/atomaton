@@ -92,6 +92,33 @@ The version is the single declaration, and `self/atomaton/scripts/tag-release.sh
 tag from it, so there is no tag to push and nothing that can disagree. Releasing is
 an ordinary reviewed change rather than a separate act of remembering.
 
+To make that one edit without a checkout, dispatch **Atomaton Release**:
+
+```bash
+gh workflow run atomaton-release.yml --ref main -f version=0.2.0
+```
+
+Or press **Run workflow** on **Atomaton Release** in the Actions tab. It writes the
+version into `package.json` and opens a pull request; it merges nothing.
+`package.json` is in `merge.governed_paths`, so a person reviews it — a version is a
+claim about what is being shipped, and deciding that is not an agent's to make.
+
+It refuses two things, and only two:
+
+- **a downgrade** — the new version must not be below the declared one. This is the
+  one check that is not a judgement, so it is the one check made.
+- **a version already released** — the tag and the release exist, so there is
+  nothing to do.
+
+Everything else is left to the person merging. A version equal to the declared one
+is not an error: it means a publish did not finish, and the fix is to re-run the
+deploy rather than open a pull request for no diff.
+
+The workflow is hand-written and lives in `self/workflows/`, like the self-deploy,
+and for the same reasons: it is not in the deliverable, no agent triggers it, and it
+uses `SELF_DEPLOY_TOKEN` because a pull request opened with `GITHUB_TOKEN` starts no
+workflow run — so its checks would never appear and it could never be merged.
+
 It happens in two halves, and the second is triggered by the first:
 
 1. **`deploy.on_merge` → `self/atomaton/scripts/tag-release.sh`.** Runs after every merge and is
