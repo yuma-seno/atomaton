@@ -201,8 +201,8 @@
   {
     "path": "sessions/issue-17/reviewer.json",
     "agent": "reviewer",
-    "messages": 120,
-    "calls": 90,
+    "messages": 135,
+    "calls": 99,
     "failed": 0,
     "refused": 0,
     "skills": [
@@ -211,20 +211,20 @@
     "reported": true,
     "tools": {
       "list": 8,
-      "read": 29,
-      "grep": 29,
-      "github__get_pr": 1,
-      "github__get_issue_comments": 3,
+      "read": 30,
+      "grep": 31,
+      "github__get_pr": 2,
+      "github__get_issue_comments": 4,
       "github__get_check_runs": 2,
       "glob": 1,
       "atoma_builtin__load_skill": 1,
       "github__get_pr_diff": 1,
-      "github__get_branch": 2,
-      "web__fetch": 8,
-      "github__get_issue": 1,
+      "github__get_branch": 3,
+      "web__fetch": 9,
+      "github__get_issue": 2,
       "delegate_readonly__run": 1,
       "github__list_prs": 1,
-      "github__check_merge_readiness": 1,
+      "github__check_merge_readiness": 2,
       "search__search_issues": 1
     },
     "acts": {},
@@ -236,6 +236,14 @@
         "messages": 120,
         "seconds": 1018,
         "started": "2026-09-28T00:35:59Z"
+      },
+      {
+        "ended": "2026-09-28T01:17:54Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 135,
+        "seconds": 63,
+        "started": "2026-09-28T01:16:51Z"
       }
     ]
   },
