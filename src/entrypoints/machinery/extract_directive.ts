@@ -26,6 +26,7 @@ import { existsSync, readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { AGENT_NAME_PATTERN } from "../../domain/work/agent-name.ts";
+import { lineForms } from "../../domain/work/comment-command.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ExtractDirectiveArgs {
@@ -37,23 +38,9 @@ export const ref = defineScript<ExtractDirectiveArgs>(import.meta.url);
 
 const COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
 
-function candidates(rawLine: string): string[] {
-  let line = rawLine.trim();
-  if (!line) return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
-
 export function extractDirective(output: string, defDir: string): string {
   for (const rawLine of output.split("\n")) {
-    for (const candidate of candidates(rawLine)) {
+    for (const candidate of lineForms(rawLine)) {
       const match = COMMAND_RE.exec(candidate);
       if (match) {
         const agent = match[1]!;

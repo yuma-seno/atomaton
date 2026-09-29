@@ -102,8 +102,14 @@ export const STOP_TAG = stringTag("stop", "requested");
  * `stopped` is a person's stop or a closed issue's; `limit` is a spent iteration or
  * time budget; `done` is every ordinary ending. Only the first is resumed
  * automatically, because only it was interrupted rather than finished.
+ *
+ * `handoff` is the one ending that leaves the node with an agent rather than giving
+ * it back, and it is what `domain/work/whose-turn.ts` reads to answer "is a comment
+ * arriving mid-turn". It is a fourth value rather than a second tag because it is the
+ * same fact -- how this turn ended -- and a reader that wants only the three older
+ * answers still gets them: `/resume` looks for `stopped` and nothing else.
  */
-export const ENDED_TAG = stringTag("ended", "stopped|limit|done");
+export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 
 // `PARENT_TAG` (`atomaton:parent`, sub-issue -> parent issue) was here. GitHub's own
 // sub-issue link answers the same question and a person can change it, while this was

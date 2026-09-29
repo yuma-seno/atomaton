@@ -300,6 +300,10 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
     number,
     notify: (process.env.ISSUE_NOTIFY ?? "").trim(),
     reloadCount: next,
+    // The same turn, continued: the agent running right now is restarting itself, so
+    // the thread's last event is the command that started this very run. Without this
+    // the outstanding-request check would read the reload as a second request.
+    continues: true,
     log,
   });
   if (outcome === "refused-closed") {

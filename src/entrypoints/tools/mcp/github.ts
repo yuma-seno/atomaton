@@ -29,6 +29,7 @@ import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
 import { LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
 import { closingKeywordRefusal, closingReferences } from "../../../domain/work/issue-links.ts";
+import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -346,6 +347,15 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   const sub = a.sub_issue ?? true;
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
 
+  // An issue body is read for a command by `resolve_entry_agent.ts` when the issue is
+  // opened, so an agent writing one here would start a run on a child it just created.
+  // The route it meant is `launch_sub_agent`, which is also what the parent's
+  // aggregation waits on.
+  refuseCommandLines(
+    body,
+    "issue body",
+    "Use `atomaton__launch_sub_agent` to start an agent on a sub-issue.",
+  );
   body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
   if (sub) {
     const subIssueLabel = getLabel("sub_issue");
@@ -674,6 +684,23 @@ function refuseClosingKeywords(text: string, what: string): void {
   if (refusal !== undefined) mcpFail(refusal);
 }
 
+/**
+ * Refuse a body an agent wrote that carries a command on a line of its own.
+ *
+ * A command is a request from someone entitled to make it, and a body an agent wrote
+ * is not one — but the next reader takes it for one: `extract_directive.ts` reads a
+ * pull request body for the agent to dispatch, and `resolve_entry_agent.ts` reads an
+ * issue body the same way. So an agent that writes `/engineer` into a body is starting
+ * a run by accident, and the route it meant to use is a tool argument.
+ *
+ * `instead` names that route, and is required: a refusal that says what to do instead
+ * is followed, and one that only states a rule is not.
+ */
+function refuseCommandLines(text: string, what: string, instead: string): void {
+  const refusal = commandInBodyRefusal(commandLinesIn(text), what, instead);
+  if (refusal !== undefined) mcpFail(refusal);
+}
+
 function withCheckedMentions(body: string): string {
   const checked = escapeUnknownMentions(
     body,
@@ -688,6 +715,16 @@ function withCheckedMentions(body: string): string {
 function injectParentIssue(body: string, reviewer: string): string {
   const parent = (process.env.ISSUE_NUMBER ?? "").trim();
   refuseClosingKeywords(body, "pull request body");
+  // The reviewer is a tool argument, and the machinery writes the `/<agent>` line
+  // itself below. An agent writing one into the body is asking for a run in the one
+  // place a reader takes for a request, so it is refused rather than merged with the
+  // argument -- two answers to "who reviews this" is the shape this repository keeps
+  // finding.
+  refuseCommandLines(
+    body,
+    "pull request body",
+    "Pass the agent as the `reviewer` argument instead; the machinery writes the line for you.",
+  );
   body = notifyTagPrefix(body, "PR") + withCheckedMentions(body);
   // The reviewer, as the same line a person would type. Written before the tags so
   // it is the first visible line of the body, which is where a directive is read

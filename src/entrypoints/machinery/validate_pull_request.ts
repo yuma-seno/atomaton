@@ -166,6 +166,41 @@ export function pickDispatchedRun(
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
 
+/** A CI run as the Actions API reports it, for the question asked of it here. */
+interface CiRun {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  head_sha: string;
+  path: string;
+  created_at: string;
+  event: string;
+}
+
+/**
+ * A CI run that already exists for this commit, if one does.
+ *
+ * CI is dispatched more than once for the same commit. `create_pr` starts a
+ * validation, `commit_and_push` starts another, and a person's `/agent` comment
+ * starts a third -- and each of those used to run CI again from scratch. The commit
+ * has not changed between them, so the verdict cannot have, and the second and third
+ * runs bought nothing but runner time.
+ *
+ * Only `workflow_dispatch` runs are considered, and only the named workflow's. A
+ * `pull_request` run sits on the same commit held at `action_required` -- GitHub
+ * holds a workflow a bot's pull request triggered -- and adopting it would read the
+ * hold as a verdict.
+ */
+export function findExistingCiRun(runs: CiRun[], workflow: string, headSha: string): RunRef | undefined {
+  const candidates = runs
+    .filter((run) => run.event === "workflow_dispatch")
+    .filter((run) => run.head_sha === headSha)
+    .filter((run) => run.path.endsWith(`/${workflow}`))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  const run = candidates[0];
+  return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
+}
+
 /** Comments this script has left on the pull request, each marking one hand-back. */
 function countPriorRetries(repo: string, number: string): number {
   const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments?per_page=100`);
@@ -212,7 +247,14 @@ function reportFailure(
 }
 
 /**
- * Dispatch CI and wait for it, returning what it concluded.
+ * Dispatch CI and wait for it, or reuse a run that already exists, returning what
+ * it concluded.
+ *
+ * A run that already exists for this commit is reused rather than duplicated. CI is
+ * dispatched more than once for the same commit -- `create_pr`, `commit_and_push`,
+ * and a person's `/agent` comment each start a validation -- and each used to run CI
+ * again from scratch. The commit has not changed between them, so the verdict cannot
+ * have. See `findExistingCiRun`.
  *
  * A function rather than the body of `main`, so the one caller that must NOT run it
  * — a pull request whose own `.github/atomaton/` is broken — can skip it by not
@@ -230,39 +272,57 @@ function runCiAndWait(
   headSha: string,
   timeoutSeconds: number,
 ): { conclusion: string; runUrl: string } {
+  const listRuns = (): CiRun[] => {
+    const listed = gh("api", `repos/${repo}/actions/runs?per_page=50&event=workflow_dispatch`).stdout;
+    const { workflow_runs = [] } = JSON.parse(listed || "{}") as { workflow_runs?: CiRun[] };
+    return workflow_runs;
+  };
+
+  // Reuse a CI run that already exists for this commit rather than starting a
+  // second one. A cancelled run is not a verdict -- it was superseded, not judged --
+  // so it is not reused and CI is dispatched again.
+  const existing = findExistingCiRun(listRuns(), workflow, headSha);
+  const reusable = existing?.status === "completed" && existing.conclusion && existing.conclusion !== "cancelled";
+  if (reusable) {
+    log(`reusing CI run ${existing.id} for ${headSha.slice(0, 7)}: ${existing.conclusion}`);
+    return { conclusion: existing.conclusion!, runUrl: `https://github.com/${repo}/actions/runs/${existing.id}` };
+  }
+
+  // A run already going for this commit is waited for rather than duplicated. It is
+  // the same commit and the same workflow, so a second run would answer the same
+  // question twice.
+  const alreadyRunning = existing !== undefined && existing.status !== "completed";
   const since = new Date().toISOString();
-  // `dispatchWorkflow` rather than a `gh workflow run` built here. This is the sixth
-  // stand-in for the same hole — GitHub starts no workflow run for an event its own
-  // token triggered — and the only one that cannot live in `adapters/actions/dispatch-targets.ts`,
-  // because it has to RECOGNISE the run it started (see `pickDispatchedRun`: `gh
-  // workflow run` returns nothing identifying, so the wait below matches on head sha
-  // and start time). What it can share is the call itself.
-  //
-  // Fatal here, unlike everywhere else that dispatch is best-effort: this function's
-  // whole purpose is the verdict CI gives, and there is none without a run.
-  if (!dispatchWorkflow(`validate_pull_request: CI for ${branch}`, workflow, ["--repo", repo, "--ref", branch], log)) {
-    process.exit(1);
+  if (alreadyRunning) {
+    log(`CI run ${existing.id} is already ${existing.status} for ${headSha.slice(0, 7)}; waiting for it`);
+  } else {
+    // `dispatchWorkflow` rather than a `gh workflow run` built here. This is the sixth
+    // stand-in for the same hole — GitHub starts no workflow run for an event its own
+    // token triggered — and the only one that cannot live in `adapters/actions/dispatch-targets.ts`,
+    // because it has to RECOGNISE the run it started (see `pickDispatchedRun`: `gh
+    // workflow run` returns nothing identifying, so the wait below matches on head sha
+    // and start time). What it can share is the call itself.
+    //
+    // Fatal here, unlike everywhere else that dispatch is best-effort: this function's
+    // whole purpose is the verdict CI gives, and there is none without a run.
+    if (!dispatchWorkflow(`validate_pull_request: CI for ${branch}`, workflow, ["--repo", repo, "--ref", branch], log)) {
+      process.exit(1);
+    }
   }
 
   const deadline = Date.now() + timeoutSeconds * 1000;
   while (Date.now() < deadline) {
     Bun.sleepSync(10_000);
-    const listed = gh("api", `repos/${repo}/actions/runs?per_page=30&event=workflow_dispatch`).stdout;
-    const { workflow_runs = [] } = JSON.parse(listed || "{}") as {
-      workflow_runs?: {
-        id: number;
-        status: string;
-        conclusion: string | null;
-        head_sha: string;
-        created_at: string;
-        event: string;
-      }[];
-    };
-    const run = pickDispatchedRun(workflow_runs, headSha, since);
+    // A run that was already going is matched by id, not by `since`: it started
+    // before this validation did, so `pickDispatchedRun`'s start-time filter would
+    // never see it.
+    const run = alreadyRunning
+      ? listRuns().find((candidate) => candidate.id === existing.id)
+      : pickDispatchedRun(listRuns(), headSha, since);
     if (!run) continue;
     if (run.status !== "completed") continue;
     const conclusion = run.conclusion ?? "";
-    log(`dispatched run ${run.id} concluded ${conclusion}`);
+    log(`CI run ${run.id} concluded ${conclusion}`);
     return { conclusion, runUrl: `https://github.com/${repo}/actions/runs/${run.id}` };
   }
 
