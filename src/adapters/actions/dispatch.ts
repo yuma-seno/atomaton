@@ -32,6 +32,8 @@
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { logDispatch } from "../../adapters/runner/ops-log.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
+import { requestOutstandingOn } from "../../adapters/github/whose-turn.ts";
+import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { dispatchRefusedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-issue.ts";
 
 /** The reusable workflow every agent run enters through. */
@@ -85,6 +87,21 @@ export interface RunnerDispatch {
    * answer: there is no agent to report to, and the prompt says so.
    */
   dispatchedBy?: string;
+  /**
+   * Whether this dispatch continues work already in flight, rather than starting a
+   * turn somebody asked for.
+   *
+   * One caller sets it: `reload_environment`, where the agent running right now is
+   * restarting itself. The thread's last turn-changing event is the command that
+   * started that very run, so the outstanding-request check below would read the
+   * reload as a second request and refuse it. It is not one — it is the same turn,
+   * continued — so the check is skipped.
+   *
+   * Omitted everywhere else, which is the honest default: a dispatch that is not a
+   * continuation is a new turn, and a new turn must not start on a node that already
+   * has one.
+   */
+  continues?: boolean;
   log?: (message: string) => void;
 }
 
@@ -102,6 +119,8 @@ export type DispatchOutcome =
   | "dispatched"
   /** The target is closed, or its state could not be read. Nobody was dispatched, and the escalation is posted. */
   | "refused-closed"
+  /** A request for an agent was already outstanding on the target. Nobody was dispatched, and the marker is removed. */
+  | "refused-outstanding"
   /** GitHub rejected the dispatch. Nothing is running and nothing will retry. */
   | "failed";
 
@@ -141,7 +160,84 @@ function refuseClosedTarget(d: RunnerDispatch, state: TargetState): "refused-clo
 }
 
 /**
- * Dispatch the runner, unless the target is not open.
+ * Post the marker that says this node has been handed to an agent, and return its id.
+ *
+ * The marker is what makes the ordering check below possible: it is the "asked" event
+ * this dispatch writes, so a request that came BEFORE it is one nobody has taken up.
+ * It is also the record a person reads — the same line the runner used to post on a
+ * pull request, now posted for every node and every path, because the check needs it
+ * everywhere.
+ *
+ * Returns `undefined` when it could not be posted. That is not fatal on its own — the
+ * dispatch can still go out — but the ordering check cannot run without it, so the
+ * caller decides.
+ */
+function postDispatchMarker(d: RunnerDispatch): string | undefined {
+  const log = d.log ?? ((message: string) => console.error(message));
+  const body =
+    `${LLM_CONTEXT_TAG.write("exclude")}\n${DISPATCH_TAG.write(d.agent)}\n` +
+    `Atomaton: \`${d.agent}\` starting on this ${d.type === "pr" ? "pull request" : "issue"}.`;
+  const { code, stdout, stderr } = gh(
+    "api",
+    `repos/${d.repo ?? "{owner}/{repo}"}/issues/${d.number}/comments`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+    "--jq",
+    ".id",
+  );
+  if (code !== 0) {
+    log(`${d.context}: could not post the dispatch marker on #${d.number}: ${stderr || stdout}`);
+    return undefined;
+  }
+  return stdout.trim();
+}
+
+/**
+ * Refuse a dispatch when a request for an agent is already outstanding on the target.
+ *
+ * A node holds one turn. A person's command, or a marker from a dispatch that already
+ * went out, is a request — and if the last turn-changing event in the thread is one of
+ * those, nobody has taken it up, so this dispatch would be a second run on a node that
+ * already has one. Two agents, two comments, one issue.
+ *
+ * The marker posted just above is excluded from the read, so the question is what came
+ * BEFORE this dispatch. When the answer is "a request", the marker is removed: it was
+ * the second one, and leaving it would make the thread say two agents were asked for.
+ *
+ * A read that fails refuses too. The alternative is dispatching a second agent because
+ * GitHub was briefly unreachable, which is the failure this exists to prevent.
+ *
+ * Returns the refusal, or `undefined` when the dispatch may proceed.
+ */
+function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefined): "refused-outstanding" | undefined {
+  const log = d.log ?? ((message: string) => console.error(message));
+  const removeMarker = (): void => {
+    if (markerId === undefined) return;
+    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+  };
+
+  let outstanding: boolean;
+  try {
+    outstanding = requestOutstandingOn(d.repo ?? "", d.number, markerId);
+  } catch (e) {
+    removeMarker();
+    log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+    return "refused-outstanding";
+  }
+  if (!outstanding) return undefined;
+
+  removeMarker();
+  log(
+    `${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` +
+      "the dispatch marker was removed",
+  );
+  return "refused-outstanding";
+}
+
+/**
+ * Dispatch the runner, unless the target is not open or already has a turn.
  *
  * Callers that have a fallback (closing an issue directly rather than asking an agent
  * to) branch on the outcome; callers that do not should at least not treat anything
@@ -150,6 +246,16 @@ function refuseClosedTarget(d: RunnerDispatch, state: TargetState): "refused-clo
 export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state)) return refuseClosedTarget(d, state);
+
+  // The marker goes out before the check, so the check has something to be ordered
+  // against. A continuation (`continues`) skips both: it is the same turn, not a new
+  // request, and the thread's last event is the command that started the run it is
+  // continuing.
+  if (!d.continues) {
+    const markerId = postDispatchMarker(d);
+    const refusal = refuseOutstandingRequest(d, markerId);
+    if (refusal !== undefined) return refusal;
+  }
 
   const args = [
     ...(d.repo ? ["--repo", d.repo] : []),

@@ -113,6 +113,16 @@ export type DispatchGateResult =
    */
   | { kind: "parent-closed" }
   /**
+   * Everything was ready and the parent already had an agent asked for on it, so no
+   * atomaton was started.
+   *
+   * Distinct from `dispatch-failed` for the same reason `parent-closed` is: nothing
+   * malfunctioned. Somebody asked for an agent on the parent while its children were
+   * finishing, and that request stands. `dispatchRunner` removed its own marker and
+   * said so in the log.
+   */
+  | { kind: "parent-busy" }
+  /**
    * Something could not be read or written, so the gate refused to decide.
    *
    * Distinct from every answer above, because the safe move here is to do
@@ -123,7 +133,12 @@ export type DispatchGateResult =
 
 /** True when the atomaton was not started and something is left undone. */
 export function needsAttention(result: DispatchGateResult): boolean {
-  return result.kind === "dispatch-failed" || result.kind === "undetermined" || result.kind === "parent-closed";
+  return (
+    result.kind === "dispatch-failed" ||
+    result.kind === "undetermined" ||
+    result.kind === "parent-closed" ||
+    result.kind === "parent-busy"
+  );
 }
 
 /**
@@ -161,6 +176,12 @@ export function describeGateResult(result: DispatchGateResult, closedNum: number
         `All sub-tasks of ${which} complete, but ${which} is closed, so no agent was started. ` +
         `The aggregation marker is already written, so no other caller will retry: ` +
         `reopen it and run the parent's agent by hand. Whoever asked for the run has been told on the issue.`
+      );
+    case "parent-busy":
+      return (
+        `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` +
+        `so no second one was started. The aggregation marker is already written, so no other caller ` +
+        `will retry: the run that was asked for first is the one to wait for.`
       );
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
@@ -263,7 +284,11 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   // A closed parent is not a fault, and the person who asked for the run has already
   // been told by `dispatchRunner` itself. Kept apart from `dispatch-failed` so this
   // does not read in the log as GitHub having rejected something.
-  return outcome === "refused-closed" ? { kind: "parent-closed" } : { kind: "dispatch-failed" };
+  if (outcome === "refused-closed") return { kind: "parent-closed" };
+  // The same shape one step along: the parent already had an agent asked for on it, so
+  // this dispatch was the second one and stood down. Nothing malfunctioned.
+  if (outcome === "refused-outstanding") return { kind: "parent-busy" };
+  return { kind: "dispatch-failed" };
 }
 
 /**

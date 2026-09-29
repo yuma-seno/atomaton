@@ -254,6 +254,34 @@ describe("mcp/github.ts", () => {
   });
 
   /**
+   * A pull request body is read for the agent to dispatch by `extract_directive.ts`,
+   * so an agent writing `/reviewer` into it would be asking for a run in the one place
+   * a reader takes for a request. The route it meant is the `reviewer` argument, which
+   * the machinery writes as that same line.
+   */
+  test("create_pr refuses a body carrying a command on its own line", async () => {
+    const { root, work } = makeRemoteBranchFixture();
+    try {
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0",
+          id: 8,
+          method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR", body: "The change.\n\n/reviewer" } },
+        },
+        { BRANCH: "atomaton/issue-1", ...fakeGhSeam(), FAKE_GH_RESPONSES: "[]" },
+        work,
+      );
+      expect(response.result.isError).toBe(true);
+      expect(response.result.content[0].text).toContain("/reviewer");
+      expect(response.result.content[0].text).toContain("reviewer` argument");
+    } finally {
+      removeTemp(root);
+    }
+  });
+
+  /**
    * The other half: the routes that must keep working. An `issue` run starts on the
    * base branch with no branch of its own, `commit_and_push` names one at the first
    * commit, and `create_pr` then reads that same branch back out of HEAD. Verifying
@@ -451,6 +479,52 @@ describe("mcp/github.ts", () => {
     );
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0].text).toContain("already contains a notify tag");
+  });
+
+  /**
+   * A command on a line of its own is a request from someone entitled to make it, and
+   * a body an agent wrote is not one — but the next reader takes it for one:
+   * `resolve_entry_agent.ts` reads an issue body for the agent to start, and
+   * `extract_directive.ts` reads a pull request body the same way. So an agent writing
+   * `/engineer` into a body would start a run by accident.
+   */
+  test("create_issue refuses a body carrying a command on its own line", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 32, method: "tools/call",
+        params: {
+          name: "create_issue",
+          arguments: { title: "Test", body: "Do the thing.\n\n/engineer", sub_issue: false },
+        },
+      },
+      {
+        ...fakeGhSeam(),
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("/engineer");
+    expect(r.result.content[0].text).toContain("launch_sub_agent");
+  });
+
+  // The point of "on a line of its own": prose that mentions a command is not one.
+  test("create_issue allows a command mentioned inside a sentence", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 33, method: "tools/call",
+        params: {
+          name: "create_issue",
+          arguments: { title: "Test", body: "Comment /engineer to start one.", sub_issue: false },
+        },
+      },
+      {
+        ...fakeGhSeam(),
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+      },
+    );
+    expect(r.result.isError).toBe(false);
   });
 
   test("create_issue provisions the sub-issue label before creating a child", async () => {
@@ -943,6 +1017,84 @@ describe("mcp/atomaton.ts", () => {
     });
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0].text).toContain("tasks must be a non-empty list");
+  });
+
+  /**
+   * A sub-issue is created by `create_issue` and started here, and a person may
+   * comment in between. If that comment asks for an agent, this dispatch would be a
+   * second run on a node that already has one.
+   *
+   * The dispatch comment is posted first so the check has something to be ordered
+   * against, and removed when it turns out to be a second one.
+   */
+  test("launch_sub_agent refuses when an agent was already asked for on the sub-issue", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-guard-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 4, method: "tools/call",
+          params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+        },
+        {
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // The dispatch marker, posted first, and the thread read that follows it.
+            // Listed before the state rule, whose `["api", "issues"]` is a substring
+            // of these paths too.
+            { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
+            // The thread read: a person already asked for an agent.
+            { match: ["api", "issues/7/comments"], stdout: JSON.stringify([{ id: 1, body: "/engineer" }]) },
+            { match: ["api", "issues/7", "--jq"], stdout: "" },
+            { match: ["api", "DELETE"] },
+            { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) },
+          ]),
+        },
+      );
+      expect(r.result.isError).toBe(true);
+      expect(r.result.content[0].text).toContain("already has an agent asked for");
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      // The dispatch comment was removed, and nothing was dispatched.
+      expect(calls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/555"))).toBe(true);
+      expect(calls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(false);
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  // The ordinary path: nothing was asked for first, so the dispatch proceeds.
+  test("launch_sub_agent dispatches when the sub-issue has no agent asked for", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-ok-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 5, method: "tools/call",
+          params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+        },
+        {
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
+            { match: ["api", "issues/7/comments"], stdout: "[]" },
+            { match: ["api", "issues/7", "--jq"], stdout: "" },
+            { match: ["issue", "edit"] },
+            { match: ["workflow", "run"] },
+            { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) },
+          ]),
+        },
+      );
+      expect(r.result.isError).toBe(false);
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      expect(calls.some((c) => c.includes("DELETE"))).toBe(false);
+      expect(calls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(true);
+    } finally {
+      removeTemp(dir);
+    }
   });
 });
 

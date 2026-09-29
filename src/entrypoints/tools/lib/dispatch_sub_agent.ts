@@ -2,7 +2,6 @@ import { gh } from "../../../adapters/github/gh.ts";
 import { isAgentName } from "../../../domain/work/agent-name.ts";
 import { getLabel } from "../../../adapters/runner/config.ts";
 import { dispatchRunner } from "../../../adapters/actions/dispatch.ts";
-import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
 
 export interface DispatchSubAgentResult {
   issue: number;
@@ -10,14 +9,21 @@ export interface DispatchSubAgentResult {
 }
 
 /**
- * Posts a dispatch-confirmation comment on the sub-issue, tags it as
- * "launched", and dispatches the runner workflow.
+ * Tags a sub-issue as "launched" and dispatches the runner workflow on it.
  *
  * `dispatchedBy` is the agent starting this run -- the one waiting on its result.
  * It defaults to the current run's own agent (`process.env.AGENT`), which is the
  * caller in every real path: an atomaton launching a sub-agent. Passed through to
  * the runner so the started run knows who to report back to; see
  * `RunnerDispatch.dispatchedBy` for why that name has no other route.
+ *
+ * ## What this no longer does
+ *
+ * It used to post its own dispatch comment, and to check the thread for a request that
+ * came first. Both moved into `dispatchRunner`, which every path that starts an agent
+ * goes through: the comment is the marker the ordering check is written against, and
+ * the check is the same question for a sub-issue, a pull request and a parent issue.
+ * A guard that each caller has to remember is one the next caller will not have.
  */
 export function dispatchSubAgent(issue: number, agent: string, notify = "", dispatchedBy = (process.env.AGENT ?? "").trim()): DispatchSubAgentResult {
   if (!Number.isInteger(issue) || issue <= 0) {
@@ -26,14 +32,6 @@ export function dispatchSubAgent(issue: number, agent: string, notify = "", disp
   if (!isAgentName(agent)) {
     throw new Error(`agent must be a valid lowercase agent name, got: ${agent}`);
   }
-
-  gh(
-    "issue", "comment", String(issue),
-    "--body",
-    `${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: Agent \`${agent}\` dispatched` +
-      (dispatchedBy ? ` by \`${dispatchedBy}\`` : "") +
-      ` to work on this sub-task.`,
-  );
 
   const launchedLabel = getLabel("launched");
   // Create it first, as the in-progress and sub-issue labels already do. Adding a
@@ -48,9 +46,8 @@ export function dispatchSubAgent(issue: number, agent: string, notify = "", disp
   }
 
   // Throws rather than returning quietly: `launch_sub_agent` reports each task's
-  // outcome to the atomaton individually, and the confirmation comment above
-  // is already posted, so a swallowed failure would leave a sub-issue that says
-  // an agent is working on it while nothing is.
+  // outcome to the atomaton individually, and a swallowed failure would leave a
+  // sub-issue that says an agent is working on it while nothing is.
   const outcome = dispatchRunner({
     context: `${agent} was to be started on sub-issue #${issue}`,
     agent,
@@ -64,6 +61,14 @@ export function dispatchSubAgent(issue: number, agent: string, notify = "", disp
     // separately because "see the workflow log for the gh error" would send the
     // atomaton looking for a failure that did not happen.
     throw new Error(`#${issue} is not open, so ${agent} was not started on it; the issue says so.`);
+  }
+  if (outcome === "refused-outstanding") {
+    // Somebody asked for an agent on this sub-issue before this dispatch reached it.
+    // The dispatch marker was removed, and the request that came first stands.
+    throw new Error(
+      `#${issue} already has an agent asked for on it, so ${agent} was not started. ` +
+        "Wait for that run, or comment on the issue yourself.",
+    );
   }
   if (outcome !== "dispatched") {
     throw new Error(`could not dispatch ${agent} on sub-issue #${issue}; see the workflow log for the gh error`);

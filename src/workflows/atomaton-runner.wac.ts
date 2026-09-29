@@ -1331,32 +1331,6 @@ fi
 `,
 });
 
-// Traceability + visibility: post an explicit "starting" marker on the PR as
-// soon as an agent is about to run on it, regardless of what dispatched it
-// (github__create_pr's own dispatch, a manual /<agent> comment) -- one single
-// place covering every path, rather than duplicating this in each dispatcher.
-// The atomaton/in-progress label (added just above, before this step) already
-// gives ongoing at-a-glance status; this comment gives a concrete, timestamped
-// entry in the PR's own history of a run actually starting.
-//
-// The agent's name is interpolated rather than compared against a literal. It
-// used to be `inputs.agent == 'reviewer'`, so a project that renamed its reviewer
-// silently lost this comment -- and the name is right there in the input, so
-// there was never anything to compare.
-const agentStartCommentStep = new TypedOutputsStep({
-  name: "Post agent-start comment",
-  if: `${buildContextStep.rawOutputs.new_event_count} != '0' && inputs.type == 'pr'`,
-  shell: "bash",
-  env: {
-    GH_TOKEN: "${{ github.token }}",
-    NUMBER: "${{ inputs.number }}",
-    AGENT: "${{ inputs.agent }}",
-  },
-  run: `gh issue comment "$NUMBER" --body "${LLM_CONTEXT_TAG.write("exclude")}
-Atomaton: \${AGENT} starting."
-`,
-});
-
 const runJob = new NormalJob("run", {
   "runs-on": "ubuntu-latest",
   "timeout-minutes": JOB_TIMEOUT_MINUTES,
@@ -1725,7 +1699,6 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
     run: `${scriptCommandWithArgs(manageInProgressLabelRef, { action: "add", number: "\${NUMBER}" })}
 `,
   }),
-  agentStartCommentStep,
   // Put every tool server on one OS user that cannot become root.
   //
   // AFTER environment setup, because that is what installs the toolchain this
