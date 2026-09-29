@@ -151,7 +151,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -166,6 +166,24 @@ var CI_RETRY_TAG = numericTag("ci-retry");
 // src/entrypoints/machinery/extract_directive.ts
 import { existsSync, readFileSync, appendFileSync } from "fs";
 import { join } from "path";
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
 
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
@@ -193,26 +211,12 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/extract_directive.ts
 var ref = defineScript(import.meta.url);
-var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
-function candidates(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
+var COMMAND_RE2 = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
 function extractDirective(output, defDir) {
   for (const rawLine of output.split(`
 `)) {
-    for (const candidate of candidates(rawLine)) {
-      const match = COMMAND_RE.exec(candidate);
+    for (const candidate of lineForms(rawLine)) {
+      const match = COMMAND_RE2.exec(candidate);
       if (match) {
         const agent = match[1];
         if (existsSync(join(defDir, `${agent}.md`)))
@@ -232,6 +236,11 @@ function log(message) {
 }
 function pickDispatchedRun(runs, headSha, since) {
   const candidates = runs.filter((run) => run.event === "workflow_dispatch").filter((run) => run.head_sha === headSha).filter((run) => run.created_at >= since).sort((a, b) => a.created_at < b.created_at ? 1 : -1);
+  const run = candidates[0];
+  return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
+}
+function findExistingCiRun(runs, workflow, headSha) {
+  const candidates = runs.filter((run) => run.event === "workflow_dispatch").filter((run) => run.head_sha === headSha).filter((run) => run.path.endsWith(`/${workflow}`)).sort((a, b) => a.created_at < b.created_at ? 1 : -1);
   const run = candidates[0];
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
@@ -261,22 +270,36 @@ function reportFailure(repo, number, attempt, runUrl, summary, details = []) {
     log(`WARN could not post the failure comment: ${posted.stderr}`);
 }
 function runCiAndWait(repo, workflow, branch, headSha, timeoutSeconds) {
+  const listRuns = () => {
+    const listed = gh("api", `repos/${repo}/actions/runs?per_page=50&event=workflow_dispatch`).stdout;
+    const { workflow_runs = [] } = JSON.parse(listed || "{}");
+    return workflow_runs;
+  };
+  const existing = findExistingCiRun(listRuns(), workflow, headSha);
+  const reusable = existing?.status === "completed" && existing.conclusion && existing.conclusion !== "cancelled";
+  if (reusable) {
+    log(`reusing CI run ${existing.id} for ${headSha.slice(0, 7)}: ${existing.conclusion}`);
+    return { conclusion: existing.conclusion, runUrl: `https://github.com/${repo}/actions/runs/${existing.id}` };
+  }
+  const alreadyRunning = existing !== undefined && existing.status !== "completed";
   const since = new Date().toISOString();
-  if (!dispatchWorkflow(`validate_pull_request: CI for ${branch}`, workflow, ["--repo", repo, "--ref", branch], log)) {
-    process.exit(1);
+  if (alreadyRunning) {
+    log(`CI run ${existing.id} is already ${existing.status} for ${headSha.slice(0, 7)}; waiting for it`);
+  } else {
+    if (!dispatchWorkflow(`validate_pull_request: CI for ${branch}`, workflow, ["--repo", repo, "--ref", branch], log)) {
+      process.exit(1);
+    }
   }
   const deadline = Date.now() + timeoutSeconds * 1000;
   while (Date.now() < deadline) {
     Bun.sleepSync(1e4);
-    const listed = gh("api", `repos/${repo}/actions/runs?per_page=30&event=workflow_dispatch`).stdout;
-    const { workflow_runs = [] } = JSON.parse(listed || "{}");
-    const run = pickDispatchedRun(workflow_runs, headSha, since);
+    const run = alreadyRunning ? listRuns().find((candidate) => candidate.id === existing.id) : pickDispatchedRun(listRuns(), headSha, since);
     if (!run)
       continue;
     if (run.status !== "completed")
       continue;
     const conclusion = run.conclusion ?? "";
-    log(`dispatched run ${run.id} concluded ${conclusion}`);
+    log(`CI run ${run.id} concluded ${conclusion}`);
     return { conclusion, runUrl: `https://github.com/${repo}/actions/runs/${run.id}` };
   }
   log(`no conclusion within ${timeoutSeconds}s`);
@@ -374,6 +397,7 @@ function main() {
 if (import.meta.main)
   main();
 export {
+  findExistingCiRun,
   pickDispatchedRun,
   ref2 as ref
 };

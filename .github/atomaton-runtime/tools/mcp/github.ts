@@ -7322,7 +7322,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -7598,6 +7598,117 @@ function readTargetState(number, repo) {
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
+  }
+  return NOTHING;
+}
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function isCommand(form) {
+  const parsed = parseCommentCommand(form);
+  return parsed.agent !== "" || parsed.control !== "";
+}
+function commandLinesIn(text) {
+  const found = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line && lineForms(line).some(isCommand))
+      found.push(line);
+  }
+  return found;
+}
+function commandInBodyRefusal(found, what, instead) {
+  if (found.length === 0)
+    return;
+  const quoted = found.map((line) => `"${line}"`).join(", ");
+  return `This ${what} has ${quoted} on a line of its own, which Atomaton reads as a command to start an ` + `agent. A command is a request from someone entitled to make it, and a body an agent wrote is ` + `not one. ${instead} To mention a command in prose, put it inside a sentence rather than alone ` + "on its line.";
+}
+
+// src/domain/work/whose-turn.ts
+function turnEvents(bodies, readers) {
+  const events = [];
+  for (const body of bodies) {
+    if (readers.isAgentResult(body)) {
+      events.push(readers.handedOff(body) ? "handed-off" : "returned");
+    } else if (readers.asksForAgent(body)) {
+      events.push("asked");
+    }
+  }
+  return events;
+}
+function requestOutstanding(events) {
+  return events[events.length - 1] === "asked";
+}
+
+// src/adapters/github/whose-turn.ts
+var readers = {
+  isAgentResult: (body) => AGENT_TAG.has(body),
+  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  asksForAgent: (body) => parseCommentCommand(body).agent !== ""
+};
+function commentBodies(repo, number, excludeCommentId) {
+  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const comments = JSON.parse(listed.stdout || "[]");
+  const excluded = String(excludeCommentId ?? "").trim();
+  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => comment.body ?? "");
+}
+function requestOutstandingOn(repo, number, excludeCommentId) {
+  return requestOutstanding(turnEvents(commentBodies(repo, number, excludeCommentId), readers));
+}
+
 // src/domain/work/closed-issue.ts
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
@@ -7650,10 +7761,49 @@ function refuseClosedTarget(d, state) {
   }
   return "refused-closed";
 }
+function postDispatchMarker(d) {
+  const log = d.log ?? ((message) => console.error(message));
+  const body = `${LLM_CONTEXT_TAG.write("exclude")}
+${DISPATCH_TAG.write(d.agent)}
+` + `Atomaton: \`${d.agent}\` starting on this ${d.type === "pr" ? "pull request" : "issue"}.`;
+  const { code, stdout, stderr } = gh("api", `repos/${d.repo ?? "{owner}/{repo}"}/issues/${d.number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
+  if (code !== 0) {
+    log(`${d.context}: could not post the dispatch marker on #${d.number}: ${stderr || stdout}`);
+    return;
+  }
+  return stdout.trim();
+}
+function refuseOutstandingRequest(d, markerId) {
+  const log = d.log ?? ((message) => console.error(message));
+  const removeMarker = () => {
+    if (markerId === undefined)
+      return;
+    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+  };
+  let outstanding;
+  try {
+    outstanding = requestOutstandingOn(d.repo ?? "", d.number, markerId);
+  } catch (e) {
+    removeMarker();
+    log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+    return "refused-outstanding";
+  }
+  if (!outstanding)
+    return;
+  removeMarker();
+  log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
+  return "refused-outstanding";
+}
 function dispatchRunner(d) {
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
+  if (!d.continues) {
+    const markerId = postDispatchMarker(d);
+    const refusal = refuseOutstandingRequest(d, markerId);
+    if (refusal !== undefined)
+      return refusal;
+  }
   const args = [
     ...d.repo ? ["--repo", d.repo] : [],
     "--field",
@@ -7703,7 +7853,7 @@ function parentAgent(repo, parent) {
   return mostRecentAgentOn(repo, parent);
 }
 function needsAttention(result) {
-  return result.kind === "dispatch-failed" || result.kind === "undetermined" || result.kind === "parent-closed";
+  return result.kind === "dispatch-failed" || result.kind === "undetermined" || result.kind === "parent-closed" || result.kind === "parent-busy";
 }
 function describeGateResult(result, closedNum, parent) {
   const which = parent === undefined ? "the parent issue" : `#${parent}`;
@@ -7720,6 +7870,8 @@ function describeGateResult(result, closedNum, parent) {
       return `All sub-tasks of ${which} complete, but the dispatch FAILED. ` + `The aggregation marker is already written, so no other caller will retry: ` + `re-run the parent's agent by hand.`;
     case "parent-closed":
       return `All sub-tasks of ${which} complete, but ${which} is closed, so no agent was started. ` + `The aggregation marker is already written, so no other caller will retry: ` + `reopen it and run the parent's agent by hand. Whoever asked for the run has been told on the issue.`;
+    case "parent-busy":
+      return `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` + `so no second one was started. The aggregation marker is already written, so no other caller ` + `will retry: the run that was asked for first is the one to wait for.`;
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
   }
@@ -7777,7 +7929,11 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
   });
   if (outcome === "dispatched")
     return { kind: "dispatched" };
-  return outcome === "refused-closed" ? { kind: "parent-closed" } : { kind: "dispatch-failed" };
+  if (outcome === "refused-closed")
+    return { kind: "parent-closed" };
+  if (outcome === "refused-outstanding")
+    return { kind: "parent-busy" };
+  return { kind: "dispatch-failed" };
 }
 async function dispatchOrchestratorIfSubIssueReady(repo, subIssueNum) {
   const found = parentIssueOf(repo, subIssueNum);
@@ -19651,6 +19807,7 @@ async function createIssue(a) {
   let labels = a.labels ?? [];
   const sub = a.sub_issue ?? true;
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
+  refuseCommandLines(body, "issue body", "Use `atomaton__launch_sub_agent` to start an agent on a sub-issue.");
   body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
   if (sub) {
     const subIssueLabel = getLabel("sub_issue");
@@ -19797,6 +19954,11 @@ function refuseClosingKeywords(text, what) {
   if (refusal !== undefined)
     mcpFail(refusal);
 }
+function refuseCommandLines(text, what, instead) {
+  const refusal = commandInBodyRefusal(commandLinesIn(text), what, instead);
+  if (refusal !== undefined)
+    mcpFail(refusal);
+}
 function withCheckedMentions(body) {
   const checked = escapeUnknownMentions(body, knownParticipants(REPO, (process.env.ISSUE_NUMBER ?? "").trim()));
   if (checked.escaped.length === 0)
@@ -19810,6 +19972,7 @@ ${notice}`;
 function injectParentIssue(body, reviewer) {
   const parent = (process.env.ISSUE_NUMBER ?? "").trim();
   refuseClosingKeywords(body, "pull request body");
+  refuseCommandLines(body, "pull request body", "Pass the agent as the `reviewer` argument instead; the machinery writes the line for you.");
   body = notifyTagPrefix(body, "PR") + withCheckedMentions(body);
   const reviewerLine = reviewer ? `/${reviewer}
 

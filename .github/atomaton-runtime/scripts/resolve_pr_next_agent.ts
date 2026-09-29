@@ -34,6 +34,24 @@ import { join } from "path";
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -60,26 +78,12 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/extract_directive.ts
 var ref = defineScript(import.meta.url);
-var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
-function candidates(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
+var COMMAND_RE2 = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
 function extractDirective(output, defDir) {
   for (const rawLine of output.split(`
 `)) {
-    for (const candidate of candidates(rawLine)) {
-      const match = COMMAND_RE.exec(candidate);
+    for (const candidate of lineForms(rawLine)) {
+      const match = COMMAND_RE2.exec(candidate);
       if (match) {
         const agent = match[1];
         if (existsSync(join(defDir, `${agent}.md`)))

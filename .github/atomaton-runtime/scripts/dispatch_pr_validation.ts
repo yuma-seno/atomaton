@@ -151,7 +151,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -162,6 +162,10 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
 // src/adapters/github/branch-placement.ts
 var NO_BRANCH_MESSAGE = "This run is on a detached checkout with no local branch, so there is no branch to push: " + "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 
