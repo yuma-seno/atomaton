@@ -518,16 +518,6 @@ jobs:
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_in_progress_label.ts" --action "add" --number "${NUMBER}"
         if: steps.context.outputs.new_event_count != '0'
-      - name: Post agent-start comment
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NUMBER: ${{ inputs.number }}
-          AGENT: ${{ inputs.agent }}
-        run: |
-          gh issue comment "$NUMBER" --body "<!-- atomaton:llm-context=exclude -->
-          Atomaton: ${AGENT} starting."
-        if: steps.context.outputs.new_event_count != '0' && inputs.type == 'pr'
       - name: Put the tool servers on a user without sudo
         shell: bash
         run: |

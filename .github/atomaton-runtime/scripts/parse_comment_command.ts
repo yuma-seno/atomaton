@@ -14,32 +14,7 @@ function isControlCommand(name) {
   return CONTROL_COMMAND_NAMES.includes(name);
 }
 
-// src/entrypoints/machinery/lib/script-ref.ts
-import { basename } from "path";
-import { fileURLToPath } from "url";
-
-// src/domain/machinery/machinery-layout.ts
-var USER_ROOT = ".github/atomaton";
-var RUNTIME_ROOT = ".github/atomaton-runtime";
-var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
-var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
-var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
-var SKILLS_DIR = `${USER_ROOT}/skills`;
-var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
-var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
-var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
-var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
-var RULESETS_DIR = `${USER_ROOT}/rulesets`;
-var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
-
-// src/entrypoints/machinery/lib/script-ref.ts
-function defineScript(importMetaUrl) {
-  return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
-}
-
-// src/entrypoints/machinery/parse_comment_command.ts
-var ref = defineScript(import.meta.url);
+// src/domain/work/comment-command.ts
 var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
 var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
 var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
@@ -76,6 +51,33 @@ function parseCommentCommand(body) {
   }
   return NOTHING;
 }
+
+// src/entrypoints/machinery/lib/script-ref.ts
+import { basename } from "path";
+import { fileURLToPath } from "url";
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+
+// src/entrypoints/machinery/lib/script-ref.ts
+function defineScript(importMetaUrl) {
+  return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
+}
+
+// src/entrypoints/machinery/parse_comment_command.ts
+var ref = defineScript(import.meta.url);
 function main() {
   const body = process.env.ATOMATON_COMMENT_BODY ?? "";
   const { agent, control, sessionMode, error } = parseCommentCommand(body);
@@ -94,6 +96,5 @@ error=${error}
 if (import.meta.main)
   main();
 export {
-  parseCommentCommand,
   ref
 };

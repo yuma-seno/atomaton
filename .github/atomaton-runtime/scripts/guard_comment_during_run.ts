@@ -172,7 +172,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -183,6 +183,90 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
+  }
+  return NOTHING;
+}
+
+// src/domain/work/whose-turn.ts
+function turnEvents(bodies, readers) {
+  const events = [];
+  for (const body of bodies) {
+    if (readers.isAgentResult(body)) {
+      events.push(readers.handedOff(body) ? "handed-off" : "returned");
+    } else if (readers.asksForAgent(body)) {
+      events.push("asked");
+    }
+  }
+  return events;
+}
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" ? "agent" : "person";
+}
+
+// src/adapters/github/whose-turn.ts
+var readers = {
+  isAgentResult: (body) => AGENT_TAG.has(body),
+  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  asksForAgent: (body) => parseCommentCommand(body).agent !== ""
+};
+function threadBodies(repo, number, excludeCommentId) {
+  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
+  if (issue.code !== 0)
+    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
+  const body = issue.stdout ?? "";
+  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const comments = JSON.parse(listed.stdout || "[]");
+  const excluded = String(excludeCommentId ?? "").trim();
+  const bodies = comments.filter((comment) => String(comment.id) !== excluded).map((comment) => comment.body ?? "");
+  return [body, ...bodies];
+}
+function whoseTurnOn(repo, number, excludeCommentId) {
+  return whoseTurn(turnEvents(threadBodies(repo, number, excludeCommentId), readers));
+}
 
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
@@ -209,13 +293,14 @@ function main() {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const label = getLabel("in_progress");
   const githubOutput = process.env.GITHUB_OUTPUT;
-  const { code, stdout } = gh("issue", "view", String(values.number), "--repo", repo, "--json", "labels", "--jq", `([.labels[].name] | index("${label}")) != null`);
-  if (code !== 0) {
-    console.error(`Could not read the labels on #${values.number}, so this cannot tell whether a run is in progress.`);
+  let holder;
+  try {
+    holder = whoseTurnOn(repo, values.number, values["comment-id"]);
+  } catch (e) {
+    console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
     process.exit(1);
   }
-  const inProgress = stdout.trim() === "true";
-  if (!inProgress) {
+  if (holder !== "agent") {
     if (githubOutput)
       appendFileSync(githubOutput, `blocked=false
 `);
