@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Session } from "../../domain/work/session.ts";
-import { SCRIPTS_DIR, parseGithubOutput } from "./testing/harness.ts";
+import { SCRIPTS_DIR, hermeticEnv, parseGithubOutput } from "./testing/harness.ts";
 
 describe("resolve_entry_agent.ts", () => {
   test("emits agent/number/type/notify when body starts with a slash command", async () => {
@@ -16,7 +16,7 @@ describe("resolve_entry_agent.ts", () => {
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {
       encoding: "utf8",
       env: {
-        ...process.env,
+        ...hermeticEnv(),
         GITHUB_EVENT_PATH: eventFile,
         GITHUB_OUTPUT: outputFile,
         NUMBER: "123",
@@ -46,7 +46,7 @@ describe("resolve_entry_agent.ts", () => {
     writeFileSync(outputFile, "");
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {
       encoding: "utf8",
-      env: { ...process.env, GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
+      env: { ...hermeticEnv(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
     });
     expect(parseGithubOutput(await Bun.file(outputFile).text()).agent).toBe("engineer");
     rmSync(dir, { recursive: true, force: true });
@@ -63,7 +63,7 @@ describe("resolve_entry_agent.ts", () => {
     writeFileSync(outputFile, "");
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {
       encoding: "utf8",
-      env: { ...process.env, GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
+      env: { ...hermeticEnv(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
     });
     expect((await Bun.file(outputFile).text()).trim()).toBe("");
     rmSync(dir, { recursive: true, force: true });
@@ -77,7 +77,7 @@ describe("resolve_entry_agent.ts", () => {
     writeFileSync(outputFile, "");
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {
       encoding: "utf8",
-      env: { ...process.env, GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
+      env: { ...hermeticEnv(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
     });
     const out = await Bun.file(outputFile).text();
     expect(out.trim()).toBe("");
@@ -103,7 +103,7 @@ describe("resolve_entry_agent.ts", () => {
     writeFileSync(outputFile, "");
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {
       encoding: "utf8",
-      env: { ...process.env, GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
+      env: { ...hermeticEnv(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
     });
     expect((await Bun.file(outputFile).text()).trim()).toBe("");
     rmSync(dir, { recursive: true, force: true });

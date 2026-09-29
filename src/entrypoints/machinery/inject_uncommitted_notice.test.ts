@@ -3,10 +3,14 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, scriptPath } from "./testing/harness.ts";
 
 const run = (args: string[], cwd?: string) =>
-  spawnSync("bun", ["run", scriptPath("inject_uncommitted_notice.ts"), ...args], { encoding: "utf8", cwd });
+  spawnSync("bun", ["run", scriptPath("inject_uncommitted_notice.ts"), ...args], {
+    encoding: "utf8",
+    cwd,
+    env: hermeticEnv(),
+  });
 
 describe("inject_uncommitted_notice.ts", () => {
   test("appends a commit-and-push notice to the given session file", () => {
