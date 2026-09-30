@@ -314,7 +314,7 @@ function dispatchRunner(d) {
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
-  if (!d.continues) {
+  if (!d.answersRequest) {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined)
@@ -376,6 +376,7 @@ function main() {
       type: { type: "string" },
       notify: { type: "string" },
       repo: { type: "string" },
+      "answers-request": { type: "string" },
       context: { type: "string" }
     }
   });
@@ -405,7 +406,8 @@ function main() {
     type,
     number,
     notify: values.notify ?? "",
-    repo: (values.repo ?? "").trim() || undefined
+    repo: (values.repo ?? "").trim() || undefined,
+    answersRequest: (values["answers-request"] ?? "") === "true"
   });
   if (outcome === "failed") {
     console.error(`::error::Could not dispatch ${agent} on ${type} #${number}.`);

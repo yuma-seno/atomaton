@@ -7054,7 +7054,7 @@ function dispatchRunner(d) {
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
-  if (!d.continues) {
+  if (!d.answersRequest) {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined)
@@ -18666,7 +18666,7 @@ Atomaton: rebuilding the environment and restarting \`${agent}\` ` + `(reload ${
     number,
     notify: (process.env.ISSUE_NOTIFY ?? "").trim(),
     reloadCount: next,
-    continues: true,
+    answersRequest: true,
     log: log3
   });
   if (outcome === "refused-closed") {
