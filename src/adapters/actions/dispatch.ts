@@ -88,20 +88,23 @@ export interface RunnerDispatch {
    */
   dispatchedBy?: string;
   /**
-   * Whether this dispatch continues work already in flight, rather than starting a
-   * turn somebody asked for.
+   * Whether this dispatch takes up a request already in the thread, rather than
+   * starting a turn nobody asked for.
    *
-   * One caller sets it: `reload_environment`, where the agent running right now is
-   * restarting itself. The thread's last turn-changing event is the command that
-   * started that very run, so the outstanding-request check below would read the
-   * reload as a second request and refuse it. It is not one — it is the same turn,
-   * continued — so the check is skipped.
+   * Two callers set it, and both would otherwise be refused by the
+   * outstanding-request check below for the same reason: the thread's last
+   * turn-changing event is a request, and that request is this dispatch's own.
    *
-   * Omitted everywhere else, which is the honest default: a dispatch that is not a
-   * continuation is a new turn, and a new turn must not start on a node that already
-   * has one.
+   *   - `reload_environment`: the agent running right now is restarting itself, so
+   *     the request is the command that started that very run.
+   *   - validation: the dispatch fulfils the command a person typed, so the request
+   *     is that command.
+   *
+   * Omitted everywhere else, which is the honest default: a dispatch that is not
+   * taking up a request is a new turn, and a new turn must not start on a node that
+   * already has one.
    */
-  continues?: boolean;
+  answersRequest?: boolean;
   log?: (message: string) => void;
 }
 
@@ -248,10 +251,9 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
   if (!mayStartWorkOn(state)) return refuseClosedTarget(d, state);
 
   // The marker goes out before the check, so the check has something to be ordered
-  // against. A continuation (`continues`) skips both: it is the same turn, not a new
-  // request, and the thread's last event is the command that started the run it is
-  // continuing.
-  if (!d.continues) {
+  // against. A dispatch that answers a request skips both: the request it would find
+  // is its own, and the marker would be a second one for one turn.
+  if (!d.answersRequest) {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined) return refusal;

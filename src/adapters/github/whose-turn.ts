@@ -69,11 +69,6 @@ export function threadBodies(repo: string, number: string | number, excludeComme
   return [body, ...bodies];
 }
 
-/** Whose turn it is on a node, read from its thread. Throws when the thread cannot be read. */
-export function whoseTurnOn(repo: string, number: string | number, excludeCommentId?: string | number): TurnHolder {
-  return whoseTurn(turnEvents(threadBodies(repo, number, excludeCommentId), readers));
-}
-
 /** The node's comments, oldest first, minus the one being judged. */
 function commentBodies(repo: string, number: string | number, excludeCommentId?: string | number): string[] {
   const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
@@ -81,6 +76,22 @@ function commentBodies(repo: string, number: string | number, excludeCommentId?:
   const comments = JSON.parse(listed.stdout || "[]") as Comment[];
   const excluded = String(excludeCommentId ?? "").trim();
   return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => comment.body ?? "");
+}
+
+/**
+ * Whose turn it is on a node, read from its COMMENTS alone.
+ *
+ * The guard's question, and the body is deliberately left out of it. A pull request
+ * body naming a reviewer is a request the validation dispatch exists to fulfil, so a
+ * guard that counted it would delete a person's comment on the strength of a request
+ * that is already being handled — and the person would be told to wait for a run that
+ * their own comment was not racing.
+ *
+ * `whoseTurnOn` reads the body as well, which is right for a question about the node
+ * as a whole. This is the narrower one: what has been said in the thread.
+ */
+export function whoseTurnInComments(repo: string, number: string | number, excludeCommentId?: string | number): TurnHolder {
+  return whoseTurn(turnEvents(commentBodies(repo, number, excludeCommentId), readers));
 }
 
 /**
@@ -94,7 +105,6 @@ function commentBodies(repo: string, number: string | number, excludeCommentId?:
  *
  * Throws when the comments cannot be read, so a caller deciding whether to start a run
  * fails closed rather than starting a second one.
- */
-export function requestOutstandingOn(repo: string, number: string | number, excludeCommentId?: string | number): boolean {
+ */export function requestOutstandingOn(repo: string, number: string | number, excludeCommentId?: string | number): boolean {
   return requestOutstanding(turnEvents(commentBodies(repo, number, excludeCommentId), readers));
 }

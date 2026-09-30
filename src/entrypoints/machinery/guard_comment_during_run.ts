@@ -25,7 +25,7 @@ import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { getLabel } from "../../adapters/runner/config.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
-import { whoseTurnOn } from "../../adapters/github/whose-turn.ts";
+import { whoseTurnInComments } from "../../adapters/github/whose-turn.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface GuardCommentDuringRunArgs {
@@ -58,9 +58,13 @@ function main(): void {
   // The comment being judged is excluded: a person's `/engineer` is itself an "asked"
   // event, and counting it would block the very command that is starting a run. The
   // question is whose turn it was BEFORE this comment.
+  //
+  // Comments alone, not the body: a pull request body naming a reviewer is a request
+  // the validation dispatch is already handling, and deleting a person's comment on
+  // the strength of it would tell them to wait for a run their comment was not racing.
   let holder: string;
   try {
-    holder = whoseTurnOn(repo, values.number, values["comment-id"]);
+    holder = whoseTurnInComments(repo, values.number, values["comment-id"]);
   } catch (e) {
     // A failed read is not "the ball is with a person". This script exists to keep a
     // comment out of a race with a running agent, so the answer it could not determine

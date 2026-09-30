@@ -48,6 +48,18 @@ export interface DispatchAgentArgs {
   /** `owner/name`, when the step's checkout is not the target repository. */
   repo?: string;
   /**
+   * Whether this dispatch takes up a request already in the thread.
+   *
+   * Validation sets it: the run it starts fulfils the command a person typed, so the
+   * thread's last turn-changing event is that command — this dispatch's own request.
+   * Without it the outstanding-request check would read the request as somebody
+   * else's and refuse the one dispatch that should happen.
+   *
+   * A hand-off does not set it: the agent that named the next one is not answering a
+   * request, it is making one.
+   */
+  "answers-request"?: string;
+  /**
    * What was about to happen, in the caller's words.
    *
    * Not decoration: it is the sentence a person reads in the refusal notice when the
@@ -68,6 +80,7 @@ function main(): void {
       type: { type: "string" },
       notify: { type: "string" },
       repo: { type: "string" },
+      "answers-request": { type: "string" },
       context: { type: "string" },
     },
   });
@@ -105,6 +118,7 @@ function main(): void {
     number,
     notify: values.notify ?? "",
     repo: (values.repo ?? "").trim() || undefined,
+    answersRequest: (values["answers-request"] ?? "") === "true",
   });
 
   if (outcome === "failed") {

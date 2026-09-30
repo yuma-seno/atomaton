@@ -84,9 +84,11 @@ describe("guard_comment_during_run.ts", () => {
     }
   });
 
-  // A pull request body naming a reviewer is the node being handed to an agent
-  // before any comment exists.
-  test("a pull request body naming a reviewer leaves the ball with the agent", () => {
+  // A pull request body naming a reviewer is a request the validation dispatch is
+  // already handling. The guard reads comments alone, so it does not delete a
+  // person's comment on the strength of it -- which would tell them to wait for a run
+  // their comment was not racing.
+  test("a pull request body naming a reviewer does not block a comment", () => {
     const configDir = makeConfigDir({});
     try {
       const r = runWithFakeGh(
@@ -95,15 +97,11 @@ describe("guard_comment_during_run.ts", () => {
         {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
-          rules: [
-            ...thread("/reviewer\n\nCloses #1", []),
-            { match: ["api", "DELETE"] },
-            { match: ["issue", "comment"] },
-          ],
+          rules: thread("/reviewer\n\nCloses #1", []),
         },
       );
       expect(r.status).toBe(0);
-      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(true);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
