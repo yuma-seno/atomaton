@@ -53,9 +53,14 @@ export interface TurnReaders {
   isAgentResult: (body: string) => boolean;
   /** Whether that result handed the node to another agent. */
   handedOff: (body: string) => boolean;
-  /** Whether a body asks for an agent: a `/agent` command, or a dispatch marker. */
-  asksForAgent: (body: string) => boolean;
-  /** The agent a body asks for, or "" when it asks for none. */
+  /**
+   * The agent a body asks for, or "" when it asks for none.
+   *
+   * One reader, not two. It used to be paired with an `asksForAgent` that answered
+   * "does this body ask?" — but that is the same question as "is this name non-empty",
+   * so the two parsed every body twice to answer one thing. A body asks for an agent
+   * exactly when this returns a name.
+   */
   requestedAgent: (body: string) => string;
 }
 
@@ -75,6 +80,20 @@ export interface ThreadEntry {
 }
 
 /**
+ * A node's comments as the guard will leave them, and the events they are.
+ *
+ * Both halves come out of one walk, because the walk needs the events to decide what
+ * to remove and the callers need them to answer their questions. Returning only the
+ * comments would make every caller fold the events a second time to ask anything.
+ */
+export interface ShapedThread {
+  /** The comments that survive the shaping, oldest first. */
+  comments: ThreadEntry[];
+  /** The turn-changing events those comments are, oldest first. */
+  events: TurnEvent[];
+}
+
+/**
  * The turn-changing event a body is, or nothing.
  *
  * One definition, used by both the fold below and the shaping: a body that is neither
@@ -86,7 +105,7 @@ export interface ThreadEntry {
  */
 function eventOf(body: string, readers: TurnReaders): TurnEvent | undefined {
   if (readers.isAgentResult(body)) return readers.handedOff(body) ? "handed-off" : "returned";
-  if (readers.asksForAgent(body)) return "asked";
+  if (readers.requestedAgent(body) !== "") return "asked";
   return undefined;
 }
 
@@ -143,13 +162,12 @@ export function requestOutstanding(events: readonly TurnEvent[]): boolean {
  * deletion is not instant: it is a `gh api DELETE` that may fail, and even when it
  * succeeds the comment is on the page until GitHub processes it. Every reader that
  * runs in that window — the guard's own next turn, the validation that resolves who a
- * pull request asks for — would otherwise see a comment that is on its way out and
- * read it as though it were staying.
+ * pull request asks for, the dispatch that checks for a request already outstanding —
+ * would otherwise see a comment that is on its way out and read it as though it were
+ * staying.
  *
- * So the shaping is one function, and both sides use it: the guard to decide what to
- * delete, and the readers to see the thread the guard is producing. A comment the
- * guard would remove is removed here too, so the two never disagree about what the
- * thread says.
+ * So the shaping is one function, and every reader uses it. A comment the guard would
+ * remove is removed here too, so no two readers disagree about what the thread says.
  *
  * ## What it removes
  *
@@ -173,7 +191,7 @@ export function requestOutstanding(events: readonly TurnEvent[]): boolean {
  * `latestRequestedAgent` — but it does not move the turn, which is why a person's
  * later comment wins over it.
  */
-export function shapedThread(comments: readonly ThreadEntry[], readers: TurnReaders): ThreadEntry[] {
+export function shapedThread(comments: readonly ThreadEntry[], readers: TurnReaders): ShapedThread {
   const kept: ThreadEntry[] = [];
   const events: TurnEvent[] = [];
   for (const entry of comments) {
@@ -182,7 +200,7 @@ export function shapedThread(comments: readonly ThreadEntry[], readers: TurnRead
     const event = eventOf(entry.body, readers);
     if (event !== undefined) events.push(event);
   }
-  return kept;
+  return { comments: kept, events };
 }
 
 /**
@@ -199,7 +217,7 @@ export function shapedThread(comments: readonly ThreadEntry[], readers: TurnRead
  * Returns "" when nothing in the thread asks for an agent.
  */
 export function latestRequestedAgent(body: string, comments: readonly ThreadEntry[], readers: TurnReaders): string {
-  const kept = shapedThread(comments, readers);
+  const { comments: kept } = shapedThread(comments, readers);
   for (let index = kept.length - 1; index >= 0; index -= 1) {
     const agent = readers.requestedAgent(kept[index]!.body);
     if (agent !== "") return agent;
