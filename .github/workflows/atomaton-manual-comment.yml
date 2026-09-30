@@ -147,7 +147,7 @@ jobs:
           AGENT: ${{ steps.dispatch.outputs.agent }}
         run: |
           gh issue comment "$NUMBER" --body "<!-- atomaton:llm-context=exclude -->
-          Atomaton: `${AGENT}` will start once CI finishes on this pull request."
+          Atomaton: \`${AGENT}\` will start once CI finishes on this pull request."
         if: steps.dispatch.outputs.agent != '' && steps.target.outputs.type == 'pr' && steps.guard.outputs.blocked != 'true' && steps.closed-guard.outputs.blocked != 'true'
       - name: Hand the pull request to validation, which waits for CI
         shell: bash
