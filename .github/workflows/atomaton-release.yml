@@ -171,6 +171,16 @@ jobs:
             exit 1
           fi
 
+          # The tag exists but the release does not: a publish that did not
+          # finish. `tag-release.sh` will not create the tag twice, so declaring
+          # the version again would open a pull request that merges to nothing --
+          # the tag is already there and the publish is what is missing. The fix
+          # is to re-run the publish, which is idempotent.
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${NEW}" >/dev/null 2>&1; then
+            echo "::error::v${NEW} is tagged but not released, so its publish did not finish. Re-run it: gh workflow run atomaton-deploy.yml --ref v${NEW} -f target=publish"
+            exit 1
+          fi
+
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
           echo "new=${NEW}" >> "$GITHUB_OUTPUT"
           echo "declaring ${CURRENT} -> ${NEW}"
@@ -188,7 +198,7 @@ jobs:
           # re-run the deploy rather than open a pull request for no diff.
           if [ "$NEW" = "$CURRENT" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::package.json already declares ${NEW}. If its release is missing, re-run the deploy: gh workflow run atomaton-deploy.yml --ref main -f target=release"
+            echo "::notice::package.json already declares ${NEW}. If its release is missing, re-run the deploy: gh workflow run atomaton-deploy.yml --ref v${NEW} -f target=publish"
             exit 0
           fi
 

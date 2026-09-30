@@ -168,7 +168,7 @@ dispatches the workflow explicitly.
 To publish by hand, or to retry a failed run:
 
 ```bash
-gh workflow run atomaton-deploy.yml --ref main -f target=release
+gh workflow run atomaton-deploy.yml --ref v1.2.3 -f target=publish
 ```
 
 ## Applying a release to this repository

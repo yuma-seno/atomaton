@@ -340,7 +340,7 @@ const prWaitingStep = new TypedOutputsStep({
     AGENT: dispatchStep.outputs.agent,
   },
   run: `gh issue comment "$NUMBER" --body "${LLM_CONTEXT_TAG.write("exclude")}
-Atomaton: \`\${AGENT}\` will start once CI finishes on this pull request."
+Atomaton: \\\`\${AGENT}\\\` will start once CI finishes on this pull request."
 `,
 });
 
