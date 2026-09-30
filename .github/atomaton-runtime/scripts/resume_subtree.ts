@@ -256,14 +256,19 @@ function parseCommentCommand(body) {
 }
 
 // src/domain/work/whose-turn.ts
+function eventOf(body, readers) {
+  if (readers.isAgentResult(body))
+    return readers.handedOff(body) ? "handed-off" : "returned";
+  if (readers.asksForAgent(body))
+    return "asked";
+  return;
+}
 function turnEvents(bodies, readers) {
   const events = [];
   for (const body of bodies) {
-    if (readers.isAgentResult(body)) {
-      events.push(readers.handedOff(body) ? "handed-off" : "returned");
-    } else if (readers.asksForAgent(body)) {
-      events.push("asked");
-    }
+    const event = eventOf(body, readers);
+    if (event !== undefined)
+      events.push(event);
   }
   return events;
 }
@@ -275,18 +280,22 @@ function requestOutstanding(events) {
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  asksForAgent: (body) => parseCommentCommand(body).agent !== ""
+  asksForAgent: (body) => parseCommentCommand(body).agent !== "",
+  requestedAgent: (body) => parseCommentCommand(body).agent
 };
-function commentBodies(repo, number, excludeCommentId) {
+function isHumanComment(comment) {
+  return comment.user?.type !== "Bot";
+}
+function commentEntries(repo, number, excludeCommentId) {
   const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
   const comments = JSON.parse(listed.stdout || "[]");
   const excluded = String(excludeCommentId ?? "").trim();
-  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => comment.body ?? "");
+  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
 }
 function requestOutstandingOn(repo, number, excludeCommentId) {
-  return requestOutstanding(turnEvents(commentBodies(repo, number, excludeCommentId), readers));
+  return requestOutstanding(turnEvents(commentEntries(repo, number, excludeCommentId).map((entry) => entry.body), readers));
 }
 
 // src/domain/work/closed-issue.ts

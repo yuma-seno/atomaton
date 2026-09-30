@@ -79,6 +79,9 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/extract_directive.ts
 var ref = defineScript(import.meta.url);
 var COMMAND_RE2 = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
+function hasAgentDefinition(name, defDir) {
+  return name !== "" && existsSync(join(defDir, `${name}.md`));
+}
 function extractDirective(output, defDir) {
   for (const rawLine of output.split(`
 `)) {
@@ -86,7 +89,7 @@ function extractDirective(output, defDir) {
       const match = COMMAND_RE2.exec(candidate);
       if (match) {
         const agent = match[1];
-        if (existsSync(join(defDir, `${agent}.md`)))
+        if (hasAgentDefinition(agent, defDir))
           return agent;
       }
     }

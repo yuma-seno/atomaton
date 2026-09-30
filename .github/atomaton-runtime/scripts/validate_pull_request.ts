@@ -163,27 +163,121 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 
-// src/entrypoints/machinery/extract_directive.ts
-import { existsSync, readFileSync, appendFileSync } from "fs";
-import { join } from "path";
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
 
 // src/domain/work/comment-command.ts
 var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
 var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
-function lineForms(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
   }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
+  return NOTHING;
 }
+
+// src/domain/work/whose-turn.ts
+function eventOf(body, readers) {
+  if (readers.isAgentResult(body))
+    return readers.handedOff(body) ? "handed-off" : "returned";
+  if (readers.asksForAgent(body))
+    return "asked";
+  return;
+}
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" ? "agent" : "person";
+}
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent")
+      continue;
+    kept.push(entry);
+    const event = eventOf(entry.body, readers);
+    if (event !== undefined)
+      events.push(event);
+  }
+  return kept;
+}
+function latestRequestedAgent(body, comments, readers) {
+  const kept = shapedThread(comments, readers);
+  for (let index = kept.length - 1;index >= 0; index -= 1) {
+    const agent = readers.requestedAgent(kept[index].body);
+    if (agent !== "")
+      return agent;
+  }
+  return readers.requestedAgent(body);
+}
+
+// src/adapters/github/whose-turn.ts
+var readers = {
+  isAgentResult: (body) => AGENT_TAG.has(body),
+  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  asksForAgent: (body) => parseCommentCommand(body).agent !== "",
+  requestedAgent: (body) => parseCommentCommand(body).agent
+};
+function isHumanComment(comment) {
+  return comment.user?.type !== "Bot";
+}
+function commentEntries(repo, number, excludeCommentId) {
+  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const comments = JSON.parse(listed.stdout || "[]");
+  const excluded = String(excludeCommentId ?? "").trim();
+  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+}
+function latestRequestedAgentOn(repo, number, isKnownAgent, excludeCommentId) {
+  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
+  if (issue.code !== 0)
+    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
+  const body = issue.stdout ?? "";
+  const known = {
+    ...readers,
+    requestedAgent: (text) => {
+      const name = readers.requestedAgent(text);
+      return isKnownAgent(name) ? name : "";
+    }
+  };
+  return latestRequestedAgent(body, commentEntries(repo, number, excludeCommentId), known);
+}
+
+// src/entrypoints/machinery/extract_directive.ts
+import { existsSync, readFileSync, appendFileSync } from "fs";
+import { join } from "path";
 
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
@@ -212,19 +306,8 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/extract_directive.ts
 var ref = defineScript(import.meta.url);
 var COMMAND_RE2 = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
-function extractDirective(output, defDir) {
-  for (const rawLine of output.split(`
-`)) {
-    for (const candidate of lineForms(rawLine)) {
-      const match = COMMAND_RE2.exec(candidate);
-      if (match) {
-        const agent = match[1];
-        if (existsSync(join(defDir, `${agent}.md`)))
-          return agent;
-      }
-    }
-  }
-  return "";
+function hasAgentDefinition(name, defDir) {
+  return name !== "" && existsSync(join(defDir, `${name}.md`));
 }
 if (false)
   ;
@@ -369,7 +452,7 @@ function main() {
   const { conclusion, runUrl } = deliverableProblems.length > 0 ? { conclusion: "", runUrl: "" } : runCiAndWait(repo, workflow, branch, headSha, Number(values["timeout-seconds"] ?? "1800"));
   const priorRetries = countPriorRetries(repo, values.number ?? "");
   const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
-  const reviewerAgent = extractDirective(prBody, defDir);
+  const reviewerAgent = latestRequestedAgentOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const engineerAgent = ORIGIN_AGENT_TAG.read(prBody) ?? "";
   const outcome = decideValidationOutcome({
     conclusion,
