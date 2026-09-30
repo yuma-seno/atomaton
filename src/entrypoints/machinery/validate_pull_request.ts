@@ -87,7 +87,8 @@ import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-va
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
 import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
-import { extractDirective } from "./extract_directive.ts";
+import { latestRequestedAgentOn } from "../../adapters/github/whose-turn.ts";
+import { hasAgentDefinition } from "./extract_directive.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ValidatePullRequestArgs {
@@ -435,13 +436,19 @@ function main(): void {
   // needs no state of its own.
   const priorRetries = countPriorRetries(repo, values.number ?? "");
 
-  // Both names read from the pull request, neither passed in. The body carries the
-  // `/<agent>` line the pull request asks for -- written by `create_pr` when an
-  // agent named one, or by a person typing it -- and the `atomaton:origin-agent`
-  // tag carries whoever opened it. A dispatch argument would be gone by the second
-  // validation; these survive every one.
+  // Both names read from the pull request, neither passed in. The reviewer is the
+  // agent the pull request's thread asks for -- the newest `/<agent>` line that
+  // survives the guard's shaping, which is the body's line when nobody has commented
+  // and a person's later comment when somebody has. The engineer is the
+  // `atomaton:origin-agent` tag naming whoever opened it. A dispatch argument would
+  // be gone by the second validation; these survive every one.
+  //
+  // The thread rather than the body alone, because the body is the OLDEST entry in
+  // its own thread: a person commenting `/reviewer` on a pull request whose body says
+  // `/engineer` asked for the reviewer, and reading the body would dispatch the
+  // engineer instead. See `latestRequestedAgentOn`.
   const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
-  const reviewerAgent = extractDirective(prBody, defDir);
+  const reviewerAgent = latestRequestedAgentOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const engineerAgent = ORIGIN_AGENT_TAG.read(prBody) ?? "";
 
   const outcome = decideValidationOutcome({

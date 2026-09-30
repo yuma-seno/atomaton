@@ -344,6 +344,41 @@ describe("generated workflows", () => {
   });
 
   /**
+   * A person's command names the agent it wants, and validation reads that name from
+   * the pull request's THREAD rather than its body alone.
+   *
+   * The body carries a `/<agent>` line too, and it is a DIFFERENT request: a person
+   * commenting `/reviewer` on a pull request whose body says `/engineer` asked for the
+   * reviewer, and reading the body would dispatch the engineer instead. The body is the
+   * oldest entry in its own thread, so reading the thread newest-first lets the person's
+   * later comment win — see `latestRequestedAgentOn`.
+   *
+   * The wiring this pins is that the validation script reads the thread, not the body:
+   * a regression to `extractDirective(prBody)` would pass every unit test of the fold
+   * and still dispatch the wrong agent.
+   */
+  test("validation reads the agent a pull request asks for from its thread", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const validate = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-validate-pr.yml", "utf8"),
+    ) as WorkflowDocument;
+    const validateStep = (validate.jobs?.validate?.steps ?? []).find((step) =>
+      step.run?.includes("validate_pull_request.ts"),
+    );
+    expect(validateStep, "no step runs validate_pull_request.ts").toBeDefined();
+    // The script reads the thread itself, so the workflow passes it the number and the
+    // definitions directory and nothing about the agent.
+    expect(validateStep?.run, "the script must be given the number to read the thread from").toContain(
+      '--number "${{ inputs.number }}"',
+    );
+    expect(validateStep?.run, "the script must be given the definitions to resolve names against").toContain(
+      "--def-dir",
+    );
+  });
+
+  /**
    * Everything a tool server reads from the environment is passed to it.
    *
    * This is the test a review asked for, because the change it reviewed

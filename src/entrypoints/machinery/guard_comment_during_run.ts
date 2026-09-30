@@ -25,7 +25,7 @@ import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { getLabel } from "../../adapters/runner/config.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
-import { whoseTurnInComments } from "../../adapters/github/whose-turn.ts";
+import { commentWouldBeRemoved } from "../../adapters/github/whose-turn.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface GuardCommentDuringRunArgs {
@@ -62,9 +62,13 @@ function main(): void {
   // Comments alone, not the body: a pull request body naming a reviewer is a request
   // the validation dispatch is already handling, and deleting a person's comment on
   // the strength of it would tell them to wait for a run their comment was not racing.
-  let holder: string;
+  //
+  // The rule itself is `shapedThread`'s, shared with the readers that run in the window
+  // before this deletion lands -- so the guard does not re-derive it, it asks whether
+  // the comment survived the shaping. See `commentWouldBeRemoved`.
+  let removed: boolean;
   try {
-    holder = whoseTurnInComments(repo, values.number, values["comment-id"]);
+    removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
   } catch (e) {
     // A failed read is not "the ball is with a person". This script exists to keep a
     // comment out of a race with a running agent, so the answer it could not determine
@@ -73,7 +77,7 @@ function main(): void {
     process.exit(1);
   }
 
-  if (holder !== "agent") {
+  if (!removed) {
     if (githubOutput) appendFileSync(githubOutput, "blocked=false\n");
     return;
   }

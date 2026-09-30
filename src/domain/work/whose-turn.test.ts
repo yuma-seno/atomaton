@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { requestOutstanding, turnEvents, whoseTurn, type TurnReaders } from "./whose-turn.ts";
+import {
+  latestRequestedAgent,
+  requestOutstanding,
+  shapedThread,
+  turnEvents,
+  whoseTurn,
+  type ThreadEntry,
+  type TurnReaders,
+} from "./whose-turn.ts";
 
 /**
  * The readers, stubbed. The real ones live in `adapters/github/tags.ts` and
@@ -10,9 +18,14 @@ const readers: TurnReaders = {
   isAgentResult: (body) => body.startsWith("RESULT"),
   handedOff: (body) => body.includes("handoff"),
   asksForAgent: (body) => body.startsWith("/"),
+  requestedAgent: (body) => (body.startsWith("/") ? body.slice(1).split(/\s/)[0]! : ""),
 };
 
 const events = (bodies: string[]) => turnEvents(bodies, readers);
+
+/** A person's comment, or the machinery's, as the shaping needs them. */
+const human = (body: string): ThreadEntry => ({ body, isHuman: true });
+const machine = (body: string): ThreadEntry => ({ body, isHuman: false });
 
 describe("turnEvents", () => {
   test("a person's command is the node being handed to an agent", () => {
@@ -105,5 +118,94 @@ describe("requestOutstanding", () => {
 
   test("a command after a result is outstanding again", () => {
     expect(requestOutstanding(["asked", "returned", "asked"])).toBe(true);
+  });
+});
+
+/**
+ * The thread as the guard will leave it, and the agent it asks for.
+ *
+ * The guard deletes a person's comment made while the ball is with an agent, and the
+ * deletion is not instant. Every reader in that window — the guard's own next turn,
+ * the validation that resolves who a pull request asks for — has to see the thread the
+ * guard is producing, not the one still on the page. So the shaping is one function
+ * and both sides use it.
+ */
+describe("shapedThread", () => {
+  test("a person's comment while the ball is with an agent is removed", () => {
+    const shaped = shapedThread([machine("/engineer"), human("wait, actually")], readers);
+    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer"]);
+  });
+
+  test("a person's comment while the ball is with a person is kept", () => {
+    const shaped = shapedThread([human("please look at this")], readers);
+    expect(shaped.map((entry) => entry.body)).toEqual(["please look at this"]);
+  });
+
+  // The machinery's own comments are never removed, whatever they say: a dispatch
+  // marker is the machinery taking up a request, and an agent's result is the turn
+  // ending. Neither is a person racing a run.
+  test("the machinery's comments are never removed", () => {
+    const shaped = shapedThread([machine("/engineer"), machine("RESULT done")], readers);
+    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer", "RESULT done"]);
+  });
+
+  // The whole point of walking in order: the first comment is kept (it starts the
+  // turn), the second is removed (the ball is now with the agent).
+  test("only the comments that arrived mid-turn are removed", () => {
+    const shaped = shapedThread([human("/engineer"), human("one more thing")], readers);
+    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer"]);
+  });
+
+  // A result gives the ball back, so a comment after it is kept again.
+  test("a comment after the ball comes back is kept", () => {
+    const shaped = shapedThread(
+      [human("/engineer"), machine("RESULT done"), human("/reviewer")],
+      readers,
+    );
+    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer", "RESULT done", "/reviewer"]);
+  });
+});
+
+/**
+ * Who the node asks for next, from the newest request that survives the shaping.
+ *
+ * The body is the oldest entry in its own thread, so a person's later comment wins
+ * over it — which is the whole point: the body is what the node was opened asking for,
+ * and a comment is what somebody is asking for now.
+ */
+describe("latestRequestedAgent", () => {
+  test("nothing asks for an agent", () => {
+    expect(latestRequestedAgent("", [human("looks good")], readers)).toBe("");
+  });
+
+  test("the body's request is the answer when nobody has commented", () => {
+    expect(latestRequestedAgent("/engineer", [], readers)).toBe("engineer");
+  });
+
+  // The bug this exists to fix: a person commenting `/reviewer` on a pull request
+  // whose body says `/engineer` asked for the reviewer, and reading the body would
+  // dispatch the engineer instead.
+  test("a person's later comment wins over the body's line", () => {
+    expect(latestRequestedAgent("/engineer", [human("/reviewer")], readers)).toBe("reviewer");
+  });
+
+  // Read from the SHAPED thread, so a comment the guard is removing does not get to
+  // name the next agent in the window before it disappears.
+  test("a comment the guard is removing does not name the next agent", () => {
+    // `/reviewer` is kept (the ball was with a person when it arrived), `never mind`
+    // is removed (the ball is now with the agent).
+    expect(latestRequestedAgent("/engineer", [human("/reviewer"), human("never mind")], readers)).toBe("reviewer");
+  });
+
+  test("a request that arrived mid-turn is ignored", () => {
+    // `/reviewer` starts the turn; `/atomaton` arrives while the ball is with the
+    // agent, so it is removed and does not become the answer.
+    expect(latestRequestedAgent("/engineer", [human("/reviewer"), human("/atomaton")], readers)).toBe("reviewer");
+  });
+
+  // The body is the fallback, not an event: a comment that moves nothing does not
+  // displace it.
+  test("an ordinary comment leaves the body's request standing", () => {
+    expect(latestRequestedAgent("/engineer", [human("looks good")], readers)).toBe("engineer");
   });
 });

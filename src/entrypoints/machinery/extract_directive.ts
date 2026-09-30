@@ -38,13 +38,26 @@ export const ref = defineScript<ExtractDirectiveArgs>(import.meta.url);
 
 const COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
 
+/**
+ * Whether a definition exists for `name`, which is what makes a name dispatchable.
+ *
+ * The same check `extractDirective` makes before accepting a line, exposed because
+ * a name can arrive as a bare value rather than as text to be read -- a person's
+ * command carries the name it typed, and it has to clear the same bar a line does.
+ * A name with no definition would fail at `gh workflow run`, which is the moment
+ * there is nowhere left to report it.
+ */
+export function hasAgentDefinition(name: string, defDir: string): boolean {
+  return name !== "" && existsSync(join(defDir, `${name}.md`));
+}
+
 export function extractDirective(output: string, defDir: string): string {
   for (const rawLine of output.split("\n")) {
     for (const candidate of lineForms(rawLine)) {
       const match = COMMAND_RE.exec(candidate);
       if (match) {
         const agent = match[1]!;
-        if (existsSync(join(defDir, `${agent}.md`))) return agent;
+        if (hasAgentDefinition(agent, defDir)) return agent;
       }
     }
   }
