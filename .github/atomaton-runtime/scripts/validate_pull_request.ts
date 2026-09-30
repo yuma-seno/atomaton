@@ -211,7 +211,7 @@ function parseCommentCommand(body) {
 function eventOf(body, readers) {
   if (readers.isAgentResult(body))
     return readers.handedOff(body) ? "handed-off" : "returned";
-  if (readers.asksForAgent(body))
+  if (readers.requestedAgent(body) !== "")
     return "asked";
   return;
 }
@@ -230,10 +230,10 @@ function shapedThread(comments, readers) {
     if (event !== undefined)
       events.push(event);
   }
-  return kept;
+  return { comments: kept, events };
 }
 function latestRequestedAgent(body, comments, readers) {
-  const kept = shapedThread(comments, readers);
+  const { comments: kept } = shapedThread(comments, readers);
   for (let index = kept.length - 1;index >= 0; index -= 1) {
     const agent = readers.requestedAgent(kept[index].body);
     if (agent !== "")
@@ -246,25 +246,24 @@ function latestRequestedAgent(body, comments, readers) {
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  asksForAgent: (body) => parseCommentCommand(body).agent !== "",
   requestedAgent: (body) => parseCommentCommand(body).agent
 };
 function isHumanComment(comment) {
   return comment.user?.type !== "Bot";
 }
-function commentEntries(repo, number, excludeCommentId) {
-  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
-  if (listed.code !== 0)
-    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  const comments = JSON.parse(listed.stdout || "[]");
-  const excluded = String(excludeCommentId ?? "").trim();
-  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
-}
-function latestRequestedAgentOn(repo, number, isKnownAgent, excludeCommentId) {
+function readThread(repo, number, excludeCommentId) {
   const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
   if (issue.code !== 0)
     throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
-  const body = issue.stdout ?? "";
+  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const excluded = String(excludeCommentId ?? "").trim();
+  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return { body: issue.stdout ?? "", shaped: shapedThread(comments, readers) };
+}
+function latestRequestedAgentOn(repo, number, isKnownAgent, excludeCommentId) {
+  const { body, shaped } = readThread(repo, number, excludeCommentId);
   const known = {
     ...readers,
     requestedAgent: (text) => {
@@ -272,7 +271,7 @@ function latestRequestedAgentOn(repo, number, isKnownAgent, excludeCommentId) {
       return isKnownAgent(name) ? name : "";
     }
   };
-  return latestRequestedAgent(body, commentEntries(repo, number, excludeCommentId), known);
+  return latestRequestedAgent(body, shaped.comments, known);
 }
 
 // src/entrypoints/machinery/extract_directive.ts

@@ -443,43 +443,53 @@ function parseCommentCommand(body) {
 function eventOf(body, readers) {
   if (readers.isAgentResult(body))
     return readers.handedOff(body) ? "handed-off" : "returned";
-  if (readers.asksForAgent(body))
+  if (readers.requestedAgent(body) !== "")
     return "asked";
   return;
 }
-function turnEvents(bodies, readers) {
-  const events = [];
-  for (const body of bodies) {
-    const event = eventOf(body, readers);
-    if (event !== undefined)
-      events.push(event);
-  }
-  return events;
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" ? "agent" : "person";
 }
 function requestOutstanding(events) {
   return events[events.length - 1] === "asked";
+}
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent")
+      continue;
+    kept.push(entry);
+    const event = eventOf(entry.body, readers);
+    if (event !== undefined)
+      events.push(event);
+  }
+  return { comments: kept, events };
 }
 
 // src/adapters/github/whose-turn.ts
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  asksForAgent: (body) => parseCommentCommand(body).agent !== "",
   requestedAgent: (body) => parseCommentCommand(body).agent
 };
 function isHumanComment(comment) {
   return comment.user?.type !== "Bot";
 }
-function commentEntries(repo, number, excludeCommentId) {
+function readThread(repo, number, excludeCommentId) {
+  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
+  if (issue.code !== 0)
+    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
   const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  const comments = JSON.parse(listed.stdout || "[]");
   const excluded = String(excludeCommentId ?? "").trim();
-  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return { body: issue.stdout ?? "", shaped: shapedThread(comments, readers) };
 }
 function requestOutstandingOn(repo, number, excludeCommentId) {
-  return requestOutstanding(turnEvents(commentEntries(repo, number, excludeCommentId).map((entry) => entry.body), readers));
+  return requestOutstanding(readThread(repo, number, excludeCommentId).shaped.events);
 }
 
 // src/domain/work/closed-issue.ts
