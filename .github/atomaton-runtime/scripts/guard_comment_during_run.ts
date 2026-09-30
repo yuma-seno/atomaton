@@ -229,14 +229,19 @@ function parseCommentCommand(body) {
 }
 
 // src/domain/work/whose-turn.ts
+function eventOf(body, readers) {
+  if (readers.isAgentResult(body))
+    return readers.handedOff(body) ? "handed-off" : "returned";
+  if (readers.asksForAgent(body))
+    return "asked";
+  return;
+}
 function turnEvents(bodies, readers) {
   const events = [];
   for (const body of bodies) {
-    if (readers.isAgentResult(body)) {
-      events.push(readers.handedOff(body) ? "handed-off" : "returned");
-    } else if (readers.asksForAgent(body)) {
-      events.push("asked");
-    }
+    const event = eventOf(body, readers);
+    if (event !== undefined)
+      events.push(event);
   }
   return events;
 }
@@ -244,23 +249,42 @@ function whoseTurn(events) {
   const last = events[events.length - 1];
   return last === "asked" || last === "handed-off" ? "agent" : "person";
 }
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent")
+      continue;
+    kept.push(entry);
+    const event = eventOf(entry.body, readers);
+    if (event !== undefined)
+      events.push(event);
+  }
+  return kept;
+}
 
 // src/adapters/github/whose-turn.ts
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  asksForAgent: (body) => parseCommentCommand(body).agent !== ""
+  asksForAgent: (body) => parseCommentCommand(body).agent !== "",
+  requestedAgent: (body) => parseCommentCommand(body).agent
 };
-function commentBodies(repo, number, excludeCommentId) {
+function isHumanComment(comment) {
+  return comment.user?.type !== "Bot";
+}
+function commentEntries(repo, number, excludeCommentId) {
   const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
   const comments = JSON.parse(listed.stdout || "[]");
   const excluded = String(excludeCommentId ?? "").trim();
-  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => comment.body ?? "");
+  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
 }
-function whoseTurnInComments(repo, number, excludeCommentId) {
-  return whoseTurn(turnEvents(commentBodies(repo, number, excludeCommentId), readers));
+function commentWouldBeRemoved(repo, number, commentId) {
+  const entries = commentEntries(repo, number, commentId);
+  const shaped = shapedThread(entries, readers);
+  return whoseTurn(turnEvents(shaped.map((entry) => entry.body), readers)) === "agent";
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -288,14 +312,14 @@ function main() {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const label = getLabel("in_progress");
   const githubOutput = process.env.GITHUB_OUTPUT;
-  let holder;
+  let removed;
   try {
-    holder = whoseTurnInComments(repo, values.number, values["comment-id"]);
+    removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
   } catch (e) {
     console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
     process.exit(1);
   }
-  if (holder !== "agent") {
+  if (!removed) {
     if (githubOutput)
       appendFileSync(githubOutput, `blocked=false
 `);
