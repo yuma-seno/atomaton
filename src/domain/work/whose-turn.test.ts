@@ -17,7 +17,6 @@ import {
 const readers: TurnReaders = {
   isAgentResult: (body) => body.startsWith("RESULT"),
   handedOff: (body) => body.includes("handoff"),
-  asksForAgent: (body) => body.startsWith("/"),
   requestedAgent: (body) => (body.startsWith("/") ? body.slice(1).split(/\s/)[0]! : ""),
 };
 
@@ -131,38 +130,44 @@ describe("requestOutstanding", () => {
  * and both sides use it.
  */
 describe("shapedThread", () => {
+  const bodies = (entries: ThreadEntry[]) => shapedThread(entries, readers).comments.map((entry) => entry.body);
+
   test("a person's comment while the ball is with an agent is removed", () => {
-    const shaped = shapedThread([machine("/engineer"), human("wait, actually")], readers);
-    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer"]);
+    expect(bodies([machine("/engineer"), human("wait, actually")])).toEqual(["/engineer"]);
   });
 
   test("a person's comment while the ball is with a person is kept", () => {
-    const shaped = shapedThread([human("please look at this")], readers);
-    expect(shaped.map((entry) => entry.body)).toEqual(["please look at this"]);
+    expect(bodies([human("please look at this")])).toEqual(["please look at this"]);
   });
 
   // The machinery's own comments are never removed, whatever they say: a dispatch
   // marker is the machinery taking up a request, and an agent's result is the turn
   // ending. Neither is a person racing a run.
   test("the machinery's comments are never removed", () => {
-    const shaped = shapedThread([machine("/engineer"), machine("RESULT done")], readers);
-    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer", "RESULT done"]);
+    expect(bodies([machine("/engineer"), machine("RESULT done")])).toEqual(["/engineer", "RESULT done"]);
   });
 
   // The whole point of walking in order: the first comment is kept (it starts the
   // turn), the second is removed (the ball is now with the agent).
   test("only the comments that arrived mid-turn are removed", () => {
-    const shaped = shapedThread([human("/engineer"), human("one more thing")], readers);
-    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer"]);
+    expect(bodies([human("/engineer"), human("one more thing")])).toEqual(["/engineer"]);
   });
 
   // A result gives the ball back, so a comment after it is kept again.
   test("a comment after the ball comes back is kept", () => {
-    const shaped = shapedThread(
-      [human("/engineer"), machine("RESULT done"), human("/reviewer")],
-      readers,
-    );
-    expect(shaped.map((entry) => entry.body)).toEqual(["/engineer", "RESULT done", "/reviewer"]);
+    expect(bodies([human("/engineer"), machine("RESULT done"), human("/reviewer")])).toEqual([
+      "/engineer",
+      "RESULT done",
+      "/reviewer",
+    ]);
+  });
+
+  // The events come out of the same walk, so a caller never folds them a second time.
+  // They are the events of the KEPT comments, which is what makes the shaping and the
+  // answer agree.
+  test("the events are those of the comments that survived", () => {
+    const shaped = shapedThread([human("/engineer"), human("one more thing"), machine("RESULT done")], readers);
+    expect(shaped.events).toEqual(["asked", "returned"]);
   });
 });
 
