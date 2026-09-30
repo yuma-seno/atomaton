@@ -68,14 +68,20 @@ function log(message: string): void {
  * would sit with no CI, no required check and no agent scheduled, while the tool
  * reported success. The caller keeps the session open instead.
  *
- * ## No agent names are passed
+ * ## Which agent names are passed, and which are read
  *
  * It used to send `reviewer=<the caller's argument>` and `engineer=engineer`, and
  * the second was a literal -- so a project that renamed its engineer got a CI
  * failure handed to an agent with no definition, from a workflow nobody was
- * watching. Both names are now read from the pull request itself: the agent it
- * names for review, and the `atomaton:origin-agent` tag naming whoever opened it.
- * A pull request that names neither is left for a person, and told so.
+ * watching. Both names are now read from the pull request itself: the agent its
+ * thread asks for, and the `atomaton:origin-agent` tag naming whoever opened it. A
+ * pull request that names nobody is left for a person, and told so.
+ *
+ * The reviewer is read from the pull request's THREAD rather than its body alone,
+ * because the body is the oldest entry in its own thread: a person commenting
+ * `/reviewer` on a pull request whose body says `/engineer` asked for the reviewer,
+ * and reading the body would dispatch the engineer instead. See
+ * `latestRequestedAgentOn`.
  */
 export function dispatchPrValidation(
   repo: string,

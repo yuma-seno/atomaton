@@ -55,6 +55,39 @@ export interface TurnReaders {
   handedOff: (body: string) => boolean;
   /** Whether a body asks for an agent: a `/agent` command, or a dispatch marker. */
   asksForAgent: (body: string) => boolean;
+  /** The agent a body asks for, or "" when it asks for none. */
+  requestedAgent: (body: string) => string;
+}
+
+/**
+ * One entry in a node's thread, as the shaping needs it.
+ *
+ * `isHuman` is the one thing a body's text cannot answer, and the shaping cannot do
+ * without: the guard deletes a PERSON's comment made while the ball is with an agent,
+ * and the machinery's own comments are not that. A dispatch marker is the machinery
+ * taking up a request; an agent's result is the turn ending. Only a person can race a
+ * run, so only a person's comment is the one that disappears.
+ */
+export interface ThreadEntry {
+  body: string;
+  /** Whether a person wrote it, rather than the machinery. */
+  isHuman: boolean;
+}
+
+/**
+ * The turn-changing event a body is, or nothing.
+ *
+ * One definition, used by both the fold below and the shaping: a body that is neither
+ * an agent's result nor a request for one is not an event, and reading it as though it
+ * were would hand the node back to a person every time somebody said anything.
+ *
+ * An agent's result is read before a request, because a result comment may quote a
+ * command in its report and the tag is the stronger claim about what the body is.
+ */
+function eventOf(body: string, readers: TurnReaders): TurnEvent | undefined {
+  if (readers.isAgentResult(body)) return readers.handedOff(body) ? "handed-off" : "returned";
+  if (readers.asksForAgent(body)) return "asked";
+  return undefined;
 }
 
 /**
@@ -63,18 +96,12 @@ export interface TurnReaders {
  * A body that is neither an agent's result nor a request for one is not an event:
  * ordinary discussion does not move the turn, and reading it as though it did would
  * hand the node back to a person every time somebody said anything.
- *
- * An agent's result is read before a request, because a result comment may quote a
- * command in its report and the tag is the stronger claim about what the body is.
  */
 export function turnEvents(bodies: readonly string[], readers: TurnReaders): TurnEvent[] {
   const events: TurnEvent[] = [];
   for (const body of bodies) {
-    if (readers.isAgentResult(body)) {
-      events.push(readers.handedOff(body) ? "handed-off" : "returned");
-    } else if (readers.asksForAgent(body)) {
-      events.push("asked");
-    }
+    const event = eventOf(body, readers);
+    if (event !== undefined) events.push(event);
   }
   return events;
 }
@@ -105,4 +132,77 @@ export function whoseTurn(events: readonly TurnEvent[]): TurnHolder {
  */
 export function requestOutstanding(events: readonly TurnEvent[]): boolean {
   return events[events.length - 1] === "asked";
+}
+
+/**
+ * The thread as it will read once the guard has finished with it.
+ *
+ * ## Why this exists
+ *
+ * The guard deletes a person's comment made while the ball is with an agent, and the
+ * deletion is not instant: it is a `gh api DELETE` that may fail, and even when it
+ * succeeds the comment is on the page until GitHub processes it. Every reader that
+ * runs in that window — the guard's own next turn, the validation that resolves who a
+ * pull request asks for — would otherwise see a comment that is on its way out and
+ * read it as though it were staying.
+ *
+ * So the shaping is one function, and both sides use it: the guard to decide what to
+ * delete, and the readers to see the thread the guard is producing. A comment the
+ * guard would remove is removed here too, so the two never disagree about what the
+ * thread says.
+ *
+ * ## What it removes
+ *
+ * A person's comment that arrived while the ball was already with an agent — the
+ * guard's rule, applied to the whole thread in order: walk it oldest first, and drop
+ * each such comment as it is reached. It is any human comment, not only a command: a
+ * person's remark made mid-run would otherwise sit unseen until the run finished, and
+ * the guard removes it for the same reason it removes a command.
+ *
+ * A comment that arrives while the ball is with a person is kept — it is the request
+ * that starts the next turn, or an ordinary remark that moves nothing.
+ *
+ * The machinery's own comments are never removed, whatever they say: a dispatch marker
+ * is the machinery taking up a request, and an agent's result is the turn ending.
+ * Neither is a person racing a run.
+ *
+ * ## Comments only, never the node's body
+ *
+ * The body is not a comment and cannot race a run, so it is not an entry here. It is
+ * the node's opening statement, and it is read as a request source by
+ * `latestRequestedAgent` — but it does not move the turn, which is why a person's
+ * later comment wins over it.
+ */
+export function shapedThread(comments: readonly ThreadEntry[], readers: TurnReaders): ThreadEntry[] {
+  const kept: ThreadEntry[] = [];
+  const events: TurnEvent[] = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent") continue;
+    kept.push(entry);
+    const event = eventOf(entry.body, readers);
+    if (event !== undefined) events.push(event);
+  }
+  return kept;
+}
+
+/**
+ * The agent the node asks for, from the newest request in its shaped thread.
+ *
+ * The newest request is the current one, so this reads newest-first. The node's BODY
+ * is the oldest entry in its own thread — it is what the node was opened asking for —
+ * so it is the fallback: a person's later `/reviewer` comment wins over the
+ * `/engineer` line the body was opened with, which is the whole point.
+ *
+ * Read from the SHAPED thread, so a comment the guard is removing does not get to name
+ * the next agent in the window before it disappears.
+ *
+ * Returns "" when nothing in the thread asks for an agent.
+ */
+export function latestRequestedAgent(body: string, comments: readonly ThreadEntry[], readers: TurnReaders): string {
+  const kept = shapedThread(comments, readers);
+  for (let index = kept.length - 1; index >= 0; index -= 1) {
+    const agent = readers.requestedAgent(kept[index]!.body);
+    if (agent !== "") return agent;
+  }
+  return readers.requestedAgent(body);
 }
