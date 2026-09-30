@@ -95,6 +95,12 @@ merge:
     # so bumping it and merging IS the release -- and deciding that a set of work
     # is ready to ship is a judgement no agent is positioned to make. Without
     # this, an agent could merge its own release.
+    #
+    # The whole file, not just `version`: a governed path is a path, and this
+    # matcher has no way to name one field of one file. So a dependency bump is
+    # governed too, and an agent will not merge one. That is the intended
+    # reading rather than a side effect -- a lockfile change is a change to what
+    # runs, and it is worth the same look as the version beside it.
     - "package.json"
   gates:
     - reason: "This changes the code that decides what an agent may merge. Read it before merging: a weakening here would not be caught anywhere later."
