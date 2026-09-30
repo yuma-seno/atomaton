@@ -559,7 +559,7 @@ function dispatchRunner(d) {
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
-  if (!d.continues) {
+  if (!d.answersRequest) {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined)

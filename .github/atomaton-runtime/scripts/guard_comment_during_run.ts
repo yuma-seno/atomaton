@@ -251,21 +251,16 @@ var readers = {
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
   asksForAgent: (body) => parseCommentCommand(body).agent !== ""
 };
-function threadBodies(repo, number, excludeCommentId) {
-  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
-  if (issue.code !== 0)
-    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
-  const body = issue.stdout ?? "";
+function commentBodies(repo, number, excludeCommentId) {
   const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
   const comments = JSON.parse(listed.stdout || "[]");
   const excluded = String(excludeCommentId ?? "").trim();
-  const bodies = comments.filter((comment) => String(comment.id) !== excluded).map((comment) => comment.body ?? "");
-  return [body, ...bodies];
+  return comments.filter((comment) => String(comment.id) !== excluded).map((comment) => comment.body ?? "");
 }
-function whoseTurnOn(repo, number, excludeCommentId) {
-  return whoseTurn(turnEvents(threadBodies(repo, number, excludeCommentId), readers));
+function whoseTurnInComments(repo, number, excludeCommentId) {
+  return whoseTurn(turnEvents(commentBodies(repo, number, excludeCommentId), readers));
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -295,7 +290,7 @@ function main() {
   const githubOutput = process.env.GITHUB_OUTPUT;
   let holder;
   try {
-    holder = whoseTurnOn(repo, values.number, values["comment-id"]);
+    holder = whoseTurnInComments(repo, values.number, values["comment-id"]);
   } catch (e) {
     console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
     process.exit(1);
