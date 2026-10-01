@@ -37,11 +37,23 @@
  * A GitHub login as GitHub itself allows one: alphanumerics and single hyphens,
  * up to 39 characters, not starting or ending with a hyphen.
  *
- * The leading group keeps `foo@example.com` and `path/@scope` out of it -- an
- * email address is not a mention, and neither is a scoped package. The trailing
- * `(?!\/)` does the same for `@org/team`, which GitHub treats as a team.
+ * Exported as a bare pattern BODY, like `AGENT_NAME_PATTERN`, because its consumers
+ * cannot all use a `RegExp`: `unattended-pull-request.ts` needs the same shape without
+ * the capture group, and `adapters/github/tags.ts` embeds it in a larger tag regex.
+ * It was written out three times and the copies had begun to differ in what they
+ * allowed around the edges.
  */
-const MENTION = /(^|[^\w@/-])@([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\b(?!\/)/g;
+export const LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+
+/**
+ * A mention in prose: `@login`, not preceded by a word character or another `@`/`/`,
+ * and not followed by `/`.
+ *
+ * The leading group keeps `foo@example.com` and `path/@scope` out of it -- an email
+ * address is not a mention, and neither is a scoped package. The trailing `(?!\/)`
+ * does the same for `@org/team`, which GitHub treats as a team.
+ */
+const MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
 
 /** A fenced code block, or an inline code span, in that order of greed. */
 const CODE = /```[\s\S]*?```|`[^`\n]*`/g;
@@ -51,6 +63,33 @@ export interface MentionCheck {
   text: string;
   /** Which logins were escaped, in the order they appeared, without repeats. */
   escaped: string[];
+}
+
+/**
+ * Whether the text mentions a GitHub login.
+ *
+ * The same shape `escapeUnknownMentions` recognises, asked as a yes/no. It was a
+ * second copy of the pattern in `unattended-pull-request.ts`, which is how the two
+ * would have drifted apart.
+ *
+ * A fenced code block is not excluded here, unlike in `escapeUnknownMentions`: a
+ * pull request body that mentions a person only inside an example is unusual enough,
+ * and reading a notice nobody needed costs less than leaving work unattended.
+ */
+export function mentionsSomeone(text: string): boolean {
+  return new RegExp(`(^|[^\\w@/-])@${LOGIN_PATTERN}\\b(?!\\/)`).test(text);
+}
+
+/**
+ * The `@login ` prefix a notice opens with, or `""` when there is nobody to name.
+ *
+ * One function, because it was written eight times and one copy trimmed while the
+ * others did not. A mention is how a person is told it is their turn, so the shape
+ * of it is worth one definition.
+ */
+export function mentionPrefix(login: string | undefined): string {
+  const name = (login ?? "").trim();
+  return name ? `@${name} ` : "";
 }
 
 /**

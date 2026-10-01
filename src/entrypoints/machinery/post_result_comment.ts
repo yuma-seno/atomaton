@@ -18,6 +18,7 @@ import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { AGENT_TAG, CHANGED_TAG, ENDED_TAG } from "../../adapters/github/tags.ts";
 import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
+import { readTargetState } from "../../adapters/github/target-state.ts";
 import { shouldMentionOnCompletion } from "../../domain/work/completion-mention.ts";
 import { endingOf, type TurnEnding } from "../../domain/work/turn.ts";
 import { redact } from "../../shared/redaction.ts";
@@ -134,18 +135,17 @@ function tokenUsageLines(logsFile: string): string[] {
  *
  * Skipped entirely for a pull request run: `--number` is a PR number there, and
  * `gh issue view` on one is an error rather than an answer.
+ *
+ * The state is `readTargetState`'s, not a second read of `gh issue view --json state`.
+ * That copy looked for the literal `"CLOSED"` and could not tell a merged pull request
+ * from a closed one — the distinction `target-state.ts` exists to make, and the one
+ * that decides whether "reopen it" is advice a person can follow.
  */
 function subIssueState(number: string, type?: string): { isSubIssue: boolean; issueClosed: boolean } {
   if (type !== "issue") return { isSubIssue: false, issueClosed: false };
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const { code, stdout } = gh("issue", "view", number, "--repo", repo, "--json", "state");
-  if (code !== 0) return { isSubIssue: false, issueClosed: false };
-  let issueClosed = false;
-  try {
-    issueClosed = (JSON.parse(stdout) as { state?: string }).state === "CLOSED";
-  } catch {
-    return { isSubIssue: false, issueClosed: false };
-  }
+  const state = readTargetState(number, repo);
+  const issueClosed = state.known && state.state !== "open";
   // GitHub's own link, like every other reader of this relationship. The body's
   // `atomaton:parent` tag is gone -- it recorded the parent at creation and nothing
   // rewrote it. `known: false` falls in with the rest of this function's failures:

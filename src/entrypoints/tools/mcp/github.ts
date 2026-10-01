@@ -43,6 +43,7 @@ import { issueLinks } from "../../../adapters/github/issue-links.ts";
 import type { LinkedChild, LinkedIssue } from "../../../domain/work/issue-links.ts";
 import { decideMergeReadiness, formatBlockers } from "../../../domain/delivery/merge-readiness.ts";
 import { gatherMergeSignals } from "../../../adapters/github/merge-signals.ts";
+import { readTargetState } from "../../../adapters/github/target-state.ts";
 import { selectCommentRange } from "../../../domain/work/comment-range.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 
@@ -734,7 +735,7 @@ function injectParentIssue(body: string, reviewer: string): string {
   body = notifyTagPrefix(body, "PR") + withCheckedMentions(body);
   // The reviewer, as the same line a person would type. Written before the tags so
   // it is the first visible line of the body, which is where a directive is read
-  // from -- see `resolve_pr_next_agent.ts`. An empty name writes nothing, and the
+  // from -- see `latestRequestedAgentOn`. An empty name writes nothing, and the
   // pull request is then left for a person, who is told so below.
   const reviewerLine = reviewer ? `/${reviewer}\n\n` : "";
   if (!parent) return `${reviewerLine}${body}`;
@@ -1234,8 +1235,11 @@ function listPrReviewComments(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): 
 
 /** True if `number` is currently closed (used to skip a pointless post-merge re-invocation when native "Closes #N" auto-close already did the job). */
 function isIssueClosed(number: number): boolean {
-  const d = ghJsonOrThrow<{ state?: string }>("issue", "view", String(number), "--repo", REPO, "--json", "state");
-  return (d?.state ?? "").toUpperCase() === "CLOSED";
+  // `readTargetState`, not a second read of `gh issue view --json state`. That copy
+  // looked for the literal `"CLOSED"` and could not tell a merged pull request from a
+  // closed one -- the distinction `target-state.ts` exists to make.
+  const state = readTargetState(number, REPO);
+  return state.known && state.state !== "open";
 }
 
 

@@ -33,6 +33,7 @@
  * word it differently or forget it. Pure: the caller resolves who to mention and
  * what the agent had to say.
  */
+import { mentionPrefix } from "./mention.ts";
 
 export interface CloseRequest {
   /**
@@ -73,7 +74,7 @@ export const CLOSE_REQUEST_LINE =
  * lives in `adapters/github/tags.ts`.
  */
 export function closeRequestComment(request: CloseRequest): string {
-  const mention = request.notify ? `@${request.notify} ` : "";
+  const mention = mentionPrefix(request.notify);
   const body = (request.body ?? "").trim();
   const head = `${mention}${CLOSE_REQUEST_LINE}`;
   return body ? `${head}\n\n${body}` : head;

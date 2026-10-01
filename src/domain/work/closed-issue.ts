@@ -80,7 +80,15 @@ export function recoveryAdvice(state: TargetState, number: number, command: stri
   return `Reopen #${number} and comment \`${command}\` to run it.`;
 }
 
-function mentionPrefix(logins: readonly string[]): string {
+/**
+ * Several logins as one `@a @b ` prefix, or `""` when there are none.
+ *
+ * The plural of `mention.ts`'s `mentionPrefix`, which is the one-login case. Kept
+ * here rather than there because only this module names more than one person at a
+ * time, and the two are different enough (a list, not a name) that folding them
+ * together would make the common case read as the rare one.
+ */
+function mentionList(logins: readonly string[]): string {
   return logins.length > 0 ? `${logins.map((l) => `@${l}`).join(" ")} ` : "";
 }
 
@@ -159,7 +167,7 @@ export function commandOnClosedNotice(
     ? `Atomaton: \`${command}\` was not run, because the state of #${number} could not be read (${state.why}), and a command is not started on a target that might be closed.`
     : `Atomaton: \`${command}\` was not run, because #${number} is closed.`;
   return [
-    `${mentionPrefix(commenter ? [commenter] : [])}${what}`,
+    `${mentionList(commenter ? [commenter] : [])}${what}`,
     "",
     !state.known
       ? "Comment again once it can be read."
@@ -196,7 +204,7 @@ export function dispatchRefusedNotice(refused: RefusedDispatch): string {
     ? `the state of #${number} could not be read (${state.why})`
     : `#${number} is closed`;
   return [
-    `${mentionPrefix(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
     "",
     `What was about to happen: ${context}.`,
     "",
