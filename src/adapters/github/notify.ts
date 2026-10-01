@@ -43,13 +43,12 @@
  */
 import { gh } from "./gh.ts";
 import { NOTIFY_TAG, PARENT_ISSUE_TAG } from "./tags.ts";
-import { parentIssueOf } from "./parent-issue.ts";
+import { parentChain, parentIssueOf, type ParentIssue } from "./parent-issue.ts";
+import { isHumanActor } from "../../domain/work/actor.ts";
 
 function log(message: string): void {
   console.error(`[atomaton-notify] ${message}`);
 }
-
-const MAX_HOPS = 10;
 
 interface IssueLookup {
   body?: string;
@@ -123,30 +122,30 @@ function nativeParentOf(repo: string, issue: number): number | undefined {
 }
 
 export function resolveNotify(repo: string, number: number): string {
-  const visited = new Set<number>();
-  let current = number;
-  for (let i = 0; i < MAX_HOPS; i++) {
-    if (visited.has(current)) break; // cycle guard
-    visited.add(current);
-
+  // The walk is `parentChain`'s, so the depth limit and the cycle guard are the same
+  // ones `workspace-scope.ts` uses. It used to be written out here with its own
+  // `MAX_HOPS = 10`, which had drifted from the other copy's 6.
+  //
+  // One lookup per node: the same read answers "who to tell" and "what is the next
+  // edge", so the walk does not ask GitHub twice for the same issue.
+  const read = (current: number): { data: IssueLookup; parent: ParentIssue } => {
     const d = fetchIssueLookup(repo, current);
     const body = d.body ?? "";
-
-    const tagged = NOTIFY_TAG.read(body);
-    if (tagged) return tagged;
-
-    if ((d.type ?? "").toLowerCase() === "user" && d.login) {
-      return d.login;
-    }
-
     // Up one edge, and which edge depends on what this is. A pull request's link to
     // its issue is `atomaton:parent-issue`, which has no native equivalent that
     // survives — measured, and written down in `adapters/github/tags.ts`. An issue's link to its
     // parent is GitHub's own, and the tag that used to answer here is gone.
     const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
-    if (parent === undefined) break;
-    current = parent;
+    return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
+  };
+
+  for (const hop of parentChain(number, read)) {
+    const body = hop.data.body ?? "";
+    const tagged = NOTIFY_TAG.read(body);
+    if (tagged) return tagged;
+    if (isHumanActor(hop.data.type) && hop.data.login) return hop.data.login;
   }
+
   // Nothing in the thread said who to tell, so the owner is told. See
   // `repositoryOwner` for why that beats telling nobody.
   const owner = repositoryOwner(repo);

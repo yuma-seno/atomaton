@@ -204,11 +204,16 @@ export function findExistingCiRun(runs: CiRun[], workflow: string, headSha: stri
 
 /** Comments this script has left on the pull request, each marking one hand-back. */
 function countPriorRetries(repo: string, number: string): number {
-  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments?per_page=100`);
+  // `--paginate`, because this count is the retry bound and a truncated read would
+  // under-count it: on a pull request with more than a page of comments the markers
+  // beyond the first page are invisible, `CI_RETRY_LIMIT` never fires, and the
+  // engineer/CI loop runs past its bound at a model run per turn. The same read in
+  // `manage_dispatch_loop.ts` paginates for the same reason.
+  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", ".[].body");
   if (code) return 0;
   try {
-    const comments = JSON.parse(stdout || "[]") as { body?: string }[];
-    return comments.filter((c) => CI_RETRY_TAG.has(c.body ?? "")).length;
+    const bodies = JSON.parse(stdout || "[]") as string[];
+    return bodies.filter((body) => CI_RETRY_TAG.has(body ?? "")).length;
   } catch {
     return 0;
   }
@@ -273,8 +278,13 @@ function runCiAndWait(
   headSha: string,
   timeoutSeconds: number,
 ): { conclusion: string; runUrl: string } {
+  // Filtered by `head_sha` server-side, because both callers below want only runs on
+  // this commit and an unfiltered list is a bounded page: on a busy repository the
+  // just-dispatched run is not on the first page, so the poll never finds it and
+  // validation reports "no conclusion" and writes a failing check. Asking for the
+  // commit is both correct and bounded.
   const listRuns = (): CiRun[] => {
-    const listed = gh("api", `repos/${repo}/actions/runs?per_page=50&event=workflow_dispatch`).stdout;
+    const listed = gh("api", `repos/${repo}/actions/runs?event=workflow_dispatch&head_sha=${headSha}`).stdout;
     const { workflow_runs = [] } = JSON.parse(listed || "{}") as { workflow_runs?: CiRun[] };
     return workflow_runs;
   };

@@ -79,3 +79,56 @@ export function parentIssueOf(repo: string, issue: number): ParentIssue {
     return { known: false, why };
   }
 }
+
+/**
+ * How far up a parent chain to walk.
+ *
+ * Six, and it is a GitHub limit rather than a choice: a sub-issue may be nested at
+ * most six levels deep, so a chain longer than that cannot exist and a walk that
+ * keeps going is following a cycle. It was written twice — here and in
+ * `adapters/github/notify.ts` — and the two had already drifted (10 and 6), with
+ * `workspace-scope.ts`'s comment claiming it matched `notify.ts` when it did not.
+ */
+export const MAX_PARENT_HOPS = 6;
+
+/** One step of a parent walk: the node, whatever the caller read, and its parent. */
+export interface ParentHop<T> {
+  number: number;
+  /** What the caller's `read` returned for this node. */
+  data: T;
+  /** This node's own parent lookup, so a caller can tell a root from a failed read. */
+  parent: ParentIssue;
+}
+
+/**
+ * Walk up a parent chain, oldest ancestor last, at most `MAX_PARENT_HOPS` deep.
+ *
+ * The one walker, because the loop it replaces was written twice and the two copies
+ * disagreed about how far to go. `read` is the caller's, and it returns both the data
+ * the caller wants for a node and that node's parent — one lookup per node, because
+ * the caller needs the same read to decide whether to stop and to find the next edge.
+ *
+ * The edge differs by node kind: an issue's parent is GitHub's own sub-issue link,
+ * while a pull request's is the `atomaton:parent-issue` tag. See
+ * `adapters/github/tags.ts` for why that asymmetry is measured rather than accidental.
+ *
+ * Stops on a cycle, on a root (`parent: 0`), and on a lookup that failed
+ * (`known: false`) — the last of which the caller can tell apart from a root, which
+ * is the distinction `ParentIssue` exists for.
+ */
+export function* parentChain<T>(
+  start: number,
+  read: (current: number) => { data: T; parent: ParentIssue },
+  maxHops: number = MAX_PARENT_HOPS,
+): Generator<ParentHop<T>> {
+  const visited = new Set<number>();
+  let current = start;
+  for (let hop = 0; hop < maxHops; hop++) {
+    if (visited.has(current)) return;
+    visited.add(current);
+    const { data, parent } = read(current);
+    yield { number: current, data, parent };
+    if (!parent.known || parent.parent === 0) return;
+    current = parent.parent;
+  }
+}

@@ -35,6 +35,7 @@
  */
 import { parseArgs } from "node:util";
 import { LLM_CONTEXT_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
+import { isHumanActor } from "../../domain/work/actor.ts";
 import { closedTheTreeNotice, stopOnCloseNotice } from "../../domain/work/closed-issue.ts";
 import { descendants, nodesToClose, nodesToStop, subtree } from "../../domain/work/work-tree.ts";
 import { closeSubtreeUnder, readWorkTree } from "../../adapters/github/work-tree.ts";
@@ -87,7 +88,7 @@ function main(): void {
   const number = String(values.number);
   const closer = (values.closer ?? "").trim();
 
-  if ((values["closer-type"] ?? "").trim() === "Bot") {
+  if (!isHumanActor(values["closer-type"])) {
     console.error(`#${number} was closed by a bot, which is how an agent finishes its own work. Nothing to stop.`);
     return;
   }

@@ -36,6 +36,7 @@
  * is one nobody notices.
  */
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
+import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { getDeploySection, getWorkflowName } from "../../adapters/runner/config.ts";
 import { dispatchRunner } from "./dispatch.ts";
 import { resolveNotify } from "../../adapters/github/notify.ts";
@@ -126,10 +127,14 @@ export function dispatchPrValidation(
  */
 export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent: string): boolean {
   const notify = resolveNotify(repo, subIssueNum);
+  // Tagged `include`: this is the first user message the re-invoked agent reads, and
+  // it is the thing that tells it what to do. It is the one comment here that MUST
+  // reach the model -- the opposite decision from the notices addressed to a person.
   const { code, stdout, stderr } = gh(
     "issue", "comment", String(subIssueNum), "--repo", repo,
     "--body",
-    "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
+    `${LLM_CONTEXT_TAG.write("include")}\n` +
+      "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
       "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " +
       "issue when they are met, and carry on with the work when they are not.",
   );

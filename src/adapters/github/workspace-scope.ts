@@ -7,18 +7,9 @@
  * `atomaton:parent-issue` tag rather than a sub-issue relationship.
  */
 import { gh } from "./gh.ts";
-import { parentIssueOf } from "./parent-issue.ts";
+import { parentChain, parentIssueOf, type ParentIssue } from "./parent-issue.ts";
 import { PARENT_ISSUE_TAG } from "./tags.ts";
 import { workspaceScope, type WorkspaceScope } from "../../domain/work/workspace.ts";
-
-/**
- * How far up the chain to walk.
- *
- * Six, matching `adapters/github/notify.ts`'s walk. A cycle is impossible through GitHub's own
- * sub-issue links but not through the body tag, which anything can write -- and an
- * unbounded walk on a cycle is a run that never starts.
- */
-const MAX_HOPS = 6;
 
 function log(message: string): void {
   console.error(`[atomaton-workspace] ${message}`);
@@ -49,7 +40,7 @@ export function resolveWorkspaceScope(repo: string, type: string, number: string
   }
 
   const chain: number[] = [];
-  let current = target;
+  let start = target;
 
   if (type === "pr") {
     const issue = issueOfPullRequest(repo, target);
@@ -61,27 +52,21 @@ export function resolveWorkspaceScope(repo: string, type: string, number: string
       return workspaceScope(number, []);
     }
     chain.push(issue);
-    current = issue;
+    start = issue;
   }
 
-  const visited = new Set<number>([target]);
-  for (let hop = 0; hop < MAX_HOPS; hop++) {
-    if (visited.has(current) && hop > 0) {
-      log(`WARN parent chain revisits #${current}; stopping the walk here`);
-      break;
-    }
-    visited.add(current);
-
-    const parentage = parentIssueOf(repo, current);
-    if (!parentage.known) {
+  // The walk is `parentChain`'s, so the depth limit and the cycle guard are the same
+  // ones `notify.ts` uses. It used to be written out here with its own `MAX_HOPS = 6`
+  // and a comment claiming it matched `notify.ts`, which had 10.
+  for (const hop of parentChain(start, (current) => ({ data: undefined, parent: parentIssueOf(repo, current) }))) {
+    if (!hop.parent.known) {
       // Everything read so far still counts. A chain that broke three hops up is
       // more precise than falling all the way back to the target, and the tests
       // pin that: the root reached is the answer, not the failure.
-      return workspaceScope(number, chain, chain.length > 0 ? "" : parentage.why);
+      return workspaceScope(number, chain, chain.length > 0 ? "" : hop.parent.why);
     }
-    if (parentage.parent === 0) break;
-    chain.push(parentage.parent);
-    current = parentage.parent;
+    if (hop.parent.parent === 0) break;
+    chain.push(hop.parent.parent);
   }
 
   const scope = workspaceScope(number, chain);

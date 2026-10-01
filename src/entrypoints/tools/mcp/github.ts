@@ -27,6 +27,7 @@ import { logOp } from "../../../adapters/runner/ops-log.ts";
 import { report } from "../../../adapters/mcp/mcp-report.ts";
 import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
+import { isHumanAuthor } from "../../../domain/work/actor.ts";
 import { LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
 import { closingKeywordRefusal, closingReferences } from "../../../domain/work/issue-links.ts";
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
@@ -579,14 +580,19 @@ function closeIssue(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>): boolean {
   // `gh api repos/OWNER/REPO/issues/N` endpoint, as `.user.type`). Use the
   // reliable `.author.is_bot` boolean instead.
   const d = ghJsonOrThrow<GhIssueAuthor>("issue", "view", String(num), "--repo", REPO, "--json", "author");
-  const isBot = Boolean(d?.author?.is_bot);
+  const isBot = !isHumanAuthor(d?.author?.is_bot);
   log(`closeIssue: author.is_bot=${isBot}`);
   if (!isBot) {
-    const body = closeRequestComment({
+    const request = closeRequestComment({
       notify: resolveNotify(REPO, num),
       body: "Atomaton: an agent finished the work on this issue and asked for it to be closed.",
     });
-    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", body);
+    // Tagged `exclude`: addressed to the person, not to the model. See
+    // `conclude_issue.ts` for the same decision on the same comment.
+    const { code, stdout, stderr } = gh(
+      "issue", "comment", String(num), "--repo", REPO,
+      "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${request}`,
+    );
     // The one failure still worth an error. Saying nothing here would leave an
     // issue that nobody has been asked to close and an agent that believes
     // somebody has -- which is the defect above with the comment removed.

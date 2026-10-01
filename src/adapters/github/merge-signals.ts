@@ -16,6 +16,7 @@ import { gh } from "./gh.ts";
 import { readBranchRules } from "./branch-rules.ts";
 import { getGovernedPaths, getMergeGates, getMergePolicy } from "../../adapters/runner/config.ts";
 import { governedPathsIn, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
+import { isHumanAuthor } from "../../domain/work/actor.ts";
 import { pathPatternProblem } from "../../domain/delivery/path-patterns.ts";
 import {
   matchMergeGates,
@@ -275,8 +276,9 @@ export function gatherMergeSignals(
       mergeStateStatus: mergeState?.mergeStateStatus ?? "UNKNOWN",
       isDraft: pr?.isDraft ?? false,
       // Defaults to treating the author as a person. If the field is missing the
-      // safe reading is "do not merge this for someone", not "merge it".
-      authoredByAgent: pr?.author?.is_bot ?? false,
+      // safe reading is "do not merge this for someone", not "merge it". The rule
+      // is `domain/work/actor.ts`'s, shared with every other reader of the fact.
+      authoredByAgent: !isHumanAuthor(pr?.author?.is_bot),
       state: pr?.state ?? "UNKNOWN",
       // Unknown reads as enforceable, which is the cautious direction: it keeps Atomaton
       // from standing in for GitHub on a repository where GitHub is in fact blocking,

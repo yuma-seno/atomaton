@@ -36,7 +36,7 @@ import { parseArgs } from "node:util";
 import { defineScript } from "./lib/script-ref.ts";
 import type { GithubEvent } from "./fetch_events.ts";
 import type { Session, SessionMessage, SessionMessageMetadata } from "../../domain/work/session.ts";
-import { AGENT_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { isHumanActor } from "../../domain/work/actor.ts";
 import { contentWithImages, type ContentBlock } from "../../adapters/github/issue-images.ts";
 
 export interface ReconcileGithubSessionArgs {
@@ -180,10 +180,8 @@ function buildOwnCommentIds(session: Session, agentName: string): Set<string> {
 }
 
 function extractResultCommentAgent(event: GithubEvent): string | undefined {
-  if (!event.author.endsWith("[bot]")) return undefined;
-  if (!event.content) return undefined;
-  const firstLine = event.content.split("\n")[0]!.trim();
-  return AGENT_TAG.read(firstLine);
+  if (isHumanActor(event.author_type)) return undefined;
+  return event.agent;
 }
 
 function isSelfEvent(event: GithubEvent, agentName: string, ownCommentIds: Set<string>): boolean {
@@ -195,7 +193,11 @@ function isSelfEvent(event: GithubEvent, agentName: string, ownCommentIds: Set<s
 function filterEventsForAgent(events: GithubEvent[], agentName: string, ownCommentIds: Set<string>): GithubEvent[] {
   const filtered: GithubEvent[] = [];
   for (const event of events) {
-    if (event.author.endsWith("[bot]") && LLM_CONTEXT_TAG.read(event.content) === "exclude") {
+    // `event.llm_context`, not `LLM_CONTEXT_TAG.read(event.content)`: the tag was
+    // stripped by `fetch_events.ts` before this file ever saw the body, so reading
+    // it here found nothing and the filter never fired. The decision is made on the
+    // raw text upstream and carried as a field.
+    if (!isHumanActor(event.author_type) && event.llm_context === "exclude") {
       console.error(`  Skipping operational notification from LLM context: id=${event.id}`);
       continue;
     }
