@@ -436,6 +436,12 @@ function parseCommentCommand(body) {
   return NOTHING;
 }
 
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
 // src/domain/work/whose-turn.ts
 function eventOf(body, readers) {
   if (readers.isAgentResult(body))
@@ -472,7 +478,7 @@ var readers = {
   requestedAgent: (body) => parseCommentCommand(body).agent
 };
 function isHumanComment(comment) {
-  return comment.user?.type !== "Bot";
+  return isHumanActor(comment.user?.type);
 }
 function readThread(repo, number, excludeCommentId) {
   const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
@@ -625,12 +631,26 @@ function parentIssueOf(repo, issue) {
     return { known: false, why };
   }
 }
+var MAX_PARENT_HOPS = 6;
+function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
+  const visited = new Set;
+  let current = start;
+  for (let hop = 0;hop < maxHops; hop++) {
+    if (visited.has(current))
+      return;
+    visited.add(current);
+    const { data, parent } = read(current);
+    yield { number: current, data, parent };
+    if (!parent.known || parent.parent === 0)
+      return;
+    current = parent.parent;
+  }
+}
 
 // src/adapters/github/notify.ts
 function log2(message) {
   console.error(`[atomaton-notify] ${message}`);
 }
-var MAX_HOPS = 10;
 function repositoryOwner(repo) {
   const owner = repo.split("/")[0]?.trim() ?? "";
   if (!owner)
@@ -655,24 +675,19 @@ function nativeParentOf(repo, issue) {
   return found.known && found.parent ? found.parent : undefined;
 }
 function resolveNotify(repo, number) {
-  const visited = new Set;
-  let current = number;
-  for (let i = 0;i < MAX_HOPS; i++) {
-    if (visited.has(current))
-      break;
-    visited.add(current);
+  const read = (current) => {
     const d = fetchIssueLookup(repo, current);
     const body = d.body ?? "";
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
+  };
+  for (const hop of parentChain(number, read)) {
+    const body = hop.data.body ?? "";
     const tagged = NOTIFY_TAG.read(body);
     if (tagged)
       return tagged;
-    if ((d.type ?? "").toLowerCase() === "user" && d.login) {
-      return d.login;
-    }
-    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
-    if (parent === undefined)
-      break;
-    current = parent;
+    if (isHumanActor(hop.data.type) && hop.data.login)
+      return hop.data.login;
   }
   const owner = repositoryOwner(repo);
   if (owner)
@@ -756,7 +771,7 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("issue", "view", String(opts.parent), "--repo", opts.repo, "--json", "comments", "--jq", ".comments[].body");
+  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body");
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);

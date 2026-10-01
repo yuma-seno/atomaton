@@ -207,6 +207,12 @@ function parseCommentCommand(body) {
   return NOTHING;
 }
 
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
 // src/domain/work/whose-turn.ts
 function eventOf(body, readers) {
   if (readers.isAgentResult(body))
@@ -249,7 +255,7 @@ var readers = {
   requestedAgent: (body) => parseCommentCommand(body).agent
 };
 function isHumanComment(comment) {
-  return comment.user?.type !== "Bot";
+  return isHumanActor(comment.user?.type);
 }
 function readThread(repo, number, excludeCommentId) {
   const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
@@ -327,12 +333,12 @@ function findExistingCiRun(runs, workflow, headSha) {
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
 function countPriorRetries(repo, number) {
-  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments?per_page=100`);
+  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", ".[].body");
   if (code)
     return 0;
   try {
-    const comments = JSON.parse(stdout || "[]");
-    return comments.filter((c) => CI_RETRY_TAG.has(c.body ?? "")).length;
+    const bodies = JSON.parse(stdout || "[]");
+    return bodies.filter((body) => CI_RETRY_TAG.has(body ?? "")).length;
   } catch {
     return 0;
   }
@@ -353,7 +359,7 @@ function reportFailure(repo, number, attempt, runUrl, summary, details = []) {
 }
 function runCiAndWait(repo, workflow, branch, headSha, timeoutSeconds) {
   const listRuns = () => {
-    const listed = gh("api", `repos/${repo}/actions/runs?per_page=50&event=workflow_dispatch`).stdout;
+    const listed = gh("api", `repos/${repo}/actions/runs?event=workflow_dispatch&head_sha=${headSha}`).stdout;
     const { workflow_runs = [] } = JSON.parse(listed || "{}");
     return workflow_runs;
   };

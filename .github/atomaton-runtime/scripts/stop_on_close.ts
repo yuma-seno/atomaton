@@ -44,6 +44,12 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
 // src/domain/work/closed-issue.ts
 function stopOnCloseNotice(number) {
   return [
@@ -575,7 +581,7 @@ function main() {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const number = String(values.number);
   const closer = (values.closer ?? "").trim();
-  if ((values["closer-type"] ?? "").trim() === "Bot") {
+  if (!isHumanActor(values["closer-type"])) {
     console.error(`#${number} was closed by a bot, which is how an agent finishes its own work. Nothing to stop.`);
     return;
   }

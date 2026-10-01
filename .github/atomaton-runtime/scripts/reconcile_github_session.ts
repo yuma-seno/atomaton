@@ -30,45 +30,11 @@ function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }
 
-// src/domain/work/agent-name.ts
-var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
-var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
-
-// src/adapters/github/tags.ts
-var TAG_PREFIX = `atomaton:`;
-var EVERY_TAG_PATTERN = [];
-function makeTag(key, valuePattern, parse, render) {
-  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
-  EVERY_TAG_PATTERN.push(pattern);
-  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
-  return {
-    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
-    has: (text) => re.test(text),
-    search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
-  };
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
 }
-function numericTag(key) {
-  return makeTag(key, "\\d+", Number, String);
-}
-function stringTag(key, valuePattern) {
-  return makeTag(key, valuePattern, (raw) => raw, (value) => value);
-}
-var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
-var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
-var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
-var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
-var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
-var CHANGED_TAG = stringTag("changed", "yes|no");
-var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
-var AGGREGATED_TAG = numericTag("aggregated");
-var SUB_RESULT_TAG = numericTag("sub-result");
-var CI_RETRY_TAG = numericTag("ci-retry");
 
 // src/adapters/github/gh.ts
 function ghCommand() {
@@ -217,13 +183,9 @@ function buildOwnCommentIds(session, agentName) {
   return ownIds;
 }
 function extractResultCommentAgent(event) {
-  if (!event.author.endsWith("[bot]"))
+  if (isHumanActor(event.author_type))
     return;
-  if (!event.content)
-    return;
-  const firstLine = event.content.split(`
-`)[0].trim();
-  return AGENT_TAG.read(firstLine);
+  return event.agent;
 }
 function isSelfEvent(event, agentName, ownCommentIds) {
   const eventId = normalizeId(event.id);
@@ -234,7 +196,7 @@ function isSelfEvent(event, agentName, ownCommentIds) {
 function filterEventsForAgent(events, agentName, ownCommentIds) {
   const filtered = [];
   for (const event of events) {
-    if (event.author.endsWith("[bot]") && LLM_CONTEXT_TAG.read(event.content) === "exclude") {
+    if (!isHumanActor(event.author_type) && event.llm_context === "exclude") {
       console.error(`  Skipping operational notification from LLM context: id=${event.id}`);
       continue;
     }

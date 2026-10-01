@@ -137,7 +137,8 @@ jobs:
           NUMBER: ${{ steps.target.outputs.number }}
           ERROR: ${{ steps.command.outputs.error }}
         run: |
-          gh issue comment "${NUMBER}" --body "Atomaton command error: ${ERROR}"
+          gh issue comment "${NUMBER}" --body "<!-- atomaton:llm-context=exclude -->
+          Atomaton command error: ${ERROR}"
         if: steps.command.outputs.error != ''
       - name: Say the run is waiting for CI
         shell: bash

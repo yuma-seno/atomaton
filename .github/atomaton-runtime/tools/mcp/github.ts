@@ -7359,12 +7359,35 @@ function parentIssueOf(repo, issue) {
     return { known: false, why };
   }
 }
+var MAX_PARENT_HOPS = 6;
+function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
+  const visited = new Set;
+  let current = start;
+  for (let hop = 0;hop < maxHops; hop++) {
+    if (visited.has(current))
+      return;
+    visited.add(current);
+    const { data, parent } = read(current);
+    yield { number: current, data, parent };
+    if (!parent.known || parent.parent === 0)
+      return;
+    current = parent.parent;
+  }
+}
+
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+function isHumanAuthor(isBot) {
+  return !(isBot ?? false);
+}
 
 // src/adapters/github/notify.ts
 function log2(message) {
   console.error(`[atomaton-notify] ${message}`);
 }
-var MAX_HOPS = 10;
 function repositoryOwner(repo) {
   const owner = repo.split("/")[0]?.trim() ?? "";
   if (!owner)
@@ -7389,24 +7412,19 @@ function nativeParentOf(repo, issue) {
   return found.known && found.parent ? found.parent : undefined;
 }
 function resolveNotify(repo, number) {
-  const visited = new Set;
-  let current = number;
-  for (let i = 0;i < MAX_HOPS; i++) {
-    if (visited.has(current))
-      break;
-    visited.add(current);
+  const read = (current) => {
     const d = fetchIssueLookup(repo, current);
     const body = d.body ?? "";
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
+  };
+  for (const hop of parentChain(number, read)) {
+    const body = hop.data.body ?? "";
     const tagged = NOTIFY_TAG.read(body);
     if (tagged)
       return tagged;
-    if ((d.type ?? "").toLowerCase() === "user" && d.login) {
-      return d.login;
-    }
-    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
-    if (parent === undefined)
-      break;
-    current = parent;
+    if (isHumanActor(hop.data.type) && hop.data.login)
+      return hop.data.login;
   }
   const owner = repositoryOwner(repo);
   if (owner)
@@ -7711,7 +7729,7 @@ var readers = {
   requestedAgent: (body) => parseCommentCommand(body).agent
 };
 function isHumanComment(comment) {
-  return comment.user?.type !== "Bot";
+  return isHumanActor(comment.user?.type);
 }
 function readThread(repo, number, excludeCommentId) {
   const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
@@ -7920,7 +7938,7 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("issue", "view", String(opts.parent), "--repo", opts.repo, "--json", "comments", "--jq", ".comments[].body");
+  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body");
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
@@ -19406,7 +19424,8 @@ function dispatchPrValidation(repo, prNumber, branch, options = {}) {
 }
 function dispatchPostMergeAgent(repo, subIssueNum, agent) {
   const notify = resolveNotify(repo, subIssueNum);
-  const { code, stdout, stderr } = gh("issue", "comment", String(subIssueNum), "--repo", repo, "--body", "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.");
+  const { code, stdout, stderr } = gh("issue", "comment", String(subIssueNum), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("include")}
+` + "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.");
   if (code) {
     log5(`dispatchPostMergeAgent: could not post trigger comment on #${subIssueNum}: ${stderr || stdout}`);
     return false;
@@ -19573,7 +19592,7 @@ function gatherMergeSignals(repo, num, throwOnFailure) {
     signals: {
       mergeStateStatus: mergeState?.mergeStateStatus ?? "UNKNOWN",
       isDraft: pr?.isDraft ?? false,
-      authoredByAgent: pr?.author?.is_bot ?? false,
+      authoredByAgent: !isHumanAuthor(pr?.author?.is_bot),
       state: pr?.state ?? "UNKNOWN",
       requiredChecksEnforceable: required.known ? required.enforceable : true,
       checks: (runs?.check_runs ?? []).map((run) => ({
@@ -19924,14 +19943,15 @@ function closeIssue(a) {
   const num = a[ISSUE_NUMBER_ARG];
   log7(`closeIssue: #${num}`);
   const d = ghJsonOrThrow("issue", "view", String(num), "--repo", REPO, "--json", "author");
-  const isBot = Boolean(d?.author?.is_bot);
+  const isBot = !isHumanAuthor(d?.author?.is_bot);
   log7(`closeIssue: author.is_bot=${isBot}`);
   if (!isBot) {
-    const body = closeRequestComment({
+    const request = closeRequestComment({
       notify: resolveNotify(REPO, num),
       body: "Atomaton: an agent finished the work on this issue and asked for it to be closed."
     });
-    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", body);
+    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
+${request}`);
     if (code)
       mcpFail(`Could not ask for issue #${num} to be closed: ${stderr || stdout}`);
     logOp("close_issue", { number: num, closed: false });
