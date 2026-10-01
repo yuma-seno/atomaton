@@ -304,19 +304,26 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function readThread(repo, number, excludeCommentId) {
-  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
-  if (issue.code !== 0)
-    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
-  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+function readComments(repo, number, excludeCommentId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
   const excluded = String(excludeCommentId ?? "").trim();
   const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
-  return { body: issue.stdout ?? "", shaped: shapedThread(comments, readers) };
+  return shapedThread(comments, readers);
 }
-function requestOutstandingOn(repo, number, excludeCommentId) {
-  return requestOutstanding(readThread(repo, number, excludeCommentId).shaped.events);
+function runInFlight(repo, number) {
+  return whoseTurn(readComments(repo, number).events) === "agent";
+}
+function checkDispatchMarker(repo, number, markerId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const marker = String(markerId);
+  const comments = JSON.parse(listed.stdout || "[]");
+  const markerVisible = comments.some((comment) => String(comment.id) === marker);
+  const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
 
 // src/domain/work/closed-issue.ts
@@ -346,6 +353,19 @@ function dispatchRefusedNotice(refused) {
     "Nothing will retry this.",
     "",
     !state.known ? `Start it by hand once #${number} can be read: comment \`/${agent}\` on it.` : recoveryAdvice(state, number, `/${agent}`)
+  ].join(`
+`);
+}
+function dispatchUnconfirmedNotice(unconfirmed) {
+  const { agent, number, context, notify } = unconfirmed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because the dispatch could not be confirmed.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "",
+    "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue."
   ].join(`
 `);
 }
@@ -390,15 +410,53 @@ function refuseOutstandingRequest(d, markerId) {
       return;
     gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
   };
-  let outstanding;
-  try {
-    outstanding = requestOutstandingOn(d.repo ?? "", d.number, markerId);
-  } catch (e) {
-    removeMarker();
-    log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
-    return "refused-outstanding";
+  if (markerId === undefined)
+    return;
+  const delays = [1000, 2000, 4000];
+  let check;
+  for (let attempt = 0;attempt <= delays.length; attempt++) {
+    try {
+      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+    } catch (e) {
+      removeMarker();
+      log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+      return "refused-outstanding";
+    }
+    if (check.markerVisible)
+      break;
+    const delay = delays[attempt];
+    if (delay === undefined)
+      break;
+    log(`${d.context}: the dispatch marker on #${d.number} is not visible yet; waiting ${delay}ms and reading again`);
+    Bun.sleepSync(delay);
   }
-  if (!outstanding)
+  if (check === undefined || !check.markerVisible) {
+    const reposted = postDispatchMarker(d);
+    if (reposted !== undefined) {
+      try {
+        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+          removeMarker();
+          return;
+        }
+      } catch (e) {
+        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+      }
+      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+    }
+    log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
+    const body = dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? ""
+    });
+    const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
+    if (code !== 0) {
+      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+    }
+    return "unconfirmed";
+  }
+  if (!check.outstanding)
     return;
   removeMarker();
   log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
@@ -433,124 +491,6 @@ function dispatchRunner(d) {
     return "failed";
   logDispatch(d.type, d.agent, { number: Number(d.number) });
   return "dispatched";
-}
-
-// src/adapters/runner/config.ts
-import { readFileSync } from "fs";
-
-// src/domain/delivery/merge-readiness.ts
-var CI_WOULD_BE_WASTED = new Set([
-  "not-open",
-  "draft",
-  "conflicting",
-  "behind",
-  "mergeability-unknown",
-  "checks-pending",
-  "checks-failing"
-]);
-var PASSING = new Set(["success", "neutral", "skipped"]);
-
-// src/domain/machinery/machinery-layout.ts
-var USER_ROOT = ".github/atomaton";
-var RUNTIME_ROOT = ".github/atomaton-runtime";
-var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
-var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
-var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
-var SKILLS_DIR = `${USER_ROOT}/skills`;
-var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
-var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
-var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
-var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
-var RULESETS_DIR = `${USER_ROOT}/rulesets`;
-var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
-var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
-
-// src/domain/delivery/declared-secrets.ts
-var RUN_CREDENTIALS = [
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "ORCAROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "ATOMA_COPILOT_TOKEN",
-  "GH_TOKEN"
-];
-var AGENT_ENV_NAMES = [
-  "HOME",
-  "PATH",
-  "AGENT",
-  MACHINERY_ROOT_VAR,
-  "GITHUB_REPOSITORY",
-  "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
-  "ATOMATON_RELOAD_COUNT",
-  "ATOMATON_OPS_LOG",
-  "ATOMATON_DISPATCHED_BY",
-  "XDG_CACHE_HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-  "BUN_INSTALL_CACHE_DIR",
-  "npm_config_cache",
-  "PIP_CACHE_DIR",
-  "CARGO_HOME",
-  "OPENAI_BASE_URL",
-  "ATOMA_PROVIDER"
-];
-var RUN_STEP_NAMES = [
-  "GITHUB_RUN_ID",
-  "OPENROUTER_BASE_URL",
-  "ORCAROUTER_BASE_URL",
-  "ANTHROPIC_BASE_URL",
-  "COPILOT_BASE_URL",
-  "ATOMA_PROVIDER_IN",
-  "OPENAI_BASE_URL_IN"
-];
-var TOOL_SECRETS = {
-  field: "tools.secrets",
-  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
-};
-var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
-var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
-var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
-
-// src/domain/delivery/check-jobs.ts
-var CHECKS_FROM_PULL_REQUEST = {
-  where: "checks.from_pull_request",
-  secrets: {
-    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
-  }
-};
-var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
-
-// src/adapters/runner/machinery.ts
-function machineryRoot() {
-  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
-}
-function machineryPath(relative) {
-  const root = machineryRoot();
-  return root ? `${root}/${relative}` : relative;
-}
-
-// src/adapters/runner/config.ts
-function configPath() {
-  return machineryPath(CONFIG_FILE);
-}
-var cached;
-function loadConfig() {
-  if (!cached) {
-    cached = Bun.YAML.parse(readFileSync(configPath(), "utf8"));
-  }
-  return cached;
-}
-var DEFAULT_LABELS = {
-  sub_issue: "atomaton/sub-issue",
-  launched: "atomaton/launched",
-  in_progress: "atomaton/in-progress"
-};
-function getLabel(key) {
-  return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
 }
 
 // src/domain/work/issue-links.ts
@@ -641,14 +581,18 @@ function issueLinks(repo, number) {
 }
 
 // src/adapters/github/work-tree.ts
-function labelNames(labels) {
-  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "");
-}
 function parseListed(stdout) {
   try {
     return JSON.parse(stdout || "[]");
   } catch {
     return null;
+  }
+}
+function runningOn(repo, number) {
+  try {
+    return { running: runInFlight(repo, number) };
+  } catch (e) {
+    return { running: false, problem: `could not read the thread on #${number}: ${e.message}` };
   }
 }
 function readNode(repo, number) {
@@ -668,18 +612,20 @@ function readNode(repo, number) {
     return { problem: `#${number} reported an unrecognised state ${JSON.stringify(raw.state ?? null)}` };
   }
   const state = raw.state === "open" ? "open" : isPr ? pullRequestOutcome(Boolean(raw.pull_request?.merged_at)) : issueOutcome(raw.state_reason);
+  const { running, problem } = runningOn(repo, number);
+  if (problem)
+    return { problem };
   return {
     node: {
       number,
       kind: isPr ? "pull-request" : "issue",
       state,
       parent: isPr ? PARENT_ISSUE_TAG.read(raw.body ?? "") : undefined,
-      running: labelNames(raw.labels).includes(getLabel("in_progress"))
+      running
     }
   };
 }
 function readChildren(repo, parent) {
-  const label = getLabel("in_progress");
   const nodes = [];
   const problems = [];
   const prs = ghRead("pr", "list", "--repo", repo, "--state", "all", "--limit", "200", "--search", `${PARENT_ISSUE_TAG.search(parent)} in:body`, "--json", "number,body,state,labels");
@@ -691,12 +637,17 @@ function readChildren(repo, parent) {
   for (const found of listedPrs ?? []) {
     if (PARENT_ISSUE_TAG.read(found.body ?? "") !== parent)
       continue;
+    const { running, problem } = runningOn(repo, found.number);
+    if (problem) {
+      problems.push(problem);
+      continue;
+    }
     nodes.push({
       number: found.number,
       kind: "pull-request",
       state: saysOpen(found.state) ? "open" : pullRequestOutcome(found.state === "MERGED"),
       parent,
-      running: labelNames(found.labels).includes(label)
+      running
     });
   }
   const links = issueLinks(repo, parent);
@@ -707,13 +658,18 @@ function readChildren(repo, parent) {
   for (const child of links.children) {
     if (already.has(child.number))
       continue;
+    const { running, problem } = runningOn(repo, child.number);
+    if (problem) {
+      problems.push(problem);
+      continue;
+    }
     already.add(child.number);
     nodes.push({
       number: child.number,
       kind: "issue",
       state: child.state,
       parent,
-      running: child.labels.includes(label)
+      running
     });
   }
   for (const linked of links.pullRequests) {
@@ -792,6 +748,23 @@ function mostRecentAgentOn(repo, number) {
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+
+// src/entrypoints/machinery/lib/script-ref.ts
 function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }

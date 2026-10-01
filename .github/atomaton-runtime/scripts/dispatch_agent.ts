@@ -245,19 +245,15 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function readThread(repo, number, excludeCommentId) {
-  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
-  if (issue.code !== 0)
-    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
-  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+function checkDispatchMarker(repo, number, markerId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  const excluded = String(excludeCommentId ?? "").trim();
-  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
-  return { body: issue.stdout ?? "", shaped: shapedThread(comments, readers) };
-}
-function requestOutstandingOn(repo, number, excludeCommentId) {
-  return requestOutstanding(readThread(repo, number, excludeCommentId).shaped.events);
+  const marker = String(markerId);
+  const comments = JSON.parse(listed.stdout || "[]");
+  const markerVisible = comments.some((comment) => String(comment.id) === marker);
+  const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
 
 // src/domain/work/closed-issue.ts
@@ -287,6 +283,19 @@ function dispatchRefusedNotice(refused) {
     "Nothing will retry this.",
     "",
     !state.known ? `Start it by hand once #${number} can be read: comment \`/${agent}\` on it.` : recoveryAdvice(state, number, `/${agent}`)
+  ].join(`
+`);
+}
+function dispatchUnconfirmedNotice(unconfirmed) {
+  const { agent, number, context, notify } = unconfirmed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because the dispatch could not be confirmed.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "",
+    "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue."
   ].join(`
 `);
 }
@@ -331,15 +340,53 @@ function refuseOutstandingRequest(d, markerId) {
       return;
     gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
   };
-  let outstanding;
-  try {
-    outstanding = requestOutstandingOn(d.repo ?? "", d.number, markerId);
-  } catch (e) {
-    removeMarker();
-    log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
-    return "refused-outstanding";
+  if (markerId === undefined)
+    return;
+  const delays = [1000, 2000, 4000];
+  let check;
+  for (let attempt = 0;attempt <= delays.length; attempt++) {
+    try {
+      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+    } catch (e) {
+      removeMarker();
+      log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+      return "refused-outstanding";
+    }
+    if (check.markerVisible)
+      break;
+    const delay = delays[attempt];
+    if (delay === undefined)
+      break;
+    log(`${d.context}: the dispatch marker on #${d.number} is not visible yet; waiting ${delay}ms and reading again`);
+    Bun.sleepSync(delay);
   }
-  if (!outstanding)
+  if (check === undefined || !check.markerVisible) {
+    const reposted = postDispatchMarker(d);
+    if (reposted !== undefined) {
+      try {
+        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+          removeMarker();
+          return;
+        }
+      } catch (e) {
+        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+      }
+      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+    }
+    log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
+    const body = dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? ""
+    });
+    const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
+    if (code !== 0) {
+      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+    }
+    return "unconfirmed";
+  }
+  if (!check.outstanding)
     return;
   removeMarker();
   log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
@@ -451,6 +498,10 @@ function main() {
   });
   if (outcome === "failed") {
     console.error(`::error::Could not dispatch ${agent} on ${type} #${number}.`);
+    process.exit(1);
+  }
+  if (outcome === "unconfirmed") {
+    console.error(`::error::Could not confirm the dispatch marker on ${type} #${number}, so ${agent} was not started; ` + "the thread may not have caught up with the marker. Retry shortly.");
     process.exit(1);
   }
 }
