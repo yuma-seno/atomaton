@@ -82,6 +82,23 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function ghRead(...args) {
+  let result = gh(...args);
+  for (const delay of [2000, 6000]) {
+    if (result.code === 0 || !looksTransient(result))
+      return result;
+    console.error(`::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`);
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+function looksTransient(result) {
+  const text = `${result.stderr} ${result.stdout}`;
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
+    return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -262,16 +279,19 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function readThread(repo, number, excludeCommentId) {
-  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
-  if (issue.code !== 0)
-    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
-  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+function readComments(repo, number, excludeCommentId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
   const excluded = String(excludeCommentId ?? "").trim();
   const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
-  return { body: issue.stdout ?? "", shaped: shapedThread(comments, readers) };
+  return shapedThread(comments, readers);
+}
+function readThread(repo, number, excludeCommentId) {
+  const issue = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
+  if (issue.code !== 0)
+    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
+  return { body: issue.stdout ?? "", shaped: readComments(repo, number, excludeCommentId) };
 }
 function latestRequestedAgentOn(repo, number, isKnownAgent, excludeCommentId) {
   const { body, shaped } = readThread(repo, number, excludeCommentId);
