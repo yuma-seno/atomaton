@@ -7347,6 +7347,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -7489,6 +7490,9 @@ function saysOpen(state) {
 var CLOSING_KEYWORDS = "close[sd]?|fix(?:e[sd])?|resolve[sd]?";
 function claimsToClose(body, issue) {
   return new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+#${issue}\\b`, "i").test(body);
+}
+function closesLine(issue) {
+  return `Closes #${issue}`;
 }
 function closingReferences(text) {
   const pattern = new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+((?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#\\d+)\\b`, "gi");
@@ -20029,13 +20033,13 @@ function injectParentIssue(body, reviewer) {
   if (PARENT_ISSUE_TAG.has(body)) {
     mcpFail("PR body already contains a parent-issue tag; refusing to add another");
   }
-  const closesLine = `Closes #${parent}
+  const closes = `${closesLine(Number(parent))}
 `;
   const originAgent = (process.env.AGENT ?? "").trim();
   const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}
 ` : "";
   return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}
-${originLine}${closesLine}${body}`;
+${originLine}${closes}${body}`;
 }
 function createPr(a) {
   const title = a.title;

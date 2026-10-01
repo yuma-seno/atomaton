@@ -139,6 +139,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -321,6 +322,11 @@ function hasAgentDefinition(name, defDir) {
 if (false)
   ;
 
+// src/entrypoints/machinery/lib/flags.ts
+function isTrue(value) {
+  return value === "true";
+}
+
 // src/entrypoints/machinery/validate_pull_request.ts
 var ref2 = defineScript(import.meta.url);
 function log(message) {
@@ -467,7 +473,7 @@ function main() {
     conclusion,
     reviewerAgent,
     engineerAgent,
-    askedByPerson: (values["asked-by-person"] ?? "") === "true",
+    askedByPerson: isTrue(values["asked-by-person"]),
     priorRetries,
     deliverableProblems
   });

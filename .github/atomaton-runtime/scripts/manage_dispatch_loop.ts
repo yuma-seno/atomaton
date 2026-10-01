@@ -11,6 +11,12 @@ function isHumanActor(type) {
   return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
 }
 
+// src/domain/work/limits.ts
+function resolveLimit(configured, fallback) {
+  const value = typeof configured === "number" ? configured : Number(String(configured ?? "").trim());
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
 // src/domain/work/dispatch-chain.ts
 var DEFAULT_HANDOFF_LIMIT = 5;
 function isPerson(comment) {
@@ -28,8 +34,7 @@ function handoffsSincePerson(comments, isAgentComment) {
   return handoffs;
 }
 function resolveHandoffLimit(configured) {
-  const value = typeof configured === "number" ? configured : Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_HANDOFF_LIMIT;
+  return resolveLimit(configured, DEFAULT_HANDOFF_LIMIT);
 }
 
 // src/domain/work/progress.ts
@@ -47,8 +52,7 @@ function noProgressLimitReached(runs, limit) {
   return runs >= limit;
 }
 function resolveNoProgressLimit(configured) {
-  const value = Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_NO_PROGRESS_LIMIT;
+  return resolveLimit(configured, DEFAULT_NO_PROGRESS_LIMIT);
 }
 function counted(n, noun) {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -222,6 +226,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);

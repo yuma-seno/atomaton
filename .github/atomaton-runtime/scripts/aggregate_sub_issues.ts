@@ -371,6 +371,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -885,9 +886,17 @@ function injectSummary(session, summary) {
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
+
+// src/domain/machinery/data-layout.ts
+var SESSIONS_TREE = "sessions/";
+function sessionDir(type, number) {
+  return `${SESSIONS_TREE}${type}-${number}`;
+}
+
+// src/entrypoints/machinery/lib/atomaton-data.ts
 var DATA_BRANCH = "atomaton-data";
 function sessionTargetPath(type, number, agent) {
-  return `sessions/${type}-${number}/${agent}.json`;
+  return `${sessionDir(type, number)}/${agent}.json`;
 }
 function restoreSession(targetPath) {
   if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0) {

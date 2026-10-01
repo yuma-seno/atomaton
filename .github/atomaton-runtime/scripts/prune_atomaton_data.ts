@@ -198,8 +198,11 @@ function getLabel(key) {
   return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
 }
 
+// src/domain/machinery/data-layout.ts
+var WORKSPACE_TREE = "workspace/";
+
 // src/domain/machinery/atomaton-data-pruning.ts
-var OWNED_TREES = ["workspace/"];
+var OWNED_TREES = [WORKSPACE_TREE];
 function issueNumberOf(path) {
   const tree = OWNED_TREES.find((prefix) => path.startsWith(prefix));
   if (tree === undefined)

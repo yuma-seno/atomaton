@@ -27,6 +27,12 @@ function gitRun(...args) {
   return run(["git", ...args]);
 }
 
+// src/domain/machinery/data-layout.ts
+var WORKSPACE_TREE = "workspace/";
+function workspaceDir(rootIssue) {
+  return `${WORKSPACE_TREE}issue-${rootIssue}`;
+}
+
 // src/entrypoints/machinery/lib/atomaton-data.ts
 var DATA_BRANCH = "atomaton-data";
 function gitIn(cwd, ...args) {
@@ -34,7 +40,7 @@ function gitIn(cwd, ...args) {
   return { code: proc.exitCode ?? 1, stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "" };
 }
 function workspaceTargetPrefix(rootIssue) {
-  return `workspace/issue-${rootIssue}`;
+  return workspaceDir(rootIssue);
 }
 function saveWorkspace(prefix, sourceDir, commitMessage) {
   if (!existsSync(sourceDir))

@@ -50,6 +50,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -258,6 +259,11 @@ function dispatchPrValidation(repo, prNumber, branch, options = {}) {
   ], log);
 }
 
+// src/entrypoints/machinery/lib/flags.ts
+function isTrue(value) {
+  return value === "true";
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -285,7 +291,7 @@ function main() {
     process.exit(2);
   }
   const dispatched = dispatchPrValidation(repo, Number(number), branch, {
-    askedByPerson: (values["asked-by-person"] ?? "") === "true"
+    askedByPerson: isTrue(values["asked-by-person"])
   });
   if (!dispatched) {
     console.error(`::error::could not dispatch validation for PR #${number}; no agent will run`);

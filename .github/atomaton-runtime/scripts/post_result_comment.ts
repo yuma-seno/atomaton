@@ -109,6 +109,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -347,6 +348,11 @@ function knownParticipants(repo, number) {
   return [...logins];
 }
 
+// src/entrypoints/machinery/lib/flags.ts
+function isTrue(value) {
+  return value === "true";
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -458,7 +464,7 @@ function endingHere(args) {
     succeeded: true,
     endedBecause: args.endedBecause ?? "",
     loopLimitReached: false,
-    chainContinues: args.chainContinues === "true",
+    chainContinues: isTrue(args.chainContinues),
     directive: args.directive ?? "",
     reported: args.reported === true
   });
@@ -481,7 +487,7 @@ function buildCommentBody(args) {
     lines.push("", escapedNotice, "");
   if (shouldMentionOnCompletion({
     ending,
-    chainContinues: args.chainContinues === "true",
+    chainContinues: isTrue(args.chainContinues),
     notify: args.notify,
     isSubIssue: args.isSubIssue ?? false,
     issueClosed: args.issueClosed ?? false
@@ -563,12 +569,12 @@ function main() {
     directive: values.directive,
     chainContinues: values["chain-continues"],
     endedBecause: values["ended-because"],
-    reported: values.reported === "true",
+    reported: isTrue(values.reported),
     runUrl: values["run-url"],
     repo: process.env.GITHUB_REPOSITORY ?? "",
     output: checked.text,
     escapedMentions: checked.escaped,
-    changed: values.changed === "true",
+    changed: isTrue(values.changed),
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
     usageLines: tokenUsageLines(values["logs-file"] ?? ""),
     ...subIssueState(values.number, values.type)
