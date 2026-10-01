@@ -40,7 +40,10 @@
  * because the comments are on a different object. That is the right answer rather
  * than a gap: opening a pull request IS progress. The point is to catch repetition
  * that goes nowhere, not to cap how long a legitimate piece of work may take.
- */import { isHumanActor } from "./actor.ts";
+ */
+import { isHumanActor } from "./actor.ts";
+import { resolveLimit } from "./limits.ts";
+
 /** The subset of a GitHub comment this decision reads. */
 export interface ChainComment {
   /** `user.type` from the comments API: `"User"`, `"Bot"`, `"Organization"`, ... */
@@ -116,13 +119,10 @@ export function handoffLimitReached(handoffs: number, limit: number): boolean {
 /**
  * A limit from configuration, or the default.
  *
- * Zero and negatives mean the default rather than "no chains allowed", matching
- * every other limit in this project: `infra::timeouts` in atoma made that the rule
- * for timeouts after three call sites took `0` literally, and a reader who learns
- * it in one place should not be surprised in another. A repository that wants no
- * automatic handoffs at all is `1`, which says so.
+ * The rule is `limits.ts`'s, shared with every other limit in the project: zero and
+ * negatives mean the default rather than "no chains allowed". A repository that wants
+ * no automatic handoffs at all is `1`, which says so.
  */
 export function resolveHandoffLimit(configured: unknown): number {
-  const value = typeof configured === "number" ? configured : Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_HANDOFF_LIMIT;
+  return resolveLimit(configured, DEFAULT_HANDOFF_LIMIT);
 }

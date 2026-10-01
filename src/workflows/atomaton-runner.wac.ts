@@ -59,6 +59,8 @@ import { ref as reportConfigFindingsRef } from "../entrypoints/machinery/report_
 import { ref as writeCredentialsFileRef } from "../entrypoints/machinery/write_credentials_file.ts";
 import { ref as watchForStopRef } from "../entrypoints/machinery/watch_for_stop.ts";
 import { AGENT_NAME_PATTERN } from "../domain/work/agent-name.ts";
+import { NODE_TYPES } from "../domain/work/node-type.ts";
+import { SESSION_MODES } from "../domain/work/comment-command.ts";
 import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // The shared reusable workflow every entry-point workflow (atomaton-entry,
@@ -439,10 +441,10 @@ const validateInputsStep = new TypedOutputsStep({
   reject agent "$AGENT" "Expected a bare lowercase agent name, e.g. 'engineer'."
 [[ "$NUMBER" =~ ^[0-9]+$ ]] ||
   reject number "$NUMBER" "Expected an issue or pull request number."
-[[ "$TYPE" == "issue" || "$TYPE" == "pr" ]] ||
-  reject type "$TYPE" "Expected 'issue' or 'pr'."
-[[ "$SESSION_MODE" == "continue" || "$SESSION_MODE" == "recover" ]] ||
-  reject session_mode "$SESSION_MODE" "Expected 'continue' or 'recover'."
+[[ "$TYPE" == "${NODE_TYPES.join('" || "$TYPE" == "')}" ]] ||
+  reject type "$TYPE" "Expected '${NODE_TYPES.join("' or '")}'."
+[[ "$SESSION_MODE" == "${SESSION_MODES.join('" || "$SESSION_MODE" == "')}" ]] ||
+  reject session_mode "$SESSION_MODE" "Expected '${SESSION_MODES.join("' or '")}'."
 # 'source' builds from a checkout; anything else is fetched as a release asset
 # and interpolated into a download URL, so keep it to a tag-shaped string.
 [[ "$ATOMA_VERSION" =~ ^(source|latest|v[0-9A-Za-z._-]+)$ ]] ||
@@ -1980,9 +1982,9 @@ export const atomaRunner = new Workflow("atomaton-runner", {
       inputs: {
         agent: { description: AGENT_INPUT_DESC, required: true, type: "string" },
         number: { description: NUMBER_INPUT_DESC, required: true, type: "string" },
-        type: { description: "Context type", required: true, type: "choice", options: ["issue", "pr"] },
+        type: { description: "Context type", required: true, type: "choice", options: [...NODE_TYPES] },
         notify: { description: NOTIFY_INPUT_DESC, required: false, type: "string", default: "" },
-        session_mode: { description: SESSION_MODE_INPUT_DESC, required: false, type: "choice", options: ["continue", "recover"], default: "continue" },
+        session_mode: { description: SESSION_MODE_INPUT_DESC, required: false, type: "choice", options: [...SESSION_MODES], default: "continue" },
         atoma_version: { description: ATOMA_VERSION_DESC, required: false, type: "string", default: ATOMA_DEFAULT_VERSION },
         reload_count: { description: RELOAD_COUNT_INPUT_DESC, required: false, type: "string", default: "0" },
         dispatched_by: { description: DISPATCHED_BY_INPUT_DESC, required: false, type: "string", default: "" },

@@ -27,6 +27,7 @@ import { parseArgs } from "node:util";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
 import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
 import { keptCommentIds } from "../../adapters/github/whose-turn.ts";
+import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface FetchEventsArgs {
@@ -396,7 +397,7 @@ function main(): void {
     },
   });
 
-  if ((values.type !== "issue" && values.type !== "pr") || !values.number || !values.out) {
+  if (!isNodeType(values.type) || !values.number || !values.out) {
     console.error("usage: fetch_events.ts --type issue|pr --number N [--max-diff-chars N] --out events.json");
     process.exit(2);
   }

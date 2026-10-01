@@ -41,6 +41,7 @@
 import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { endingOf, nextToDispatch, refusedByChainLimit, shouldReleaseGuard } from "../../domain/work/turn.ts";
+import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface DecideTurnEndingArgs {
@@ -61,10 +62,6 @@ export interface DecideTurnEndingArgs {
 }
 
 export const ref = defineScript<DecideTurnEndingArgs>(import.meta.url);
-
-function isTrue(v: string | undefined): boolean {
-  return v === "true";
-}
 
 function main(): void {
   const { values } = parseArgs({

@@ -22,6 +22,15 @@ import { LOGIN_PATTERN } from "../../domain/work/mention.ts";
 const TAG_PREFIX = `atomaton:`;
 
 export interface AtomatonTag<T> {
+  /**
+   * The tag's name with the prefix but no value or wrapper, e.g. `atomaton:dispatch`.
+   *
+   * A workflow `if:` that only asks whether a comment carries the tag cannot call
+   * `has` — it is a GitHub expression, not TypeScript — so it writes
+   * `contains(body, 'atomaton:dispatch')` by hand. That literal is the one place a
+   * rename of the key would not follow, so the workflow builds it from here.
+   */
+  readonly marker: string;
   /** Render this tag's HTML-comment form, ready to prepend/embed in a body or comment. */
   write(value: T): string;
   /** Extract this tag's value from anywhere in `text`, or undefined if absent. */
@@ -56,6 +65,7 @@ function makeTag<T>(key: string, valuePattern: string, parse: (raw: string) => T
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);

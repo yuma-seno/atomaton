@@ -89,6 +89,7 @@ import { readBranchRules } from "../../adapters/github/branch-rules.ts";
 import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
 import { latestRequestedAgentOn } from "../../adapters/github/whose-turn.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
+import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ValidatePullRequestArgs {
@@ -465,7 +466,7 @@ function main(): void {
     conclusion,
     reviewerAgent,
     engineerAgent,
-    askedByPerson: (values["asked-by-person"] ?? "") === "true",
+    askedByPerson: isTrue(values["asked-by-person"]),
     priorRetries,
     deliverableProblems,
   });

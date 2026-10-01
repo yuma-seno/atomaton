@@ -116,6 +116,19 @@ export function claimsToClose(body: string, issue: number): boolean {
 }
 
 /**
+ * The line that makes GitHub link a pull request to the issue it closes.
+ *
+ * The writer to [`closedIssueNumber`]'s reader. It was a template literal in
+ * `mcp/github.ts` and a literal in the tests, and the two had to agree with a regex
+ * in a third file for the link to work at all — the exact shape of the bug that
+ * function's comment describes. Spelling it once means the reader and the writer
+ * cannot drift.
+ */
+export function closesLine(issue: number): string {
+  return `Closes #${issue}`;
+}
+
+/**
  * The issue a pull request body claims to close, if it claims to close one.
  *
  * The same keywords as [`claimsToClose`], asked the other way round: that one is given

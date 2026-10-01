@@ -27,6 +27,7 @@ import { toolTroubleLine } from "../../domain/record/tool-trouble.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../domain/work/mention.ts";
 import { knownParticipants } from "../../adapters/github/participants.ts";
 import type { Session } from "../../domain/work/session.ts";
+import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface PostResultCommentArgs {
@@ -350,7 +351,7 @@ function endingHere(args: {
     succeeded: true,
     endedBecause: args.endedBecause ?? "",
     loopLimitReached: false,
-    chainContinues: args.chainContinues === "true",
+    chainContinues: isTrue(args.chainContinues),
     directive: args.directive ?? "",
     reported: args.reported === true,
   });
@@ -463,7 +464,7 @@ export function buildCommentBody(args: {
   if (
     shouldMentionOnCompletion({
       ending,
-      chainContinues: args.chainContinues === "true",
+      chainContinues: isTrue(args.chainContinues),
       notify: args.notify,
       isSubIssue: args.isSubIssue ?? false,
       issueClosed: args.issueClosed ?? false,
@@ -640,14 +641,14 @@ function main(): void {
     directive: values.directive,
     chainContinues: values["chain-continues"],
     endedBecause: values["ended-because"],
-    reported: values.reported === "true",
+    reported: isTrue(values.reported),
     runUrl: values["run-url"],
     // From the environment rather than a flag: every caller is a workflow step, and
     // one more argument to thread through is one more place to forget it.
     repo: process.env.GITHUB_REPOSITORY ?? "",
     output: checked.text,
     escapedMentions: checked.escaped,
-    changed: values.changed === "true",
+    changed: isTrue(values.changed),
     // The same boundary the salvage uses, for the same reason: a session accumulates
     // across runs, and a count taken from the top would put an earlier run's trouble
     // under this one's comment.
