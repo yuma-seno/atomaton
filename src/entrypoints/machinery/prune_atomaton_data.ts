@@ -30,7 +30,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ghPaginated, gitRun } from "../../adapters/github/gh.ts";
-import { getLabel } from "../../adapters/runner/config.ts";
+import { runInFlight } from "../../adapters/github/whose-turn.ts";
 import { prunablePaths, pruneCommitMessage } from "../../domain/machinery/atomaton-data-pruning.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -77,16 +77,21 @@ function issueStates(repo: string): Map<number, IssueState> {
  * working on right now can be closed and still be live -- an agent closes the issue and
  * the job keeps going, so deleting under it would make its next save resurrect what
  * this just removed.
+ *
+ * "Still running" comes from the thread, not the `atomaton/in-progress` label. The
+ * label is a cache written late: a run that died leaves it set, and a run that has been
+ * asked for but not yet started has none -- so the label would keep a dead issue's files
+ * forever and delete a live one's. `runInFlight` is the answer itself.
  */
-function isOver(states: Map<number, IssueState>, inProgressLabel: string, issue: number): boolean {
+function isOver(states: Map<number, IssueState>, isRunning: (issue: number) => boolean, issue: number): boolean {
   const found = states.get(issue);
   if (found === undefined) {
     log(`#${issue} could not be read; leaving its files alone`);
     return false;
   }
   if (found.state !== "closed") return false;
-  if ((found.labels ?? []).some((label) => label.name === inProgressLabel)) {
-    log(`#${issue} is closed but still carries ${inProgressLabel}; leaving its files alone`);
+  if (isRunning(issue)) {
+    log(`#${issue} is closed but a run is still in flight on it; leaving its files alone`);
     return false;
   }
   return true;
@@ -119,8 +124,17 @@ function main(): void {
 
   const paths = storedPaths();
   const states = issueStates(repo);
-  const inProgress = getLabel("in_progress");
-  const decision = prunablePaths(paths, (issue) => isOver(states, inProgress, issue));
+  // A failed thread read is not "nothing is running": the cautious answer is to leave
+  // the files alone, which is what `true` here means to `isOver`.
+  const isRunning = (issue: number): boolean => {
+    try {
+      return runInFlight(repo, issue);
+    } catch (e) {
+      log(`could not read the thread on #${issue}; leaving its files alone: ${(e as Error).message}`);
+      return true;
+    }
+  };
+  const decision = prunablePaths(paths, (issue) => isOver(states, isRunning, issue));
 
   log(`${paths.length} stored files, ${decision.paths.length} belong to closed issues`);
   if (decision.paths.length === 0) return;
