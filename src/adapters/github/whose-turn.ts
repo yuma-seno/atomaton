@@ -33,7 +33,7 @@
  * script's `ref`, and the machinery scripts are bundled one per file — so the shared
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
-import { gh } from "./gh.ts";
+import { gh, ghRead } from "./gh.ts";
 import { AGENT_TAG, ENDED_TAG } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
@@ -93,6 +93,28 @@ export function keptCommentIds(comments: readonly Comment[]): Set<number> {
 }
 
 /**
+ * A node's shaped comments, read from GitHub.
+ *
+ * The comments alone, without the body. `runInFlight` needs only these, and it is
+ * called once per node in a tree walk — so reading the body too would double the
+ * requests for an answer the body cannot change. The body is not a comment and cannot
+ * move the turn; see `domain/work/whose-turn.ts`.
+ *
+ * Throws when the read fails, for the same reason `readThread` does.
+ */
+function readComments(repo: string, number: string | number, excludeCommentId?: string | number): ShapedThread {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+
+  const excluded = String(excludeCommentId ?? "").trim();
+  const comments: ThreadEntry[] = (JSON.parse(listed.stdout || "[]") as Comment[])
+    .filter((comment) => String(comment.id) !== excluded)
+    .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+
+  return shapedThread(comments, readers);
+}
+
+/**
  * A node's body and its shaped comments, read from GitHub.
  *
  * The one read every question below starts from. `excludeCommentId` drops a comment
@@ -104,18 +126,10 @@ export function keptCommentIds(comments: readonly Comment[]): Set<number> {
  * the one that lets work through.
  */
 function readThread(repo: string, number: string | number, excludeCommentId?: string | number): { body: string; shaped: ShapedThread } {
-  const issue = gh("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
+  const issue = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
   if (issue.code !== 0) throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
 
-  const listed = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
-  if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-
-  const excluded = String(excludeCommentId ?? "").trim();
-  const comments: ThreadEntry[] = (JSON.parse(listed.stdout || "[]") as Comment[])
-    .filter((comment) => String(comment.id) !== excluded)
-    .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
-
-  return { body: issue.stdout ?? "", shaped: shapedThread(comments, readers) };
+  return { body: issue.stdout ?? "", shaped: readComments(repo, number, excludeCommentId) };
 }
 
 /**
@@ -133,6 +147,27 @@ function readThread(repo: string, number: string | number, excludeCommentId?: st
  */
 export function commentWouldBeRemoved(repo: string, number: string | number, commentId: string | number): boolean {
   return whoseTurn(readThread(repo, number, commentId).shaped.events) === "agent";
+}
+
+/**
+ * Whether a run is in flight on a node, read from its thread.
+ *
+ * The `atomaton/in-progress` label is a cache of this answer, written late: the runner
+ * sets it after the job starts and clears it when the job ends, so between a person's
+ * command and the runner starting it is absent, and a run that died leaves it set. The
+ * thread is the answer itself, written when the turn changes -- the same argument
+ * `guard_comment_during_run.ts` makes for reading the thread rather than the label.
+ *
+ * The ball is with an agent exactly when the last turn-changing event was a request or
+ * a hand-off, which is `whoseTurn`'s rule. A request that no run has taken up yet still
+ * counts: a run is coming, and a stop should reach it and a resume should not start a
+ * second one.
+ *
+ * Throws when the thread cannot be read. A caller deciding whether to stop or resume
+ * work must not read a failed read as "nothing is running".
+ */
+export function runInFlight(repo: string, number: string | number): boolean {
+  return whoseTurn(readComments(repo, number).events) === "agent";
 }
 
 /**

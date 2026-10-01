@@ -12,7 +12,7 @@
  * Three GitHub calls that exist only to feed one pure function do not belong in a
  * server's tool registry.
  */
-import { gh } from "./gh.ts";
+import { gh, ghRead } from "./gh.ts";
 import { readBranchRules } from "./branch-rules.ts";
 import { getGovernedPaths, getMergeGates, getMergePolicy } from "../../adapters/runner/config.ts";
 import { governedPathsIn, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
@@ -200,7 +200,11 @@ export function gatherMergeSignals(
 
   /** Like `json`, but a failure is an absent answer rather than the end of the call. */
   const tryJson = <T>(...args: string[]): T | null => {
-    const { code, stdout, stderr } = gh(...args);
+    // `ghRead`, not `gh`: a transient failure here used to read as "no answer", and
+    // `mergeStateStatus` missing reads as `UNKNOWN`, which blocks the merge. A blip
+    // therefore refused a merge that was fine. The retry outlasts the blip; a real
+    // failure still comes back as null and still blocks.
+    const { code, stdout, stderr } = ghRead(...args);
     if (code) {
       log(`WARN gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
       return null;
