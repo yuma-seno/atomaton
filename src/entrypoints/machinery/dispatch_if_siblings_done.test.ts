@@ -38,7 +38,12 @@ describe("dispatch_if_siblings_done.ts", () => {
           cwd: configDir,
           rules: [
             subIssues(),
-            { match: ["api", "comments"], stdout: JSON.stringify([]) },
+            // The dispatch marker and the thread read that follows. The read must show
+            // the marker (555) -- the freshness probe. The POST rule comes first: it
+            // carries `--jq .id`, which the aggregation read's `--jq` also matches.
+            { match: ["api", "issues/5/comments", "POST"], stdout: "555" },
+            { match: ["api", "issues/5/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
+            { match: ["api", "comments", "--jq"], stdout: JSON.stringify([]) },
             { match: ["issue", "comment"] },
             { match: ["workflow", "run"] },
             // The parent's state. `dispatchRunner` refuses to start an agent on
@@ -65,7 +70,7 @@ describe("dispatch_if_siblings_done.ts", () => {
           cwd: configDir,
           rules: [
             subIssues(),
-            { match: ["api", "comments"], stdout: JSON.stringify(["<!-- atomaton:aggregated=9 -->", "Atomaton: All sub-tasks completed."]) },
+            { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["<!-- atomaton:aggregated=9 -->", "Atomaton: All sub-tasks completed."]) },
           ],
         },
       );

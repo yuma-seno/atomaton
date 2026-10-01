@@ -215,3 +215,33 @@ export function dispatchRefusedNotice(refused: RefusedDispatch): string {
       : recoveryAdvice(state, number, `/${agent}`),
   ].join("\n");
 }
+
+/**
+ * The notice posted when a dispatch marker never became visible in the thread.
+ *
+ * A different failure from a closed target, and it says so: nothing is wrong with the
+ * issue, and the person did not do anything wrong. What happened is that GitHub did not
+ * show the machinery its own write, so it could not tell whether another run had already
+ * been asked for — and starting one anyway risks two runs on one node.
+ *
+ * The advice is to retry, because the condition is transient by nature: the thread
+ * catches up, and the next attempt sees the marker. It names the command so the person
+ * does not have to work out how to start the run again.
+ */
+export function dispatchUnconfirmedNotice(unconfirmed: {
+  agent: string;
+  number: number;
+  context: string;
+  notify: string;
+}): string {
+  const { agent, number, context, notify } = unconfirmed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because the dispatch could not be confirmed.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "",
+    "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue.",
+  ].join("\n");
+}

@@ -10,14 +10,16 @@ const closed = { match: ["api", "issues"], stdout: JSON.stringify({ state: "clos
  * The dispatch marker, and the thread read that follows it.
  *
  * `dispatchRunner` posts the marker first so the ordering check has something to be
- * ordered against, then reads the comments with the marker excluded. An empty thread
- * means no request came first, so the dispatch proceeds.
+ * ordered against, then reads the comments. The read must SHOW the marker (id 555):
+ * that is the freshness probe -- if the dispatch's own write is visible, the read has
+ * caught up, and the ordering check can be trusted. A read that omits it is retried
+ * with backoff and then refused as `unconfirmed`.
  *
  * Listed BEFORE the state rule, because the fake takes the first match and the state
  * rule's `["api", "issues"]` is a substring of these paths too.
  */
 const marker = { match: ["api", "issues/12/comments", "POST"], stdout: "555" };
-const noRequest = { match: ["api", "issues/12/comments"], stdout: "[]" };
+const noRequest = { match: ["api", "issues/12/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=reviewer -->" }]) };
 const openTarget = [marker, noRequest, open];
 
 function run(args: string[], rules: { match: string[]; stdout?: string; code?: number }[]) {
@@ -60,7 +62,7 @@ describe("dispatch_agent.ts", () => {
   test("a request already outstanding is refused, and the marker is removed", () => {
     const r = run(HANDOFF, [
       marker,
-      { match: ["api", "issues/12/comments"], stdout: JSON.stringify([{ id: 1, body: "/engineer" }]) },
+      { match: ["api", "issues/12/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=reviewer -->" }, { id: 1, body: "/engineer" }]) },
       open,
       { match: ["api", "DELETE"] },
       { match: ["workflow", "run"] },

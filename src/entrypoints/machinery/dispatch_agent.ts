@@ -127,6 +127,13 @@ function main(): void {
     console.error(`::error::Could not dispatch ${agent} on ${type} #${number}.`);
     process.exit(1);
   }
+  if (outcome === "unconfirmed") {
+    console.error(
+      `::error::Could not confirm the dispatch marker on ${type} #${number}, so ${agent} was not started; ` +
+        "the thread may not have caught up with the marker. Retry shortly.",
+    );
+    process.exit(1);
+  }
 }
 
 if (import.meta.main) main();

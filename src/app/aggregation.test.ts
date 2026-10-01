@@ -66,9 +66,25 @@ const subIssues = (...numbers: number[]): FakeGhRule => ({
 });
 
 const NO_SIBLINGS: FakeGhRule = subIssues();
-// The marker read is `gh api .../comments --paginate --jq '.[].body'`, so the fake
-// answers with a JSON array of bodies rather than the `gh issue view` shape.
-const NO_MARKER: FakeGhRule = { match: ["api", "comments"], stdout: JSON.stringify(["some unrelated comment"]) };
+
+// The dispatch marker, posted by `dispatchRunner` before its ordering check, and the
+// thread read that follows. The read must SHOW the marker (id 555): that is the
+// freshness probe, and a read that omits it is retried and then refused as
+// `unconfirmed`.
+//
+// The POST rule comes FIRST, before `NO_MARKER` below. The post carries `--jq .id`,
+// which `NO_MARKER`'s `["api", "comments", "--jq"]` also matches -- so with the other
+// order the post returned the marker read's body and the probe never saw its id.
+const DISPATCH_MARKER: FakeGhRule[] = [
+  { match: ["api", "issues/5/comments", "POST"], stdout: "555" },
+  { match: ["api", "issues/5/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
+];
+
+// The aggregation marker read is `gh api .../comments --paginate --jq '.[].body'`, so
+// the fake answers with a JSON array of bodies rather than the `gh issue view` shape.
+// The `--jq` is what tells this apart from the dispatch thread read above, which asks
+// for the same path without it.
+const NO_MARKER: FakeGhRule = { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["some unrelated comment"]) };
 
 // The fake `gh` exits 1 for any call no rule matches, which is the right
 // default -- a test should not accidentally succeed through a call it never
@@ -85,7 +101,7 @@ const PARENT_IS_OPEN: FakeGhRule = { match: ["api", "issues"], stdout: JSON.stri
 
 describe("aggregation.ts dispatch gate", () => {
   test("dispatches once when the siblings are done and nobody claimed it", () => {
-    const { kind, ghCalls } = runGate([NO_SIBLINGS, NO_MARKER, MARKER_WRITES, DISPATCH_WORKS, PARENT_IS_OPEN]);
+    const { kind, ghCalls } = runGate([NO_SIBLINGS, ...DISPATCH_MARKER, NO_MARKER, MARKER_WRITES, DISPATCH_WORKS, PARENT_IS_OPEN]);
     expect(kind).toBe("dispatched");
     expect(wroteMarker(ghCalls)).toBe(true);
     expect(dispatched(ghCalls)).toBe(true);
@@ -102,6 +118,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("a closed parent is not dispatched onto, and says so as its own answer", () => {
     const { kind, ghCalls } = runGate([
       NO_SIBLINGS,
+      ...DISPATCH_MARKER,
       NO_MARKER,
       MARKER_WRITES,
       DISPATCH_WORKS,
@@ -126,7 +143,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("another caller's marker makes this one a no-op", () => {
     const { kind, ghCalls } = runGate([
       NO_SIBLINGS,
-      { match: ["api", "comments"], stdout: JSON.stringify(["<!-- atomaton:aggregated=10 -->"]) },
+      { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["<!-- atomaton:aggregated=10 -->"]) },
     ]);
     expect(kind).toBe("already-aggregated");
     expect(dispatched(ghCalls)).toBe(false);
@@ -153,7 +170,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("an unreadable comment list stops the dispatch too", () => {
     const { kind, ghCalls } = runGate([
       NO_SIBLINGS,
-      { match: ["api", "comments"], code: 1, stdout: "not found" },
+      { match: ["api", "comments", "--jq"], code: 1, stdout: "not found" },
     ]);
     expect(kind).toBe("undetermined");
     expect(wroteMarker(ghCalls)).toBe(false);
