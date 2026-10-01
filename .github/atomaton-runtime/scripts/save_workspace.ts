@@ -28,6 +28,7 @@ function gitRun(...args) {
 }
 
 // src/entrypoints/machinery/lib/atomaton-data.ts
+var DATA_BRANCH = "atomaton-data";
 function gitIn(cwd, ...args) {
   const proc = Bun.spawnSync({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
   return { code: proc.exitCode ?? 1, stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "" };
@@ -38,20 +39,20 @@ function workspaceTargetPrefix(rootIssue) {
 function saveWorkspace(prefix, sourceDir, commitMessage) {
   if (!existsSync(sourceDir))
     return true;
-  if (gitRun("ls-remote", "--exit-code", "origin", "atomaton-data").code !== 0) {
-    console.error("[atomaton-data] atomaton-data does not exist yet; skipping workspace save");
+  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0) {
+    console.error(`[${DATA_BRANCH}] ${DATA_BRANCH} does not exist yet; skipping workspace save`);
     return false;
   }
-  gitRun("fetch", "origin", "atomaton-data");
+  gitRun("fetch", "origin", DATA_BRANCH);
   const worktreeDir = mkdtempSync(join(tmpdir(), "atomaton-data-ws-"));
-  gitRun("worktree", "add", worktreeDir, "origin/atomaton-data");
+  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
   let saved = false;
   try {
     gitIn(worktreeDir, "config", "user.email", "action@github.com");
     gitIn(worktreeDir, "config", "user.name", "GitHub Actions");
     for (let attempt = 1;attempt <= 5; attempt++) {
-      gitIn(worktreeDir, "fetch", "origin", "atomaton-data");
-      gitIn(worktreeDir, "reset", "--hard", "origin/atomaton-data");
+      gitIn(worktreeDir, "fetch", "origin", DATA_BRANCH);
+      gitIn(worktreeDir, "reset", "--hard", `origin/${DATA_BRANCH}`);
       const target = join(worktreeDir, prefix);
       rmSync(target, { recursive: true, force: true });
       mkdirSync(dirname(target), { recursive: true });
@@ -62,11 +63,11 @@ function saveWorkspace(prefix, sourceDir, commitMessage) {
         break;
       }
       gitIn(worktreeDir, "commit", "-m", commitMessage);
-      if (gitIn(worktreeDir, "push", "origin", "HEAD:atomaton-data").code === 0) {
+      if (gitIn(worktreeDir, "push", "origin", `HEAD:${DATA_BRANCH}`).code === 0) {
         saved = true;
         break;
       }
-      console.error(`[atomaton-data] workspace push attempt ${attempt} failed (concurrent push) -- retrying`);
+      console.error(`[${DATA_BRANCH}] workspace push attempt ${attempt} failed (concurrent push) -- retrying`);
       Bun.sleepSync(attempt * 2000);
     }
   } finally {

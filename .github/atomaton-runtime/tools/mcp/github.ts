@@ -7298,6 +7298,47 @@ function getWorkflowName(kind, fallback = "") {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+var CODE = /```[\s\S]*?```|`[^`\n]*`/g;
+function mentionsSomeone(text) {
+  return new RegExp(`(^|[^\\w@/-])@${LOGIN_PATTERN}\\b(?!\\/)`).test(text);
+}
+function mentionPrefix(login) {
+  const name = (login ?? "").trim();
+  return name ? `@${name} ` : "";
+}
+function escapeUnknownMentions(text, known) {
+  const allowed = new Set([...known].map((login) => login.trim().toLowerCase()).filter(Boolean));
+  const escaped = [];
+  const transform = (segment) => segment.replace(MENTION, (whole, before, login) => {
+    if (allowed.has(login.toLowerCase()))
+      return whole;
+    if (!escaped.includes(login))
+      escaped.push(login);
+    return `${before}\`@${login}\``;
+  });
+  let out = "";
+  let last = 0;
+  CODE.lastIndex = 0;
+  for (const match of text.matchAll(CODE)) {
+    const at = match.index ?? 0;
+    out += transform(text.slice(last, at));
+    out += match[0];
+    last = at + match[0].length;
+  }
+  out += transform(text.slice(last));
+  return { text: out, escaped };
+}
+function escapedMentionNotice(escaped) {
+  if (escaped.length === 0)
+    return;
+  const names = escaped.map((login) => `\`@${login}\``).join(", ");
+  return `> [!NOTE]
+` + `> ${names} ${escaped.length === 1 ? "was" : "were"} written as ${escaped.length === 1 ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${escaped.length === 1 ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
+}
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -7324,7 +7365,7 @@ function stringTag(key, valuePattern) {
 var STOP_TAG = stringTag("stop", "requested");
 var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -7467,11 +7508,11 @@ function closingKeywordRefusal(found, what) {
   const quoted = found.map((f) => `"${f}"`).join(", ");
   return `This ${what} contains ${quoted}, which GitHub acts on: merging would close ` + "whatever issue that names, without going through the path that cleans up labels and " + "tells a parent its child is done. Remove it and try again. To close an issue, call " + "github__close_issue; to link this work to the issue it belongs to, do nothing -- " + "that link is added for you.";
 }
-var CODE = /```[\s\S]*?```|`[^`\n]*`/g;
+var CODE2 = /```[\s\S]*?```|`[^`\n]*`/g;
 function outsideCode(text) {
   const out = [];
   let last = 0;
-  for (const match of text.matchAll(CODE)) {
+  for (const match of text.matchAll(CODE2)) {
     const at = match.index ?? 0;
     out.push(text.slice(last, at));
     last = at + match[0].length;
@@ -7759,14 +7800,14 @@ function recoveryAdvice(state, number, command) {
   }
   return `Reopen #${number} and comment \`${command}\` to run it.`;
 }
-function mentionPrefix(logins) {
+function mentionList(logins) {
   return logins.length > 0 ? `${logins.map((l) => `@${l}`).join(" ")} ` : "";
 }
 function dispatchRefusedNotice(refused) {
   const { agent, number, context, state, notify } = refused;
   const why = !state.known ? `the state of #${number} could not be read (${state.why})` : `#${number} is closed`;
   return [
-    `${mentionPrefix(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
     "",
     `What was about to happen: ${context}.`,
     "",
@@ -8041,43 +8082,10 @@ function knownParticipants(repo, number) {
   return [...logins];
 }
 
-// src/domain/work/mention.ts
-var MENTION = /(^|[^\w@/-])@([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\b(?!\/)/g;
-var CODE2 = /```[\s\S]*?```|`[^`\n]*`/g;
-function escapeUnknownMentions(text, known) {
-  const allowed = new Set([...known].map((login) => login.trim().toLowerCase()).filter(Boolean));
-  const escaped = [];
-  const transform = (segment) => segment.replace(MENTION, (whole, before, login) => {
-    if (allowed.has(login.toLowerCase()))
-      return whole;
-    if (!escaped.includes(login))
-      escaped.push(login);
-    return `${before}\`@${login}\``;
-  });
-  let out = "";
-  let last = 0;
-  CODE2.lastIndex = 0;
-  for (const match of text.matchAll(CODE2)) {
-    const at = match.index ?? 0;
-    out += transform(text.slice(last, at));
-    out += match[0];
-    last = at + match[0].length;
-  }
-  out += transform(text.slice(last));
-  return { text: out, escaped };
-}
-function escapedMentionNotice(escaped) {
-  if (escaped.length === 0)
-    return;
-  const names = escaped.map((login) => `\`@${login}\``).join(", ");
-  return `> [!NOTE]
-` + `> ${names} ${escaped.length === 1 ? "was" : "were"} written as ${escaped.length === 1 ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${escaped.length === 1 ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
-}
-
 // src/domain/work/close-request.ts
 var CLOSE_REQUEST_LINE = "**This issue was opened by a person, so please close it yourself if you agree that the work below is done.** " + "Atomaton leaves that to you; comment with further instructions instead if it is not done.";
 function closeRequestComment(request) {
-  const mention = request.notify ? `@${request.notify} ` : "";
+  const mention = mentionPrefix(request.notify);
   const body = (request.body ?? "").trim();
   const head = `${mention}${CLOSE_REQUEST_LINE}`;
   return body ? `${head}
@@ -19119,13 +19127,13 @@ function decidePostMergeHandoff(signals) {
 function isAttended(attendance) {
   if (attendance.next)
     return true;
-  return mentionsSomeone(attendance.body);
+  return mentionsSomeone2(attendance.body);
 }
-function mentionsSomeone(text) {
-  return /(^|[^\w@/-])@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\b(?!\/)/.test(text);
+function mentionsSomeone2(text) {
+  return mentionsSomeone(text);
 }
 function unattendedNotice(notify, agent) {
-  const mention = notify.trim() ? `@${notify.trim()} ` : "";
+  const mention = mentionPrefix(notify);
   return `${mention}This pull request was opened by \`${agent}\` with no reviewer named and nobody mentioned, ` + `so nothing is scheduled to look at it. CI still runs and its result stands. ` + `Comment \`/reviewer\` to have it reviewed, or take it from here.`;
 }
 
@@ -20281,8 +20289,8 @@ function listPrReviewComments(a) {
   return JSON.stringify({ total: projected.length, omitted, comments: kept });
 }
 function isIssueClosed(number) {
-  const d = ghJsonOrThrow("issue", "view", String(number), "--repo", REPO, "--json", "state");
-  return (d?.state ?? "").toUpperCase() === "CLOSED";
+  const state = readTargetState(number, REPO);
+  return state.known && state.state !== "open";
 }
 function checkMergeReadiness(a) {
   const num = prContextNumber(a);

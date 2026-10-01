@@ -359,6 +359,10 @@ function readTargetState(number, repo) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -385,7 +389,7 @@ function stringTag(key, valuePattern) {
 var STOP_TAG = stringTag("stop", "requested");
 var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -511,14 +515,14 @@ function recoveryAdvice(state, number, command) {
   }
   return `Reopen #${number} and comment \`${command}\` to run it.`;
 }
-function mentionPrefix(logins) {
+function mentionList(logins) {
   return logins.length > 0 ? `${logins.map((l) => `@${l}`).join(" ")} ` : "";
 }
 function dispatchRefusedNotice(refused) {
   const { agent, number, context, state, notify } = refused;
   const why = !state.known ? `the state of #${number} could not be read (${state.why})` : `#${number} is closed`;
   return [
-    `${mentionPrefix(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
     "",
     `What was about to happen: ${context}.`,
     "",
@@ -881,17 +885,18 @@ function injectSummary(session, summary) {
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
+var DATA_BRANCH = "atomaton-data";
 function sessionTargetPath(type, number, agent) {
   return `sessions/${type}-${number}/${agent}.json`;
 }
 function restoreSession(targetPath) {
-  if (gitRun("fetch", "origin", "atomaton-data", "--depth=1").code !== 0) {
+  if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0) {
     return;
   }
-  if (gitRun("cat-file", "-e", `origin/atomaton-data:${targetPath}`).code !== 0) {
+  if (gitRun("cat-file", "-e", `origin/${DATA_BRANCH}:${targetPath}`).code !== 0) {
     return;
   }
-  const shown = gitRun("show", `origin/atomaton-data:${targetPath}`);
+  const shown = gitRun("show", `origin/${DATA_BRANCH}:${targetPath}`);
   return shown.code === 0 ? shown.stdout : undefined;
 }
 function gitIn(cwd, ...args) {
@@ -899,22 +904,22 @@ function gitIn(cwd, ...args) {
   return { code: proc.exitCode ?? 1, stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "" };
 }
 function saveSession(targetPath, content, commitMessage) {
-  if (gitRun("ls-remote", "--exit-code", "origin", "atomaton-data").code !== 0) {
+  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0) {
     gitRun("config", "user.email", "action@github.com");
     gitRun("config", "user.name", "GitHub Actions");
-    const commit = gitRun("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "init: atomaton-data session store").stdout;
-    gitRun("push", "origin", `${commit}:refs/heads/atomaton-data`);
+    const commit = gitRun("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", `init: ${DATA_BRANCH} session store`).stdout;
+    gitRun("push", "origin", `${commit}:refs/heads/${DATA_BRANCH}`);
   }
-  gitRun("fetch", "origin", "atomaton-data");
+  gitRun("fetch", "origin", DATA_BRANCH);
   const worktreeDir = mkdtempSync(join(tmpdir(), "atomaton-data-wt-"));
-  gitRun("worktree", "add", worktreeDir, "origin/atomaton-data");
+  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
   let saved = false;
   try {
     gitIn(worktreeDir, "config", "user.email", "action@github.com");
     gitIn(worktreeDir, "config", "user.name", "GitHub Actions");
     for (let attempt = 1;attempt <= 5; attempt++) {
-      gitIn(worktreeDir, "fetch", "origin", "atomaton-data");
-      gitIn(worktreeDir, "reset", "--hard", "origin/atomaton-data");
+      gitIn(worktreeDir, "fetch", "origin", DATA_BRANCH);
+      gitIn(worktreeDir, "reset", "--hard", `origin/${DATA_BRANCH}`);
       const fullTarget = join(worktreeDir, targetPath);
       mkdirSync(dirname(fullTarget), { recursive: true });
       writeFileSync(fullTarget, content);
@@ -924,7 +929,7 @@ function saveSession(targetPath, content, commitMessage) {
         break;
       }
       gitIn(worktreeDir, "commit", "-m", commitMessage);
-      if (gitIn(worktreeDir, "push", "origin", "HEAD:atomaton-data").code === 0) {
+      if (gitIn(worktreeDir, "push", "origin", `HEAD:${DATA_BRANCH}`).code === 0) {
         saved = true;
         break;
       }

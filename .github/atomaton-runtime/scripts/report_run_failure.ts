@@ -52,6 +52,14 @@ function redact(text, literals = []) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+function mentionPrefix(login) {
+  const name = (login ?? "").trim();
+  return name ? `@${name} ` : "";
+}
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -78,7 +86,7 @@ function stringTag(key, valuePattern) {
 var STOP_TAG = stringTag("stop", "requested");
 var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -122,7 +130,7 @@ function logExcerpt(text) {
 `).trim();
 }
 function failureNotice(agent, notify, runUrl, excerpt) {
-  const mention = notify ? `@${notify} ` : "";
+  const mention = mentionPrefix(notify);
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     `${mention}Atomaton: \`${agent}\` did not finish \u2014 the run failed.`,
