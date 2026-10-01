@@ -227,9 +227,14 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   // decide they are the first — which is the one thing the marker exists to
   // prevent. Not finding the marker and not being able to look are different
   // answers, and only one of them means "go ahead".
+  //
+  // `--paginate`, because `gh issue view --json comments` returns a bounded page: on
+  // a parent with a long thread the marker written by the first racer is not in the
+  // page the second racer reads, so the second concludes it is first and dispatches
+  // again. A missed aggregation is recoverable by the other racer; a double dispatch
+  // is not, which is why this read has to see the whole thread.
   const { code: commentsCode, stdout: commentsOut } = gh(
-    "issue", "view", String(opts.parent), "--repo", opts.repo,
-    "--json", "comments", "--jq", ".comments[].body",
+    "api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body",
   );
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;

@@ -66,7 +66,9 @@ const subIssues = (...numbers: number[]): FakeGhRule => ({
 });
 
 const NO_SIBLINGS: FakeGhRule = subIssues();
-const NO_MARKER: FakeGhRule = { match: ["issue", "view"], stdout: "some unrelated comment" };
+// The marker read is `gh api .../comments --paginate --jq '.[].body'`, so the fake
+// answers with a JSON array of bodies rather than the `gh issue view` shape.
+const NO_MARKER: FakeGhRule = { match: ["api", "comments"], stdout: JSON.stringify(["some unrelated comment"]) };
 
 // The fake `gh` exits 1 for any call no rule matches, which is the right
 // default -- a test should not accidentally succeed through a call it never
@@ -124,7 +126,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("another caller's marker makes this one a no-op", () => {
     const { kind, ghCalls } = runGate([
       NO_SIBLINGS,
-      { match: ["issue", "view"], stdout: "<!-- atomaton:aggregated=10 -->" },
+      { match: ["api", "comments"], stdout: JSON.stringify(["<!-- atomaton:aggregated=10 -->"]) },
     ]);
     expect(kind).toBe("already-aggregated");
     expect(dispatched(ghCalls)).toBe(false);
@@ -151,7 +153,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("an unreadable comment list stops the dispatch too", () => {
     const { kind, ghCalls } = runGate([
       NO_SIBLINGS,
-      { match: ["issue", "view"], code: 1, stdout: "not found" },
+      { match: ["api", "comments"], code: 1, stdout: "not found" },
     ]);
     expect(kind).toBe("undetermined");
     expect(wroteMarker(ghCalls)).toBe(false);

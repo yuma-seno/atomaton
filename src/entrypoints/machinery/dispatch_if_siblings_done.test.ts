@@ -38,7 +38,7 @@ describe("dispatch_if_siblings_done.ts", () => {
           cwd: configDir,
           rules: [
             subIssues(),
-            { match: ["issue", "view", "comments"], stdout: "" },
+            { match: ["api", "comments"], stdout: JSON.stringify([]) },
             { match: ["issue", "comment"] },
             { match: ["workflow", "run"] },
             // The parent's state. `dispatchRunner` refuses to start an agent on
@@ -65,7 +65,7 @@ describe("dispatch_if_siblings_done.ts", () => {
           cwd: configDir,
           rules: [
             subIssues(),
-            { match: ["issue", "view", "comments"], stdout: "<!-- atomaton:aggregated=9 -->\nAtomaton: All sub-tasks completed." },
+            { match: ["api", "comments"], stdout: JSON.stringify(["<!-- atomaton:aggregated=9 -->", "Atomaton: All sub-tasks completed."]) },
           ],
         },
       );

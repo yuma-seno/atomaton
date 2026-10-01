@@ -267,7 +267,11 @@ const commandErrorStep = new TypedOutputsStep({
     NUMBER: targetStep.outputs.number,
     ERROR: parseCommandStep.outputs.error,
   },
-  run: `gh issue comment "\${NUMBER}" --body "Atomaton command error: \${ERROR}"
+  // Tagged `exclude`: this is addressed to the person who typed the command, not to
+  // the model. An untagged copy joins the next run's context as something the agent
+  // was told, when what it actually says is that somebody's command was malformed.
+  run: `gh issue comment "\${NUMBER}" --body "${LLM_CONTEXT_TAG.write("exclude")}
+Atomaton command error: \${ERROR}"
 `,
 });
 

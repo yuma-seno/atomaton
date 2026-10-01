@@ -36,6 +36,7 @@
 import { gh } from "./gh.ts";
 import { AGENT_TAG, ENDED_TAG } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
+import { isHumanActor } from "../../domain/work/actor.ts";
 import {
   latestRequestedAgent,
   requestOutstanding,
@@ -69,7 +70,26 @@ interface Comment {
 
 /** Whether a comment was written by a person rather than the machinery. */
 function isHumanComment(comment: Comment): boolean {
-  return comment.user?.type !== "Bot";
+  return isHumanActor(comment.user?.type);
+}
+
+/**
+ * Which of a list of comments survive the guard's shaping, by id.
+ *
+ * For a caller that has already fetched the comments and wants to drop the ones the
+ * guard is removing — `fetch_events.ts`, which builds the model's context from a
+ * comment list it read itself. It does not re-read the thread; it shapes what it has,
+ * with the same rule every other reader uses.
+ *
+ * The comments must be oldest first, which is the order the API returns them in.
+ */
+export function keptCommentIds(comments: readonly Comment[]): Set<number> {
+  const entries = comments.map((comment) => ({
+    id: comment.id,
+    body: comment.body ?? "",
+    isHuman: isHumanComment(comment),
+  }));
+  return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
 }
 
 /**

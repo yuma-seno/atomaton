@@ -85,10 +85,13 @@ export interface ThreadEntry {
  * Both halves come out of one walk, because the walk needs the events to decide what
  * to remove and the callers need them to answer their questions. Returning only the
  * comments would make every caller fold the events a second time to ask anything.
+ *
+ * Generic in the entry, so a caller that carries an id alongside the body gets its own
+ * entries back rather than having to match them up again.
  */
-export interface ShapedThread {
+export interface ShapedThread<T extends ThreadEntry = ThreadEntry> {
   /** The comments that survive the shaping, oldest first. */
-  comments: ThreadEntry[];
+  comments: T[];
   /** The turn-changing events those comments are, oldest first. */
   events: TurnEvent[];
 }
@@ -191,8 +194,8 @@ export function requestOutstanding(events: readonly TurnEvent[]): boolean {
  * `latestRequestedAgent` — but it does not move the turn, which is why a person's
  * later comment wins over it.
  */
-export function shapedThread(comments: readonly ThreadEntry[], readers: TurnReaders): ShapedThread {
-  const kept: ThreadEntry[] = [];
+export function shapedThread<T extends ThreadEntry>(comments: readonly T[], readers: TurnReaders): ShapedThread<T> {
+  const kept: T[] = [];
   const events: TurnEvent[] = [];
   for (const entry of comments) {
     if (entry.isHuman && whoseTurn(events) === "agent") continue;
