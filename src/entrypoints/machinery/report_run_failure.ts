@@ -40,6 +40,7 @@ import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { redact } from "../../shared/redaction.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { mentionPrefix } from "../../domain/work/mention.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ReportRunFailureArgs {
@@ -79,7 +80,7 @@ export function failureNotice(
   runUrl: string,
   excerpt: string,
 ): string {
-  const mention = notify ? `@${notify} ` : "";
+  const mention = mentionPrefix(notify);
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     `${mention}Atomaton: \`${agent}\` did not finish — the run failed.`,

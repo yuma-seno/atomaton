@@ -8,6 +8,7 @@
  * re-deriving its own regex.
  */
 import { AGENT_NAME_PATTERN } from "../../domain/work/agent-name.ts";
+import { LOGIN_PATTERN } from "../../domain/work/mention.ts";
 
 /**
  * The prefix every tag carries, written once.
@@ -142,7 +143,7 @@ export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
  */
 export const PARENT_ISSUE_TAG = numericTag("parent-issue");
 /** Who to `@mention` on completion/escalation. */
-export const NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+export const NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 /** Which agent originally created a PR (for post-merge/rejection re-invocation). */
 export const ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 /** Slash-command-equivalent dispatch marker on a bot-authored comment. */

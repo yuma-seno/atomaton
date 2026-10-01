@@ -26,6 +26,7 @@ import { gh } from "../../adapters/github/gh.ts";
 import { getLabel } from "../../adapters/runner/config.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { commentWouldBeRemoved } from "../../adapters/github/whose-turn.ts";
+import { mentionPrefix } from "../../domain/work/mention.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface GuardCommentDuringRunArgs {
@@ -94,7 +95,7 @@ function main(): void {
   // removed when it is still on the page — and will not be parsed as a command
   // either, since `blocked=true` suppresses that — leaves them waiting for a run
   // that is not coming, with the evidence in front of them saying otherwise.
-  const mention = values.commenter ? `@${values.commenter} ` : "";
+  const mention = mentionPrefix(values.commenter);
   const what = deleted
     ? "Your comment was removed because"
     : "Your comment could not be removed, and will not be acted on, because";
