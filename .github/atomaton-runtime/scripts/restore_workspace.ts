@@ -70,17 +70,18 @@ function gitRun(...args) {
 }
 
 // src/entrypoints/machinery/lib/atomaton-data.ts
+var DATA_BRANCH = "atomaton-data";
 function workspaceTargetPrefix(rootIssue) {
   return `workspace/issue-${rootIssue}`;
 }
 function restoreWorkspace(prefix, destDir) {
-  if (gitRun("fetch", "origin", "atomaton-data", "--depth=1").code !== 0)
+  if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0)
     return false;
-  if (gitRun("cat-file", "-e", `origin/atomaton-data:${prefix}`).code !== 0)
+  if (gitRun("cat-file", "-e", `origin/${DATA_BRANCH}:${prefix}`).code !== 0)
     return false;
   mkdirSync(destDir, { recursive: true });
   const archive = Bun.spawnSync({
-    cmd: ["git", "archive", "--format=tar", `origin/atomaton-data:${prefix}`],
+    cmd: ["git", "archive", "--format=tar", `origin/${DATA_BRANCH}:${prefix}`],
     stdout: "pipe",
     stderr: "pipe"
   });
@@ -141,6 +142,10 @@ function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -167,7 +172,7 @@ function stringTag(key, valuePattern) {
 var STOP_TAG = stringTag("stop", "requested");
 var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
