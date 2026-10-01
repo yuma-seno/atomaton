@@ -6867,6 +6867,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -18572,15 +18573,19 @@ function hardenCredentialHolder(log) {
     log(`also removed ${unreadable.length} PATH entries this process cannot inspect`);
 }
 
+// src/domain/work/limits.ts
+function resolveLimit(configured, fallback) {
+  const value = typeof configured === "number" ? configured : Number(String(configured ?? "").trim());
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
 // src/domain/work/environment-reload.ts
 var DEFAULT_RELOAD_LIMIT = 3;
 function resolveReloadLimit(configured) {
-  const value = typeof configured === "number" ? configured : Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_RELOAD_LIMIT;
+  return resolveLimit(configured, DEFAULT_RELOAD_LIMIT);
 }
 function reloadsSoFar(raw) {
-  const value = typeof raw === "number" ? raw : Number(String(raw ?? "").trim());
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  return resolveLimit(raw, 0);
 }
 function reloadRefusal(soFar, limit) {
   if (soFar < limit)

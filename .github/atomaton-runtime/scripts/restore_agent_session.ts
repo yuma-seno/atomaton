@@ -27,16 +27,23 @@ function gitRun(...args) {
   return run(["git", ...args]);
 }
 
+// src/domain/machinery/data-layout.ts
+var SESSIONS_TREE = "sessions/";
+var ARCHIVE_DIR = "archive";
+function sessionDir(type, number) {
+  return `${SESSIONS_TREE}${type}-${number}`;
+}
+
 // src/entrypoints/machinery/lib/atomaton-data.ts
 var DATA_BRANCH = "atomaton-data";
 function sessionTargetPath(type, number, agent) {
-  return `sessions/${type}-${number}/${agent}.json`;
+  return `${sessionDir(type, number)}/${agent}.json`;
 }
 function nextArchiveSessionPath(type, number, agent, existingNames) {
   const escapedAgent = agent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const archivePattern = new RegExp(`^${escapedAgent}-(\\d+)\\.json$`);
   const nextNumber = existingNames.map((name) => archivePattern.exec(name)).filter((match) => match !== null).reduce((max, match) => Math.max(max, Number(match[1])), 0) + 1;
-  return `sessions/${type}-${number}/archive/${agent}-${nextNumber}.json`;
+  return `${sessionDir(type, number)}/${ARCHIVE_DIR}/${agent}-${nextNumber}.json`;
 }
 function restoreSession(targetPath) {
   if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0) {
@@ -65,7 +72,7 @@ function archiveSession(type, number, agent, content) {
     for (let attempt = 1;attempt <= 5; attempt++) {
       gitIn(worktreeDir, "fetch", "origin", DATA_BRANCH);
       gitIn(worktreeDir, "reset", "--hard", `origin/${DATA_BRANCH}`);
-      const archiveDir = join(worktreeDir, `sessions/${type}-${number}/archive`);
+      const archiveDir = join(worktreeDir, sessionDir(type, number), ARCHIVE_DIR);
       mkdirSync(archiveDir, { recursive: true });
       const relativePath = nextArchiveSessionPath(type, number, agent, readdirSync(archiveDir));
       const fullPath = join(worktreeDir, relativePath);

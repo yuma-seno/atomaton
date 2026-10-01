@@ -115,6 +115,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -240,6 +241,11 @@ function keptCommentIds(comments) {
     isHuman: isHumanComment(comment)
   }));
   return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
+}
+
+// src/domain/work/node-type.ts
+function isNodeType(value) {
+  return value === "issue" || value === "pr";
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -454,7 +460,7 @@ function main() {
       out: { type: "string" }
     }
   });
-  if (values.type !== "issue" && values.type !== "pr" || !values.number || !values.out) {
+  if (!isNodeType(values.type) || !values.number || !values.out) {
     console.error("usage: fetch_events.ts --type issue|pr --number N [--max-diff-chars N] --out events.json");
     process.exit(2);
   }

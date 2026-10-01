@@ -27,10 +27,16 @@ function gitRun(...args) {
   return run(["git", ...args]);
 }
 
+// src/domain/machinery/data-layout.ts
+var SESSIONS_TREE = "sessions/";
+function sessionDir(type, number) {
+  return `${SESSIONS_TREE}${type}-${number}`;
+}
+
 // src/entrypoints/machinery/lib/atomaton-data.ts
 var DATA_BRANCH = "atomaton-data";
 function sessionTargetPath(type, number, agent) {
-  return `sessions/${type}-${number}/${agent}.json`;
+  return `${sessionDir(type, number)}/${agent}.json`;
 }
 function gitIn(cwd, ...args) {
   const proc = Bun.spawnSync({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });

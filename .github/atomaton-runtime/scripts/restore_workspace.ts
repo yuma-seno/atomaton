@@ -69,10 +69,16 @@ function gitRun(...args) {
   return run(["git", ...args]);
 }
 
+// src/domain/machinery/data-layout.ts
+var WORKSPACE_TREE = "workspace/";
+function workspaceDir(rootIssue) {
+  return `${WORKSPACE_TREE}issue-${rootIssue}`;
+}
+
 // src/entrypoints/machinery/lib/atomaton-data.ts
 var DATA_BRANCH = "atomaton-data";
 function workspaceTargetPrefix(rootIssue) {
-  return `workspace/issue-${rootIssue}`;
+  return workspaceDir(rootIssue);
 }
 function restoreWorkspace(prefix, destDir) {
   if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0)
@@ -154,6 +160,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);

@@ -11,6 +11,11 @@ function isAgentName(value) {
   return AGENT_NAME_RE.test(value);
 }
 
+// src/domain/work/node-type.ts
+function isNodeType(value) {
+  return value === "issue" || value === "pr";
+}
+
 // src/adapters/github/gh.ts
 function run(cmd) {
   const proc = Bun.spawnSync({
@@ -123,6 +128,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -370,6 +376,11 @@ function dispatchRunner(d) {
   return "dispatched";
 }
 
+// src/entrypoints/machinery/lib/flags.ts
+function isTrue(value) {
+  return value === "true";
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -417,7 +428,7 @@ function main() {
     console.error(`::error::dispatch_agent: '${agent}' is not an agent name, so nothing was dispatched.`);
     process.exit(1);
   }
-  if (type !== "issue" && type !== "pr") {
+  if (!isNodeType(type)) {
     console.error(`::error::dispatch_agent: --type must be 'issue' or 'pr', not '${type}'.`);
     process.exit(1);
   }
@@ -436,7 +447,7 @@ function main() {
     number,
     notify: values.notify ?? "",
     repo: (values.repo ?? "").trim() || undefined,
-    answersRequest: (values["answers-request"] ?? "") === "true"
+    answersRequest: isTrue(values["answers-request"])
   });
   if (outcome === "failed") {
     console.error(`::error::Could not dispatch ${agent} on ${type} #${number}.`);
