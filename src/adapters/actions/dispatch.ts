@@ -32,9 +32,9 @@
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { logDispatch } from "../../adapters/runner/ops-log.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
-import { requestOutstandingOn } from "../../adapters/github/whose-turn.ts";
+import { checkDispatchMarker, type MarkerCheck } from "../../adapters/github/whose-turn.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
-import { dispatchRefusedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-issue.ts";
+import { dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-issue.ts";
 
 /** The reusable workflow every agent run enters through. */
 function runnerWorkflow(): string {
@@ -124,6 +124,15 @@ export type DispatchOutcome =
   | "refused-closed"
   /** A request for an agent was already outstanding on the target. Nobody was dispatched, and the marker is removed. */
   | "refused-outstanding"
+  /**
+   * The dispatch marker could not be confirmed in the thread, so the ordering check
+   * could not be trusted. Nobody was dispatched, and a notice is posted.
+   *
+   * Separate from `failed`, which is GitHub rejecting the dispatch itself. This is the
+   * read side: the marker was posted but never became visible, so a second dispatch
+   * could not be ruled out and starting one would risk two runs on one node.
+   */
+  | "unconfirmed"
   /** GitHub rejected the dispatch. Nothing is running and nothing will retry. */
   | "failed";
 
@@ -209,27 +218,101 @@ function postDispatchMarker(d: RunnerDispatch): string | undefined {
  * BEFORE this dispatch. When the answer is "a request", the marker is removed: it was
  * the second one, and leaving it would make the thread say two agents were asked for.
  *
- * A read that fails refuses too. The alternative is dispatching a second agent because
- * GitHub was briefly unreachable, which is the failure this exists to prevent.
+ * ## Why the marker is confirmed before the check is trusted
+ *
+ * GitHub does not guarantee read-after-write: a comment can be missing from the listing
+ * for a moment after it is created. The check reads the thread to see whether ANOTHER
+ * dispatch's marker is there — and if this dispatch's own marker is not visible yet, the
+ * read has not caught up, so another's may be missing too. Two dispatches racing would
+ * then both see "no request" and both start a run, which is exactly what this exists to
+ * prevent.
+ *
+ * So the marker is a freshness probe: read the thread, and if the marker is not there,
+ * wait and read again. Once the marker is visible the read has caught up at least to
+ * this dispatch's own write, and a write that happened before it is very likely visible
+ * too. This is a heuristic, not a guarantee — but it is strictly better than reading
+ * once and hoping.
+ *
+ * ## When the marker never appears
+ *
+ * The post itself may have failed, so it is retried a few times. If it still never
+ * appears, the ordering check cannot be trusted and nobody is dispatched: a notice is
+ * posted and the outcome is `unconfirmed`. Starting a run on an unverified thread is the
+ * failure this whole function exists to prevent, so the cautious answer is to stand down.
+ *
+ * A read that fails refuses too, for the same reason.
  *
  * Returns the refusal, or `undefined` when the dispatch may proceed.
  */
-function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefined): "refused-outstanding" | undefined {
+function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefined): "refused-outstanding" | "unconfirmed" | undefined {
   const log = d.log ?? ((message: string) => console.error(message));
   const removeMarker = (): void => {
     if (markerId === undefined) return;
     gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
   };
 
-  let outstanding: boolean;
-  try {
-    outstanding = requestOutstandingOn(d.repo ?? "", d.number, markerId);
-  } catch (e) {
-    removeMarker();
-    log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
-    return "refused-outstanding";
+  // No marker means the ordering check has nothing to be ordered against, so it cannot
+  // run. The dispatch still goes out -- the marker failing to post is not fatal on its
+  // own -- but the check is skipped rather than guessed at.
+  if (markerId === undefined) return undefined;
+
+  // Widening, like `ghRead`: the point is to outlast a lag, not to sit out an outage.
+  // A run holds a runner while this sleeps, so the total is bounded.
+  const delays = [1_000, 2_000, 4_000];
+  let check: MarkerCheck | undefined;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+    } catch (e) {
+      removeMarker();
+      log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+      return "refused-outstanding";
+    }
+    if (check.markerVisible) break;
+    const delay = delays[attempt];
+    if (delay === undefined) break;
+    log(`${d.context}: the dispatch marker on #${d.number} is not visible yet; waiting ${delay}ms and reading again`);
+    Bun.sleepSync(delay);
   }
-  if (!outstanding) return undefined;
+
+  if (check === undefined || !check.markerVisible) {
+    // The marker never became visible. The post may have failed, so try once more before
+    // giving up -- a second post is safe, because the first is not in the thread.
+    const reposted = postDispatchMarker(d);
+    if (reposted !== undefined) {
+      try {
+        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+          // The repost is visible, so the thread has caught up. The first marker, if it
+          // exists at all, is a duplicate of this one -- remove it so the thread does not
+          // say two agents were asked for.
+          removeMarker();
+          return undefined;
+        }
+      } catch (e) {
+        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+      }
+      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+    }
+    log(
+      `${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` +
+        `and ${d.agent} was not started`,
+    );
+    const body = dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? "",
+    });
+    const { code, stdout, stderr } = gh(
+      "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
+    );
+    if (code !== 0) {
+      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+    }
+    return "unconfirmed";
+  }
+
+  if (!check.outstanding) return undefined;
 
   removeMarker();
   log(

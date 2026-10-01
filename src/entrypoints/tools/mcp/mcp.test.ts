@@ -1045,8 +1045,9 @@ describe("mcp/atomaton.ts", () => {
             // Listed before the state rule, whose `["api", "issues"]` is a substring
             // of these paths too.
             { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
-            // The thread read: a person already asked for an agent.
-            { match: ["api", "issues/7/comments"], stdout: JSON.stringify([{ id: 1, body: "/engineer" }]) },
+            // The thread read: a person already asked for an agent. The marker (555)
+            // is present, which is the freshness probe -- the read has caught up.
+            { match: ["api", "issues/7/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=engineer -->" }, { id: 1, body: "/engineer" }]) },
             { match: ["api", "issues/7", "--jq"], stdout: "" },
             { match: ["api", "DELETE"] },
             { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) },
@@ -1080,7 +1081,7 @@ describe("mcp/atomaton.ts", () => {
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
-            { match: ["api", "issues/7/comments"], stdout: "[]" },
+            { match: ["api", "issues/7/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=engineer -->" }]) },
             { match: ["api", "issues/7", "--jq"], stdout: "" },
             { match: ["issue", "edit"] },
             { match: ["workflow", "run"] },

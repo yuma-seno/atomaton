@@ -187,6 +187,53 @@ export function requestOutstandingOn(repo: string, number: string | number, excl
   return requestOutstanding(readThread(repo, number, excludeCommentId).shaped.events);
 }
 
+/** What a dispatch learns from one read of the thread after posting its marker. */
+export interface MarkerCheck {
+  /**
+   * Whether the marker this dispatch just posted is visible in the thread yet.
+   *
+   * GitHub does not guarantee read-after-write: a comment can be missing from the
+   * listing for a moment after it is created. This is the freshness probe -- if the
+   * dispatch's OWN write is visible, the read has caught up at least that far, and a
+   * write that happened before it is very likely visible too.
+   */
+  markerVisible: boolean;
+  /** Whether a request for an agent was outstanding BEFORE that marker. */
+  outstanding: boolean;
+}
+
+/**
+ * Read the thread once and answer both questions a dispatch has after posting its marker.
+ *
+ * One read, not two, because the two answers come from the same listing: whether the
+ * marker is visible, and whether a request preceded it. Asking them separately would
+ * double the API calls for a dispatch, and the API has a rate limit.
+ *
+ * The marker is excluded from the outstanding check -- it is this dispatch's own
+ * request, and counting it would refuse the very dispatch that posted it. That is the
+ * same exclusion `requestOutstandingOn` takes as an argument, folded in here so the
+ * caller gets both answers from one call.
+ *
+ * Throws when the read fails, like every other reader here.
+ */
+export function checkDispatchMarker(
+  repo: string,
+  number: string | number,
+  markerId: string | number,
+): MarkerCheck {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+
+  const marker = String(markerId);
+  const comments = JSON.parse(listed.stdout || "[]") as Comment[];
+  const markerVisible = comments.some((comment) => String(comment.id) === marker);
+  const entries: ThreadEntry[] = comments
+    .filter((comment) => String(comment.id) !== marker)
+    .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+
+  return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
+}
+
 /**
  * The agent a node asks for next, from the newest request in its shaped thread.
  *
