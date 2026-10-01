@@ -7,6 +7,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeF
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gitRun } from "../../../adapters/github/gh.ts";
+import { ARCHIVE_DIR, sessionDir, workspaceDir } from "../../../domain/machinery/data-layout.ts";
 
 /**
  * The orphan branch this repository keeps its durable state on.
@@ -19,7 +20,7 @@ export const DATA_BRANCH = "atomaton-data";
 
 /** Path of a given agent's session file on the atomaton-data branch. */
 export function sessionTargetPath(type: string, number: string | number, agent: string): string {
-  return `sessions/${type}-${number}/${agent}.json`;
+  return `${sessionDir(type, number)}/${agent}.json`;
 }
 
 export function nextArchiveSessionPath(
@@ -34,7 +35,7 @@ export function nextArchiveSessionPath(
     .map((name) => archivePattern.exec(name))
     .filter((match): match is RegExpExecArray => match !== null)
     .reduce((max, match) => Math.max(max, Number(match[1])), 0) + 1;
-  return `sessions/${type}-${number}/archive/${agent}-${nextNumber}.json`;
+  return `${sessionDir(type, number)}/${ARCHIVE_DIR}/${agent}-${nextNumber}.json`;
 }
 
 /**
@@ -210,7 +211,7 @@ export function archiveSession(
       gitIn(worktreeDir, "fetch", "origin", DATA_BRANCH);
       gitIn(worktreeDir, "reset", "--hard", `origin/${DATA_BRANCH}`);
 
-      const archiveDir = join(worktreeDir, `sessions/${type}-${number}/archive`);
+      const archiveDir = join(worktreeDir, sessionDir(type, number), ARCHIVE_DIR);
       mkdirSync(archiveDir, { recursive: true });
       const relativePath = nextArchiveSessionPath(type, number, agent, readdirSync(archiveDir));
       const fullPath = join(worktreeDir, relativePath);
@@ -251,7 +252,7 @@ export function archiveSession(
 
 /** Where a root issue's workspace lives on the atomaton-data branch. */
 export function workspaceTargetPrefix(rootIssue: string | number): string {
-  return `workspace/issue-${rootIssue}`;
+  return workspaceDir(rootIssue);
 }
 
 /**

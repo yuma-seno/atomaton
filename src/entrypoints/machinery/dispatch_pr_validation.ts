@@ -27,6 +27,7 @@
  */
 import { parseArgs } from "node:util";
 import { dispatchPrValidation } from "../../adapters/actions/dispatch-targets.ts";
+import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface DispatchPrValidationArgs {
@@ -63,7 +64,7 @@ function main(): void {
   // pull request -- the same pull request can be validated by an agent's push and
   // by a person's comment, and the two route a failure differently.
   const dispatched = dispatchPrValidation(repo, Number(number), branch, {
-    askedByPerson: (values["asked-by-person"] ?? "") === "true",
+    askedByPerson: isTrue(values["asked-by-person"]),
   });
   if (!dispatched) {
     // Fatal, unlike most dispatches. The person asked for a run and nothing was

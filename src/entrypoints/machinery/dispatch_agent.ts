@@ -33,7 +33,9 @@
  */
 import { parseArgs } from "node:util";
 import { isAgentName } from "../../domain/work/agent-name.ts";
+import { isNodeType } from "../../domain/work/node-type.ts";
 import { dispatchRunner } from "../../adapters/actions/dispatch.ts";
+import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface DispatchAgentArgs {
@@ -98,7 +100,7 @@ function main(): void {
     console.error(`::error::dispatch_agent: '${agent}' is not an agent name, so nothing was dispatched.`);
     process.exit(1);
   }
-  if (type !== "issue" && type !== "pr") {
+  if (!isNodeType(type)) {
     console.error(`::error::dispatch_agent: --type must be 'issue' or 'pr', not '${type}'.`);
     process.exit(1);
   }
@@ -118,7 +120,7 @@ function main(): void {
     number,
     notify: values.notify ?? "",
     repo: (values.repo ?? "").trim() || undefined,
-    answersRequest: (values["answers-request"] ?? "") === "true",
+    answersRequest: isTrue(values["answers-request"]),
   });
 
   if (outcome === "failed") {

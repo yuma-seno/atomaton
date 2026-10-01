@@ -37,10 +37,22 @@ const COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
 // the one place reading a marker a human may have retyped by hand.
 const DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
 
+/**
+ * How a run starts: continuing the saved session, or rebuilding it.
+ *
+ * Exported as a list, because the same two words are validated in three places — the
+ * parser here, `restore_agent_session.ts`, and a bash `[[ ... ]]` in
+ * `atomaton-runner.wac.ts` that is generated from this list rather than hand-kept in
+ * step. A third mode added here reaches all three.
+ */
+export const SESSION_MODES = ["continue", "recover"] as const;
+
+export type SessionMode = (typeof SESSION_MODES)[number];
+
 export interface ParsedCommentCommand {
   agent: string;
   control: ControlCommand;
-  sessionMode: "continue" | "recover";
+  sessionMode: SessionMode;
   error: string;
 }
 

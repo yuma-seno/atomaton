@@ -29,7 +29,7 @@ import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
 import { LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
-import { closingKeywordRefusal, closingReferences } from "../../../domain/work/issue-links.ts";
+import { closingKeywordRefusal, closingReferences, closesLine } from "../../../domain/work/issue-links.ts";
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
@@ -746,10 +746,10 @@ function injectParentIssue(body: string, reviewer: string): string {
   // none of its own. This used to check first, because a second "Closes #N" made
   // downstream parsing match twice and corrupted $GITHUB_OUTPUT -- a duplicate that can
   // no longer arrive, since a body carrying one never reaches this line.
-  const closesLine = `Closes #${parent}\n`;
+  const closes = `${closesLine(Number(parent))}\n`;
   const originAgent = (process.env.AGENT ?? "").trim();
   const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}\n` : "";
-  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${closesLine}${body}`;
+  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${closes}${body}`;
 }
 
 function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {

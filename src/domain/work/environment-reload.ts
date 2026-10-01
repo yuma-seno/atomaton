@@ -41,6 +41,7 @@
  * leave comments. A reload leaves none, so there is nothing to count -- the tally
  * travels as a workflow input instead, which is what the proposal suggested.
  */
+import { resolveLimit } from "./limits.ts";
 
 /**
  * How many times one piece of work may rebuild its environment.
@@ -55,20 +56,18 @@ export const DEFAULT_RELOAD_LIMIT = 3;
 /**
  * A limit from configuration, or the default.
  *
- * Zero and nonsense mean the default, the rule every limit in this project shares
- * (see `dispatch-chain.ts` and `infra::timeouts` in atoma). A project that wants
- * no reloads at all is asking for a different thing -- that the tool not be
- * offered -- and would say so by removing `atomaton_env` from the agent's `mcp_servers`.
+ * The rule is `limits.ts`'s, shared with every other limit in the project. A project
+ * that wants no reloads at all is asking for a different thing -- that the tool not
+ * be offered -- and would say so by removing `atomaton_env` from the agent's
+ * `mcp_servers`.
  */
 export function resolveReloadLimit(configured: unknown): number {
-  const value = typeof configured === "number" ? configured : Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_RELOAD_LIMIT;
+  return resolveLimit(configured, DEFAULT_RELOAD_LIMIT);
 }
 
 /** How many reloads this run is already the result of. Absent or unusable means none. */
 export function reloadsSoFar(raw: unknown): number {
-  const value = typeof raw === "number" ? raw : Number(String(raw ?? "").trim());
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  return resolveLimit(raw, 0);
 }
 
 /**
