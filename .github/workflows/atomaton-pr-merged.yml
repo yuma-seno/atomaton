@@ -83,7 +83,8 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           gh issue comment "$PARENT" --repo "$REPO" --body \
-            "PR #${PR_NUMBER} merged: ${PR_TITLE} (${PR_URL})"
+            "<!-- atomaton:llm-context=exclude -->
+          PR #${PR_NUMBER} merged: ${PR_TITLE} (${PR_URL})"
   aggregate-sub-issues:
     runs-on: ubuntu-latest
     env:

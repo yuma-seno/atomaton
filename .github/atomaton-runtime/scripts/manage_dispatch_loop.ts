@@ -5,10 +5,16 @@
 import { appendFileSync } from "fs";
 import { parseArgs } from "util";
 
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
 // src/domain/work/dispatch-chain.ts
 var DEFAULT_HANDOFF_LIMIT = 5;
 function isPerson(comment) {
-  return comment.authorType === "User";
+  return isHumanActor(comment.authorType);
 }
 function handoffsSincePerson(comments, isAgentComment) {
   let handoffs = 0;
