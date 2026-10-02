@@ -7738,7 +7738,7 @@ function commandInBodyRefusal(found, what, instead) {
   return `This ${what} has ${quoted} on a line of its own, which Atomaton reads as a command to start an ` + `agent. A command is a request from someone entitled to make it, and a body an agent wrote is ` + `not one. ${instead} To mention a command in prose, put it inside a sentence rather than alone ` + "on its line.";
 }
 
-// src/domain/work/whose-turn.ts
+// src/domain/work/thread.ts
 function eventOf(body, readers) {
   if (readers.isAgentResult(body))
     return readers.handedOff(body) ? "handed-off" : "returned";
@@ -7767,7 +7767,7 @@ function shapedThread(comments, readers) {
   return { comments: kept, events };
 }
 
-// src/adapters/github/whose-turn.ts
+// src/adapters/github/thread.ts
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
@@ -7787,7 +7787,7 @@ function checkDispatchMarker(repo, number, markerId) {
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
 
-// src/domain/work/closed-issue.ts
+// src/domain/work/closed-target.ts
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
 }

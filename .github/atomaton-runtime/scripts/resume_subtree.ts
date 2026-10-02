@@ -266,7 +266,7 @@ function isHumanActor(type) {
   return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
 }
 
-// src/domain/work/whose-turn.ts
+// src/domain/work/thread.ts
 function eventOf(body, readers) {
   if (readers.isAgentResult(body))
     return readers.handedOff(body) ? "handed-off" : "returned";
@@ -295,7 +295,7 @@ function shapedThread(comments, readers) {
   return { comments: kept, events };
 }
 
-// src/adapters/github/whose-turn.ts
+// src/adapters/github/thread.ts
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
@@ -326,7 +326,7 @@ function checkDispatchMarker(repo, number, markerId) {
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
 
-// src/domain/work/closed-issue.ts
+// src/domain/work/closed-target.ts
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
 }
