@@ -58,6 +58,18 @@ export interface IssueIndex {
   version: number;
   /** The newest `updated_at` seen, and the `since` for the next refresh. */
   updatedThrough: string;
+  /**
+   * When the last full metadata sweep ran, or absent if none has.
+   *
+   * The `?since=` cursor can skip an issue. GitHub's listing is index-backed and can
+   * lag a write, so an issue updated at T1 can be missing from a read that already
+   * returned one updated at T2 > T1 -- and the cursor then advances past T1 and never
+   * asks for it again. The sweep is the backstop: list every issue's metadata and
+   * re-fetch any the index is missing or has stale. It is cheap enough to run
+   * periodically and too expensive to run on every search, so this records when it
+   * last ran.
+   */
+  lastSweep?: string;
   issues: IndexedIssue[];
   /** Built from `issues`; stored so a search does not pay to rebuild it. */
   bm25?: Bm25Index;
@@ -179,6 +191,76 @@ function commentsOf(repo: string, issue: number): string[] {
     .filter((comment) => comment.body)
     .slice(0, MAX_COMMENTS_PER_ISSUE)
     .map((comment) => (comment.body ?? "").slice(0, MAX_COMMENT));
+}
+
+/**
+ * How long between full metadata sweeps.
+ *
+ * A day. The sweep exists to catch an issue the `?since=` cursor skipped, and a
+ * skipped issue is one nobody can search for until the next sweep -- so the interval
+ * is the longest a search can be wrong. A day is short enough that a missed issue is
+ * found while it still matters, and long enough that the sweep is not a cost anybody
+ * notices.
+ */
+export const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether a full sweep is due, given when the last one ran.
+ *
+ * `now` is a parameter rather than `Date.now()` so this is a function of its inputs
+ * and can be tested without a clock. An absent or unparseable `lastSweep` is due: a
+ * sweep that has never run, or whose record is corrupt, is one to run now.
+ */
+export function sweepDue(lastSweep: string | undefined, now: Date): boolean {
+  if (lastSweep === undefined) return true;
+  const last = Date.parse(lastSweep);
+  return Number.isNaN(last) || now.getTime() - last >= SWEEP_INTERVAL_MS;
+}
+
+/**
+ * Every issue's metadata and body, without conversations. One request per hundred.
+ *
+ * The bodies come along in the same listing, so they cost nothing extra -- and they
+ * are what a stale issue is re-indexed from, so the sweep does not re-fetch the issue
+ * itself. Only the conversations are separate requests, and only for the issues that
+ * turn out to be stale.
+ */
+function fetchIssueBodies(repo: string): IndexedIssue[] {
+  const raw = ghJsonPaged<ApiIssue>(`repos/${repo}/issues?state=all&per_page=100`);
+  return raw
+    .filter((issue) => issue.pull_request === undefined)
+    .map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      body: (issue.body ?? "").slice(0, MAX_BODY),
+      state: issue.state,
+      updatedAt: issue.updated_at,
+      comments: [],
+    }));
+}
+
+/**
+ * The backstop for the `?since=` cursor: list every issue and re-fetch the ones the
+ * index is missing or has stale.
+ *
+ * An issue whose `updated_at` differs from the stored one has changed since it was
+ * indexed; one that is absent was never indexed at all. Both are re-fetched in full,
+ * conversation included. Everything else is left as it is.
+ *
+ * This does not use the cursor, which is the point: the cursor is what can skip an
+ * issue, so the thing that catches a skipped issue must not depend on it. A full
+ * listing is also far less likely to lag than a delta, and even if one sweep's listing
+ * lags, the next sweep lists the issue again and finds it missing from the index.
+ */
+export function sweepIssues(repo: string, stored: readonly IndexedIssue[]): IndexedIssue[] {
+  const listed = fetchIssueBodies(repo);
+  const byNumber = new Map(stored.map((issue) => [issue.number, issue]));
+  for (const issue of listed) {
+    const existing = byNumber.get(issue.number);
+    if (existing !== undefined && existing.updatedAt === issue.updatedAt) continue;
+    byNumber.set(issue.number, { ...issue, comments: commentsOf(repo, issue.number) });
+  }
+  return [...byNumber.values()].sort((a, b) => b.number - a.number);
 }
 
 /**
