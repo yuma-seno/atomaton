@@ -18121,6 +18121,35 @@ function allComments(repo) {
 function commentsOf(repo, issue) {
   return ghJsonPaged(`repos/${repo}/issues/${issue}/comments?per_page=100`).filter((comment) => comment.body).slice(0, MAX_COMMENTS_PER_ISSUE).map((comment) => (comment.body ?? "").slice(0, MAX_COMMENT));
 }
+var SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+function sweepDue(lastSweep, now) {
+  if (lastSweep === undefined)
+    return true;
+  const last = Date.parse(lastSweep);
+  return Number.isNaN(last) || now.getTime() - last >= SWEEP_INTERVAL_MS;
+}
+function fetchIssueBodies(repo) {
+  const raw = ghJsonPaged(`repos/${repo}/issues?state=all&per_page=100`);
+  return raw.filter((issue) => issue.pull_request === undefined).map((issue) => ({
+    number: issue.number,
+    title: issue.title,
+    body: (issue.body ?? "").slice(0, MAX_BODY),
+    state: issue.state,
+    updatedAt: issue.updated_at,
+    comments: []
+  }));
+}
+function sweepIssues(repo, stored) {
+  const listed = fetchIssueBodies(repo);
+  const byNumber = new Map(stored.map((issue) => [issue.number, issue]));
+  for (const issue of listed) {
+    const existing = byNumber.get(issue.number);
+    if (existing !== undefined && existing.updatedAt === issue.updatedAt)
+      continue;
+    byNumber.set(issue.number, { ...issue, comments: commentsOf(repo, issue.number) });
+  }
+  return [...byNumber.values()].sort((a, b) => b.number - a.number);
+}
 function mergeIssues(stored, fresh) {
   const byNumber = new Map(stored.map((issue) => [issue.number, issue]));
   for (const issue of fresh)
@@ -18303,15 +18332,21 @@ function loadIndex() {
   }
   const since = previous?.updatedThrough;
   const fresh = fetchIssues(REPO, since);
-  if (previous && fresh.length === 0) {
+  const now = new Date;
+  const sweep = previous !== undefined && sweepDue(previous.lastSweep, now);
+  const swept = sweep && previous ? sweepIssues(REPO, previous.issues) : undefined;
+  if (sweep)
+    log2(`sweep: ${swept.length} issues after listing every one`);
+  if (previous && fresh.length === 0 && !sweep) {
     log2(`index current: ${previous.issues.length} issues, nothing changed since ${since}`);
     return previous.bm25 && previous.chunks ? previous : withDerived(previous);
   }
-  const issues = mergeIssues(previous?.issues ?? [], fresh);
+  const issues = mergeIssues(swept ?? previous?.issues ?? [], fresh);
   log2(`index: ${issues.length} issues (${fresh.length} fetched${since ? ` since ${since}` : " \u2014 full build"})`);
   const index = withDerived({
     version: INDEX_VERSION,
     updatedThrough: newestTimestamp(fresh, since ?? "1970-01-01T00:00:00Z"),
+    ...sweep ? { lastSweep: now.toISOString() } : previous?.lastSweep ? { lastSweep: previous.lastSweep } : {},
     issues
   });
   if (!saveAsOnlyCommit(INDEX_BRANCH, INDEX_PATH, JSON.stringify(index), `atomaton: issue search index (${issues.length} issues)`)) {

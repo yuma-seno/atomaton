@@ -391,10 +391,25 @@ function main() {
         log("nothing left to delete after the refetch");
         return;
       }
-      git("rm", "-q", "--", ...present);
-      git("commit", "-m", pruneCommitMessage({ ...decision, paths: present }));
+      const stillDead = present.filter((path) => {
+        const issue = issueNumberOf(path);
+        if (issue === undefined)
+          return true;
+        if (!decision.issues.includes(issue))
+          return true;
+        if (!isRunning(issue))
+          return true;
+        log(`#${issue} has a run in flight again; leaving its files alone`);
+        return false;
+      });
+      if (stillDead.length === 0) {
+        log("every issue came back to life before the delete; nothing to do");
+        return;
+      }
+      git("rm", "-q", "--", ...stillDead);
+      git("commit", "-m", pruneCommitMessage({ ...decision, paths: stillDead }));
       if ((git("push", "origin", `HEAD:${BRANCH}`).exitCode ?? 1) === 0) {
-        log(`deleted ${present.length} files`);
+        log(`deleted ${stillDead.length} files`);
         return;
       }
       log(`push attempt ${attempt} lost a race; refetching`);
