@@ -7,7 +7,7 @@ import {
   whoseTurn,
   type ThreadEntry,
   type TurnReaders,
-} from "./whose-turn.ts";
+} from "./thread.ts";
 
 /**
  * The readers, stubbed. The real ones live in `adapters/github/tags.ts` and

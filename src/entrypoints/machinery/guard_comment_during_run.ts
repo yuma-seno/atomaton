@@ -14,7 +14,7 @@
  * pull request, where a command goes through validation and CI before any agent
  * starts — so a comment made in that window went through. The label is a cache of the
  * answer, written late; the thread is the answer, written when the turn changes. See
- * `domain/work/whose-turn.ts`.
+ * `domain/work/thread.ts`.
  *
  * Usage:
  *   guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN
@@ -25,7 +25,7 @@ import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { getLabel } from "../../adapters/runner/config.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
-import { commentWouldBeRemoved } from "../../adapters/github/whose-turn.ts";
+import { commentWouldBeRemoved } from "../../adapters/github/thread.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
 import { defineScript } from "./lib/script-ref.ts";
 

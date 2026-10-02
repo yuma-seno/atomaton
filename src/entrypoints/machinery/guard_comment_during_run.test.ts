@@ -7,7 +7,7 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
  *
  * The guard asks for the node's body and its comments, then folds them into "whose
  * turn is it". These rules answer those two reads; the fold itself is tested in
- * `domain/work/whose-turn.test.ts`.
+ * `domain/work/thread.test.ts`.
  */
 const thread = (body: string, comments: string[]) => [
   { match: ["api", "/issues/9", "--jq"], stdout: body },

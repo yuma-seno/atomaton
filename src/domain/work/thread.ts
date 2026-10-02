@@ -1,6 +1,6 @@
 /**
- * whose-turn.ts — whether the ball is with an agent or with a person, read from a
- * node's thread.
+ * thread.ts — a node's thread: the events in it, whose turn they leave it with, and
+ * the agent it asks for.
  *
  * ## The question
  *

@@ -250,7 +250,7 @@ function endedTag(ending: TurnEnding): string {
     case "spent":
     case "looped":
       return "limit";
-    // The one ending that leaves the node with an agent. `domain/work/whose-turn.ts`
+    // The one ending that leaves the node with an agent. `domain/work/thread.ts`
     // reads it to tell a comment arriving mid-turn from one arriving after the work
     // came back, which the three older values could not answer.
     case "handed-off":

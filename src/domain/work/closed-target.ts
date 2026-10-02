@@ -1,5 +1,5 @@
 /**
- * closed-issue.ts — what happens when work meets an issue or pull request that is closed.
+ * closed-target.ts — what happens when work meets an issue or pull request that is closed.
  *
  * Three paths used to walk straight past a closed target, and all three did it
  * silently: a person closing an issue did not stop the run working on it, a slash

@@ -7,7 +7,7 @@ import {
   recoveryAdvice,
   stopOnCloseNotice,
   type TargetState,
-} from "./closed-issue.ts";
+} from "./closed-target.ts";
 
 const OPEN: TargetState = { known: true, kind: "issue", state: "open" };
 const CLOSED: TargetState = { known: true, kind: "issue", state: "done" };

@@ -6,7 +6,7 @@
  * `/resume`). This is the one definition of that syntax, and three readers share it:
  *
  *   - `parse_comment_command.ts` reads a person's comment to decide what to start
- *   - `domain/work/whose-turn.ts`, through the thread reader, reads a thread to decide
+ *   - `domain/work/thread.ts`, through the thread reader, reads a thread to decide
  *     whose turn it is
  *   - `create_pr` and `create_issue` read an agent's body to refuse a command in it
  *

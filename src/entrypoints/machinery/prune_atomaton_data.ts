@@ -30,7 +30,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ghPaginated, gitRun } from "../../adapters/github/gh.ts";
-import { runInFlight } from "../../adapters/github/whose-turn.ts";
+import { runInFlight } from "../../adapters/github/thread.ts";
 import { prunablePaths, pruneCommitMessage, issueNumberOf } from "../../domain/machinery/atomaton-data-pruning.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
