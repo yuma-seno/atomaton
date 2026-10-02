@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ghPaginated, gitRun } from "../../adapters/github/gh.ts";
 import { runInFlight } from "../../adapters/github/whose-turn.ts";
-import { prunablePaths, pruneCommitMessage } from "../../domain/machinery/atomaton-data-pruning.ts";
+import { prunablePaths, pruneCommitMessage, issueNumberOf } from "../../domain/machinery/atomaton-data-pruning.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export const ref = defineScript(import.meta.url);
@@ -167,11 +167,31 @@ function main(): void {
         log("nothing left to delete after the refetch");
         return;
       }
-      git("rm", "-q", "--", ...present);
-      git("commit", "-m", pruneCommitMessage({ ...decision, paths: present }));
+
+      // The decision was made from a read taken before this loop, and a run can start
+      // on a closed issue in between -- an agent closes the issue and the job keeps
+      // going, which is the case `isOver` exists for. So the thread is read again here,
+      // immediately before the delete, and any issue that has come back to life is
+      // dropped. Without this, the files a live run is about to write are the ones this
+      // removes, and its next save resurrects what was just deleted.
+      const stillDead = present.filter((path) => {
+        const issue = issueNumberOf(path);
+        if (issue === undefined) return true;
+        if (!decision.issues.includes(issue)) return true;
+        if (!isRunning(issue)) return true;
+        log(`#${issue} has a run in flight again; leaving its files alone`);
+        return false;
+      });
+      if (stillDead.length === 0) {
+        log("every issue came back to life before the delete; nothing to do");
+        return;
+      }
+
+      git("rm", "-q", "--", ...stillDead);
+      git("commit", "-m", pruneCommitMessage({ ...decision, paths: stillDead }));
 
       if ((git("push", "origin", `HEAD:${BRANCH}`).exitCode ?? 1) === 0) {
-        log(`deleted ${present.length} files`);
+        log(`deleted ${stillDead.length} files`);
         return;
       }
       log(`push attempt ${attempt} lost a race; refetching`);
