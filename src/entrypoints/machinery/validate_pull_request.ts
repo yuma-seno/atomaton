@@ -87,7 +87,7 @@ import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-va
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
 import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
-import { latestRequestedAgentOn } from "../../adapters/github/whose-turn.ts";
+import { latestRequestedAgentOn } from "../../adapters/github/thread.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";

@@ -17,7 +17,7 @@
  *
  * ## Why it is one function
  *
- * It was nine, and two of them had already drifted. `whose-turn.ts` read
+ * It was nine, and two of them had already drifted. `thread.ts` read
  * `user.type !== "Bot"` (so `Organization` was a person) while `dispatch-chain.ts`
  * read `user.type === "User"` (so `Organization` was not). The guard would delete an
  * `Organization` comment as a person's, and the handoff tally would not reset for it

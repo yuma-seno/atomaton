@@ -1,7 +1,7 @@
 /**
- * whose-turn.ts — read a node's thread and answer what it says about the turn.
+ * thread.ts — read a node's thread and answer what it says about the turn.
  *
- * The I/O half of `domain/work/whose-turn.ts`. That module folds a list of events into
+ * The I/O half of `domain/work/thread.ts`. That module folds a list of events into
  * an answer; this one reads the events out of GitHub — the node's own body and its
  * comments — and hands them over.
  *
@@ -46,7 +46,7 @@ import {
   type ThreadEntry,
   type TurnHolder,
   type TurnReaders,
-} from "../../domain/work/whose-turn.ts";
+} from "../../domain/work/thread.ts";
 
 /**
  * The readers, from the modules that own each format.
@@ -98,7 +98,7 @@ export function keptCommentIds(comments: readonly Comment[]): Set<number> {
  * The comments alone, without the body. `runInFlight` needs only these, and it is
  * called once per node in a tree walk — so reading the body too would double the
  * requests for an answer the body cannot change. The body is not a comment and cannot
- * move the turn; see `domain/work/whose-turn.ts`.
+ * move the turn; see `domain/work/thread.ts`.
  *
  * Throws when the read fails, for the same reason `readThread` does.
  */

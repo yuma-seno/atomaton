@@ -39,7 +39,7 @@
  */
 import { gh, ghRead } from "./gh.ts";
 import { issueLinks } from "./issue-links.ts";
-import { runInFlight } from "./whose-turn.ts";
+import { runInFlight } from "./thread.ts";
 import { issueOutcome, pullRequestOutcome, saysOpen } from "./outcome.ts";
 import { ENDED_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, STOP_TAG } from "./tags.ts";
 import {

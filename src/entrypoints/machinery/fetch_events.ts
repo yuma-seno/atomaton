@@ -26,7 +26,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
 import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
-import { keptCommentIds } from "../../adapters/github/whose-turn.ts";
+import { keptCommentIds } from "../../adapters/github/thread.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
 

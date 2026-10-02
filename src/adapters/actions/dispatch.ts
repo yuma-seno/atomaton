@@ -32,9 +32,9 @@
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { logDispatch } from "../../adapters/runner/ops-log.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
-import { checkDispatchMarker, type MarkerCheck } from "../../adapters/github/whose-turn.ts";
+import { checkDispatchMarker, type MarkerCheck } from "../../adapters/github/thread.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
-import { dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-issue.ts";
+import { dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-target.ts";
 
 /** The reusable workflow every agent run enters through. */
 function runnerWorkflow(): string {

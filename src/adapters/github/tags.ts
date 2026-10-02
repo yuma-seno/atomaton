@@ -115,7 +115,7 @@ export const STOP_TAG = stringTag("stop", "requested");
  * automatically, because only it was interrupted rather than finished.
  *
  * `handoff` is the one ending that leaves the node with an agent rather than giving
- * it back, and it is what `domain/work/whose-turn.ts` reads to answer "is a comment
+ * it back, and it is what `domain/work/thread.ts` reads to answer "is a comment
  * arriving mid-turn". It is a fourth value rather than a second tag because it is the
  * same fact -- how this turn ended -- and a reader that wants only the three older
  * answers still gets them: `/resume` looks for `stopped` and nothing else.

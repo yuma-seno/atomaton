@@ -73,7 +73,7 @@ export const DEFAULT_HANDOFF_LIMIT = 5;
  * The rule is `domain/work/actor.ts`'s, and it is one rule for the whole repository:
  * a person is anything that is not a bot. It used to be written here as
  * `authorType === "User"`, which read `Organization` as not-a-person while the guard
- * (`whose-turn.ts`) read it as one — two readers, one thread, two answers.
+ * (`thread.ts`) read it as one — two readers, one thread, two answers.
  *
  * The direction is still the cautious one for the cases that matter: a missing or
  * unrecognised type reads as a person, so the tally resets and the limit fires later

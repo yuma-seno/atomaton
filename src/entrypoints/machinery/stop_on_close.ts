@@ -36,7 +36,7 @@
 import { parseArgs } from "node:util";
 import { LLM_CONTEXT_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
-import { closedTheTreeNotice, stopOnCloseNotice } from "../../domain/work/closed-issue.ts";
+import { closedTheTreeNotice, stopOnCloseNotice } from "../../domain/work/closed-target.ts";
 import { descendants, nodesToClose, nodesToStop, subtree } from "../../domain/work/work-tree.ts";
 import { closeSubtreeUnder, readWorkTree } from "../../adapters/github/work-tree.ts";
 import { defineScript } from "./lib/script-ref.ts";
