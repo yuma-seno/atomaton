@@ -297,61 +297,6 @@ function issueLinks(repo, number) {
   };
 }
 
-// src/adapters/github/sibling-check.ts
-function countOpenSiblings(opts) {
-  const label = opts.label || getLabel("sub_issue");
-  const launchedLabel = opts.launchedLabel || getLabel("launched");
-  const links = issueLinks(opts.repo, opts.parent);
-  if (links.unavailable) {
-    throw new Error(`countOpenSiblings: could not read the sub-issues of #${opts.parent}: ${links.unavailable}`);
-  }
-  return links.children.filter((child) => child.state === "open" && child.labels.includes(label) && child.labels.includes(launchedLabel) && child.number !== opts.exclude).length;
-}
-
-// src/adapters/runner/ops-log.ts
-import { appendFileSync } from "fs";
-var OPS_LOG_PATH = process.env.ATOMATON_OPS_LOG ?? "/tmp/atomaton_ops.log";
-function logOp(op, payload = {}) {
-  const entry = { ts: new Date().toISOString(), op, ...payload };
-  try {
-    appendFileSync(OPS_LOG_PATH, JSON.stringify(entry) + `
-`);
-  } catch (e) {
-    console.error(`[ops-log] WARN: failed to write op log: ${e}`);
-  }
-}
-function logDispatch(target, agent, extra = {}) {
-  logOp("dispatch", { target, agent, ...extra });
-}
-
-// src/adapters/github/target-state.ts
-function readTargetState(number, repo) {
-  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
-  const { code, stdout, stderr } = ghRead("api", path);
-  if (code !== 0) {
-    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
-`)[0] ?? "" };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return { known: false, why: "the response was not JSON" };
-  }
-  const isPr = parsed.pull_request !== undefined;
-  const kind = isPr ? "pull-request" : "issue";
-  if (parsed.state === "open")
-    return { known: true, kind, state: "open" };
-  if (parsed.state === "closed") {
-    return {
-      known: true,
-      kind,
-      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
-    };
-  }
-  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
-}
-
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
@@ -475,15 +420,30 @@ function shapedThread(comments, readers) {
   }
   return { comments: kept, events };
 }
+function wasLaunched(comments, readers) {
+  return comments.some((entry) => readers.isDispatchMarker(entry.body));
+}
 
 // src/adapters/github/thread.ts
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  requestedAgent: (body) => parseCommentCommand(body).agent
+  requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
+}
+function readComments(repo, number, excludeCommentId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const excluded = String(excludeCommentId ?? "").trim();
+  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return shapedThread(comments, readers);
+}
+function wasLaunchedOn(repo, number) {
+  return wasLaunched(readComments(repo, number).comments, readers);
 }
 function checkDispatchMarker(repo, number, markerId) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
@@ -494,6 +454,60 @@ function checkDispatchMarker(repo, number, markerId) {
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
   const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
+}
+
+// src/adapters/github/sibling-check.ts
+function countOpenSiblings(opts) {
+  const label = opts.label || getLabel("sub_issue");
+  const links = issueLinks(opts.repo, opts.parent);
+  if (links.unavailable) {
+    throw new Error(`countOpenSiblings: could not read the sub-issues of #${opts.parent}: ${links.unavailable}`);
+  }
+  return links.children.filter((child) => child.state === "open" && child.labels.includes(label) && child.number !== opts.exclude && wasLaunchedOn(opts.repo, child.number)).length;
+}
+
+// src/adapters/runner/ops-log.ts
+import { appendFileSync } from "fs";
+var OPS_LOG_PATH = process.env.ATOMATON_OPS_LOG ?? "/tmp/atomaton_ops.log";
+function logOp(op, payload = {}) {
+  const entry = { ts: new Date().toISOString(), op, ...payload };
+  try {
+    appendFileSync(OPS_LOG_PATH, JSON.stringify(entry) + `
+`);
+  } catch (e) {
+    console.error(`[ops-log] WARN: failed to write op log: ${e}`);
+  }
+}
+function logDispatch(target, agent, extra = {}) {
+  logOp("dispatch", { target, agent, ...extra });
+}
+
+// src/adapters/github/target-state.ts
+function readTargetState(number, repo) {
+  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
+  const { code, stdout, stderr } = ghRead("api", path);
+  if (code !== 0) {
+    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
+`)[0] ?? "" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { known: false, why: "the response was not JSON" };
+  }
+  const isPr = parsed.pull_request !== undefined;
+  const kind = isPr ? "pull-request" : "issue";
+  if (parsed.state === "open")
+    return { known: true, kind, state: "open" };
+  if (parsed.state === "closed") {
+    return {
+      known: true,
+      kind,
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
+    };
+  }
+  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
 // src/domain/work/closed-target.ts

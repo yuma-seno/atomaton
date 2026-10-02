@@ -240,7 +240,8 @@ function shapedThread(comments, readers) {
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  requestedAgent: (body) => parseCommentCommand(body).agent
+  requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);

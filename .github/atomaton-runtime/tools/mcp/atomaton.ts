@@ -6977,15 +6977,30 @@ function shapedThread(comments, readers) {
   }
   return { comments: kept, events };
 }
+function wasLaunched(comments, readers) {
+  return comments.some((entry) => readers.isDispatchMarker(entry.body));
+}
 
 // src/adapters/github/thread.ts
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  requestedAgent: (body) => parseCommentCommand(body).agent
+  requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
+}
+function readComments(repo, number, excludeCommentId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const excluded = String(excludeCommentId ?? "").trim();
+  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return shapedThread(comments, readers);
+}
+function wasLaunchedOn(repo, number) {
+  return wasLaunched(readComments(repo, number).comments, readers);
 }
 function checkDispatchMarker(repo, number, markerId) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
@@ -7173,12 +7188,6 @@ function dispatchSubAgent(issue, agent, notify = "", dispatchedBy = (process.env
   if (!isAgentName(agent)) {
     throw new Error(`agent must be a valid lowercase agent name, got: ${agent}`);
   }
-  const launchedLabel = getLabel("launched");
-  gh("label", "create", launchedLabel, "--force", "-c", "1f883d", "-d", "Atomaton has dispatched an agent for this sub-task");
-  const { code: labelCode } = gh("issue", "edit", String(issue), "--add-label", launchedLabel);
-  if (labelCode !== 0) {
-    console.error(`Warning: failed to add '${launchedLabel}' label to #${issue}`);
-  }
   const outcome = dispatchRunner({
     context: `${agent} was to be started on sub-issue #${issue}`,
     agent,
@@ -7195,6 +7204,12 @@ function dispatchSubAgent(issue, agent, notify = "", dispatchedBy = (process.env
   }
   if (outcome !== "dispatched") {
     throw new Error(`could not dispatch ${agent} on sub-issue #${issue}; see the workflow log for the gh error`);
+  }
+  const launchedLabel = getLabel("launched");
+  gh("label", "create", launchedLabel, "--force", "-c", "1f883d", "-d", "Atomaton has dispatched an agent for this sub-task");
+  const { code: labelCode } = gh("issue", "edit", String(issue), "--add-label", launchedLabel);
+  if (labelCode !== 0) {
+    console.error(`Warning: failed to add '${launchedLabel}' label to #${issue}`);
   }
   return { issue, agent };
 }
@@ -7373,12 +7388,11 @@ function issueLinks(repo, number) {
 // src/adapters/github/sibling-check.ts
 function countOpenSiblings(opts) {
   const label = opts.label || getLabel("sub_issue");
-  const launchedLabel = opts.launchedLabel || getLabel("launched");
   const links = issueLinks(opts.repo, opts.parent);
   if (links.unavailable) {
     throw new Error(`countOpenSiblings: could not read the sub-issues of #${opts.parent}: ${links.unavailable}`);
   }
-  return links.children.filter((child) => child.state === "open" && child.labels.includes(label) && child.labels.includes(launchedLabel) && child.number !== opts.exclude).length;
+  return links.children.filter((child) => child.state === "open" && child.labels.includes(label) && child.number !== opts.exclude && wasLaunchedOn(opts.repo, child.number)).length;
 }
 
 // src/adapters/github/agent-on-issue.ts
