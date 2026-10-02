@@ -235,7 +235,7 @@ function isHumanActor(type) {
   return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
 }
 
-// src/domain/work/whose-turn.ts
+// src/domain/work/thread.ts
 function eventOf(body, readers) {
   if (readers.isAgentResult(body))
     return readers.handedOff(body) ? "handed-off" : "returned";
@@ -270,7 +270,7 @@ function latestRequestedAgent(body, comments, readers) {
   return readers.requestedAgent(body);
 }
 
-// src/adapters/github/whose-turn.ts
+// src/adapters/github/thread.ts
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",

@@ -125,7 +125,7 @@ function readTargetState(number, repo) {
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
-// src/domain/work/closed-issue.ts
+// src/domain/work/closed-target.ts
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
 }
