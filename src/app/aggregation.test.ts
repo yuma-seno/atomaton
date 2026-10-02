@@ -43,29 +43,38 @@ const wroteMarker = (calls: string[][]) =>
 /**
  * The sub-issue links, which is where siblings come from now -- `atomaton:parent=N
  * in:body` and the tag behind it are gone. See `adapters/github/parent-issue.ts`.
+ *
+ * "Launched" is read from each child's thread now, not the `atomaton/launched` label,
+ * so every child also needs a comment read answered. These children are launched.
  */
-const subIssues = (...numbers: number[]): FakeGhRule => ({
-  match: ["graphql"],
-  stdout: JSON.stringify({
-    data: {
-      repository: {
-        issueOrPullRequest: {
-          __typename: "Issue",
-          subIssues: {
-            nodes: numbers.map((number) => ({
-              number,
-              title: `#`,
-              state: "OPEN",
-              labels: { nodes: [{ name: "atomaton/sub-issue" }, { name: "atomaton/launched" }] },
-            })),
+const subIssues = (...numbers: number[]): FakeGhRule[] => [
+  {
+    match: ["graphql"],
+    stdout: JSON.stringify({
+      data: {
+        repository: {
+          issueOrPullRequest: {
+            __typename: "Issue",
+            subIssues: {
+              nodes: numbers.map((number) => ({
+                number,
+                title: `#`,
+                state: "OPEN",
+                labels: { nodes: [{ name: "atomaton/sub-issue" }] },
+              })),
+            },
           },
         },
       },
-    },
-  }),
-});
+    }),
+  },
+  ...numbers.map((number): FakeGhRule => ({
+    match: ["api", `issues/${number}/comments`],
+    stdout: JSON.stringify([{ id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } }]),
+  })),
+];
 
-const NO_SIBLINGS: FakeGhRule = subIssues();
+const NO_SIBLINGS: FakeGhRule[] = subIssues();
 
 // The dispatch marker, posted by `dispatchRunner` before its ordering check, and the
 // thread read that follows. The read must SHOW the marker (id 555): that is the
@@ -101,7 +110,7 @@ const PARENT_IS_OPEN: FakeGhRule = { match: ["api", "issues"], stdout: JSON.stri
 
 describe("aggregation.ts dispatch gate", () => {
   test("dispatches once when the siblings are done and nobody claimed it", () => {
-    const { kind, ghCalls } = runGate([NO_SIBLINGS, ...DISPATCH_MARKER, NO_MARKER, MARKER_WRITES, DISPATCH_WORKS, PARENT_IS_OPEN]);
+    const { kind, ghCalls } = runGate([...NO_SIBLINGS, ...DISPATCH_MARKER, NO_MARKER, MARKER_WRITES, DISPATCH_WORKS, PARENT_IS_OPEN]);
     expect(kind).toBe("dispatched");
     expect(wroteMarker(ghCalls)).toBe(true);
     expect(dispatched(ghCalls)).toBe(true);
@@ -117,7 +126,7 @@ describe("aggregation.ts dispatch gate", () => {
    */
   test("a closed parent is not dispatched onto, and says so as its own answer", () => {
     const { kind, ghCalls } = runGate([
-      NO_SIBLINGS,
+      ...NO_SIBLINGS,
       ...DISPATCH_MARKER,
       NO_MARKER,
       MARKER_WRITES,
@@ -133,7 +142,7 @@ describe("aggregation.ts dispatch gate", () => {
 
   test("siblings still open is `waiting`, and nothing is claimed", () => {
     const { kind, ghCalls } = runGate([
-      subIssues(11),
+      ...subIssues(11),
     ]);
     expect(kind).toBe("waiting");
     expect(wroteMarker(ghCalls)).toBe(false);
@@ -142,7 +151,7 @@ describe("aggregation.ts dispatch gate", () => {
 
   test("another caller's marker makes this one a no-op", () => {
     const { kind, ghCalls } = runGate([
-      NO_SIBLINGS,
+      ...NO_SIBLINGS,
       { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["<!-- atomaton:aggregated=10 -->"]) },
     ]);
     expect(kind).toBe("already-aggregated");
@@ -156,7 +165,7 @@ describe("aggregation.ts dispatch gate", () => {
   // recoverable by that racer; a double dispatch is not.
   test("a failed marker write stops the dispatch rather than racing on", () => {
     const { kind, ghCalls, stderr } = runGate([
-      NO_SIBLINGS,
+      ...NO_SIBLINGS,
       NO_MARKER,
       { match: ["issue", "comment"], code: 1, stdout: "API rate limit exceeded" },
     ]);
@@ -169,7 +178,7 @@ describe("aggregation.ts dispatch gate", () => {
   // two halves cannot drift apart again.
   test("an unreadable comment list stops the dispatch too", () => {
     const { kind, ghCalls } = runGate([
-      NO_SIBLINGS,
+      ...NO_SIBLINGS,
       { match: ["api", "comments", "--jq"], code: 1, stdout: "not found" },
     ]);
     expect(kind).toBe("undetermined");

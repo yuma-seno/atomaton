@@ -9,13 +9,21 @@ export interface DispatchSubAgentResult {
 }
 
 /**
- * Tags a sub-issue as "launched" and dispatches the runner workflow on it.
+ * Dispatches the runner workflow on a sub-issue, and tags it as "launched".
  *
  * `dispatchedBy` is the agent starting this run -- the one waiting on its result.
  * It defaults to the current run's own agent (`process.env.AGENT`), which is the
  * caller in every real path: an atomaton launching a sub-agent. Passed through to
  * the runner so the started run knows who to report back to; see
  * `RunnerDispatch.dispatchedBy` for why that name has no other route.
+ *
+ * ## Why the label is written after the dispatch, not before
+ *
+ * It used to go on first, so that a refused dispatch still left the sub-issue saying
+ * "launched" while nothing had been. The label is a record for a person now, not a
+ * fact anything reads -- `countOpenSiblings` reads the dispatch marker from the thread
+ * -- but a record that can be wrong is worse than none, so it is written only once the
+ * dispatch has actually gone out.
  *
  * ## What this no longer does
  *
@@ -31,18 +39,6 @@ export function dispatchSubAgent(issue: number, agent: string, notify = "", disp
   }
   if (!isAgentName(agent)) {
     throw new Error(`agent must be a valid lowercase agent name, got: ${agent}`);
-  }
-
-  const launchedLabel = getLabel("launched");
-  // Create it first, as the in-progress and sub-issue labels already do. Adding a
-  // label that does not exist fails, and the failure below is only a warning — but
-  // `sibling-check.ts` reads this label to decide whether a sub-issue has already
-  // been launched, so silently never applying it makes a child look unlaunched and
-  // invites a relaunch.
-  gh("label", "create", launchedLabel, "--force", "-c", "1f883d", "-d", "Atomaton has dispatched an agent for this sub-task");
-  const { code: labelCode } = gh("issue", "edit", String(issue), "--add-label", launchedLabel);
-  if (labelCode !== 0) {
-    console.error(`Warning: failed to add '${launchedLabel}' label to #${issue}`);
   }
 
   // Throws rather than returning quietly: `launch_sub_agent` reports each task's
@@ -72,6 +68,16 @@ export function dispatchSubAgent(issue: number, agent: string, notify = "", disp
   }
   if (outcome !== "dispatched") {
     throw new Error(`could not dispatch ${agent} on sub-issue #${issue}; see the workflow log for the gh error`);
+  }
+
+  // Only now, with the run actually started. Create the label first, as the
+  // in-progress and sub-issue labels already do: adding a label that does not exist
+  // fails, and the failure below is only a warning.
+  const launchedLabel = getLabel("launched");
+  gh("label", "create", launchedLabel, "--force", "-c", "1f883d", "-d", "Atomaton has dispatched an agent for this sub-task");
+  const { code: labelCode } = gh("issue", "edit", String(issue), "--add-label", launchedLabel);
+  if (labelCode !== 0) {
+    console.error(`Warning: failed to add '${launchedLabel}' label to #${issue}`);
   }
 
   return { issue, agent };

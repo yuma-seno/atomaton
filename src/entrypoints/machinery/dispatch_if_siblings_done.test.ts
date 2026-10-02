@@ -5,27 +5,36 @@ import { makeConfigDir, runWithFakeGh, scriptPath, type FakeGhRule } from "./tes
 /**
  * The sub-issue links, which is where siblings come from now. `atomaton:parent=N
  * in:body` and the tag behind it are gone -- see `adapters/github/parent-issue.ts`.
+ *
+ * "Launched" is read from each child's thread now, not the `atomaton/launched` label,
+ * so every child also needs a comment read answered. These children are launched.
  */
-const subIssues = (...numbers: number[]): FakeGhRule => ({
-  match: ["graphql"],
-  stdout: JSON.stringify({
-    data: {
-      repository: {
-        issueOrPullRequest: {
-          __typename: "Issue",
-          subIssues: {
-            nodes: numbers.map((number) => ({
-              number,
-              title: `#`,
-              state: "OPEN",
-              labels: { nodes: [{ name: "atomaton/sub-issue" }, { name: "atomaton/launched" }] },
-            })),
+const subIssues = (...numbers: number[]): FakeGhRule[] => [
+  {
+    match: ["graphql"],
+    stdout: JSON.stringify({
+      data: {
+        repository: {
+          issueOrPullRequest: {
+            __typename: "Issue",
+            subIssues: {
+              nodes: numbers.map((number) => ({
+                number,
+                title: `#`,
+                state: "OPEN",
+                labels: { nodes: [{ name: "atomaton/sub-issue" }] },
+              })),
+            },
           },
         },
       },
-    },
-  }),
-});
+    }),
+  },
+  ...numbers.map((number): FakeGhRule => ({
+    match: ["api", `issues/${number}/comments`],
+    stdout: JSON.stringify([{ id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } }]),
+  })),
+];
 
 describe("dispatch_if_siblings_done.ts", () => {
   test("dispatches the atomaton once all siblings are done", () => {
@@ -37,7 +46,7 @@ describe("dispatch_if_siblings_done.ts", () => {
         {
           cwd: configDir,
           rules: [
-            subIssues(),
+            ...subIssues(),
             // The dispatch marker and the thread read that follows. The read must show
             // the marker (555) -- the freshness probe. The POST rule comes first: it
             // carries `--jq .id`, which the aggregation read's `--jq` also matches.
@@ -69,7 +78,7 @@ describe("dispatch_if_siblings_done.ts", () => {
         {
           cwd: configDir,
           rules: [
-            subIssues(),
+            ...subIssues(),
             { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["<!-- atomaton:aggregated=9 -->", "Atomaton: All sub-tasks completed."]) },
           ],
         },
@@ -88,7 +97,7 @@ describe("dispatch_if_siblings_done.ts", () => {
       const r = runWithFakeGh(
         scriptPath("dispatch_if_siblings_done.ts"),
         ["--repo", "owner/repo", "--parent", "5", "--closed-num", "9"],
-        { cwd: configDir, rules: [subIssues(1)] },
+        { cwd: configDir, rules: [...subIssues(1)] },
       );
       expect(r.status).toBe(0);
       expect(r.ghCalls.some((c) => c.includes("comment"))).toBe(false);
