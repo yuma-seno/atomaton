@@ -34,13 +34,14 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead } from "./gh.ts";
-import { AGENT_TAG, ENDED_TAG } from "./tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
   latestRequestedAgent,
   requestOutstanding,
   shapedThread,
+  wasLaunched,
   whoseTurn,
   type ShapedThread,
   type ThreadEntry,
@@ -59,6 +60,7 @@ export const readers: TurnReaders = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
   requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body),
 };
 
 /** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
@@ -168,6 +170,21 @@ export function commentWouldBeRemoved(repo: string, number: string | number, com
  */
 export function runInFlight(repo: string, number: string | number): boolean {
   return whoseTurn(readComments(repo, number).events) === "agent";
+}
+
+/**
+ * Whether an agent was ever dispatched onto a node, read from its thread.
+ *
+ * The `atomaton/launched` label used to answer this, and it was written before the
+ * dispatch was attempted -- so a refused dispatch left it saying "launched" while
+ * nothing had been. The dispatch marker is written by `dispatchRunner` only when it is
+ * about to start a run, so the thread is the accurate record. See `wasLaunched`.
+ *
+ * Throws when the thread cannot be read, like every other reader here: a caller
+ * deciding whether a sub-issue has been started must not read a failed read as "no".
+ */
+export function wasLaunchedOn(repo: string, number: string | number): boolean {
+  return wasLaunched(readComments(repo, number).comments, readers);
 }
 
 /**

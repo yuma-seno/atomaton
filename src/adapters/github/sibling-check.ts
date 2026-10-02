@@ -13,17 +13,26 @@
  * so this gate went on counting under the old parent while `parentIssueOf` followed
  * the new one. Both confident, neither aware of the other. See `adapters/github/parent-issue.ts`.
  *
- * The labels arrive in the same request, so the change costs no extra call: one
- * GraphQL query where there was one search.
+ * ## Why "launched" is read from the thread
+ *
+ * A sub-issue that was never dispatched must not block the count, or the atomaton is
+ * never re-invoked. That used to be the `atomaton/launched` label, which
+ * `dispatch_sub_agent` wrote BEFORE it attempted the dispatch — so a dispatch that was
+ * refused (a closed target, a request already outstanding) left the label saying
+ * "launched" while nothing had been. The dispatch marker is written by `dispatchRunner`
+ * only when it is about to start a run, so the thread is the accurate record.
+ *
+ * The cost is one comment read per open child. The labels used to arrive free with the
+ * links, but a label that can be wrong is not free.
  */
 import { getLabel } from "../../adapters/runner/config.ts";
 import { issueLinks } from "./issue-links.ts";
+import { wasLaunchedOn } from "./thread.ts";
 
 export interface CountOpenSiblingsOptions {
   repo: string;
   parent: number;
   label?: string;
-  launchedLabel?: string;
   /**
    * Drop this specific issue number from the count regardless of its live
    * open/closed state on GitHub -- used right after a PR merges its linked
@@ -36,10 +45,9 @@ export interface CountOpenSiblingsOptions {
 }
 
 /**
- * Only counts siblings that have actually been dispatched (labeled
- * "launched"). Sub-issues created but not yet launched (e.g. a later phase
- * in a dependency-ordered plan) must NOT block re-invocation of the
- * atomaton, otherwise the count can never reach zero.
+ * Only counts siblings that have actually been dispatched. Sub-issues created but not
+ * yet launched (e.g. a later phase in a dependency-ordered plan) must NOT block
+ * re-invocation of the atomaton, otherwise the count can never reach zero.
  *
  * Throws when the children could not be read, and that is the point: this number
  * decides whether the atomaton is re-invoked, and a list nobody could read
@@ -47,7 +55,6 @@ export interface CountOpenSiblingsOptions {
  */
 export function countOpenSiblings(opts: CountOpenSiblingsOptions): number {
   const label = opts.label || getLabel("sub_issue");
-  const launchedLabel = opts.launchedLabel || getLabel("launched");
 
   const links = issueLinks(opts.repo, opts.parent);
   if (links.unavailable) {
@@ -58,7 +65,7 @@ export function countOpenSiblings(opts: CountOpenSiblingsOptions): number {
     (child) =>
       child.state === "open" &&
       child.labels.includes(label) &&
-      child.labels.includes(launchedLabel) &&
-      child.number !== opts.exclude,
+      child.number !== opts.exclude &&
+      wasLaunchedOn(opts.repo, child.number),
   ).length;
 }

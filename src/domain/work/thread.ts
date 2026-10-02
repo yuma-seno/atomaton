@@ -62,6 +62,14 @@ export interface TurnReaders {
    * exactly when this returns a name.
    */
   requestedAgent: (body: string) => string;
+  /**
+   * Whether a body is a dispatch marker the machinery wrote.
+   *
+   * Distinct from `requestedAgent`, which answers for a person's `/agent` command too.
+   * This is the narrower question "did the machinery start a run here", and it is what
+   * `wasLaunched` asks.
+   */
+  isDispatchMarker: (body: string) => boolean;
 }
 
 /**
@@ -226,4 +234,21 @@ export function latestRequestedAgent(body: string, comments: readonly ThreadEntr
     if (agent !== "") return agent;
   }
   return readers.requestedAgent(body);
+}
+
+/**
+ * Whether an agent was ever dispatched onto this node, from its thread.
+ *
+ * The `atomaton/launched` label used to answer this, and it was written BEFORE the
+ * dispatch was attempted -- so a dispatch that was refused (a closed target, a request
+ * already outstanding) left the label saying "launched" while nothing had been. The
+ * dispatch marker is written by `dispatchRunner` itself, and only when it is about to
+ * start a run, so the thread is the accurate record.
+ *
+ * Read from the shaped thread, which is safe because a dispatch marker is the
+ * machinery's own comment and the guard never removes one -- so shaping cannot change
+ * the answer.
+ */
+export function wasLaunched(comments: readonly ThreadEntry[], readers: TurnReaders): boolean {
+  return comments.some((entry) => readers.isDispatchMarker(entry.body));
 }

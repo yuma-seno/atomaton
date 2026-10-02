@@ -18,6 +18,7 @@ const readers: TurnReaders = {
   isAgentResult: (body) => body.startsWith("RESULT"),
   handedOff: (body) => body.includes("handoff"),
   requestedAgent: (body) => (body.startsWith("/") ? body.slice(1).split(/\s/)[0]! : ""),
+  isDispatchMarker: (body) => body.startsWith("DISPATCH"),
 };
 
 const events = (bodies: string[]) => turnEvents(bodies, readers);
