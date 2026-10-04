@@ -48,6 +48,17 @@ function sleep(ms: number): Promise<void> {
  * dispatching an agent called "". The gate's caller reports that as
  * `dispatch-failed`, which is what it is: the work is done and nobody was
  * started to aggregate it.
+ *
+ * ## Why the request is read too
+ *
+ * This used to read only the result comment's `atomaton:agent`, and that is the
+ * defect #18 walked into: an atomaton that decomposes work ends by calling
+ * `launch_sub_agent`, a session-ending tool, so it posts no result comment and
+ * leaves no `atomaton:agent`. The parent of every orchestrated subtree therefore
+ * read `""`, and the gate dispatched an agent called "" -- which GitHub refused with
+ * `HTTP 422: Required input 'agent' not provided`. The request that started the run
+ * (a person's `/agent` command, or the `atomaton:dispatch` marker) is always there,
+ * so `mostRecentAgent` reads the newest of the two records.
  */
 function parentAgent(repo: string, parent: number): string {
   return mostRecentAgentOn(repo, parent);

@@ -51,6 +51,12 @@ describe("dispatch_if_siblings_done.ts", () => {
             // the marker (555) -- the freshness probe. The POST rule comes first: it
             // carries `--jq .id`, which the aggregation read's `--jq` also matches.
             { match: ["api", "issues/5/comments", "POST"], stdout: "555" },
+            // The parent's own thread, read by `mostRecentAgentOn` to name the agent to
+            // re-invoke. `--jq "[.[].body]"` asks for bodies as strings, so this answers
+            // with a string array -- the rule below answers with comment objects, and the
+            // two must not be confused. Listed first, because that rule matches this path
+            // too.
+            { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["<!-- atomaton:dispatch=atomaton -->"]) },
             { match: ["api", "issues/5/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
             { match: ["api", "comments", "--jq"], stdout: JSON.stringify([]) },
             { match: ["issue", "comment"] },
