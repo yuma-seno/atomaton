@@ -27,24 +27,32 @@ function gitRun(...args) {
   return run(["git", ...args]);
 }
 
+// src/domain/machinery/data-layout.ts
+var SESSIONS_TREE = "sessions/";
+var ARCHIVE_DIR = "archive";
+function sessionDir(type, number) {
+  return `${SESSIONS_TREE}${type}-${number}`;
+}
+
 // src/entrypoints/machinery/lib/atomaton-data.ts
+var DATA_BRANCH = "atomaton-data";
 function sessionTargetPath(type, number, agent) {
-  return `sessions/${type}-${number}/${agent}.json`;
+  return `${sessionDir(type, number)}/${agent}.json`;
 }
 function nextArchiveSessionPath(type, number, agent, existingNames) {
   const escapedAgent = agent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const archivePattern = new RegExp(`^${escapedAgent}-(\\d+)\\.json$`);
   const nextNumber = existingNames.map((name) => archivePattern.exec(name)).filter((match) => match !== null).reduce((max, match) => Math.max(max, Number(match[1])), 0) + 1;
-  return `sessions/${type}-${number}/archive/${agent}-${nextNumber}.json`;
+  return `${sessionDir(type, number)}/${ARCHIVE_DIR}/${agent}-${nextNumber}.json`;
 }
 function restoreSession(targetPath) {
-  if (gitRun("fetch", "origin", "atomaton-data", "--depth=1").code !== 0) {
+  if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0) {
     return;
   }
-  if (gitRun("cat-file", "-e", `origin/atomaton-data:${targetPath}`).code !== 0) {
+  if (gitRun("cat-file", "-e", `origin/${DATA_BRANCH}:${targetPath}`).code !== 0) {
     return;
   }
-  const shown = gitRun("show", `origin/atomaton-data:${targetPath}`);
+  const shown = gitRun("show", `origin/${DATA_BRANCH}:${targetPath}`);
   return shown.code === 0 ? shown.stdout : undefined;
 }
 function gitIn(cwd, ...args) {
@@ -52,19 +60,19 @@ function gitIn(cwd, ...args) {
   return { code: proc.exitCode ?? 1, stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "" };
 }
 function archiveSession(type, number, agent, content) {
-  if (gitRun("ls-remote", "--exit-code", "origin", "atomaton-data").code !== 0)
+  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0)
     return;
-  gitRun("fetch", "origin", "atomaton-data");
+  gitRun("fetch", "origin", DATA_BRANCH);
   const worktreeDir = mkdtempSync(join(tmpdir(), "atomaton-data-archive-wt-"));
-  gitRun("worktree", "add", worktreeDir, "origin/atomaton-data");
+  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
   let archivedPath;
   try {
     gitIn(worktreeDir, "config", "user.email", "action@github.com");
     gitIn(worktreeDir, "config", "user.name", "GitHub Actions");
     for (let attempt = 1;attempt <= 5; attempt++) {
-      gitIn(worktreeDir, "fetch", "origin", "atomaton-data");
-      gitIn(worktreeDir, "reset", "--hard", "origin/atomaton-data");
-      const archiveDir = join(worktreeDir, `sessions/${type}-${number}/archive`);
+      gitIn(worktreeDir, "fetch", "origin", DATA_BRANCH);
+      gitIn(worktreeDir, "reset", "--hard", `origin/${DATA_BRANCH}`);
+      const archiveDir = join(worktreeDir, sessionDir(type, number), ARCHIVE_DIR);
       mkdirSync(archiveDir, { recursive: true });
       const relativePath = nextArchiveSessionPath(type, number, agent, readdirSync(archiveDir));
       const fullPath = join(worktreeDir, relativePath);
@@ -73,11 +81,11 @@ function archiveSession(type, number, agent, content) {
       writeFileSync(fullPath, content);
       gitIn(worktreeDir, "add", relativePath);
       gitIn(worktreeDir, "commit", "-m", `session: archive ${agent} on ${type} ${number}`);
-      if (gitIn(worktreeDir, "push", "origin", "HEAD:atomaton-data").code === 0) {
+      if (gitIn(worktreeDir, "push", "origin", `HEAD:${DATA_BRANCH}`).code === 0) {
         archivedPath = relativePath;
         break;
       }
-      console.error(`Archive push attempt ${attempt} failed -- retrying with the latest atomaton-data branch.`);
+      console.error(`Archive push attempt ${attempt} failed -- retrying with the latest ${DATA_BRANCH} branch.`);
       Bun.sleepSync(attempt * 2000);
     }
   } finally {

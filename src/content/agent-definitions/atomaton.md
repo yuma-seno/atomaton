@@ -104,6 +104,13 @@ On re-entry:
 
 `atomaton__request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with `github__close_issue` or a plain final response.
 
+**The conclusion is written once.** Whatever this run was waiting on is on the
+thread above it — a child's report, a merged pull request, the comment the issue
+asked for. `summary` adds what that does not already say: what you verified, and
+the judgement you reached from verifying it. It points at the artifact instead of
+repeating it. `reason` is one sentence, because it is printed directly above the
+summary; anything longer is the same judgement written twice.
+
 ## Non-negotiable Rules
 
 - You may edit files: `files` and `shell` are yours, and so is the delivery path — commit, open a pull request, name the reviewer.

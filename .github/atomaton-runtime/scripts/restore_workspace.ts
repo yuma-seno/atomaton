@@ -69,18 +69,25 @@ function gitRun(...args) {
   return run(["git", ...args]);
 }
 
+// src/domain/machinery/data-layout.ts
+var WORKSPACE_TREE = "workspace/";
+function workspaceDir(rootIssue) {
+  return `${WORKSPACE_TREE}issue-${rootIssue}`;
+}
+
 // src/entrypoints/machinery/lib/atomaton-data.ts
+var DATA_BRANCH = "atomaton-data";
 function workspaceTargetPrefix(rootIssue) {
-  return `workspace/issue-${rootIssue}`;
+  return workspaceDir(rootIssue);
 }
 function restoreWorkspace(prefix, destDir) {
-  if (gitRun("fetch", "origin", "atomaton-data", "--depth=1").code !== 0)
+  if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0)
     return false;
-  if (gitRun("cat-file", "-e", `origin/atomaton-data:${prefix}`).code !== 0)
+  if (gitRun("cat-file", "-e", `origin/${DATA_BRANCH}:${prefix}`).code !== 0)
     return false;
   mkdirSync(destDir, { recursive: true });
   const archive = Bun.spawnSync({
-    cmd: ["git", "archive", "--format=tar", `origin/atomaton-data:${prefix}`],
+    cmd: ["git", "archive", "--format=tar", `origin/${DATA_BRANCH}:${prefix}`],
     stdout: "pipe",
     stderr: "pipe"
   });
@@ -121,10 +128,29 @@ function parentIssueOf(repo, issue) {
     return { known: false, why };
   }
 }
+var MAX_PARENT_HOPS = 6;
+function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
+  const visited = new Set;
+  let current = start;
+  for (let hop = 0;hop < maxHops; hop++) {
+    if (visited.has(current))
+      return;
+    visited.add(current);
+    const { data, parent } = read(current);
+    yield { number: current, data, parent };
+    if (!parent.known || parent.parent === 0)
+      return;
+    current = parent.parent;
+  }
+}
 
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
+
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
 
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
@@ -134,6 +160,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -150,9 +177,9 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -174,7 +201,6 @@ function workspaceScope(target, parents, why = "") {
 }
 
 // src/adapters/github/workspace-scope.ts
-var MAX_HOPS = 6;
 function log2(message) {
   console.error(`[atomaton-workspace] ${message}`);
 }
@@ -192,7 +218,7 @@ function resolveWorkspaceScope(repo, type, number) {
     return workspaceScope(number, [], `"${number}" is not an issue or pull request number`);
   }
   const chain = [];
-  let current = target;
+  let start = target;
   if (type === "pr") {
     const issue = issueOfPullRequest(repo, target);
     if (issue === undefined) {
@@ -200,23 +226,15 @@ function resolveWorkspaceScope(repo, type, number) {
       return workspaceScope(number, []);
     }
     chain.push(issue);
-    current = issue;
+    start = issue;
   }
-  const visited = new Set([target]);
-  for (let hop = 0;hop < MAX_HOPS; hop++) {
-    if (visited.has(current) && hop > 0) {
-      log2(`WARN parent chain revisits #${current}; stopping the walk here`);
-      break;
+  for (const hop of parentChain(start, (current) => ({ data: undefined, parent: parentIssueOf(repo, current) }))) {
+    if (!hop.parent.known) {
+      return workspaceScope(number, chain, chain.length > 0 ? "" : hop.parent.why);
     }
-    visited.add(current);
-    const parentage = parentIssueOf(repo, current);
-    if (!parentage.known) {
-      return workspaceScope(number, chain, chain.length > 0 ? "" : parentage.why);
-    }
-    if (parentage.parent === 0)
+    if (hop.parent.parent === 0)
       break;
-    chain.push(parentage.parent);
-    current = parentage.parent;
+    chain.push(hop.parent.parent);
   }
   const scope = workspaceScope(number, chain);
   if (!scope.resolved)

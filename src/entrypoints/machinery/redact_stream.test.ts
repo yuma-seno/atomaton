@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { REDACTED } from "../../shared/redaction.ts";
-import { scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, scriptPath } from "./testing/harness.ts";
 
 function run(input: string) {
-  return spawnSync("bun", ["run", scriptPath("redact_stream.ts")], { input, encoding: "utf8" });
+  return spawnSync("bun", ["run", scriptPath("redact_stream.ts")], {
+    input,
+    encoding: "utf8",
+    env: hermeticEnv(),
+  });
 }
 
 describe("redact_stream.ts", () => {

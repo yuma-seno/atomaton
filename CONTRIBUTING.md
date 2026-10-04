@@ -92,6 +92,33 @@ The version is the single declaration, and `self/atomaton/scripts/tag-release.sh
 tag from it, so there is no tag to push and nothing that can disagree. Releasing is
 an ordinary reviewed change rather than a separate act of remembering.
 
+To make that one edit without a checkout, dispatch **Atomaton Release**:
+
+```bash
+gh workflow run atomaton-release.yml --ref main -f version=0.2.0
+```
+
+Or press **Run workflow** on **Atomaton Release** in the Actions tab. It writes the
+version into `package.json` and opens a pull request; it merges nothing.
+`package.json` is in `merge.governed_paths`, so a person reviews it — a version is a
+claim about what is being shipped, and deciding that is not an agent's to make.
+
+It refuses two things, and only two:
+
+- **a downgrade** — the new version must not be below the declared one. This is the
+  one check that is not a judgement, so it is the one check made.
+- **a version already released** — the tag and the release exist, so there is
+  nothing to do.
+
+Everything else is left to the person merging. A version equal to the declared one
+is not an error: it means a publish did not finish, and the fix is to re-run the
+deploy rather than open a pull request for no diff.
+
+The workflow is hand-written and lives in `self/workflows/`, like the self-deploy,
+and for the same reasons: it is not in the deliverable, no agent triggers it, and it
+uses `SELF_DEPLOY_TOKEN` because a pull request opened with `GITHUB_TOKEN` starts no
+workflow run — so its checks would never appear and it could never be merged.
+
 It happens in two halves, and the second is triggered by the first:
 
 1. **`deploy.on_merge` → `self/atomaton/scripts/tag-release.sh`.** Runs after every merge and is
@@ -141,7 +168,7 @@ dispatches the workflow explicitly.
 To publish by hand, or to retry a failed run:
 
 ```bash
-gh workflow run atomaton-deploy.yml --ref main -f target=release
+gh workflow run atomaton-deploy.yml --ref v1.2.3 -f target=publish
 ```
 
 ## Applying a release to this repository
@@ -238,9 +265,16 @@ What each command proves:
 - `test`: unit-level behavior across `src/domain`, `src/shared`, `src/adapters`, `src/app`, `src/entrypoints/machinery`, and the MCP servers and hooks.
 - `test:e2e`: end-to-end checks in `tests/e2e`.
 
-`test:e2e` runs against the built tree, so `bun run synth` has to come first — it
-reads `dist/.github/atomaton-runtime/tools/mcp/*.ts`, which an untracked `dist/` does
-not have until you build it.
+Seventeen files across those two commands name a `dist/` path besides the contract test
+below, and `dist/` is gitignored and so absent from a checkout. `test` and `test:e2e`
+therefore each build it first through a `pre<name>` script, which is why `bun run synth`
+is no longer a step you have to remember before either of them. It matters most where
+nobody is watching: CI runs `synth` before `test` anyway, but an agent's run does not, and
+a missing `dist/` there is 59 `ENOENT` failures an agent cannot tell from ones its own
+change caused. `tests/contract/test-builds-first.test.ts` is the guard: it fails when a
+`test*` script whose files name a `dist/` path has no `pre<name>` running `synth`, and it
+fails on a `pre` hook that is present but does not build. The `synth` check command CI
+runs stays, because it is what proves the build works before the tests read it.
 
 ### Green does not mean it ran
 

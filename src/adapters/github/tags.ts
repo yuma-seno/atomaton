@@ -8,6 +8,7 @@
  * re-deriving its own regex.
  */
 import { AGENT_NAME_PATTERN } from "../../domain/work/agent-name.ts";
+import { LOGIN_PATTERN } from "../../domain/work/mention.ts";
 
 /**
  * The prefix every tag carries, written once.
@@ -21,6 +22,15 @@ import { AGENT_NAME_PATTERN } from "../../domain/work/agent-name.ts";
 const TAG_PREFIX = `atomaton:`;
 
 export interface AtomatonTag<T> {
+  /**
+   * The tag's name with the prefix but no value or wrapper, e.g. `atomaton:dispatch`.
+   *
+   * A workflow `if:` that only asks whether a comment carries the tag cannot call
+   * `has` — it is a GitHub expression, not TypeScript — so it writes
+   * `contains(body, 'atomaton:dispatch')` by hand. That literal is the one place a
+   * rename of the key would not follow, so the workflow builds it from here.
+   */
+  readonly marker: string;
   /** Render this tag's HTML-comment form, ready to prepend/embed in a body or comment. */
   write(value: T): string;
   /** Extract this tag's value from anywhere in `text`, or undefined if absent. */
@@ -55,6 +65,7 @@ function makeTag<T>(key: string, valuePattern: string, parse: (raw: string) => T
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -102,8 +113,14 @@ export const STOP_TAG = stringTag("stop", "requested");
  * `stopped` is a person's stop or a closed issue's; `limit` is a spent iteration or
  * time budget; `done` is every ordinary ending. Only the first is resumed
  * automatically, because only it was interrupted rather than finished.
+ *
+ * `handoff` is the one ending that leaves the node with an agent rather than giving
+ * it back, and it is what `domain/work/thread.ts` reads to answer "is a comment
+ * arriving mid-turn". It is a fourth value rather than a second tag because it is the
+ * same fact -- how this turn ended -- and a reader that wants only the three older
+ * answers still gets them: `/resume` looks for `stopped` and nothing else.
  */
-export const ENDED_TAG = stringTag("ended", "stopped|limit|done");
+export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 
 // `PARENT_TAG` (`atomaton:parent`, sub-issue -> parent issue) was here. GitHub's own
 // sub-issue link answers the same question and a person can change it, while this was
@@ -136,7 +153,7 @@ export const ENDED_TAG = stringTag("ended", "stopped|limit|done");
  */
 export const PARENT_ISSUE_TAG = numericTag("parent-issue");
 /** Who to `@mention` on completion/escalation. */
-export const NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+export const NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 /** Which agent originally created a PR (for post-merge/rejection re-invocation). */
 export const ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 /** Slash-command-equivalent dispatch marker on a bot-authored comment. */

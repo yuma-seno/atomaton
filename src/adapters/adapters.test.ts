@@ -48,11 +48,15 @@ function makeShim(code: string): { file: string; dir: string } {
  * The siblings come from GitHub's own sub-issue links now, with their labels in the
  * same request — the `atomaton:parent=N in:body` search is gone, along with the tag
  * it read. See `adapters/github/parent-issue.ts`.
+ *
+ * "Launched" is read from each child's thread now, not the `atomaton/launched` label,
+ * so every child the count looks at needs a comment read answered. A child with a
+ * dispatch marker was launched; one with an empty thread was not.
  */
 describe("sibling-check.ts countOpenSiblings", () => {
-  const LAUNCHED = ["atomaton/sub-issue", "atomaton/launched"];
+  const SUB_ISSUE = ["atomaton/sub-issue"];
   /** One `subIssues` node, as the GraphQL reader asks for it. */
-  const child = (number: number, state: string, labels: string[] = LAUNCHED) => ({
+  const child = (number: number, state: string, labels: string[] = SUB_ISSUE) => ({
     number,
     title: `#${number}`,
     state,
@@ -69,14 +73,22 @@ describe("sibling-check.ts countOpenSiblings", () => {
     }),
   });
 
-  function count(options: string, rule: FakeGhRule): string {
+  /** A child's thread, with a dispatch marker (launched) or without (not). */
+  const thread = (number: number, launched: boolean): FakeGhRule => ({
+    match: ["api", `issues/${number}/comments`],
+    stdout: launched
+      ? JSON.stringify([{ id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } }])
+      : "[]",
+  });
+
+  function count(options: string, rules: FakeGhRule[]): string {
     const configDir = makeConfigDir({});
     const { file, dir } = makeShim(`
       import { countOpenSiblings } from "${importable(join(GITHUB_DIR, "sibling-check.ts"))}";
       console.log(countOpenSiblings(${options}));
     `);
     try {
-      return runWithFakeGh(file, [], { cwd: configDir, rules: [rule] }).stdout.trim();
+      return runWithFakeGh(file, [], { cwd: configDir, rules }).stdout.trim();
     } finally {
       rmSync(configDir, { recursive: true, force: true });
       rmSync(dir, { recursive: true, force: true });
@@ -84,11 +96,21 @@ describe("sibling-check.ts countOpenSiblings", () => {
   }
 
   test("counts the open, launched sub-issues", () => {
-    expect(count(`{ repo: "owner/repo", parent: 5 }`, links(child(10, "OPEN"), child(11, "OPEN")))).toBe("2");
+    expect(
+      count(`{ repo: "owner/repo", parent: 5 }`, [
+        links(child(10, "OPEN"), child(11, "OPEN")),
+        thread(10, true),
+        thread(11, true),
+      ]),
+    ).toBe("2");
   });
 
   test("prints 0 when no siblings are open", () => {
-    expect(count(`{ repo: "owner/repo", parent: 5 }`, links(child(10, "CLOSED"), child(11, "CLOSED")))).toBe("0");
+    expect(
+      count(`{ repo: "owner/repo", parent: 5 }`, [
+        links(child(10, "CLOSED"), child(11, "CLOSED")),
+      ]),
+    ).toBe("0");
   });
 
   /**
@@ -97,11 +119,18 @@ describe("sibling-check.ts countOpenSiblings", () => {
    * atomaton, or the count never reaches zero.
    */
   test("a sub-issue that was never launched does not block the count", () => {
-    expect(count(`{ repo: "owner/repo", parent: 5 }`, links(child(10, "OPEN", ["atomaton/sub-issue"])))).toBe("0");
+    expect(
+      count(`{ repo: "owner/repo", parent: 5 }`, [links(child(10, "OPEN")), thread(10, false)]),
+    ).toBe("0");
   });
 
   test("exclude drops a specific issue number regardless of its live open state", () => {
-    expect(count(`{ repo: "owner/repo", parent: 5, exclude: 10 }`, links(child(10, "OPEN"), child(11, "OPEN")))).toBe("1");
+    expect(
+      count(`{ repo: "owner/repo", parent: 5, exclude: 10 }`, [
+        links(child(10, "OPEN"), child(11, "OPEN")),
+        thread(11, true),
+      ]),
+    ).toBe("1");
   });
 
   /**

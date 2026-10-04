@@ -5,10 +5,22 @@
 import { appendFileSync } from "fs";
 import { parseArgs } from "util";
 
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
+// src/domain/work/limits.ts
+function resolveLimit(configured, fallback) {
+  const value = typeof configured === "number" ? configured : Number(String(configured ?? "").trim());
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
 // src/domain/work/dispatch-chain.ts
 var DEFAULT_HANDOFF_LIMIT = 5;
 function isPerson(comment) {
-  return comment.authorType === "User";
+  return isHumanActor(comment.authorType);
 }
 function handoffsSincePerson(comments, isAgentComment) {
   let handoffs = 0;
@@ -22,8 +34,7 @@ function handoffsSincePerson(comments, isAgentComment) {
   return handoffs;
 }
 function resolveHandoffLimit(configured) {
-  const value = typeof configured === "number" ? configured : Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_HANDOFF_LIMIT;
+  return resolveLimit(configured, DEFAULT_HANDOFF_LIMIT);
 }
 
 // src/domain/work/progress.ts
@@ -41,8 +52,7 @@ function noProgressLimitReached(runs, limit) {
   return runs >= limit;
 }
 function resolveNoProgressLimit(configured) {
-  const value = Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_NO_PROGRESS_LIMIT;
+  return resolveLimit(configured, DEFAULT_NO_PROGRESS_LIMIT);
 }
 function counted(n, noun) {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -204,6 +214,10 @@ function gh(...args) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -212,6 +226,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -228,9 +243,9 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);

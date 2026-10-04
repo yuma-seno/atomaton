@@ -90,6 +90,10 @@ function ghGraphqlRead(query, variables = {}) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -98,6 +102,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -114,9 +119,9 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -146,12 +151,32 @@ function parentIssueOf(repo, issue) {
     return { known: false, why };
   }
 }
+var MAX_PARENT_HOPS = 6;
+function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
+  const visited = new Set;
+  let current = start;
+  for (let hop = 0;hop < maxHops; hop++) {
+    if (visited.has(current))
+      return;
+    visited.add(current);
+    const { data, parent } = read(current);
+    yield { number: current, data, parent };
+    if (!parent.known || parent.parent === 0)
+      return;
+    current = parent.parent;
+  }
+}
+
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
 
 // src/adapters/github/notify.ts
 function log2(message) {
   console.error(`[atomaton-notify] ${message}`);
 }
-var MAX_HOPS = 10;
 function repositoryOwner(repo) {
   const owner = repo.split("/")[0]?.trim() ?? "";
   if (!owner)
@@ -176,24 +201,19 @@ function nativeParentOf(repo, issue) {
   return found.known && found.parent ? found.parent : undefined;
 }
 function resolveNotify(repo, number) {
-  const visited = new Set;
-  let current = number;
-  for (let i = 0;i < MAX_HOPS; i++) {
-    if (visited.has(current))
-      break;
-    visited.add(current);
+  const read = (current) => {
     const d = fetchIssueLookup(repo, current);
     const body = d.body ?? "";
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
+  };
+  for (const hop of parentChain(number, read)) {
+    const body = hop.data.body ?? "";
     const tagged = NOTIFY_TAG.read(body);
     if (tagged)
       return tagged;
-    if ((d.type ?? "").toLowerCase() === "user" && d.login) {
-      return d.login;
-    }
-    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
-    if (parent === undefined)
-      break;
-    current = parent;
+    if (isHumanActor(hop.data.type) && hop.data.login)
+      return hop.data.login;
   }
   const owner = repositoryOwner(repo);
   if (owner)

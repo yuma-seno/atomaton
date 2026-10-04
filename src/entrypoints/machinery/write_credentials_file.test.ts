@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collect } from "./write_credentials_file.ts";
-import { scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, scriptPath } from "./testing/harness.ts";
 
 describe("collect", () => {
   test("takes the credentials the run always needs", () => {
@@ -67,7 +67,10 @@ describe("write_credentials_file.ts", () => {
       const r = spawnSync("bun", ["run", scriptPath("write_credentials_file.ts"), "--out", out], {
         encoding: "utf8",
         env: {
-          ...process.env,
+          // Not `...process.env`: inside an Atomaton run that also carries the run's
+          // own `ATOMATON_SECRET_NAMES` and slots, which this script would then write
+          // into the credentials file alongside the fixture's. See `hermeticEnv`.
+          ...hermeticEnv(),
           OPENAI_API_KEY: "sk-test",
           GH_TOKEN: "ghs-test",
           ATOMATON_SECRET_NAMES: '["SLACK_TOKEN"]',
@@ -89,7 +92,10 @@ describe("write_credentials_file.ts", () => {
   });
 
   test("refuses to run without a destination", () => {
-    const r = spawnSync("bun", ["run", scriptPath("write_credentials_file.ts")], { encoding: "utf8" });
+    const r = spawnSync("bun", ["run", scriptPath("write_credentials_file.ts")], {
+      encoding: "utf8",
+      env: hermeticEnv(),
+    });
     expect(r.status).toBe(2);
   });
 });

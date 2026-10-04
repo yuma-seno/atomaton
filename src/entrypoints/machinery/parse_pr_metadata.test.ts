@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SCRIPTS_DIR, parseGithubOutput } from "./testing/harness.ts";
+import { SCRIPTS_DIR, hermeticEnv, parseGithubOutput } from "./testing/harness.ts";
 
 describe("parse_pr_metadata.ts", () => {
   test("parses parent-issue and Closes # references", async () => {
@@ -13,7 +13,7 @@ describe("parse_pr_metadata.ts", () => {
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/parse_pr_metadata.ts`], {
       encoding: "utf8",
       env: {
-        ...process.env,
+        ...hermeticEnv(),
         PR_BODY: "<!-- atomaton:parent-issue=42 -->\nCloses #7\nsome body",
         PR_NUMBER: "99",
         GITHUB_OUTPUT: outputFile,
@@ -31,7 +31,7 @@ describe("parse_pr_metadata.ts", () => {
     writeFileSync(outputFile, "");
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/parse_pr_metadata.ts`], {
       encoding: "utf8",
-      env: { ...process.env, PR_BODY: "plain body", PR_NUMBER: "1", GITHUB_OUTPUT: outputFile },
+      env: { ...hermeticEnv(), PR_BODY: "plain body", PR_NUMBER: "1", GITHUB_OUTPUT: outputFile },
     });
     const out = parseGithubOutput(await Bun.file(outputFile).text());
     expect(out.parent_number).toBe("");

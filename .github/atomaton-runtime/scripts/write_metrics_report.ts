@@ -107,27 +107,28 @@ function defineScript(importMetaUrl) {
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { dirname, join } from "path";
+var DATA_BRANCH = "atomaton-data";
 function gitIn(cwd, ...args) {
   const proc = Bun.spawnSync({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
   return { code: proc.exitCode ?? 1, stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "" };
 }
 function saveSession(targetPath, content, commitMessage) {
-  if (gitRun("ls-remote", "--exit-code", "origin", "atomaton-data").code !== 0) {
+  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0) {
     gitRun("config", "user.email", "action@github.com");
     gitRun("config", "user.name", "GitHub Actions");
-    const commit = gitRun("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", "init: atomaton-data session store").stdout;
-    gitRun("push", "origin", `${commit}:refs/heads/atomaton-data`);
+    const commit = gitRun("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", `init: ${DATA_BRANCH} session store`).stdout;
+    gitRun("push", "origin", `${commit}:refs/heads/${DATA_BRANCH}`);
   }
-  gitRun("fetch", "origin", "atomaton-data");
+  gitRun("fetch", "origin", DATA_BRANCH);
   const worktreeDir = mkdtempSync(join(tmpdir(), "atomaton-data-wt-"));
-  gitRun("worktree", "add", worktreeDir, "origin/atomaton-data");
+  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
   let saved = false;
   try {
     gitIn(worktreeDir, "config", "user.email", "action@github.com");
     gitIn(worktreeDir, "config", "user.name", "GitHub Actions");
     for (let attempt = 1;attempt <= 5; attempt++) {
-      gitIn(worktreeDir, "fetch", "origin", "atomaton-data");
-      gitIn(worktreeDir, "reset", "--hard", "origin/atomaton-data");
+      gitIn(worktreeDir, "fetch", "origin", DATA_BRANCH);
+      gitIn(worktreeDir, "reset", "--hard", `origin/${DATA_BRANCH}`);
       const fullTarget = join(worktreeDir, targetPath);
       mkdirSync(dirname(fullTarget), { recursive: true });
       writeFileSync(fullTarget, content);
@@ -137,7 +138,7 @@ function saveSession(targetPath, content, commitMessage) {
         break;
       }
       gitIn(worktreeDir, "commit", "-m", commitMessage);
-      if (gitIn(worktreeDir, "push", "origin", "HEAD:atomaton-data").code === 0) {
+      if (gitIn(worktreeDir, "push", "origin", `HEAD:${DATA_BRANCH}`).code === 0) {
         saved = true;
         break;
       }

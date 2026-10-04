@@ -1,7 +1,7 @@
 /**
  * target-state.ts — read whether an issue or pull request is open, closed, or merged.
  *
- * The one lookup behind every guard in `domain/work/closed-issue.ts`, which decides what to
+ * The one lookup behind every guard in `domain/work/closed-target.ts`, which decides what to
  * do with the answer. Three callers need it — the slash-command guard, the stop-on-close
  * job, and `dispatchRunner` — and a fourth will be added by whoever adds the next way
  * to start an agent, so it is a function rather than three spellings of one `gh` call.
@@ -29,7 +29,7 @@
  */
 import { ghRead } from "./gh.ts";
 import { issueOutcome, pullRequestOutcome } from "./outcome.ts";
-import type { TargetState } from "../../domain/work/closed-issue.ts";
+import type { TargetState } from "../../domain/work/closed-target.ts";
 import type { NodeKind } from "../../domain/work/work-tree.ts";
 
 interface IssueOrPr {

@@ -1,5 +1,5 @@
 /**
- * closed-issue.ts — what happens when work meets an issue or pull request that is closed.
+ * closed-target.ts — what happens when work meets an issue or pull request that is closed.
  *
  * Three paths used to walk straight past a closed target, and all three did it
  * silently: a person closing an issue did not stop the run working on it, a slash
@@ -80,7 +80,15 @@ export function recoveryAdvice(state: TargetState, number: number, command: stri
   return `Reopen #${number} and comment \`${command}\` to run it.`;
 }
 
-function mentionPrefix(logins: readonly string[]): string {
+/**
+ * Several logins as one `@a @b ` prefix, or `""` when there are none.
+ *
+ * The plural of `mention.ts`'s `mentionPrefix`, which is the one-login case. Kept
+ * here rather than there because only this module names more than one person at a
+ * time, and the two are different enough (a list, not a name) that folding them
+ * together would make the common case read as the rare one.
+ */
+function mentionList(logins: readonly string[]): string {
   return logins.length > 0 ? `${logins.map((l) => `@${l}`).join(" ")} ` : "";
 }
 
@@ -159,7 +167,7 @@ export function commandOnClosedNotice(
     ? `Atomaton: \`${command}\` was not run, because the state of #${number} could not be read (${state.why}), and a command is not started on a target that might be closed.`
     : `Atomaton: \`${command}\` was not run, because #${number} is closed.`;
   return [
-    `${mentionPrefix(commenter ? [commenter] : [])}${what}`,
+    `${mentionList(commenter ? [commenter] : [])}${what}`,
     "",
     !state.known
       ? "Comment again once it can be read."
@@ -196,7 +204,7 @@ export function dispatchRefusedNotice(refused: RefusedDispatch): string {
     ? `the state of #${number} could not be read (${state.why})`
     : `#${number} is closed`;
   return [
-    `${mentionPrefix(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
     "",
     `What was about to happen: ${context}.`,
     "",
@@ -205,5 +213,35 @@ export function dispatchRefusedNotice(refused: RefusedDispatch): string {
     !state.known
       ? `Start it by hand once #${number} can be read: comment \`/${agent}\` on it.`
       : recoveryAdvice(state, number, `/${agent}`),
+  ].join("\n");
+}
+
+/**
+ * The notice posted when a dispatch marker never became visible in the thread.
+ *
+ * A different failure from a closed target, and it says so: nothing is wrong with the
+ * issue, and the person did not do anything wrong. What happened is that GitHub did not
+ * show the machinery its own write, so it could not tell whether another run had already
+ * been asked for — and starting one anyway risks two runs on one node.
+ *
+ * The advice is to retry, because the condition is transient by nature: the thread
+ * catches up, and the next attempt sees the marker. It names the command so the person
+ * does not have to work out how to start the run again.
+ */
+export function dispatchUnconfirmedNotice(unconfirmed: {
+  agent: string;
+  number: number;
+  context: string;
+  notify: string;
+}): string {
+  const { agent, number, context, notify } = unconfirmed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because the dispatch could not be confirmed.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "",
+    "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue.",
   ].join("\n");
 }

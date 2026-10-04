@@ -67,6 +67,40 @@ function ghGraphqlRead(query, variables = {}) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+var CODE = /```[\s\S]*?```|`[^`\n]*`/g;
+function escapeUnknownMentions(text, known) {
+  const allowed = new Set([...known].map((login) => login.trim().toLowerCase()).filter(Boolean));
+  const escaped = [];
+  const transform = (segment) => segment.replace(MENTION, (whole, before, login) => {
+    if (allowed.has(login.toLowerCase()))
+      return whole;
+    if (!escaped.includes(login))
+      escaped.push(login);
+    return `${before}\`@${login}\``;
+  });
+  let out = "";
+  let last = 0;
+  CODE.lastIndex = 0;
+  for (const match of text.matchAll(CODE)) {
+    const at = match.index ?? 0;
+    out += transform(text.slice(last, at));
+    out += match[0];
+    last = at + match[0].length;
+  }
+  out += transform(text.slice(last));
+  return { text: out, escaped };
+}
+function escapedMentionNotice(escaped) {
+  if (escaped.length === 0)
+    return;
+  const names = escaped.map((login) => `\`@${login}\``).join(", ");
+  return `> [!NOTE]
+` + `> ${names} ${escaped.length === 1 ? "was" : "were"} written as ${escaped.length === 1 ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${escaped.length === 1 ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
+}
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -75,6 +109,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -91,9 +126,9 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -122,6 +157,43 @@ function parentIssueOf(repo, issue) {
     log(`WARN ${why}`);
     return { known: false, why };
   }
+}
+
+// src/adapters/github/outcome.ts
+function issueOutcome(reason) {
+  const said = (reason ?? "").toLowerCase();
+  return said === "not_planned" || said === "duplicate" ? "abandoned" : "done";
+}
+function pullRequestOutcome(merged) {
+  return merged ? "done" : "abandoned";
+}
+
+// src/adapters/github/target-state.ts
+function readTargetState(number, repo) {
+  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
+  const { code, stdout, stderr } = ghRead("api", path);
+  if (code !== 0) {
+    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
+`)[0] ?? "" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { known: false, why: "the response was not JSON" };
+  }
+  const isPr = parsed.pull_request !== undefined;
+  const kind = isPr ? "pull-request" : "issue";
+  if (parsed.state === "open")
+    return { known: true, kind, state: "open" };
+  if (parsed.state === "closed") {
+    return {
+      known: true,
+      kind,
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
+    };
+  }
+  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
 // src/domain/work/completion-mention.ts
@@ -252,39 +324,6 @@ function toolTroubleLine(session, from) {
   return `Counted from the session: ${parts.join(", ")}.`;
 }
 
-// src/domain/work/mention.ts
-var MENTION = /(^|[^\w@/-])@([A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})\b(?!\/)/g;
-var CODE = /```[\s\S]*?```|`[^`\n]*`/g;
-function escapeUnknownMentions(text, known) {
-  const allowed = new Set([...known].map((login) => login.trim().toLowerCase()).filter(Boolean));
-  const escaped = [];
-  const transform = (segment) => segment.replace(MENTION, (whole, before, login) => {
-    if (allowed.has(login.toLowerCase()))
-      return whole;
-    if (!escaped.includes(login))
-      escaped.push(login);
-    return `${before}\`@${login}\``;
-  });
-  let out = "";
-  let last = 0;
-  CODE.lastIndex = 0;
-  for (const match of text.matchAll(CODE)) {
-    const at = match.index ?? 0;
-    out += transform(text.slice(last, at));
-    out += match[0];
-    last = at + match[0].length;
-  }
-  out += transform(text.slice(last));
-  return { text: out, escaped };
-}
-function escapedMentionNotice(escaped) {
-  if (escaped.length === 0)
-    return;
-  const names = escaped.map((login) => `\`@${login}\``).join(", ");
-  return `> [!NOTE]
-` + `> ${names} ${escaped.length === 1 ? "was" : "were"} written as ${escaped.length === 1 ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${escaped.length === 1 ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
-}
-
 // src/adapters/github/participants.ts
 function knownParticipants(repo, number) {
   if (!repo || !String(number).trim())
@@ -307,6 +346,11 @@ function knownParticipants(repo, number) {
   collect(["api", `repos/${repo}/issues/${number}/comments`, "--paginate"], (json) => json.map((comment) => comment.user?.login));
   collect(["api", `repos/${repo}/collaborators`, "--paginate"], (json) => json.map((person) => person.login));
   return [...logins];
+}
+
+// src/entrypoints/machinery/lib/flags.ts
+function isTrue(value) {
+  return value === "true";
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -352,15 +396,8 @@ function subIssueState(number, type) {
   if (type !== "issue")
     return { isSubIssue: false, issueClosed: false };
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const { code, stdout } = gh("issue", "view", number, "--repo", repo, "--json", "state");
-  if (code !== 0)
-    return { isSubIssue: false, issueClosed: false };
-  let issueClosed = false;
-  try {
-    issueClosed = JSON.parse(stdout).state === "CLOSED";
-  } catch {
-    return { isSubIssue: false, issueClosed: false };
-  }
+  const state = readTargetState(number, repo);
+  const issueClosed = state.known && state.state !== "open";
   const found = parentIssueOf(repo, Number(number));
   return { isSubIssue: found.known && found.parent > 0, issueClosed };
 }
@@ -394,9 +431,10 @@ function endedTag(ending) {
     case "spent":
     case "looped":
       return "limit";
+    case "handed-off":
+      return "handoff";
     case "failed":
     case "chain-over":
-    case "handed-off":
     case "no-report":
     case "finished":
       return "done";
@@ -426,7 +464,7 @@ function endingHere(args) {
     succeeded: true,
     endedBecause: args.endedBecause ?? "",
     loopLimitReached: false,
-    chainContinues: args.chainContinues === "true",
+    chainContinues: isTrue(args.chainContinues),
     directive: args.directive ?? "",
     reported: args.reported === true
   });
@@ -449,7 +487,7 @@ function buildCommentBody(args) {
     lines.push("", escapedNotice, "");
   if (shouldMentionOnCompletion({
     ending,
-    chainContinues: args.chainContinues === "true",
+    chainContinues: isTrue(args.chainContinues),
     notify: args.notify,
     isSubIssue: args.isSubIssue ?? false,
     issueClosed: args.issueClosed ?? false
@@ -531,12 +569,12 @@ function main() {
     directive: values.directive,
     chainContinues: values["chain-continues"],
     endedBecause: values["ended-because"],
-    reported: values.reported === "true",
+    reported: isTrue(values.reported),
     runUrl: values["run-url"],
     repo: process.env.GITHUB_REPOSITORY ?? "",
     output: checked.text,
     escapedMentions: checked.escaped,
-    changed: values.changed === "true",
+    changed: isTrue(values.changed),
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
     usageLines: tokenUsageLines(values["logs-file"] ?? ""),
     ...subIssueState(values.number, values.type)

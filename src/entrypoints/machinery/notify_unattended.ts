@@ -26,6 +26,7 @@ import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { resolveNotify } from "../../adapters/github/notify.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { mentionPrefix } from "../../domain/work/mention.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface NotifyUnattendedArgs {
@@ -54,7 +55,7 @@ function main(): void {
   }
 
   const notify = resolveNotify(repo, Number(number));
-  const mention = notify ? `@${notify} ` : "";
+  const mention = mentionPrefix(notify);
   const summary = (values.summary ?? "").trim();
 
   // Tagged `include`, deliberately. This is a fact about the pull request -- that

@@ -60,8 +60,22 @@ afterAll(() => {
 });
 
 function run(rules: FakeGhRule[]) {
+  // `running` is read from the thread now, not the `atomaton/in-progress` label, so
+  // every run needs the comment reads answered. They go FIRST: the `["api", "issues"]`
+  // rule a caller passes matches `issues/3/comments` too, and rules are first-match.
+  //
+  // #3 is the closed issue a run is still working on -- a dispatch marker is the last
+  // turn-changing event, so `runInFlight` says yes and its files are left alone.
+  const comments: FakeGhRule[] = [
+    {
+      match: ["api", "issues/3/comments"],
+      stdout: JSON.stringify([{ id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } }]),
+    },
+    { match: ["api", "issues/1/comments"], stdout: "[]" },
+    { match: ["api", "issues/2/comments"], stdout: "[]" },
+  ];
   return runWithFakeGh(scriptPath("prune_atomaton_data.ts"), ["--repo", "acme/widgets", "--dry-run"], {
-    rules,
+    rules: [...comments, ...rules],
     cwd: repo,
     // git work happens in the temp repository above; `config.yaml` is read from the
     // real checkout, which is what `ATOMATON_MACHINERY_ROOT` exists to separate. Without

@@ -2,14 +2,16 @@
   "name": "atomaton",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.15.0",
   "engines": {
     "bun": ">=1.2.0"
   },
   "scripts": {
     "synth": "bun run src/synth-workflows.ts && bun run src/build-dist.ts",
     "typecheck": "tsc --noEmit",
+    "pretest": "bun run synth",
     "test": "bun test ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./tests/contract ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks",
+    "pretest:e2e": "bun run synth",
     "test:e2e": "bun test ./tests/e2e",
     "lint": "bun run typecheck && bun run synth"
   },

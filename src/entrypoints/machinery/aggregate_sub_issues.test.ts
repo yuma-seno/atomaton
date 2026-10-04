@@ -20,6 +20,9 @@ describe("aggregate_sub_issues.ts", () => {
           cwd: dir,
           // The siblings come from GitHub's own sub-issue links now, with their
           // labels in the same request. See `adapters/github/parent-issue.ts`.
+          //
+          // "Launched" is read from each child's thread now, not the
+          // `atomaton/launched` label, so child #1 needs a comment read answered.
           rules: [
             {
               match: ["graphql"],
@@ -34,7 +37,7 @@ describe("aggregate_sub_issues.ts", () => {
                             number: 1,
                             title: "#1",
                             state: "OPEN",
-                            labels: { nodes: [{ name: "atomaton/sub-issue" }, { name: "atomaton/launched" }] },
+                            labels: { nodes: [{ name: "atomaton/sub-issue" }] },
                           },
                         ],
                       },
@@ -42,6 +45,10 @@ describe("aggregate_sub_issues.ts", () => {
                   },
                 },
               }),
+            },
+            {
+              match: ["api", "issues/1/comments"],
+              stdout: JSON.stringify([{ id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } }]),
             },
           ],
         },

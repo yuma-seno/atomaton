@@ -20,10 +20,10 @@
  *
  * ## What each exit code means
  *
- * - `0` — the run was dispatched, or it was refused because the target is not open.
- *   A refusal is not a fault: nothing is running, and the person who asked has
- *   already been told on the target itself. Failing the step here would report the
- *   refusal as a broken workflow.
+ * - `0` — the run was dispatched, or it was refused because the target is not open or
+ *   already has an agent asked for on it. A refusal is not a fault: nothing is running,
+ *   and the person who asked has already been told on the target itself. Failing the
+ *   step here would report the refusal as a broken workflow.
  * - `1` — GitHub rejected the dispatch, or the arguments were not usable. Nothing is
  *   running and nothing will retry, which is worth failing the job over.
  *
@@ -33,7 +33,9 @@
  */
 import { parseArgs } from "node:util";
 import { isAgentName } from "../../domain/work/agent-name.ts";
+import { isNodeType } from "../../domain/work/node-type.ts";
 import { dispatchRunner } from "../../adapters/actions/dispatch.ts";
+import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface DispatchAgentArgs {
@@ -47,6 +49,18 @@ export interface DispatchAgentArgs {
   notify?: string;
   /** `owner/name`, when the step's checkout is not the target repository. */
   repo?: string;
+  /**
+   * Whether this dispatch takes up a request already in the thread.
+   *
+   * Validation sets it: the run it starts fulfils the command a person typed, so the
+   * thread's last turn-changing event is that command — this dispatch's own request.
+   * Without it the outstanding-request check would read the request as somebody
+   * else's and refuse the one dispatch that should happen.
+   *
+   * A hand-off does not set it: the agent that named the next one is not answering a
+   * request, it is making one.
+   */
+  "answers-request"?: string;
   /**
    * What was about to happen, in the caller's words.
    *
@@ -68,6 +82,7 @@ function main(): void {
       type: { type: "string" },
       notify: { type: "string" },
       repo: { type: "string" },
+      "answers-request": { type: "string" },
       context: { type: "string" },
     },
   });
@@ -85,7 +100,7 @@ function main(): void {
     console.error(`::error::dispatch_agent: '${agent}' is not an agent name, so nothing was dispatched.`);
     process.exit(1);
   }
-  if (type !== "issue" && type !== "pr") {
+  if (!isNodeType(type)) {
     console.error(`::error::dispatch_agent: --type must be 'issue' or 'pr', not '${type}'.`);
     process.exit(1);
   }
@@ -105,10 +120,18 @@ function main(): void {
     number,
     notify: values.notify ?? "",
     repo: (values.repo ?? "").trim() || undefined,
+    answersRequest: isTrue(values["answers-request"]),
   });
 
   if (outcome === "failed") {
     console.error(`::error::Could not dispatch ${agent} on ${type} #${number}.`);
+    process.exit(1);
+  }
+  if (outcome === "unconfirmed") {
+    console.error(
+      `::error::Could not confirm the dispatch marker on ${type} #${number}, so ${agent} was not started; ` +
+        "the thread may not have caught up with the marker. Retry shortly.",
+    );
     process.exit(1);
   }
 }

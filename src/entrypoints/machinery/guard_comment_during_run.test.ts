@@ -1,10 +1,23 @@
 import { describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
 import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
+/**
+ * The thread the guard reads, as the fake `gh` returns it.
+ *
+ * The guard asks for the node's body and its comments, then folds them into "whose
+ * turn is it". These rules answer those two reads; the fold itself is tested in
+ * `domain/work/thread.test.ts`.
+ */
+const thread = (body: string, comments: string[]) => [
+  { match: ["api", "/issues/9", "--jq"], stdout: body },
+  { match: ["api", "/issues/9/comments"], stdout: JSON.stringify(comments.map((b, i) => ({ id: 100 + i, body: b }))) },
+];
+
 describe("guard_comment_during_run.ts", () => {
-  test("deletes the comment and notifies the commenter when in_progress is set", () => {
+  // The window this exists to close: a person asked for an agent, and before the
+  // runner started another person commented. The ball is still the agent's.
+  test("deletes the comment and notifies the commenter when the ball is with an agent", () => {
     const configDir = makeConfigDir({});
     try {
       const r = runWithFakeGh(
@@ -14,7 +27,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            { match: ["issue", "view", "labels"], stdout: "true" },
+            ...thread("", ["/engineer"]),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
           ],
@@ -29,7 +42,7 @@ describe("guard_comment_during_run.ts", () => {
     }
   });
 
-  test("leaves the comment alone when the issue is not in_progress", () => {
+  test("leaves the comment alone when the ball is with a person", () => {
     const configDir = makeConfigDir({});
     try {
       const r = runWithFakeGh(
@@ -38,12 +51,79 @@ describe("guard_comment_during_run.ts", () => {
         {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
-          rules: [{ match: ["issue", "view", "labels"], stdout: "false" }],
+          rules: thread("", []),
         },
       );
       expect(r.status).toBe(0);
       expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
       expect(r.ghCalls.some((c) => c.includes("comment"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // The comment being judged is excluded, so a person's own `/engineer` does not
+  // count as the node already being the agent's -- which would block the very
+  // command that is starting a run.
+  test("does not count the comment being judged as a request", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "100", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: thread("", ["/engineer"]),
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // A pull request body naming a reviewer is a request the validation dispatch is
+  // already handling. The guard reads comments alone, so it does not delete a
+  // person's comment on the strength of it -- which would tell them to wait for a run
+  // their comment was not racing.
+  test("a pull request body naming a reviewer does not block a comment", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: thread("/reviewer\n\nCloses #1", []),
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // A failed read is not "the ball is with a person". The guard exists to keep a
+  // comment out of a race, so an answer it could not determine must not be the one
+  // that lets the comment through.
+  test("fails closed when the thread cannot be read", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [{ match: ["api", "/issues/9"], code: 1 }],
+        },
+      );
+      expect(r.status).toBe(1);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
