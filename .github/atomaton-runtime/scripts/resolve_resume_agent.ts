@@ -71,12 +71,60 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
+  }
+  return NOTHING;
+}
+
 // src/adapters/github/agent-on-issue.ts
 function mostRecentAgent(bodies) {
   for (let i = bodies.length - 1;i >= 0; i--) {
-    const agent = AGENT_TAG.read(bodies[i] ?? "");
-    if (agent)
-      return agent;
+    const body = bodies[i] ?? "";
+    const result = AGENT_TAG.read(body);
+    if (result)
+      return result;
+    const asked = parseCommentCommand(body).agent;
+    if (asked)
+      return asked;
   }
   return "";
 }
