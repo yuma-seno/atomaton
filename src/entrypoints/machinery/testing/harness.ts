@@ -54,6 +54,12 @@ export interface RunWithFakeGhResult {
  * away would change what CI has been testing all along. A test that wants any of
  * these declares it, and an explicit value still wins -- callers spread their own
  * `env` after this.
+ *
+ * Every call site is the thing that decays -- eleven files that spawn a script were
+ * still spreading `process.env` when this was written -- so
+ * `tests/contract/test-hermetic-env.test.ts` holds both halves: that a `.test.ts`
+ * spawning `bun` calls this, and that the suite which was red is green with a decoy
+ * machinery root forced on it.
  */
 export function hermeticEnv(): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};

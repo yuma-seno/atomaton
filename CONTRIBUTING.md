@@ -265,9 +265,16 @@ What each command proves:
 - `test`: unit-level behavior across `src/domain`, `src/shared`, `src/adapters`, `src/app`, `src/entrypoints/machinery`, and the MCP servers and hooks.
 - `test:e2e`: end-to-end checks in `tests/e2e`.
 
-`test:e2e` runs against the built tree, so `bun run synth` has to come first — it
-reads `dist/.github/atomaton-runtime/tools/mcp/*.ts`, which an untracked `dist/` does
-not have until you build it.
+Seventeen files across those two commands name a `dist/` path besides the contract test
+below, and `dist/` is gitignored and so absent from a checkout. `test` and `test:e2e`
+therefore each build it first through a `pre<name>` script, which is why `bun run synth`
+is no longer a step you have to remember before either of them. It matters most where
+nobody is watching: CI runs `synth` before `test` anyway, but an agent's run does not, and
+a missing `dist/` there is 59 `ENOENT` failures an agent cannot tell from ones its own
+change caused. `tests/contract/test-builds-first.test.ts` is the guard: it fails when a
+`test*` script whose files name a `dist/` path has no `pre<name>` running `synth`, and it
+fails on a `pre` hook that is present but does not build. The `synth` check command CI
+runs stays, because it is what proves the build works before the tests read it.
 
 ### Green does not mean it ran
 

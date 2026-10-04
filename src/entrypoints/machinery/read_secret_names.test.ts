@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { CONFIG_FILE } from "../../domain/machinery/machinery-layout.ts";
-import { parseGithubOutput, scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, parseGithubOutput, scriptPath } from "./testing/harness.ts";
 import { declarationIn } from "./read_secret_names.ts";
 
 /**
@@ -25,7 +25,7 @@ function run(config: Record<string, unknown> | null) {
     const r = spawnSync(
       "bun",
       ["run", scriptPath("read_secret_names.ts"), "--config", configPath],
-      { encoding: "utf8", cwd: dir, env: { ...process.env, GITHUB_OUTPUT: outputPath } },
+      { encoding: "utf8", cwd: dir, env: { ...hermeticEnv(), GITHUB_OUTPUT: outputPath } },
     );
     return { ...r, outputs: parseGithubOutput(readFileSync(outputPath, "utf8")) };
   } finally {
@@ -129,7 +129,7 @@ describe("read_secret_names.ts", () => {
       const r = spawnSync("bun", ["run", scriptPath("read_secret_names.ts")], {
         encoding: "utf8",
         cwd: dir,
-        env: { ...process.env, GITHUB_OUTPUT: outputPath },
+        env: { ...hermeticEnv(), GITHUB_OUTPUT: outputPath },
       });
       expect(r.status).toBe(0);
       expect(r.stderr).toContain("::warning::");
