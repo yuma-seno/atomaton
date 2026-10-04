@@ -21,7 +21,7 @@
  */
 import { gh } from "../../../adapters/github/gh.ts";
 import { dispatchSubAgent } from "../lib/dispatch_sub_agent.ts";
-import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
+import { ENDED_TAG, LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
 import { concludeIssue, type ConcludeIssueResult } from "../lib/conclude_issue.ts";
 import { describeGateResult, needsAttention } from "../../../app/aggregation.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -159,8 +159,20 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   // Posted even on a partial dispatch: the session stays open there, but a report
   // the agent has already written is not worth discarding for that.
   const summary = (args.summary ?? "").trim();
+  // The session ends only when every task was dispatched -- see below. Written here
+  // because the `waiting` tag means exactly that: the run is over and a child carries
+  // it. A partial dispatch keeps the session OPEN, so it is not waiting and must not
+  // carry the tag.
+  const complete = errors.length === 0;
   if (parentIssue && (dispatched.length || summary)) {
     const bodyLines = [LLM_CONTEXT_TAG.write("exclude")];
+    // The ending, on the thread. `launch_sub_agent` ends the session and posts no
+    // result comment, so without this the node's last event reverts to the `asked`
+    // that started the run -- and the aggregation gate reads that as a request nobody
+    // took up, refusing to re-invoke the parent with `parent-busy`. `waiting` says
+    // the request was taken up and the next work is on a child. See
+    // `domain/work/thread.ts`.
+    if (complete) bodyLines.push(ENDED_TAG.write("waiting"));
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));
     }
@@ -181,7 +193,8 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   // are closed — and a sub-issue nobody was dispatched onto is never closed, so
   // the parent waited forever. The atomaton is the one caller that can still
   // fix a partial dispatch, and it was the one being told to stop.
-  const complete = errors.length === 0;
+  //
+  // `complete` is computed above, beside the `waiting` tag it also decides.
 
   // Structured, because the prose was wrong in both directions. "Agents will be
   // dispatched automatically" described neither group: the successful ones were

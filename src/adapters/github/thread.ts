@@ -59,6 +59,7 @@ import {
 export const readers: TurnReaders = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  waiting: (body) => ENDED_TAG.read(body) === "waiting",
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body),
 };

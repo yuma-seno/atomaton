@@ -17,6 +17,7 @@ import {
 const readers: TurnReaders = {
   isAgentResult: (body) => body.startsWith("RESULT"),
   handedOff: (body) => body.includes("handoff"),
+  waiting: (body) => body.startsWith("WAITING"),
   requestedAgent: (body) => (body.startsWith("/") ? body.slice(1).split(/\s/)[0]! : ""),
   isDispatchMarker: (body) => body.startsWith("DISPATCH"),
 };
@@ -52,6 +53,13 @@ describe("turnEvents", () => {
     expect(events(["RESULT done\n\n/engineer was the command"])).toEqual(["returned"]);
   });
 
+  // The session-ending tools' own comment. It carries `waiting` and no result tag --
+  // those runs post no result comment, so tagging theirs as one would file a hand-off
+  // with the runs that reported.
+  test("the machinery's own waiting comment is a waiting event", () => {
+    expect(events(["WAITING\nAtomaton: Launched sub-agent(s):"])).toEqual(["waiting"]);
+  });
+
   test("the events keep their order", () => {
     expect(events(["/engineer", "RESULT handoff", "RESULT done"])).toEqual([
       "asked",
@@ -78,6 +86,12 @@ describe("whoseTurn", () => {
 
   test("a result that did not hand off gives the node back", () => {
     expect(whoseTurn(["asked", "returned"])).toBe("person");
+  });
+
+  // The node's own run is over and the ball is with a child, not with this node's
+  // agent -- so a comment here is a person's, and the guard keeps it.
+  test("waiting on a child gives the node back to a person", () => {
+    expect(whoseTurn(["asked", "waiting"])).toBe("person");
   });
 
   // The whole point of reading the last event rather than any of them.
@@ -114,6 +128,14 @@ describe("requestOutstanding", () => {
 
   test("a result that came back is not outstanding", () => {
     expect(requestOutstanding(["asked", "returned"])).toBe(false);
+  });
+
+  // The defect this fixes: a run ends inside `launch_sub_agent`, posting a `waiting`
+  // comment and no result. The `asked` that started it is still in the thread, but the
+  // run took it up -- so the aggregation gate may start the parent again. Reading the
+  // old `asked` was what refused it with `parent-busy`.
+  test("a request a waiting run took up is not outstanding", () => {
+    expect(requestOutstanding(["asked", "waiting"])).toBe(false);
   });
 
   test("a command after a result is outstanding again", () => {

@@ -119,8 +119,15 @@ export const STOP_TAG = stringTag("stop", "requested");
  * arriving mid-turn". It is a fourth value rather than a second tag because it is the
  * same fact -- how this turn ended -- and a reader that wants only the three older
  * answers still gets them: `/resume` looks for `stopped` and nothing else.
+ *
+ * `waiting` is the same fact for the OTHER way a run leaves work behind: not the next
+ * agent on this node (`handoff`), but a child started under it (`launch_sub_agent`,
+ * `create_pr`). The run ends inside that call, so no result comment of the usual kind
+ * follows -- this is how the ending reaches the thread. `thread.ts` reads it to keep
+ * the node off the `asked` that started the run, which the aggregation gate would
+ * otherwise read as a request nobody had taken up.
  */
-export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
 
 // `PARENT_TAG` (`atomaton:parent`, sub-issue -> parent issue) was here. GitHub's own
 // sub-issue link answers the same question and a person can change it, while this was
