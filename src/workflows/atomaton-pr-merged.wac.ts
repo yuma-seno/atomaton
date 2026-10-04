@@ -9,6 +9,7 @@ import { SetupBunAction } from "./actions/third-party.ts";
 import { ref as resolveOrchestratorParentRef } from "../entrypoints/machinery/resolve_orchestrator_parent.ts";
 import { ref as aggregateSubIssuesRef } from "../entrypoints/machinery/aggregate_sub_issues.ts";
 import { ref as parsePrMetadataRef } from "../entrypoints/machinery/parse_pr_metadata.ts";
+import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // Detect PR merges and aggregate sub-issue results.
 // Uses pull_request_target so GITHUB_TOKEN-created PR merges are detected.
@@ -115,7 +116,8 @@ export const atomaPrMerged = new Workflow("atomaton-pr-merged", {
           PR_URL: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.html_url),
         },
         run: `gh issue comment "$PARENT" --repo "$REPO" --body \\
-  "PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
+  "${LLM_CONTEXT_TAG.write("exclude")}
+PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
 `,
       }),
     ],

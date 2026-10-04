@@ -32,7 +32,9 @@
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { logDispatch } from "../../adapters/runner/ops-log.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
-import { dispatchRefusedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-issue.ts";
+import { checkDispatchMarker, type MarkerCheck } from "../../adapters/github/thread.ts";
+import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-target.ts";
 
 /** The reusable workflow every agent run enters through. */
 function runnerWorkflow(): string {
@@ -85,6 +87,24 @@ export interface RunnerDispatch {
    * answer: there is no agent to report to, and the prompt says so.
    */
   dispatchedBy?: string;
+  /**
+   * Whether this dispatch takes up a request already in the thread, rather than
+   * starting a turn nobody asked for.
+   *
+   * Two callers set it, and both would otherwise be refused by the
+   * outstanding-request check below for the same reason: the thread's last
+   * turn-changing event is a request, and that request is this dispatch's own.
+   *
+   *   - `reload_environment`: the agent running right now is restarting itself, so
+   *     the request is the command that started that very run.
+   *   - validation: the dispatch fulfils the command a person typed, so the request
+   *     is that command.
+   *
+   * Omitted everywhere else, which is the honest default: a dispatch that is not
+   * taking up a request is a new turn, and a new turn must not start on a node that
+   * already has one.
+   */
+  answersRequest?: boolean;
   log?: (message: string) => void;
 }
 
@@ -102,6 +122,17 @@ export type DispatchOutcome =
   | "dispatched"
   /** The target is closed, or its state could not be read. Nobody was dispatched, and the escalation is posted. */
   | "refused-closed"
+  /** A request for an agent was already outstanding on the target. Nobody was dispatched, and the marker is removed. */
+  | "refused-outstanding"
+  /**
+   * The dispatch marker could not be confirmed in the thread, so the ordering check
+   * could not be trusted. Nobody was dispatched, and a notice is posted.
+   *
+   * Separate from `failed`, which is GitHub rejecting the dispatch itself. This is the
+   * read side: the marker was posted but never became visible, so a second dispatch
+   * could not be ruled out and starting one would risk two runs on one node.
+   */
+  | "unconfirmed"
   /** GitHub rejected the dispatch. Nothing is running and nothing will retry. */
   | "failed";
 
@@ -141,15 +172,190 @@ function refuseClosedTarget(d: RunnerDispatch, state: TargetState): "refused-clo
 }
 
 /**
- * Dispatch the runner, unless the target is not open.
+ * Post the marker that says this node has been handed to an agent, and return its id.
+ *
+ * The marker is what makes the ordering check below possible: it is the "asked" event
+ * this dispatch writes, so a request that came BEFORE it is one nobody has taken up.
+ * It is also the record a person reads — the same line the runner used to post on a
+ * pull request, now posted for every node and every path, because the check needs it
+ * everywhere.
+ *
+ * Returns `undefined` when it could not be posted. That is not fatal on its own — the
+ * dispatch can still go out — but the ordering check cannot run without it, so the
+ * caller decides.
+ */
+function postDispatchMarker(d: RunnerDispatch): string | undefined {
+  const log = d.log ?? ((message: string) => console.error(message));
+  const body =
+    `${LLM_CONTEXT_TAG.write("exclude")}\n${DISPATCH_TAG.write(d.agent)}\n` +
+    `Atomaton: \`${d.agent}\` starting on this ${d.type === "pr" ? "pull request" : "issue"}.`;
+  const { code, stdout, stderr } = gh(
+    "api",
+    `repos/${d.repo ?? "{owner}/{repo}"}/issues/${d.number}/comments`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+    "--jq",
+    ".id",
+  );
+  if (code !== 0) {
+    log(`${d.context}: could not post the dispatch marker on #${d.number}: ${stderr || stdout}`);
+    return undefined;
+  }
+  return stdout.trim();
+}
+
+/**
+ * Refuse a dispatch when a request for an agent is already outstanding on the target.
+ *
+ * A node holds one turn. A person's command, or a marker from a dispatch that already
+ * went out, is a request — and if the last turn-changing event in the thread is one of
+ * those, nobody has taken it up, so this dispatch would be a second run on a node that
+ * already has one. Two agents, two comments, one issue.
+ *
+ * The marker posted just above is excluded from the read, so the question is what came
+ * BEFORE this dispatch. When the answer is "a request", the marker is removed: it was
+ * the second one, and leaving it would make the thread say two agents were asked for.
+ *
+ * ## Why the marker is confirmed before the check is trusted
+ *
+ * GitHub does not guarantee read-after-write: a comment can be missing from the listing
+ * for a moment after it is created. The check reads the thread to see whether ANOTHER
+ * dispatch's marker is there — and if this dispatch's own marker is not visible yet, the
+ * read has not caught up, so another's may be missing too. Two dispatches racing would
+ * then both see "no request" and both start a run, which is exactly what this exists to
+ * prevent.
+ *
+ * So the marker is a freshness probe: read the thread, and if the marker is not there,
+ * wait and read again. Once the marker is visible the read has caught up at least to
+ * this dispatch's own write, and a write that happened before it is very likely visible
+ * too. This is a heuristic, not a guarantee — but it is strictly better than reading
+ * once and hoping.
+ *
+ * ## When the marker never appears
+ *
+ * The post itself may have failed, so it is retried a few times. If it still never
+ * appears, the ordering check cannot be trusted and nobody is dispatched: a notice is
+ * posted and the outcome is `unconfirmed`. Starting a run on an unverified thread is the
+ * failure this whole function exists to prevent, so the cautious answer is to stand down.
+ *
+ * A read that fails refuses too, for the same reason.
+ *
+ * Returns the refusal, or `undefined` when the dispatch may proceed.
+ */
+function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefined): "refused-outstanding" | "unconfirmed" | undefined {
+  const log = d.log ?? ((message: string) => console.error(message));
+  const removeMarker = (): void => {
+    if (markerId === undefined) return;
+    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+  };
+
+  // No marker means the ordering check has nothing to be ordered against, so it cannot
+  // run. The dispatch still goes out -- the marker failing to post is not fatal on its
+  // own -- but the check is skipped rather than guessed at.
+  if (markerId === undefined) return undefined;
+
+  // Widening, like `ghRead`: the point is to outlast a lag, not to sit out an outage.
+  // A run holds a runner while this sleeps, so the total is bounded.
+  const delays = [1_000, 2_000, 4_000];
+  let check: MarkerCheck | undefined;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+    } catch (e) {
+      removeMarker();
+      log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+      return "refused-outstanding";
+    }
+    if (check.markerVisible) break;
+    const delay = delays[attempt];
+    if (delay === undefined) break;
+    log(`${d.context}: the dispatch marker on #${d.number} is not visible yet; waiting ${delay}ms and reading again`);
+    Bun.sleepSync(delay);
+  }
+
+  if (check === undefined || !check.markerVisible) {
+    // The marker never became visible. The post may have failed, so try once more before
+    // giving up -- a second post is safe, because the first is not in the thread.
+    const reposted = postDispatchMarker(d);
+    if (reposted !== undefined) {
+      try {
+        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+          // The repost is visible, so the thread has caught up. The first marker, if it
+          // exists at all, is a duplicate of this one -- remove it so the thread does not
+          // say two agents were asked for.
+          removeMarker();
+          return undefined;
+        }
+      } catch (e) {
+        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+      }
+      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+    }
+    log(
+      `${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` +
+        `and ${d.agent} was not started`,
+    );
+    const body = dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? "",
+    });
+    const { code, stdout, stderr } = gh(
+      "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
+    );
+    if (code !== 0) {
+      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+    }
+    return "unconfirmed";
+  }
+
+  if (!check.outstanding) return undefined;
+
+  removeMarker();
+  log(
+    `${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` +
+      "the dispatch marker was removed",
+  );
+  return "refused-outstanding";
+}
+
+/**
+ * Dispatch the runner, unless the target is not open or already has a turn.
  *
  * Callers that have a fallback (closing an issue directly rather than asking an agent
  * to) branch on the outcome; callers that do not should at least not treat anything
  * but `"dispatched"` as success.
  */
 export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
+  // An empty agent is refused here rather than sent to GitHub, which rejects it with
+  // `HTTP 422: Required input 'agent' not provided`. The doc comment on
+  // `aggregation.ts`'s `parentAgent` has claimed this refusal for a while; it was not
+  // there, and the 422 was the only thing that stopped a run for an agent called "".
+  //
+  // The caller that reaches this is the aggregation gate, when the parent's thread
+  // names no agent -- see `mostRecentAgent`. `failed` is the honest answer: nothing is
+  // running and nothing will retry, which is what the gate reports as
+  // `dispatch-failed`.
+  if (!d.agent.trim()) {
+    const log = d.log ?? ((message: string) => console.error(message));
+    log(`${d.context}: no agent was named, so nothing was dispatched (an empty agent is not a run).`);
+    return "failed";
+  }
+
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state)) return refuseClosedTarget(d, state);
+
+  // The marker goes out before the check, so the check has something to be ordered
+  // against. A dispatch that answers a request skips both: the request it would find
+  // is its own, and the marker would be a second one for one turn.
+  if (!d.answersRequest) {
+    const markerId = postDispatchMarker(d);
+    const refusal = refuseOutstandingRequest(d, markerId);
+    if (refusal !== undefined) return refusal;
+  }
 
   const args = [
     ...(d.repo ? ["--repo", d.repo] : []),

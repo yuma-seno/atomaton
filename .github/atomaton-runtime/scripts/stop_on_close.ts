@@ -8,6 +8,10 @@ import { parseArgs } from "util";
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -16,6 +20,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -32,9 +37,9 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -44,7 +49,13 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 
-// src/domain/work/closed-issue.ts
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
+// src/domain/work/closed-target.ts
 function stopOnCloseNotice(number) {
   return [
     "Atomaton: this issue was closed while an agent was working on it, so the run has been asked to stop.",
@@ -177,124 +188,6 @@ function ghGraphqlRead(query, variables = {}) {
   return graphqlResult(ghRead(...graphqlArgs(query, variables)));
 }
 
-// src/adapters/runner/config.ts
-import { readFileSync } from "fs";
-
-// src/domain/delivery/merge-readiness.ts
-var CI_WOULD_BE_WASTED = new Set([
-  "not-open",
-  "draft",
-  "conflicting",
-  "behind",
-  "mergeability-unknown",
-  "checks-pending",
-  "checks-failing"
-]);
-var PASSING = new Set(["success", "neutral", "skipped"]);
-
-// src/domain/machinery/machinery-layout.ts
-var USER_ROOT = ".github/atomaton";
-var RUNTIME_ROOT = ".github/atomaton-runtime";
-var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
-var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
-var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
-var SKILLS_DIR = `${USER_ROOT}/skills`;
-var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
-var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
-var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
-var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
-var RULESETS_DIR = `${USER_ROOT}/rulesets`;
-var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
-var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
-
-// src/domain/delivery/declared-secrets.ts
-var RUN_CREDENTIALS = [
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "ORCAROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "ATOMA_COPILOT_TOKEN",
-  "GH_TOKEN"
-];
-var AGENT_ENV_NAMES = [
-  "HOME",
-  "PATH",
-  "AGENT",
-  MACHINERY_ROOT_VAR,
-  "GITHUB_REPOSITORY",
-  "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
-  "ATOMATON_RELOAD_COUNT",
-  "ATOMATON_OPS_LOG",
-  "ATOMATON_DISPATCHED_BY",
-  "XDG_CACHE_HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-  "BUN_INSTALL_CACHE_DIR",
-  "npm_config_cache",
-  "PIP_CACHE_DIR",
-  "CARGO_HOME",
-  "OPENAI_BASE_URL",
-  "ATOMA_PROVIDER"
-];
-var RUN_STEP_NAMES = [
-  "GITHUB_RUN_ID",
-  "OPENROUTER_BASE_URL",
-  "ORCAROUTER_BASE_URL",
-  "ANTHROPIC_BASE_URL",
-  "COPILOT_BASE_URL",
-  "ATOMA_PROVIDER_IN",
-  "OPENAI_BASE_URL_IN"
-];
-var TOOL_SECRETS = {
-  field: "tools.secrets",
-  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
-};
-var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
-var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
-var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
-
-// src/domain/delivery/check-jobs.ts
-var CHECKS_FROM_PULL_REQUEST = {
-  where: "checks.from_pull_request",
-  secrets: {
-    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
-  }
-};
-var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
-
-// src/adapters/runner/machinery.ts
-function machineryRoot() {
-  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
-}
-function machineryPath(relative) {
-  const root = machineryRoot();
-  return root ? `${root}/${relative}` : relative;
-}
-
-// src/adapters/runner/config.ts
-function configPath() {
-  return machineryPath(CONFIG_FILE);
-}
-var cached;
-function loadConfig() {
-  if (!cached) {
-    cached = Bun.YAML.parse(readFileSync(configPath(), "utf8"));
-  }
-  return cached;
-}
-var DEFAULT_LABELS = {
-  sub_issue: "atomaton/sub-issue",
-  launched: "atomaton/launched",
-  in_progress: "atomaton/in-progress"
-};
-function getLabel(key) {
-  return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
-}
-
 // src/adapters/github/outcome.ts
 function issueOutcome(reason) {
   const said = (reason ?? "").toLowerCase();
@@ -394,15 +287,111 @@ function issueLinks(repo, number) {
   };
 }
 
-// src/adapters/github/work-tree.ts
-function labelNames(labels) {
-  return (labels ?? []).map((l) => typeof l === "string" ? l : l.name ?? "");
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
 }
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
+  }
+  return NOTHING;
+}
+
+// src/domain/work/thread.ts
+function eventOf(body, readers) {
+  if (readers.isAgentResult(body))
+    return readers.handedOff(body) ? "handed-off" : "returned";
+  if (readers.requestedAgent(body) !== "")
+    return "asked";
+  return;
+}
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" ? "agent" : "person";
+}
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent")
+      continue;
+    kept.push(entry);
+    const event = eventOf(entry.body, readers);
+    if (event !== undefined)
+      events.push(event);
+  }
+  return { comments: kept, events };
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  isAgentResult: (body) => AGENT_TAG.has(body),
+  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
+};
+function isHumanComment(comment) {
+  return isHumanActor(comment.user?.type);
+}
+function readComments(repo, number, excludeCommentId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const excluded = String(excludeCommentId ?? "").trim();
+  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return shapedThread(comments, readers);
+}
+function runInFlight(repo, number) {
+  return whoseTurn(readComments(repo, number).events) === "agent";
+}
+
+// src/adapters/github/work-tree.ts
 function parseListed(stdout) {
   try {
     return JSON.parse(stdout || "[]");
   } catch {
     return null;
+  }
+}
+function runningOn(repo, number) {
+  try {
+    return { running: runInFlight(repo, number) };
+  } catch (e) {
+    return { running: false, problem: `could not read the thread on #${number}: ${e.message}` };
   }
 }
 function readNode(repo, number) {
@@ -422,18 +411,20 @@ function readNode(repo, number) {
     return { problem: `#${number} reported an unrecognised state ${JSON.stringify(raw.state ?? null)}` };
   }
   const state = raw.state === "open" ? "open" : isPr ? pullRequestOutcome(Boolean(raw.pull_request?.merged_at)) : issueOutcome(raw.state_reason);
+  const { running, problem } = runningOn(repo, number);
+  if (problem)
+    return { problem };
   return {
     node: {
       number,
       kind: isPr ? "pull-request" : "issue",
       state,
       parent: isPr ? PARENT_ISSUE_TAG.read(raw.body ?? "") : undefined,
-      running: labelNames(raw.labels).includes(getLabel("in_progress"))
+      running
     }
   };
 }
 function readChildren(repo, parent) {
-  const label = getLabel("in_progress");
   const nodes = [];
   const problems = [];
   const prs = ghRead("pr", "list", "--repo", repo, "--state", "all", "--limit", "200", "--search", `${PARENT_ISSUE_TAG.search(parent)} in:body`, "--json", "number,body,state,labels");
@@ -445,12 +436,17 @@ function readChildren(repo, parent) {
   for (const found of listedPrs ?? []) {
     if (PARENT_ISSUE_TAG.read(found.body ?? "") !== parent)
       continue;
+    const { running, problem } = runningOn(repo, found.number);
+    if (problem) {
+      problems.push(problem);
+      continue;
+    }
     nodes.push({
       number: found.number,
       kind: "pull-request",
       state: saysOpen(found.state) ? "open" : pullRequestOutcome(found.state === "MERGED"),
       parent,
-      running: labelNames(found.labels).includes(label)
+      running
     });
   }
   const links = issueLinks(repo, parent);
@@ -461,13 +457,18 @@ function readChildren(repo, parent) {
   for (const child of links.children) {
     if (already.has(child.number))
       continue;
+    const { running, problem } = runningOn(repo, child.number);
+    if (problem) {
+      problems.push(problem);
+      continue;
+    }
     already.add(child.number);
     nodes.push({
       number: child.number,
       kind: "issue",
       state: child.state,
       parent,
-      running: child.labels.includes(label)
+      running
     });
   }
   for (const linked of links.pullRequests) {
@@ -544,6 +545,23 @@ function closeSubtreeUnder(repo, root, rootBody) {
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+
+// src/entrypoints/machinery/lib/script-ref.ts
 function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }
@@ -575,7 +593,7 @@ function main() {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const number = String(values.number);
   const closer = (values.closer ?? "").trim();
-  if ((values["closer-type"] ?? "").trim() === "Bot") {
+  if (!isHumanActor(values["closer-type"])) {
     console.error(`#${number} was closed by a bot, which is how an agent finishes its own work. Nothing to stop.`);
     return;
   }

@@ -217,6 +217,12 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           number: "\${NUMBER}",
           type: "pr",
           repo: "\${REPO}",
+          // This dispatch fulfils the request the pull request carries -- the command
+          // a person typed, or the reviewer line `create_pr` wrote. The thread's last
+          // turn-changing event is that request, so without this the
+          // outstanding-request check would read it as somebody else's and refuse the
+          // one dispatch that should happen.
+          "answers-request": "true",
           context: "validation of #\${NUMBER} finished: \${SUMMARY}",
         })}
 `,

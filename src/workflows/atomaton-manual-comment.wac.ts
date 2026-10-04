@@ -14,7 +14,7 @@ import { ref as requestStopRef } from "../entrypoints/machinery/request_stop.ts"
 import { ref as resolveResumeAgentRef } from "../entrypoints/machinery/resolve_resume_agent.ts";
 import { ref as resumeSubtreeRef } from "../entrypoints/machinery/resume_subtree.ts";
 import { ref as dispatchPrValidationRef } from "../entrypoints/machinery/dispatch_pr_validation.ts";
-import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
+import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // Invoke agents via /agent-name slash command in issue/PR comments.
 // Slash-command DISPATCH is restricted to OWNER/MEMBER/COLLABORATOR (see
@@ -46,7 +46,7 @@ const IS_HUMAN_COMMENT = JobCondition.isNot(COMMENT_USER_TYPE, "Bot");
 // The distinction is the whole point of the two types: a step may read `steps.`,
 // and this condition is built from event references, which both contexts allow.
 const PARSE_ALLOWED = Condition.is(COMMENT_USER_TYPE, "Bot")
-  .and(Condition.of(`contains(${COMMENT_BODY}, 'atomaton:dispatch')`))
+  .and(Condition.of(`contains(${COMMENT_BODY}, '${DISPATCH_TAG.marker}')`))
   .or(
     Condition.isNot(COMMENT_USER_TYPE, "Bot").and(
       isRepositoryMember(githubEventRaw<IssueCommentCreatedEvent>((e) => e.comment.author_association)),
@@ -267,7 +267,11 @@ const commandErrorStep = new TypedOutputsStep({
     NUMBER: targetStep.outputs.number,
     ERROR: parseCommandStep.outputs.error,
   },
-  run: `gh issue comment "\${NUMBER}" --body "Atomaton command error: \${ERROR}"
+  // Tagged `exclude`: this is addressed to the person who typed the command, not to
+  // the model. An untagged copy joins the next run's context as something the agent
+  // was told, when what it actually says is that somebody's command was malformed.
+  run: `gh issue comment "\${NUMBER}" --body "${LLM_CONTEXT_TAG.write("exclude")}
+Atomaton command error: \${ERROR}"
 `,
 });
 
@@ -340,7 +344,7 @@ const prWaitingStep = new TypedOutputsStep({
     AGENT: dispatchStep.outputs.agent,
   },
   run: `gh issue comment "$NUMBER" --body "${LLM_CONTEXT_TAG.write("exclude")}
-Atomaton: \`\${AGENT}\` will start once CI finishes on this pull request."
+Atomaton: \\\`\${AGENT}\\\` will start once CI finishes on this pull request."
 `,
 });
 
@@ -362,7 +366,7 @@ export const atomaManualComment = new Workflow("atomaton-manual-comment", {
       // parseCommandStep's own `if:` above.
       if: IS_HUMAN_COMMENT.or(
         JobCondition.is(COMMENT_USER_TYPE, "Bot").and(
-          JobCondition.of(`contains(${COMMENT_BODY}, 'atomaton:dispatch')`),
+          JobCondition.of(`contains(${COMMENT_BODY}, '${DISPATCH_TAG.marker}')`),
         ),
       ),
       outputs: {

@@ -266,12 +266,17 @@ describe("reconcile_github_session.ts", () => {
   });
 
   test("excludes marked operational notices but keeps human-action notifications", () => {
+    // `llm_context` and `author_type` are carried as fields, not read from `content`:
+    // `fetch_events.ts` strips every tag before this file sees the body, so a reader
+    // that looked for the tag here would never find it. See `GithubEvent`.
     const events = [
       {
         id: 302,
         event_type: "issue_comment",
-        content: "<!-- atomaton:llm-context=exclude -->\nAtomaton: Agent `engineer` dispatched.",
+        content: "Atomaton: Agent `engineer` dispatched.",
         author: "github-actions[bot]",
+        author_type: "Bot",
+        llm_context: "exclude",
         created_at: "2026-05-27T12:00:00Z",
       },
       {
@@ -279,13 +284,16 @@ describe("reconcile_github_session.ts", () => {
         event_type: "issue_comment",
         content: "@alice Atomaton ran out of time. Please review and retry.",
         author: "github-actions[bot]",
+        author_type: "Bot",
         created_at: "2026-05-27T12:01:00Z",
       },
       {
         id: 304,
         event_type: "issue_comment",
-        content: "<!-- atomaton:llm-context=exclude -->\nHuman instruction must still be visible.",
+        content: "Human instruction must still be visible.",
         author: "alice",
+        author_type: "User",
+        llm_context: "exclude",
         created_at: "2026-05-27T12:02:00Z",
       },
     ];
@@ -295,7 +303,7 @@ describe("reconcile_github_session.ts", () => {
     expect(eventCount).toBe(2);
     expect(mergedSession.messages?.map((message) => message.content)).toEqual([
       "@alice Atomaton ran out of time. Please review and retry.",
-      "<!-- atomaton:llm-context=exclude -->\nHuman instruction must still be visible.",
+      "Human instruction must still be visible.",
     ]);
   });
 

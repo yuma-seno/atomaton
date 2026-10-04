@@ -35,6 +35,11 @@ function refusedByChainLimit(ending) {
   return ending.ended === "chain-over" ? ending.next : undefined;
 }
 
+// src/entrypoints/machinery/lib/flags.ts
+function isTrue(value) {
+  return value === "true";
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -61,9 +66,6 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/decide_turn_ending.ts
 var ref = defineScript(import.meta.url);
-function isTrue(v) {
-  return v === "true";
-}
 function main() {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),

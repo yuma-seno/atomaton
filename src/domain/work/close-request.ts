@@ -33,6 +33,7 @@
  * word it differently or forget it. Pure: the caller resolves who to mention and
  * what the agent had to say.
  */
+import { mentionPrefix } from "./mention.ts";
 
 export interface CloseRequest {
   /**
@@ -66,9 +67,14 @@ export const CLOSE_REQUEST_LINE =
  * be appended after them, which put the only sentence addressed to the reader
  * under however many paragraphs of report the agent had written — and the reader
  * is the one being asked to act.
+ *
+ * The caller tags it `exclude` before posting: it is addressed to the person, not to
+ * the model, and an untagged copy joins the next run's context as something the agent
+ * was told. The tag is the caller's because this module is pure and the tag format
+ * lives in `adapters/github/tags.ts`.
  */
 export function closeRequestComment(request: CloseRequest): string {
-  const mention = request.notify ? `@${request.notify} ` : "";
+  const mention = mentionPrefix(request.notify);
   const body = (request.body ?? "").trim();
   const head = `${mention}${CLOSE_REQUEST_LINE}`;
   return body ? `${head}\n\n${body}` : head;

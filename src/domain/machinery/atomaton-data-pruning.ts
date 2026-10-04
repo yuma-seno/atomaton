@@ -30,6 +30,7 @@
  * Both start `issue-<number>`, which is all this needs. `workspace/issue-7/…` is the
  * same shape and dies of the same cause, so it is pruned by the same pass.
  */
+import { WORKSPACE_TREE } from "./data-layout.ts";
 
 /**
  * The one tree this prunes, and why sessions are not in it.
@@ -51,7 +52,7 @@
  * arbitrary -- whatever an agent chose to put there -- so nothing can be assumed about
  * how it compresses, and a closed issue's scratch files answer no question at all.
  */
-const OWNED_TREES = ["workspace/"];
+const OWNED_TREES = [WORKSPACE_TREE];
 
 /**
  * The issue a stored path belongs to, or `undefined` if it belongs to none.

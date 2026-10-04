@@ -297,15 +297,173 @@ function issueLinks(repo, number) {
   };
 }
 
+// src/domain/work/agent-name.ts
+var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
+var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
+
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
+// src/adapters/github/tags.ts
+var TAG_PREFIX = `atomaton:`;
+var EVERY_TAG_PATTERN = [];
+function makeTag(key, valuePattern, parse, render) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read: (text) => {
+      const m = re.exec(text);
+      return m ? parse(m[1]) : undefined;
+    },
+    has: (text) => re.test(text),
+    search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
+  };
+}
+function numericTag(key) {
+  return makeTag(key, "\\d+", Number, String);
+}
+function stringTag(key, valuePattern) {
+  return makeTag(key, valuePattern, (raw) => raw, (value) => value);
+}
+var STOP_TAG = stringTag("stop", "requested");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+var PARENT_ISSUE_TAG = numericTag("parent-issue");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
+var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
+var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
+var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
+var CHANGED_TAG = stringTag("changed", "yes|no");
+var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
+var AGGREGATED_TAG = numericTag("aggregated");
+var SUB_RESULT_TAG = numericTag("sub-result");
+var CI_RETRY_TAG = numericTag("ci-retry");
+
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
+  }
+  return NOTHING;
+}
+
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
+// src/domain/work/thread.ts
+function eventOf(body, readers) {
+  if (readers.isAgentResult(body))
+    return readers.handedOff(body) ? "handed-off" : "returned";
+  if (readers.requestedAgent(body) !== "")
+    return "asked";
+  return;
+}
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" ? "agent" : "person";
+}
+function requestOutstanding(events) {
+  return events[events.length - 1] === "asked";
+}
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent")
+      continue;
+    kept.push(entry);
+    const event = eventOf(entry.body, readers);
+    if (event !== undefined)
+      events.push(event);
+  }
+  return { comments: kept, events };
+}
+function wasLaunched(comments, readers) {
+  return comments.some((entry) => readers.isDispatchMarker(entry.body));
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  isAgentResult: (body) => AGENT_TAG.has(body),
+  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
+};
+function isHumanComment(comment) {
+  return isHumanActor(comment.user?.type);
+}
+function readComments(repo, number, excludeCommentId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const excluded = String(excludeCommentId ?? "").trim();
+  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return shapedThread(comments, readers);
+}
+function wasLaunchedOn(repo, number) {
+  return wasLaunched(readComments(repo, number).comments, readers);
+}
+function checkDispatchMarker(repo, number, markerId) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const marker = String(markerId);
+  const comments = JSON.parse(listed.stdout || "[]");
+  const markerVisible = comments.some((comment) => String(comment.id) === marker);
+  const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
+}
+
 // src/adapters/github/sibling-check.ts
 function countOpenSiblings(opts) {
   const label = opts.label || getLabel("sub_issue");
-  const launchedLabel = opts.launchedLabel || getLabel("launched");
   const links = issueLinks(opts.repo, opts.parent);
   if (links.unavailable) {
     throw new Error(`countOpenSiblings: could not read the sub-issues of #${opts.parent}: ${links.unavailable}`);
   }
-  return links.children.filter((child) => child.state === "open" && child.labels.includes(label) && child.labels.includes(launchedLabel) && child.number !== opts.exclude).length;
+  return links.children.filter((child) => child.state === "open" && child.labels.includes(label) && child.number !== opts.exclude && wasLaunchedOn(opts.repo, child.number)).length;
 }
 
 // src/adapters/runner/ops-log.ts
@@ -352,7 +510,7 @@ function readTargetState(number, repo) {
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
-// src/domain/work/closed-issue.ts
+// src/domain/work/closed-target.ts
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
 }
@@ -365,20 +523,33 @@ function recoveryAdvice(state, number, command) {
   }
   return `Reopen #${number} and comment \`${command}\` to run it.`;
 }
-function mentionPrefix(logins) {
+function mentionList(logins) {
   return logins.length > 0 ? `${logins.map((l) => `@${l}`).join(" ")} ` : "";
 }
 function dispatchRefusedNotice(refused) {
   const { agent, number, context, state, notify } = refused;
   const why = !state.known ? `the state of #${number} could not be read (${state.why})` : `#${number} is closed`;
   return [
-    `${mentionPrefix(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because ${why}.`,
     "",
     `What was about to happen: ${context}.`,
     "",
     "Nothing will retry this.",
     "",
     !state.known ? `Start it by hand once #${number} can be read: comment \`/${agent}\` on it.` : recoveryAdvice(state, number, `/${agent}`)
+  ].join(`
+`);
+}
+function dispatchUnconfirmedNotice(unconfirmed) {
+  const { agent, number, context, notify } = unconfirmed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because the dispatch could not be confirmed.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "",
+    "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue."
   ].join(`
 `);
 }
@@ -404,10 +575,92 @@ function refuseClosedTarget(d, state) {
   }
   return "refused-closed";
 }
+function postDispatchMarker(d) {
+  const log = d.log ?? ((message) => console.error(message));
+  const body = `${LLM_CONTEXT_TAG.write("exclude")}
+${DISPATCH_TAG.write(d.agent)}
+` + `Atomaton: \`${d.agent}\` starting on this ${d.type === "pr" ? "pull request" : "issue"}.`;
+  const { code, stdout, stderr } = gh("api", `repos/${d.repo ?? "{owner}/{repo}"}/issues/${d.number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
+  if (code !== 0) {
+    log(`${d.context}: could not post the dispatch marker on #${d.number}: ${stderr || stdout}`);
+    return;
+  }
+  return stdout.trim();
+}
+function refuseOutstandingRequest(d, markerId) {
+  const log = d.log ?? ((message) => console.error(message));
+  const removeMarker = () => {
+    if (markerId === undefined)
+      return;
+    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+  };
+  if (markerId === undefined)
+    return;
+  const delays = [1000, 2000, 4000];
+  let check;
+  for (let attempt = 0;attempt <= delays.length; attempt++) {
+    try {
+      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+    } catch (e) {
+      removeMarker();
+      log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+      return "refused-outstanding";
+    }
+    if (check.markerVisible)
+      break;
+    const delay = delays[attempt];
+    if (delay === undefined)
+      break;
+    log(`${d.context}: the dispatch marker on #${d.number} is not visible yet; waiting ${delay}ms and reading again`);
+    Bun.sleepSync(delay);
+  }
+  if (check === undefined || !check.markerVisible) {
+    const reposted = postDispatchMarker(d);
+    if (reposted !== undefined) {
+      try {
+        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+          removeMarker();
+          return;
+        }
+      } catch (e) {
+        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+      }
+      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+    }
+    log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
+    const body = dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? ""
+    });
+    const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
+    if (code !== 0) {
+      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+    }
+    return "unconfirmed";
+  }
+  if (!check.outstanding)
+    return;
+  removeMarker();
+  log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
+  return "refused-outstanding";
+}
 function dispatchRunner(d) {
+  if (!d.agent.trim()) {
+    const log = d.log ?? ((message) => console.error(message));
+    log(`${d.context}: no agent was named, so nothing was dispatched (an empty agent is not a run).`);
+    return "failed";
+  }
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
+  if (!d.answersRequest) {
+    const markerId = postDispatchMarker(d);
+    const refusal = refuseOutstandingRequest(d, markerId);
+    if (refusal !== undefined)
+      return refusal;
+  }
   const args = [
     ...d.repo ? ["--repo", d.repo] : [],
     "--field",
@@ -429,46 +682,6 @@ function dispatchRunner(d) {
   return "dispatched";
 }
 
-// src/domain/work/agent-name.ts
-var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
-var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
-
-// src/adapters/github/tags.ts
-var TAG_PREFIX = `atomaton:`;
-var EVERY_TAG_PATTERN = [];
-function makeTag(key, valuePattern, parse, render) {
-  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
-  EVERY_TAG_PATTERN.push(pattern);
-  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
-  return {
-    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
-    has: (text) => re.test(text),
-    search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
-  };
-}
-function numericTag(key) {
-  return makeTag(key, "\\d+", Number, String);
-}
-function stringTag(key, valuePattern) {
-  return makeTag(key, valuePattern, (raw) => raw, (value) => value);
-}
-var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
-var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
-var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
-var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
-var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
-var CHANGED_TAG = stringTag("changed", "yes|no");
-var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
-var AGGREGATED_TAG = numericTag("aggregated");
-var SUB_RESULT_TAG = numericTag("sub-result");
-var CI_RETRY_TAG = numericTag("ci-retry");
-
 // src/adapters/github/parent-issue.ts
 function log(message) {
   console.error(`[atomaton-parent] ${message}`);
@@ -489,12 +702,26 @@ function parentIssueOf(repo, issue) {
     return { known: false, why };
   }
 }
+var MAX_PARENT_HOPS = 6;
+function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
+  const visited = new Set;
+  let current = start;
+  for (let hop = 0;hop < maxHops; hop++) {
+    if (visited.has(current))
+      return;
+    visited.add(current);
+    const { data, parent } = read(current);
+    yield { number: current, data, parent };
+    if (!parent.known || parent.parent === 0)
+      return;
+    current = parent.parent;
+  }
+}
 
 // src/adapters/github/notify.ts
 function log2(message) {
   console.error(`[atomaton-notify] ${message}`);
 }
-var MAX_HOPS = 10;
 function repositoryOwner(repo) {
   const owner = repo.split("/")[0]?.trim() ?? "";
   if (!owner)
@@ -519,24 +746,19 @@ function nativeParentOf(repo, issue) {
   return found.known && found.parent ? found.parent : undefined;
 }
 function resolveNotify(repo, number) {
-  const visited = new Set;
-  let current = number;
-  for (let i = 0;i < MAX_HOPS; i++) {
-    if (visited.has(current))
-      break;
-    visited.add(current);
+  const read = (current) => {
     const d = fetchIssueLookup(repo, current);
     const body = d.body ?? "";
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
+  };
+  for (const hop of parentChain(number, read)) {
+    const body = hop.data.body ?? "";
     const tagged = NOTIFY_TAG.read(body);
     if (tagged)
       return tagged;
-    if ((d.type ?? "").toLowerCase() === "user" && d.login) {
-      return d.login;
-    }
-    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
-    if (parent === undefined)
-      break;
-    current = parent;
+    if (isHumanActor(hop.data.type) && hop.data.login)
+      return hop.data.login;
   }
   const owner = repositoryOwner(repo);
   if (owner)
@@ -547,9 +769,13 @@ function resolveNotify(repo, number) {
 // src/adapters/github/agent-on-issue.ts
 function mostRecentAgent(bodies) {
   for (let i = bodies.length - 1;i >= 0; i--) {
-    const agent = AGENT_TAG.read(bodies[i] ?? "");
-    if (agent)
-      return agent;
+    const body = bodies[i] ?? "";
+    const result = AGENT_TAG.read(body);
+    if (result)
+      return result;
+    const asked = parseCommentCommand(body).agent;
+    if (asked)
+      return asked;
   }
   return "";
 }
@@ -572,7 +798,7 @@ function parentAgent(repo, parent) {
   return mostRecentAgentOn(repo, parent);
 }
 function needsAttention(result) {
-  return result.kind === "dispatch-failed" || result.kind === "undetermined" || result.kind === "parent-closed";
+  return result.kind === "dispatch-failed" || result.kind === "undetermined" || result.kind === "parent-closed" || result.kind === "parent-busy";
 }
 function describeGateResult(result, closedNum, parent) {
   const which = parent === undefined ? "the parent issue" : `#${parent}`;
@@ -589,6 +815,8 @@ function describeGateResult(result, closedNum, parent) {
       return `All sub-tasks of ${which} complete, but the dispatch FAILED. ` + `The aggregation marker is already written, so no other caller will retry: ` + `re-run the parent's agent by hand.`;
     case "parent-closed":
       return `All sub-tasks of ${which} complete, but ${which} is closed, so no agent was started. ` + `The aggregation marker is already written, so no other caller will retry: ` + `reopen it and run the parent's agent by hand. Whoever asked for the run has been told on the issue.`;
+    case "parent-busy":
+      return `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` + `so no second one was started. The aggregation marker is already written, so no other caller ` + `will retry: the run that was asked for first is the one to wait for.`;
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
   }
@@ -618,7 +846,7 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("issue", "view", String(opts.parent), "--repo", opts.repo, "--json", "comments", "--jq", ".comments[].body");
+  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body");
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
@@ -646,7 +874,11 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
   });
   if (outcome === "dispatched")
     return { kind: "dispatched" };
-  return outcome === "refused-closed" ? { kind: "parent-closed" } : { kind: "dispatch-failed" };
+  if (outcome === "refused-closed")
+    return { kind: "parent-closed" };
+  if (outcome === "refused-outstanding")
+    return { kind: "parent-busy" };
+  return { kind: "dispatch-failed" };
 }
 
 // src/entrypoints/machinery/dispatch_if_siblings_done.ts

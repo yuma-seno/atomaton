@@ -35,6 +35,7 @@
  * wasted runs, and the cost of interrupting real work is real work interrupted.
  */
 import type { ChainComment } from "./dispatch-chain.ts";
+import { resolveLimit } from "./limits.ts";
 
 /**
  * How many consecutive runs may change nothing before a person is asked.
@@ -82,13 +83,11 @@ export function noProgressLimitReached(runs: number, limit: number): boolean {
 /**
  * A limit from configuration, or the default.
  *
- * Zero and negatives mean the default rather than "never stop", matching every
- * other limit here -- see `resolveHandoffLimit` for why one rule about zero across
- * the whole project is worth more than a cleverer rule in one place.
+ * The rule is `limits.ts`'s, shared with every other limit in the project: zero and
+ * negatives mean the default rather than "never stop".
  */
 export function resolveNoProgressLimit(configured: unknown): number {
-  const value = Number(configured);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_NO_PROGRESS_LIMIT;
+  return resolveLimit(configured, DEFAULT_NO_PROGRESS_LIMIT);
 }
 
 export interface StopDecision {

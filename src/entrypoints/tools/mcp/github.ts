@@ -27,8 +27,10 @@ import { logOp } from "../../../adapters/runner/ops-log.ts";
 import { report } from "../../../adapters/mcp/mcp-report.ts";
 import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
+import { isHumanAuthor } from "../../../domain/work/actor.ts";
 import { LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
-import { closingKeywordRefusal, closingReferences } from "../../../domain/work/issue-links.ts";
+import { closingKeywordRefusal, closingReferences, closesLine } from "../../../domain/work/issue-links.ts";
+import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -41,6 +43,7 @@ import { issueLinks } from "../../../adapters/github/issue-links.ts";
 import type { LinkedChild, LinkedIssue } from "../../../domain/work/issue-links.ts";
 import { decideMergeReadiness, formatBlockers } from "../../../domain/delivery/merge-readiness.ts";
 import { gatherMergeSignals } from "../../../adapters/github/merge-signals.ts";
+import { readTargetState } from "../../../adapters/github/target-state.ts";
 import { selectCommentRange } from "../../../domain/work/comment-range.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 
@@ -346,6 +349,30 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   const sub = a.sub_issue ?? true;
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
 
+  // A pull request run does not create sub-issues. It reviews or fixes one pull
+  // request, and `ISSUE_NUMBER` on such a run is the pull request's own number (or
+  // the parent issue `fetch_events.ts` resolved for context) -- so a sub-issue
+  // created here would hang under a node that was never decomposing anything, and
+  // the pull request's `atomaton/in-progress` guard would be held by a chain that
+  // had moved elsewhere. Decomposition belongs to an issue run.
+  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
+    mcpFail(
+      "create_issue is for an issue run that is decomposing work into sub-issues. " +
+        "This run is on a pull request, which reviews or fixes one pull request rather than " +
+        "decomposing it. Use github__create_pr to hand this pull request to a reviewer, or " +
+        "atomaton__request_close_issue to conclude it.",
+    );
+  }
+
+  // An issue body is read for a command by `resolve_entry_agent.ts` when the issue is
+  // opened, so an agent writing one here would start a run on a child it just created.
+  // The route it meant is `launch_sub_agent`, which is also what the parent's
+  // aggregation waits on.
+  refuseCommandLines(
+    body,
+    "issue body",
+    "Use `atomaton__launch_sub_agent` to start an agent on a sub-issue.",
+  );
   body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
   if (sub) {
     const subIssueLabel = getLabel("sub_issue");
@@ -569,14 +596,19 @@ function closeIssue(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>): boolean {
   // `gh api repos/OWNER/REPO/issues/N` endpoint, as `.user.type`). Use the
   // reliable `.author.is_bot` boolean instead.
   const d = ghJsonOrThrow<GhIssueAuthor>("issue", "view", String(num), "--repo", REPO, "--json", "author");
-  const isBot = Boolean(d?.author?.is_bot);
+  const isBot = !isHumanAuthor(d?.author?.is_bot);
   log(`closeIssue: author.is_bot=${isBot}`);
   if (!isBot) {
-    const body = closeRequestComment({
+    const request = closeRequestComment({
       notify: resolveNotify(REPO, num),
       body: "Atomaton: an agent finished the work on this issue and asked for it to be closed.",
     });
-    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", body);
+    // Tagged `exclude`: addressed to the person, not to the model. See
+    // `conclude_issue.ts` for the same decision on the same comment.
+    const { code, stdout, stderr } = gh(
+      "issue", "comment", String(num), "--repo", REPO,
+      "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${request}`,
+    );
     // The one failure still worth an error. Saying nothing here would leave an
     // issue that nobody has been asked to close and an agent that believes
     // somebody has -- which is the defect above with the comment removed.
@@ -674,6 +706,23 @@ function refuseClosingKeywords(text: string, what: string): void {
   if (refusal !== undefined) mcpFail(refusal);
 }
 
+/**
+ * Refuse a body an agent wrote that carries a command on a line of its own.
+ *
+ * A command is a request from someone entitled to make it, and a body an agent wrote
+ * is not one — but the next reader takes it for one: `extract_directive.ts` reads a
+ * pull request body for the agent to dispatch, and `resolve_entry_agent.ts` reads an
+ * issue body the same way. So an agent that writes `/engineer` into a body is starting
+ * a run by accident, and the route it meant to use is a tool argument.
+ *
+ * `instead` names that route, and is required: a refusal that says what to do instead
+ * is followed, and one that only states a rule is not.
+ */
+function refuseCommandLines(text: string, what: string, instead: string): void {
+  const refusal = commandInBodyRefusal(commandLinesIn(text), what, instead);
+  if (refusal !== undefined) mcpFail(refusal);
+}
+
 function withCheckedMentions(body: string): string {
   const checked = escapeUnknownMentions(
     body,
@@ -688,10 +737,20 @@ function withCheckedMentions(body: string): string {
 function injectParentIssue(body: string, reviewer: string): string {
   const parent = (process.env.ISSUE_NUMBER ?? "").trim();
   refuseClosingKeywords(body, "pull request body");
+  // The reviewer is a tool argument, and the machinery writes the `/<agent>` line
+  // itself below. An agent writing one into the body is asking for a run in the one
+  // place a reader takes for a request, so it is refused rather than merged with the
+  // argument -- two answers to "who reviews this" is the shape this repository keeps
+  // finding.
+  refuseCommandLines(
+    body,
+    "pull request body",
+    "Pass the agent as the `reviewer` argument instead; the machinery writes the line for you.",
+  );
   body = notifyTagPrefix(body, "PR") + withCheckedMentions(body);
   // The reviewer, as the same line a person would type. Written before the tags so
   // it is the first visible line of the body, which is where a directive is read
-  // from -- see `resolve_pr_next_agent.ts`. An empty name writes nothing, and the
+  // from -- see `latestRequestedAgentOn`. An empty name writes nothing, and the
   // pull request is then left for a person, who is told so below.
   const reviewerLine = reviewer ? `/${reviewer}\n\n` : "";
   if (!parent) return `${reviewerLine}${body}`;
@@ -702,10 +761,10 @@ function injectParentIssue(body: string, reviewer: string): string {
   // none of its own. This used to check first, because a second "Closes #N" made
   // downstream parsing match twice and corrupted $GITHUB_OUTPUT -- a duplicate that can
   // no longer arrive, since a body carrying one never reaches this line.
-  const closesLine = `Closes #${parent}\n`;
+  const closes = `${closesLine(Number(parent))}\n`;
   const originAgent = (process.env.AGENT ?? "").trim();
   const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}\n` : "";
-  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${closesLine}${body}`;
+  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${closes}${body}`;
 }
 
 function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
@@ -1191,8 +1250,11 @@ function listPrReviewComments(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): 
 
 /** True if `number` is currently closed (used to skip a pointless post-merge re-invocation when native "Closes #N" auto-close already did the job). */
 function isIssueClosed(number: number): boolean {
-  const d = ghJsonOrThrow<{ state?: string }>("issue", "view", String(number), "--repo", REPO, "--json", "state");
-  return (d?.state ?? "").toUpperCase() === "CLOSED";
+  // `readTargetState`, not a second read of `gh issue view --json state`. That copy
+  // looked for the literal `"CLOSED"` and could not tell a merged pull request from a
+  // closed one -- the distinction `target-state.ts` exists to make.
+  const state = readTargetState(number, REPO);
+  return state.known && state.state !== "open";
 }
 
 

@@ -1,0 +1,276 @@
+# Atomaton Release — declare a version in `package.json`, as a pull request, on a
+# button press.
+#
+# ## Why this file is hand-written and lives in `self/`
+#
+# The same three reasons as `atomaton-self-deploy.yml`, and the same consequences:
+# it is not in the deliverable, so no adopter receives a workflow naming a secret
+# they do not have; no agent triggers it and no agent step reads its token; and it
+# does one thing a person asks for, by pressing a button.
+#
+# ## What a release is here
+#
+# `package.json`'s `version` is the single declaration. `tag-release.sh` derives the
+# tag from it, so declaring a version and merging IS the release:
+#
+#     package.json version -> deploy.on_merge -> tag-release.sh   -> vX.Y.Z
+#                          -> deploy.on_tag   -> publish-release.sh -> release
+#
+# Nothing else declares a version, so nothing else has to be kept in step. This
+# workflow exists to make the one edit that starts that chain, and to refuse the one
+# edit that should never start it.
+#
+# ## What it refuses, and what it does not
+#
+# A downgrade. That is the only thing checked, because it is the only thing that is
+# not a judgement: a version is a claim about what is being shipped, and this
+# workflow is not positioned to make it. It checks that the number goes up, not
+# down, and leaves the rest to the person merging.
+#
+# It also refuses a version that is already released, because there is nothing to
+# do: the tag exists, the release exists, and re-declaring it changes nothing.
+#
+# ## Why it needs a token that is not `GITHUB_TOKEN`
+#
+# A pull request opened with `GITHUB_TOKEN` starts no workflow run -- GitHub starts
+# none for an event its own token caused. So `atomaton-check` would never run on
+# this pull request, its required context would never appear, and the pull request
+# could never be merged. `SELF_DEPLOY_TOKEN` is already here for the self-deploy and
+# carries an identity that does start runs; it is a PAT, held by a person pressing a
+# button, and no agent step reads it.
+#
+# ## What it does not do
+#
+# It does not merge. `package.json` is in `merge.governed_paths`, so the pull
+# request needs a person. Deciding that a set of work is ready to ship is a
+# judgement no agent is positioned to make, and a version is that judgement written
+# as a number.
+name: Atomaton Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.2.0 (a leading "v" is accepted)'
+        required: true
+        type: string
+
+# Read-only. Every write in this job goes through the PAT, which keeps the two
+# identities apart: if something here can write, it is because a person's token
+# allowed it.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Prepare the release pull request
+    runs-on: ubuntu-latest
+    steps:
+      # A bot must not reach this. The agent runner's token carries `actions:
+      # write`, so dispatching this file is within what that token could
+      # theoretically do. An agent has no route to it today, but "no route today"
+      # is a denylist, and this is a token that can open a pull request against a
+      # governed path. So the check is also here, where it is a property of the job
+      # rather than of what an agent happens to be offered.
+      - name: Refuse a non-human trigger
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          case "$ACTOR" in
+            *'[bot]'|github-actions)
+              echo "::error::$ACTOR is not a person. This workflow is dispatched by hand, on purpose."
+              exit 1
+              ;;
+          esac
+          echo "dispatched by $ACTOR"
+
+      - name: Check the token is present
+        env:
+          TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::SELF_DEPLOY_TOKEN is unset. It needs a PAT; a pull request opened with GITHUB_TOKEN starts no workflow run, so its checks would never appear. See CONTRIBUTING.md."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The PAT, so the pull request opened later carries an identity that
+          # starts the checks it needs.
+          token: ${{ secrets.SELF_DEPLOY_TOKEN }}
+
+      - name: Validate the version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          # A leading `v` is how a tag is written and how a person says it out
+          # loud; the declaration is bare. Accept both, store one.
+          NEW="${REQUESTED#v}"
+
+          if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$REQUESTED' is not a plain semver version. Expected X.Y.Z, optionally with a -prerelease suffix."
+            exit 1
+          fi
+
+          CURRENT=$(jq -r '.version // empty' package.json)
+          if [ -z "$CURRENT" ]; then
+            echo "::error::package.json declares no version; there is nothing to compare against."
+            exit 1
+          fi
+
+          # The one thing that is not a judgement: does the number go up? Equal
+          # is allowed -- re-declaring the same version is how a release whose
+          # publish failed is retried.
+          #
+          # Not `sort -V` on the whole string. GNU version sort orders a
+          # prerelease ABOVE its release, so it would call 1.0.0-rc.1 -> 1.0.0 a
+          # downgrade. The core is compared with it; the prerelease is not.
+          is_downgrade() {
+            local cur="$1" new="$2"
+            local cur_core="${cur%%-*}" new_core="${new%%-*}"
+            local lower_core
+            lower_core=$(printf '%s\n%s\n' "$cur_core" "$new_core" | sort -V | head -n1)
+            if [ "$lower_core" != "$cur_core" ]; then
+              return 0
+            fi
+            if [ "$cur_core" != "$new_core" ]; then
+              return 1
+            fi
+
+            # Equal cores. A prerelease is below its release, so a final version
+            # is never below its own prerelease, and the reverse is a downgrade.
+            local cur_pre="" new_pre=""
+            if [ "$cur" != "$cur_core" ]; then cur_pre="${cur#*-}"; fi
+            if [ "$new" != "$new_core" ]; then new_pre="${new#*-}"; fi
+            if [ -z "$cur_pre" ] && [ -n "$new_pre" ]; then return 0; fi
+            if [ -n "$cur_pre" ] && [ -z "$new_pre" ]; then return 1; fi
+            if [ -z "$cur_pre" ] && [ -z "$new_pre" ]; then return 1; fi
+
+            local lower_pre
+            lower_pre=$(printf '%s\n%s\n' "$cur_pre" "$new_pre" | sort -V | head -n1)
+            if [ "$lower_pre" != "$cur_pre" ]; then
+              return 0
+            fi
+            return 1
+          }
+
+          if is_downgrade "$CURRENT" "$NEW"; then
+            echo "::error::${NEW} is below the declared ${CURRENT}. A release does not go backwards; if this is a correction, ship it as a new version."
+            exit 1
+          fi
+
+          # Already out. The tag exists and the release exists, so declaring it
+          # again would change nothing and open a pull request for no diff.
+          if gh release view "v${NEW}" >/dev/null 2>&1; then
+            echo "::error::v${NEW} is already released. There is nothing to do."
+            exit 1
+          fi
+
+          # The tag exists but the release does not: a publish that did not
+          # finish. `tag-release.sh` will not create the tag twice, so declaring
+          # the version again would open a pull request that merges to nothing --
+          # the tag is already there and the publish is what is missing. The fix
+          # is to re-run the publish, which is idempotent.
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v${NEW}" >/dev/null 2>&1; then
+            echo "::error::v${NEW} is tagged but not released, so its publish did not finish. Re-run it: gh workflow run atomaton-deploy.yml --ref v${NEW} -f target=publish"
+            exit 1
+          fi
+
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "new=${NEW}" >> "$GITHUB_OUTPUT"
+          echo "declaring ${CURRENT} -> ${NEW}"
+
+      - name: Write the version
+        id: write
+        env:
+          NEW: ${{ steps.version.outputs.new }}
+          CURRENT: ${{ steps.version.outputs.current }}
+        run: |
+          set -euo pipefail
+
+          # Same version, no release. That is a publish that did not finish, not a
+          # change to make: the declaration is already right, so the fix is to
+          # re-run the deploy rather than open a pull request for no diff.
+          if [ "$NEW" = "$CURRENT" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::package.json already declares ${NEW}. If its release is missing, re-run the deploy: gh workflow run atomaton-deploy.yml --ref v${NEW} -f target=publish"
+            exit 0
+          fi
+
+          # `jq` rather than a regex over the line: it sets the field and leaves
+          # the rest of the file alone, so the diff is the one line that changed.
+          # The file is already 2-space indented, which is what jq writes.
+          jq --indent 2 --arg v "$NEW" '.version = $v' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::package.json already declares ${NEW}; nothing to open a pull request for."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git --no-pager diff -- package.json
+          fi
+
+      - name: Open the pull request
+        if: steps.write.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}
+          NEW: ${{ steps.version.outputs.new }}
+          CURRENT: ${{ steps.version.outputs.current }}
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/v${NEW}"
+
+          git config user.name "atomaton-release"
+          git config user.email "atomaton-release@users.noreply.github.com"
+          git checkout -q -b "$BRANCH"
+          git add package.json
+
+          # Through a file, not `-m`, for the reason spelled out in
+          # atomaton-self-deploy.yml: a multi-line message written inline has to
+          # start its continuation lines at column 0 to keep them out of the commit
+          # body's indentation -- and column 0 leaves this block scalar, which makes
+          # the whole workflow unparseable.
+          MSG=$(mktemp)
+          {
+            echo "release: declare ${NEW}"
+            echo
+            echo "Prepared by self/workflows/atomaton-release.yml, dispatched by ${ACTOR}."
+            echo
+            echo "package.json version ${CURRENT} -> ${NEW}. Merging this tags v${NEW}"
+            echo "and publishes it; nothing else declares a version."
+          } > "$MSG"
+          git commit -q -F "$MSG"
+          rm -f "$MSG"
+
+          # Force, because the branch is derived from the input: re-running for the
+          # same version should reproduce it rather than conflict with the previous
+          # attempt. Nothing hand-written belongs here.
+          git push -q --force origin "$BRANCH"
+
+          {
+            echo "Declares version \`${NEW}\` in \`package.json\` (was \`${CURRENT}\`)."
+            echo
+            echo "Prepared by \`self/workflows/atomaton-release.yml\`, dispatched by @${ACTOR}. No agent was involved."
+            echo
+            echo "Merging this **is** the release: \`deploy.on_merge\` runs \`tag-release.sh\`, which derives \`v${NEW}\` from this declaration, and the tag's own deployment publishes it."
+            echo
+            echo "\`package.json\` is in \`merge.governed_paths\`, so this needs a person to merge. That is the point: a version is a claim about what is being shipped, and deciding that is not an agent's to make."
+          } > /tmp/body.md
+
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh pr edit "$EXISTING" --body-file /tmp/body.md
+            echo "::notice::updated pull request #${EXISTING}"
+          else
+            gh pr create \
+              --title "release: declare ${NEW}" \
+              --body-file /tmp/body.md \
+              --head "$BRANCH"
+          fi

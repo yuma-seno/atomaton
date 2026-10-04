@@ -1,5 +1,5 @@
 {
-  "version": "v0.1.166",
+  "version": "v0.14.0",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -11,7 +11,6 @@
     ".github/atomaton-runtime/scripts/dispatch_new_tags.ts",
     ".github/atomaton-runtime/scripts/dispatch_pr_validation.ts",
     ".github/atomaton-runtime/scripts/extract_directive.ts",
-    ".github/atomaton-runtime/scripts/extract_notify_tag.ts",
     ".github/atomaton-runtime/scripts/fetch_events.ts",
     ".github/atomaton-runtime/scripts/get_config_value.ts",
     ".github/atomaton-runtime/scripts/guard_command_on_closed.ts",
@@ -42,7 +41,6 @@
     ".github/atomaton-runtime/scripts/resolve_notify.ts",
     ".github/atomaton-runtime/scripts/resolve_orchestrator_parent.ts",
     ".github/atomaton-runtime/scripts/resolve_pr_branch.ts",
-    ".github/atomaton-runtime/scripts/resolve_pr_next_agent.ts",
     ".github/atomaton-runtime/scripts/resolve_resume_agent.ts",
     ".github/atomaton-runtime/scripts/restore_agent_session.ts",
     ".github/atomaton-runtime/scripts/restore_workspace.ts",
