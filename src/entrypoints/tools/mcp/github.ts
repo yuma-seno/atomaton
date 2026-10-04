@@ -28,7 +28,7 @@ import { report } from "../../../adapters/mcp/mcp-report.ts";
 import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
-import { LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
+import { ENDED_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
 import { closingKeywordRefusal, closingReferences, closesLine } from "../../../domain/work/issue-links.ts";
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
@@ -865,9 +865,16 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
       : reviewer
         ? `Running CI; \`${reviewer}\` follows if it passes.`
         : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
+    // The `waiting` tag rides on this comment when the session ends here, so the node's
+    // thread records that its run stopped to wait on a child (the pull request). Without
+    // it the node's last turn event reverts to the `asked` that started the run, and the
+    // aggregation gate reads that as a request nobody took up. Only when "something
+    // happens next": a failed validation dispatch keeps the session open, so the run is
+    // not waiting and must not carry the tag. See `domain/work/thread.ts`.
+    const ending = validationDispatched ? `${ENDED_TAG.write("waiting")}\n` : "";
     gh(
       "issue", "comment", currentIssue, "--repo", REPO,
-      "--body", `${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: PR #${num} created (${stdout.trim()}). ${next}`,
+      "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${ending}Atomaton: PR #${num} created (${stdout.trim()}). ${next}`,
     );
   }
 

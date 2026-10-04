@@ -39,20 +39,44 @@
 export type TurnEvent =
   /** The node was handed to an agent: a `/agent` command, or a dispatch. */
   | "asked"
-  /** An agent handed the node to another agent. */
+  /** An agent handed the node to another agent, which runs on THIS node. */
   | "handed-off"
+  /**
+   * An agent finished by starting work UNDER this node, and waits for it.
+   *
+   * `launch_sub_agent` files children and `create_pr` opens a pull request; the run
+   * ends inside that call, so no result comment follows. This event is how that
+   * ending reaches the thread.
+   *
+   * Distinct from `handed-off`, which is the next agent taking THIS node. Here the
+   * next work is on a child, and the node itself is only waiting — so a person may
+   * still comment on it (it is not mid-turn), and `whoseTurn` gives it back to them.
+   * Without this event the node fell back to the `asked` that started the run, and
+   * the aggregation gate read that as "a request nobody has taken up" and refused to
+   * re-invoke the parent.
+   */
+  | "waiting"
   /** An agent finished and gave the node back to a person. */
   | "returned";
 
 /** Who holds a node's turn. */
 export type TurnHolder = "agent" | "person";
 
-/** How to read the three events out of a body. */
+/** How to read the events out of a body. */
 export interface TurnReaders {
   /** Whether a body is an agent's own result comment. */
   isAgentResult: (body: string) => boolean;
   /** Whether that result handed the node to another agent. */
   handedOff: (body: string) => boolean;
+  /**
+   * Whether that result ended with the run waiting on work under this node.
+   *
+   * Read instead of `handedOff` for a result comment, because only one of the two can
+   * be true and they lead to different answers: `handed-off` is the next agent on THIS
+   * node (the ball is the agent's), `waiting` is a child being started (the ball is
+   * nobody's until the child reports). See `TurnEvent`.
+   */
+  waiting: (body: string) => boolean;
   /**
    * The agent a body asks for, or "" when it asks for none.
    *
@@ -111,10 +135,17 @@ export interface ShapedThread<T extends ThreadEntry = ThreadEntry> {
  * an agent's result nor a request for one is not an event, and reading it as though it
  * were would hand the node back to a person every time somebody said anything.
  *
+ * `waiting` is checked first and on its own tag, BEFORE `isAgentResult`. It is written
+ * by the session-ending tools (`launch_sub_agent`, `create_pr`) on the comment they
+ * already post, and it carries no `AGENT_TAG` -- those runs post no result comment, and
+ * tagging theirs as one would file a hand-off with the runs that reported. So it cannot
+ * be read through `isAgentResult`, and it is the same body's stronger claim.
+ *
  * An agent's result is read before a request, because a result comment may quote a
  * command in its report and the tag is the stronger claim about what the body is.
  */
 function eventOf(body: string, readers: TurnReaders): TurnEvent | undefined {
+  if (readers.waiting(body)) return "waiting";
   if (readers.isAgentResult(body)) return readers.handedOff(body) ? "handed-off" : "returned";
   if (readers.requestedAgent(body) !== "") return "asked";
   return undefined;
@@ -141,6 +172,10 @@ export function turnEvents(bodies: readonly string[], readers: TurnReaders): Tur
  *
  * The last event decides. An empty thread is a person's: nothing has been asked for,
  * so there is nothing for an agent to be doing.
+ *
+ * `waiting` is a person's turn. The node's own run is over and the ball is with a
+ * child, not with this node's agent — so a comment here is a person talking to
+ * nobody's turn, which the guard keeps rather than deletes. See `TurnEvent`.
  */
 export function whoseTurn(events: readonly TurnEvent[]): TurnHolder {
   const last = events[events.length - 1];
@@ -155,6 +190,12 @@ export function whoseTurn(events: readonly TurnEvent[]): TurnHolder {
  * next agent, so `whoseTurn` reads it as the agent's — but the dispatch that follows a
  * hand-off IS that hand-off being taken up, so it is not an outstanding request. Only
  * `asked` is: a person's command, or a marker from a dispatch that already went out.
+ *
+ * `waiting` is not outstanding either, and that is the point of it. The `asked` that
+ * started the run is still in the thread, but the run took it up and ended inside a
+ * child-starting tool — so the request is spent, and the aggregation gate may start
+ * the parent again. Reading the old `asked` as outstanding was what refused the
+ * parent with `parent-busy` after every orchestrated subtree finished.
  *
  * Read from comments alone, never the node's body. A pull request body naming a
  * reviewer is the request the validation dispatch exists to fulfil, so counting it
