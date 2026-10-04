@@ -104,3 +104,109 @@ condition to be verifiable on the PR's own branch.
   (`.github/atomaton/config.yaml`, `self/atomaton/config.yaml`), `ci_dispatched: false`.
 - Local HEAD == `refs/heads/atomaton/issue-18` == `27d89c8`; `git status --porcelain`
   empty. No code was changed by the atomaton run.
+
+---
+
+# 2026-10-04 (third atomaton entry on #18) — aggregation judgement: NOT closeable
+
+## What forced this run
+yuma-seno manually resumed the parent (#18) because the aggregation marker was
+written without the parent being re-invoked (their words; fixed in v0.14.0).
+
+## State measured this run
+- `orig/main` = `66bca29` "deploy: apply v0.14.0 to .github/ (#71)" (2026-10-04).
+- Branch `atomaton/issue-18` = `b861570` (aa921cb -> 27d89c8 -> b861570).
+- GitHub compare `main...atomaton/issue-18`: `status: diverged`, `ahead_by: 3`,
+  `behind_by: 42`, merge_base `37f1c44` (InitialCommit).
+- `github__check_merge_readiness(21)`: blockers = `conflicting` ("branch conflicts
+  with the base") + `governance-change`; `merge_state_status: DIRTY`;
+  `required_checks: ["atomaton-check"]`, `checks: []`;
+  `github__get_check_runs("b861570")` -> `[]` (no checks on the head).
+  So PR #21 is unmergeable AND unverified.
+
+## #18's fix is NOT on main (reproduced)
+`git archive origin/main` into /tmp/main-v14 (no dist), then:
+- `ATOMATON_MACHINERY_ROOT=... bun test ./src/entrypoints/machinery/run_environment_setup.test.ts`
+  -> `0 pass / 3 fail`
+- `env -u ATOMATON_MACHINERY_ROOT bun test ...` -> `3 pass / 0 fail`
+main's `run_environment_setup.test.ts` has `hermeticEnv` count 0 (main's
+harness.ts does have the function, used by runWithFakeGh).
+
+## #23's fix is NOT on main either
+main's `package.json` (v0.14.0) has no `pretest`/`pretest:e2e`. Fresh main tree,
+no dist: `bun run test` -> 64 fail (var set) / 59 fail (unset) - all under dist/.
+Branch `b861570` in this run: `bun run test` -> `1473 pass / 0 fail`
+(4278 expect calls, 127 files) WITH the var set AND unset. So both close
+conditions hold on the branch, neither on main.
+
+## NEW: main is deliverable-invalid again (the #22 drift, re-materialised)
+`/tmp/main-v14`: `bun run .github/atomaton-runtime/scripts/validate_deliverable.ts
+--root .` -> exit 1:
+    `agents.on_config_finding` is required in config.yaml. It names the agent a
+    workflow starts when no issue or pull request can name one, so there is
+    nothing to fall back to.
+main's `.github/atomaton/config.yaml` has no `agents:` (grep "agents" -> only
+line 85 `policy: auto`) and `self/atomaton/config.yaml` has none either, while
+`src/content/config.yaml:135-138` has the key. The v0.14.0 self-deploy deletes
+`.github/` and copies `self/` over it, so #21's second commit was wiped.
+=> ANY PR against main fails validation before CI is dispatched, including the
+   PR that re-lands #18. The repair must ride in the same PR (#22 is the guard,
+   still open, untouched).
+
+## NOT established
+- Whether main's 3 remaining failures are exactly #18's (I ran main's file
+  directly: 3 fail with the var; 1533 pass/3 fail for the whole suite with dist
+  built and the var set - the 4th failure I saw was `own-pipeline.test.ts`
+  reading `git ls-files -s`, an artifact of my `git archive` extraction having
+  no index; `git ls-tree origin/main self/atomaton/scripts/` shows `100755`, so
+  it is not a real main failure).
+- Whether the engineer can get onto a base cut from current main: raw git
+  mutations are blocked and there is no MCP rebase. The only route I can see is
+  a content sync (see the handoff brief).
+
+---
+
+# DECISION (third entry): hand #18 to /engineer to re-apply onto current main
+
+Routes closed:
+- `github__sync_branch("atomaton/issue-18")` -> `{"status":"up_to_date","ahead":0,"behind":0}`.
+  Useless here: the remote branch itself is `b861570`, and the divergence is against
+  `main` (ahead 3 / behind 42), which sync_branch never rebases.
+- Raw `git merge|rebase|checkout|switch|reset|restore|branch` are all refused by
+  `/home/runner/work/_temp/atomaton-machinery/.github/atomaton-runtime/tools/hooks/
+  shell_guard.ts` (`MUTATING_GIT_COMMANDS`, lines 141-168). Verified: `git switch -c`
+  -> "Raw 'git switch' is disabled. Use the github__* MCP tools..."
+- The runner puts an issue run on the newest *unmerged* `atomaton/issue-18*` branch
+  (`resolve_issue_branch.ts` -> `resume_subtree`), i.e. the stale `b861570` tip, so the
+  engineer starts there too and must not build on it.
+
+The route the engineer should take (only one that does not need a blocked command):
+`git archive origin/main | tar -x -C .` in the checkout (archive is not a mutating
+git command; `tar -x` writes inside the repo), then delete the files main no longer
+has, then apply the changes, then `github__commit_and_push`. That is a fast-forward
+on top of `b861570` whose TREE equals main + the fixes, so PR #21's diff against
+main becomes exactly the fixes and its `conflicting` blocker goes away.
+
+Files main has that the branch does not (must be deleted after the extract):
+  .github/workflows/atomaton-release.yml        self/workflows/atomaton-release.yml
+  src/adapters/github/issue-index.test.ts       src/adapters/github/thread.ts
+  src/domain/machinery/data-layout.ts           src/domain/work/actor.ts
+  src/domain/work/comment-command.test.ts       src/domain/work/comment-command.ts
+  src/domain/work/limits.ts                     src/domain/work/node-type.ts
+  src/domain/work/thread.test.ts                src/domain/work/thread.ts
+  src/entrypoints/machinery/lib/flags.ts
+
+Three changes to re-apply (all are absent from main - verified):
+1. #18  `hermeticEnv()` at every `spawnSync("bun", ...)` that lacks `env` on CURRENT
+        main + the ratchet `tests/contract/test-hermetic-env.test.ts`. main's
+        `run_environment_setup.test.ts` spawns at lines 10/22/32 with no `env`
+        (`hermeticEnv` count 0); main's `harness.ts:58` already exports it.
+        Files on main still spreading process.env into a bun spawn: read_run_ending,
+        write_credentials_file, resolve_entry_agent, parse_pr_metadata,
+        read_secret_names, decide_turn_ending, shell_guard (7).
+2. #23  `pretest`/`pretest:e2e` in package.json + `tests/contract/test-builds-first.
+        test.ts` + the CONTRIBUTING paragraph (main still carries "test:e2e runs
+        against the built tree, so `bun run synth` has to come first").
+3. MANDATORY, or the PR cannot get CI: `agents.on_config_finding: engineer` into
+        `.github/atomaton/config.yaml` AND `self/atomaton/config.yaml` (byte-identical),
+        mirroring `src/content/config.yaml:135-138`.
