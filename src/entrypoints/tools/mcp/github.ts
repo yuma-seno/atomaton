@@ -349,6 +349,21 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   const sub = a.sub_issue ?? true;
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
 
+  // A pull request run does not create sub-issues. It reviews or fixes one pull
+  // request, and `ISSUE_NUMBER` on such a run is the pull request's own number (or
+  // the parent issue `fetch_events.ts` resolved for context) -- so a sub-issue
+  // created here would hang under a node that was never decomposing anything, and
+  // the pull request's `atomaton/in-progress` guard would be held by a chain that
+  // had moved elsewhere. Decomposition belongs to an issue run.
+  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
+    mcpFail(
+      "create_issue is for an issue run that is decomposing work into sub-issues. " +
+        "This run is on a pull request, which reviews or fixes one pull request rather than " +
+        "decomposing it. Use github__create_pr to hand this pull request to a reviewer, or " +
+        "atomaton__request_close_issue to conclude it.",
+    );
+  }
+
   // An issue body is read for a command by `resolve_entry_agent.ts` when the issue is
   // opened, so an agent writing one here would start a run on a child it just created.
   // The route it meant is `launch_sub_agent`, which is also what the parent's

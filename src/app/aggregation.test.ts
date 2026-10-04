@@ -89,6 +89,19 @@ const DISPATCH_MARKER: FakeGhRule[] = [
   { match: ["api", "issues/5/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
 ];
 
+// The parent's own thread, read by `mostRecentAgentOn` to name the agent to re-invoke.
+// `--jq "[.[].body]"` asks for bodies as strings, so this answers with a string array
+// -- the dispatch-marker read above answers with comment objects, and the two must not
+// be confused. Matched on the exact `[.[].body]` element, which the aggregation marker
+// read's `.[].body` (no leading bracket) does not contain.
+//
+// Listed FIRST, because `DISPATCH_MARKER`'s second rule matches the same path and would
+// otherwise answer this read with objects.
+const PARENT_AGENT: FakeGhRule = {
+  match: ["api", "issues/5/comments", "[.[].body]"],
+  stdout: JSON.stringify(["<!-- atomaton:dispatch=atomaton -->"]),
+};
+
 // The aggregation marker read is `gh api .../comments --paginate --jq '.[].body'`, so
 // the fake answers with a JSON array of bodies rather than the `gh issue view` shape.
 // The `--jq` is what tells this apart from the dispatch thread read above, which asks
@@ -110,7 +123,7 @@ const PARENT_IS_OPEN: FakeGhRule = { match: ["api", "issues"], stdout: JSON.stri
 
 describe("aggregation.ts dispatch gate", () => {
   test("dispatches once when the siblings are done and nobody claimed it", () => {
-    const { kind, ghCalls } = runGate([...NO_SIBLINGS, ...DISPATCH_MARKER, NO_MARKER, MARKER_WRITES, DISPATCH_WORKS, PARENT_IS_OPEN]);
+    const { kind, ghCalls } = runGate([...NO_SIBLINGS, PARENT_AGENT, ...DISPATCH_MARKER, NO_MARKER, MARKER_WRITES, DISPATCH_WORKS, PARENT_IS_OPEN]);
     expect(kind).toBe("dispatched");
     expect(wroteMarker(ghCalls)).toBe(true);
     expect(dispatched(ghCalls)).toBe(true);
@@ -127,6 +140,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("a closed parent is not dispatched onto, and says so as its own answer", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
+      PARENT_AGENT,
       ...DISPATCH_MARKER,
       NO_MARKER,
       MARKER_WRITES,
@@ -172,6 +186,50 @@ describe("aggregation.ts dispatch gate", () => {
     expect(kind).toBe("undetermined");
     expect(dispatched(ghCalls)).toBe(false);
     expect(stderr).toContain("aggregation marker");
+  });
+
+  /**
+   * #18: an atomaton that decomposes work ends by calling `launch_sub_agent`, a
+   * session-ending tool, so it posts no result comment and leaves no `atomaton:agent`
+   * on the parent. The gate read `""` and dispatched an agent called "", which GitHub
+   * refused with `HTTP 422: Required input 'agent' not provided`.
+   *
+   * The request that started the run is the fallback, so a parent whose thread carries
+   * only a dispatch marker still names its agent. This is the regression test for that
+   * fallback: the parent's thread has the marker and nothing else.
+   */
+  test("the parent's agent is read from the request when no result comment exists", () => {
+    const { kind, ghCalls } = runGate([
+      ...NO_SIBLINGS,
+      PARENT_AGENT,
+      ...DISPATCH_MARKER,
+      NO_MARKER,
+      MARKER_WRITES,
+      DISPATCH_WORKS,
+      PARENT_IS_OPEN,
+    ]);
+    expect(kind).toBe("dispatched");
+    const dispatch = ghCalls.find((c) => c.includes("workflow") && c.includes("run")) ?? [];
+    expect(dispatch.join(" ")).toContain("agent=atomaton");
+  });
+
+  /**
+   * The other half: a parent whose thread names no agent at all is not dispatched onto
+   * with an empty name. `dispatchRunner` refuses it, and the gate reports
+   * `dispatch-failed` -- the work is done and nobody was started to aggregate it.
+   */
+  test("a parent that names no agent is not dispatched onto with an empty name", () => {
+    const { kind, ghCalls } = runGate([
+      ...NO_SIBLINGS,
+      { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
+      ...DISPATCH_MARKER,
+      NO_MARKER,
+      MARKER_WRITES,
+      DISPATCH_WORKS,
+      PARENT_IS_OPEN,
+    ]);
+    expect(kind).toBe("dispatch-failed");
+    expect(dispatched(ghCalls)).toBe(false);
   });
 
   // The read half of the same argument, which was already guarded. Kept so the

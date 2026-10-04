@@ -527,6 +527,31 @@ describe("mcp/github.ts", () => {
     expect(r.result.isError).toBe(false);
   });
 
+  /**
+   * A pull request run reviews or fixes one pull request; it does not decompose work.
+   * `ISSUE_NUMBER` on such a run is the pull request's own number (or the parent issue
+   * `fetch_events.ts` resolved for context), so a sub-issue created here would hang
+   * under a node that was never decomposing anything -- and the pull request's
+   * `atomaton/in-progress` guard would be held by a chain that had moved elsewhere.
+   */
+  test("create_issue refuses on a pull request run", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 34, method: "tools/call",
+        params: { name: "create_issue", arguments: { title: "Child task" } },
+      },
+      {
+        ...fakeGhSeam(),
+        ATOMATON_RUN_TYPE: "pr",
+        ISSUE_NUMBER: "21",
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("pull request");
+  });
+
   test("create_issue provisions the sub-issue label before creating a child", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-create-sub-issue-"));
     const log = join(dir, "gh.log");
@@ -1017,6 +1042,27 @@ describe("mcp/atomaton.ts", () => {
     });
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0].text).toContain("tasks must be a non-empty list");
+  });
+
+  /**
+   * A pull request run reviews or fixes one pull request; it does not decompose work.
+   * `ISSUE_NUMBER` on such a run is the pull request's own number (or the parent issue
+   * `fetch_events.ts` resolved for context), so a dispatch from here would start
+   * sub-agents under a node that was never decomposing anything -- and the pull
+   * request's `atomaton/in-progress` guard would be held by a chain that had moved
+   * elsewhere. This is the shape #21 walked into.
+   */
+  test("launch_sub_agent refuses on a pull request run", async () => {
+    const r = await sendRequest(
+      "atomaton.ts",
+      {
+        jsonrpc: "2.0", id: 6, method: "tools/call",
+        params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+      },
+      { ...fakeGhSeam(), ATOMATON_RUN_TYPE: "pr", ISSUE_NUMBER: "21" },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("pull request");
   });
 
   /**

@@ -330,6 +330,21 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
  * but `"dispatched"` as success.
  */
 export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
+  // An empty agent is refused here rather than sent to GitHub, which rejects it with
+  // `HTTP 422: Required input 'agent' not provided`. The doc comment on
+  // `aggregation.ts`'s `parentAgent` has claimed this refusal for a while; it was not
+  // there, and the 422 was the only thing that stopped a run for an agent called "".
+  //
+  // The caller that reaches this is the aggregation gate, when the parent's thread
+  // names no agent -- see `mostRecentAgent`. `failed` is the honest answer: nothing is
+  // running and nothing will retry, which is what the gate reports as
+  // `dispatch-failed`.
+  if (!d.agent.trim()) {
+    const log = d.log ?? ((message: string) => console.error(message));
+    log(`${d.context}: no agent was named, so nothing was dispatched (an empty agent is not a run).`);
+    return "failed";
+  }
+
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state)) return refuseClosedTarget(d, state);
 
