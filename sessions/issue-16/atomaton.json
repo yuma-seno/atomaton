@@ -1769,7 +1769,7 @@
     },
     {
       "role": "tool",
-      "content": "{\"dispatched\":[\"#17→engineer\",\"#18→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
+      "content": "All sub-issues have been completed.\n\n## Sub-issue Results\n\n### #17: 報告契約に上限を入れる — 4部は残し、各部を縛り、結論は一度だけ書く\nStatus: OPEN\nLinked PRs:\n- PR #20: Bound the report contract's parts and write the conclusion once (https://github.com/yuma-seno/atomaton/pull/20)\n\n---\nAll sub-issues are complete. Please review the results and aggregate them into a final summary.",
       "tool_call_id": "call_00_cw0k88ip01gu1n876tfdh273"
     }
   ],
