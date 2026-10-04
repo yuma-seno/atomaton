@@ -770,6 +770,24 @@ function injectParentIssue(body: string, reviewer: string): string {
 function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   const title = a.title;
   let body = a.body ?? "";
+
+  // A pull request is a leaf, so a pull request run does not open another one. The
+  // tree is Issue -> sub-Issue -> (single) pull request; a PR run either reviews that
+  // pull request or fixes it, and neither adds a node below it. Without this guard a
+  // PR run could open a second PR whose base is the first PR's head -- a pull request
+  // under a pull request, which is not a shape the tree has.
+  //
+  // `create_issue` and `launch_sub_agent` refuse on a PR run for the same reason; this
+  // is the third tool that could add a child, and it was the one left open.
+  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
+    mcpFail(
+      "create_pr opens the pull request for an ISSUE's branch. This run is on a pull " +
+        "request, which is a leaf of the tree -- it reviews or fixes one pull request rather " +
+        "than opening another. Use github__commit_and_push to push a fix onto this pull " +
+        "request's branch, or atomaton__request_close_issue to conclude it.",
+    );
+  }
+
   // Three answers, most specific first.
   //
   // An explicit `base` wins. Otherwise a sub-issue aims at its parent's branch,

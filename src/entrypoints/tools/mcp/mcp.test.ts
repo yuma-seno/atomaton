@@ -238,10 +238,21 @@ describe("mcp/github.ts", () => {
         },
         {
           BRANCH: "HEAD",
-          ATOMATON_RUN_TYPE: "pr",
+          // An ISSUE run, not a pull request run: `create_issue`/`launch_sub_agent`
+          // and now `create_pr` itself refuse on a pull request run (a pull request is
+          // a leaf and opens nothing below it), so the detached-checkout refusal is
+          // reached by the one run type that legitimately opens a pull request. The
+          // detached case a pull request run hits is covered by
+          // `commit_and_push`, which a pull request run may still call.
+          ATOMATON_RUN_TYPE: "issue",
           ISSUE_NUMBER: "802",
           ...fakeGhSeam(),
-          FAKE_GH_RESPONSES: "[]",
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // `stackedPrBase` asks GitHub whether #802 is a sub-issue before
+            // `resolveBranch` is reached, so the read has to answer -- `parent: null`
+            // is "not a sub-issue", which falls through to the base branch.
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+          ]),
         },
         work,
       );
@@ -279,6 +290,24 @@ describe("mcp/github.ts", () => {
     } finally {
       removeTemp(root);
     }
+  });
+
+  /**
+   * A pull request is a leaf of the tree, so a pull request run does not open another
+   * one. `create_issue` and `launch_sub_agent` already refuse on a PR run; this is the
+   * third tool that could add a child, and it was the one left open.
+   */
+  test("create_pr refuses on a pull request run", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 35, method: "tools/call",
+        params: { name: "create_pr", arguments: { title: "Test PR" } },
+      },
+      { ...fakeGhSeam(), ATOMATON_RUN_TYPE: "pr", ISSUE_NUMBER: "21", FAKE_GH_RESPONSES: "[]" },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("pull request");
   });
 
   /**
