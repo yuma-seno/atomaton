@@ -20117,6 +20117,9 @@ ${originLine}${closes}${body}`;
 function createPr(a) {
   const title = a.title;
   let body = a.body ?? "";
+  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
+    mcpFail("create_pr opens the pull request for an ISSUE's branch. This run is on a pull " + "request, which is a leaf of the tree -- it reviews or fixes one pull request rather " + "than opening another. Use github__commit_and_push to push a fix onto this pull " + "request's branch, or atomaton__request_close_issue to conclude it.");
+  }
   const base = a.base ?? stackedPrBase(REPO) ?? getBaseBranch();
   const reviewer = (a.reviewer ?? "").trim();
   body = injectParentIssue(body, reviewer);
