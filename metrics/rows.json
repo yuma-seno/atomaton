@@ -250,40 +250,42 @@
   {
     "path": "sessions/issue-18/atomaton.json",
     "agent": "atomaton",
-    "messages": 334,
-    "calls": 213,
-    "failed": 6,
-    "refused": 1,
+    "messages": 450,
+    "calls": 289,
+    "failed": 0,
+    "refused": 2,
     "skills": [
       "project/conventions",
       "engineering/environment",
       "delivery/pipeline-setup"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
-      "github__get_issue": 4,
-      "github__list_prs": 1,
-      "github__get_pr": 1,
-      "github__get_pr_reviews": 1,
-      "github__get_issue_comments": 4,
-      "github__check_merge_readiness": 1,
+      "github__get_issue": 7,
+      "github__list_prs": 3,
+      "github__get_pr": 3,
+      "github__get_pr_reviews": 2,
+      "github__get_issue_comments": 6,
+      "github__check_merge_readiness": 2,
       "github__list_pr_review_comments": 1,
       "read": 30,
-      "shell__shell_execute": 141,
-      "github__get_check_runs": 2,
+      "shell__shell_execute": 199,
+      "github__get_check_runs": 4,
       "search__search_issues": 7,
       "atoma_builtin__load_skill": 3,
-      "web__fetch": 4,
+      "web__fetch": 6,
       "search__search_code": 1,
-      "grep": 8,
+      "grep": 9,
       "github__get_pr_diff": 1,
       "write": 1,
       "github__create_issue": 1,
-      "atomaton__launch_sub_agent": 1
+      "atomaton__launch_sub_agent": 1,
+      "github__sync_branch": 1,
+      "github__list_issues": 1
     },
     "acts": {
-      "other": 119,
-      "edit": 21,
+      "other": 174,
+      "edit": 24,
       "open": 1
     },
     "runs": [
@@ -294,6 +296,14 @@
         "messages": 334,
         "seconds": 10246,
         "started": "2026-09-27T18:23:47Z"
+      },
+      {
+        "ended": "2026-10-04T14:04:50Z",
+        "ended_because": "completed",
+        "iterations": 35,
+        "messages": 450,
+        "seconds": 2124,
+        "started": "2026-10-04T13:29:26Z"
       }
     ]
   },
