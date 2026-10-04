@@ -48,6 +48,17 @@ function sleep(ms: number): Promise<void> {
  * dispatching an agent called "". The gate's caller reports that as
  * `dispatch-failed`, which is what it is: the work is done and nobody was
  * started to aggregate it.
+ *
+ * ## Why the request is read too
+ *
+ * This used to read only the result comment's `atomaton:agent`, and that is the
+ * defect #18 walked into: an atomaton that decomposes work ends by calling
+ * `launch_sub_agent`, a session-ending tool, so it posts no result comment and
+ * leaves no `atomaton:agent`. The parent of every orchestrated subtree therefore
+ * read `""`, and the gate dispatched an agent called "" -- which GitHub refused with
+ * `HTTP 422: Required input 'agent' not provided`. The request that started the run
+ * (a person's `/agent` command, or the `atomaton:dispatch` marker) is always there,
+ * so `mostRecentAgent` reads the newest of the two records.
  */
 function parentAgent(repo: string, parent: number): string {
   return mostRecentAgentOn(repo, parent);
@@ -113,6 +124,16 @@ export type DispatchGateResult =
    */
   | { kind: "parent-closed" }
   /**
+   * Everything was ready and the parent already had an agent asked for on it, so no
+   * atomaton was started.
+   *
+   * Distinct from `dispatch-failed` for the same reason `parent-closed` is: nothing
+   * malfunctioned. Somebody asked for an agent on the parent while its children were
+   * finishing, and that request stands. `dispatchRunner` removed its own marker and
+   * said so in the log.
+   */
+  | { kind: "parent-busy" }
+  /**
    * Something could not be read or written, so the gate refused to decide.
    *
    * Distinct from every answer above, because the safe move here is to do
@@ -123,7 +144,12 @@ export type DispatchGateResult =
 
 /** True when the atomaton was not started and something is left undone. */
 export function needsAttention(result: DispatchGateResult): boolean {
-  return result.kind === "dispatch-failed" || result.kind === "undetermined" || result.kind === "parent-closed";
+  return (
+    result.kind === "dispatch-failed" ||
+    result.kind === "undetermined" ||
+    result.kind === "parent-closed" ||
+    result.kind === "parent-busy"
+  );
 }
 
 /**
@@ -161,6 +187,12 @@ export function describeGateResult(result: DispatchGateResult, closedNum: number
         `All sub-tasks of ${which} complete, but ${which} is closed, so no agent was started. ` +
         `The aggregation marker is already written, so no other caller will retry: ` +
         `reopen it and run the parent's agent by hand. Whoever asked for the run has been told on the issue.`
+      );
+    case "parent-busy":
+      return (
+        `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` +
+        `so no second one was started. The aggregation marker is already written, so no other caller ` +
+        `will retry: the run that was asked for first is the one to wait for.`
       );
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
@@ -206,9 +238,14 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   // decide they are the first — which is the one thing the marker exists to
   // prevent. Not finding the marker and not being able to look are different
   // answers, and only one of them means "go ahead".
+  //
+  // `--paginate`, because `gh issue view --json comments` returns a bounded page: on
+  // a parent with a long thread the marker written by the first racer is not in the
+  // page the second racer reads, so the second concludes it is first and dispatches
+  // again. A missed aggregation is recoverable by the other racer; a double dispatch
+  // is not, which is why this read has to see the whole thread.
   const { code: commentsCode, stdout: commentsOut } = gh(
-    "issue", "view", String(opts.parent), "--repo", opts.repo,
-    "--json", "comments", "--jq", ".comments[].body",
+    "api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body",
   );
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
@@ -263,7 +300,11 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   // A closed parent is not a fault, and the person who asked for the run has already
   // been told by `dispatchRunner` itself. Kept apart from `dispatch-failed` so this
   // does not read in the log as GitHub having rejected something.
-  return outcome === "refused-closed" ? { kind: "parent-closed" } : { kind: "dispatch-failed" };
+  if (outcome === "refused-closed") return { kind: "parent-closed" };
+  // The same shape one step along: the parent already had an agent asked for on it, so
+  // this dispatch was the second one and stood down. Nothing malfunctioned.
+  if (outcome === "refused-outstanding") return { kind: "parent-busy" };
+  return { kind: "dispatch-failed" };
 }
 
 /**

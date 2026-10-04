@@ -103,6 +103,10 @@ function ghPaginated(...args) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
 var EVERY_TAG_PATTERN = [];
@@ -111,6 +115,7 @@ function makeTag(key, valuePattern, parse, render) {
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
   return {
+    marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
     read: (text) => {
       const m = re.exec(text);
@@ -127,9 +132,9 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", "[A-Za-z0-9-]+");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
 var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
 var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
@@ -142,6 +147,106 @@ function withoutTags(text) {
   const tags = EVERY_TAG_PATTERN.join("|");
   const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;
   return text.replace(new RegExp(String.raw`(?:^[ \t]*)?(?:${tags})[ \t]*${lineEnd}`, "gm"), "");
+}
+
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
+  }
+  return NOTHING;
+}
+
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
+// src/domain/work/thread.ts
+function eventOf(body, readers) {
+  if (readers.isAgentResult(body))
+    return readers.handedOff(body) ? "handed-off" : "returned";
+  if (readers.requestedAgent(body) !== "")
+    return "asked";
+  return;
+}
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" ? "agent" : "person";
+}
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent")
+      continue;
+    kept.push(entry);
+    const event = eventOf(entry.body, readers);
+    if (event !== undefined)
+      events.push(event);
+  }
+  return { comments: kept, events };
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  isAgentResult: (body) => AGENT_TAG.has(body),
+  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
+};
+function isHumanComment(comment) {
+  return isHumanActor(comment.user?.type);
+}
+function keptCommentIds(comments) {
+  const entries = comments.map((comment) => ({
+    id: comment.id,
+    body: comment.body ?? "",
+    isHuman: isHumanComment(comment)
+  }));
+  return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
+}
+
+// src/domain/work/node-type.ts
+function isNodeType(value) {
+  return value === "issue" || value === "pr";
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -203,14 +308,17 @@ function fetchIssueEvents(owner, repo, issueNum, openedType, commentType, idPref
 ${labelsLine}
 ${issue.body ?? ""}`,
     author: issue.user.login,
+    author_type: issue.user.type,
     created_at: issue.created_at
   };
   const comments = contextList(`comments on #${issueNum}`, "api", `repos/${owner}/${repo}/issues/${issueNum}/comments`);
-  const commentEvents = comments.map((c) => ({
+  const kept = keptCommentIds(comments);
+  const commentEvents = comments.filter((c) => kept.has(c.id)).map((c) => ({
     id: c.id,
     event_type: commentType,
     content: c.body,
     author: c.user.login,
+    author_type: c.user.type,
     created_at: c.created_at
   }));
   return [openedEvent, ...commentEvents];
@@ -231,6 +339,7 @@ function fetchPrEvents(owner, repo, number, maxDiffChars) {
     content: prContentLines.join(`
 `),
     author: pr.user.login,
+    author_type: pr.user.type,
     created_at: pr.created_at
   });
   const diffResult = gh("api", `repos/${owner}/${repo}/pulls/${number}`, "-H", "Accept: application/vnd.github.v3.diff");
@@ -252,11 +361,13 @@ function fetchPrEvents(owner, repo, number, maxDiffChars) {
     });
   }
   const prComments = contextList(`comments on #${number}`, "api", `repos/${owner}/${repo}/issues/${number}/comments`);
-  events.push(...prComments.map((comment) => ({
+  const keptPrComments = keptCommentIds(prComments);
+  events.push(...prComments.filter((comment) => keptPrComments.has(comment.id)).map((comment) => ({
     id: comment.id,
     event_type: "pr_comment",
     content: comment.body,
     author: comment.user.login,
+    author_type: comment.user.type,
     created_at: comment.created_at
   })));
   const reviews = contextList(`reviews on #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}/reviews`);
@@ -267,6 +378,7 @@ function fetchPrEvents(owner, repo, number, maxDiffChars) {
 
 ${review.body ?? ""}`,
     author: review.user.login,
+    author_type: review.user.type,
     created_at: review.submitted_at
   })));
   const inlineComments = contextList(`inline review comments on #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}/comments`);
@@ -277,6 +389,7 @@ ${review.body ?? ""}`,
 
 ${comment.body}`,
     author: comment.user.login,
+    author_type: comment.user.type,
     created_at: comment.created_at
   })));
   return { events, parentIssue };
@@ -348,7 +461,7 @@ function main() {
       out: { type: "string" }
     }
   });
-  if (values.type !== "issue" && values.type !== "pr" || !values.number || !values.out) {
+  if (!isNodeType(values.type) || !values.number || !values.out) {
     console.error("usage: fetch_events.ts --type issue|pr --number N [--max-diff-chars N] --out events.json");
     process.exit(2);
   }
@@ -356,6 +469,8 @@ function main() {
   const { events, resolvedType, resolvedNumber } = fetchEvents(values.type, Number(values.number), maxDiffChars);
   const withoutBookkeeping = events.map((event) => ({
     ...event,
+    llm_context: LLM_CONTEXT_TAG.read(event.content),
+    agent: AGENT_TAG.read(event.content),
     content: withoutTags(event.content)
   }));
   writeFileSync(values.out, JSON.stringify(withoutBookkeeping, null, 2));

@@ -16,6 +16,7 @@
  * present.
  */
 import type { NextTurn } from "./turn.ts";
+import { mentionPrefix, mentionsSomeone as mentionsLogin } from "./mention.ts";
 
 /** What a new pull request was given to reach someone. */
 export interface Attendance {
@@ -54,21 +55,16 @@ export function isAttended(attendance: Attendance): boolean {
 /**
  * Whether the text mentions a GitHub login.
  *
- * `@` at a word boundary, then GitHub's own login shape: alphanumerics and single
- * hyphens, 1-39 characters. The boundary before is what keeps an email address out
- * -- `someone@example.com` has a word character in front of the `@`.
- *
- * The lookahead after keeps a SCOPED PACKAGE out, which is the case that made this
- * fail when it was written: `bun add @huggingface/transformers` matched, because
- * `@huggingface` is exactly the shape of a login. A trailing `/` is what tells them
- * apart, and this repository's own pull request bodies contain the package form.
+ * The shape is `mention.ts`'s, so this and `escapeUnknownMentions` cannot drift
+ * apart. It used to be a second copy of the same regex, with its own comment
+ * explaining the same scoped-package case.
  *
  * A fenced code block is not excluded. A pull request body that mentions a person
  * only inside an example is unusual enough, and reading a notice nobody needed
  * costs less than leaving work unattended.
  */
 export function mentionsSomeone(text: string): boolean {
-  return /(^|[^\w@/-])@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\b(?!\/)/.test(text);
+  return mentionsLogin(text);
 }
 
 /**
@@ -84,7 +80,7 @@ export function mentionsSomeone(text: string): boolean {
  * comment on the pull request is at least visible to whoever opens it.
  */
 export function unattendedNotice(notify: string, agent: string): string {
-  const mention = notify.trim() ? `@${notify.trim()} ` : "";
+  const mention = mentionPrefix(notify);
   return (
     `${mention}This pull request was opened by \`${agent}\` with no reviewer named and nobody mentioned, ` +
     `so nothing is scheduled to look at it. CI still runs and its result stands. ` +

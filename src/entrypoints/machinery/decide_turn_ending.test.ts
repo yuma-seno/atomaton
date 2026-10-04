@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseGithubOutput, scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, parseGithubOutput, scriptPath } from "./testing/harness.ts";
 
 describe("decide_turn_ending.ts", () => {
   function run(args: string[]) {
@@ -13,7 +13,7 @@ describe("decide_turn_ending.ts", () => {
     try {
       const r = spawnSync("bun", ["run", scriptPath("decide_turn_ending.ts"), ...args], {
         encoding: "utf8",
-        env: { ...process.env, GITHUB_OUTPUT: outputFile },
+        env: { ...hermeticEnv(), GITHUB_OUTPUT: outputFile },
       });
       return { status: r.status, out: parseGithubOutput(readFileSync(outputFile, "utf8")) };
     } finally {

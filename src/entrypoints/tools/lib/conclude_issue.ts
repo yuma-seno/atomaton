@@ -6,6 +6,8 @@ import {
   type DispatchGateResult,
 } from "../../../app/aggregation.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
+import { isHumanAuthor } from "../../../domain/work/actor.ts";
+import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 
 export interface ConcludeIssueResult {
@@ -78,8 +80,9 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   }
   const authorInfo = stdout ? (JSON.parse(stdout) as GhIssueAuthor) : {};
   // Absent field still means "treat as a person", which is the cautious half of
-  // the pair: it hands the decision to someone rather than taking it.
-  const isBot = authorInfo.author?.is_bot ?? false;
+  // the pair: it hands the decision to someone rather than taking it. The rule is
+  // `domain/work/actor.ts`'s, shared with every other reader of the same fact.
+  const isBot = !isHumanAuthor(authorInfo.author?.is_bot);
 
   let body = `Atomaton: the agent on this issue considers its work complete.\n\n**Reason:** ${reason}`;
   if (summary) {
@@ -89,8 +92,15 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   if (!isBot) {
     // The request goes above the reason and summary, not after them. It is the
     // only sentence in the comment addressed to the person reading it.
-    body = closeRequestComment({ notify: resolveNotify(repo, issue), body });
-    mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", body), `comment on issue #${issue}`);
+    //
+    // Tagged `exclude`: it is addressed to the person, not to the model. An untagged
+    // copy joins the next run's context as something the agent was told, when what it
+    // actually says is that a person was asked to close their own issue.
+    const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
+    mustSucceed(
+      gh("issue", "comment", String(issue), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${request}`),
+      `comment on issue #${issue}`,
+    );
     // stderr, where the tool's own decisions belong. Putting it in the result is
     // what put it in the agent's report.
     console.error(`close requested: issue=#${issue} (opened by a person, left open for them)`);

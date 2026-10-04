@@ -31,15 +31,22 @@ describe.skipIf(!atomaAvailable)("E2E: real atoma binary + real mcp/atomaton.ts"
       },
     ]);
     // Real invocations the real dispatch chain makes, in order:
-    //   1. dispatchSubAgent: `gh issue comment 7 --body ...`
-    //   2. dispatchSubAgent: `gh issue edit 7 --add-label atomaton/launched`
-    //   3. dispatchSubAgent: `gh workflow run atomaton-runner.yml ...`
+    //   1. dispatchSubAgent: `gh api .../issues/7/comments --method POST` (the
+    //      dispatch comment, posted first so the thread read below can be ordered
+    //      against it)
+    //   2. dispatchSubAgent: reads the thread to check no agent was asked for first
+    //   3. dispatchSubAgent: `gh issue edit 7 --add-label atomaton/launched`
+    //   4. dispatchSubAgent: `gh workflow run atomaton-runner.yml ...`
     const fakeGh = setupFakeGh([
-      { match: ["issue", "comment"] },
+      // The dispatch comment, and the thread read that follows it. The read returns
+      // an empty thread, so no agent was asked for first and the dispatch proceeds.
+      { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
+      { match: ["api", "issues/7/comments"], stdout: "[]" },
+      { match: ["api", "issues/7", "--jq"], stdout: "" },
       { match: ["issue", "edit"] },
       { match: ["workflow", "run"] },
-      // 4. dispatchRunner reads the sub-issue's state, and starts nothing on one it
-      //    cannot confirm is open.
+      // dispatchRunner reads the sub-issue's state, and starts nothing on one it
+      // cannot confirm is open.
       { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) },
     ]);
 
@@ -94,7 +101,7 @@ You are a test orchestrator agent.
       // lookup ran), and the runner workflow was dispatched for the right
       // agent/issue -- none of this is hardcoded by this test.
       const calls = fakeGh.calls();
-      const commentCall = calls.find((c) => c.includes("comment"));
+      const commentCall = calls.find((c) => c.includes("comments") && c.includes("POST"));
       expect(commentCall?.join(" ")).toContain("engineer");
       const editCall = calls.find((c) => c.includes("edit"));
       expect(editCall).toContain("atomaton/launched");

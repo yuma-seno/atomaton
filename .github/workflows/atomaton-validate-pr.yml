@@ -108,7 +108,7 @@ jobs:
           SUMMARY: ${{ steps.validate.outputs.summary }}
           REPO: ${{ github.repository }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${AGENT}" --number "${NUMBER}" --type "pr" --repo "${REPO}" --context "validation of #${NUMBER} finished: ${SUMMARY}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${AGENT}" --number "${NUMBER}" --type "pr" --repo "${REPO}" --answers-request "true" --context "validation of #${NUMBER} finished: ${SUMMARY}"
         if: steps.validate.outputs.next_agent != ''
       - name: Tell a person nobody was dispatched
         shell: bash

@@ -38,8 +38,8 @@
  * leaves work running with nobody told.
  */
 import { gh, ghRead } from "./gh.ts";
-import { getLabel } from "../../adapters/runner/config.ts";
 import { issueLinks } from "./issue-links.ts";
+import { runInFlight } from "./thread.ts";
 import { issueOutcome, pullRequestOutcome, saysOpen } from "./outcome.ts";
 import { ENDED_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, STOP_TAG } from "./tags.ts";
 import {
@@ -61,10 +61,6 @@ interface Listed {
   labels?: ({ name?: string } | string)[];
 }
 
-function labelNames(labels: Listed["labels"]): string[] {
-  return (labels ?? []).map((l) => (typeof l === "string" ? l : (l.name ?? "")));
-}
-
 /**
  * The listing, or null when it could not be read as one.
  *
@@ -82,6 +78,25 @@ function parseListed(stdout: string): Listed[] | null {
     return JSON.parse(stdout || "[]") as Listed[];
   } catch {
     return null;
+  }
+}
+
+/**
+ * Whether a run is in flight on a node, from its thread.
+ *
+ * The `atomaton/in-progress` label used to answer this, and it is a cache written
+ * late: the runner sets it after the job starts and clears it when the job ends, so a
+ * run that died leaves it set and a run that has been asked for but not yet started
+ * has none. The thread is the answer itself -- see `runInFlight`.
+ *
+ * A read that fails is a problem, not "nothing is running": a stop that read a failed
+ * read as idle would leave a live run going, and a resume would start a second one.
+ */
+function runningOn(repo: string, number: number): { running: boolean; problem?: string } {
+  try {
+    return { running: runInFlight(repo, number) };
+  } catch (e) {
+    return { running: false, problem: `could not read the thread on #${number}: ${(e as Error).message}` };
   }
 }
 
@@ -115,6 +130,9 @@ function readNode(repo: string, number: number): { node?: WorkNode; problem?: st
         ? pullRequestOutcome(Boolean(raw.pull_request?.merged_at))
         : issueOutcome(raw.state_reason);
 
+  const { running, problem } = runningOn(repo, number);
+  if (problem) return { problem };
+
   return {
     node: {
       number,
@@ -127,7 +145,7 @@ function readNode(repo: string, number: number): { node?: WorkNode; problem?: st
       // one this is, so an issue carrying a pull request's tag was accepted without
       // a word.
       parent: isPr ? PARENT_ISSUE_TAG.read(raw.body ?? "") : undefined,
-      running: labelNames(raw.labels).includes(getLabel("in_progress")),
+      running,
     },
   };
 }
@@ -151,7 +169,6 @@ function readNode(repo: string, number: number): { node?: WorkNode; problem?: st
  * the post-merge agent closes the sub-issue itself. See `adapters/github/tags.ts`.
  */
 function readChildren(repo: string, parent: number): { nodes: WorkNode[]; problems: string[] } {
-  const label = getLabel("in_progress");
   const nodes: WorkNode[] = [];
   const problems: string[] = [];
 
@@ -165,13 +182,18 @@ function readChildren(repo: string, parent: number): { nodes: WorkNode[]; proble
   if (listedPrs === null) problems.push(`the pull request listing for #${parent} was not readable`);
   for (const found of listedPrs ?? []) {
     if (PARENT_ISSUE_TAG.read(found.body ?? "") !== parent) continue;
+    const { running, problem } = runningOn(repo, found.number);
+    if (problem) {
+      problems.push(problem);
+      continue;
+    }
     nodes.push({
       number: found.number,
       kind: "pull-request",
       // `gh` says outright whether it merged, so the outcome needs nothing else.
       state: saysOpen(found.state) ? "open" : pullRequestOutcome(found.state === "MERGED"),
       parent,
-      running: labelNames(found.labels).includes(label),
+      running,
     });
   }
 
@@ -180,9 +202,8 @@ function readChildren(repo: string, parent: number): { nodes: WorkNode[]; proble
   // issue a person opened, decomposed and closed without an agent ever touching it,
   // and markers only exist where an agent has been."
   //
-  // Children arrive with their labels, in the same request, so `running` needs no
-  // second read for them. A pull request GitHub knows about and the tag search above
-  // missed still does — rare by construction, since it is one no agent opened.
+  // A pull request GitHub knows about and the tag search above missed still does —
+  // rare by construction, since it is one no agent opened.
   const links = issueLinks(repo, parent);
   if (links.unavailable) {
     problems.push(`could not read GitHub's own links for #${parent}: ${links.unavailable}`);
@@ -190,6 +211,11 @@ function readChildren(repo: string, parent: number): { nodes: WorkNode[]; proble
   const already = new Set(nodes.map((node) => node.number));
   for (const child of links.children) {
     if (already.has(child.number)) continue;
+    const { running, problem } = runningOn(repo, child.number);
+    if (problem) {
+      problems.push(problem);
+      continue;
+    }
     already.add(child.number);
     nodes.push({
       number: child.number,
@@ -198,7 +224,7 @@ function readChildren(repo: string, parent: number): { nodes: WorkNode[]; proble
       // answers in it, so there is nothing left here to decide.
       state: child.state,
       parent,
-      running: child.labels.includes(label),
+      running,
     });
   }
   for (const linked of links.pullRequests) {

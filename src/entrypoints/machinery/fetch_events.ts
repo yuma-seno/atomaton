@@ -25,7 +25,9 @@
 import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
-import { PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
+import { keptCommentIds } from "../../adapters/github/thread.ts";
+import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface FetchEventsArgs {
@@ -42,6 +44,32 @@ export interface GithubEvent {
   event_type: string;
   content: string;
   author: string;
+  /**
+   * `user.type` from the API: `"User"`, `"Bot"`, `"Organization"`, ...
+   *
+   * Carried so a reader can tell a person from the machinery by the rule the API
+   * decides (`domain/work/actor.ts`) rather than by a `[bot]` suffix on the login,
+   * which is part of a name anyone can choose. Absent for events the API does not
+   * attribute to a user (the diff), which read as a person -- the cautious side.
+   */
+  author_type?: string;
+  /**
+   * The `llm-context` tag's value, read from the RAW body before `withoutTags` strips
+   * it.
+   *
+   * It has to be carried rather than re-read downstream: `withoutTags` removes every
+   * tag on the way out, so a reader that looked for `llm-context=exclude` in the
+   * written file would never find it and the exclusion would silently never fire.
+   * That is exactly what happened -- the filter in `reconcile_github_session.ts` was
+   * dead, and every operational notice reached the model.
+   */
+  llm_context?: string;
+  /**
+   * The `atomaton:agent` tag's value, read from the RAW body before `withoutTags`
+   * strips it. Same reason as `llm_context`: it names which agent wrote a result
+   * comment, and the tag is gone by the time the file is read.
+   */
+  agent?: string;
   created_at: string;
   sha?: string;
 }
@@ -51,14 +79,14 @@ interface GhIssueApi {
   title: string;
   body: string | null;
   labels: { name: string }[];
-  user: { login: string };
+  user: { login: string; type?: string };
   created_at: string;
 }
 
 interface GhCommentApi {
   id: number;
   body: string;
-  user: { login: string };
+  user: { login: string; type?: string };
   created_at: string;
 }
 
@@ -66,7 +94,7 @@ interface GhPrApi {
   number: number;
   title: string;
   body: string | null;
-  user: { login: string };
+  user: { login: string; type?: string };
   created_at: string;
   updated_at: string;
   labels: { name: string }[];
@@ -77,7 +105,7 @@ interface GhReviewApi {
   id: number;
   body: string | null;
   state: string;
-  user: { login: string };
+  user: { login: string; type?: string };
   submitted_at: string | null;
 }
 
@@ -87,7 +115,7 @@ interface GhReviewCommentApi {
   line: number | null;
   original_line: number | null;
   body: string;
-  user: { login: string };
+  user: { login: string; type?: string };
   created_at: string;
 }
 
@@ -166,6 +194,7 @@ function fetchIssueEvents(
     event_type: openedType,
     content: `Issue #${issue.number}: ${issue.title}\n${labelsLine}\n${issue.body ?? ""}`,
     author: issue.user.login,
+    author_type: issue.user.type,
     created_at: issue.created_at,
   };
 
@@ -174,13 +203,22 @@ function fetchIssueEvents(
     "api",
     `repos/${owner}/${repo}/issues/${issueNum}/comments`,
   );
-  const commentEvents: GithubEvent[] = comments.map((c) => ({
-    id: c.id,
-    event_type: commentType,
-    content: c.body,
-    author: c.user.login,
-    created_at: c.created_at,
-  }));
+  // The guard deletes a person's comment made while an agent is working, and the
+  // deletion is not instant. The model's context is built from this list, so it has
+  // to see the thread the guard is producing -- otherwise the agent reads a comment
+  // the guard told its author would not be acted on. Same rule as every other reader:
+  // `keptCommentIds` is `shapedThread`'s.
+  const kept = keptCommentIds(comments);
+  const commentEvents: GithubEvent[] = comments
+    .filter((c) => kept.has(c.id))
+    .map((c) => ({
+      id: c.id,
+      event_type: commentType,
+      content: c.body,
+      author: c.user.login,
+      author_type: c.user.type,
+      created_at: c.created_at,
+    }));
 
   return [openedEvent, ...commentEvents];
 }
@@ -201,6 +239,7 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     event_type: "pr_opened",
     content: prContentLines.join("\n"),
     author: pr.user.login,
+    author_type: pr.user.type,
     created_at: pr.created_at,
   });
 
@@ -225,13 +264,19 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     "api",
     `repos/${owner}/${repo}/issues/${number}/comments`,
   );
-  events.push(...prComments.map((comment) => ({
-    id: comment.id,
-    event_type: "pr_comment",
-    content: comment.body,
-    author: comment.user.login,
-    created_at: comment.created_at,
-  })));
+  // Same shaping as the issue path: the model must not read a comment the guard is
+  // removing. See `keptCommentIds`.
+  const keptPrComments = keptCommentIds(prComments);
+  events.push(...prComments
+    .filter((comment) => keptPrComments.has(comment.id))
+    .map((comment) => ({
+      id: comment.id,
+      event_type: "pr_comment",
+      content: comment.body,
+      author: comment.user.login,
+      author_type: comment.user.type,
+      created_at: comment.created_at,
+    })));
 
   // The endpoint that failed on 2026-08-17. See `contextList`.
   const reviews = contextList<GhReviewApi>(
@@ -244,6 +289,7 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     event_type: "pr_review",
     content: `Review state: ${review.state}\n\n${review.body ?? ""}`,
     author: review.user.login,
+    author_type: review.user.type,
     created_at: review.submitted_at!,
   })));
 
@@ -257,6 +303,7 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     event_type: "pr_review_comment",
     content: `On \`${comment.path}\` line ${comment.line ?? comment.original_line ?? "?"}:\n\n${comment.body}`,
     author: comment.user.login,
+    author_type: comment.user.type,
     created_at: comment.created_at,
   })));
 
@@ -350,7 +397,7 @@ function main(): void {
     },
   });
 
-  if ((values.type !== "issue" && values.type !== "pr") || !values.number || !values.out) {
+  if (!isNodeType(values.type) || !values.number || !values.out) {
     console.error("usage: fetch_events.ts --type issue|pr --number N [--max-diff-chars N] --out events.json");
     process.exit(2);
   }
@@ -361,8 +408,16 @@ function main(): void {
   // One place, because there are six kinds of body above -- issue, pull request,
   // their comments, reviews, inline review comments -- and a seventh added later
   // would have to remember. Everything this file produces leaves through here.
+  //
+  // The two tags a downstream reader needs are read from the RAW body first, because
+  // `withoutTags` is about to remove them. `llm_context` decides whether the event
+  // reaches the model at all, and `agent` names which agent wrote a result comment --
+  // both are decisions made on the raw text, and both were silently broken while the
+  // reader looked for a tag that had already been stripped.
   const withoutBookkeeping = events.map((event) => ({
     ...event,
+    llm_context: LLM_CONTEXT_TAG.read(event.content),
+    agent: AGENT_TAG.read(event.content),
     content: withoutTags(event.content),
   }));
   writeFileSync(values.out, JSON.stringify(withoutBookkeeping, null, 2));

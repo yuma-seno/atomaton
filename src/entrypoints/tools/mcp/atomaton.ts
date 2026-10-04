@@ -108,6 +108,25 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
 
   log(`Dispatching ${validTasks.length} sub-issue(s): ${JSON.stringify(validTasks)}`);
 
+  // A pull request run does not decompose work. It reviews or fixes one pull
+  // request, and the node it is on is that pull request -- so there is no parent
+  // issue for a sub-issue to hang under, and `ISSUE_NUMBER` here is the pull
+  // request's own number (or, worse, the parent issue `fetch_events.ts` resolved
+  // for context). Dispatching from it created sub-issues under a node that was
+  // never decomposing anything, and left the pull request's `atomaton/in-progress`
+  // guard held by a chain that had moved to a different node entirely.
+  //
+  // The route a pull request run has is `create_pr` (to hand to a reviewer) or
+  // `request_close_issue` (to conclude). Decomposition belongs to an issue run.
+  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
+    mcpFail(
+      "launch_sub_agent is for an issue run that is decomposing work into sub-issues. " +
+        "This run is on a pull request, which reviews or fixes one pull request rather than " +
+        "decomposing it. Use github__create_pr to hand this pull request to a reviewer, or " +
+        "atomaton__request_close_issue to conclude it.",
+    );
+  }
+
   // The atomaton's OWN current issue (the parent, from the sub-issues'
   // point of view).
   const parentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
@@ -306,6 +325,10 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
     number,
     notify: (process.env.ISSUE_NOTIFY ?? "").trim(),
     reloadCount: next,
+    // The same turn, continued: the agent running right now is restarting itself, so
+    // the thread's last event is the command that started this very run. Without this
+    // the outstanding-request check would read the reload as a second request.
+    answersRequest: true,
     log,
   });
   if (outcome === "refused-closed") {

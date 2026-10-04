@@ -36,6 +36,7 @@
  * is one nobody notices.
  */
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
+import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { getDeploySection, getWorkflowName } from "../../adapters/runner/config.ts";
 import { dispatchRunner } from "./dispatch.ts";
 import { resolveNotify } from "../../adapters/github/notify.ts";
@@ -68,14 +69,20 @@ function log(message: string): void {
  * would sit with no CI, no required check and no agent scheduled, while the tool
  * reported success. The caller keeps the session open instead.
  *
- * ## No agent names are passed
+ * ## Which agent names are passed, and which are read
  *
  * It used to send `reviewer=<the caller's argument>` and `engineer=engineer`, and
  * the second was a literal -- so a project that renamed its engineer got a CI
  * failure handed to an agent with no definition, from a workflow nobody was
- * watching. Both names are now read from the pull request itself: the agent it
- * names for review, and the `atomaton:origin-agent` tag naming whoever opened it.
- * A pull request that names neither is left for a person, and told so.
+ * watching. Both names are now read from the pull request itself: the agent its
+ * thread asks for, and the `atomaton:origin-agent` tag naming whoever opened it. A
+ * pull request that names nobody is left for a person, and told so.
+ *
+ * The reviewer is read from the pull request's THREAD rather than its body alone,
+ * because the body is the oldest entry in its own thread: a person commenting
+ * `/reviewer` on a pull request whose body says `/engineer` asked for the reviewer,
+ * and reading the body would dispatch the engineer instead. See
+ * `latestRequestedAgentOn`.
  */
 export function dispatchPrValidation(
   repo: string,
@@ -120,10 +127,14 @@ export function dispatchPrValidation(
  */
 export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent: string): boolean {
   const notify = resolveNotify(repo, subIssueNum);
+  // Tagged `include`: this is the first user message the re-invoked agent reads, and
+  // it is the thing that tells it what to do. It is the one comment here that MUST
+  // reach the model -- the opposite decision from the notices addressed to a person.
   const { code, stdout, stderr } = gh(
     "issue", "comment", String(subIssueNum), "--repo", repo,
     "--body",
-    "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
+    `${LLM_CONTEXT_TAG.write("include")}\n` +
+      "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
       "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " +
       "issue when they are met, and carry on with the work when they are not.",
   );

@@ -6,6 +6,22 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 const open = { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) };
 const closed = { match: ["api", "issues"], stdout: JSON.stringify({ state: "closed" }) };
 
+/**
+ * The dispatch marker, and the thread read that follows it.
+ *
+ * `dispatchRunner` posts the marker first so the ordering check has something to be
+ * ordered against, then reads the comments. The read must SHOW the marker (id 555):
+ * that is the freshness probe -- if the dispatch's own write is visible, the read has
+ * caught up, and the ordering check can be trusted. A read that omits it is retried
+ * with backoff and then refused as `unconfirmed`.
+ *
+ * Listed BEFORE the state rule, because the fake takes the first match and the state
+ * rule's `["api", "issues"]` is a substring of these paths too.
+ */
+const marker = { match: ["api", "issues/12/comments", "POST"], stdout: "555" };
+const noRequest = { match: ["api", "issues/12/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=reviewer -->" }]) };
+const openTarget = [marker, noRequest, open];
+
 function run(args: string[], rules: { match: string[]; stdout?: string; code?: number }[]) {
   const configDir = makeConfigDir({});
   try {
@@ -25,7 +41,7 @@ const HANDOFF = ["--agent", "reviewer", "--number", "12", "--type", "pr", "--con
  */
 describe("dispatch_agent.ts", () => {
   test("an open target is dispatched, with every field the runner takes", () => {
-    const r = run(HANDOFF, [open, { match: ["workflow", "run"] }]);
+    const r = run(HANDOFF, [...openTarget, { match: ["workflow", "run"] }]);
     expect(r.status).toBe(0);
 
     const dispatch = r.ghCalls.find((call) => call[0] === "workflow") ?? [];
@@ -36,6 +52,26 @@ describe("dispatch_agent.ts", () => {
     // Sent on every path, so the input never defaults in one place and is absent in
     // another. The bash this replaces sent it on no path at all.
     expect(dispatch.join(" ")).toContain("reload_count=0");
+  });
+
+  /**
+   * A node holds one turn. A request that came before this dispatch — a person's
+   * command, or a marker from a dispatch that already went out — means nobody has
+   * taken it up, so this would be a second run on a node that already has one.
+   */
+  test("a request already outstanding is refused, and the marker is removed", () => {
+    const r = run(HANDOFF, [
+      marker,
+      { match: ["api", "issues/12/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=reviewer -->" }, { id: 1, body: "/engineer" }]) },
+      open,
+      { match: ["api", "DELETE"] },
+      { match: ["workflow", "run"] },
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.some((call) => call[0] === "workflow")).toBe(false);
+    // The marker was the second one, so it is removed rather than left saying two
+    // agents were asked for.
+    expect(r.ghCalls.some((call) => call.includes("DELETE") && call.join(" ").includes("comments/555"))).toBe(true);
   });
 
   /**
@@ -56,7 +92,7 @@ describe("dispatch_agent.ts", () => {
 
   /** Nothing is running and nothing will retry, which is what a failing step is for. */
   test("a dispatch GitHub rejects fails the step", () => {
-    const r = run(HANDOFF, [open, { match: ["workflow", "run"], code: 1, stdout: "refused" }]);
+    const r = run(HANDOFF, [...openTarget, { match: ["workflow", "run"], code: 1, stdout: "refused" }]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("::error::");
   });

@@ -62,6 +62,8 @@ import {
   fetchIssues,
   mergeIssues,
   newestTimestamp,
+  sweepDue,
+  sweepIssues,
   withDerived,
   type IndexedIssue,
   type IssueIndex,
@@ -175,17 +177,28 @@ function loadIndex(): IssueIndex {
 
   const since = previous?.updatedThrough;
   const fresh = fetchIssues(REPO, since);
-  if (previous && fresh.length === 0) {
+
+  // The backstop for the `?since=` cursor, which can skip an issue GitHub's listing
+  // had not caught up with. Run at most once a day: it lists every issue's metadata,
+  // which is cheap, and re-fetches only the ones the index is missing or has stale.
+  // See `sweepIssues` for why the cursor cannot be trusted to find them itself.
+  const now = new Date();
+  const sweep = previous !== undefined && sweepDue(previous.lastSweep, now);
+  const swept = sweep && previous ? sweepIssues(REPO, previous.issues) : undefined;
+  if (sweep) log(`sweep: ${swept!.length} issues after listing every one`);
+
+  if (previous && fresh.length === 0 && !sweep) {
     log(`index current: ${previous.issues.length} issues, nothing changed since ${since}`);
     return previous.bm25 && previous.chunks ? previous : withDerived(previous);
   }
 
-  const issues = mergeIssues(previous?.issues ?? [], fresh);
+  const issues = mergeIssues(swept ?? previous?.issues ?? [], fresh);
   log(`index: ${issues.length} issues (${fresh.length} fetched${since ? ` since ${since}` : " — full build"})`);
 
   const index = withDerived({
     version: INDEX_VERSION,
     updatedThrough: newestTimestamp(fresh, since ?? "1970-01-01T00:00:00Z"),
+    ...(sweep ? { lastSweep: now.toISOString() } : previous?.lastSweep ? { lastSweep: previous.lastSweep } : {}),
     issues,
   });
 

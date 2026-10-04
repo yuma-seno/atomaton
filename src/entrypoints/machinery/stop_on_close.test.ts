@@ -14,8 +14,19 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
  * read as if it had been looked for. Two tests passed that way before this was written.
  */
 describe("stop_on_close.ts", () => {
-  const RUNNING_ROOT = JSON.stringify({ state: "open", labels: [{ name: "atomaton/in-progress" }] });
+  const RUNNING_ROOT = JSON.stringify({ state: "open", labels: [] });
   const CLOSED_ARGS = ["--number", "803", "--closer", "octocat", "--closer-type", "User"];
+
+  /**
+   * A thread whose last turn-changing event is a request for an agent -- a run is in
+   * flight. `running` is read from the thread now, not the `atomaton/in-progress`
+   * label, so a fixture that wants a live node says so with a comment.
+   */
+  const RUNNING_THREAD = JSON.stringify([
+    { id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } },
+  ]);
+  /** A thread with nothing asked for: no run is in flight. */
+  const IDLE_THREAD = "[]";
 
   /**
    * The sub-issues under a node, as GitHub's own links report them.
@@ -26,7 +37,7 @@ describe("stop_on_close.ts", () => {
    * by their own tag, because GitHub does not keep its PR-to-issue link in this
    * design.
    */
-  const subIssues = (...children: { number: number; running?: boolean; state?: string }[]) => ({
+  const subIssues = (...children: { number: number; state?: string }[]) => ({
     match: ["api", "graphql"],
     stdout: JSON.stringify({
       data: {
@@ -39,7 +50,7 @@ describe("stop_on_close.ts", () => {
                 number: child.number,
                 title: `#${child.number}`,
                 state: child.state ?? "OPEN",
-                labels: { nodes: child.running ? [{ name: "atomaton/in-progress" }] : [] },
+                labels: { nodes: [] },
               })),
             },
             closedByPullRequestsReferences: { nodes: [] },
@@ -66,6 +77,7 @@ describe("stop_on_close.ts", () => {
 
   test("asks the run to stop, and says so where the run is looking", () => {
     const r = run(CLOSED_ARGS, [
+      { match: ["api", "issues/803/comments"], stdout: RUNNING_THREAD },
       { match: ["api", "issues/803"], stdout: RUNNING_ROOT },
       { match: ["pr", "list", "parent-issue="], stdout: "[]" },
       NO_NATIVE_LINKS,
@@ -100,6 +112,8 @@ describe("stop_on_close.ts", () => {
    */
   test("closes the work under an issue even when nothing was running on it", () => {
     const r = run(CLOSED_ARGS, [
+      { match: ["api", "issues/803/comments"], stdout: IDLE_THREAD },
+      { match: ["api", "issues/807/comments"], stdout: IDLE_THREAD },
       { match: ["api", "issues/803"], stdout: JSON.stringify({ state: "closed", labels: [] }) },
       { match: ["pr", "list", "parent-issue="], stdout: "[]" },
       subIssues({ number: 807 }),
@@ -112,6 +126,7 @@ describe("stop_on_close.ts", () => {
 
   test("nothing running and nothing open under it is nothing to do", () => {
     const r = run(CLOSED_ARGS, [
+      { match: ["api", "issues/803/comments"], stdout: IDLE_THREAD },
       { match: ["api", "issues/803"], stdout: JSON.stringify({ state: "closed", labels: [] }) },
       { match: ["pr", "list", "parent-issue="], stdout: "[]" },
       NO_NATIVE_LINKS,
@@ -139,9 +154,11 @@ describe("stop_on_close.ts", () => {
    */
   test("a running sub-issue is stopped and told why", () => {
     const r = run(CLOSED_ARGS, [
+      { match: ["api", "issues/803/comments"], stdout: RUNNING_THREAD },
+      { match: ["api", "issues/807/comments"], stdout: RUNNING_THREAD },
       { match: ["api", "issues/803"], stdout: RUNNING_ROOT },
       { match: ["pr", "list", "parent-issue="], stdout: "[]" },
-      subIssues({ number: 807, running: true }),
+      subIssues({ number: 807 }),
       { match: ["issue", "comment"] },
       { match: ["issue", "close"] },
     ]);
@@ -157,6 +174,8 @@ describe("stop_on_close.ts", () => {
    */
   test("a merged pull request under the issue is left alone", () => {
     const r = run(CLOSED_ARGS, [
+      { match: ["api", "issues/803/comments"], stdout: RUNNING_THREAD },
+      { match: ["api", "issues/817/comments"], stdout: IDLE_THREAD },
       { match: ["api", "issues/803"], stdout: RUNNING_ROOT },
       {
         match: ["pr", "list", "parent-issue="],
@@ -174,6 +193,8 @@ describe("stop_on_close.ts", () => {
   /** An open pull request is a node like any other, and closes with its issue. */
   test("an open pull request under the issue is closed with it", () => {
     const r = run(CLOSED_ARGS, [
+      { match: ["api", "issues/803/comments"], stdout: RUNNING_THREAD },
+      { match: ["api", "issues/826/comments"], stdout: IDLE_THREAD },
       { match: ["api", "issues/803"], stdout: RUNNING_ROOT },
       {
         match: ["pr", "list", "parent-issue="],

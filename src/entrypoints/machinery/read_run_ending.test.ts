@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { endingFromSession, parseSession } from "./read_run_ending.ts";
-import { parseGithubOutput, scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, parseGithubOutput, scriptPath } from "./testing/harness.ts";
 
 /** What the script does with the bytes it read, so these exercise the real path. */
 const endingOfText = (raw: string) => endingFromSession(parseSession(raw));
@@ -63,7 +63,7 @@ describe("read_run_ending.ts", () => {
       const r = spawnSync(
         "bun",
         ["run", scriptPath("read_run_ending.ts"), "--session", sessionPath, "--exit-code", exitCode, "--stop-file", stopFile],
-        { encoding: "utf8", env: { ...process.env, GITHUB_OUTPUT: outputFile } },
+        { encoding: "utf8", env: { ...hermeticEnv(), GITHUB_OUTPUT: outputFile } },
       );
       return { status: r.status, out: parseGithubOutput(readFileSync(outputFile, "utf8")) };
     } finally {
