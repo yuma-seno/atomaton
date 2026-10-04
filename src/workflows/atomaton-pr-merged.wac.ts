@@ -9,6 +9,7 @@ import { SetupBunAction } from "./actions/third-party.ts";
 import { ref as resolveOrchestratorParentRef } from "../entrypoints/machinery/resolve_orchestrator_parent.ts";
 import { ref as aggregateSubIssuesRef } from "../entrypoints/machinery/aggregate_sub_issues.ts";
 import { ref as parsePrMetadataRef } from "../entrypoints/machinery/parse_pr_metadata.ts";
+import { ref as dispatchPostMergeRef } from "../entrypoints/machinery/dispatch_post_merge.ts";
 import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // Detect PR merges and aggregate sub-issue results.
@@ -21,9 +22,24 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 // merged PR (see its "Check if closed via a merged PR" step) to avoid
 // dispatching the atomaton twice for the same completion.
 //
+// Two things happen for a merged pull request, and the order between them is the
+// point:
+//
+//   1. Re-invoke the agent that opened it, to JUDGE whether what merged satisfies
+//      the issue it delivers. `dispatchPostMergeAgent` posts the trigger comment and
+//      starts the run. This is the same decision `github__merge_pr` takes for an
+//      agent-made merge (`decidePostMergeHandoff`); a person's merge skipped it, so a
+//      sub-issue's pull request merged by hand went straight to aggregating the parent
+//      with the sub-issue still open.
+//   2. Aggregate the parent, but ONLY when step 1 did not re-invoke anybody. When it
+//      did, the judgement runs, closes the sub-issue if the criteria are met, and THAT
+//      close aggregates the parent -- so aggregating here would race it and start the
+//      parent on a subtree that is not finished.
+//
 // Job graph:
 //   parse --> resolve-parent --> notify-parent
-//                             \-> aggregate-sub-issues
+//                             \-> re-invoke (may stand the aggregate job down)
+//                             \-> aggregate-sub-issues (skipped when re-invoke did)
 
 const parseMetadataStep = new TypedOutputsStep(
   {
@@ -87,6 +103,47 @@ const resolveParentJob = new DefinedJob(
 // number) -- so this is the one place that lists that dependency.
 const NOTIFY_AND_AGGREGATE_NEEDS = [resolveParentJob, parseJob];
 
+/**
+ * Re-invoke the agent that opened the merged pull request, to judge the merge.
+ *
+ * The step writes `reinvoked=true` when `dispatchPostMergeAgent` started a run; the
+ * aggregate job reads it (below) and stands down. Everything about which agent and
+ * which issue is decided in `dispatch_post_merge.ts`, which applies the same
+ * `decidePostMergeHandoff` as `github__merge_pr`, so the two merge routes cannot drift.
+ */
+const reinvokeStep = new TypedOutputsStep(
+  {
+    name: "Re-invoke the origin agent to judge the merge",
+    id: "reinvoke",
+    shell: "bash",
+    env: {
+      GH_TOKEN: "${{ github.token }}",
+      PR_BODY: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.body),
+      PR_NUMBER: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.number),
+      OWNER: "${{ github.repository_owner }}",
+      REPO: githubEvent<PullRequestClosedEvent>((e) => e.repository.name),
+    },
+    run: `${scriptCommand(dispatchPostMergeRef)}\n`,
+  },
+  ["reinvoked"] as const,
+);
+
+const reinvokeJob = new DefinedJob(
+  "reinvoke-origin-agent",
+  {
+    "runs-on": "ubuntu-latest",
+    if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, ""),
+    needs: NOTIFY_AND_AGGREGATE_NEEDS,
+    outputs: {
+      reinvoked: reinvokeStep.outputs.reinvoked,
+    },
+    env: {
+      GH_TOKEN: "${{ github.token }}",
+    },
+  },
+  [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), reinvokeStep],
+);
+
 export const atomaPrMerged = new Workflow("atomaton-pr-merged", {
   name: "Atomaton PR Merged",
   on: {
@@ -122,12 +179,23 @@ PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
       }),
     ],
   ),
+  // The judgement, before the aggregation. Reads the same two body tags
+  // `github__merge_pr` reads and applies the same `decidePostMergeHandoff`, so the
+  // agent-made and person-made merge routes agree by construction. `reinvoked=true`
+  // stands the aggregate job down: the agent it starts closes the sub-issue if the
+  // criteria are met, and THAT close aggregates the parent.
+  reinvokeJob,
   new DefinedJob(
     "aggregate-sub-issues",
     {
       "runs-on": "ubuntu-latest",
-      if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, ""),
-      needs: NOTIFY_AND_AGGREGATE_NEEDS,
+      // Not when the judgement was dispatched: it re-invokes the parent itself once
+      // the sub-issue is closed, and aggregating here would start the parent on a
+      // subtree whose sub-issue is still open.
+      if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, "").and(
+        JobCondition.isNot(reinvokeJob.rawOutputs.reinvoked, "true"),
+      ),
+      needs: [...NOTIFY_AND_AGGREGATE_NEEDS, reinvokeJob],
       env: {
         GH_TOKEN: "${{ github.token }}",
       },
