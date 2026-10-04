@@ -464,6 +464,11 @@ function refuseOutstandingRequest(d, markerId) {
   return "refused-outstanding";
 }
 function dispatchRunner(d) {
+  if (!d.agent.trim()) {
+    const log = d.log ?? ((message) => console.error(message));
+    log(`${d.context}: no agent was named, so nothing was dispatched (an empty agent is not a run).`);
+    return "failed";
+  }
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
@@ -729,9 +734,13 @@ function lastEnding(repo, number) {
 // src/adapters/github/agent-on-issue.ts
 function mostRecentAgent(bodies) {
   for (let i = bodies.length - 1;i >= 0; i--) {
-    const agent = AGENT_TAG.read(bodies[i] ?? "");
-    if (agent)
-      return agent;
+    const body = bodies[i] ?? "";
+    const result = AGENT_TAG.read(body);
+    if (result)
+      return result;
+    const asked = parseCommentCommand(body).agent;
+    if (asked)
+      return asked;
   }
   return "";
 }

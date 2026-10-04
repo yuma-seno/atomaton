@@ -394,6 +394,11 @@ function refuseOutstandingRequest(d, markerId) {
   return "refused-outstanding";
 }
 function dispatchRunner(d) {
+  if (!d.agent.trim()) {
+    const log = d.log ?? ((message) => console.error(message));
+    log(`${d.context}: no agent was named, so nothing was dispatched (an empty agent is not a run).`);
+    return "failed";
+  }
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);

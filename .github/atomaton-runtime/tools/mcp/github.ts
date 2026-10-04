@@ -7938,6 +7938,11 @@ function refuseOutstandingRequest(d, markerId) {
   return "refused-outstanding";
 }
 function dispatchRunner(d) {
+  if (!d.agent.trim()) {
+    const log = d.log ?? ((message) => console.error(message));
+    log(`${d.context}: no agent was named, so nothing was dispatched (an empty agent is not a run).`);
+    return "failed";
+  }
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
@@ -7971,9 +7976,13 @@ function dispatchRunner(d) {
 // src/adapters/github/agent-on-issue.ts
 function mostRecentAgent(bodies) {
   for (let i = bodies.length - 1;i >= 0; i--) {
-    const agent = AGENT_TAG.read(bodies[i] ?? "");
-    if (agent)
-      return agent;
+    const body = bodies[i] ?? "";
+    const result = AGENT_TAG.read(body);
+    if (result)
+      return result;
+    const asked = parseCommentCommand(body).agent;
+    if (asked)
+      return asked;
   }
   return "";
 }
@@ -19918,6 +19927,9 @@ async function createIssue(a) {
   let labels = a.labels ?? [];
   const sub = a.sub_issue ?? true;
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
+  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
+    mcpFail("create_issue is for an issue run that is decomposing work into sub-issues. " + "This run is on a pull request, which reviews or fixes one pull request rather than " + "decomposing it. Use github__create_pr to hand this pull request to a reviewer, or " + "atomaton__request_close_issue to conclude it.");
+  }
   refuseCommandLines(body, "issue body", "Use `atomaton__launch_sub_agent` to start an agent on a sub-issue.");
   body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
   if (sub) {
