@@ -437,10 +437,11 @@ ${DISPATCH_TAG.write(d.agent)}
 }
 function refuseOutstandingRequest(d, markerId) {
   const log = d.log ?? ((message) => console.error(message));
+  const repoPath = d.repo ?? "{owner}/{repo}";
   const removeMarker = () => {
     if (markerId === undefined)
       return;
-    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+    gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${markerId}`);
   };
   if (markerId === undefined)
     return;
@@ -448,7 +449,7 @@ function refuseOutstandingRequest(d, markerId) {
   let check;
   for (let attempt = 0;attempt <= delays.length; attempt++) {
     try {
-      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+      check = checkDispatchMarker(repoPath, d.number, markerId);
     } catch (e) {
       removeMarker();
       log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
@@ -466,14 +467,14 @@ function refuseOutstandingRequest(d, markerId) {
     const reposted = postDispatchMarker(d);
     if (reposted !== undefined) {
       try {
-        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
           removeMarker();
           return;
         }
       } catch (e) {
         log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
       }
-      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     const body = dispatchUnconfirmedNotice({
