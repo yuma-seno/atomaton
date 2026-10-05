@@ -248,6 +248,13 @@ conclude the issue by the call your role contract names. Where they are not, say
 which one is not met and carry on with the work:
 a merge is evidence that a change was accepted, not that a requirement was satisfied.
 
+**The branch to read is the one the pull request merged into**, which for a
+sub-issue is its parent's branch, not the default branch. Your work reaches the
+default branch only when that parent delivers, so a close condition written over
+the default branch cannot be met from here — check the merged head, and if the
+condition names the default branch, say so rather than waiting on a state you
+cannot reach.
+
 **The third identical failure ends the run.** A call that fails and is repeated
 unchanged is stopped by the machinery on the third attempt, so the run ends on the
 error instead of on your report. After a tool error, read what came back — it is a

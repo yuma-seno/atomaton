@@ -324,6 +324,38 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * #80: a sub-issue's close condition must be checkable where its work lands.
+   *
+   * A child's pull request is cut from and merges back into its PARENT's branch, so the
+   * default branch has none of it until the parent delivers -- and the parent is gated
+   * on the child closing. A close condition written over the default branch therefore
+   * waits on a state the child cannot reach until after it closes, which is a deadlock.
+   * Measured on #17: its condition named `main`, its work was on `atomaton/issue-16`,
+   * and the engineer correctly refused to close it.
+   *
+   * Both halves are pinned because either alone leaves the deadlock: the dispatch
+   * contract says how to WRITE the condition, and the post-merge paragraph says how to
+   * READ one that named the wrong branch.
+   */
+  test("the close-condition contract names the branch the work lands on, not the default one", () => {
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    expect(atomaton, "the close condition is checked against the branch the work lands on").toContain(
+      "the branch the child's work lands on",
+    );
+    expect(atomaton, "and that is not the default branch").toContain(
+      "which is this issue's own branch, not the default branch",
+    );
+
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8");
+    expect(prompt, "the reader is told which branch to read").toContain(
+      "The branch to read is the one the pull request merged into",
+    );
+    expect(prompt, "and the parent's branch is named as the one it is").toContain(
+      "sub-issue is its parent's branch, not the default branch",
+    );
+  });
+
+  /**
    * And the template has to close the loop, not just absolve the agent.
    * `docs/method/edd.md` names the failure this is against: "Whoever observed the gap
    * cannot propose the fix, so it waits until someone else notices." The run that saw
