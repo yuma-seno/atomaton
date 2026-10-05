@@ -7364,7 +7364,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -7685,6 +7685,8 @@ function commandInBodyRefusal(found, what, instead) {
 
 // src/domain/work/thread.ts
 function eventOf(body, readers) {
+  if (readers.waiting(body))
+    return "waiting";
   if (readers.isAgentResult(body))
     return readers.handedOff(body) ? "handed-off" : "returned";
   if (readers.requestedAgent(body) !== "")
@@ -7719,6 +7721,7 @@ function wasLaunched(comments, readers) {
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  waiting: (body) => ENDED_TAG.read(body) === "waiting",
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
@@ -20163,8 +20166,10 @@ function createPr(a) {
   const currentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
   if (currentIssue) {
     const next = !validationDispatched ? "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log." : reviewer ? `Running CI; \`${reviewer}\` follows if it passes.` : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
+    const ending = validationDispatched ? `${ENDED_TAG.write("waiting")}
+` : "";
     gh("issue", "comment", currentIssue, "--repo", REPO, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
-Atomaton: PR #${num} created (${stdout.trim()}). ${next}`);
+${ending}Atomaton: PR #${num} created (${stdout.trim()}). ${next}`);
   }
   if (!isAttended({ ...reviewer ? { next: { agent: reviewer } } : {}, body: body ?? "" })) {
     const openedBy = (process.env.AGENT ?? "").trim() || "an agent";

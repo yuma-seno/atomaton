@@ -1,33 +1,8 @@
 #!/usr/bin/env bun
 // @bun
 
-// src/entrypoints/machinery/dispatch_if_siblings_done.ts
-import { parseArgs } from "util";
-
-// src/entrypoints/machinery/lib/script-ref.ts
-import { basename } from "path";
-import { fileURLToPath } from "url";
-
-// src/domain/machinery/machinery-layout.ts
-var USER_ROOT = ".github/atomaton";
-var RUNTIME_ROOT = ".github/atomaton-runtime";
-var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
-var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
-var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
-var SKILLS_DIR = `${USER_ROOT}/skills`;
-var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
-var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
-var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
-var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
-var RULESETS_DIR = `${USER_ROOT}/rulesets`;
-var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
-var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
-
-// src/entrypoints/machinery/lib/script-ref.ts
-function defineScript(importMetaUrl) {
-  return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
-}
+// src/entrypoints/machinery/dispatch_post_merge.ts
+import { appendFileSync as appendFileSync2 } from "fs";
 
 // src/adapters/github/gh.ts
 function run(cmd) {
@@ -96,8 +71,50 @@ function dispatchWorkflow(context, workflow, args = [], log = (m) => console.err
   return true;
 }
 
-// src/adapters/runner/config.ts
-import { readFileSync } from "fs";
+// src/domain/work/agent-name.ts
+var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
+var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
+
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
+// src/adapters/github/tags.ts
+var TAG_PREFIX = `atomaton:`;
+var EVERY_TAG_PATTERN = [];
+function makeTag(key, valuePattern, parse, render) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read: (text) => {
+      const m = re.exec(text);
+      return m ? parse(m[1]) : undefined;
+    },
+    has: (text) => re.test(text),
+    search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
+  };
+}
+function numericTag(key) {
+  return makeTag(key, "\\d+", Number, String);
+}
+function stringTag(key, valuePattern) {
+  return makeTag(key, valuePattern, (raw) => raw, (value) => value);
+}
+var STOP_TAG = stringTag("stop", "requested");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var PARENT_ISSUE_TAG = numericTag("parent-issue");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
+var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
+var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
+var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
+var CHANGED_TAG = stringTag("changed", "yes|no");
+var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
+var AGGREGATED_TAG = numericTag("aggregated");
+var SUB_RESULT_TAG = numericTag("sub-result");
+var CI_RETRY_TAG = numericTag("ci-retry");
 
 // src/domain/delivery/merge-readiness.ts
 var CI_WOULD_BE_WASTED = new Set([
@@ -110,6 +127,22 @@ var CI_WOULD_BE_WASTED = new Set([
   "checks-failing"
 ]);
 var PASSING = new Set(["success", "neutral", "skipped"]);
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
 
 // src/domain/delivery/declared-secrets.ts
 var RUN_CREDENTIALS = [
@@ -169,33 +202,20 @@ var CHECKS_FROM_PULL_REQUEST = {
 };
 var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
 
-// src/adapters/runner/machinery.ts
-function machineryRoot() {
-  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
-}
-function machineryPath(relative) {
-  const root = machineryRoot();
-  return root ? `${root}/${relative}` : relative;
-}
-
-// src/adapters/runner/config.ts
-function configPath() {
-  return machineryPath(CONFIG_FILE);
-}
-var cached;
-function loadConfig() {
-  if (!cached) {
-    cached = Bun.YAML.parse(readFileSync(configPath(), "utf8"));
+// src/adapters/runner/ops-log.ts
+import { appendFileSync } from "fs";
+var OPS_LOG_PATH = process.env.ATOMATON_OPS_LOG ?? "/tmp/atomaton_ops.log";
+function logOp(op, payload = {}) {
+  const entry = { ts: new Date().toISOString(), op, ...payload };
+  try {
+    appendFileSync(OPS_LOG_PATH, JSON.stringify(entry) + `
+`);
+  } catch (e) {
+    console.error(`[ops-log] WARN: failed to write op log: ${e}`);
   }
-  return cached;
 }
-var DEFAULT_LABELS = {
-  sub_issue: "atomaton/sub-issue",
-  launched: "atomaton/launched",
-  in_progress: "atomaton/in-progress"
-};
-function getLabel(key) {
-  return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
+function logDispatch(target, agent, extra = {}) {
+  logOp("dispatch", { target, agent, ...extra });
 }
 
 // src/adapters/github/outcome.ts
@@ -206,141 +226,34 @@ function issueOutcome(reason) {
 function pullRequestOutcome(merged) {
   return merged ? "done" : "abandoned";
 }
-function saysOpen(state) {
-  return (state ?? "").toLowerCase() === "open";
-}
 
-// src/domain/work/issue-links.ts
-var CLOSING_KEYWORDS = "close[sd]?|fix(?:e[sd])?|resolve[sd]?";
-function claimsToClose(body, issue) {
-  return new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+#${issue}\\b`, "i").test(body);
-}
-function dedupeByNumber(...lists) {
-  const seen = new Map;
-  for (const list of lists)
-    for (const item of list)
-      if (!seen.has(item.number))
-        seen.set(item.number, item);
-  return [...seen.values()].sort((a, b) => a.number - b.number);
-}
-
-// src/adapters/github/issue-links.ts
-var LINK_LIMIT = 50;
-var LABEL_LIMIT = 20;
-var QUERY = `
-query($owner:String!, $name:String!, $number:Int!, $limit:Int!, $labelLimit:Int!) {
-  repository(owner:$owner, name:$name) {
-    issueOrPullRequest(number:$number) {
-      __typename
-      ... on Issue {
-        parent { number title state stateReason }
-        subIssues(first:$limit) { nodes { number title state stateReason labels(first:$labelLimit) { nodes { name } } } }
-        closedByPullRequestsReferences(first:$limit, includeClosedPrs:true) {
-          nodes { number title state merged body }
-        }
-        timelineItems(last:$limit, itemTypes:[CROSS_REFERENCED_EVENT]) {
-          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number title state merged body } } } }
-        }
-      }
-      ... on PullRequest {
-        closingIssuesReferences(first:$limit) { nodes { number title state stateReason } }
-      }
-    }
+// src/adapters/github/target-state.ts
+function readTargetState(number, repo) {
+  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
+  const { code, stdout, stderr } = ghRead("api", path);
+  if (code !== 0) {
+    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
+`)[0] ?? "" };
   }
-}`;
-function normalise(node) {
-  return {
-    number: node.number,
-    title: node.title,
-    state: saysOpen(node.state) ? "open" : issueOutcome(node.stateReason)
-  };
-}
-function asChild(node) {
-  return { ...normalise(node), labels: (node.labels?.nodes ?? []).map((label) => label.name) };
-}
-function asPr(node) {
-  return {
-    number: node.number,
-    title: node.title,
-    state: saysOpen(node.state) ? "open" : pullRequestOutcome(Boolean(node.merged))
-  };
-}
-function issueLinks(repo, number) {
-  const [owner, name] = repo.split("/");
-  if (!owner || !name) {
-    return { children: [], pullRequests: [], unavailable: `"${repo}" is not an owner/name repository` };
-  }
-  let issue = null;
+  let parsed;
   try {
-    issue = ghGraphqlRead(QUERY, { owner, name, number, limit: LINK_LIMIT, labelLimit: LABEL_LIMIT }).repository?.issueOrPullRequest ?? null;
-  } catch (error) {
-    const why = error.message;
-    console.error(`[atomaton-github] WARN could not read links for #${number}: ${why}`);
-    return { children: [], pullRequests: [], unavailable: `GitHub could not be reached: ${why}` };
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { known: false, why: "the response was not JSON" };
   }
-  if (!issue)
-    return { children: [], pullRequests: [], unavailable: `#${number} was not found` };
-  if (issue.__typename === "PullRequest") {
-    const closes = issue.closingIssuesReferences?.nodes ?? [];
+  const isPr = parsed.pull_request !== undefined;
+  const kind = isPr ? "pull-request" : "issue";
+  if (parsed.state === "open")
+    return { known: true, kind, state: "open" };
+  if (parsed.state === "closed") {
     return {
-      parent: closes[0] ? normalise(closes[0]) : undefined,
-      children: [],
-      pullRequests: []
+      known: true,
+      kind,
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
     };
   }
-  const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
-  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && claimsToClose(source?.body ?? "", number)).map(asPr);
-  return {
-    parent: issue.parent ? normalise(issue.parent) : undefined,
-    children: (issue.subIssues?.nodes ?? []).map(asChild),
-    pullRequests: dedupeByNumber(declared, referenced)
-  };
+  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
-
-// src/domain/work/agent-name.ts
-var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
-var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
-
-// src/domain/work/mention.ts
-var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
-var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
-
-// src/adapters/github/tags.ts
-var TAG_PREFIX = `atomaton:`;
-var EVERY_TAG_PATTERN = [];
-function makeTag(key, valuePattern, parse, render) {
-  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
-  EVERY_TAG_PATTERN.push(pattern);
-  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
-  return {
-    marker: `${TAG_PREFIX}${key}`,
-    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
-    has: (text) => re.test(text),
-    search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
-  };
-}
-function numericTag(key) {
-  return makeTag(key, "\\d+", Number, String);
-}
-function stringTag(key, valuePattern) {
-  return makeTag(key, valuePattern, (raw) => raw, (value) => value);
-}
-var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
-var PARENT_ISSUE_TAG = numericTag("parent-issue");
-var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
-var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
-var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
-var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
-var CHANGED_TAG = stringTag("changed", "yes|no");
-var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
-var AGGREGATED_TAG = numericTag("aggregated");
-var SUB_RESULT_TAG = numericTag("sub-result");
-var CI_RETRY_TAG = numericTag("ci-retry");
 
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
@@ -422,9 +335,6 @@ function shapedThread(comments, readers) {
   }
   return { comments: kept, events };
 }
-function wasLaunched(comments, readers) {
-  return comments.some((entry) => readers.isDispatchMarker(entry.body));
-}
 
 // src/adapters/github/thread.ts
 var readers = {
@@ -437,17 +347,6 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function readComments(repo, number, excludeCommentId) {
-  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
-  if (listed.code !== 0)
-    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  const excluded = String(excludeCommentId ?? "").trim();
-  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
-  return shapedThread(comments, readers);
-}
-function wasLaunchedOn(repo, number) {
-  return wasLaunched(readComments(repo, number).comments, readers);
-}
 function checkDispatchMarker(repo, number, markerId) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
@@ -457,60 +356,6 @@ function checkDispatchMarker(repo, number, markerId) {
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
   const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
-}
-
-// src/adapters/github/sibling-check.ts
-function countOpenSiblings(opts) {
-  const label = opts.label || getLabel("sub_issue");
-  const links = issueLinks(opts.repo, opts.parent);
-  if (links.unavailable) {
-    throw new Error(`countOpenSiblings: could not read the sub-issues of #${opts.parent}: ${links.unavailable}`);
-  }
-  return links.children.filter((child) => child.state === "open" && child.labels.includes(label) && child.number !== opts.exclude && wasLaunchedOn(opts.repo, child.number)).length;
-}
-
-// src/adapters/runner/ops-log.ts
-import { appendFileSync } from "fs";
-var OPS_LOG_PATH = process.env.ATOMATON_OPS_LOG ?? "/tmp/atomaton_ops.log";
-function logOp(op, payload = {}) {
-  const entry = { ts: new Date().toISOString(), op, ...payload };
-  try {
-    appendFileSync(OPS_LOG_PATH, JSON.stringify(entry) + `
-`);
-  } catch (e) {
-    console.error(`[ops-log] WARN: failed to write op log: ${e}`);
-  }
-}
-function logDispatch(target, agent, extra = {}) {
-  logOp("dispatch", { target, agent, ...extra });
-}
-
-// src/adapters/github/target-state.ts
-function readTargetState(number, repo) {
-  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
-  const { code, stdout, stderr } = ghRead("api", path);
-  if (code !== 0) {
-    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
-`)[0] ?? "" };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return { known: false, why: "the response was not JSON" };
-  }
-  const isPr = parsed.pull_request !== undefined;
-  const kind = isPr ? "pull-request" : "issue";
-  if (parsed.state === "open")
-    return { known: true, kind, state: "open" };
-  if (parsed.state === "closed") {
-    return {
-      known: true,
-      kind,
-      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
-    };
-  }
-  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
 // src/domain/work/closed-target.ts
@@ -768,148 +613,162 @@ function resolveNotify(repo, number) {
     log2(`no requester found for #${number}; falling back to the repository owner @${owner}`);
   return owner;
 }
+// src/adapters/github/branch-placement.ts
+var NO_BRANCH_MESSAGE = "This run is on a detached checkout with no local branch, so there is no branch to push: " + "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 
-// src/adapters/github/agent-on-issue.ts
-function mostRecentAgent(bodies) {
-  for (let i = bodies.length - 1;i >= 0; i--) {
-    const body = bodies[i] ?? "";
-    const result = AGENT_TAG.read(body);
-    if (result)
-      return result;
-    const asked = parseCommentCommand(body).agent;
-    if (asked)
-      return asked;
+// src/domain/delivery/deploy-jobs.ts
+function refPatternProblem(pattern) {
+  const body = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern;
+  if (body.includes("*")) {
+    return `"${pattern}" uses a '*' somewhere other than the end, which this matcher cannot honour, ` + 'so it would match nothing. Write a literal ref, or a prefix followed by "*" \u2014 e.g. "v*".';
+  }
+  if (/[?[\]{}]/.test(body)) {
+    return `"${pattern}" uses a glob character this matcher cannot honour, so it would match nothing. ` + 'Write a literal ref, or a prefix followed by "*".';
   }
   return "";
 }
-function mostRecentAgentOn(repo, number) {
-  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (code !== 0)
-    return "";
-  try {
-    return mostRecentAgent(JSON.parse(stdout || "[]"));
-  } catch {
-    return "";
+function readPatterns(raw, key, required, where, problems) {
+  const list = raw ?? [];
+  if (!Array.isArray(list) || list.some((p) => typeof p !== "string" || p.trim() === "")) {
+    problems.push(`${where}: \`${key}\` must be an array of non-empty patterns.`);
+    return null;
   }
+  const patterns = list.map((p) => p.trim());
+  const bad = patterns.map(refPatternProblem).find((problem) => problem !== "");
+  if (bad) {
+    problems.push(`${where}: ${bad}`);
+    return null;
+  }
+  if (required && patterns.length === 0) {
+    problems.push(`${where}: \`${key}\` needs at least one pattern \u2014 e.g. ["v*"].`);
+    return null;
+  }
+  return patterns;
 }
+function refsFrom(keys) {
+  const owned = [...keys.tags ? ["tags"] : [], ...keys.branches ? ["branches"] : []];
+  return {
+    keys: owned,
+    read: (entry, where, problems) => {
+      const tags = keys.tags ? readPatterns(entry.tags, "tags", true, where, problems) : [];
+      const branches = keys.branches ? readPatterns(entry.branches, "branches", false, where, problems) : [];
+      return tags === null || branches === null ? null : { tags, branches };
+    }
+  };
+}
+var DEPLOY_ARMS = {
+  merge: {
+    key: "on_merge",
+    rules: {
+      where: "deploy.on_merge",
+      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      extra: refsFrom({ branches: true })
+    }
+  },
+  tag: {
+    key: "on_tag",
+    rules: {
+      where: "deploy.on_tag",
+      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      extra: refsFrom({ branches: true, tags: true })
+    }
+  },
+  demand: {
+    key: "on_demand",
+    rules: {
+      where: "deploy.on_demand",
+      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      extra: { keys: [], read: () => ({ branches: [], tags: [] }) }
+    }
+  }
+};
+var TRIGGERS = Object.keys(DEPLOY_ARMS);
 
-// src/app/aggregation.ts
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// src/adapters/actions/dispatch-targets.ts
+function log3(message) {
+  console.error(`[atomaton-github] ${message}`);
 }
-function parentAgent(repo, parent) {
-  return mostRecentAgentOn(repo, parent);
-}
-function needsAttention(result) {
-  return result.kind === "dispatch-failed" || result.kind === "undetermined" || result.kind === "parent-closed" || result.kind === "parent-busy";
-}
-function describeGateResult(result, closedNum, parent) {
-  const which = parent === undefined ? "the parent issue" : `#${parent}`;
-  switch (result.kind) {
-    case "not-tracked":
-      return `#${closedNum} is not a tracked sub-issue; nothing to aggregate.`;
-    case "waiting":
-      return `${result.remaining} sibling(s) of ${which} still open. No action needed.`;
-    case "already-aggregated":
-      return `Another caller already aggregated #${closedNum}. Nothing to do -- this is the normal race.`;
-    case "dispatched":
-      return `All sub-tasks of ${which} complete. The parent's agent was re-invoked.`;
-    case "dispatch-failed":
-      return `All sub-tasks of ${which} complete, but the dispatch FAILED. ` + `The aggregation marker is already written, so no other caller will retry: ` + `re-run the parent's agent by hand.`;
-    case "parent-closed":
-      return `All sub-tasks of ${which} complete, but ${which} is closed, so no agent was started. ` + `The aggregation marker is already written, so no other caller will retry: ` + `reopen it and run the parent's agent by hand. Whoever asked for the run has been told on the issue.`;
-    case "parent-busy":
-      return `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` + `so no second one was started. The aggregation marker is already written, so no other caller ` + `will retry: the run that was asked for first is the one to wait for.`;
-    case "undetermined":
-      return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
+function dispatchPostMergeAgent(repo, subIssueNum, agent) {
+  const notify = resolveNotify(repo, subIssueNum);
+  const { code, stdout, stderr } = gh("issue", "comment", String(subIssueNum), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("include")}
+` + "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.");
+  if (code) {
+    log3(`dispatchPostMergeAgent: could not post trigger comment on #${subIssueNum}: ${stderr || stdout}`);
+    return false;
   }
-}
-async function dispatchOrchestratorIfReady(opts) {
-  const excludeNum = opts.exclude ? opts.closedNum : undefined;
-  const count = () => countOpenSiblings({ repo: opts.repo, parent: opts.parent, exclude: excludeNum });
-  let remaining;
-  try {
-    remaining = count();
-    if (opts.retry) {
-      for (let attempt = 1;remaining > 0 && attempt < 4; attempt++) {
-        await sleep(2000 * attempt);
-        remaining = count();
-      }
-    }
-  } catch (error) {
-    const why = `could not count #${opts.parent}'s open sub-issues: ${error.message}`;
-    console.error(why);
-    return { kind: "undetermined", why };
-  }
-  if (remaining > 0) {
-    if (opts.progressMessage) {
-      gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
-${SUB_RESULT_TAG.write(opts.closedNum)}
-${opts.progressMessage(remaining)}`);
-    }
-    return { kind: "waiting", remaining };
-  }
-  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body");
-  if (commentsCode !== 0) {
-    const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
-    console.error(`${why}; not dispatching`);
-    return { kind: "undetermined", why };
-  }
-  if (commentsOut.includes(AGGREGATED_TAG.write(opts.closedNum))) {
-    return { kind: "already-aggregated" };
-  }
-  if (opts.beforeDispatch)
-    await opts.beforeDispatch();
-  const marker = gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", `${AGGREGATED_TAG.write(opts.closedNum)}
-Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
-  if (marker.code !== 0) {
-    const why = `could not write the aggregation marker on #${opts.parent}: ${marker.stderr.trim() || marker.stdout.trim()}`;
-    console.error(`${why}; not dispatching, because without the marker a second caller would dispatch too`);
-    return { kind: "undetermined", why };
-  }
-  const outcome = dispatchRunner({
-    context: `all sub-issues of #${opts.parent} are complete, so the agent that was on it was to be re-invoked`,
-    agent: parentAgent(opts.repo, opts.parent),
+  return dispatchRunner({
+    context: `the pull request for #${subIssueNum} was merged, so ${agent} was to judge whether it satisfies the issue`,
+    agent,
     type: "issue",
-    number: opts.parent,
-    notify: resolveNotify(opts.repo, opts.parent),
-    repo: opts.repo
-  });
-  if (outcome === "dispatched")
-    return { kind: "dispatched" };
-  if (outcome === "refused-closed")
-    return { kind: "parent-closed" };
-  if (outcome === "refused-outstanding")
-    return { kind: "parent-busy" };
-  return { kind: "dispatch-failed" };
+    number: subIssueNum,
+    notify,
+    repo,
+    log: log3
+  }) === "dispatched";
 }
 
-// src/entrypoints/machinery/dispatch_if_siblings_done.ts
-var ref = defineScript(import.meta.url);
-async function main() {
-  const { values } = parseArgs({
-    args: Bun.argv.slice(2),
-    options: {
-      repo: { type: "string" },
-      parent: { type: "string" },
-      "closed-num": { type: "string" }
-    }
-  });
-  if (!values.repo || !values.parent || !values["closed-num"]) {
-    console.error("usage: dispatch_if_siblings_done.ts --repo OWNER/REPO --parent N --closed-num N");
-    process.exit(2);
+// src/domain/work/handoff.ts
+function decidePostMergeHandoff(signals) {
+  if (signals.parentIssue === undefined)
+    return { kind: "no-parent" };
+  if (signals.parentAlreadyClosed)
+    return { kind: "already-closed", parentIssue: signals.parentIssue };
+  if (signals.originAgent) {
+    return { kind: "reinvoke-origin-agent", parentIssue: signals.parentIssue, agent: signals.originAgent };
   }
-  const { repo, parent } = values;
-  const closedNum = values["closed-num"];
-  console.log("Sub-issue closed manually. Checking open siblings...");
-  const result = await dispatchOrchestratorIfReady({
-    repo,
-    parent: Number(parent),
-    closedNum: Number(closedNum)
-  });
-  console.log(describeGateResult(result, Number(closedNum), Number(parent)));
-  if (needsAttention(result))
-    process.exit(1);
+  return { kind: "close-directly", parentIssue: signals.parentIssue };
+}
+
+// src/entrypoints/machinery/lib/script-ref.ts
+import { basename } from "path";
+import { fileURLToPath } from "url";
+function defineScript(importMetaUrl) {
+  return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
+}
+
+// src/entrypoints/machinery/dispatch_post_merge.ts
+var ref = defineScript(import.meta.url);
+function main() {
+  const body = process.env.PR_BODY ?? "";
+  const prNumber = (process.env.PR_NUMBER ?? "").trim();
+  const repo = `${process.env.OWNER ?? ""}/${process.env.REPO ?? ""}`;
+  const githubOutput = process.env.GITHUB_OUTPUT;
+  const say = (message) => console.error(message);
+  const write = (reinvoked) => {
+    if (githubOutput)
+      appendFileSync2(githubOutput, `reinvoked=${reinvoked}
+`);
+  };
+  const parentIssue = PARENT_ISSUE_TAG.read(body);
+  const originAgent = ORIGIN_AGENT_TAG.read(body);
+  const parentState = parentIssue === undefined ? undefined : readTargetState(parentIssue, repo);
+  const parentAlreadyClosed = parentState?.known === true && parentState.state !== "open";
+  const handoff = decidePostMergeHandoff({ parentIssue, parentAlreadyClosed, originAgent });
+  switch (handoff.kind) {
+    case "no-parent":
+      say(`PR #${prNumber} has no parent issue; nothing to re-invoke.`);
+      write(false);
+      return;
+    case "already-closed":
+      say(`Parent issue #${handoff.parentIssue} is already closed; nothing to re-invoke.`);
+      write(false);
+      return;
+    case "close-directly":
+      say(`PR #${prNumber} has no origin agent tagged; the parent will be aggregated.`);
+      write(false);
+      return;
+    case "reinvoke-origin-agent": {
+      const dispatched = dispatchPostMergeAgent(repo, handoff.parentIssue, handoff.agent);
+      if (dispatched) {
+        say(`Re-invoked ${handoff.agent} on #${handoff.parentIssue} to judge the merge.`);
+        write(true);
+      } else {
+        say(`Could not re-invoke ${handoff.agent} on #${handoff.parentIssue}; the parent will be aggregated.`);
+        write(false);
+      }
+      return;
+    }
+  }
 }
 if (import.meta.main)
   main();

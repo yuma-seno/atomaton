@@ -204,7 +204,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -268,6 +268,8 @@ function isHumanActor(type) {
 
 // src/domain/work/thread.ts
 function eventOf(body, readers) {
+  if (readers.waiting(body))
+    return "waiting";
   if (readers.isAgentResult(body))
     return readers.handedOff(body) ? "handed-off" : "returned";
   if (readers.requestedAgent(body) !== "")
@@ -299,6 +301,7 @@ function shapedThread(comments, readers) {
 var readers = {
   isAgentResult: (body) => AGENT_TAG.has(body),
   handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  waiting: (body) => ENDED_TAG.read(body) === "waiting",
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
