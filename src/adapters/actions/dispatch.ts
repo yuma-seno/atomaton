@@ -246,9 +246,18 @@ function postDispatchMarker(d: RunnerDispatch): string | undefined {
  */
 function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefined): "refused-outstanding" | "unconfirmed" | undefined {
   const log = d.log ?? ((message: string) => console.error(message));
+  // The repository as a `gh` path segment, the same way `postDispatchMarker` writes it.
+  // A caller that did not name one (the runner's own hand-off, via `dispatch_agent.ts`)
+  // used to get `""` here and `"{owner}/{repo}"` there -- so the marker POST succeeded
+  // against the checkout's repository while every READ went to `repos//issues/...` and
+  // came back 404. The dispatch then reported `refused-outstanding`, which is the one
+  // answer that looks benign: the log says the node already had an agent asked for it,
+  // and no run is started. `gh` fills the placeholder in from the checkout, which is
+  // the same repository the POST reached.
+  const repoPath = d.repo ?? "{owner}/{repo}";
   const removeMarker = (): void => {
     if (markerId === undefined) return;
-    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+    gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${markerId}`);
   };
 
   // No marker means the ordering check has nothing to be ordered against, so it cannot
@@ -262,7 +271,7 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
   let check: MarkerCheck | undefined;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
-      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+      check = checkDispatchMarker(repoPath, d.number, markerId);
     } catch (e) {
       removeMarker();
       log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
@@ -281,7 +290,7 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
     const reposted = postDispatchMarker(d);
     if (reposted !== undefined) {
       try {
-        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
           // The repost is visible, so the thread has caught up. The first marker, if it
           // exists at all, is a duplicate of this one -- remove it so the thread does not
           // say two agents were asked for.
@@ -291,7 +300,7 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
       } catch (e) {
         log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
       }
-      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(
       `${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` +
