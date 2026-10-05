@@ -112,7 +112,7 @@ const NO_MARKER: FakeGhRule = { match: ["api", "comments", "--jq"], stdout: JSON
 // default -- a test should not accidentally succeed through a call it never
 // described. These two are the calls the happy path makes after the checks:
 // claiming the completion, and starting the atomaton.
-const MARKER_WRITES: FakeGhRule = { match: ["issue", "comment"], code: 0 };
+const MARKER_WRITES: FakeGhRule = { match: ["issue", "comment"], stdout: "777", code: 0 };
 const DISPATCH_WORKS: FakeGhRule = { match: ["workflow", "run"], code: 0 };
 // Two calls read the parent through this endpoint, and only one of them is
 // optional. `resolveNotify` looks it up to find someone to mention and tolerates
@@ -230,6 +230,48 @@ describe("aggregation.ts dispatch gate", () => {
     ]);
     expect(kind).toBe("dispatch-failed");
     expect(dispatched(ghCalls)).toBe(false);
+  });
+
+  /**
+   * #7: the marker is a claim that this completion was aggregated, and the claim is
+   * only true if a run started. A failed dispatch leaves it false, and the marker is
+   * exactly what makes every later caller answer `already-aggregated` -- so leaving it
+   * is how a parent ends up open with every child closed and no path back in.
+   *
+   * Taking it back is what reopens the retry. The id the write returns (`--jq .id`) is
+   * what the delete needs, so this also pins that the two calls agree on it.
+   */
+  test("a failed dispatch takes the aggregation marker back, so a later close retries", () => {
+    const { kind, ghCalls } = runGate([
+      ...NO_SIBLINGS,
+      { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
+      ...DISPATCH_MARKER,
+      NO_MARKER,
+      MARKER_WRITES,
+      DISPATCH_WORKS,
+      PARENT_IS_OPEN,
+    ]);
+    expect(kind).toBe("dispatch-failed");
+    const removed = ghCalls.find((c) => c.includes("DELETE") && c.join(" ").includes("comments/777"));
+    expect(removed, "the marker written as id 777 must be deleted").toBeDefined();
+  });
+
+  /**
+   * A closed parent keeps the marker: the parent is closed, so a retry could start
+   * nothing, and the claim "this completion was dealt with" is true.
+   */
+  test("a closed parent keeps the marker rather than taking it back", () => {
+    const { kind, ghCalls } = runGate([
+      ...NO_SIBLINGS,
+      PARENT_AGENT,
+      ...DISPATCH_MARKER,
+      NO_MARKER,
+      MARKER_WRITES,
+      DISPATCH_WORKS,
+      { match: ["api", "issues"], stdout: JSON.stringify({ state: "closed" }) },
+    ]);
+    expect(kind).toBe("parent-closed");
+    expect(ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/777"))).toBe(false);
   });
 
   // The read half of the same argument, which was already guarded. Kept so the
