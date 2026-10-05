@@ -15,9 +15,15 @@ import {
  * so the tests hand it the answers directly.
  */
 const readers: TurnReaders = {
-  isAgentResult: (body) => body.startsWith("RESULT"),
-  handedOff: (body) => body.includes("handoff"),
-  waiting: (body) => body.startsWith("WAITING"),
+  // `RESULT ...` simulates a result comment: it carries an ending AND the result tag.
+  // `ENDED ...` simulates a body with an ending and NO result tag -- the failure
+  // notice, or a `launch_sub_agent` comment. Both are endings, which is the point.
+  ending: (body) => {
+    if (body.startsWith("RESULT handoff") || body.startsWith("ENDED handoff")) return "handed-off";
+    if (body.startsWith("WAITING")) return "waiting";
+    if (body.startsWith("RESULT") || body.startsWith("ENDED")) return "returned";
+    return "";
+  },
   requestedAgent: (body) => (body.startsWith("/") ? body.slice(1).split(/\s/)[0]! : ""),
   isDispatchMarker: (body) => body.startsWith("DISPATCH"),
 };
@@ -58,6 +64,19 @@ describe("turnEvents", () => {
   // with the runs that reported.
   test("the machinery's own waiting comment is a waiting event", () => {
     expect(events(["WAITING\nAtomaton: Launched sub-agent(s):"])).toEqual(["waiting"]);
+  });
+
+  /**
+   * #90: a failed run's notice ends the turn and is NOT a result comment.
+   *
+   * It used to be read from `isAgentResult` (`atomaton:agent`), which the failure notice
+   * does not carry -- so the body was not an event at all, the node's last event stayed
+   * the `asked` that started the run, and the guard deleted the very comment the notice
+   * told the reader to post. The ending tag is what decides, so a body with an ending
+   * and no result tag is still an ending.
+   */
+  test("an ending with no result tag is still an ending", () => {
+    expect(events(["ENDED done -- run failed, session saved"])).toEqual(["returned"]);
   });
 
   test("the events keep their order", () => {

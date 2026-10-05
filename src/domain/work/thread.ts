@@ -62,21 +62,36 @@ export type TurnEvent =
 /** Who holds a node's turn. */
 export type TurnHolder = "agent" | "person";
 
-/** How to read the events out of a body. */
+/**
+ * How to read the events out of a body.
+ *
+ * ## Why the ending, and not "is this a result comment"
+ *
+ * The event a body is used to be derived from `isAgentResult` -- an `atomaton:agent`
+ * tag meant `returned` or `handed-off`, and nothing else could be either. That put the
+ * result comment in charge of "how the turn ended", and there are bodies that end a
+ * turn and are NOT result comments: the failure notice (`report_run_failure.ts`) gives
+ * the node back to a person, and `launch_sub_agent`/`create_pr` leave it waiting on a
+ * child. Neither carries `atomaton:agent` (tagging them as results would file a
+ * failure with the runs that reported), so neither was read as an event at all, and
+ * the node's last event stayed the `asked` that started the run.
+ *
+ * `ending` is the tag that means "how this run ended" -- `atomaton:ended`, written on
+ * every body that ends a turn -- so it is what decides. A body with no ending is not
+ * an ending, whatever else it carries.
+ *
+ * `requestedAgent` stays a separate reader because a request is the one event that is
+ * not an ending: a person's `/agent` command, or the machinery's dispatch marker.
+ */
 export interface TurnReaders {
-  /** Whether a body is an agent's own result comment. */
-  isAgentResult: (body: string) => boolean;
-  /** Whether that result handed the node to another agent. */
-  handedOff: (body: string) => boolean;
   /**
-   * Whether that result ended with the run waiting on work under this node.
+   * How this body ended the turn, or "" when it is not an ending.
    *
-   * Read instead of `handedOff` for a result comment, because only one of the two can
-   * be true and they lead to different answers: `handed-off` is the next agent on THIS
-   * node (the ball is the agent's), `waiting` is a child being started (the ball is
-   * nobody's until the child reports). See `TurnEvent`.
+   * One of `returned`, `handed-off`, `waiting` -- the same three `TurnEvent`s an ending
+   * can be, said in the vocabulary of the tag rather than of the fold, so a reader that
+   * has the tag does not have to guess which event it implies.
    */
-  waiting: (body: string) => boolean;
+  ending: (body: string) => "returned" | "handed-off" | "waiting" | "";
   /**
    * The agent a body asks for, or "" when it asks for none.
    *
@@ -132,21 +147,15 @@ export interface ShapedThread<T extends ThreadEntry = ThreadEntry> {
  * The turn-changing event a body is, or nothing.
  *
  * One definition, used by both the fold below and the shaping: a body that is neither
- * an agent's result nor a request for one is not an event, and reading it as though it
- * were would hand the node back to a person every time somebody said anything.
+ * an ending nor a request for one is not an event, and reading it as though it were
+ * would hand the node back to a person every time somebody said anything.
  *
- * `waiting` is checked first and on its own tag, BEFORE `isAgentResult`. It is written
- * by the session-ending tools (`launch_sub_agent`, `create_pr`) on the comment they
- * already post, and it carries no `AGENT_TAG` -- those runs post no result comment, and
- * tagging theirs as one would file a hand-off with the runs that reported. So it cannot
- * be read through `isAgentResult`, and it is the same body's stronger claim.
- *
- * An agent's result is read before a request, because a result comment may quote a
- * command in its report and the tag is the stronger claim about what the body is.
+ * The ending is read first, because an ending's body may quote a command in its report
+ * and the ending is the stronger claim about what the body is. See `TurnReaders`.
  */
 function eventOf(body: string, readers: TurnReaders): TurnEvent | undefined {
-  if (readers.waiting(body)) return "waiting";
-  if (readers.isAgentResult(body)) return readers.handedOff(body) ? "handed-off" : "returned";
+  const ending = readers.ending(body);
+  if (ending !== "") return ending;
   if (readers.requestedAgent(body) !== "") return "asked";
   return undefined;
 }

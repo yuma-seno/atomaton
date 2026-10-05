@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { failureNotice, logExcerpt } from "./report_run_failure.ts";
-import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { ENDED_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 
 describe("report_run_failure.ts", () => {
   /**
@@ -23,6 +23,33 @@ describe("report_run_failure.ts", () => {
   // Addressed to a person and useless to the next run, which would only carry it.
   test("is kept out of the agent's context", () => {
     expect(failureNotice("engineer", "octocat", "u", "")).toContain(LLM_CONTEXT_TAG.write("exclude"));
+  });
+
+  /**
+   * #90: the notice tells the reader to comment `/agent` to continue, and the guard
+   * used to remove exactly that comment. The node's last turn-changing event stayed the
+   * `asked` that started the run, because a failed run left no ending on the thread --
+   * so the guard read "the ball is with an agent" and deleted the person's next
+   * comment, and the run could only be restarted by hand.
+   *
+   * `ended=done` is the `returned` ending, and it is true: a failed run gave the node
+   * back to a person.
+   */
+  test("records that the turn ended, so a person can comment without the guard removing it", () => {
+    expect(failureNotice("engineer", "octocat", "u", "")).toContain(ENDED_TAG.write("done"));
+  });
+
+  /**
+   * And the tag actually reads as a turn ending, through the same reader the guard uses.
+   *
+   * The check above only says the string is present; this says the machinery agrees it
+   * ended the turn. The gap between the two is exactly #90: the notice could carry a
+   * tag the turn-reader did not look at, and the test would still pass.
+   */
+  test("the failure notice reads as the node coming back to a person", async () => {
+    const { readers } = await import("../../adapters/github/thread.ts");
+    const body = failureNotice("engineer", "octocat", "u", "");
+    expect(readers.ending(body)).toBe("returned");
   });
 
   test("carries the run's own link", () => {
