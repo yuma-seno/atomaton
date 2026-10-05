@@ -142,42 +142,47 @@
   {
     "path": "sessions/issue-17/engineer.json",
     "agent": "engineer",
-    "messages": 383,
-    "calls": 229,
+    "messages": 583,
+    "calls": 360,
     "failed": 6,
-    "refused": 0,
+    "refused": 3,
     "skills": [
       "project/conventions",
       "engineering/environment",
-      "delivery/pipeline-setup"
+      "delivery/pipeline-setup",
+      "project/conventions"
     ],
     "reported": true,
     "tools": {
-      "read": 37,
-      "atoma_builtin__load_skill": 3,
-      "edit": 19,
-      "shell__shell_execute": 107,
+      "read": 52,
+      "atoma_builtin__load_skill": 4,
+      "edit": 29,
+      "shell__shell_execute": 175,
       "grep": 15,
-      "github__get_issue_comments": 6,
-      "write": 3,
-      "github__commit_and_push": 3,
+      "github__get_issue_comments": 11,
+      "write": 4,
+      "github__commit_and_push": 4,
       "github__create_pr": 2,
-      "search__search_issues": 6,
-      "github__list_prs": 1,
+      "search__search_issues": 9,
+      "github__list_prs": 4,
       "github__list_issues": 2,
-      "github__get_issue": 2,
+      "github__get_issue": 7,
       "github__check_merge_readiness": 4,
-      "github__get_check_runs": 12,
-      "github__get_pr": 2,
+      "github__get_check_runs": 14,
+      "github__get_pr": 3,
       "github__get_pr_reviews": 1,
       "github__list_pr_review_comments": 3,
-      "github__create_issue": 1
+      "github__create_issue": 2,
+      "github__get_branch": 5,
+      "web__fetch": 9,
+      "github__get_pr_diff": 1
     },
     "acts": {
       "verify": 6,
-      "other": 93,
+      "other": 151,
       "search": 2,
-      "edit": 6
+      "edit": 14,
+      "open": 2
     },
     "runs": [
       {
@@ -195,6 +200,14 @@
         "messages": 383,
         "seconds": 2685,
         "started": "2026-09-27T17:36:41Z"
+      },
+      {
+        "ended": "2026-10-05T01:50:04Z",
+        "ended_because": "completed",
+        "iterations": 63,
+        "messages": 583,
+        "seconds": 3364,
+        "started": "2026-10-05T00:54:00Z"
       }
     ]
   },
