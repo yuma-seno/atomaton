@@ -173,7 +173,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -237,8 +237,9 @@ function isHumanActor(type) {
 
 // src/domain/work/thread.ts
 function eventOf(body, readers) {
-  if (readers.isAgentResult(body))
-    return readers.handedOff(body) ? "handed-off" : "returned";
+  const ending = readers.ending(body);
+  if (ending !== "")
+    return ending;
   if (readers.requestedAgent(body) !== "")
     return "asked";
   return;
@@ -272,8 +273,16 @@ function latestRequestedAgent(body, comments, readers) {
 
 // src/adapters/github/thread.ts
 var readers = {
-  isAgentResult: (body) => AGENT_TAG.has(body),
-  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  ending: (body) => {
+    const ended = ENDED_TAG.read(body);
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done")
+      return "returned";
+    return "";
+  },
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };

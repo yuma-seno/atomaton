@@ -55,6 +55,28 @@ describe("dispatch_agent.ts", () => {
   });
 
   /**
+   * A dispatch with no `--repo` (the runner's own hand-off step passes none) must read
+   * the thread through the `{owner}/{repo}` placeholder, the same way it POSTS the
+   * marker. It used to read `repos//issues/12/comments` -- an empty segment -- and get
+   * `404`, which `dispatchRunner` reported as `refused-outstanding`: a benign-looking
+   * "the node already had an agent asked for it" while no run started. The two paths
+   * must use one repository spelling.
+   */
+  test("reads the thread through the placeholder when no --repo is given", () => {
+    const r = run(HANDOFF, [...openTarget, { match: ["workflow", "run"] }]);
+    expect(r.status).toBe(0);
+
+    const reads = r.ghCalls.filter((call) => call.join(" ").includes("issues/12/comments") && call.includes("--paginate"));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const read of reads) {
+      // `{owner}/{repo}`, not an empty segment. `gh` fills the placeholder from the
+      // checkout; `//` is what `gh` answered 404 to.
+      expect(read.join(" ")).toContain("repos/{owner}/{repo}/issues/12/comments");
+      expect(read.join(" ")).not.toContain("repos//issues");
+    }
+  });
+
+  /**
    * A node holds one turn. A request that came before this dispatch — a person's
    * command, or a marker from a dispatch that already went out — means nobody has
    * taken it up, so this would be a second run on a node that already has one.

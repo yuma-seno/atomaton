@@ -85,7 +85,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -134,6 +134,7 @@ function failureNotice(agent, notify, runUrl, excerpt) {
   const mention = mentionPrefix(notify);
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
+    ENDED_TAG.write("done"),
     `${mention}Atomaton: \`${agent}\` did not finish \u2014 the run failed.`,
     "",
     "**The session was saved.** What this run worked out is still there.",

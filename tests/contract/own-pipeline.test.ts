@@ -22,6 +22,7 @@ import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveDeployJobs } from "../../src/domain/delivery/deploy-jobs.ts";
+import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
 
 /** The live configuration, which is what the runner reads. */
 function deployCommands(): string[] {
@@ -33,7 +34,7 @@ function deployCommands(): string[] {
 
 /** The mode git records for `path`, or "" when git does not track it. */
 function recordedMode(path: string): string {
-  const result = spawnSync("git", ["ls-files", "-s", "--", path], { encoding: "utf8" });
+  const result = spawnSync("git", ["ls-files", "-s", "--", path], { encoding: "utf8", env: hermeticEnv() });
   return (result.stdout ?? "").trim().split(/\s+/)[0] ?? "";
 }
 

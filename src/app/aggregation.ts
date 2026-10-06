@@ -112,7 +112,7 @@ export type DispatchGateResult =
   | { kind: "already-aggregated" }
   /** The atomaton is running. */
   | { kind: "dispatched" }
-  /** Everything was ready and the dispatch itself failed. Nothing will retry. */
+  /** Everything was ready and the dispatch itself failed. The marker was taken back, so a later close retries. */
   | { kind: "dispatch-failed" }
   /**
    * Everything was ready and the parent is closed, so no atomaton was started.
@@ -130,7 +130,8 @@ export type DispatchGateResult =
    * Distinct from `dispatch-failed` for the same reason `parent-closed` is: nothing
    * malfunctioned. Somebody asked for an agent on the parent while its children were
    * finishing, and that request stands. `dispatchRunner` removed its own marker and
-   * said so in the log.
+   * said so in the log, and so did this gate: the aggregation marker is taken back so
+   * this completion can still be aggregated once the earlier run is done.
    */
   | { kind: "parent-busy" }
   /**
@@ -179,8 +180,8 @@ export function describeGateResult(result: DispatchGateResult, closedNum: number
     case "dispatch-failed":
       return (
         `All sub-tasks of ${which} complete, but the dispatch FAILED. ` +
-        `The aggregation marker is already written, so no other caller will retry: ` +
-        `re-run the parent's agent by hand.`
+        `The aggregation marker was removed, so closing a sub-issue again retries it -- ` +
+        `or re-run the parent's agent by hand.`
       );
     case "parent-closed":
       return (
@@ -191,8 +192,8 @@ export function describeGateResult(result: DispatchGateResult, closedNum: number
     case "parent-busy":
       return (
         `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` +
-        `so no second one was started. The aggregation marker is already written, so no other caller ` +
-        `will retry: the run that was asked for first is the one to wait for.`
+        `so no second one was started. The aggregation marker was removed, so this completion can be ` +
+        `aggregated once that run is done: the run that was asked for first is the one to wait for.`
       );
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
@@ -273,9 +274,13 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   //
   // A missed aggregation is recoverable by the other racer. A double dispatch is
   // not, and that asymmetry is exactly what the read already relies on.
+  //
+  // `--jq .id` so the marker can be taken back below. The id is what `/issues/comments/{id}`
+  // deletes, and a marker this function cannot remove is one it can only apologise for.
   const marker = gh(
     "issue", "comment", String(opts.parent), "--repo", opts.repo,
     "--body", `${AGGREGATED_TAG.write(opts.closedNum)}\nAtomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`,
+    "--jq", ".id",
   );
   if (marker.code !== 0) {
     const why =
@@ -283,6 +288,7 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
     console.error(`${why}; not dispatching, because without the marker a second caller would dispatch too`);
     return { kind: "undetermined", why };
   }
+  const markerId = marker.stdout.trim();
 
   const outcome = dispatchRunner({
     context: `all sub-issues of #${opts.parent} are complete, so the agent that was on it was to be re-invoked`,
@@ -293,17 +299,43 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
     repo: opts.repo,
   });
 
-  // Reported rather than assumed. The `atomaton:aggregated` marker above is already
-  // written at this point, so a failed dispatch cannot be retried by the racing
-  // caller either -- saying so is the only way it reaches a human.
+  // Reported rather than assumed. The marker is a claim that this completion has been
+  // aggregated -- and it is only true if a run started. When the dispatch did not go
+  // out, the claim is false and has to be taken back, or nothing will ever retry: the
+  // marker is exactly what makes every later caller answer `already-aggregated`. #7 is
+  // that sequence observed by hand -- marker written, dispatch failed, parent stayed
+  // open with every child closed and no path back in.
+  //
+  // The removal is best-effort: if it fails too, the parent is where #7 left it, and
+  // the log is the only record. Nothing here can make that worse.
+  const takeBackMarker = (why: string): void => {
+    const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);
+    if (removed.code === 0) {
+      console.error(`${why}; the aggregation marker was removed so this can be retried`);
+    } else {
+      console.error(
+        `${why}; AND the aggregation marker could not be removed (${removed.stderr.trim() || removed.stdout.trim()}), ` +
+          `so nothing will retry: aggregate #${opts.parent} by hand`,
+      );
+    }
+  };
+
   if (outcome === "dispatched") return { kind: "dispatched" };
   // A closed parent is not a fault, and the person who asked for the run has already
   // been told by `dispatchRunner` itself. Kept apart from `dispatch-failed` so this
-  // does not read in the log as GitHub having rejected something.
+  // does not read in the log as GitHub having rejected something. The marker STAYS:
+  // the parent is closed, so there is nothing a retry could start, and leaving the
+  // claim says "this completion was dealt with", which is true.
   if (outcome === "refused-closed") return { kind: "parent-closed" };
-  // The same shape one step along: the parent already had an agent asked for on it, so
-  // this dispatch was the second one and stood down. Nothing malfunctioned.
-  if (outcome === "refused-outstanding") return { kind: "parent-busy" };
+  // The parent already had an agent asked for on it, so this dispatch stood down. The
+  // marker is taken back for the same reason as a failure: it claims an aggregation
+  // that did not happen, and the run that was asked for first is not this one. If that
+  // first run finishes without aggregating, this completion must still be able to.
+  if (outcome === "refused-outstanding") {
+    takeBackMarker(`parent #${opts.parent} already had an agent asked for on it, so this aggregation did not start`);
+    return { kind: "parent-busy" };
+  }
+  takeBackMarker(`the dispatch of ${parentAgent(opts.repo, opts.parent) || "(no agent)"} onto #${opts.parent} failed`);
   return { kind: "dispatch-failed" };
 }
 

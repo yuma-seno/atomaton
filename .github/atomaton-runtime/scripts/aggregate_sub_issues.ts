@@ -333,7 +333,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -397,8 +397,9 @@ function isHumanActor(type) {
 
 // src/domain/work/thread.ts
 function eventOf(body, readers) {
-  if (readers.isAgentResult(body))
-    return readers.handedOff(body) ? "handed-off" : "returned";
+  const ending = readers.ending(body);
+  if (ending !== "")
+    return ending;
   if (readers.requestedAgent(body) !== "")
     return "asked";
   return;
@@ -429,8 +430,16 @@ function wasLaunched(comments, readers) {
 
 // src/adapters/github/thread.ts
 var readers = {
-  isAgentResult: (body) => AGENT_TAG.has(body),
-  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  ending: (body) => {
+    const ended = ENDED_TAG.read(body);
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done")
+      return "returned";
+    return "";
+  },
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
@@ -592,10 +601,11 @@ ${DISPATCH_TAG.write(d.agent)}
 }
 function refuseOutstandingRequest(d, markerId) {
   const log = d.log ?? ((message) => console.error(message));
+  const repoPath = d.repo ?? "{owner}/{repo}";
   const removeMarker = () => {
     if (markerId === undefined)
       return;
-    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+    gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${markerId}`);
   };
   if (markerId === undefined)
     return;
@@ -603,7 +613,7 @@ function refuseOutstandingRequest(d, markerId) {
   let check;
   for (let attempt = 0;attempt <= delays.length; attempt++) {
     try {
-      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+      check = checkDispatchMarker(repoPath, d.number, markerId);
     } catch (e) {
       removeMarker();
       log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
@@ -621,14 +631,14 @@ function refuseOutstandingRequest(d, markerId) {
     const reposted = postDispatchMarker(d);
     if (reposted !== undefined) {
       try {
-        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
           removeMarker();
           return;
         }
       } catch (e) {
         log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
       }
-      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     const body = dispatchUnconfirmedNotice({
@@ -815,11 +825,11 @@ function describeGateResult(result, closedNum, parent) {
     case "dispatched":
       return `All sub-tasks of ${which} complete. The parent's agent was re-invoked.`;
     case "dispatch-failed":
-      return `All sub-tasks of ${which} complete, but the dispatch FAILED. ` + `The aggregation marker is already written, so no other caller will retry: ` + `re-run the parent's agent by hand.`;
+      return `All sub-tasks of ${which} complete, but the dispatch FAILED. ` + `The aggregation marker was removed, so closing a sub-issue again retries it -- ` + `or re-run the parent's agent by hand.`;
     case "parent-closed":
       return `All sub-tasks of ${which} complete, but ${which} is closed, so no agent was started. ` + `The aggregation marker is already written, so no other caller will retry: ` + `reopen it and run the parent's agent by hand. Whoever asked for the run has been told on the issue.`;
     case "parent-busy":
-      return `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` + `so no second one was started. The aggregation marker is already written, so no other caller ` + `will retry: the run that was asked for first is the one to wait for.`;
+      return `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` + `so no second one was started. The aggregation marker was removed, so this completion can be ` + `aggregated once that run is done: the run that was asked for first is the one to wait for.`;
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
   }
@@ -861,12 +871,13 @@ ${opts.progressMessage(remaining)}`);
   if (opts.beforeDispatch)
     await opts.beforeDispatch();
   const marker = gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", `${AGGREGATED_TAG.write(opts.closedNum)}
-Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
+Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`, "--jq", ".id");
   if (marker.code !== 0) {
     const why = `could not write the aggregation marker on #${opts.parent}: ${marker.stderr.trim() || marker.stdout.trim()}`;
     console.error(`${why}; not dispatching, because without the marker a second caller would dispatch too`);
     return { kind: "undetermined", why };
   }
+  const markerId = marker.stdout.trim();
   const outcome = dispatchRunner({
     context: `all sub-issues of #${opts.parent} are complete, so the agent that was on it was to be re-invoked`,
     agent: parentAgent(opts.repo, opts.parent),
@@ -875,12 +886,23 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
     notify: resolveNotify(opts.repo, opts.parent),
     repo: opts.repo
   });
+  const takeBackMarker = (why) => {
+    const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);
+    if (removed.code === 0) {
+      console.error(`${why}; the aggregation marker was removed so this can be retried`);
+    } else {
+      console.error(`${why}; AND the aggregation marker could not be removed (${removed.stderr.trim() || removed.stdout.trim()}), ` + `so nothing will retry: aggregate #${opts.parent} by hand`);
+    }
+  };
   if (outcome === "dispatched")
     return { kind: "dispatched" };
   if (outcome === "refused-closed")
     return { kind: "parent-closed" };
-  if (outcome === "refused-outstanding")
+  if (outcome === "refused-outstanding") {
+    takeBackMarker(`parent #${opts.parent} already had an agent asked for on it, so this aggregation did not start`);
     return { kind: "parent-busy" };
+  }
+  takeBackMarker(`the dispatch of ${parentAgent(opts.repo, opts.parent) || "(no agent)"} onto #${opts.parent} failed`);
   return { kind: "dispatch-failed" };
 }
 

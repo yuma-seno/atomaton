@@ -34,7 +34,7 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead } from "./gh.ts";
-import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG } from "./tags.ts";
+import { DISPATCH_TAG, ENDED_TAG } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
@@ -57,8 +57,16 @@ import {
  * a person types and the dispatch marker the machinery writes.
  */
 export const readers: TurnReaders = {
-  isAgentResult: (body) => AGENT_TAG.has(body),
-  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  // The ending is the tag that means "how this run ended". `handoff` and `waiting` are
+  // the two that leave the ball somewhere other than a person; `stopped`/`limit`/`done`
+  // all give the node back, and end the turn the same way. See `TurnReaders`.
+  ending: (body) => {
+    const ended = ENDED_TAG.read(body);
+    if (ended === "handoff") return "handed-off";
+    if (ended === "waiting") return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done") return "returned";
+    return "";
+  },
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body),
 };

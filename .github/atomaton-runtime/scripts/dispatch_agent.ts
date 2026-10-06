@@ -145,7 +145,7 @@ function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -209,8 +209,9 @@ function isHumanActor(type) {
 
 // src/domain/work/thread.ts
 function eventOf(body, readers) {
-  if (readers.isAgentResult(body))
-    return readers.handedOff(body) ? "handed-off" : "returned";
+  const ending = readers.ending(body);
+  if (ending !== "")
+    return ending;
   if (readers.requestedAgent(body) !== "")
     return "asked";
   return;
@@ -238,8 +239,16 @@ function shapedThread(comments, readers) {
 
 // src/adapters/github/thread.ts
 var readers = {
-  isAgentResult: (body) => AGENT_TAG.has(body),
-  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
+  ending: (body) => {
+    const ended = ENDED_TAG.read(body);
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done")
+      return "returned";
+    return "";
+  },
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
@@ -336,10 +345,11 @@ ${DISPATCH_TAG.write(d.agent)}
 }
 function refuseOutstandingRequest(d, markerId) {
   const log = d.log ?? ((message) => console.error(message));
+  const repoPath = d.repo ?? "{owner}/{repo}";
   const removeMarker = () => {
     if (markerId === undefined)
       return;
-    gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+    gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${markerId}`);
   };
   if (markerId === undefined)
     return;
@@ -347,7 +357,7 @@ function refuseOutstandingRequest(d, markerId) {
   let check;
   for (let attempt = 0;attempt <= delays.length; attempt++) {
     try {
-      check = checkDispatchMarker(d.repo ?? "", d.number, markerId);
+      check = checkDispatchMarker(repoPath, d.number, markerId);
     } catch (e) {
       removeMarker();
       log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
@@ -365,14 +375,14 @@ function refuseOutstandingRequest(d, markerId) {
     const reposted = postDispatchMarker(d);
     if (reposted !== undefined) {
       try {
-        if (checkDispatchMarker(d.repo ?? "", d.number, reposted).markerVisible) {
+        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
           removeMarker();
           return;
         }
       } catch (e) {
         log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
       }
-      gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${reposted}`);
+      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     const body = dispatchUnconfirmedNotice({

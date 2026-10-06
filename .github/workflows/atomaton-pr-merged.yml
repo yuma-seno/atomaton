@@ -85,14 +85,42 @@ jobs:
           gh issue comment "$PARENT" --repo "$REPO" --body \
             "<!-- atomaton:llm-context=exclude -->
           PR #${PR_NUMBER} merged: ${PR_TITLE} (${PR_URL})"
-  aggregate-sub-issues:
+  reinvoke-origin-agent:
     runs-on: ubuntu-latest
+    outputs:
+      reinvoked: ${{ steps.reinvoke.outputs.reinvoked }}
     env:
       GH_TOKEN: ${{ github.token }}
     if: needs.resolve-parent.outputs.parent_issue != ''
     needs:
       - resolve-parent
       - parse
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Bun
+        with:
+          bun-version: latest
+        uses: oven-sh/setup-bun@v2
+      - name: Re-invoke the origin agent to judge the merge
+        id: reinvoke
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_post_merge.ts"
+  aggregate-sub-issues:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    if: (needs.resolve-parent.outputs.parent_issue != '') && (needs.reinvoke-origin-agent.outputs.reinvoked != 'true')
+    needs:
+      - resolve-parent
+      - parse
+      - reinvoke-origin-agent
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun

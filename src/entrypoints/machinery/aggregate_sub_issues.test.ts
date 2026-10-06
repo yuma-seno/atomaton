@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 describe("aggregate_sub_issues.ts", () => {
   test("posts a progress comment and returns early when siblings remain open", () => {
@@ -11,7 +11,7 @@ describe("aggregate_sub_issues.ts", () => {
     // check_open_siblings.ts call inherits this same cwd and reads config.yaml
     // via getLabel()) in the SAME directory.
     const dir = makeConfigDir({});
-    spawnSync("git", ["init"], { cwd: dir });
+    spawnSync("git", ["init"], { cwd: dir, env: hermeticEnv() });
     try {
       const r = runWithFakeGh(
         scriptPath("aggregate_sub_issues.ts"),
