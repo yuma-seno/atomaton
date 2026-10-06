@@ -28,10 +28,11 @@ import { report } from "../../../adapters/mcp/mcp-report.ts";
 import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
-import { ENDED_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
+import { LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
 import { closingKeywordRefusal, closingReferences, closesLine } from "../../../domain/work/issue-links.ts";
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
+import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
 import { capText, fitItems, TOOL_OUTPUT_BUDGET } from "../../../shared/tool-output.ts";
@@ -603,11 +604,15 @@ function closeIssue(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>): boolean {
       notify: resolveNotify(REPO, num),
       body: "Atomaton: an agent finished the work on this issue and asked for it to be closed.",
     });
-    // Tagged `exclude`: addressed to the person, not to the model. See
-    // `conclude_issue.ts` for the same decision on the same comment.
+    // `ended: "done"`, `audience: "person"`: this is the turn ending (the run is over and
+    // the issue stays open for the person who was just asked), and it is addressed to
+    // that person rather than to the model. Both used to be missing — the `exclude` tag
+    // was written by hand and the ending was not written at all — and the missing ending
+    // is what let the guard delete the person's agreement to close the issue. See
+    // `conclude_issue.ts`, which has the same bug, and `turn-comment.ts`.
     const { code, stdout, stderr } = gh(
       "issue", "comment", String(num), "--repo", REPO,
-      "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${request}`,
+      "--body", turnCommentBody({ ended: "done", audience: "person", body: request }),
     );
     // The one failure still worth an error. Saying nothing here would leave an
     // issue that nobody has been asked to close and an agent that believes
@@ -871,11 +876,17 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     // aggregation gate reads that as a request nobody took up. Only when "something
     // happens next": a failed validation dispatch keeps the session open, so the run is
     // not waiting and must not carry the tag. See `domain/work/thread.ts`.
-    const ending = validationDispatched ? `${ENDED_TAG.write("waiting")}\n` : "";
-    gh(
-      "issue", "comment", currentIssue, "--repo", REPO,
-      "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${ending}Atomaton: PR #${num} created (${stdout.trim()}). ${next}`,
-    );
+    //
+    // That second case is why the ending is chosen here rather than inside the wrapper:
+    // a comment with no ending is not a turn comment, and writing `done` on a run that
+    // has not ended would hand the node to a person while its agent is still going. So
+    // the open path writes the `llm-context` tag by hand, which is the decision it always
+    // was — and the one the contract test in `generated-workflows.test.ts` asks for.
+    const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;
+    const body = validationDispatched
+      ? turnCommentBody({ ended: "waiting", audience: "person", body: text })
+      : `${LLM_CONTEXT_TAG.write("exclude")}\n${text}`;
+    gh("issue", "comment", currentIssue, "--repo", REPO, "--body", body);
   }
 
   // Nobody coming, said out loud on the pull request itself.

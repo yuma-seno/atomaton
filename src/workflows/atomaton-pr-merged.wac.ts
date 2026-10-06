@@ -172,6 +172,11 @@ export const atomaPrMerged = new Workflow("atomaton-pr-merged", {
           PR_TITLE: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.title),
           PR_URL: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.html_url),
         },
+        // Not a turn comment: this is machinery bookkeeping about a merge that happened
+        // to a NODE OTHER THAN the one it is posted on (the parent). The parent's own
+        // turn is moved by the aggregation dispatch, not by this line, so writing an
+        // `ended` tag here would put an ending on the parent's thread that the parent's
+        // run did not produce. It keeps the `llm-context=exclude` tag it always had.
         run: `gh issue comment "$PARENT" --repo "$REPO" --body \\
   "${LLM_CONTEXT_TAG.write("exclude")}
 PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"

@@ -118,6 +118,15 @@ describe("generated workflows", () => {
    * and the cost was measured: three failed runs left a 425-message session, and the
    * fourth spent 348k prompt tokens and then abandoned its instructions. The same
    * instructions on a fresh issue took 61k.
+   *
+   * ## The turn-comment half
+   *
+   * A script that posts a TURN COMMENT satisfies this by calling `turnCommentBody` /
+   * `turnHeader` instead, which write the tag from the `audience` argument. That is the
+   * point of the wrapper: the decision is still made at the call site, but it is made as
+   * a word rather than as a tag, and the ending cannot be forgotten because it is a
+   * required argument of the same call. So either spelling passes, and a comment with
+   * neither still fails.
    */
   test("every script that posts a comment says whether the agent should read it", () => {
     const dir = "src/entrypoints/machinery";
@@ -126,6 +135,9 @@ describe("generated workflows", () => {
     // `post_result_comment.ts` is the one comment that IS the agent's own output. It
     // is the thing the next run is supposed to read.
     const exempt = new Set(["post_result_comment.ts"]);
+
+    /** The tag written out, or the wrapper that writes it from an audience. */
+    const DECIDES_INCLUSION = /LLM_CONTEXT_TAG\.write\("(include|exclude)"\)|(turnCommentBody|turnHeader)\(\{/;
 
     const posters: string[] = [];
     for (const file of scripts) {
@@ -138,14 +150,45 @@ describe("generated workflows", () => {
       if (!/gh\( ?"issue", ?"comment"/.test(flat)) continue;
       posters.push(file);
       expect(
-        /LLM_CONTEXT_TAG\.write\("(include|exclude)"\)/.test(source),
+        DECIDES_INCLUSION.test(source),
         `${file} posts a comment with no llm-context tag, so it joins the next run's ` +
           "context because nobody said otherwise. Write exclude for a notice addressed " +
-          "to a person, or include for something the agent has to read",
+          "to a person, or include for something the agent has to read — or, for a comment " +
+          "that ends the turn, call turnCommentBody/turnHeader, which write the tag from " +
+          "`audience` and the ending from `ended`",
       ).toBe(true);
     }
 
     expect(posters.length, "scripts that post a comment").toBeGreaterThan(0);
+  });
+
+  /**
+   * The failure notice stands down once the run has already reported.
+   *
+   * Both comments describe the same run, and the second one contradicts the first: a
+   * person reading "the work is on the issue" and then "the run failed" has no way to
+   * tell which is true. The trigger is therefore the run's own `comment_id`, which
+   * `post-result` writes only on the path that posts — so the condition is exactly "this
+   * run has no ending on the thread", which is also when the notice is the thing that
+   * must write one.
+   *
+   * Held on the generated YAML because that is where the condition lives, and because a
+   * `always()` that loses a term still runs — it just runs when it should not.
+   */
+  test("the failure notice does not fire on a run that already posted its report", () => {
+    type WorkflowStep = { name?: string; if?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const step = workflow.jobs?.run?.steps?.find((candidate) => candidate.name === "Report failure");
+    expect(step, "the failure notice step").toBeDefined();
+    const condition = step?.if ?? "";
+    expect(condition, "it has to run when a prior step failed").toContain("always()");
+    expect(condition, "and only when this run failed").toContain("job.status != 'success'");
+    expect(
+      condition,
+      "and not when a result comment was already posted, or the two comments disagree",
+    ).toContain("steps.post-result.outputs.comment_id == ''");
   });
 
   /**

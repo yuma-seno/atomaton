@@ -1127,10 +1127,24 @@ const saveSessionStep = new TypedOutputsStep({
  * `if:`, GitHub Actions implicitly ANDs the whole condition with `success()` -- which
  * is exactly false once a prior step has genuinely failed, so without `always()` the
  * step whose entire purpose is to report THAT failure would never run.
+ *
+ * ## Why it stands down once the run has reported
+ *
+ * This notice exists for the run that produced NOTHING -- it tells a person the work
+ * is recoverable and how to resume it. A run that already posted its result comment
+ * has said everything this would say, and the failure afterwards is in the machinery
+ * rather than in the work: saving the session, writing metrics. Firing here too would
+ * put "the run failed" underneath a report that reads as finished, and a person who
+ * has been told both has no way to tell which is true.
+ *
+ * So the trigger is `job.status != 'success'` AND no result comment was posted --
+ * `postResultCommentStep`'s own `comment_id` output, which is written only on the
+ * path that posts. That is also the condition for "this run has no ending on the
+ * thread", so the notice is the one that writes it exactly when one is missing.
  */
 const reportFailureStep = new TypedOutputsStep({
   name: "Report failure",
-  if: "always() && job.status != 'success'",
+  if: `always() && job.status != 'success' && ${postResultCommentStep.rawOutputs.comment_id} == ''`,
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",

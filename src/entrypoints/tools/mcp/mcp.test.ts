@@ -10,6 +10,8 @@ import { hermeticEnv } from "../../../entrypoints/machinery/testing/harness.ts";
 const SCRIPTS_DIR = join(process.cwd(), "src/entrypoints/tools/mcp");
 import { FAKE_GH_IMPL } from "../../../entrypoints/machinery/testing/fake-gh-env.ts";
 import { removeTemp } from "../../../entrypoints/machinery/testing/harness.ts";
+import { readers } from "../../../adapters/github/thread.ts";
+import { turnEvents, whoseTurn } from "../../../domain/work/thread.ts";
 
 /**
  * Point this server's `gh` at the fake, and leave the real one unusable.
@@ -977,6 +979,54 @@ describe("mcp/github.ts", () => {
     expect(r.result.content[0].text).toContain("Invalid arguments for close_issue");
   });
 
+  /**
+   * The close-request half of #90. `close_issue` on an issue a PERSON opened does not
+   * close it — it asks them to, on the thread — and that comment is the turn ending.
+   *
+   * Without the ending the node's last turn event stays the `asked` that started the run,
+   * so the guard reads "the ball is with an agent" and DELETES the person's reply. On
+   * this path that reply is their agreement to close the issue, so the issue stayed open
+   * with nobody able to say yes. Checked through the guard's own reader rather than by
+   * matching the tag text, because a tag nobody reads is exactly how this survived its
+   * first fix.
+   */
+  test("close_issue asking a person to close ends the turn, so their reply survives", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-close-request-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 26, method: "tools/call",
+          params: { name: "close_issue", arguments: { issue_number: 12 } },
+        },
+        {
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // A person opened it, so the tool asks rather than closes.
+            { match: ["issue", "view"], stdout: JSON.stringify({ author: { id: "1", is_bot: false, login: "alice", name: "Alice" } }) },
+            // resolveNotify reads the issue's own body and author.
+            { match: ["api"], stdout: JSON.stringify({ body: "no tag", login: "alice", type: "User" }) },
+            { match: ["issue", "comment"] },
+          ]),
+        },
+      );
+      expect(r.result.isError).toBe(false);
+      expect(JSON.parse(r.result.content[0].text)).toMatchObject({ close_requested: 12 });
+
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      expect(calls.some((c) => c[0] === "issue" && c[1] === "close")).toBe(false);
+      const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
+      const body = comment?.join(" ") ?? "";
+      expect(body).toContain("please close it yourself");
+      expect(readers.ending(body)).toBe("returned");
+      expect(whoseTurn(turnEvents(["/engineer", body], readers))).toBe("person");
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
   test("list_issues accepts a bare string for labels", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-list-issues-labels-"));
     const log = join(dir, "gh.log");
@@ -1168,6 +1218,60 @@ describe("mcp/atomaton.ts", () => {
       const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
       expect(calls.some((c) => c.includes("DELETE"))).toBe(false);
       expect(calls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(true);
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  /**
+   * The dispatch comment has to carry the turn's ending, or the node's last event
+   * stays the `asked` that started the run and the aggregation gate refuses the parent
+   * with `parent-busy` once the children are done. The `waiting` value is what says the
+   * run took the request up and left the work under the node.
+   *
+   * Checked through the same reader the guard uses, not by string-matching the tag: a
+   * comment could carry a tag nobody read, which is the gap that made #90 survive its
+   * own fix.
+   */
+  test("launch_sub_agent's dispatch comment ends the turn as `waiting`", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-ending-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 9, method: "tools/call",
+          params: {
+            name: "launch_sub_agent",
+            arguments: { tasks: [{ issue: 7, agent: "engineer" }], summary: "Split the work." },
+          },
+        },
+        {
+          ...fakeGhSeam(),
+          // The parent this run is on. `launch_sub_agent` posts its dispatch comment
+          // THERE, not on the child, so an unset number skips the very comment this test
+          // is about.
+          ISSUE_NUMBER: "3",
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
+            { match: ["api", "issues/7/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=engineer -->" }]) },
+            { match: ["api", "issues/7", "--jq"], stdout: "" },
+            { match: ["issue", "edit"] },
+            { match: ["workflow", "run"] },
+            { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) },
+          ]),
+        },
+      );
+      expect(r.result.isError).toBe(false);
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      // The comment on the PARENT (this run's own issue), which is the one carrying the
+      // ending. The dispatch marker on the child is a different comment.
+      const parentComment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
+      const body = parentComment?.join(" ") ?? "";
+      expect(body).toContain("Launched sub-agent(s)");
+      expect(await readers.ending(body)).toBe("waiting");
+      expect(await whoseTurn(turnEvents(["/atomaton", body], readers))).toBe("person");
     } finally {
       removeTemp(dir);
     }
