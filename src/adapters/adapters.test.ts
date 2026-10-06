@@ -25,7 +25,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeConfigDir, runWithFakeGh, type FakeGhRule, importable } from "../entrypoints/machinery/testing/harness.ts";
+import { hermeticEnv, makeConfigDir, runWithFakeGh, type FakeGhRule, importable } from "../entrypoints/machinery/testing/harness.ts";
 import { extractImageUrls, sniffMimeType } from "../adapters/github/issue-images.ts";
 import { looksTransient } from "../adapters/github/gh.ts";
 import { injectSummary } from "../adapters/atoma/inject-sub-results.ts";
@@ -371,7 +371,7 @@ describe("mcp-tool schema helpers", () => {
  */
 describe("branch-placement.ts resolveBranch", () => {
   function git(cwd: string, ...args: string[]): string {
-    return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+    return execFileSync("git", args, { cwd, encoding: "utf8", env: hermeticEnv() }).trim();
   }
 
   /** A repository with one commit on a real branch, and git identity configured. */

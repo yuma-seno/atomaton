@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
+import { hermeticEnv, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
 
 /**
  * The script end to end: a real `atomaton-data` to read, a fake `gh` to answer about the
@@ -29,7 +29,7 @@ const ISSUES = JSON.stringify([
 let repo: string;
 
 function git(cwd: string, ...args: string[]): void {
-  execFileSync("git", args, { cwd, stdio: "pipe" });
+  execFileSync("git", args, { cwd, stdio: "pipe", env: hermeticEnv() });
 }
 
 beforeAll(() => {

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseGithubOutput, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
+import { parseGithubOutput, hermeticEnv, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
 import { isBranchName, prHead } from "./resolve_pr_branch.ts";
 
 /**
@@ -23,7 +23,7 @@ import { isBranchName, prHead } from "./resolve_pr_branch.ts";
  */
 describe("resolve_pr_branch.ts", () => {
   function git(cwd: string, ...args: string[]): string {
-    return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+    return execFileSync("git", args, { cwd, encoding: "utf8", env: hermeticEnv() }).trim();
   }
 
   /**

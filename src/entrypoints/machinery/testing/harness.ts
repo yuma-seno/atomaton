@@ -65,6 +65,16 @@ export function hermeticEnv(): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (key.startsWith("ATOMA_") || key.startsWith("ATOMATON_") || key === "ISSUE_NUMBER" || key.startsWith("FAKE_GH_")) continue;
+    // `git` finds its repository through these, and they OVERRIDE `cwd`: a child started
+    // with `cwd: tempDir` and `GIT_DIR` set runs every `git` command against `GIT_DIR`,
+    // not the temp dir. A test that reconstructs another branch's tree and runs the
+    // suite there (`GIT_DIR=<repo>/.git GIT_WORK_TREE=/tmp/merged-tree bun run test`)
+    // therefore wrote to the checkout: a seed commit on the local branch, `core.worktree`
+    // in `.git/config`, and an index that no longer described the tree. #27 measured it.
+    //
+    // Removed for the same reason `ATOMATON_MACHINERY_ROOT` is: a test spawning a child
+    // must not have the child's writes land somewhere the caller did not name.
+    if (key === "GIT_DIR" || key === "GIT_WORK_TREE" || key === "GIT_INDEX_FILE" || key === "GIT_COMMON_DIR") continue;
     out[key] = value;
   }
   return out;

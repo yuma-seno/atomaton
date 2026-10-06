@@ -28,12 +28,13 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { pathMatches } from "../../src/domain/delivery/path-patterns.ts";
+import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
 
 const CONFIGS = [".github/atomaton/config.yaml", "self/atomaton/config.yaml"];
 
 /** Every file git knows about, for the patterns that are globs rather than paths. */
 function trackedFiles(): string[] {
-  const listed = spawnSync("git", ["ls-files"], { encoding: "utf8" });
+  const listed = spawnSync("git", ["ls-files"], { encoding: "utf8", env: hermeticEnv() });
   expect(listed.status, "could not list the repository's files").toBe(0);
   return listed.stdout.split("\n").filter(Boolean);
 }
