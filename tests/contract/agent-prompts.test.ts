@@ -159,6 +159,102 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * The four parts need ceilings, because the contract said where the parts go but never
+   * where the work itself goes.
+   *
+   * Measured from `origin/atomaton-data` sessions (`sessions/issue-N/engineer.json`) and
+   * comment bodies from the GitHub API. Lengths are characters.
+   *
+   * The engineer's whole four-part report:
+   *
+   *   issue  whole   What I concluded  How I know  could not establish  next
+   *   #2     23,895  17,983            2,435       2,770                707
+   *   #3     12,517  (no four headings at all)
+   *   #4     11,191  (no four headings at all)
+   *
+   * #2's `What I concluded` was `## 1. What it is` through `## Atoma core, and where the
+   * line falls` -- six headings, and the deliverable the issue asked for. #3 and #4 put
+   * the deliverable outside the four parts and barely wrote the headings at all, so the
+   * contract never decided where the artifact goes. That is what "The work itself is not
+   * one of the parts" fixes.
+   *
+   * The atomaton close comment, where `conclude_issue.ts` prints `reason` directly above
+   * `summary`:
+   *
+   *   issue  whole  reason  conclusion  evidence  could not establish  next
+   *   #2     6,301  795     700         2,524     1,608                581
+   *   #3     3,087  181     178         1,657     643                  335
+   *   #4     2,947  1,320   243         857       266                  168
+   *
+   * On #4 `reason` was 44.8% of the comment and restated the 243-character conclusion
+   * below it -- the same judgement written twice, which is what the one-sentence `reason`
+   * and "The conclusion is written once." are for.
+   *
+   * Checkable-sentence share by part, #2's engineer, with a regex close to the one used
+   * earlier: `What I concluded` 63/94 = 67% (17,964 chars), `How I know` 10/11 = 91%
+   * (2,422), `What you could not establish` 6/13 = 46% (2,741), `What happens next` 3/5 =
+   * 60% (687). Across whole reports, #3's engineer was 34/44 = 77% and #4's 36/40 = 90%.
+   * The anchor requirement is doing its work in `How I know` (91%) and the thinnest part
+   * is `What you could not establish` (46%) -- so the part worth narrowing and the part
+   * worth protecting are not the same part. Hence the five-item ceiling on one and the
+   * floor-with-no-ceiling on the other.
+   *
+   * The share metric cannot be compared across this change: narrowing `How I know` shrinks
+   * its own denominator, so its share can fall without anything getting worse. What to
+   * compare before and after is anchored claims per report, not their ratio -- and the
+   * failure condition is not a falling ratio but (a) a claim the conclusion rests on
+   * having no anchor, and (b) a report saying it measured something it did not measure.
+   *
+   * Precedent, in the same direction: `src/entrypoints/tools/mcp/atomaton.ts` already asks
+   * `launch_sub_agent`'s `summary` to be short and explicitly not the full four-part
+   * report. This does the same for the arguments of the call that ends a run.
+   *
+   * Two alternatives were rejected and are not worth re-opening. A character ceiling in
+   * the tool schema: `request_close_issue` ends the session, so an over-length argument
+   * would be a tool error demanding a rewrite as the last thing a run does, and the
+   * numbers worth capping are per part, which a schema cannot see. Dropping the fixed four
+   * parts: the `no-report` mechanism depends on that shape.
+   *
+   * The heading spelling is `How you know`, not `How I know`. The wording this change was
+   * specified from wrote the part as `**How I know.**` in its replacement block, but the
+   * same specification says the four heading strings do not change by one character and
+   * that the test above pins them. That test pins `How you know`, so the pinned spelling
+   * wins and only the ceiling sentence was added.
+   *
+   * Pinned as single-line fragments, because these files are wrapped prose and a phrase
+   * spanning a line break also picks up whatever indentation wraps it.
+   */
+  test("the report contract puts a ceiling on three of its parts and says where the work goes", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8");
+    expect(
+      prompt,
+      "the artifact belongs in the message body, not in a part that reports on the run",
+    ).toContain("not one of the parts");
+    expect(prompt, "a ceiling is a limit, and the conclusion's is two sentences").toContain(
+      "is the ceiling, not the opening move",
+    );
+    // The exact phrase, because the wrap decides whether it is a phrase at all: it was
+    // split across a line break when this was written, and a rewrap could split it again.
+    expect(prompt, "the conclusion's ceiling must stay on one line").toContain(
+      "Two sentences is the ceiling",
+    );
+    expect(prompt, "How you know carries only the claims the conclusion rests on").toContain(
+      "Five items at most.",
+    );
+    expect(prompt, "What happens next is bounded too").toContain("Three sentences at most.");
+    expect(
+      prompt,
+      "the part that goes missing keeps its floor and no ceiling",
+    ).toContain("with no ceiling, because it is the one that goes missing.");
+
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    expect(
+      atomaton,
+      "the close call must add a judgement rather than restate the thread",
+    ).toContain("The conclusion is written once.");
+  });
+
+  /**
    * And it has to say where the report goes when there is no turn left to write it in.
    *
    * A session-ending tool call stops the inference loop the moment it returns, so a run
