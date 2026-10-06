@@ -7685,10 +7685,9 @@ function commandInBodyRefusal(found, what, instead) {
 
 // src/domain/work/thread.ts
 function eventOf(body, readers) {
-  if (readers.waiting(body))
-    return "waiting";
-  if (readers.isAgentResult(body))
-    return readers.handedOff(body) ? "handed-off" : "returned";
+  const ending = readers.ending(body);
+  if (ending !== "")
+    return ending;
   if (readers.requestedAgent(body) !== "")
     return "asked";
   return;
@@ -7719,9 +7718,16 @@ function wasLaunched(comments, readers) {
 
 // src/adapters/github/thread.ts
 var readers = {
-  isAgentResult: (body) => AGENT_TAG.has(body),
-  handedOff: (body) => ENDED_TAG.read(body) === "handoff",
-  waiting: (body) => ENDED_TAG.read(body) === "waiting",
+  ending: (body) => {
+    const ended = ENDED_TAG.read(body);
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done")
+      return "returned";
+    return "";
+  },
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
