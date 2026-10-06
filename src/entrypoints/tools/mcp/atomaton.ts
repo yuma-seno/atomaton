@@ -21,6 +21,7 @@
  */
 import { gh } from "../../../adapters/github/gh.ts";
 import { dispatchSubAgent } from "../lib/dispatch_sub_agent.ts";
+import { parentIssueOf } from "../../../adapters/github/parent-issue.ts";
 import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
 import { concludeIssue, type ConcludeIssueResult } from "../lib/conclude_issue.ts";
@@ -136,7 +137,60 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   const dispatched: string[] = [];
   const errors: string[] = [];
 
-  for (const { issue, agent } of validTasks) {
+  // Every task must name an issue that is actually UNDER this one.
+  //
+  // `launch_sub_agent` used to dispatch whatever number it was handed, and the
+  // dispatch comment says "sub-task" whatever the truth is — so a number that was
+  // never a child of this issue was announced as one, counted as one, and waited on
+  // as one. #16 hit it: the atomaton created #18 with `sub_issue: false` (a genuine
+  // "stands alone" child), dispatched it anyway, and the parent's aggregation then
+  // waited for a child GitHub does not record it as having. Every sub-issue was
+  // closed and the parent still never woke (#29; the empty-agent crash beside it is
+  // #30).
+  //
+  // Also catches the converse, which is the louder half: an issue that is a child of
+  // SOME OTHER issue would be pulled into this subtree by a dispatch it does not
+  // belong to.
+  //
+  // Checked here rather than in `dispatchSubAgent`, because it needs to know WHICH
+  // node this run is on — and that is this tool's own `ISSUE_NUMBER`, not something
+  // `dispatchSubAgent` can see. It reads the parent rather than a label: GitHub's
+  // sub-issue link is the edge the aggregation counts, so it is the edge this has to
+  // agree with (`adapters/github/parent-issue.ts`).
+  //
+  // Skipped entirely when this run does not know its own number: an empty parent is
+  // not a parent of zero, and refusing every dispatch on a run whose environment is
+  // broken would replace a wrong dispatch with no dispatch at all.
+  const repo = process.env.GITHUB_REPOSITORY ?? "";
+  const parentNum = parentIssue === "" ? 0 : Number(parentIssue);
+  const unrelated: string[] = [];
+  const tasks = parentNum === 0 ? validTasks : validTasks.filter(({ issue }) => {
+    const found = parentIssueOf(repo, issue);
+    if (!found.known) {
+      // A parent that could not be read is not a parent that is absent. Dispatching
+      // on a guess would be the defect this check exists for, so it is refused and
+      // the atomaton is told why — it can retry, or create the link first.
+      errors.push(`#${issue}: could not read its parent (${found.why}), so nothing was dispatched onto it`);
+      return false;
+    }
+    if (found.parent === parentNum) return true;
+    unrelated.push(found.parent === 0 ? `#${issue} (a root issue)` : `#${issue} (a child of #${found.parent})`);
+    return false;
+  });
+  if (unrelated.length) {
+    // Named individually and together, because the atomaton has to act on each one
+    // and the shape of the mistake is what tells it what to do: create the link, or
+    // stop treating the number as its own.
+    errors.push(
+      `not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` +
+        "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " +
+        "sub-issue links — an issue not linked under this one is never counted, so a dispatch onto " +
+        "it would leave this issue waiting forever. Create it with `github__create_issue` " +
+        "(`sub_issue: true`, the default) so the link exists.",
+    );
+  }
+
+  for (const { issue, agent } of tasks) {
     try {
       dispatchSubAgent(issue, agent, notify);
       dispatched.push(`#${issue}→${agent}`);

@@ -1145,6 +1145,125 @@ describe("mcp/atomaton.ts", () => {
   });
 
   /**
+   * #29. `launch_sub_agent` used to dispatch whatever number it was handed, and the
+   * dispatch comment says "sub-task" whatever the truth is — so an issue that is not
+   * under this one was announced, counted and waited on as a child. The aggregation
+   * counts GitHub's sub-issue links, so a dispatch onto an unlinked issue leaves the
+   * parent waiting forever.
+   *
+   * #16 is the observed case: #18 was created with `sub_issue: false`, dispatched
+   * anyway, and the parent never woke when everything closed.
+   */
+  test("launch_sub_agent refuses an issue that is not a child of this one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-parent-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 30, method: "tools/call",
+          params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+        },
+        {
+          ...fakeGhSeam(),
+          ISSUE_NUMBER: "3",
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // #7's parent is nothing — a root issue, not a child of #3.
+            { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+          ]),
+        },
+      );
+      expect(r.result.isError).toBe(true);
+      expect(r.result.content[0].text).toContain("not a child of #3");
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      // Nothing was started, and no marker was written on #7: the refusal happens
+      // before the dispatch, not after it.
+      expect(calls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(false);
+      expect(calls.some((c) => c.includes("POST") && c.some((a) => a.includes("issues/7/comments")))).toBe(false);
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  /** The converse: a child of SOME OTHER issue is not this one's to dispatch. */
+  test("launch_sub_agent refuses an issue that is a child of a different parent", async () => {
+    const r = await sendRequest(
+      "atomaton.ts",
+      {
+        jsonrpc: "2.0", id: 31, method: "tools/call",
+        params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+      },
+      {
+        ...fakeGhSeam(),
+        ISSUE_NUMBER: "3",
+        FAKE_GH_RESPONSES: JSON.stringify([
+          { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 99 } } } } }) },
+        ]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("a child of #99");
+  });
+
+  /**
+   * A parent that could not be read is not a parent that is absent. Dispatching on a
+   * failed read is the same defect this check exists for, so the read failing refuses
+   * too — and says which read failed.
+   */
+  test("launch_sub_agent refuses when the parent could not be read", async () => {
+    const r = await sendRequest(
+      "atomaton.ts",
+      {
+        jsonrpc: "2.0", id: 32, method: "tools/call",
+        params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+      },
+      {
+        ...fakeGhSeam(),
+        ISSUE_NUMBER: "3",
+        // No rule for it, so the fake exits 1 and the read does not answer.
+        FAKE_GH_RESPONSES: JSON.stringify([]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("could not read its parent");
+  });
+
+  // The ordinary path with the check in force: the issue really is under this one.
+  test("launch_sub_agent dispatches a genuine child of this issue", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-child-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 33, method: "tools/call",
+          params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+        },
+        {
+          ...fakeGhSeam(),
+          ISSUE_NUMBER: "3",
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 3 } } } } }) },
+            { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
+            { match: ["api", "issues/7/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=engineer -->" }]) },
+            { match: ["api", "issues/7", "--jq"], stdout: "" },
+            { match: ["issue", "edit"] },
+            { match: ["workflow", "run"] },
+            { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) },
+          ]),
+        },
+      );
+      expect(r.result.isError).toBe(false);
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      expect(calls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(true);
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  /**
    * A sub-issue is created by `create_issue` and started here, and a person may
    * comment in between. If that comment asks for an agent, this dispatch would be a
    * second run on a node that already has one.
@@ -1254,6 +1373,7 @@ describe("mcp/atomaton.ts", () => {
           ISSUE_NUMBER: "3",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 3 } } } } }) },
             { match: ["api", "issues/7/comments", "POST"], stdout: "555" },
             { match: ["api", "issues/7/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=engineer -->" }]) },
             { match: ["api", "issues/7", "--jq"], stdout: "" },
