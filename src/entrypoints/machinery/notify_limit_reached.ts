@@ -80,6 +80,12 @@ function main(): void {
   // actually needs here is whether to retry or to re-scope, and a tally answers that.
   const spent = toolCallTally(readSession(values.session));
 
+  // Not a turn comment, deliberately: on this path `post_result_comment` has already
+  // posted the run's report and written the ending (`limit`), and that is what answers
+  // "whose turn is this node". A second ending here would say the same thing twice, and
+  // a second `ENDED_TAG` is a lie about how many turns ended. This is a notice ABOUT the
+  // ending, addressed to the person the report could not reach — the one thing it adds
+  // is the tally of what the run spent its budget on.
   gh(
     "issue",
     "comment",

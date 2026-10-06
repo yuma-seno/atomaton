@@ -7,7 +7,7 @@ import {
 } from "../../../app/aggregation.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
-import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
+import { turnCommentBody } from "../../../adapters/github/turn-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 
 export interface ConcludeIssueResult {
@@ -93,12 +93,15 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
     // The request goes above the reason and summary, not after them. It is the
     // only sentence in the comment addressed to the person reading it.
     //
-    // Tagged `exclude`: it is addressed to the person, not to the model. An untagged
-    // copy joins the next run's context as something the agent was told, when what it
-    // actually says is that a person was asked to close their own issue.
+    // `ended: "done"` because this IS the turn ending: the run is over, the issue stays
+    // open, and the ball is with the person who was just asked to close it. Leaving it
+    // out left the node's last turn event as the `asked` that started the run, so the
+    // guard read "the ball is with an agent" and DELETED the person's next comment —
+    // which, on this path, is their agreement to close the issue. #90 on the failure
+    // notice, and the same defect here, in code written to fix #90. See `turn-comment.ts`.
     const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
     mustSucceed(
-      gh("issue", "comment", String(issue), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${request}`),
+      gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request })),
       `comment on issue #${issue}`,
     );
     // stderr, where the tool's own decisions belong. Putting it in the result is
@@ -107,7 +110,19 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
     return { outcome: "close-requested" };
   }
 
-  mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", body), `comment on issue #${issue}`);
+  // The conclusion itself. `audience: "model"` because this is what the parent agent
+  // reads when it aggregates what its children found — the reason and the summary are
+  // written for that reader, and were reaching it only because an untagged comment is
+  // included by default rather than by anybody deciding.
+  //
+  // `ended: "done"` for the same reason as the branch above: this run is over and the
+  // session ends on this call. It closes the issue just below, so the thread has an
+  // answer either way — but a close is not an event to `domain/work/thread.ts`, and the
+  // turn's ending has to be written down rather than inferred from one.
+  mustSucceed(
+    gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body })),
+    `comment on issue #${issue}`,
+  );
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);

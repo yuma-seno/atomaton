@@ -423,6 +423,12 @@ export function buildCommentBody(args: {
   // than there are facts.
   const ending = endingHere(args);
 
+  // This comment is the agent's own report, not a turn comment of the kind
+  // `turn-comment.ts` wraps: it carries `AGENT_TAG` and `CHANGED_TAG` as bookkeeping
+  // (which `withoutBookkeeping` strips on the way back in) and it is deliberately NOT
+  // `llm-context`-tagged, because it is the thing the next run is supposed to read. The
+  // one thing it shares with every other turn-ending comment is the ending, so that is
+  // what it has in common with them and nothing else.
   const lines = [
     AGENT_TAG.write(args.agent),
     CHANGED_TAG.write(args.changed === true ? "yes" : "no"),

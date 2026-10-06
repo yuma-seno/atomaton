@@ -21,7 +21,8 @@
  */
 import { gh } from "../../../adapters/github/gh.ts";
 import { dispatchSubAgent } from "../lib/dispatch_sub_agent.ts";
-import { ENDED_TAG, LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
+import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
+import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
 import { concludeIssue, type ConcludeIssueResult } from "../lib/conclude_issue.ts";
 import { describeGateResult, needsAttention } from "../../../app/aggregation.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -171,14 +172,19 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   // carry the tag.
   const complete = errors.length === 0;
   if (parentIssue && (dispatched.length || summary)) {
-    const bodyLines = [LLM_CONTEXT_TAG.write("exclude")];
-    // The ending, on the thread. `launch_sub_agent` ends the session and posts no
-    // result comment, so without this the node's last event reverts to the `asked`
-    // that started the run -- and the aggregation gate reads that as a request nobody
-    // took up, refusing to re-invoke the parent with `parent-busy`. `waiting` says
-    // the request was taken up and the next work is on a child. See
-    // `domain/work/thread.ts`.
-    if (complete) bodyLines.push(ENDED_TAG.write("waiting"));
+    // The ending goes on through `turnHeader`, and only when the session really ends.
+    // `launch_sub_agent` ends the session on a COMPLETE dispatch and posts no result
+    // comment then, so without `waiting` the node's last event reverts to the `asked`
+    // that started the run — and the aggregation gate reads that as a request nobody
+    // took up, refusing to re-invoke the parent with `parent-busy`. `waiting` says the
+    // request was taken up and the next work is on a child. See `domain/work/thread.ts`.
+    //
+    // A partial dispatch keeps the session OPEN, so it is not waiting and must not carry
+    // the tag, which is why the header is built from `complete` and the tags are not
+    // baked into the body below.
+    const bodyLines = complete
+      ? turnHeader({ ended: "waiting", audience: "person" })
+      : [LLM_CONTEXT_TAG.write("exclude")];
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));
     }
@@ -321,14 +327,25 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
   }
 
   const next = soFar + 1;
-  // Posted before the dispatch, and excluded from the model's context: it is a
-  // record for a person reading the issue later, and the agent about to be started
-  // is told the same thing by the tool result.
+  // Posted before the dispatch, and addressed to a person reading the issue later: the
+  // agent about to be started is told the same thing by the tool result, and this run's
+  // session ends here.
+  //
+  // `handoff`, not `waiting`: the new run is on THIS node and continues this turn — the
+  // dispatch passes `answersRequest`, which is the same claim in the thread's terms. A
+  // comment with no ending would leave the node's last event as the `asked` this run is
+  // fulfilling, which is indistinguishable from a request nobody took up. See
+  // `turn-comment.ts` for why the ending is a required argument.
   gh(
     "issue", "comment", number,
     "--body",
-    `${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: rebuilding the environment and restarting \`${agent}\` ` +
-      `(reload ${next} of ${limit}). Reason: ${args.reason}`,
+    turnCommentBody({
+      ended: "handoff",
+      audience: "person",
+      body:
+        `Atomaton: rebuilding the environment and restarting \`${agent}\` ` +
+        `(reload ${next} of ${limit}). Reason: ${args.reason}`,
+    }),
   );
 
   const outcome = dispatchRunner({

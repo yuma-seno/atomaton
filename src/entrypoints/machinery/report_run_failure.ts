@@ -39,7 +39,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { redact } from "../../shared/redaction.ts";
-import { ENDED_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { turnHeader } from "../../adapters/github/turn-comment.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -82,21 +82,25 @@ export function failureNotice(
 ): string {
   const mention = mentionPrefix(notify);
   const lines = [
-    LLM_CONTEXT_TAG.write("exclude"),
-    // The turn's ending, on the thread. A failed run gave the node back to a person --
-    // it is not processing anything -- but without this the node's last turn-changing
-    // event stays the `asked` that STARTED the run, and the guard reads that as
-    // "the ball is with an agent" and deletes the person's next comment.
+    // The turn's ending, through the one place that writes turn headers. A failed run
+    // gave the node back to a person -- it is not processing anything -- but without
+    // this the node's last turn-changing event stays the `asked` that STARTED the run,
+    // and the guard reads that as "the ball is with an agent" and deletes the person's
+    // next comment.
     //
     // That is what #90 was: this notice tells the reader to comment `/agent` to
     // continue, and the guard then removed exactly that comment, so the run could only
-    // be restarted by hand. `ended=done` is the `returned` ending -- the same one a run
-    // that finished and reported gets -- and it is true here.
+    // be restarted by hand. `done` is the `returned` ending -- the same one a run that
+    // finished and reported gets -- and it is true here.
+    //
+    // Addressed to a person: it names one and tells them what to do, and the next run
+    // can do nothing with it but carry it.
     //
     // No `AGENT_TAG`: this is not the agent's result comment, and tagging it as one
     // would file a failure with the runs that reported, which is the distinction
-    // `domain/work/thread.ts` keeps.
-    ENDED_TAG.write("done"),
+    // `domain/work/thread.ts` keeps. `turnHeader` writes the two tags this DOES carry
+    // and nothing else, which is why the note fits here rather than in the wrapper.
+    ...turnHeader({ ended: "done", audience: "person" }),
     `${mention}Atomaton: \`${agent}\` did not finish — the run failed.`,
     "",
     "**The session was saved.** What this run worked out is still there.",

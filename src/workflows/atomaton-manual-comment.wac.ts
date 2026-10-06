@@ -270,6 +270,10 @@ const commandErrorStep = new TypedOutputsStep({
   // Tagged `exclude`: this is addressed to the person who typed the command, not to
   // the model. An untagged copy joins the next run's context as something the agent
   // was told, when what it actually says is that somebody's command was malformed.
+  //
+  // Not a turn comment: the command never parsed, so it never became an `asked` event
+  // and there is no turn here to end. Writing an ending would put a turn on the thread
+  // that nobody started.
   run: `gh issue comment "\${NUMBER}" --body "${LLM_CONTEXT_TAG.write("exclude")}
 Atomaton command error: \${ERROR}"
 `,
@@ -331,6 +335,10 @@ ${scriptCommandWithArgs(dispatchPrValidationRef, {
  * Tagged out of the model's context. It is addressed to the person who typed the
  * command, and the agent that eventually runs is told the same thing by its own
  * dispatch.
+ *
+ * Not a turn comment: the person's `/agent` on the pull request IS the `asked`, and the
+ * turn is still the agent's while validation runs. An ending here would hand the node
+ * back to a person while the run they asked for was on its way.
  */
 const prWaitingStep = new TypedOutputsStep({
   name: "Say the run is waiting for CI",
