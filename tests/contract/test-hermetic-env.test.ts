@@ -46,6 +46,17 @@ const SPAWNS = /(?:^|[^\w.])(?:spawn|spawnSync|execFileSync|execSync|execFile)\s
 /** A spawn target that is this repository's own runner, rather than `git` or `bash`. */
 const RUNS_BUN = /["'`]bun["'`]/;
 
+/**
+ * A spawn target that is `git`.
+ *
+ * `git` finds its repository through `GIT_DIR`/`GIT_WORK_TREE`, which OVERRIDE `cwd`, so
+ * a child `git` started from a test inherits them and writes somewhere the test did not
+ * name. #27 measured the damage: a suite run with those set to reconstruct another
+ * branch's tree wrote a seed commit onto this repository's own local branch, set
+ * `core.worktree` in `.git/config`, and left an index that no longer described the tree.
+ */
+const RUNS_GIT = /["'`]git["'`]/;
+
 /** Every `.test.ts` under a directory, at any depth. */
 function testFiles(dir: string): string[] {
   return readdirSync(dir, { recursive: true })
@@ -67,6 +78,29 @@ describe("a test that spawns a script", () => {
       `import hermeticEnv() from src/entrypoints/machinery/testing/harness.ts and pass it as \`env\`. ` +
         `A child started with ...process.env reads the run's deployed config and the run's own ops log ` +
         `instead of this test's fixtures, which is red in an agent's run and green in CI: ${offenders.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  /**
+   * The `git` half of the same ratchet, from #27.
+   *
+   * A test that runs `git` in a temp dir still inherits `GIT_DIR`/`GIT_WORK_TREE` from the
+   * caller, and those OVERRIDE `cwd`. The measured consequence was a run that rewrote
+   * this repository's checkout -- a seed commit on its own branch, `core.worktree` in
+   * `.git/config` -- while every assertion in the suite passed. `hermeticEnv()` removes
+   * them, so a test that spawns `git` has to pass it, the same way the `bun` ones do.
+   */
+  test("does not hand a spawned git the run's own GIT_DIR or GIT_WORK_TREE", () => {
+    const offenders = [...testFiles("src"), ...testFiles("tests")].filter((path) => {
+      const source = readFileSync(path, "utf8");
+      return SPAWNS.test(source) && RUNS_GIT.test(source) && !source.includes("hermeticEnv(");
+    });
+
+    expect(
+      offenders,
+      `import hermeticEnv() from src/entrypoints/machinery/testing/harness.ts and pass it as \`env\` ` +
+        `to any \`git\` you spawn. GIT_DIR/GIT_WORK_TREE override \`cwd\`, so a child git reads and ` +
+        `writes the repository the caller pointed it at rather than this test's temp dir: ${offenders.join(", ")}`,
     ).toEqual([]);
   });
 
