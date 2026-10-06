@@ -1,5 +1,5 @@
 {
-  "version": "v0.19.0",
+  "version": "v0.20.0",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -75,8 +75,10 @@
     ".github/atomaton-runtime/tools/mcp/web.ts",
     ".github/atomaton-runtime/tools/packages.json",
     ".github/atomaton/README.md",
+    ".github/atomaton/agent-definitions/architect.md",
     ".github/atomaton/agent-definitions/atomaton.md",
     ".github/atomaton/agent-definitions/engineer.md",
+    ".github/atomaton/agent-definitions/free.md",
     ".github/atomaton/agent-definitions/reviewer.md",
     ".github/atomaton/config.yaml",
     ".github/atomaton/prompt-template.md",

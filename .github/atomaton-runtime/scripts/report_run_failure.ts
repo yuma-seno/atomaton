@@ -97,6 +97,12 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 
+// src/adapters/github/turn-comment.ts
+function turnHeader(h) {
+  const context = h.audience === "model" ? "include" : "exclude";
+  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -133,8 +139,7 @@ function logExcerpt(text) {
 function failureNotice(agent, notify, runUrl, excerpt) {
   const mention = mentionPrefix(notify);
   const lines = [
-    LLM_CONTEXT_TAG.write("exclude"),
-    ENDED_TAG.write("done"),
+    ...turnHeader({ ended: "done", audience: "person" }),
     `${mention}Atomaton: \`${agent}\` did not finish \u2014 the run failed.`,
     "",
     "**The session was saved.** What this run worked out is still there.",
