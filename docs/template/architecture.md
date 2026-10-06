@@ -56,7 +56,7 @@ Three categories, and the test that separates them:
 | | Where it lives | Examples |
 | --- | --- | --- |
 | **Borrowed vocabulary** — concepts GitHub *chose*, which we adopt on purpose | `domain/`, keeping GitHub's own names | issue, pull request, review, merge, the tree, the thread |
-| **Mechanism** — how GitHub happens to implement something | `adapters/` | label, check run, `workflow_dispatch`, GraphQL fields, orphan branches, the 60-minute cap |
+| **Mechanism** — how GitHub happens to implement something | `adapters/` | label, check run, `workflow_dispatch`, GraphQL fields, orphan branches, the job timeout |
 | **Defect** — where GitHub does not do what it appears to | one table, in `adapters/github/` | `closingIssuesReferences` dropped, search tokenisation, no workflow run for our own token's events |
 
 Renaming `Issue` to `WorkItem` is not on the list. It is a generalisation nobody

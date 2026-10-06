@@ -23,11 +23,16 @@ What an agent's *tools* can and cannot reach is a different boundary —
 ## What bounds a run
 
 Not configurable, on purpose. The runner gives an agent whatever is left of the
-60-minute job it runs inside, minus five minutes for what follows it — saving the
+four-hour job it runs inside, minus five minutes for what follows it 窶・saving the
 session, posting the result, dispatching whatever comes next. A run that stops on
 that budget saves its session and can be continued with `/<agent>`; a run killed by
 the job's timeout reaches none of those steps and its work is gone. There is no
 ceiling on turns, and a new run gets a fresh budget.
+
+That figure is the runner's own `timeout-minutes` (`JOB_TIMEOUT_MINUTES` in the
+runner's source, 240), and it is a ceiling rather than a target — a run that finishes
+in ten minutes ends in ten. This paragraph said sixty for a while, which is a quarter
+of the budget an agent is actually given.
 
 A number in `config.yaml` could not have said that. It would have been a guess about
 how long the checkout, the container build and the environment setup take on the
