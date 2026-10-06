@@ -525,4 +525,142 @@ describe("agent prompt contracts", () => {
       ).toEqual([]);
     }
   });
+
+  /**
+   * The tree, in the shared prompt, because every role acts on a node and means the work
+   * under it.
+   *
+   * This lived in `docs/work/how-it-works/work-is-a-tree-of-issues.md`, which an adopter's
+   * tree does not have: the documentation is this repository's, and the prompt is what
+   * every agent actually reads. So the shape of the work was described in the one place
+   * no agent looks, and each role was left to infer it -- which is how #80's deadlock
+   * (a close condition naming the default branch) could be written in good faith.
+   *
+   * The branch half is pinned because it is the operational consequence: a sub-issue's PR
+   * merges into its parent's branch, so the close condition is checkable there and not on
+   * the default branch.
+   */
+  test("the shared prompt says work is a tree and where a branch merges back to", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8");
+    expect(prompt, "work is a tree, and a pull request is a leaf").toContain(
+      "Work is a tree of issues, and a pull request is a leaf",
+    );
+    expect(prompt, "a sub-issue's branch merges back into its parent's").toContain(
+      "A sub-issue's branch is cut from its parent's and merges back into it",
+    );
+    expect(prompt, "so the default branch has none of it yet").toContain(
+      "the top of your part of the tree delivers it",
+    );
+  });
+
+  /**
+   * Who is asked, and who is not -- the split that stops a design question reaching a
+   * person who cannot answer it.
+   *
+   * Measured: a person asking for retries does not know the backoff, the error classes,
+   * or whether the operation is idempotent. Asking them puts a design decision in front
+   * of somebody who cannot make it and gets a guess back. The purpose is the other half,
+   * and only they own it.
+   *
+   * The three sentences are pinned together because the split only holds as a whole:
+   * what to ask (the purpose), what not to (the design), and what to do when the answer
+   * is wrong (say so rather than build it or hand it back).
+   */
+  test("the shared prompt splits what to ask from what to derive, and forbids agreement", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8");
+    // The phrasing these pin is on one line. These files are wrapped prose, and a
+    // phrase spanning a break also picks up whatever indentation wraps it -- so what
+    // is asserted is the part that is genuinely one line, and it is asserted for the
+    // meaning rather than the wrapping.
+    expect(prompt, "the goal is the asker's").toContain("Ask about the goal, never about the means");
+    expect(prompt, "the means is not a question they can answer").toContain(
+      "is not a question they can answer",
+    );
+    expect(prompt, "a question about the means is a decision put to the wrong person").toContain(
+      "a question about those puts a",
+    );
+    expect(prompt, "who cannot make it").toContain("decision in front of somebody who cannot make it");
+    expect(prompt, "and a wrong diagnosis is corrected, not agreed with").toContain(
+      "Their answer can be wrong",
+    );
+    expect(prompt, "agreeing with a diagnosis that is wrong helps nobody").toContain(
+      "Agreeing with a diagnosis you can see is wrong helps nobody",
+    );
+    expect(prompt, "the correction says what to do instead").toContain("what you would do instead");
+    // The purpose comes first, and the enquiry is a thing the run does rather than a
+    // rule it reads -- measured: an agent asked for retries does not know the backoff,
+    // and a person asked for one does not either.
+    expect(prompt, "what it is for is established before what to do").toContain(
+      "Work out what it is for before you work out what to do",
+    );
+    expect(prompt, "and an answer already written down is read rather than asked for").toContain(
+      "Read before you ask",
+    );
+  });
+
+  /**
+   * `architect` exists, is reachable, and is told to read through a delegate rather than
+   * itself.
+   *
+   * The whole reason it is a separate agent is cost: it is the most expensive model in
+   * the tree, and a prompt token is resent on every turn of the session. So what it
+   * reads with `files_readonly` stays in the session and is paid for repeatedly, while a
+   * `delegate_readonly` summary is one paragraph. The definition has to say which is the
+   * habit, or the model with the most context to gain is the one that fills it fastest.
+   *
+   * Pinned as a set because each alone is not the design: the agent must exist, be
+   * dispatchable by name from `atomaton`, hold the read-only servers, and be told to
+   * prefer the delegate.
+   */
+  test("architect exists, reads through the delegate, and is handed work by atomaton", () => {
+    const architect = readFileSync("src/content/agent-definitions/architect.md", "utf8");
+    expect(architect, "the read-only pair, and nothing that writes").toContain("- files_readonly");
+    expect(architect, "the delegate is the habit, not the fallback").toContain("delegate_readonly");
+    expect(architect, "and the reason is the session it would otherwise carry").toContain(
+      "one summary",
+    );
+    // No shell: it decides, and a shell is a way to act on the decision.
+    expect(architect, "an architect that can run things is an engineer").not.toContain("- shell");
+
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    expect(atomaton, "atomaton has to know the name to dispatch it").toContain("  - architect");
+    expect(atomaton, "and the contract says what to hand up").toContain(
+      "When to hand a decision to `architect`",
+    );
+    expect(atomaton, "the purpose is explicitly not the thing to hand up").toContain(
+      "Do not hand up what the work is *for*",
+    );
+  });
+
+  /**
+   * The four places a written thing goes, in the engineer's own contract.
+   *
+   * Not style advice: each line is a fact that has exactly one place it can live. The
+   * reason a change was made is not in the diff, which is why it is in the commit; the
+   * alternative somebody ruled out is in no artifact at all, which is why it is the
+   * comment. Without this, the pull is to write the same thing in all four.
+   */
+  test("the engineer is told what belongs in code, tests, commits and comments", () => {
+    const engineer = readFileSync("src/content/agent-definitions/engineer.md", "utf8");
+    expect(engineer).toContain("Code says how");
+    expect(engineer).toContain("A test says what");
+    expect(engineer).toContain("A commit says why");
+    expect(engineer).toContain("A comment says why not");
+  });
+
+  /**
+   * A path with a line is written the way GitHub links it.
+   *
+   * `path/to/file.ts:42` is a link in a comment, and prose about where something is is
+   * not. The report contract already asked for "a path with a line number"; what it did
+   * not say is the one spelling the page can follow, which is the difference between an
+   * anchor a reader clicks and one they search for by hand.
+   */
+  test("the report writes an anchor in the form the page turns into a link", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8");
+    expect(prompt).toContain("`path/to/file.ts:42`");
+    expect(prompt, "and says why that spelling rather than another").toContain(
+      "GitHub turns that into a link to",
+    );
+  });
 });
