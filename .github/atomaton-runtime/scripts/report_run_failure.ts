@@ -134,6 +134,7 @@ function failureNotice(agent, notify, runUrl, excerpt) {
   const mention = mentionPrefix(notify);
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
+    ENDED_TAG.write("done"),
     `${mention}Atomaton: \`${agent}\` did not finish \u2014 the run failed.`,
     "",
     "**The session was saved.** What this run worked out is still there.",
