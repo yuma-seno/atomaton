@@ -379,6 +379,12 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
     "--field", `dispatched_by=${d.dispatchedBy ?? ""}`,
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) return "failed";
-  logDispatch(d.type, d.agent, { number: Number(d.number) });
+  // Which of the two this dispatch is, judged by the target node: a run started on
+  // THIS node moves its turn on, one started on another node leaves this node waiting.
+  // The caller passes the number of the node it is on, so the comparison is exact
+  // rather than a guess. See `ops-log.ts` for what the two op names decide.
+  const here = (process.env.ISSUE_NUMBER ?? "").trim();
+  const elsewhere = here !== "" && String(d.number) !== here;
+  logDispatch(d.type, d.agent, { number: Number(d.number), ...(elsewhere ? { elsewhere: true } : {}) });
   return "dispatched";
 }

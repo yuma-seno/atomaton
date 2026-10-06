@@ -107,6 +107,35 @@ describe("guard_comment_during_run.ts", () => {
     }
   });
 
+  // The notice used to name the `atomaton/in-progress` label and tell the person to
+  // wait for it to come off. The decision never read the label — it reads the thread —
+  // so removing the label changed nothing and the next comment was deleted the same
+  // way. Observed on #17. The notice now says what the decision actually looked at.
+  test("the notice says the ball is with an agent, not that a label is active", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer"]),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      const notice = r.ghCalls.find((c) => c.includes("comment"))?.join(" ") ?? "";
+      expect(notice).toContain("the ball is with an agent");
+      expect(notice).not.toContain("label");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   // A failed read is not "the ball is with a person". The guard exists to keep a
   // comment out of a race, so an answer it could not determine must not be the one
   // that lets the comment through.

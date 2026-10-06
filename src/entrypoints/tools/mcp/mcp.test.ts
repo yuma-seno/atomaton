@@ -1384,6 +1384,33 @@ describe("mcp/files.ts", () => {
     expect(r.result.content[0].text).toContain("No match");
   });
 
+  /**
+   * `path` accepts one place or several, and the advertised schema is an `anyOf` of a
+   * string and an array. A model reaching for "several" can send the array serialised
+   * — `'["src/one.ts","src/deep"]'` — which the string arm accepts, so the whole text
+   * reached `grep` as one path and the error named a file that does not exist. Both
+   * spellings have to search the same places.
+   */
+  test("grep accepts several places, spelled as an array or as its JSON text", async () => {
+    const root = fixture({
+      "src/one.ts": "wanted\n",
+      "src/deep/two.ts": "wanted\n",
+      "other/three.ts": "wanted\n",
+    });
+    const asArray = (await call(root, "grep", { pattern: "wanted", path: ["src/one.ts", "src/deep"] })).result;
+    const asText = (await call(root, "grep", { pattern: "wanted", path: '["src/one.ts","src/deep"]' })).result;
+    expect(asArray.isError).toBe(false);
+    expect(asText.isError).toBe(false);
+    expect(asArray.content[0].text).toBe(asText.content[0].text);
+    expect(asText.content[0].text).toContain("src/one.ts:1:");
+    expect(asText.content[0].text).toContain("src/deep/two.ts:1:");
+    expect(asText.content[0].text).not.toContain("other/three.ts");
+    // A string that is not a serialised list stays one path, so an ordinary miss still
+    // reports a missing file rather than searching something the caller did not name.
+    const literal = (await call(root, "grep", { pattern: "wanted", path: "src/nope" })).result;
+    expect(literal.isError).toBe(true);
+  });
+
   test("glob finds files by path and grep finds them by content", async () => {
     const root = fixture({ "src/one.ts": "alpha\n", "src/deep/two.ts": "beta\n", "notes.md": "alpha\n" });
     const text = (await call(root, "glob", { pattern: "src/**/*.ts" })).result.content[0].text;
