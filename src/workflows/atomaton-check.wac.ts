@@ -240,6 +240,29 @@ const toolsJob = new DefinedJob(
       shell: "bash",
       run: `${scriptCommand(checkLiveToolsRef)}\n`,
     }),
+    // The end-to-end suite, in the one job that has the CLI installed.
+    //
+    // `bun run test` does not include `tests/e2e`, and until this step NOTHING ran it:
+    // the suite skips itself without `ATOMA_BIN`, `atoma-cli.ts` installs to
+    // `/usr/local/bin`, and the helper looks beside the checkout. So the one part of
+    // the suite that starts a real sub-run and reads a real tool result had never run
+    // anywhere -- which is why #25 (a delegate that could not read a file) could only
+    // be argued about from the outside.
+    //
+    // Here rather than in the pull request's own matrix, and for the reason this job
+    // exists at all: it is the one job that installs the CLI, and the matrix would
+    // install it once per declared check to run the same suite against the same tree.
+    // This job holds no repository secret, so nothing here is a credential a pull
+    // request could reach.
+    new TypedOutputsStep({
+      name: "Run the end-to-end suite against the real CLI",
+      shell: "bash",
+      // `ATOMA_BIN` is what the helper looks for, and `/usr/local/bin/atoma` is where
+      // the install step puts it. Both platforms: the helper's default is the
+      // sibling checkout, which only exists on a developer's machine.
+      env: { ATOMA_BIN: "/usr/local/bin/atoma" },
+      run: `bun run test:e2e\n`,
+    }),
   ],
 );
 

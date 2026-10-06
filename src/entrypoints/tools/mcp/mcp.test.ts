@@ -1468,6 +1468,90 @@ describe("mcp/delegate.ts", () => {
       removeTemp(dirname(empty));
     }
   });
+
+  /**
+   * #25: the sub-run the reviewer's `delegate_readonly__run` starts must actually carry
+   * `files_readonly`.
+   *
+   * A sub-run with no tools answers every task with "I could not read it", which reads
+   * as a refusal rather than as the environment being wrong — and the reviewer has no
+   * shell, so this is the one path it has for offloading a large read.
+   *
+   * The check is on the tools file the server hands the sub-run, because that is the
+   * thing that decides it: `readToolsFile` writes `SUB_RUN_TOOLS` into a temp file and
+   * passes `--tools-file`. Its servers come from `--agent-def`'s sibling
+   * `delegate_readonly.tools.yaml`, resolved through `--delegates-dir`.
+   *
+   * Both spellings of the path are tried — layout-relative (what `defaults.yaml` passes,
+   * resolved by `machineryPath`) and absolute (what a caller with no
+   * `ATOMATON_MACHINERY_ROOT` gets) — because a path that resolves to nothing is fatal
+   * at startup and looks from the outside like the entry not being wired at all.
+   */
+  test("the read-only delegate's sub-run is given files_readonly, both ways the path resolves", async () => {
+    const start = async (delegatesDir: string) => {
+      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-def", "delegate_readonly.md", "--delegates-dir", delegatesDir], {
+        env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
+        cwd: process.cwd(),
+      });
+      let stderr = "";
+      const started = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`server did not start: ${stderr}`)), 5000);
+        child.stderr.on("data", (d) => {
+          stderr += d.toString();
+          if (stderr.includes("Starting atomaton-delegate-mcp-server")) {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        child.on("exit", (code) => {
+          clearTimeout(timer);
+          reject(new Error(`delegate exited ${code}: ${stderr}`));
+        });
+      });
+      await started;
+      child.kill();
+      return stderr;
+    };
+
+    // Layout-relative, which is what `tools/defaults.yaml` passes. `machineryPath`
+    // resolves it against ATOMATON_MACHINERY_ROOT, and with that unset the cwd is the
+    // job's own checkout — which is exactly the case this has to survive.
+    const relative = await start("src/entrypoints/tools/delegates");
+    expect(relative).toContain("servers=files_readonly");
+    expect(relative).toContain("def=delegate_readonly.md");
+
+    // And the fallback, with no `--delegates-dir` at all: the directory beside the
+    // script. A run whose caller forgot the flag must still start, or the reviewer's
+    // only read path is dead for a reason nothing names.
+    const fallback = await start(join(process.cwd(), "src/entrypoints/tools/delegates"));
+    expect(fallback).toContain("servers=files_readonly");
+
+    // No flag: `defaultDelegatesDir()` resolves relative to the script, which is the
+    // src tree here. Asserted last because it is the one that has to work with nothing
+    // telling it where to look.
+    const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-def", "delegate_readonly.md"], {
+      env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
+      cwd: process.cwd(),
+    });
+    let stderr = "";
+    const asked = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no-default server did not start: ${stderr}`)), 5000);
+      child.stderr.on("data", (d) => {
+        stderr += d.toString();
+        if (stderr.includes("Starting atomaton-delegate-mcp-server")) {
+          clearTimeout(timer);
+          resolve();
+        }
+      });
+      child.on("exit", (code) => {
+        clearTimeout(timer);
+        reject(new Error(`no-default delegate exited ${code}: ${stderr}`));
+      });
+    });
+    await asked;
+    child.kill();
+    expect(stderr).toContain("servers=files_readonly");
+  }, 20_000);
 });
 
 // The two servers that had no round-trip test at all.
