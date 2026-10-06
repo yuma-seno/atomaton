@@ -16,6 +16,11 @@
  * answer, written late; the thread is the answer, written when the turn changes. See
  * `domain/work/thread.ts`.
  *
+ * The notice below says "the ball is with an agent", NOT "the label is active".
+ * Naming the label told a person to remove it and re-comment, which does nothing:
+ * the decision never read the label, and `commentWouldBeRemoved` still finds the
+ * last turn event "asked" and deletes the comment anyway. Observed on #17.
+ *
  * Usage:
  *   guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN
  * Writes `blocked=true|false` to $GITHUB_OUTPUT.
@@ -23,7 +28,6 @@
 import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { getLabel } from "../../adapters/runner/config.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { commentWouldBeRemoved } from "../../adapters/github/thread.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
@@ -53,7 +57,6 @@ function main(): void {
   }
 
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const label = getLabel("in_progress");
   const githubOutput = process.env.GITHUB_OUTPUT;
 
   // The comment being judged is excluded: a person's `/engineer` is itself an "asked"
@@ -108,7 +111,7 @@ function main(): void {
     "--body",
     [
       LLM_CONTEXT_TAG.write("exclude"),
-      `${mention}${what} Atomaton is currently processing this issue/PR (the \`${label}\` label is active). Please wait for the current run to finish, then comment again.`,
+      `${mention}${what} the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, and it has not come back to a person yet. Please wait for that to finish, then comment again.`,
     ].join("\n"),
   );
 

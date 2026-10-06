@@ -930,16 +930,27 @@ RESULT_EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
 ${scriptCommandWithArgs(extractDirectiveRef, { "output-file": `${RUN_DIR}/atomaton_output.txt`, "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}` })}
 
 # Detect whether a tool call already triggered an automatic follow-up
-# dispatch during this run (atomaton__launch_sub_agent, github__create_pr ->
-# reviewer, github__merge_pr -> atomaton-or-re-invoked-agent), as
-# opposed to the agent genuinely finishing with nothing further happening.
-# Every dispatch site writes a structured \`{"op":"dispatch",...}\` entry to
-# the ops log (see lib/ops-log.ts's logDispatch()) -- checking for that one
-# stable, documented JSON field is far more robust than the previous
-# approach (grepping the agent's raw stderr TEXT for hand-written
-# strings like "dispatched: agent=..."), which silently broke once already
-# when a refactor changed a log message's wording without updating the grep
-# pattern to match.
+# dispatch ON THIS NODE during this run (a hand-off to a colleague:
+# github__merge_pr -> re-invoked agent), as opposed to the agent genuinely
+# finishing with nothing further happening.
+#
+# A dispatch onto a DIFFERENT node -- launch_sub_agent starting children,
+# create_pr starting the reviewer on the pull request -- is deliberately NOT this
+# flag. Those start work UNDER this node and leave it waiting, so this node's turn
+# is over and its \`atomaton/in-progress\` guard must come off; holding it left the
+# node looking busy while nothing ran on it, and a person's /resume and /stop
+# skipped it. See \`ops-log.ts\` for the two op names and \`domain/work/turn.ts\` for
+# what each ending implies.
+#
+# Every dispatch site writes a structured \`{"op":...}\` entry to the ops log (see
+# lib/ops-log.ts's logDispatch()), and WHICH entry it writes carries that
+# distinction -- \`"op":"dispatch"\` is this node, \`"op":"dispatch-elsewhere"\` is
+# another. Checking that one stable, documented JSON field is far more robust than
+# grepping the agent's raw stderr TEXT for hand-written strings like
+# "dispatched: agent=...", which silently broke once already when a refactor
+# changed a log message's wording without updating the grep pattern to match. The
+# trailing quote does the work: \`"op":"dispatch"\` cannot match
+# \`"op":"dispatch-elsewhere"\`.
 CHAIN_CONTINUES=false
 if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -q '"op":"dispatch"' "${RUN_DIR}/atomaton_ops.log"; then
   CHAIN_CONTINUES=true

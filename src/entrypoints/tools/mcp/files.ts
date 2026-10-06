@@ -164,10 +164,37 @@ function readFile(a: z.infer<typeof READ_SCHEMA>): McpToolResult {
   return { text: `${shown(full)} lines ${from}-${last} of ${total}\n\n${out.join("\n")}${more}` };
 }
 
+/**
+ * A `path` the caller sent as the JSON text of an array, turned back into an array.
+ *
+ * `path` takes one place or several, and the schema emits an `anyOf` — a string or an
+ * array. Weaker models read that and, reaching for "several", send the array
+ * *serialised*: `'["src/shared","src/adapters"]'`. The `string` arm accepts that, so
+ * the whole text arrives at `grep` as one path and the failure it gets back names a
+ * file that does not exist, which reads as a bad path rather than an unsupported
+ * argument. The array form itself is fine — this repairs the one shape the `anyOf`
+ * invites and a string arm then swallows. Same tolerance, and same reason, as
+ * `stringArray`/`positiveInt` in `adapters/mcp/mcp-tool.ts`.
+ *
+ * Only a string that *is* a JSON array of strings is converted; every other string,
+ * including one that merely looks like a path, is left alone.
+ */
+function serialisedPathList(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  const text = value.trim();
+  if (!text.startsWith("[") || !text.endsWith("]")) return value;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return Array.isArray(parsed) && parsed.every((one) => typeof one === "string") ? parsed : value;
+  } catch {
+    return value;
+  }
+}
+
 const GREP_SCHEMA = z.object({
   pattern: z.string().describe("Extended regular expression, as `grep -E` reads it."),
   path: z
-    .union([z.string(), z.array(z.string()).min(1)])
+    .preprocess(serialisedPathList, z.union([z.string(), z.array(z.string()).min(1)]))
     .optional()
     .describe("File or directory to search, or several of them. Default: the working directory."),
   glob: z
