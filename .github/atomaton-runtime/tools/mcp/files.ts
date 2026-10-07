@@ -17799,9 +17799,22 @@ function readFile(a) {
 ${out.join(`
 `)}${more}` };
 }
+function serialisedPathList(value) {
+  if (typeof value !== "string")
+    return value;
+  const text = value.trim();
+  if (!text.startsWith("[") || !text.endsWith("]"))
+    return value;
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) && parsed.every((one) => typeof one === "string") ? parsed : value;
+  } catch {
+    return value;
+  }
+}
 var GREP_SCHEMA = objectType({
   pattern: stringType().describe("Extended regular expression, as `grep -E` reads it."),
-  path: unionType([stringType(), arrayType(stringType()).min(1)]).optional().describe("File or directory to search, or several of them. Default: the working directory."),
+  path: preprocessType(serialisedPathList, unionType([stringType(), arrayType(stringType()).min(1)])).optional().describe("File or directory to search, or several of them. Default: the working directory."),
   glob: stringType().optional().describe("Only search files whose name matches this shell glob, such as `*.ts`. Matched against the file name, not the whole path."),
   exclude: arrayType(stringType()).optional().describe("Skip files and directories whose name matches any of these globs, such as `node_modules` or `*.min.js`."),
   context: numberType().int().min(0).max(20).optional().describe("Lines of surrounding context to include with each match. Default 0."),

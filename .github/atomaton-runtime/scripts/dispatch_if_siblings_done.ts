@@ -488,7 +488,8 @@ function logOp(op, payload = {}) {
   }
 }
 function logDispatch(target, agent, extra = {}) {
-  logOp("dispatch", { target, agent, ...extra });
+  const { elsewhere, ...rest } = extra;
+  logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
 }
 
 // src/adapters/github/target-state.ts
@@ -688,7 +689,9 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  logDispatch(d.type, d.agent, { number: Number(d.number) });
+  const here = (process.env.ISSUE_NUMBER ?? "").trim();
+  const elsewhere = here !== "" && String(d.number) !== here;
+  logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }
 

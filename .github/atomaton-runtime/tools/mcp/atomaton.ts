@@ -6808,7 +6808,8 @@ function logOp(op, payload = {}) {
   }
 }
 function logDispatch(target, agent, extra = {}) {
-  logOp("dispatch", { target, agent, ...extra });
+  const { elsewhere, ...rest } = extra;
+  logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
 }
 
 // src/adapters/github/outcome.ts
@@ -7191,7 +7192,9 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  logDispatch(d.type, d.agent, { number: Number(d.number) });
+  const here = (process.env.ISSUE_NUMBER ?? "").trim();
+  const elsewhere = here !== "" && String(d.number) !== here;
+  logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }
 
@@ -7263,6 +7266,16 @@ function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
       return;
     current = parent.parent;
   }
+}
+
+// src/adapters/github/turn-comment.ts
+function turnHeader(h) {
+  const context = h.audience === "model" ? "include" : "exclude";
+  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+}
+function turnCommentBody(h) {
+  return [...turnHeader(h), h.body].join(`
+`);
 }
 
 // src/adapters/github/notify.ts
@@ -7585,12 +7598,11 @@ ${summary}`;
   }
   if (!isBot) {
     const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
-    mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
-${request}`), `comment on issue #${issue}`);
+    mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request })), `comment on issue #${issue}`);
     console.error(`close requested: issue=#${issue} (opened by a person, left open for them)`);
     return { outcome: "close-requested" };
   }
-  mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", body), `comment on issue #${issue}`);
+  mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body })), `comment on issue #${issue}`);
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
@@ -18701,7 +18713,7 @@ var LAUNCH_SUB_AGENT_SCHEMA = objectType({
   summary: stringType().optional().describe("Your report for this run. It is folded into the dispatch comment on the issue you are on, " + "behind a `<details>`, so keep it short: what you concluded and what happens next, not the " + "full four-part report. This call ends your session when every dispatch succeeds, so there " + "is no turn after it to write one in.")
 });
 var REQUEST_CLOSE_ISSUE_SCHEMA = objectType({
-  reason: stringType().min(1).describe("Why this issue's work is considered complete."),
+  reason: stringType().min(1).describe("Why this issue's work is considered complete \u2014 one sentence. It is printed directly " + "above `summary`, so anything longer is the same judgement written twice."),
   summary: stringType().optional().describe("Final summary to include in the posted comment (e.g. an aggregation report).")
 });
 function mcpFail(message) {
@@ -18717,7 +18729,24 @@ function handleLaunchSubAgent(args) {
   const notify = process.env.ISSUE_NOTIFY ?? "";
   const dispatched = [];
   const errors = [];
-  for (const { issue, agent } of validTasks) {
+  const repo = process.env.GITHUB_REPOSITORY ?? "";
+  const parentNum = parentIssue === "" ? 0 : Number(parentIssue);
+  const unrelated = [];
+  const tasks = parentNum === 0 ? validTasks : validTasks.filter(({ issue }) => {
+    const found = parentIssueOf(repo, issue);
+    if (!found.known) {
+      errors.push(`#${issue}: could not read its parent (${found.why}), so nothing was dispatched onto it`);
+      return false;
+    }
+    if (found.parent === parentNum)
+      return true;
+    unrelated.push(found.parent === 0 ? `#${issue} (a root issue)` : `#${issue} (a child of #${found.parent})`);
+    return false;
+  });
+  if (unrelated.length) {
+    errors.push(`not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` + "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " + "sub-issue links \u2014 an issue not linked under this one is never counted, so a dispatch onto " + "it would leave this issue waiting forever. Create it with `github__create_issue` " + "(`sub_issue: true`, the default) so the link exists.");
+  }
+  for (const { issue, agent } of tasks) {
     try {
       dispatchSubAgent(issue, agent, notify);
       dispatched.push(`#${issue}\u2192${agent}`);
@@ -18730,9 +18759,7 @@ function handleLaunchSubAgent(args) {
   const summary = (args.summary ?? "").trim();
   const complete = errors.length === 0;
   if (parentIssue && (dispatched.length || summary)) {
-    const bodyLines = [LLM_CONTEXT_TAG.write("exclude")];
-    if (complete)
-      bodyLines.push(ENDED_TAG.write("waiting"));
+    const bodyLines = complete ? turnHeader({ ended: "waiting", audience: "person" }) : [LLM_CONTEXT_TAG.write("exclude")];
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));
     }
@@ -18805,8 +18832,11 @@ function handleReloadEnvironment(args) {
     mcpFail(refusal);
   }
   const next = soFar + 1;
-  gh("issue", "comment", number, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
-Atomaton: rebuilding the environment and restarting \`${agent}\` ` + `(reload ${next} of ${limit}). Reason: ${args.reason}`);
+  gh("issue", "comment", number, "--body", turnCommentBody({
+    ended: "handoff",
+    audience: "person",
+    body: `Atomaton: rebuilding the environment and restarting \`${agent}\` ` + `(reload ${next} of ${limit}). Reason: ${args.reason}`
+  }));
   const outcome = dispatchRunner({
     context: `${agent} was to be restarted on #${number} after an environment rebuild`,
     agent,

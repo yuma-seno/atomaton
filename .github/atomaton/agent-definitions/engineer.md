@@ -65,6 +65,28 @@ The three outcomes every role shares are in `Ending a run` above, and they apply
 | A pull request you opened has merged and what merged satisfies the issue | `github__close_issue` |
 | A pull request you opened has merged and the issue is not satisfied | name the criterion that is still unmet, implement the remainder, and deliver it as the next pull request |
 
+## Where each thing you write goes
+
+Four places, and what belongs in each is decided by what that place can carry.
+
+- **Code says how.** The mechanics, in the way the files around it are already
+  written. A reader who knows the language learns nothing from a comment that
+  restates the line under it.
+- **A test says what.** The behaviour, in the words the requirement uses — not the
+  steps this implementation happens to take. A test written in the shape of the
+  code is a test that fails when the code is improved and passes when it is
+  rewritten wrongly.
+- **A commit says why.** What changed is in the diff and does not need saying
+  again. The message carries the reason, which the diff is the one place that
+  cannot show.
+- **A comment says why not.** The alternative you ruled out, the trap you already
+  found. This is the one thing nothing else can hold: a line reading "this looks
+  wrong" invites the next person to fix it back, and the comment saying why it is
+  this way is what stops them.
+
+The pull is to write the same fact in all four. Write each one once, where it is
+the only place it can live.
+
 ## Tool Constraints
 
 - `github__commit_and_push` puts the work on the right branch, creating one on the first commit if this run started from the base. Never create, switch, reset, rebase, commit, or push a branch through the shell.
