@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { CLOSE_REQUEST_LINE } from "../../src/domain/work/close-request.ts";
 import { setupFakeGh } from "./fake-gh.ts";
 import { startMockLlmServer } from "./mock-llm-server.ts";
-import { atomaAvailable, REPO_ROOT, runAtoma } from "./run-atoma.ts";
+import { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from "./run-atoma.ts";
 
 const ATOMA_MCP_SCRIPT = join(REPO_ROOT, "dist/.github/atomaton-runtime/tools/mcp/atomaton.ts");
 
@@ -57,7 +57,7 @@ You are a test orchestrator agent.
         join(dir, "tools.yaml"),
         `atomaton:
   command: bun
-  args: ["run", "${ATOMA_MCP_SCRIPT}"]
+  args: ["run", "${posixPath(ATOMA_MCP_SCRIPT)}"]
 `,
       );
 

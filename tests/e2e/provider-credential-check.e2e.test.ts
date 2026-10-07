@@ -20,11 +20,12 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUN_CREDENTIALS } from "../../src/domain/delivery/declared-secrets.ts";
 import { AGENT_DEFINITIONS_DIR } from "../../src/domain/machinery/machinery-layout.ts";
 import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
+import { withPosixPath } from "./run-atoma.ts";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CHECK_STEP = "Check the resolved provider has a credential";
@@ -44,6 +45,20 @@ function findAtoma(): string | undefined {
 }
 
 const ATOMA = findAtoma();
+
+/**
+ * The `bash` the step runs under, as an absolute path.
+ *
+ * Not the name `bash`, because the PATH handed to the child is in the form `bash`
+ * itself reads -- `:`-separated, forward slashes -- and the runtime resolves the
+ * executable using the PATH it is given, so the bare name finds nothing once that
+ * PATH is set. On a POSIX platform the two forms are the same string and this is the
+ * name it always was.
+ *
+ * Prefer an explicit `BASH_BIN` when one is needed: on Windows `bash` on PATH can be
+ * the WSL one, which is not the shell these steps are written for.
+ */
+const BASH = process.env.BASH_BIN ?? Bun.which("bash") ?? "bash";
 
 describe.skipIf(ATOMA === undefined)("provider credential check against the real atoma", () => {
   /**
@@ -71,10 +86,12 @@ describe.skipIf(ATOMA === undefined)("provider credential check against the real
     try {
       const result = Bun.spawnSync({
         // The flags GitHub's own `shell: bash` runs: `bash --noprofile --norc -eo pipefail {0}`.
-        cmd: ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", `${stage}\n${step!.run}`],
+        cmd: [BASH, "--noprofile", "--norc", "-eo", "pipefail", "-c", `${stage}\n${step!.run}`],
         env: {
-          ...hermeticEnv(),
-          PATH: `${dirname(ATOMA!)}:${process.env.PATH ?? ""}`,
+          ...withPosixPath(
+            { ...hermeticEnv() },
+            `${dirname(ATOMA!)}${delimiter}${process.env.PATH ?? ""}`,
+          ),
           AGENT: "engineer",
           ATOMATON_MACHINERY_ROOT: machinery,
           ATOMA_PROVIDER_IN: "",
