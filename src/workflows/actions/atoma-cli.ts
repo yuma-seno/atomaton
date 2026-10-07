@@ -15,182 +15,95 @@ import { TypedOutputsStep } from "./base.ts";
 /**
  * The Atoma release a run installs unless the dispatch says otherwise.
  *
- * Every raise of this pin so far has been coupled to something else in this
- * repository, and the record of what is the reason this comment is long.
+ * ## Raising this pin is never a version bump on its own
  *
- * Moves with `tools.servers` in config.yaml -- the declarations the tools file is
- * generated from -- not independently. From v0.1.11 atoma removes
- * the credentials it knows about from a tool server's environment unless that
- * server names them, and expands `${NAME}` in an `env:` value against the run's
- * credentials. Before v0.1.11 those values were literal, so a tools file carrying
- * `${GH_TOKEN}` would hand `github` those seven characters as its token --
- * overriding the value it had been inheriting and failing every call with a 401.
+ * Almost every capability this repository depends on arrives as a NEW release
+ * rather than as a change here, so a raise is usually one half of a change whose
+ * other half is in this tree -- and the two have to move together, because the
+ * halves fail differently: a binary that is too old refuses the invocation, while a
+ * tree that expects a binary which is too old fails later and more quietly.
  *
- * So the two are one change: raising this pin without the declarations strips a
- * token nothing asks for, and shipping the declarations without raising it passes
- * a literal.
+ * So the list below is the checklist, keyed by what the pin is coupled TO. A raise
+ * crosses the entries it crosses, and the rest are what to check when something
+ * starts behaving unlike itself. Which release carried which entry is deliberately
+ * not recorded: it is in that repository's history, the tags were renumbered when
+ * it was recreated, and a number here would be one no reader can look up.
  *
- * v0.1.12 adds the same coupling for `args`: it expands `${NAME}` there, from the
- * environment, which is how a tool server is read from the machinery checkout
- * rather than from the pull request under review. To v0.1.11 an `args` entry
- * carrying `${ATOMATON_MACHINERY_ROOT:-.}` is a literal path that does not exist, so
- * this pin and `tools.servers` move together here too.
+ * ## What a raise is coupled to
  *
- * v0.1.13 is a third coupling, and this one is with the repository's SECRETS.
- * Providers became a table there: `openai` means OpenAI rather than defaulting to
- * OpenRouter, the routers have their own names, and each provider reads its own
- * credential -- `OPENROUTER_API_KEY`, `ORCAROUTER_API_KEY` -- with no fallback to
- * `OPENAI_API_KEY`. Two credentials present is an error naming both, so a
- * repository that keeps an OpenRouter key under the old name AND adds it under the
- * new one gets a failed run rather than a guess. Raising this pin means the secret
- * has to have been renamed first.
+ * **The flags the runner passes.** The runner passes `--max-runtime-secs`,
+ * `--stop-file`, `--loop-retries`, `--tools-file`, `--skills-dir`, `--template`,
+ * `--agent-def`, `--in-session` and `--out-session`; a binary that does not know one
+ * refuses the invocation before the agent starts. This is the entry that makes a
+ * raise mandatory rather than optional, and it is why the runner's arguments are
+ * worth reading before raising: adding a flag here without raising the pin is a
+ * workflow that fails every run.
  *
- * v0.1.14 gives each router a name for each dialect it serves, which is what the
- * agent definitions here needed: they read `provider: openai-responses # openrouter`,
- * a row that in v0.1.13 means OpenAI itself. So this pin moves with
- * `agent-definitions/*.md` as well. The comment is gone today: all three ship
- * `provider: orcarouter-responses`, a name that says where the request goes.
+ * **`tools.servers` in `config.yaml`, which the tools file is generated from.** Three
+ * separate couplings: the pin strips the credentials it knows about from a tool
+ * server's environment unless that server names them, and expands `${NAME}` in an
+ * `env:` value and in an `args:` entry against the run's credentials and environment.
+ * An older binary takes those as literal text -- so a `${GH_TOKEN}` reaches a server
+ * as those nine characters, overriding what it was inheriting. Raising without the
+ * declarations strips a token nothing asks for; shipping the declarations without
+ * raising passes a literal.
  *
- * v0.1.16 carries two fixes that are about THIS repository's runs specifically.
+ * **The `request_timeout_secs` in those declarations.** This one is different: the
+ * older binary does not reject the key, it ignores it and caps every call at 60
+ * seconds instead. `shell` offers the agent `timeout_seconds` up to 3600 — every
+ * value above 60 is a promise the client will not keep — and `search`'s first call
+ * loads a reranker measured at 63.9s, so under a binary without this the first search
+ * of every run fails. Nothing says so; the declaration is simply not in effect.
  *
- * The Responses adapter assembled its own `extra_body` merge and left out the
- * reconciliation that protects the runtime tool definitions -- so an agent carrying
- * `extra_body.tools` replaced them. All three definitions here carry OpenRouter's two
- * server tools, and all three use that adapter, so every request sent those two and no
- * MCP schema at all. The model was inferring argument shapes from the names in the
- * system prompt, which is the shape of the argument failures that have been read as model
- * weakness -- `issue_number` for `number`, `form` for `from`, `label` for `labels`.
+ * **`agent-definitions/*.md`.** The provider names in them are this repository's, and
+ * a dialect's name is a row in the core's provider table. A name the installed binary
+ * does not have resolves to nothing.
  *
- * And a `vision: false` agent had pictures replaced before the message entered the
- * session, so what atomaton-data recorded was not what happened: resuming with
- * `vision: true` could never get them back.
+ * **The repository's SECRETS, by name.** Each provider reads its own credential with
+ * no fallback: two credentials present for one provider is an error naming both rather
+ * than a guess. A repository holding a key under a name the new binary no longer
+ * reads gets a failed run, so the secret has to be renamed before or with the raise.
  *
- * v0.1.17 is a fourth coupling, this one with `tools.servers` again, and the
- * first where the OLD version is actively wrong rather than merely unaware.
+ * **The spelling of `load_skill`'s argument.** It is `skill_name` and there is no
+ * other. An older binary accepts the aliases too, so a model calling it `name`
+ * succeeds there and the session records `name` -- which is not the spelling
+ * `write_metrics_report.ts` reads. Until the pin moves, the skill tally counts calls
+ * it cannot attribute.
  *
- * It reads `request_timeout_secs` per server. v0.1.16 ignores the key -- serde
- * drops unknown fields -- so the tools file is accepted either way and nothing
- * fails. What the old version does instead is cap every `tools/call` at 60
- * seconds, which is what `shell` and `search` declare that key to escape:
+ * **`max_output_chars`, the per-server cap on a tool result.** It is what covers
+ * third-party servers, and it is why `files_guard`'s denylist can be as short as it
+ * is: an unbounded server was the reason an entry was there.
  *
- *   - `shell_execute` offers the agent `timeout_seconds` up to 3600. Under v0.1.16
- *     every value above 60 is a promise that cannot be kept, and a build or a test
- *     suite running over a minute fails with an error naming the shell server
- *     rather than the client that gave up.
- *   - the first search of a run loads a 544MB reranker. Measured at 63.9s against
- *     the 60s cap, so under v0.1.16 the first search of EVERY run fails.
+ * **A report a tool makes about itself.** A server's problem -- over
+ * `notifications/message`, or on stderr -- is attached to its next tool result so the
+ * agent sees it. An older binary discards it. `prompt-template.md` and the skills tell
+ * an agent to act on that report, so pinning back leaves them describing something the
+ * agent will never be shown.
  *
- * v0.1.17 also matches the JSON-RPC id when reading a response. Without that, one
- * timeout desynchronises that server for the rest of the run: the abandoned call's
- * answer stays in the pipe and the next call reads it, so every answer belongs to
- * the previous question and nothing detects it. Which makes lowering this pin back
- * to v0.1.16 worse than it looks -- the timeouts declared in the tools file stop
- * applying at the same moment the mispairing starts.
+ * **The `cached=` counts.** An older binary prints none, and every reader downstream --
+ * the step summary, the result comment, the metrics report -- then reports it as
+ * unknown, forever. A run here is almost all prompt, so this is most of what separates
+ * the token counts from the bill.
  *
- * v0.1.18 is why an agent can see a degraded tool at all. A server that reports a
- * problem about itself -- over `notifications/message`, or on stderr, which is
- * what the servers here use today -- has that report attached to its next tool
- * result. Under v0.1.17 the notification was discarded and the stderr line went to
- * the run log, where a person reads it later if at all. `search.ts` logging
- * "WARN could not preload the reranker" is the case that made this necessary: two
- * releases went out with every search answering worse. The instruction that acts on
- * the report is in `prompt-template.md` and `engineering/environment`, so pinning
- * back to v0.1.17 leaves those two telling an agent to read something it will never
- * be shown.
+ * **A session with an unanswered tool call is repaired before it is written.** Saving
+ * a session on failure is only safe because of that repair: a session carrying an
+ * unanswered call is refused by every provider, so an older binary turns lost work
+ * into an issue nothing can run on.
  *
- * v0.1.19 adds MCP's Streamable HTTP transport, which nothing here uses yet: every
- * server under `tools.servers` is still a child process over stdio. The pin moves anyway
- * because it is what `probe-http-transport.ts` measures, and a repository whose
- * probes and whose runs are on different builds is one where a green probe means
- * less than it looks. What it opens up is a server that is already running -- a
- * shared internal one, or something too expensive to start per run, which is what
- * `search` is at 55 to 64 seconds of reranker.
- * v0.1.21 caps every tool result at 50,000 characters, per server and overridable
- * with `max_output_chars`. It is what lets `filesystem__search_files` off the
- * denylist: what kept it out was that nothing bounded a third-party server, and the
- * bound is now on the client where it covers all of them. Measured before it: one
- * `read_text_file` returned 72,141 characters, a seventh of a 128k window in one
- * message.
+ * **`extra_body.tools` is merged with the runtime tool definitions rather than
+ * replacing them.** Every definition here carries extra server tools and uses the
+ * adapter that had its own merge, so under an older binary each request sent those and
+ * no MCP schema at all -- the model then infers argument shapes from the names in the
+ * system prompt.
  *
- * v0.1.22 removes the default iteration ceiling and adds `--max-runtime-secs`. The
- * pin is not optional here: the runner passes that flag, and an older binary would
- * reject it and fail every run before the agent started. What it replaces is a count
- * of turns, which stopped a run measured at 169 distinct searches and 6 repeats --
- * working, and stopped for being long.
- *
- * v0.1.23 adds `--stop-file`, which is what makes `/stop` a pause rather than a
- * discard: the run ends at a turn boundary with its session written, where killing
- * the job would have left the previous run's session on disk. Pinned rather than
- * optional for the same reason as above — the runner passes the flag, and a binary
- * that does not know it refuses the invocation.
- *
- * v0.1.24 keeps a session whatever ended the run, and answers any tool call left
- * without a result before it writes one. The pin is required by the step below it:
- * saving on failure is only safe because of that repair -- a session carrying an
- * unanswered call is refused by every provider, so an older binary would turn lost
- * work into an issue nothing can run on.
- *
- * v0.1.25 adds three guards on a run that has stopped being work: the same call
- * returning the same answer, a cycle (A,B,A,B) that the old single-slot tracker could
- * not see, and nothing coming back over and over. Each fires on 0-0.3% of the 341
- * stored sessions, which is the point -- they are insurance with no false positives.
- * The pin moves because the guard in `shell_guard.ts` depends on the first of them:
- * its refusal is deterministic, so an agent that ignores it is stopped by the core
- * rather than by a new rule.
- *
- * v0.1.43 records how much of each prompt was served from cache, per inference as
- * well as per run. The pin is what makes the figure exist: an older binary prints no
- * `cached=`, and every reader downstream -- the step summary, the result comment,
- * the metrics report -- then correctly reports it as unknown, forever. A run here is
- * almost all prompt and a cached token costs a fraction of a fresh one, so this is
- * most of what separates the token counts from the bill.
- *
- * It also says when it could not read one: a reply carrying usage but no cached
- * figure logs the usage field names nothing read. That is how the spelling this
- * provider uses gets established -- by a real response rather than by adding a field
- * name and shipping a release to see whether a number appears, which is what the
- * version before it did.
- *
- * v0.1.44 lets an agent definition send its own request headers, which is how one
- * conversation is kept on one deployment -- the reviewer carries an OrcaRouter
- * session id. Measured before it: inferences inside a single run alternating between
- * a 98% cache hit and a fall back to exactly the shared prefix, which is what being
- * routed to a deployment that has not seen this conversation looks like.
- *
- * v0.1.45 names `load_skill`'s one argument `skill_name` and accepts no other
- * spelling. This pin is what makes that true of a run: an older binary still takes
- * the four aliases, so a model calling it `name` succeeds there and the session
- * records `name` -- which is the spelling `write_metrics_report.ts` stopped reading
- * when it was corrected to `skill_name`. Until this moves, the skill tally counts
- * calls it cannot attribute.
- *
- * It also stops five answers being invented where a refusal was owed: a fabricated
- * `tool_use_id`, a tool definition read without its wrapper, an `extra_body.tools`
- * that is not a list, a nameless tool registered as `unknown`, and an `unprefixed`
- * server whose hooks -- its denylist and allowlist included -- were never found.
- * That last one is the reason to take this release rather than wait: a guard that
- * silently does not run is indistinguishable from one that passes.
- *
- * v0.1.46 is the repetition circuit breaker, and the pin is required by the runner
- * below: it passes `--loop-retries`, and a binary that does not know the flag refuses
- * the invocation before the agent starts.
- *
- * What it does is watch the token stream -- reasoning included, because that is where
- * a model gets stuck -- and cut a completion off when the last 500 tokens collapse to
- * too few distinct words. A loop is visible there long before `max_tokens`, and the
- * run ends on the loop rather than on the ceiling. `--loop-retries` then treats the
- * loop as a bad sample: the aborted completion is discarded, a note is appended, and
- * the same turn is asked again, without limit -- the run's own clock and stop file are
- * what bound it, re-checked before each re-ask.
- *
- * The ending is recorded as `loop`, apart from `failed`, because it is the one failure
- * a person can act on. `turn.ts` reads it as `looped` and the notices name it, so a
- * run that got stuck repeating itself is not reported as one that ran out of time.
+ * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`
+ * measures the binary, and a repository whose probes and whose runs are on different
+ * builds is one where a green probe means less than it looks.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.1.0";
+export const ATOMA_DEFAULT_VERSION = "v0.1.1";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.1.7). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.1.1). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead
