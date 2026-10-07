@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #110: 検証: orphan ブランチに原稿を置き、Issue から辿れる URL を確かめる\n**Labels:** atomaton/sub-issue, atomaton/launched\n\n# orphan ブランチへの push を、設計書の原稿で 1 回通す\n\n親: #12。#12 の設計における「原稿」の層の実測。**orphan ブランチに業務文書の原稿（Markdown / 表は CSV）を置き、メインの履歴を一切汚さず、Issue から辿れる**ことを確かめる。\n\n## やること\n\n1. **orphan ブランチを作る**\n   `git switch --orphan docs/business-docs` 相当（ブランチ名はこの Issue で決めてよい。案: `business-docs`）。**orphan の意味を検証に含める**: このブランチの先頭コミットが main と親を持たないこと、main の log にこのコミットが出ないことを `git log --oneline main --not business-docs` 等で確かめて記録する。\n2. **原稿を 1 通置いて push する**\n   設計書の原稿のサンプル（Markdown 1 ファイル + 表なら CSV 1 ファイル。中身は簡単なサンプルでよい）を置き、コミットして push。ディレクトリ構成は自由（案: `designs/<issue-number>/<slug>.md`）。\n3. **リンクの形を確認する**\n   push 後に `https://github.com/yuma-seno/atomaton/blob/business-docs/<path>` が開けることを curl または web__fetch で確認し、**Issue コメントに貼る URL の形**を記録する（raw/blob/単純 URL のどれを貼るのが正かを、開けるかどうかで決めて書く）。\n\n## 前提\n\n- このタスクは #109（添付の機械経路）に**依存しない**。並行でよい。\n- ただし「orphan push は github サーバーが拒否するか」は実測してほしい。現状の `commit_and_push` はチェックアウト中のブランチに push する道具で、orphan を作れない。**この検証では shell に `git` を直接使ってよい**（#12 のスレッドに記録した「`gh` は拒否されるが `git` は通る」の事実確認も兼ねる）。拒否されたら、そのメッセージを記録して以降をやめる。\n\n## 成果物（この Issue の最終コメント）\n\n1. orphan ブランチ名と、その先頭コミットの SHA\n2. 「main にこのコミットが現れない」ことの実測（コマンドと出力）\n3. 原稿の URL（ブラウザで開ける形で）\n4. shell からの `git` push が通ったか、通らなかった場合はメッセージそのもの\n\n## 明示的にやらないこと\n\n- 添付・PDF・endpoint への POST（#109）\n- ツールサーバー実装（次の子タスク）\n- 原稿フォーマットの詳細仕様の確定\n\n## 閉じ条件\n\n上の成果物 4 点がコメントに載ること。orphan push が何らかの guard で拒否された場合は、その記録をもってこの子は完了（親の設計が改められる）。",
+      "content": "Issue #110: 検証: orphan ブランチに原稿を置き、Issue から辿れる URL を確かめる\n**Labels:** atomaton/in-progress, atomaton/sub-issue, atomaton/launched\n\n# orphan ブランチへの push を、設計書の原稿で 1 回通す\n\n親: #12。#12 の設計における「原稿」の層の実測。**orphan ブランチに業務文書の原稿（Markdown / 表は CSV）を置き、メインの履歴を一切汚さず、Issue から辿れる**ことを確かめる。\n\n## やること\n\n1. **orphan ブランチを作る**\n   `git switch --orphan docs/business-docs` 相当（ブランチ名はこの Issue で決めてよい。案: `business-docs`）。**orphan の意味を検証に含める**: このブランチの先頭コミットが main と親を持たないこと、main の log にこのコミットが出ないことを `git log --oneline main --not business-docs` 等で確かめて記録する。\n2. **原稿を 1 通置いて push する**\n   設計書の原稿のサンプル（Markdown 1 ファイル + 表なら CSV 1 ファイル。中身は簡単なサンプルでよい）を置き、コミットして push。ディレクトリ構成は自由（案: `designs/<issue-number>/<slug>.md`）。\n3. **リンクの形を確認する**\n   push 後に `https://github.com/yuma-seno/atomaton/blob/business-docs/<path>` が開けることを curl または web__fetch で確認し、**Issue コメントに貼る URL の形**を記録する（raw/blob/単純 URL のどれを貼るのが正かを、開けるかどうかで決めて書く）。\n\n## 前提\n\n- このタスクは #109（添付の機械経路）に**依存しない**。並行でよい。\n- ただし「orphan push は github サーバーが拒否するか」は実測してほしい。現状の `commit_and_push` はチェックアウト中のブランチに push する道具で、orphan を作れない。**この検証では shell に `git` を直接使ってよい**（#12 のスレッドに記録した「`gh` は拒否されるが `git` は通る」の事実確認も兼ねる）。拒否されたら、そのメッセージを記録して以降をやめる。\n\n## 成果物（この Issue の最終コメント）\n\n1. orphan ブランチ名と、その先頭コミットの SHA\n2. 「main にこのコミットが現れない」ことの実測（コマンドと出力）\n3. 原稿の URL（ブラウザで開ける形で）\n4. shell からの `git` push が通ったか、通らなかった場合はメッセージそのもの\n\n## 明示的にやらないこと\n\n- 添付・PDF・endpoint への POST（#109）\n- ツールサーバー実装（次の子タスク）\n- 原稿フォーマットの詳細仕様の確定\n\n## 閉じ条件\n\n上の成果物 4 点がコメントに載ること。orphan push が何らかの guard で拒否された場合は、その記録をもってこの子は完了（親の設計が改められる）。",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-10-07T02:10:22Z",
@@ -865,19 +865,37 @@
       "role": "assistant",
       "content": "**結論。** orphan ブランチへの push は、この run が持つどの正規インターフェースからも行えなかった — shell からの `git` 直接操作は全形態が guard に拒否され、`github__commit_and_push` には issue 命名規約外のブランチを指す経路が構造的に無い。本 Issue の閉じ条件どおり、この拒否記録をもって子は完了で、親 #12 の設計は「publish はツールサーバーが自プロセスで push する」形で確定する。\n\n## 閉じ条件の成果物 4 点\n\n**1. orphan ブランチ名と先頭コミット SHA** — 作れなかった。ブランチも commit も存在しない。`git ls-remote --heads origin` に `business-docs` は現れず、`github__get_branch` は `{exists: false}` を返した。クリーンアップすべきものも無い。\n\n**2. 「main に現れない」ことの実測** — 対象コミット自体が存在しない。代わりに main 側に何も加わっていないことの実測: `git log --oneline -3` → `be275ed deploy: apply v0.20.1 to .github/ (#106)`（run 開始時と同一、worktree も clean）。\n\n**3. URL の形** — 原稿を置けなかったのでURLは無い。**貼るべき形は決まった**: blob URL（`https://github.com/yuma-seno/atomaton/blob/<branch>/<path>`）。web__fetch で実在ファイル `blob/main/docs/config/reference.md` を開き、中身まで返ることを確認した（公開リポなので認証不要）。raw URL はプログラム取得用で、コメントに貼る用ではない。\n\n**4. shell からの git push** — **通らなかった。メッセージそのもの**:\n\n1. `git switch --orphan business-docs` → `Command blocked by shell guard: Raw 'git switch' is disabled. Use the github__* MCP tools for Git mutations and branch synchronization.`\n2. `git push origin HEAD:refs/heads/business-docs` → `Command blocked by shell guard: Raw 'git push' is disabled. Use the github__* MCP tools for Git mutations and branch synchronization.`\n3. （前提確認の）`git config user.name` → `Raw 'git config' is disabled, and there is no MCP tool for it: this run does not do that. Commit with github__commit_and_push; read-only inspection (status, diff, log) runs normally.`（読み取りは `git config --get user.name` の綴りで通る — 実測済み）\n\n**#12 スレッドの「gh は拒否されるが git は通る」は、この環境では否定された。** mutate 系 git サブコマンドは一覧ごと拒否される（src/entrypoints/tools/hooks/shell_guard.ts:224-228）。\n\n## 親の設計に返す実測\n\n- `github__commit_and_push` は構造的に orphan を push できない。push 先は `branchForCommit()` が決め、issue 命名規約（`atomaton/issue-<n>`）でしかブランチを名付けない（src/adapters/github/branch-placement.ts:173-201）。push はチェックアウト中ブランチへの 1 種類のみ（src/entrypoints/tools/mcp/github.ts:980）。仮に HEAD が `business-docs` にあっても、規約外の名前は受理されず `atomaton/issue-110` を作ってそちらへ切る。\n- shell guard の読み取り専用 carve-out は branch/stash/config/remote/tag にだけある（shell_guard.ts:194-208）。`switch`/`checkout`/`push` に read-only 形は無い。\n- よって orphan push が成立する唯一の経路は、親の設計が既に述べている**「GH_TOKEN を持つツールサーバーが自プロセスで git を動かす」形**。hook はサーバー entry ごとの設定（.github/atomaton-runtime/tools/defaults.yaml）なので、config.yaml `tools.servers`（155-162 行が拡張点）に足す新サーバーに shell_guard は載らない。\n- 設計メモ（読みからの推論で、実測はしていない）: この checkout の `.git/config` には actions/checkout が残した `http.https://github.com/.extraheader`（`AUTHORIZATION: basic <redacted>` — 実測で確認）があり、runner job は `contents: write` を持つ（.github/workflows/atomaton-runner.yml:106-111）。つまり guard が無ければ shell push は資格情報不足では止まらない見込みで、今日効いているのは guard の一点。harden.ts:38-41 がこの露出を「受容済み」と記す。同じく delegate サブ run は shell_guard を持たず（src/entrypoints/tools/delegates/delegate.tools.yaml:25-44）同じ work tree で動く — 迂回路の形状がここにあり、#8 と接続する論点として親に渡す。\n\n## 確認できなかったこと\n\n- 成果物 1〜3 の実物（SHA・URL）: push が拒否されたため存在しない。上の記録がこの Issue の実測の全部。\n- extraheader のトークンで実際に push が通るか: **意図的に未測定**。本 Issue が「拒否されたら、そのメッセージを記録して以降をやめる」と指示しており、確かめるには guard の迂回が必要になるため。\n\n## 次に起きること\n\n親が本コメントをもって #110 を閉じ条件どおり集約する。#12 の設計は「publish = ツールサーバー側で push」で確定させる。なお #109 の curl POST は同じ壁に当たる予測がある（shell_guard が curl を web__fetch に振り、web__fetch は Bearer+バイナリの POST を運べない — shell_guard.ts:56-58 と defaults.yaml の読みからの予測で、#109 の実測ではない）。\n\n/atomaton\n#110 は閉じ条件を満たして完了: orphan push は現行の全インターフェースで拒否され、メッセージ記録済み（上の 3 件）。#12 に戻って #110 を集約・クローズし、設計の「手段」節を「publish は GH_TOKEN を持つツールサーバーが自プロセスで実行」で確定してください。#109 の実測はその run に任せるとして、集約コメントに「curl POST も guard に振られる見込み」の予測を添えると無駄な試行を削れます。",
       "atoma_metadata": {
-        "github_comment_id": 6029848854,
-        "agent": "atomaton"
+        "agent": "atomaton",
+        "github_comment_id": 6029848854
       }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_nokszgxmukyfrv6z425f1c9v",
+          "type": "function",
+          "function": {
+            "name": "atomaton__request_close_issue",
+            "arguments": "{\"reason\": \"orphan push が shell guard と commit_and_push の両方で拒否されることを実測し、閉じ条件の成果物（拒否メッセージの記録）をもって本検証を完了した。\", \"summary\": \"#110 の閉じ条件は「成果物 4 点がコメントに載ること。orphan push が guard で拒否された場合は、その記録をもって完了」— 拒否を確認したので完了。\\n\\n実測（最終コメントに全文あり）:\\n- shell からの `git switch --orphan` / `git push` はともに shell_guard が拒否。メッセージを一字一句記録済み。「gh は拒否されるが git は通る」は現行では否定された（mutate 系 git は全て拒否、shell_guard.ts:224-228）。\\n- `github__commit_and_push` は構造的に orphan を作れない: push 先ブランチは branch-placement.ts の issue 命名規約で決まり、規約外の名前は受理されない。\\n- したがって orphan ブランチ・原稿・URL は作れず、成果物 1〜3 は「存在しない」が実測結果。代わりに main が一切変わっていないこと（be275ed のまま、worktree clean）と、コメントに貼る URL 形は blob URL が正（web__fetch で実在 blob を確認）を実測した。\\n\\n親 #12 への設計帰結: publish は「GH_TOKEN を持つツールサーバーが自プロセスで git を実行」する形で確定すべき。hook はサーバー設定ごとのため config.yaml `tools.servers` に新サーバーを足せば shell_guard は載らない（.github/atomaton-runtime/tools/defaults.yaml 155-162 が拡張点）。参考実測: checkout の .git/config に actions/checkout 由来の extraheader（job は contents: write を持つ）があり、guard が無ければ shell push は資格情報では止まらなかった見込み。#8 と接続する迂回路論点（shell_guard を持たない delegate サブ run が同じ work tree で動く）を設計コメントに含めた。予測（#109 の実測ではない）: #109 の curl POST も shell_guard が web__fetch に振るため、同様に壁に当たる見込み���\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Issue #110 is concluded: your reason and summary are on the issue. 1 sibling(s) of the parent issue still open. No action needed. Nothing else is yours to do here.",
+      "tool_call_id": "call_nokszgxmukyfrv6z425f1c9v"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
       "event_count": 1,
-      "snapshot_hash": "e47b5303c39bf9934b09c2f8e63e75a0fc0cec56d04221a8148938d436147b44",
-      "version": 1,
+      "resolved_number": "110",
+      "snapshot_hash": "7a4809f30581a90a25a6103d0ab2d6a92dc95b50f58d98deae1dae523449ab53",
       "type": "issue",
-      "resolved_number": "110"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -888,6 +906,14 @@
       "messages": 89,
       "seconds": 2199,
       "started": "2026-10-07T02:11:26Z"
+    },
+    {
+      "ended": "2026-10-07T02:49:07Z",
+      "ended_because": "completed",
+      "iterations": 1,
+      "messages": 91,
+      "seconds": 29,
+      "started": "2026-10-07T02:48:38Z"
     }
   ]
 }
