@@ -52,31 +52,33 @@
   {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
-    "messages": 85,
-    "calls": 51,
+    "messages": 106,
+    "calls": 61,
     "failed": 1,
     "refused": 1,
     "skills": [
       "research/web-search"
     ],
-    "reported": true,
+    "reported": false,
     "tools": {
       "github__get_issue": 2,
       "search__search_issues": 1,
-      "list": 7,
+      "list": 8,
       "atoma_builtin__load_skill": 1,
       "web__fetch": 9,
       "read": 12,
       "glob": 2,
       "grep": 5,
-      "shell__shell_execute": 9,
-      "github__create_issue": 1,
+      "shell__shell_execute": 14,
+      "github__create_issue": 4,
       "github__list_issues": 1,
-      "github__get_issue_comments": 1
+      "github__get_issue_comments": 1,
+      "atomaton__launch_sub_agent": 1
     },
     "acts": {
-      "other": 5,
-      "search": 4
+      "other": 6,
+      "search": 6,
+      "open": 2
     },
     "runs": [
       {
@@ -86,6 +88,14 @@
         "messages": 85,
         "seconds": 1059,
         "started": "2026-10-07T00:57:27Z"
+      },
+      {
+        "ended": "2026-10-07T02:11:03Z",
+        "ended_because": "completed",
+        "iterations": 10,
+        "messages": 106,
+        "seconds": 308,
+        "started": "2026-10-07T02:05:55Z"
       }
     ]
   },
