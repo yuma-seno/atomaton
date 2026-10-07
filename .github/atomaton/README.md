@@ -46,7 +46,6 @@ Nothing counts them, and nothing names them outside the files themselves.
 | `engineer` | Implements one engineer-ready leaf task, validates it, and opens a pull request. |
 | `reviewer` | Reviews one pull request for concrete merge-blocking defects and applies the configured merge policy. |
 | `architect` | Decides how to build something when it cannot be worked out from where the question was asked, and writes the decision down. Builds nothing. |
-| `free` | Does a bounded, self-contained piece of work at zero token cost. Exists to find out what the free tier can carry. |
 
 | Skill | When an agent loads it |
 | --- | --- |
@@ -102,17 +101,26 @@ every run.
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. |
 | `atomaton_env` | Rebuilding the run's environment, and nothing else. |
 | `delegate` | Runs one small piece of work in a sub-run and returns what it found. |
+| `delegate_free` | The same, on a free model. Prefer it — only the price differs. |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. |
+| `delegate_readonly_free` | The same read-only sub-run on a free model. Prefer it for the same reason. |
 
 An agent gets the ones its own `mcp_servers` names, and only those. A server
 nobody names is never started, so there is nothing to gain by removing one — which
 is why there is no way to.
 
-`delegate` and `delegate_readonly` are one program started with a different
-definition and a different tools file, both under
-`atomaton-runtime/tools/delegates/`. They are not agent definitions: a delegate is
-started by the tool and never by a person, so it is deliberately outside
-`agent-definitions/`, which is the namespace `/<name>` dispatches from.
+Each of the four is one program started with a different definition and a
+different tools file, both under `atomaton-runtime/tools/delegates/`. They are not
+agent definitions: a delegate is started by the tool and never by a person, so it
+is deliberately outside `agent-definitions/`, which is the namespace `/<name>`
+dispatches from.
+
+The `_free` pairs exist because a delegated task is the one place the free tier can
+be used at all: a top-level run starts from the issue, every comment and the pull
+request's diff, which exceeds the tier's per-request cap before the model says
+anything, whereas a delegate is handed only the task its caller wrote. The choice
+between the two is a price and nothing else, which is why an agent is told to reach
+for the free one and fall back only when it says the task did not fit.
 
 **Why they are not in the file you edit.** Deleting one takes a capability from
 every agent that named it, and `atoma` stops the run before a single tool starts

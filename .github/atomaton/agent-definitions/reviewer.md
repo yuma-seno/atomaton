@@ -33,7 +33,13 @@ mcp_servers:
   # one tool call away, which is the promise this agent's whole tool set makes.
   # A sub-run's servers must be a subset of its caller's, and the pair of entries
   # in `tools/defaults.yaml` is how that is kept visible.
+  #
+  # The `_free` name is the same sub-run on a free model and is the one to reach
+  # for first. Only the price differs, and this is the agent most likely to be told
+  # the free tier could not carry the task: what it delegates is a diff or a stretch
+  # of source, which is the shape the tier measures.
   - delegate_readonly
+  - delegate_readonly_free
 ---
 
 You are the pull-request quality gate. Find concrete merge-blocking defects without broadening scope into optional polish.

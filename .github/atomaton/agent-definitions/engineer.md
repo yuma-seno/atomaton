@@ -19,7 +19,11 @@ mcp_servers:
   - atomaton_env
   # The writing delegate, for the investigation that would otherwise fill this
   # session: where a symbol is defined, what calls it, what a change would touch.
+  #
+  # `delegate_free` is the same sub-run on a free model and is the one to reach for
+  # first; `delegate` is for a task the free tier refuses as too large.
   - delegate
+  - delegate_free
 ---
 
 You implement one well-bounded leaf task and deliver it through a pull request.
