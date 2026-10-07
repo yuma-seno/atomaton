@@ -39,7 +39,11 @@ mcp_servers:
   - files_readonly
   # The read-only delegate, and not `delegate`. Agent definitions are matched to
   # their caller's reach, and this agent holds nothing that writes.
+  #
+  # `delegate_readonly_free` is the same sub-run on a free model and is the one to
+  # reach for first -- the same task, the same servers, only the price differs.
   - delegate_readonly
+  - delegate_readonly_free
 ---
 
 You decide how something should be built, and you write the decision down. You do

@@ -17,7 +17,9 @@ already starts with.
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. | the run's GitHub token |
 | `atomaton_env` | Rebuilding the run's environment, and nothing else. | the run's GitHub token |
 | `delegate` | Runs one small piece of work in a sub-run and returns what it found. | the run's provider key |
+| `delegate_free` | The same work on a free model. Prefer it — only the price differs. | the run's provider key |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. | the run's provider key |
+| `delegate_readonly_free` | The same read-only sub-run on a free model. Prefer it too. | the run's provider key |
 
 Why four of them declare a credential rather than inheriting one, and why the
 other four cannot see it, is
@@ -38,6 +40,16 @@ whole tool set says it cannot change anything. Their definitions and tools files
 live under `.github/atomaton-runtime/tools/delegates/`, **not** under
 `agent-definitions/`, which is the namespace a person dispatches from. See
 [delegating a piece of work](how-it-works/delegating-a-piece-of-work.md).
+
+The two `_free` entries are those same servers again, with the sub-run on a free
+model. Nothing differs but the definition's `model:` line, and they are the ones an
+agent is told to reach for first, because a delegated task is the only place the
+free tier can be used at all: a top-level run starts from the issue, every comment
+and the pull request's diff, which exceeds the tier's per-request cap before the
+model says anything — while a delegate is handed only the task its caller wrote, so
+the caller decides how much context it carries. A task the tier refuses comes back
+as an error saying the prompt was too big, which is an answer about the task's size;
+the agent narrows it or uses the paid entry for that one call.
 
 What each server's tools do in a run is in
 [searching your repository's issues](how-it-works/searching-the-issues.md) and
