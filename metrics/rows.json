@@ -50,6 +50,40 @@
     ]
   },
   {
+    "path": "sessions/issue-109/atomaton.json",
+    "agent": "atomaton",
+    "messages": 46,
+    "calls": 26,
+    "failed": 0,
+    "refused": 4,
+    "skills": [
+      "engineering/environment"
+    ],
+    "reported": false,
+    "tools": {
+      "atoma_builtin__load_skill": 1,
+      "shell__shell_execute": 24,
+      "read": 1
+    },
+    "acts": {
+      "other": 8,
+      "search": 9,
+      "open": 1,
+      "edit": 2,
+      "verify": 4
+    },
+    "runs": [
+      {
+        "ended": "2026-10-07T02:25:36Z",
+        "ended_because": "failed",
+        "iterations": 17,
+        "messages": 46,
+        "seconds": 854,
+        "started": "2026-10-07T02:11:22Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
     "messages": 106,
