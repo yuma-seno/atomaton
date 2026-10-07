@@ -52,23 +52,26 @@
   {
     "path": "sessions/issue-109/atomaton.json",
     "agent": "atomaton",
-    "messages": 46,
-    "calls": 26,
+    "messages": 63,
+    "calls": 39,
     "failed": 0,
-    "refused": 4,
+    "refused": 5,
     "skills": [
-      "engineering/environment"
+      "engineering/environment",
+      "project/conventions"
     ],
     "reported": false,
     "tools": {
-      "atoma_builtin__load_skill": 1,
-      "shell__shell_execute": 24,
-      "read": 1
+      "atoma_builtin__load_skill": 2,
+      "shell__shell_execute": 30,
+      "read": 4,
+      "github__get_issue": 2,
+      "github__list_prs": 1
     },
     "acts": {
-      "other": 8,
+      "other": 13,
       "search": 9,
-      "open": 1,
+      "open": 2,
       "edit": 2,
       "verify": 4
     },
@@ -80,6 +83,14 @@
         "messages": 46,
         "seconds": 854,
         "started": "2026-10-07T02:11:22Z"
+      },
+      {
+        "ended": "2026-10-07T16:38:04Z",
+        "ended_because": "failed",
+        "iterations": 3,
+        "messages": 63,
+        "seconds": 409,
+        "started": "2026-10-07T16:31:15Z"
       }
     ]
   },
