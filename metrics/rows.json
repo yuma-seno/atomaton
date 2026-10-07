@@ -84,6 +84,40 @@
     ]
   },
   {
+    "path": "sessions/issue-110/atomaton.json",
+    "agent": "atomaton",
+    "messages": 89,
+    "calls": 52,
+    "failed": 2,
+    "refused": 5,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "shell__shell_execute": 7,
+      "read": 24,
+      "glob": 3,
+      "grep": 11,
+      "github__get_issue": 1,
+      "github__get_issue_comments": 2,
+      "github__get_branch": 1,
+      "delegate__run": 2,
+      "web__fetch": 1
+    },
+    "acts": {
+      "other": 7
+    },
+    "runs": [
+      {
+        "ended": "2026-10-07T02:48:05Z",
+        "ended_because": "completed",
+        "iterations": 34,
+        "messages": 89,
+        "seconds": 2199,
+        "started": "2026-10-07T02:11:26Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
     "messages": 106,
