@@ -217,6 +217,12 @@ jobs:
         shell: bash
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_live_tools.ts"
+      - name: Run the end-to-end suite against the real CLI
+        shell: bash
+        env:
+          ATOMA_BIN: /usr/local/bin/atoma
+        run: |
+          bun run test:e2e
   atomaton-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5

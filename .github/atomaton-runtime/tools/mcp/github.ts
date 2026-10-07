@@ -7779,7 +7779,8 @@ function logOp(op, payload = {}) {
   }
 }
 function logDispatch(target, agent, extra = {}) {
-  logOp("dispatch", { target, agent, ...extra });
+  const { elsewhere, ...rest } = extra;
+  logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
 }
 
 // src/adapters/github/target-state.ts
@@ -7979,7 +7980,9 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  logDispatch(d.type, d.agent, { number: Number(d.number) });
+  const here = (process.env.ISSUE_NUMBER ?? "").trim();
+  const elsewhere = here !== "" && String(d.number) !== here;
+  logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }
 
@@ -8187,6 +8190,16 @@ function closeRequestComment(request) {
   return body ? `${head}
 
 ${body}` : head;
+}
+
+// src/adapters/github/turn-comment.ts
+function turnHeader(h) {
+  const context = h.audience === "model" ? "include" : "exclude";
+  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+}
+function turnCommentBody(h) {
+  return [...turnHeader(h), h.body].join(`
+`);
 }
 
 // node_modules/zod/v3/helpers/util.js
@@ -20057,8 +20070,7 @@ function closeIssue(a) {
       notify: resolveNotify(REPO, num),
       body: "Atomaton: an agent finished the work on this issue and asked for it to be closed."
     });
-    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
-${request}`);
+    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", turnCommentBody({ ended: "done", audience: "person", body: request }));
     if (code)
       mcpFail(`Could not ask for issue #${num} to be closed: ${stderr || stdout}`);
     logOp("close_issue", { number: num, closed: false });
@@ -20185,10 +20197,10 @@ function createPr(a) {
   const currentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
   if (currentIssue) {
     const next = !validationDispatched ? "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log." : reviewer ? `Running CI; \`${reviewer}\` follows if it passes.` : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
-    const ending = validationDispatched ? `${ENDED_TAG.write("waiting")}
-` : "";
-    gh("issue", "comment", currentIssue, "--repo", REPO, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
-${ending}Atomaton: PR #${num} created (${stdout.trim()}). ${next}`);
+    const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;
+    const body = validationDispatched ? turnCommentBody({ ended: "waiting", audience: "person", body: text }) : `${LLM_CONTEXT_TAG.write("exclude")}
+${text}`;
+    gh("issue", "comment", currentIssue, "--repo", REPO, "--body", body);
   }
   if (!isAttended({ ...reviewer ? { next: { agent: reviewer } } : {}, body: body ?? "" })) {
     const openedBy = (process.env.AGENT ?? "").trim() || "an agent";
