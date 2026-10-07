@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 10 | 20% | 2,124 | 3,364 | 31 | 53.5 |
-| Last 30 days | 30 | 6.7% | 1,078 | 10,246 | 36 | 34.2 |
-| Last year | 30 | 6.7% | 1,078 | 10,246 | 36 | 34.2 |
-| All time | 30 | 6.7% | 1,078 | 10,246 | 36 | 34.2 |
+| Last 7 days | 11 | 27.3% | 1,123 | 3,364 | 28 | 53.5 |
+| Last 30 days | 31 | 9.7% | 1,059 | 10,246 | 35 | 34.2 |
+| Last year | 31 | 9.7% | 1,059 | 10,246 | 35 | 34.2 |
+| All time | 31 | 9.7% | 1,059 | 10,246 | 35 | 34.2 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,7 +22,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 28 |
-| `failed` | 2 |
+| `failed` | 3 |
 
 ## Last 7 days
 
@@ -37,7 +37,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 3,047,517 | 11,067,135 | 11,067,135 | 11,067,135 | 21,879,599 |
-| messages per session | 119 | 583 | 583 | 583 | 1,783 |
+| messages per session | 119 | 583 | 583 | 583 | 1,800 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -49,19 +49,19 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `shell__shell_execute` | 584 | 9 | 15 | 1.5% |
-| `read` | 156 | 2 | 1 | 1.3% |
+| `shell__shell_execute` | 590 | 9 | 16 | 1.5% |
+| `read` | 159 | 2 | 1 | 1.3% |
 | `web__fetch` | 71 | 4 | 0 | 5.6% |
 | `grep` | 56 | 0 | 1 | 0% |
-| `github__get_issue` | 31 | 0 | 0 | 0% |
+| `github__get_issue` | 33 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 31 | 0 | 0 | 0% |
 | `edit` | 29 | 0 | 0 | 0% |
 | `search__search_issues` | 25 | 0 | 0 | 0% |
 | `github__get_check_runs` | 19 | 0 | 0 | 0% |
-| `github__list_prs` | 14 | 0 | 0 | 0% |
+| `github__list_prs` | 15 | 0 | 0 | 0% |
 | `github__get_branch` | 13 | 0 | 0 | 0% |
 | `list` | 13 | 0 | 0 | 0% |
-| `atoma_builtin__load_skill` | 11 | 0 | 0 | 0% |
+| `atoma_builtin__load_skill` | 12 | 0 | 0 | 0% |
 | `github__create_issue` | 10 | 0 | 0 | 0% |
 | `github__get_pr` | 10 | 1 | 0 | 10% |
 | `write` | 10 | 0 | 0 | 0% |
@@ -85,18 +85,18 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 494 | 84.6% |
-| `edit` | 55 | 9.4% |
+| `other` | 499 | 84.6% |
+| `edit` | 55 | 9.3% |
 | `search` | 17 | 2.9% |
 | `verify` | 10 | 1.7% |
-| `open` | 8 | 1.4% |
+| `open` | 9 | 1.5% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 5 | 45.5% |
-| `engineering/environment` | 3 | 27.3% |
-| `delivery/pipeline-setup` | 2 | 18.2% |
-| `research/web-search` | 1 | 9.1% |
+| `project/conventions` | 6 | 50% |
+| `engineering/environment` | 3 | 25% |
+| `delivery/pipeline-setup` | 2 | 16.7% |
+| `research/web-search` | 1 | 8.3% |
 
 ## Last 30 days
 
@@ -111,7 +111,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,068,104 | 11,220,302 | 16,895,165 | 16,895,165 | 75,824,115 |
-| messages per session | 135 | 557 | 583 | 583 | 3,919 |
+| messages per session | 135 | 557 | 583 | 583 | 3,936 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -123,12 +123,12 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `shell__shell_execute` | 1,038 | 15 | 22 | 1.4% |
-| `read` | 523 | 3 | 2 | 0.6% |
+| `shell__shell_execute` | 1,044 | 15 | 23 | 1.4% |
+| `read` | 526 | 3 | 2 | 0.6% |
 | `grep` | 277 | 4 | 1 | 1.4% |
 | `web__fetch` | 126 | 6 | 0 | 4.8% |
 | `edit` | 81 | 0 | 0 | 0% |
-| `github__get_issue` | 61 | 0 | 0 | 0% |
+| `github__get_issue` | 63 | 0 | 0 | 0% |
 | `list` | 57 | 1 | 0 | 1.8% |
 | `github__get_issue_comments` | 55 | 0 | 0 | 0% |
 | `search__search_issues` | 40 | 0 | 0 | 0% |
@@ -136,8 +136,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_branch` | 28 | 0 | 0 | 0% |
 | `github__get_check_runs` | 28 | 0 | 0 | 0% |
 | `github__get_pr` | 25 | 3 | 0 | 12% |
-| `atoma_builtin__load_skill` | 23 | 0 | 0 | 0% |
-| `github__list_prs` | 22 | 0 | 0 | 0% |
+| `atoma_builtin__load_skill` | 24 | 0 | 0 | 0% |
+| `github__list_prs` | 23 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `glob` | 15 | 0 | 0 | 0% |
 | `github__check_merge_readiness` | 12 | 0 | 0 | 0% |
@@ -165,18 +165,18 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 843 | 81.1% |
+| `other` | 848 | 81.1% |
 | `edit` | 99 | 9.5% |
-| `search` | 61 | 5.9% |
-| `open` | 24 | 2.3% |
-| `verify` | 12 | 1.2% |
+| `search` | 61 | 5.8% |
+| `open` | 25 | 2.4% |
+| `verify` | 12 | 1.1% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 14 | 60.9% |
-| `delivery/pipeline-setup` | 4 | 17.4% |
-| `engineering/environment` | 4 | 17.4% |
-| `research/web-search` | 1 | 4.3% |
+| `project/conventions` | 15 | 62.5% |
+| `delivery/pipeline-setup` | 4 | 16.7% |
+| `engineering/environment` | 4 | 16.7% |
+| `research/web-search` | 1 | 4.2% |
 
 ## Last year
 
@@ -191,7 +191,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,068,104 | 11,220,302 | 16,895,165 | 16,895,165 | 75,824,115 |
-| messages per session | 135 | 557 | 583 | 583 | 3,919 |
+| messages per session | 135 | 557 | 583 | 583 | 3,936 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -203,12 +203,12 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `shell__shell_execute` | 1,038 | 15 | 22 | 1.4% |
-| `read` | 523 | 3 | 2 | 0.6% |
+| `shell__shell_execute` | 1,044 | 15 | 23 | 1.4% |
+| `read` | 526 | 3 | 2 | 0.6% |
 | `grep` | 277 | 4 | 1 | 1.4% |
 | `web__fetch` | 126 | 6 | 0 | 4.8% |
 | `edit` | 81 | 0 | 0 | 0% |
-| `github__get_issue` | 61 | 0 | 0 | 0% |
+| `github__get_issue` | 63 | 0 | 0 | 0% |
 | `list` | 57 | 1 | 0 | 1.8% |
 | `github__get_issue_comments` | 55 | 0 | 0 | 0% |
 | `search__search_issues` | 40 | 0 | 0 | 0% |
@@ -216,8 +216,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_branch` | 28 | 0 | 0 | 0% |
 | `github__get_check_runs` | 28 | 0 | 0 | 0% |
 | `github__get_pr` | 25 | 3 | 0 | 12% |
-| `atoma_builtin__load_skill` | 23 | 0 | 0 | 0% |
-| `github__list_prs` | 22 | 0 | 0 | 0% |
+| `atoma_builtin__load_skill` | 24 | 0 | 0 | 0% |
+| `github__list_prs` | 23 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `glob` | 15 | 0 | 0 | 0% |
 | `github__check_merge_readiness` | 12 | 0 | 0 | 0% |
@@ -245,18 +245,18 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 843 | 81.1% |
+| `other` | 848 | 81.1% |
 | `edit` | 99 | 9.5% |
-| `search` | 61 | 5.9% |
-| `open` | 24 | 2.3% |
-| `verify` | 12 | 1.2% |
+| `search` | 61 | 5.8% |
+| `open` | 25 | 2.4% |
+| `verify` | 12 | 1.1% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 14 | 60.9% |
-| `delivery/pipeline-setup` | 4 | 17.4% |
-| `engineering/environment` | 4 | 17.4% |
-| `research/web-search` | 1 | 4.3% |
+| `project/conventions` | 15 | 62.5% |
+| `delivery/pipeline-setup` | 4 | 16.7% |
+| `engineering/environment` | 4 | 16.7% |
+| `research/web-search` | 1 | 4.2% |
 
 ## All time
 
@@ -271,7 +271,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,068,104 | 11,220,302 | 16,895,165 | 16,895,165 | 75,824,115 |
-| messages per session | 135 | 557 | 583 | 583 | 3,919 |
+| messages per session | 135 | 557 | 583 | 583 | 3,936 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -283,12 +283,12 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `shell__shell_execute` | 1,038 | 15 | 22 | 1.4% |
-| `read` | 523 | 3 | 2 | 0.6% |
+| `shell__shell_execute` | 1,044 | 15 | 23 | 1.4% |
+| `read` | 526 | 3 | 2 | 0.6% |
 | `grep` | 277 | 4 | 1 | 1.4% |
 | `web__fetch` | 126 | 6 | 0 | 4.8% |
 | `edit` | 81 | 0 | 0 | 0% |
-| `github__get_issue` | 61 | 0 | 0 | 0% |
+| `github__get_issue` | 63 | 0 | 0 | 0% |
 | `list` | 57 | 1 | 0 | 1.8% |
 | `github__get_issue_comments` | 55 | 0 | 0 | 0% |
 | `search__search_issues` | 40 | 0 | 0 | 0% |
@@ -296,8 +296,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_branch` | 28 | 0 | 0 | 0% |
 | `github__get_check_runs` | 28 | 0 | 0 | 0% |
 | `github__get_pr` | 25 | 3 | 0 | 12% |
-| `atoma_builtin__load_skill` | 23 | 0 | 0 | 0% |
-| `github__list_prs` | 22 | 0 | 0 | 0% |
+| `atoma_builtin__load_skill` | 24 | 0 | 0 | 0% |
+| `github__list_prs` | 23 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `glob` | 15 | 0 | 0 | 0% |
 | `github__check_merge_readiness` | 12 | 0 | 0 | 0% |
@@ -325,18 +325,18 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 843 | 81.1% |
+| `other` | 848 | 81.1% |
 | `edit` | 99 | 9.5% |
-| `search` | 61 | 5.9% |
-| `open` | 24 | 2.3% |
-| `verify` | 12 | 1.2% |
+| `search` | 61 | 5.8% |
+| `open` | 25 | 2.4% |
+| `verify` | 12 | 1.1% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 14 | 60.9% |
-| `delivery/pipeline-setup` | 4 | 17.4% |
-| `engineering/environment` | 4 | 17.4% |
-| `research/web-search` | 1 | 4.3% |
+| `project/conventions` | 15 | 62.5% |
+| `delivery/pipeline-setup` | 4 | 16.7% |
+| `engineering/environment` | 4 | 16.7% |
+| `research/web-search` | 1 | 4.2% |
 
 ## Degraded answers
 
