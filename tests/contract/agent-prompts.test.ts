@@ -663,4 +663,44 @@ describe("agent prompt contracts", () => {
       "GitHub turns that into a link to",
     );
   });
+
+  /**
+   * A check that needs a real secret is made after the merge, and the prompt has to
+   * say so *before* the run starts.
+   *
+   * #109 was dispatched to answer one question — whether the attachment endpoint
+   * accepts the credential a run holds — and could not answer it where it was asked:
+   * `curl` is refused, and even with it there is no token in the shell to send. The
+   * run found that out one refusal at a time, and then proposed building a tool server
+   * so the check would be possible at all. That is a reasonable reply to an impossible
+   * task and a whole run spent on the wrong one.
+   *
+   * What the prompt owes a run instead is the boundary, stated once, so the plan it
+   * makes at the start is one it can carry out. Three claims have to survive editing:
+   * that the check belongs after the merge, that a tool which would make it possible
+   * earlier is the wrong thing to ask for, and what a run can do here instead.
+   */
+  test("the prompt says a check needing a real secret happens after the merge", () => {
+    // Whitespace collapsed before asserting, because this file is wrapped prose: a
+    // sentence breaks across a line at a column, so an assertion written against the
+    // whole sentence holds only until the paragraph around it is re-flowed -- and then
+    // it fails over where a line ended rather than over anything it is about. The same
+    // lesson the e2e suite learned about `prompt-template.md`.
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8").replace(/\s+/g, " ");
+
+    expect(prompt, "the boundary, in the terms a run plans against").toContain(
+      "A check that needs a real secret is made after the merge, not before.",
+    );
+    expect(prompt, "and why no rearrangement of the tools closes it").toContain(
+      "a tool that would make it askable is the wrong thing to ask for",
+    );
+    expect(prompt, "what the pull request's own checks are for instead").toContain(
+      "What you can do here is verify the **shape**",
+    );
+    expect(prompt, "and that a question the shape cannot settle is a decision").toContain(
+      "say so and hand it up, instead of building the machinery",
+    );
+    // The reason, not just the rule: a run that reads only "you cannot" looks for a way.
+    expect(prompt).toContain("it would be a credential in the hands of code nobody has read yet");
+  });
 });
