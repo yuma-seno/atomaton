@@ -86,12 +86,12 @@
   {
     "path": "sessions/issue-110/atomaton.json",
     "agent": "atomaton",
-    "messages": 89,
-    "calls": 52,
+    "messages": 91,
+    "calls": 53,
     "failed": 2,
     "refused": 5,
     "skills": [],
-    "reported": true,
+    "reported": false,
     "tools": {
       "shell__shell_execute": 7,
       "read": 24,
@@ -101,7 +101,8 @@
       "github__get_issue_comments": 2,
       "github__get_branch": 1,
       "delegate__run": 2,
-      "web__fetch": 1
+      "web__fetch": 1,
+      "atomaton__request_close_issue": 1
     },
     "acts": {
       "other": 7
@@ -114,6 +115,14 @@
         "messages": 89,
         "seconds": 2199,
         "started": "2026-10-07T02:11:26Z"
+      },
+      {
+        "ended": "2026-10-07T02:49:07Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 91,
+        "seconds": 29,
+        "started": "2026-10-07T02:48:38Z"
       }
     ]
   },
