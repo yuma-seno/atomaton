@@ -199,3 +199,59 @@ servers:
       ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
     request_timeout_secs: 660
     hooks: {}
+  # The same two entries again, with the sub-run on the free router. Nothing differs
+  # but `--agent-def`, and that is the point: which model runs a delegated task is a
+  # property of the definition, so it is one more pair of entries here rather than a
+  # model argument a caller could pass. See `delegates/delegate_free.md`.
+  #
+  # ## Why both halves, when the free one is cheaper
+  #
+  # The free tier is rate-limited rather than metered, and its limits are per
+  # ACCOUNT rather than per task: what it will carry is not knowable from here, and
+  # the only way to find out is to send something. These entries are that probe,
+  # made cheap — a task a caller has already decided is small.
+  #
+  # ## What a caller does with the pair
+  #
+  # Reach for `delegate_free` first. The two are the same program, the same servers
+  # and the same role prompt; only the price differs, so the free one is the right
+  # default and the paid one is for a task that has failed on cost rather than on
+  # content. A free sub-run that dies does so with a report — the caller reads what
+  # it said, narrows the task or pays for it — which is different from the silence a
+  # fallback chain would leave.
+  delegate_free:
+    description: "The same work as `delegate`, run on a free model. Prefer it: a task that fits the free tier costs nothing, and one that does not says so."
+    command: bun
+    args:
+      - run
+      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
+      - --agent-def
+      - delegate_free.md
+      - --delegates-dir
+      - ".github/atomaton-runtime/tools/delegates"
+    env:
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
+    request_timeout_secs: 660
+    hooks: {}
+  delegate_readonly_free:
+    description: "The same reading as `delegate_readonly`, run on a free model. Prefer it for the same reason: only the price differs."
+    command: bun
+    args:
+      - run
+      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
+      - --agent-def
+      - delegate_readonly_free.md
+      - --delegates-dir
+      - ".github/atomaton-runtime/tools/delegates"
+    env:
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+      ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
+    request_timeout_secs: 660
+    hooks: {}
