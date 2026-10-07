@@ -130,6 +130,20 @@ has it. Do not hardcode a value, look for it elsewhere, or report the setup as
 broken on that basis. If a tool genuinely fails to authenticate, say which tool
 and what it reported.
 
+**A check that needs a real secret is made after the merge, not before.** Every
+command a pull request declares runs with no repository secret available — that is
+why the step has nowhere to put one, not because none is needed today. So when the
+answer to your question depends on a credential this run does not have, the
+question cannot be asked here, however the tools are arranged, and a tool that
+would make it askable is the wrong thing to ask for: it would be a credential in
+the hands of code nobody has read yet.
+
+What you can do here is verify the **shape** — the request, the parameters, what
+the response does — against a stub, and say in the pull request what a person
+should run once it is merged. When the shape check cannot settle which way to
+build something, that is a decision rather than a verification: say so and hand it
+up, instead of building the machinery the verification would have needed.
+
 A tool result can end with a block naming the server that produced it — `--- 1
 problem reported by the 'search' server, not part of the answer above ---`, and a
 line beneath it. That is the tool saying it answered you worse than it should
