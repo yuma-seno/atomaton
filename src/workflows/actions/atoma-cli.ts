@@ -96,14 +96,27 @@ import { TypedOutputsStep } from "./base.ts";
  * no MCP schema at all -- the model then infers argument shapes from the names in the
  * system prompt.
  *
+ * **A retry now waits as long as the provider asks.** Up to a two-minute cap, taken
+ * from the provider's own `Retry-After` rather than from this repository's fixed
+ * 1s-then-4s backoff, which is what the older binary always waited. The wait is
+ * spent out of `--max-runtime-secs` -- the runner floors that at 300 seconds -- so
+ * a rate-limited run now pauses and carries on instead of failing five seconds in
+ * with "The upstream provider is temporarily unavailable".
+ *
+ * **`ATOMA_LLM_ERROR`, the machine-readable reason an inference failed.** It carries
+ * `label=`, `code=` and `type=` beside the prose, in the same `key=value` shape as
+ * `ATOMA_TOKEN_USAGE` and `ATOMA_CONFIG_FINDING`. Nothing here reads it yet, and an
+ * older binary writes no such line -- so a reader added before the raise would find
+ * nothing to read. It is in the log for whoever is looking at a failed run.
+ *
  * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`
  * measures the binary, and a repository whose probes and whose runs are on different
  * builds is one where a green probe means less than it looks.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.1.1";
+export const ATOMA_DEFAULT_VERSION = "v0.1.2";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.1.1). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.1.2). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead
