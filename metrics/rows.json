@@ -198,31 +198,34 @@
   {
     "path": "sessions/issue-109/reviewer.json",
     "agent": "reviewer",
-    "messages": 183,
-    "calls": 134,
-    "failed": 4,
-    "refused": 1,
+    "messages": 323,
+    "calls": 234,
+    "failed": 9,
+    "refused": 3,
     "skills": [
       "project/conventions"
     ],
     "reported": true,
     "tools": {
-      "read": 49,
+      "read": 80,
       "atoma_builtin__load_skill": 1,
-      "grep": 60,
-      "glob": 1,
-      "github__get_pr_diff": 2,
-      "github__get_pr": 1,
-      "list": 6,
+      "grep": 109,
+      "glob": 4,
+      "github__get_pr_diff": 3,
+      "github__get_pr": 2,
+      "list": 7,
       "github__get_pr_reviews": 1,
-      "github__get_issue_comments": 2,
-      "github__get_check_runs": 1,
-      "web__fetch": 4,
-      "github__list_prs": 1,
-      "github__get_branch": 1,
+      "github__get_issue_comments": 3,
+      "github__get_check_runs": 3,
+      "web__fetch": 8,
+      "github__list_prs": 2,
+      "github__get_branch": 3,
       "dev_null": 1,
-      "github__get_issue": 1,
-      "search__search_issues": 2
+      "github__get_issue": 2,
+      "search__search_issues": 2,
+      "github__check_merge_readiness": 1,
+      "search__search_code": 1,
+      "github__merge_pr": 1
     },
     "acts": {},
     "runs": [
@@ -233,6 +236,14 @@
         "messages": 183,
         "seconds": 1907,
         "started": "2026-10-08T15:53:02Z"
+      },
+      {
+        "ended": "2026-10-08T18:26:37Z",
+        "ended_because": "completed",
+        "iterations": 37,
+        "messages": 323,
+        "seconds": 1486,
+        "started": "2026-10-08T18:01:51Z"
       }
     ]
   },
