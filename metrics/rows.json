@@ -50,7 +50,7 @@
     ]
   },
   {
-    "path": "sessions/issue-109/atomaton.json",
+    "path": "sessions/issue-109/archive/atomaton-1.json",
     "agent": "atomaton",
     "messages": 63,
     "calls": 39,
@@ -91,6 +91,53 @@
         "messages": 63,
         "seconds": 409,
         "started": "2026-10-07T16:31:15Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/issue-109/atomaton.json",
+    "agent": "atomaton",
+    "messages": 651,
+    "calls": 338,
+    "failed": 11,
+    "refused": 7,
+    "skills": [
+      "project/conventions",
+      "engineering/environment",
+      "engineering/secrets-in-a-check"
+    ],
+    "reported": false,
+    "tools": {
+      "github__get_issue": 2,
+      "github__get_issue_comments": 1,
+      "shell__shell_execute": 251,
+      "list": 6,
+      "atoma_builtin__load_skill": 3,
+      "glob": 3,
+      "github__list_prs": 1,
+      "read": 36,
+      "grep": 5,
+      "web__fetch": 10,
+      "write": 6,
+      "edit": 12,
+      "github__commit_and_push": 1,
+      "github__create_pr": 1
+    },
+    "acts": {
+      "other": 41,
+      "open": 49,
+      "search": 142,
+      "verify": 12,
+      "edit": 7
+    },
+    "runs": [
+      {
+        "ended": "2026-10-08T15:51:11Z",
+        "ended_because": "completed",
+        "iterations": 309,
+        "messages": 651,
+        "seconds": 3170,
+        "started": "2026-10-08T14:58:21Z"
       }
     ]
   },
