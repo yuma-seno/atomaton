@@ -125,6 +125,28 @@ servers:
       GH_TOKEN: "${GH_TOKEN}"
     hooks:
       {}
+  # The user-asset upload endpoint — what `gh --attach` posts to — is reached
+  # only from here. `gh` refuses the Actions token client-side before any
+  # request is built (`gho_`/`ghp_`/`github_pat_` are its allowlist; a `ghs_`
+  # is not on it, measured on the cli/cli source at v2.101.0), and `curl` is
+  # routed away from the shell, which holds no credential to send anyway. So
+  # the POST lives where the token lives, and `probe` is the endpoint check
+  # that could not run anywhere else — the check `engineering/secrets-in-a-check`
+  # says belongs after a merge, in the tool that a merge puts into runs.
+  #
+  # Added as its own server rather than a tool on `github`: an agent that
+  # reaches for an upload should have to name it, because `upload` stores a
+  # permanent file on GitHub's CDN with no documented way to delete it.
+  attachments:
+    description: "Probes and uses GitHub's user-asset upload endpoint (the one `gh --attach` posts to). Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion."
+    command: bun
+    args:
+      - run
+      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/attachments.ts"
+    env:
+      GH_TOKEN: "${GH_TOKEN}"
+    hooks:
+      {}
   atomaton_env:
     description: "Rebuilding the run's environment, and nothing else."
     command: bun

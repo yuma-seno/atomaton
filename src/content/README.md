@@ -100,6 +100,7 @@ every run.
 | `web` | Fetches a URL. Searching the web is a skill, not a tool. |
 | `search` | Ranked search over this repository's issues and code. |
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. |
+| `attachments` | Probes and uses GitHub's user-asset upload endpoint, the one `gh --attach` posts to. Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion. |
 | `atomaton_env` | Rebuilding the run's environment, and nothing else. |
 | `delegate` | Runs one small piece of work in a sub-run and returns what it found. |
 | `delegate_free` | The same, on a free model. Prefer it — only the price differs. |

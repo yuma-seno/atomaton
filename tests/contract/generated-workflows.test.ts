@@ -464,6 +464,17 @@ describe("generated workflows", () => {
      * it must be passed — an entry here is a claim that the code works without it.
      */
     const NOT_PASSED = new Map([
+      [
+        // A credential, and the one name on this list that is deliberate twice over.
+        // The agent step keeps credentials out of its own environment on purpose —
+        // its bash lives for the whole run, and anything there is readable from
+        // `/proc` by every tool server — so GH_TOKEN travels by the credentials
+        // file atoma reads before it starts a server, and the servers that hold it
+        // get it through their `env:` entries. A tool server reading it directly
+        // (`attachments.ts`) is served by that routing, not by this list.
+        "GH_TOKEN",
+        "the run's own token; it reaches servers through the credentials file and their `env:` entries, never the agent step's environment",
+      ],
       ["ATOMATON_DISPATCH_WORKFLOW", "an override nothing sets; the reader has a default"],
       [
         // A test seam, and the one variable whose absence in a run is the point. Set, it
