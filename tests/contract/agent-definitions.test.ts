@@ -109,6 +109,41 @@ describe("agent definitions", () => {
 });
 
 /**
+ * A shipped server nobody names is a capability the release carries and no run ever
+ * starts.
+ *
+ * `attachments` was added to `tools/defaults.yaml` with a test file of its own and
+ * named by no definition, so `attachments__probe` was uncallable and the post-merge
+ * measurement the server exists for could not be taken at all. Nothing reported it,
+ * and that is the shape: `atoma` starts only the servers a definition's
+ * `mcp_servers` names, so an unreferenced server is not an error anywhere — it is a
+ * tool that answers "Unknown tool" the first time an agent reaches for it.
+ *
+ * Named for the server rather than written as "every shipped server must be named by
+ * somebody", because that is not the rule: `README.md` says a server nobody names
+ * costs nothing, and a narrowed variant kept for one agent (`atomaton_env`) is
+ * exactly that by design. What is not allowed is a server whose whole reason to
+ * exist is a call some agent is meant to make.
+ */
+describe("a server that exists for a call an agent must make", () => {
+  test("`attachments` is named by a definition, or its probe is uncallable", () => {
+    const namers = agentFiles.filter((file) => requestedServers(file).includes("attachments"));
+    expect(
+      namers,
+      "no agent definition lists `attachments` in mcp_servers, so the server never starts and " +
+        "`attachments__probe` cannot be called by any run. Name it in the definition(s) that need it.",
+    ).not.toEqual([]);
+    // And in the one a person dispatches a measurement on: the probe is run from an
+    // issue, and `atomaton` is the agent a `/atomaton` on that issue starts.
+    expect(
+      namers,
+      "`atomaton` does not list `attachments`, so a run started by a person on an issue cannot call " +
+        "`attachments__probe` — the run this server was added to make the measurement possible in.",
+    ).toContain("atomaton.md");
+  });
+});
+
+/**
  * The delegate's definitions are NOT agent definitions, and this is the file that
  * says so.
  *

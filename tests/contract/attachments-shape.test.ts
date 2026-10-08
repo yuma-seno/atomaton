@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { rmSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { UPLOAD_LIMIT_BYTES, interpret, readFileFor, requestUrlFor } from "../../src/entrypoints/tools/mcp/attachments.ts";
+import {
+  REQUEST_ABORT_MS,
+  UPLOAD_LIMIT_BYTES,
+  interpret,
+  readFileFor,
+  requestUrlFor,
+} from "../../src/entrypoints/tools/mcp/attachments.ts";
 
 /**
  * The shape the probe sends, held here because the endpoint's meaning depends on
@@ -52,6 +58,29 @@ describe("the probe refuses to measure nothing", () => {
     } finally {
       rmSync(path);
     }
+  });
+});
+
+/**
+ * This server's own abort has to be the one that fires.
+ *
+ * atoma cuts a `tools/call` off at the server entry's `request_timeout_secs`, and a
+ * call cut off there is DISCARDED — the server keeps working, `upload` mode may still
+ * store the file, and nobody is waiting for the answer. So the entry must allow more
+ * time than the POST this file sends, which is the same relationship `delegate`'s
+ * 660 has to its sub-run's 600-second limit.
+ */
+describe("the endpoint POST gets to time out before atoma gives up on it", () => {
+  test("the shipped entry allows longer than the server's own abort", () => {
+    const defaults = Bun.YAML.parse(readFileSync("src/entrypoints/tools/defaults.yaml", "utf8")) as {
+      servers?: Record<string, { request_timeout_secs?: number }>;
+    };
+    const allowed = defaults.servers?.attachments?.request_timeout_secs;
+    expect(allowed, "the attachments entry declares no request_timeout_secs, so atoma's 60-second default applies").toBeDefined();
+    expect(
+      allowed! * 1000,
+      "atoma would discard the call before this server's own abort, and in upload mode the file may already be stored",
+    ).toBeGreaterThan(REQUEST_ABORT_MS);
   });
 });
 

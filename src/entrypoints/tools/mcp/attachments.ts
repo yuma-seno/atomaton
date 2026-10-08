@@ -56,6 +56,17 @@ export const UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 /** Past this size the file is not read into memory at all, whatever the mode. */
 const MAX_READ_BYTES = 128 * 1024 * 1024;
 
+/**
+ * How long this server waits for the endpoint before giving up.
+ *
+ * Exported because it is only useful in relation to something outside this file:
+ * `defaults.yaml` must allow a longer `tools/call` than this, or atoma discards the
+ * call first and the server's own answer arrives after nobody is waiting for it —
+ * and in `upload` mode the file may already have been stored. `attachments-shape.test.ts`
+ * reads both and holds them in that order.
+ */
+export const REQUEST_ABORT_MS = 120_000;
+
 /** How much of a response body reaches the result. The status decides the design; the body records why. */
 const BODY_EXCERPT_CHARS = 2_000;
 
@@ -304,7 +315,7 @@ async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
     // A redirect is a finding, not a route to follow: following one would turn
     // the POST into a GET and report the wrong endpoint's answer as the answer.
     redirect: "manual",
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(REQUEST_ABORT_MS),
   });
   const responseText = await response.text();
   const location = response.headers.get("location") ?? undefined;

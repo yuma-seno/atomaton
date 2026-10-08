@@ -85,7 +85,7 @@ file.
 
 ## The tool servers a run starts with
 
-Ten, and they are not in `config.yaml`. They are in
+Thirteen, and they are not in `config.yaml`. They are in
 `.github/atomaton-runtime/tools/defaults.yaml`, in the same schema as `tools.servers`
 in your config, and that file is the one to read when you are about to override
 one. What it declares is written into the file `atoma` is handed at the start of
@@ -127,11 +127,11 @@ for the free one and fall back only when it says the task did not fit.
 **Why they are not in the file you edit.** Deleting one takes a capability from
 every agent that named it, and `atoma` stops the run before a single tool starts
 rather than continuing without it. `config.yaml` is the file this README calls
-yours; sixty-six of its ninety-three lines used to be these eight, which is a lot
-of machinery to keep in a file labelled that way. The line drawn was: **hide what
-breaks when it is edited wrong, show what degrades.** A skill or a prompt template
-edited badly makes an agent less well-informed and the run carries on; those stay
-where you can reach them.
+yours; sixty-six of its ninety-three lines used to be the tool servers, which is a
+lot of machinery to keep in a file labelled that way. The line drawn was: **hide
+what breaks when it is edited wrong, show what degrades.** A skill or a prompt
+template edited badly makes an agent less well-informed and the run carries on;
+those stay where you can reach them.
 
 **What you can still do**, in `tools.servers`:
 
@@ -200,8 +200,8 @@ Everything here except `config.yaml` is replaced wholesale on upgrade. Edit it a
 the next upgrade takes your edit with it.
 
 The file `atoma --tools-file` reads is in neither directory, so there is nothing
-anywhere to edit: each run writes it into the runner's temp directory — the eight
-servers above, with whatever `tools.servers` in the config adds or overrides — and
+anywhere to edit: each run writes it into the runner's temp directory — the servers
+above, with whatever `tools.servers` in the config adds or overrides — and
 throws it away with the runner. It used to ship, which gave a repository a config
 and a file generated from it that nothing here could regenerate — editing the
 config changed nothing, and adding a server blocked every run. If an upgrade from a

@@ -145,6 +145,13 @@ servers:
       - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/attachments.ts"
     env:
       GH_TOKEN: "${GH_TOKEN}"
+    # Above the server's own 120-second abort, so a POST that never answers is
+    # reported BY the server rather than cut off here. At the 60-second default the
+    # `tools/call` is discarded while the server keeps working -- and in `upload`
+    # mode it may still store the file, retiring exactly the one outcome this probe
+    # must never produce without saying so. The same shape as `delegate`'s 660 over
+    # its sub-run's 600-second limit.
+    request_timeout_secs: 180
     hooks:
       {}
   atomaton_env:

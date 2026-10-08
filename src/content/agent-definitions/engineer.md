@@ -13,6 +13,14 @@ mcp_servers:
   - github
   - web
   - search
+  # Where a file this run produced becomes an attachment: the POST goes to GitHub's
+  # upload endpoint from here, because the shell holds no token and both `curl` and
+  # `gh` are refused there. Not a delegate's job either -- a sub-run is handed
+  # `files` and `shell` and reaches no GitHub API. This is also the definition a
+  # merged pull request's own agent is re-invoked under, which is the run that takes
+  # the endpoint measurement. `upload` stores a file with no documented deletion, so
+  # the read-only agents do not name this server.
+  - attachments
   # `reload_environment` only -- the same server the atomaton has, with its
   # other two tools withheld, so an engineer cannot close the issue it is working
   # on. Atomaton ships both entries; neither is in config.yaml.
