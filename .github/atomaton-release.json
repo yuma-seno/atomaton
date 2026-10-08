@@ -1,5 +1,5 @@
 {
-  "version": "v0.20.3",
+  "version": "v0.20.4",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -88,6 +88,7 @@
     ".github/atomaton/rulesets/main.json",
     ".github/atomaton/skills/delivery/pipeline-setup.md",
     ".github/atomaton/skills/engineering/environment.md",
+    ".github/atomaton/skills/engineering/secrets-in-a-check.md",
     ".github/atomaton/skills/research/web-search.md",
     ".github/workflows/atomaton-check.yml",
     ".github/workflows/atomaton-deploy.yml",

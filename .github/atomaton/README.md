@@ -51,6 +51,7 @@ Nothing counts them, and nothing names them outside the files themselves.
 | --- | --- |
 | `delivery/pipeline-setup` | `checks` is empty, a pull request comes back with no required check, or nothing deploys on merge. |
 | `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |
+| `engineering/secrets-in-a-check` | A check you were asked for needs a real credential to mean anything. |
 | `research/web-search` | The answer is not in this repository. |
 
 `skills/project/` is yours outright — the template ships nothing there and an
