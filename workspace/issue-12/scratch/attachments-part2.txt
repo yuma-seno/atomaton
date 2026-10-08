@@ -1,0 +1,159 @@
+
+/**
+ * What a status means, per mode — the probe's whole output beyond the raw
+ * numbers. The expected values are the ones measured by hand on #12's thread:
+ * 404 for a request without repository_id, 400 "Invalid name for request" for
+ * one with an empty name, against a token the endpoint accepted.
+ */
+export function interpret(mode: ProbeMode, status: number, body: string, location?: string): string {
+  if (status >= 300 && status < 400) {
+    return `redirected (${status}): the endpoint did not answer the POST directly${location ? ` — Location: ${location}` : ""}. Record this as a route that moves rather than one that answers.`;
+  }
+  if (status === 429) {
+    return "rate limited: wait and run the same probe again. The answer it exists for has not arrived yet.";
+  }
+
+  if (mode === "routing") {
+    if (status === 404) {
+      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists — endpoint mode's 400 is that proof.";
+    }
+    return "unexpected: the measured expectation for a request without repository_id is 404. Record the status and body.";
+  }
+
+  if (mode === "endpoint") {
+    if (status === 400) {
+      const exact = body.includes("Invalid name for request") ? " — the body matches the message measured by hand" : "";
+      return (
+        "matches the measured expectation: the endpoint is real and the credential was accepted. " +
+        "A rejected credential would be 401, and a token without write access would be 404 (gh's source says READ and TRIAGE get 404, not 403). " +
+        `Nothing was stored: name was empty${exact}.`
+      );
+    }
+    if (status === 401) {
+      return "the credential was rejected by the endpoint. gh already refuses a ghs_ token client-side; an endpoint-side rejection closes the direct-POST path too, and the design needs a different credential (a PAT declared in tools.secrets). This is the answer that reopens #12's design.";
+    }
+    if (status === 403) {
+      return "the credential is recognised but forbidden. gh's source says a token without write access gets 404 here, so a 403 points at policy — an app not authorised, or SSO — rather than at the repository role.";
+    }
+    if (status === 404) {
+      return "the endpoint did not route for this credential. gh's source says READ and TRIAGE roles get 404 — check the token's permission on the repository before concluding the endpoint is gone.";
+    }
+    if (status === 201) {
+      return "the endpoint ignored the empty name and stored an asset anyway. There is no documented deletion API for a user-attachment asset — record the URL and treat the file as permanent.";
+    }
+    return "unexpected: the measured expectation is 400. Record the status and body.";
+  }
+
+  if (mode === "upload") {
+    if (status === 201) {
+      return "stored: the URL in the result is the attachment reference for markdown. There is no documented API to delete a user-attachment asset, so this URL is permanent — weigh that before the next upload.";
+    }
+    if (status === 413) {
+      return "over the size ceiling: the upload was refused and nothing was stored.";
+    }
+    if (status === 404) {
+      return "the endpoint did not route for this credential: gh's source says a token without write access on the repository gets 404, not 403.";
+    }
+    if (status === 401) {
+      return "the credential was rejected by the endpoint — the direct-POST design needs a different credential, and #12's design reopens.";
+    }
+    if (status === 403) {
+      return "the credential is recognised but forbidden — policy rather than role, since a low role gets 404 here.";
+    }
+    if (status === 422) {
+      return "refused as unprocessable — the endpoint's own message is in the body. This is the shape a validation rule (a format the endpoint rejects) takes.";
+    }
+    return "unexpected: the measured expectation is 201 with an asset URL. Record the status and body.";
+  }
+
+  // oversize
+  if (status === 413) {
+    return "the ceiling is enforced server-side: a file over 25MB cannot be attached whole. The design question — split the artifact, or regenerate a smaller one from the source — is settled toward pieces at or under the limit.";
+  }
+  if (status === 201) {
+    return "the over-limit file WAS stored: the documented 25MB ceiling did not fire for this content type. Record the URL — this contradicts the premise the design rests on, and #12's design reopens.";
+  }
+  if (status === 422 || status === 400) {
+    return `refused with ${status}: the ceiling may be reported as a validation message rather than 413. The body is the record; either way the file was not stored whole.`;
+  }
+  if (status === 404) {
+    return "the endpoint did not route for this credential: gh's source says a token without write access on the repository gets 404. The size question was not reached.";
+  }
+  if (status === 401) {
+    return "the credential was rejected before the size question was reached — the direct-POST design needs a different credential, and #12's design reopens.";
+  }
+  return "unexpected: the measured expectation is a refusal (413, or 422 carrying the ceiling as a validation message). Record the status and body.";
+}
+
+async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
+  const { token, kind } = credential();
+  const mode = a.mode as ProbeMode;
+  const contentType = a.content_type ?? "application/octet-stream";
+
+  const needsRepo = mode !== "routing";
+  const repositoryId = a.repository_id ?? (needsRepo ? resolveRepositoryId(resolveRepo()) : undefined);
+  const name = mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined;
+
+  let body: Uint8Array | undefined;
+  if (mode === "upload" || mode === "oversize") {
+    if (!a.file) throw new Error(`mode ${mode} needs a file to send`);
+    ({ bytes: body } = readFileFor(mode, a.file));
+  }
+
+  const url = requestUrlFor(mode, { repositoryId, name, contentType });
+
+  const started = Date.now();
+  log(`probe ${mode} ${body ? `${body.length}B` : "(no body)"}`);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      // `token`, not `Bearer` — the prefix gh's own client sends, so the probe
+      // measures the endpoint against the credential shape gh would have used.
+      Authorization: `token ${token}`,
+      "Content-Type": contentType,
+      Accept: "application/vnd.github+json",
+    },
+    ...(body ? { body } : {}),
+    // A redirect is a finding, not a route to follow: following one would turn
+    // the POST into a GET and report the wrong endpoint's answer as the answer.
+    redirect: "manual",
+    signal: AbortSignal.timeout(120_000),
+  });
+  const responseText = await response.text();
+  const location = response.headers.get("location") ?? undefined;
+  log(`probe ${mode} -> ${response.status} in ${Date.now() - started}ms`);
+
+  const interpretation = interpret(mode, response.status, responseText, location);
+  return JSON.stringify(
+    {
+      mode,
+      sent: url,
+      content_length: body ? body.length : 0,
+      credential: `present, prefix ${kind}`,
+      status: response.status,
+      location: location ?? null,
+      body_excerpt: responseText.slice(0, BODY_EXCERPT_CHARS) || null,
+      interpretation,
+    },
+    null,
+    2,
+  );
+}
+
+const { tools, dispatch } = buildMcpTools([
+  defineMcpTool({
+    name: "probe",
+    description:
+      "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " +
+      "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted — without saving a file. " +
+      "Mode `routing` omits repository_id; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL. " +
+      "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
+    schema: PROBE_SCHEMA,
+    handler: probe,
+  }),
+]);
+
+async function main(): Promise<void> {
+  await serveMcpServer({ name: "atomaton-attachments-mcp", version: "1.0.0", tools, dispatch, log });
+}
+if (import.meta.main) void main();
