@@ -142,6 +142,47 @@
     ]
   },
   {
+    "path": "sessions/issue-109/reviewer.json",
+    "agent": "reviewer",
+    "messages": 183,
+    "calls": 134,
+    "failed": 4,
+    "refused": 1,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "read": 49,
+      "atoma_builtin__load_skill": 1,
+      "grep": 60,
+      "glob": 1,
+      "github__get_pr_diff": 2,
+      "github__get_pr": 1,
+      "list": 6,
+      "github__get_pr_reviews": 1,
+      "github__get_issue_comments": 2,
+      "github__get_check_runs": 1,
+      "web__fetch": 4,
+      "github__list_prs": 1,
+      "github__get_branch": 1,
+      "dev_null": 1,
+      "github__get_issue": 1,
+      "search__search_issues": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-08T16:24:49Z",
+        "ended_because": "completed",
+        "iterations": 43,
+        "messages": 183,
+        "seconds": 1907,
+        "started": "2026-10-08T15:53:02Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-110/atomaton.json",
     "agent": "atomaton",
     "messages": 91,
