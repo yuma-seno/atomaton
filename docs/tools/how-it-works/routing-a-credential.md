@@ -11,9 +11,10 @@ can read is a credential the agent can read and send anywhere. It ships with
 — which is what makes "the tool holds the secret, the agent does not" true rather
 than aspirational.
 
-That is also why four of the shipped servers declare the run's GitHub token
-rather than inheriting it. `github`, `search`, `atomaton` and `atomaton_env` shell
-out to `gh`; the declaration on each is what keeps the same token out of `shell`.
+That is also why five of the shipped servers declare the run's GitHub token
+rather than inheriting it. `github`, `search`, `atomaton`, `attachments` and
+`atomaton_env` reach GitHub's API; the declaration on each is what keeps the same
+token out of `shell`.
 
 ## Which layer decides what
 
