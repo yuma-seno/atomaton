@@ -66,6 +66,14 @@ import { TypedOutputsStep } from "./base.ts";
  * The pin and `defaults.yaml` therefore move together, and the older of the two is
  * the one that breaks a run.
  *
+ * **`server_calls` on `atoma_runs`.** Which tools each server was asked for, per run.
+ * A session cannot answer it: `unprefixed` is what makes a tool arrive under its own
+ * bare name, and it is also what strips the server off the call. So the metrics report
+ * read the server out of the name — `read_text_file` split on `__` — which stopped
+ * working the moment the servers were unprefixed. Under an older binary the field is
+ * absent, and the report says it could not check rather than naming every server as
+ * unused.
+ *
  * **`agent-definitions/*.md`.** The provider names in them are this repository's, and
  * a dialect's name is a row in the core's provider table. A name the installed binary
  * does not have resolves to nothing.
@@ -124,10 +132,10 @@ import { TypedOutputsStep } from "./base.ts";
  * measures the binary, and a repository whose probes and whose runs are on different
  * builds is one where a green probe means less than it looks.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.3.0";
+export const ATOMA_DEFAULT_VERSION = "v0.4.0";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.3.0). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead

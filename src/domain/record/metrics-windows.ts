@@ -39,6 +39,21 @@ export interface RunRecord {
    * waited the same number of times.
    */
   iterations?: number;
+  /**
+   * Which tools each MCP server was asked for, and how many times, for this run.
+   *
+   * `server -> tool -> calls`, written by atoma from v0.4.0. This is the only record
+   * that can say which server answered: a tool reaches the model under its own bare
+   * name (`read`, `bash`), so the transcript it is read from does not name one. Before
+   * this field the report guessed by splitting the call name on `__`, which worked only
+   * while the servers were prefixed and reported every server as unused once they were
+   * not.
+   *
+   * Optional because runs stored before it exists have none. Absent rather than an empty
+   * map at the reader, so a report can say "could not check" instead of "nothing was
+   * called" -- the two look identical in the data and mean opposite things.
+   */
+  server_calls?: Record<string, Record<string, number>>;
 }
 
 /** A stretch of time the report covers. */

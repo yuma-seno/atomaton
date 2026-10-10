@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { distributionOf, metricsOf, type CallRecord, type SessionRecord } from "./metrics.ts";
 import { renderReport } from "./metrics-report.ts";
-import { sessionEndedAt, within, type Window } from "./metrics-windows.ts";
+import { sessionEndedAt, within, type RunRecord, type Window } from "./metrics-windows.ts";
 /**
  * Render with the same metrics in every window.
  *
@@ -21,12 +21,29 @@ const call = (tool: string, extra: Partial<CallRecord> = {}): CallRecord => ({
   ...extra,
 });
 
+/**
+ * A run as atoma writes it, with the servers it invoked.
+ *
+ * `server_calls` is where a server's use is read from now -- `server -> tool -> calls`,
+ * atoma v0.4.0. Before it the report guessed at the server by splitting the call name,
+ * which only ever worked for a prefixed one.
+ */
+const run = (servers: Record<string, Record<string, number>>): RunRecord => ({
+  started: "2026-09-13T00:00:00Z",
+  ended: "2026-09-13T00:01:00Z",
+  seconds: 60,
+  ended_because: "completed",
+  messages: 10,
+  iterations: 5,
+  server_calls: servers,
+});
+
 const SESSIONS: SessionRecord[] = [
   {
     path: "sessions/issue-1/engineer.json",
     agent: "engineer",
     messages: 10,
-    runs: [],
+    runs: [run({ shell: { bash: 3 }, acme: { read_text_file: 1 }, github: { create_pr: 1 } })],
     reported: true,
     calls: [
       call("bash", { act: "search" }),
@@ -37,25 +54,27 @@ const SESSIONS: SessionRecord[] = [
       call("bash", { act: "edit", refused: true }),
     ],
   },
-  { path: "sessions/issue-2/reviewer.json", agent: "reviewer", messages: 40, runs: [], reported: true, calls: [call("get_pr")] },
+  { path: "sessions/issue-2/reviewer.json", agent: "reviewer", messages: 40, runs: [run({ github: { get_pr: 1 } })], reported: true, calls: [call("get_pr")] },
 ];
 
 /**
- * Every shipped server sets `unprefixed: true`, so a call names no server at all.
+ * The servers a configuration declares -- names and nothing else.
  *
- * `acme` and `slack` are declared WITHOUT it, which is what a third-party server looks
- * like. Two of them so that the two answers a report can give -- judged and found used,
- * judged and found unused -- both have an example to be tested against. Neither name is
- * one this repository has ever shipped: a retired server's name in a fixture reads as a
- * server that is still there.
+ * The `unprefixed` flag is gone from the type, because it no longer decides anything:
+ * a run records which server every call reached, so a server's use is judgeable
+ * whatever its spelling. These are the six the report compares against usage, two of
+ * which nothing called.
+ *
+ * Neither `acme` nor `slack` is a name this repository has ever shipped: a retired
+ * server's name in a fixture reads as a server that is still there.
  */
 const SERVERS = [
-  { name: "shell", unprefixed: true },
+  { name: "shell" },
   { name: "acme" },
   { name: "slack" },
-  { name: "github", unprefixed: true },
-  { name: "web", unprefixed: true },
-  { name: "search", unprefixed: true },
+  { name: "github" },
+  { name: "web" },
+  { name: "search" },
 ];
 const SKILLS = ["engineering/tdd", "delivery/pipeline-setup"];
 const TOKENS = [
@@ -79,17 +98,20 @@ describe("metricsOf", () => {
   const metrics = metricsOf(SESSIONS, SERVERS, SKILLS, TOKENS);
 
   /**
-   * The defect the first run against real data exposed. `tools.yaml` declares servers
-   * (`acme`) and a call names a tool (`acme__read_text_file`), so comparing the two
-   * directly reported every server as unused -- a section of confident nonsense.
+   * The defect the first run against real data exposed, and the shape of its fix.
    *
-   * `acme` is judged and found used; `slack` is judged and found unused; the four that
-   * this repository actually ships set `unprefixed`, so no call can name them and they
-   * belong to the other list.
+   * `tools.yaml` declares servers and a session names tools, so comparing the two
+   * directly reported every server as unused -- a section of confident nonsense. The
+   * fix then was to read the server off the call's `server__tool` name, which stopped
+   * working the moment the servers were `unprefixed`: a bare `read` names no server, so
+   * every shipped server became unjudgeable and the report named them as such.
+   *
+   * `server_calls` is atoma's own record of which server each call reached, so the
+   * question is answerable again and for all of them: `slack` and `web` and `search` are
+   * the declared servers nothing called, whatever their spelling.
    */
   test("an unused server is one whose tools nothing called", () => {
-    expect(metrics.neverUsedServers).toEqual(["slack"]);
-    expect(metrics.unrecognisableServers).toEqual(["github", "search", "shell", "web"]);
+    expect(metrics.neverUsedServers).toEqual(["search", "slack", "web"]);
   });
 
   test("an unloaded skill is named, since it is described in every prompt", () => {
@@ -118,38 +140,51 @@ describe("metricsOf", () => {
   });
 
   /**
-   * An unprefixed server's tools arrive under their own names -- `read`, `grep` --
-   * so no call names the server. Calling that unused would state the opposite of the
-   * truth about the most-used server there is.
+   * A repository that has not run since the upgrade cannot answer, and saying it is
+   * empty would be the same lie in the other direction.
    *
-   * Its own two servers rather than `SERVERS` plus one, because what is asserted is the
-   * whole of both lists and a shared fixture would make this test move every time one
-   * is added.
+   * Every run stored before atoma v0.4.0 has no `server_calls`, so there is nothing to
+   * compare a declaration against. `undefined` is that answer -- the report says it could
+   * not check. Returning an empty list there would name every server as unused on a
+   * repository whose servers are all in use.
    */
-  test("a server a call cannot name is not reported as one nothing called", () => {
-    const servers = [{ name: "files", unprefixed: true }, { name: "acme" }];
-    const sessions: SessionRecord[] = [
+  test("a repository with no recorded calls does not read as nothing used", () => {
+    const old: SessionRecord[] = [
       {
         path: "sessions/issue-1/engineer.json",
         agent: "engineer",
         messages: 10,
-        runs: [],
-        calls: [call("read"), call("grep"), call("get_pr")],
+        runs: [{ started: "", ended: "", seconds: 1, ended_because: "completed", messages: 10 }],
         reported: true,
+        calls: [call("read")],
       },
     ];
 
-    const m = metricsOf(sessions, servers, SKILLS, []);
-    expect(m.neverUsedServers).not.toContain("files");
-    // And not quietly dropped either: unchecked has to read as unchecked.
-    expect(m.unrecognisableServers).toEqual(["files"]);
+    const m = metricsOf(old, SERVERS, SKILLS, []);
+    expect(m.neverUsedServers).toBeUndefined();
+
+    const text = render(m, new Date("2026-09-13T00:00:00Z"));
+    expect(text).toContain("could not be read");
   });
 
-  test("the report names what it could not check rather than passing it", () => {
-    const servers = [...SERVERS, { name: "files", unprefixed: true }];
-    const text = render(metricsOf(SESSIONS, servers, SKILLS, TOKENS), new Date("2026-09-13T00:00:00Z"));
-    expect(text).toContain("Not checked, because a call does not name them");
-    expect(text).toContain("`files`");
+  /**
+   * And a run that recorded its calls but invoked nothing is the opposite answer: no
+   * server was used, and every declared one is named.
+   */
+  test("a run that called no server names every declared one", () => {
+    const idle: SessionRecord[] = [
+      {
+        path: "sessions/issue-1/engineer.json",
+        agent: "engineer",
+        messages: 10,
+        runs: [run({})],
+        reported: true,
+        calls: [],
+      },
+    ];
+
+    const m = metricsOf(idle, [{ name: "files" }], SKILLS, []);
+    expect(m.neverUsedServers).toEqual(["files"]);
   });
 
   test("failures and refusals are counted apart", () => {
@@ -254,15 +289,16 @@ describe("renderReport", () => {
    * Named, not counted: the point is that somebody can go and delete them. The heading
    * they sit under has moved once already, so the assertion is on the names.
    *
-   * `slack` and not `web`, because `web` sets `unprefixed` and is therefore in the
-   * not-checked line rather than this one. The two lists are the whole distinction the
-   * metric draws, so the test reads both.
+   * Every declared server is judgeable now: `server_calls` names the server, so the
+   * `unprefixed` flag no longer decides anything. `search`, `slack` and `web` are the
+   * ones nothing called, and the not-checked line is gone with the case that needed it.
    */
   test("it names the servers and skills nothing used", () => {
     expect(report).toContain("- `slack`");
+    expect(report).toContain("- `web`");
     expect(report).toContain("- `delivery/pipeline-setup`");
     expect(report).toContain("never");
-    expect(report).toContain("Not checked, because a call does not name them");
+    expect(report).not.toContain("Not checked, because a call does not name them");
   });
 
   /** No money, deliberately: see the module comment. */
