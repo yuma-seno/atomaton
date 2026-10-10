@@ -321,13 +321,13 @@ function declared(): { tools: DeclaredServer[] | undefined; skills: string[] | u
     };
     // An empty `tools.servers` is ordinary -- a project that adds no server of its own
     // has none -- so this stays a list. Only the read failing above leaves it unknown.
-    // With `unprefixed`, which decides whether a call can name this server at all.
-    // Read here rather than guessed at from the calls: a bare tool name belongs to
-    // some unprefixed server and never says which.
-    tools = Object.entries(config.tools?.servers ?? {}).map(([name, server]) => ({
-      name,
-      unprefixed: (server as { unprefixed?: boolean } | null)?.unprefixed === true,
-    }));
+    //
+    // Just the names. It carried `unprefixed` too, because that flag decided whether a
+    // server could be recognised in a call at all -- and the report then had to say
+    // "could not check" for every server that set it, which was all of them. A run
+    // records the server for every call now (`server_calls`, atoma v0.4.0), so the
+    // declaration is a name and the flag has nothing left to decide.
+    tools = Object.keys(config.tools?.servers ?? {}).map((name) => ({ name }));
   } catch {
     log("could not read the tool servers from config.yaml; the report will not name unused tools");
   }

@@ -157,14 +157,14 @@ export interface TokenRecord {
 /**
  * A tool server as `config.yaml` declares it.
  *
- * `unprefixed` is here because it decides whether this server can be recognised in
- * a call at all. A prefixed server's tools arrive as `name__tool`, so a call names
- * its server; an unprefixed server's arrive bare -- `read`, `grep` -- and nothing
- * in the call says which server answered.
+ * Just the name now. `unprefixed` used to decide whether a server's use could be read at
+ * all -- a prefixed server's tools arrived as `name__tool`, so a call named its server,
+ * and an unprefixed one's arrived bare -- and that flag was the reason half the servers
+ * were listed as unjudgeable. A run records the server for every call now, whatever its
+ * spelling, so the declaration is a name and nothing more.
  */
 export interface DeclaredServer {
   name: string;
-  unprefixed?: boolean;
 }
 
 /**
@@ -204,17 +204,6 @@ export interface Metrics {
   byTool: FailureTally[];
   bySkill: Tally[];
   byAct: Tally[];
-  /**
-   * Declared servers whose use cannot be decided from a call, or `undefined` when the
-   * declared list could not be read.
-   *
-   * An unprefixed server's tools arrive under their own names, so nothing in a call
-   * says which server answered it. Listing such a server as unused would state the
-   * opposite of the truth about the most-used server there is, and leaving it out
-   * silently would let "not checked" pass as "checked and fine" -- so it is named,
-   * as the thing this could not check.
-   */
-  unrecognisableServers?: string[];
   /**
    * Declared servers that nothing called, or `undefined` when the declared list could
    * not be read. See `metricsOf` for why servers and not tools, and why the two states
@@ -360,10 +349,32 @@ export function metricsOf(
     }
   }
 
-  // A call names its server only when the server is prefixed. An unprefixed one's
-  // tools arrive bare, so this set cannot contain it however much it was used --
-  // which is why the two kinds are answered separately below rather than together.
-  const usedServers = new Set(calls.map((c) => c.tool.split("__")[0] ?? ""));
+  // Which servers a run invoked, out of the record atoma writes for exactly this.
+  //
+  // It used to be derived from the call names, by splitting each on `__` and taking the
+  // head -- which answered for a prefixed server and could not answer at all for an
+  // `unprefixed` one, whose tools arrive bare. That was most of the servers, so the
+  // report either listed them as unused, which was false, or set them aside as
+  // uncheckable, which was useless. `server_calls` is the registry's own answer, so the
+  // question is now answerable for every server.
+  //
+  // A session may hold several runs, and a server used by any of them was used.
+  const usedServers = new Set<string>();
+  let sawServerCalls = false;
+  for (const session of sessions) {
+    for (const run of session.runs) {
+      if (!run.server_calls) continue;
+      sawServerCalls = true;
+      for (const server of Object.keys(run.server_calls)) usedServers.add(server);
+    }
+  }
+
+  // A session whose runs all predate the field cannot answer, and that is not the same
+  // answer as `none were called`. Without this the report would name every server as
+  // unused on a repository that simply had not run since the upgrade -- a section of
+  // confident nonsense, which is the failure this whole area keeps producing.
+  const serverUsageKnown = sawServerCalls;
+
   const loaded = new Set(calls.flatMap((c) => (c.skill ? [c.skill] : [])));
 
   return {
@@ -373,14 +384,15 @@ export function metricsOf(
     byTool: [...byTool.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     bySkill: tally(calls.flatMap((c) => (c.skill ? [c.skill] : []))),
     byAct: tally(calls.flatMap((c) => (c.act ? [c.act] : []))),
-    neverUsedServers: declaredServers
-      ?.filter((s) => !s.unprefixed && !usedServers.has(s.name))
-      .map((s) => s.name)
-      .sort(),
-    unrecognisableServers: declaredServers
-      ?.filter((s) => s.unprefixed)
-      .map((s) => s.name)
-      .sort(),
+    // `undefined` when no run recorded one, which the report says rather than listing
+    // every server as unused. See `serverUsageKnown`.
+    neverUsedServers:
+      declaredServers && serverUsageKnown
+        ? declaredServers
+            .filter((s) => !usedServers.has(s.name))
+            .map((s) => s.name)
+            .sort()
+        : undefined,
     neverLoaded: declaredSkills?.filter((s) => !loaded.has(s)).sort(),
     refusals: calls.filter((c) => c.refused).length,
     completions: completionsOf(sessions),
