@@ -17,10 +17,8 @@ already starts with.
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. | the run's GitHub token |
 | `attachments` | Probes and uses GitHub's user-asset upload endpoint, the one `gh --attach` posts to. Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion. | the run's GitHub token |
 | `atomaton_env` | Rebuilding the run's environment, and nothing else. | the run's GitHub token |
-| `delegate` | Runs one small piece of work in a sub-run and returns what it found. | the run's provider key |
-| `delegate_free` | The same work on a free model. Prefer it — only the price differs. | the run's provider key |
-| `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. | the run's provider key |
-| `delegate_readonly_free` | The same read-only sub-run on a free model. Prefer it too. | the run's provider key |
+| `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers `delegate` and `delegate_free` as tools. | the run's provider key |
+| `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. Offers `delegate_readonly` and `delegate_readonly_free`. | the run's provider key |
 
 Why five of them declare a credential rather than inheriting it, and why the
 other four cannot see it, is

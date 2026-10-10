@@ -38,12 +38,10 @@ mcp_servers:
   # and searching that would otherwise fill this session with transcripts. See
   # `delegate.md` for what it is and is not for.
   #
-  # `delegate_free` is the same sub-run on a free model -- the same program, the
-  # same servers, the same task, and only the price differs -- so it is the one to
-  # reach for first. Both are here because a task the free tier refuses as too
-  # large has to have somewhere to go.
+  # It carries the pair as two TOOLS -- `delegate_free` is the same sub-run on a free
+  # model, and only the price differs -- so the free one is what to reach for first,
+  # and the paid one is where a task the free tier refuses has to go.
   - delegate
-  - delegate_free
 ---
 
 You are the agent a person reaches first. A request arrives here before it is a

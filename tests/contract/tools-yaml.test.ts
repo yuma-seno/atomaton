@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { toolDefaults } from "../../src/domain/machinery/shipped-servers.ts";
 import { toolsFileFrom, type ToolsSection } from "../../src/domain/machinery/tools-file.ts";
 import { TOOL_OUTPUT_BACKSTOP, TOOL_OUTPUT_BUDGET } from "../../src/shared/tool-output.ts";
+
+/** Where the shipped agent definitions are, as `agent-definitions.test.ts` reads them. */
+const AGENT_DEFINITIONS_DIR = join(process.cwd(), "src/content/agent-definitions");
 
 /**
  * `tools.yaml` decides how every tool server is started, and nothing was reading
@@ -211,12 +214,10 @@ describe("tools.yaml is valid YAML with the shape atoma expects", () => {
     const allowed = new Set([
       "shell",
       "search",
+      // One program started twice, with the same ten-minute sub-run ceiling, so
+      // their timeouts are the same number for the same reason.
       "delegate",
       "delegate_readonly",
-      // The free pair does the same work with the same ten-minute sub-run ceiling,
-      // so their timeouts are the same number for the same reason.
-      "delegate_free",
-      "delegate_readonly_free",
       // The one server whose work is a network POST of up to 25MB. Its own abort
       // fires at 120 seconds, and it has to sit below this value to be the thing
       // that answers: a call cut off here is discarded, and in `upload` mode the
@@ -231,7 +232,80 @@ describe("tools.yaml is valid YAML with the shape atoma expects", () => {
       ).toBe(true);
     }
   });
+
+  /**
+   * No one agent is handed two servers that advertise a tool of the same name.
+   *
+   * This is the check nothing had, and its absence shipped a release that could not
+   * publish. The delegate family was four servers -- one per definition -- and each
+   * named its tool after the server, which was harmless while the servers were
+   * prefixed and fatal the moment they were not: `unprefixed` means a tool is known
+   * by its own name, so the two delegate servers an agent was given together both
+   * offered `delegate`, and the release script refused to publish.
+   *
+   * Per AGENT rather than across all servers, because two servers may legitimately
+   * offer one name when no agent ever sees both: `files` and `files_readonly` both
+   * offer `read`, and no definition lists both. The rule the core enforces is about
+   * the set it registers for one run, which is what this reconstructs.
+   */
+  test("no agent is given two servers that advertise a tool of the same name", () => {
+    const servers = parse(SOURCE);
+    const definitions = readdirSync(AGENT_DEFINITIONS_DIR).filter((f) => f.endsWith(".md"));
+    expect(definitions.length).toBeGreaterThan(0);
+
+    for (const def of definitions) {
+      const text = readFileSync(join(AGENT_DEFINITIONS_DIR, def), "utf8");
+      const block = /^mcp_servers:\n((?:[ \t]*(?:#.*)?\n|[ \t]*-.*\n)*)/m.exec(text)?.[1] ?? "";
+      const named = [...block.matchAll(/^[ \t]*-[ \t]*([a-z_]+)/gm)].map((m) => m[1] ?? "");
+
+      const seen = new Map<string, string>();
+      for (const server of named) {
+        for (const tool of declaredToolsOf(server, servers[server])) {
+          const already = seen.get(tool);
+          expect(
+            already,
+            `${def} is given both '${already}' and '${server}', which each advertise '${tool}'. An ` +
+              `unprefixed tool is known by its own name, so atoma refuses to register the pair and ` +
+              `the run will not start.`,
+          ).toBeUndefined();
+          seen.set(tool, server);
+        }
+      }
+    }
+  });
 });
+
+/**
+ * The tool names a server would advertise, read from the repository rather than by
+ * starting anything.
+ *
+ * `delegate` and `delegate_readonly` name their tools in the definition files they
+ * are handed; every other server names them in `mcp/<name>.ts`. Both spellings are
+ * read here so the check above covers the whole tree.
+ */
+function declaredToolsOf(server: string, entry: unknown): string[] {
+  const args = Array.isArray((entry as { args?: unknown })?.args)
+    ? ((entry as { args: string[] }).args)
+    : [];
+  if (args.includes("--agent-defs")) {
+    // One tool per definition, named after the file, which is `delegate.ts`'s rule.
+    // The flag repeats, because that is how the server's `parseArgs` takes a list.
+    const out: string[] = [];
+    for (let i = 0; i < args.length; i += 1) {
+      const next = args[i + 1];
+      if (args[i] === "--agent-defs" && next?.endsWith(".md")) out.push(next.replace(/\.md$/, ""));
+    }
+    return out;
+  }
+  // Otherwise the server is a script that defines its own tools. Read the names out
+  // of it; a server whose script cannot be found contributes nothing, and the
+  // `check-live-tools` phase is where that is caught.
+  const script = (args[1] ?? "").split("/").pop() ?? "";
+  const path = join("src/entrypoints/tools/mcp", script);
+  if (!script.endsWith(".ts") || !existsSync(path)) return [];
+  const text = readFileSync(path, "utf8");
+  return [...text.matchAll(/defineMcpTool\(\{\s*name:\s*"([a-z_]+)"/g)].map((m) => m[1] ?? "");
+}
 
 /**
  * The generated file is handed to a binary that refuses what it cannot parse.

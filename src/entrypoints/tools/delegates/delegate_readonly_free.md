@@ -1,6 +1,6 @@
 ---
 name: delegate_readonly_free
-description: The same reading as `delegate_readonly`, run on a free model. Started by the `delegate` tool, never by a person.
+description: The same reading as `delegate_readonly`, run on a free model. Started by the `delegate_readonly_free` tool, never by a person.
 # `delegate_readonly.md` with the model line and the name substituted, which is
 # the whole of the difference between them. See `delegate_free.md` for why a free
 # variant can work where a top-level `free` agent cannot, and for what

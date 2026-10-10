@@ -1399,13 +1399,15 @@ describe("mcp/atomaton.ts", () => {
 });
 
 /**
- * The delegate server, which is one program behind two entries.
+ * The delegate server, which is one program behind two entries and offers one tool
+ * per definition it is given.
  *
  * What is checked here is the part that is a promise rather than an
- * implementation detail: the tool exists, its arguments are the two the design
- * settled on, and the server refuses to start when it is told to run with no
- * servers — a sub-run with no tools looks like a confused delegate rather than a
- * broken configuration, so it fails at startup where the log line names the cause.
+ * implementation detail: a tool exists per definition, its name is the definition's,
+ * its arguments are the two the design settled on, and the server refuses to start
+ * when it is told to run with no servers — a sub-run with no tools looks like a
+ * confused delegate rather than a broken configuration, so it fails at startup
+ * where the log line names the cause.
  *
  * The sub-run itself is not started here. It needs an `atoma` binary and a
  * provider key, neither of which a laptop running `bun test` has, and a test that
@@ -1416,20 +1418,43 @@ describe("mcp/atomaton.ts", () => {
  */
 describe("mcp/delegate.ts", () => {
   test("initialize returns server info", async () => {
-    const r = await sendRequest("delegate.ts", INIT_REQUEST);
+    const r = await sendRequest("delegate.ts", INIT_REQUEST, {}, process.cwd(), ["--agent-defs", "delegate.md"]);
     expect(r.result.serverInfo.name).toBe("atomaton-delegate-mcp");
   });
 
-  test("advertises one tool, `delegate`, taking task and context", async () => {
-    const r = await sendRequest("delegate.ts", {
-      jsonrpc: "2.0", id: 2, method: "tools/list", params: {},
-    });
+  test("advertises one tool per definition, named after it, taking task and context", async () => {
+    const r = await sendRequest(
+      "delegate.ts",
+      { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      {},
+      process.cwd(),
+      ["--agent-defs", "delegate.md"],
+    );
+    // The names are the definition file names, which is what makes two definitions
+    // two tools rather than two servers claiming one name.
     const names = r.result.tools.map((t: { name: string }) => t.name);
     expect(names).toEqual(["delegate"]);
     const tool = r.result.tools[0];
     expect(tool.inputSchema.required).toEqual(["task"]);
     expect(tool.inputSchema.properties).toHaveProperty("task");
     expect(tool.inputSchema.properties).toHaveProperty("context");
+  });
+
+  /**
+   * Two definitions in one server are two tools, and each is named after its own
+   * file. This is the promise `unprefixed` rests on: a tool is known by its own
+   * name, so the writing pair and the free variants cannot collide.
+   */
+  test("offers one tool per definition, and names it after the file", async () => {
+    const r = await sendRequest(
+      "delegate.ts",
+      { jsonrpc: "2.0", id: 20, method: "tools/list", params: {} },
+      {},
+      process.cwd(),
+      ["--agent-defs", "delegate.md", "--agent-defs", "delegate_free.md"],
+    );
+    const names = r.result.tools.map((t: { name: string }) => t.name).sort();
+    expect(names).toEqual(["delegate", "delegate_free"]);
   });
 
   /**
@@ -1442,7 +1467,7 @@ describe("mcp/delegate.ts", () => {
       { jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
       {},
       process.cwd(),
-      ["--agent-def", "delegate_readonly.md"],
+      ["--agent-defs", "delegate_readonly.md"],
     );
     expect(r.result.tools[0].description).toContain("CANNOT change anything");
   });
@@ -1452,10 +1477,11 @@ describe("mcp/delegate.ts", () => {
     // it writes a response, so the harness would wait for a line that never comes
     // and report a timeout instead of the refusal. What is being checked is the
     // exit, and the message on stderr that names the cause.
-    const empty = join(mkdtempSync(join(tmpdir(), "atomaton-delegate-empty-")), "empty.tools.yaml");
-    writeFileSync(empty, "watch: {}\nservers: {}\n");
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-delegate-empty-"));
+    writeFileSync(join(dir, "empty.md"), "---\nname: empty\n---\nbody\n");
+    writeFileSync(join(dir, "empty.tools.yaml"), "watch: {}\nservers: {}\n");
     try {
-      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--tools-file", empty], {
+      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-defs", "empty.md", "--delegates-dir", dir], {
         env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
         cwd: process.cwd(),
       });
@@ -1465,8 +1491,25 @@ describe("mcp/delegate.ts", () => {
       expect(code).toBe(2);
       expect(stderr).toContain("declares no servers");
     } finally {
-      removeTemp(dirname(empty));
+      removeTemp(dir);
     }
+  });
+
+  /**
+   * No `--agent-defs` at all is a configuration error, not a default. A default
+   * would be one definition's name, and guessing it starts a server with the wrong
+   * reach — the read-only pair and the writing pair are told apart by this list.
+   */
+  test("refuses to start with no --agent-defs", async () => {
+    const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`], {
+      env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
+      cwd: process.cwd(),
+    });
+    let stderr = "";
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+    expect(code).toBe(2);
+    expect(stderr).toContain("no --agent-defs");
   });
 
   /**
@@ -1489,7 +1532,7 @@ describe("mcp/delegate.ts", () => {
    */
   test("the read-only delegate's sub-run is given files_readonly, both ways the path resolves", async () => {
     const start = async (delegatesDir: string) => {
-      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-def", "delegate_readonly.md", "--delegates-dir", delegatesDir], {
+      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-defs", "delegate_readonly.md", "--delegates-dir", delegatesDir], {
         env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
         cwd: process.cwd(),
       });
@@ -1517,19 +1560,18 @@ describe("mcp/delegate.ts", () => {
     // resolves it against ATOMATON_MACHINERY_ROOT, and with that unset the cwd is the
     // job's own checkout — which is exactly the case this has to survive.
     const relative = await start("src/entrypoints/tools/delegates");
-    expect(relative).toContain("servers=files_readonly");
-    expect(relative).toContain("def=delegate_readonly.md");
+    expect(relative).toContain("delegate_readonly=files_readonly");
 
     // And the fallback, with no `--delegates-dir` at all: the directory beside the
     // script. A run whose caller forgot the flag must still start, or the reviewer's
     // only read path is dead for a reason nothing names.
     const fallback = await start(join(process.cwd(), "src/entrypoints/tools/delegates"));
-    expect(fallback).toContain("servers=files_readonly");
+    expect(fallback).toContain("delegate_readonly=files_readonly");
 
     // No flag: `defaultDelegatesDir()` resolves relative to the script, which is the
     // src tree here. Asserted last because it is the one that has to work with nothing
     // telling it where to look.
-    const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-def", "delegate_readonly.md"], {
+    const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-defs", "delegate_readonly.md"], {
       env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
       cwd: process.cwd(),
     });
@@ -1550,7 +1592,7 @@ describe("mcp/delegate.ts", () => {
     });
     await asked;
     child.kill();
-    expect(stderr).toContain("servers=files_readonly");
+    expect(stderr).toContain("delegate_readonly=files_readonly");
   }, 20_000);
 });
 

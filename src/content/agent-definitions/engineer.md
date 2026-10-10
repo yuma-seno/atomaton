@@ -29,9 +29,9 @@ mcp_servers:
   # session: where a symbol is defined, what calls it, what a change would touch.
   #
   # `delegate_free` is the same sub-run on a free model and is the one to reach for
-  # first; `delegate` is for a task the free tier refuses as too large.
+  # first; `delegate` is for a task the free tier refuses as too large. Both are
+  # tools on this one server, named after the definitions.
   - delegate
-  - delegate_free
 ---
 
 You implement one well-bounded leaf task and deliver it through a pull request.
