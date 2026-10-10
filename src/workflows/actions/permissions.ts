@@ -18,7 +18,7 @@ export const ATOMATON_WORKFLOW_PERMISSIONS: GWT.PermissionsEvent = {
   issues: "write",
   "pull-requests": "write",
   contents: "write",
-  // Read-only, and added because `github__check_merge_readiness` reads the check runs on
+  // Read-only, and added because `check_merge_readiness` reads the check runs on
   // a head commit to say which one is failing. Declaring any permission sets every other
   // one to `none`, and on a PUBLIC repository that still worked -- the data is public, so
   // the endpoint served it anyway. On a private repository it does not: the reviewer got

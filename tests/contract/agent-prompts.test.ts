@@ -468,7 +468,7 @@ describe("agent prompt contracts", () => {
    */
   test("a reported problem turns into a filed issue that outlives the work", () => {
     const prompt = readFileSync("src/content/prompt-template.md", "utf8");
-    expect(prompt).toContain("github__create_issue");
+    expect(prompt).toContain("create_issue");
     expect(prompt, "a tool defect is not a child of the current issue").toContain("sub_issue: false");
     expect(prompt, "and the run has to say so where the next reader looks").toContain(
       "Say so in your report",
@@ -479,7 +479,7 @@ describe("agent prompt contracts", () => {
    * The scratch workspace's path is stated in three places and has to be one path.
    *
    * `domain/work/workspace.ts` holds it, the runner mounts it there, the prompt template
-   * tells the agent about it, and `shell_execute`'s description repeats it. Both of
+   * tells the agent about it, and `bash`'s description repeats it. Both of
    * the last two, because a tool's own description was measured to carry more weight
    * than the same words in the system prompt -- and this sentence has to hold
    * at the moment the agent is deciding where to put a file, which is when it is

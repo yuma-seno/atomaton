@@ -17,7 +17,7 @@ describe("selectCommentRange", () => {
     expect(range.showing).toBe("all 3 comment(s)");
   });
 
-  // The form `search__search_issues` produces: it reports one comment number.
+  // The form `search_issues` produces: it reports one comment number.
   test("from alone reads exactly that comment", () => {
     const range = selectCommentRange(20, 7);
     expect(range).toMatchObject({ from: 7, to: 7, count: 1 });

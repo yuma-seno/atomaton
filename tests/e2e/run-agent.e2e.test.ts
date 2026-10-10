@@ -40,7 +40,7 @@ describe.skipIf(!atomaAvailable)("E2E: real atoma binary + real mcp/github.ts", 
       {
         toolCalls: [{
           id: "shell_1",
-          name: "shell__shell_execute",
+          name: "bash",
           arguments: { command: "printf shell-ok", execution_mode: "foreground", timeout_seconds: 5 },
         }],
       },
@@ -63,6 +63,10 @@ You are a test agent.
       writeFileSync(
         join(dir, "tools.yaml"),
         `shell:
+  # Every shipped server sets this, so the tool is called bash rather than
+  # shell__bash. A tools file written here by hand does not inherit it from
+  # tools/defaults.yaml -- the tests name the servers themselves.
+  unprefixed: true
   command: bun
   args: ["run", "${posixPath(SHELL_MCP_SCRIPT)}"]
 `,
@@ -92,9 +96,9 @@ You are a test agent.
     }
   }, 30_000);
 
-  test("agent calls github__get_issue through the real MCP server", async () => {
+  test("agent calls get_issue through the real MCP server", async () => {
     const mock = startMockLlmServer([
-      { toolCalls: [{ id: "call_1", name: "github__get_issue", arguments: { issue_number: 42 } }] },
+      { toolCalls: [{ id: "call_1", name: "get_issue", arguments: { issue_number: 42 } }] },
       { content: "Done: fetched issue #42." },
     ]);
     const fakeGh = setupFakeGh([
@@ -131,6 +135,8 @@ You are a test agent.
       writeFileSync(
         join(dir, "tools.yaml"),
         `github:
+  # See the note on the shell fixture: the bare names below are called as-is.
+  unprefixed: true
   command: bun
   args: ["run", "${posixPath(GITHUB_MCP_SCRIPT)}"]
 `,

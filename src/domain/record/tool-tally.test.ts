@@ -18,10 +18,10 @@ describe("what a run spent its iterations on", () => {
    * that prompted it made 215 calls, 199 of them shell.
    */
   test("the most-used tool comes first, so going round is recognisable", () => {
-    const tally = toolCallTally(session(...Array(9).fill("shell__shell_execute"), "github__get_issue"));
+    const tally = toolCallTally(session(...Array(9).fill("bash"), "get_issue"));
     expect(tally).toContain("10 tool calls");
-    expect(tally).toContain("`shell__shell_execute` 9");
-    expect(tally?.indexOf("shell__shell_execute")).toBeLessThan(tally?.indexOf("github__get_issue") ?? 0);
+    expect(tally).toContain("`bash` 9");
+    expect(tally?.indexOf("bash")).toBeLessThan(tally?.indexOf("get_issue") ?? 0);
   });
 
   test("several calls in one turn are all counted", () => {
@@ -30,8 +30,8 @@ describe("what a run spent its iterations on", () => {
         {
           role: "assistant",
           tool_calls: [
-            { id: "a", function: { name: "shell__shell_execute" } },
-            { id: "b", function: { name: "shell__shell_execute" } },
+            { id: "a", function: { name: "bash" } },
+            { id: "b", function: { name: "bash" } },
           ],
         },
       ],

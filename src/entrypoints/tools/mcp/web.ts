@@ -37,7 +37,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
  *
  * `z.string().url()` accepts anything `new URL()` accepts, which is every scheme
  * — `file:`, `data:`, `blob:`. The description said "http(s)" and nothing
- * enforced it, so `web__fetch` was a general local-file read: Bun's `fetch`
+ * enforced it, so `fetch` was a general local-file read: Bun's `fetch`
  * handles `file:` URLs, and this server declares `env: {}` precisely so that it
  * holds no credentials.
  *

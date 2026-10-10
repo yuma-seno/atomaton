@@ -154,7 +154,7 @@ describe("tools.yaml is valid YAML with the shape atoma expects", () => {
    * A tool that promises the agent a long timeout must have a server entry that
    * allows it.
    *
-   * `shell_execute` accepts `timeout_seconds` up to 3600 and defaults to 300.
+   * `bash` accepts `timeout_seconds` up to 3600 and defaults to 300.
    * atoma caps every `tools/call` at 60 seconds unless the server says otherwise,
    * and nothing connected the two -- so every value above 60 was a promise this
    * file quietly broke. A build or a test suite running over a minute failed, and
@@ -174,7 +174,7 @@ describe("tools.yaml is valid YAML with the shape atoma expects", () => {
       expect(declared, `${path}: shell must declare request_timeout_secs`).toBeDefined();
       expect(
         declared,
-        `${path}: shell_execute offers timeout_seconds up to ${seconds}, so atoma must allow at least that long`,
+        `${path}: bash offers timeout_seconds up to ${seconds}, so atoma must allow at least that long`,
       ).toBeGreaterThanOrEqual(seconds);
     }
   });
@@ -322,7 +322,7 @@ describe("the cap the core applies to Atomaton's own servers", () => {
   /**
    * Above what the servers spend, because the two caps count different strings: the
    * budget is CONTENT, and the core counts that content escaped inside a JSON
-   * envelope. Measured, a `shell_execute` that fills both streams spends exactly
+   * envelope. Measured, a `bash` call that fills both streams spends exactly
    * 50,000 and returns 51,412 -- so a cap at the budget would cut a result this
    * project had already cut well, and write a second note about it.
    */

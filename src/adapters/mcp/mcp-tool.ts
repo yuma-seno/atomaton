@@ -260,7 +260,7 @@ export function buildMcpTools(specs: BuiltMcpTool[]): { tools: Tool[]; dispatch:
  * What to say when a name does not exist here.
  *
  * It used to say `Unknown: execute` and stop. Measured: an agent called
- * `shell__execute` -- the real name is `shell__shell_execute` -- and, told only that
+ * `shell__execute` -- the real name is `bash` -- and, told only that
  * it was unknown, **made the same mistake three times.** The one place that knows the
  * right answer is the map two lines up, and it was not being asked.
  *

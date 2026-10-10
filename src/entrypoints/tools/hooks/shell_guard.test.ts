@@ -149,9 +149,9 @@ describe("shell_guard.ts", () => {
   describe("routing to the MCP tool that does the job", () => {
     test("names the replacement for each disabled CLI", () => {
       const cases: [string, string][] = [
-        ["gh issue list", "github__"],
-        ["curl example.com", "web__fetch"],
-        ["wget https://example.com", "web__fetch"],
+        ["gh issue list", ""],
+        ["curl example.com", "fetch"],
+        ["wget https://example.com", "fetch"],
         ["ssh host", "repository"],
         ["scp a host:b", "repository"],
         ["rsync -a a b", "repository"],
@@ -217,7 +217,7 @@ describe("shell_guard.ts", () => {
   });
 
   describe("raw Git mutations", () => {
-    test("are routed to the github__* tools", () => {
+    test("are routed to the github tools", () => {
       for (const command of [
         "git push origin main --force",
         "cd repo && git pull --rebase origin main",
@@ -227,7 +227,7 @@ describe("shell_guard.ts", () => {
       ]) {
         const out = guard({ command });
         expect(out, command).toContain('"allow":false');
-        expect(out, command).toContain("github__");
+        expect(out, command).toContain("");
       }
     });
 

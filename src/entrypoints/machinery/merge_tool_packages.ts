@@ -5,10 +5,10 @@
  *
  * ## Why there are two lists
  *
- * `tools/packages.json` exists for the servers Atomaton ships —
- * `@modelcontextprotocol/server-filesystem` is what `filesystem` runs, and
- * `@huggingface/transformers` is what `search` reranks with. Neither is a project's
- * decision, so neither belongs in the file a project edits.
+ * `tools/packages.json` exists for the servers Atomaton ships. It now holds one entry:
+ * `@huggingface/transformers`, which `search` reranks with. It used to hold the npm
+ * filesystem server too, which left with the `filesystem` server that ran it. Neither
+ * kind is a project's decision, so neither belongs in the file a project edits.
  *
  * `tools.packages` in `config.yaml` is for the other case: a project adds a server of
  * its own under `tools.servers`, and that server needs something installed. Declaring

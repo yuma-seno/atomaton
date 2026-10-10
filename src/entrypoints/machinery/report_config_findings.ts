@@ -8,7 +8,7 @@
  * `atoma` checks the tools file before it starts any server, and writes one
  * machine-readable line per defect to the run log:
  *
- *     ATOMA_CONFIG_FINDING: kind=dead_guard severity=warn server=files_ro pattern=files_ro__* tools=read,grep
+ *     ATOMA_CONFIG_FINDING: kind=dead_guard severity=warn server=web pattern=webhooks tools=fetch,hooks
  *     ATOMA_CONFIG_FINDING: kind=duplicate_tool severity=error tool=read servers=files,files_ro
  *
  * The run carries on. Stopping would not close a guard that has stopped guarding --

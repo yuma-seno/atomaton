@@ -15,7 +15,7 @@ describe("validatorProblems", () => {
   const output = [
     "✓ Agent definition parsed: engineer",
     "✓ Tools file parsed: 6 server(s) defined",
-    "  ✓ mcp_servers 'filesystem' found in tools file",
+    "  ✓ mcp_servers 'acme' found in tools file",
     "",
     "Validation failed with 2 error(s):",
     "  ✗ mcp_servers 'shell': not found in tools file \"tools.yaml\"",

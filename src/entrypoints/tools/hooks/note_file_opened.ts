@@ -16,12 +16,12 @@
  * identical failures. Measured on issue #706: the streak went 15 to 27, with two
  * reads in the middle, and the run died. See `domain/work/search-streak.ts` for the full
  * account -- including the second time the refusal came to name a tool nothing could
- * call, after `/server-filesystem` left the deliverable.
+ * call, after `@modelcontextprotocol/server-filesystem` left the deliverable.
  *
  * ## Why an after-hook, and why on the server rather than file-wide
  *
  * After, because a read that failed opened nothing — the streak should clear on work
- * that happened, not on work that was attempted. On the filesystem servers, because
+ * that happened, not on work that was attempted. On the files servers, because
  * the file-wide `after_tool` slot holds one script and `workspace_guard` has it; a
  * tools file allows one per level and concatenates them, so a per-server declaration
  * is the free slot. `toolOpens` still matches on the tool rather than the server, so

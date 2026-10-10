@@ -1,7 +1,7 @@
 /**
  * tool-output.test.ts — the cap, and which end of an over-long result survives.
  *
- * The direction of the cut is the part worth pinning. `shell_execute` kept the
+ * The direction of the cut is the part worth pinning. `bash` kept the
  * head of a million-byte output, so a build log that overran returned its banner
  * and dropped the compiler error.
  */

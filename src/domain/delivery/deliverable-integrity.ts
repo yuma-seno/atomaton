@@ -5,8 +5,8 @@
  * ## What this is for
  *
  * A name in configuration that resolves to nothing is the one class of defect
- * this project keeps producing and cannot see. `mcp_servers: [filesystem]` with
- * no `filesystem` in tools.yaml aborts the whole run before a single server
+ * this project keeps producing and cannot see. `mcp_servers: [acme]` with
+ * no `acme` in tools.yaml aborts the whole run before a single server
  * starts; `chain.labels.in_progres` guards work with a label nobody applies; a
  * `merge.gates` entry that fails validation resolves the WHOLE list to empty,
  * so every trigger stops firing. Each of those is silent at merge time and

@@ -88,7 +88,7 @@ describe("read_run_ending.ts", () => {
       atoma_runs: [{ started: "", ended: "", seconds: 1, ended_because: "completed", messages: 2 }],
     });
     const silent = JSON.stringify({
-      messages: [{ role: "assistant", content: "", tool_calls: [{ function: { name: "shell__shell_execute" } }] }],
+      messages: [{ role: "assistant", content: "", tool_calls: [{ function: { name: "bash" } }] }],
       atoma_runs: [{ started: "", ended: "", seconds: 1, ended_because: "completed", messages: 2 }],
     });
     expect(run({ session: said }, "0").out.reported).toBe("true");

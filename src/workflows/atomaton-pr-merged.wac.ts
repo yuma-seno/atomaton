@@ -27,7 +27,7 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 //
 //   1. Re-invoke the agent that opened it, to JUDGE whether what merged satisfies
 //      the issue it delivers. `dispatchPostMergeAgent` posts the trigger comment and
-//      starts the run. This is the same decision `github__merge_pr` takes for an
+//      starts the run. This is the same decision `merge_pr` takes for an
 //      agent-made merge (`decidePostMergeHandoff`); a person's merge skipped it, so a
 //      sub-issue's pull request merged by hand went straight to aggregating the parent
 //      with the sub-issue still open.
@@ -109,7 +109,7 @@ const NOTIFY_AND_AGGREGATE_NEEDS = [resolveParentJob, parseJob];
  * The step writes `reinvoked=true` when `dispatchPostMergeAgent` started a run; the
  * aggregate job reads it (below) and stands down. Everything about which agent and
  * which issue is decided in `dispatch_post_merge.ts`, which applies the same
- * `decidePostMergeHandoff` as `github__merge_pr`, so the two merge routes cannot drift.
+ * `decidePostMergeHandoff` as `merge_pr`, so the two merge routes cannot drift.
  */
 const reinvokeStep = new TypedOutputsStep(
   {
@@ -185,7 +185,7 @@ PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
     ],
   ),
   // The judgement, before the aggregation. Reads the same two body tags
-  // `github__merge_pr` reads and applies the same `decidePostMergeHandoff`, so the
+  // `merge_pr` reads and applies the same `decidePostMergeHandoff`, so the
   // agent-made and person-made merge routes agree by construction. `reinvoked=true`
   // stands the aggregate job down: the agent it starts closes the sub-issue if the
   // criteria are met, and THAT close aggregates the parent.

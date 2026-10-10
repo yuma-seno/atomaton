@@ -70,7 +70,7 @@ Changing the rule is a pull request against the JSON, followed by one `gh api`
 call from an account with admin (see CONTRIBUTING.md). CI cannot make that call —
 `administration` is not a permission a workflow can hold.
 
-`github__check_merge_readiness` reports against whatever the ruleset currently
+`check_merge_readiness` reports against whatever the ruleset currently
 requires, so it follows the file rather than holding a second opinion.
 
 Nothing bypasses it. No workflow writes to main — the release job attaches the deliverable

@@ -420,7 +420,7 @@ function main(): void {
     // branch rules on a private repository, and this template is meant to be adopted
     // by people who have one. The verdict below is still decided by what CI actually
     // concluded, so a red run still fails, still posts its brief, and still advances
-    // the retry tally. What is gone is GitHub refusing the merge -- github__merge_pr
+    // the retry tally. What is gone is GitHub refusing the merge -- merge_pr
     // holds that line instead, and says so.
     log(`::notice::${required.why}. Atomaton enforces the CI result itself when merging.`);
   } else if (requiredContexts.length === 0) {

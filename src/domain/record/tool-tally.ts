@@ -7,7 +7,7 @@
  * more budget, and a run that was going round and needs the task re-scoped.
  *
  * A tally separates them at a glance. The run that prompted this made 215 tool
- * calls, 199 of them `shell__shell_execute` — and that shape is recognisable
+ * calls, 199 of them `bash` — and that shape is recognisable
  * without opening a session or a workflow log.
  *
  * Deliberately not a report. One was asked for, and the measurement refused it:
@@ -22,7 +22,7 @@ import type { Session } from "../work/session.ts";
 const NAMED = 4;
 
 /**
- * `215 tool calls: shell__shell_execute 199, filesystem__read_text_file 8, ...`
+ * `215 tool calls: bash 199, read 8, ...`
  *
  * `undefined` when there is nothing to say — no session, or a session with no calls
  * in it. The caller posts its notice either way; this is an addition to it.

@@ -7,7 +7,7 @@ needs is not installed, it has two ways out and they are different:
 | --- | --- |
 | a library your project declares | edits the manifest and installs it — ordinary work, committed with the change |
 | a system package, or a global CLI | adds it to [`environment.setup_commands`](reference.md#environmentsetup_commands), reports, and **stops**. That file needs your merge |
-| the environment is broken, or needs what it just declared | calls `atomaton_env__reload_environment` |
+| the environment is broken, or needs what it just declared | calls `reload_environment` |
 
 The reload re-runs `environment.setup_commands` as a privileged step against the
 current work tree, then starts a new run. **The commands come from the default

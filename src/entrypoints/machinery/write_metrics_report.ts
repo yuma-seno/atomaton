@@ -120,8 +120,7 @@ export function agentOf(session: { metadata?: { github_context?: { agent?: strin
   return session.metadata?.github_context?.agent?.trim() || "unknown";
 }
 
-function sessionFrom(path: string, raw: string): SessionRecord | undefined {
-  // `Session`, the shape `domain/work/session.ts` defines, rather than a narrowed copy
+function sessionFrom(path: string, raw: string): SessionRecord | undefined {  // `Session`, the shape `domain/work/session.ts` defines, rather than a narrowed copy
   // spelled here. The copy was fine while nothing else read this document; it stopped
   // being fine when `leftClosingReport` did, because a local shape is not something a
   // shared function can be handed.
@@ -148,27 +147,7 @@ function sessionFrom(path: string, raw: string): SessionRecord | undefined {
       const tool = call.function?.name ?? "";
       if (!tool) continue;
       const result = results.get(call.id ?? "") ?? "";
-      let skill: string | undefined;
-      let act: CallRecord["act"];
-      if (tool.endsWith("load_skill")) {
-        try {
-          // `skill_name`, which is what the tool takes. This read `name`, the spelling
-          // atoma#24 removed when it collapsed five aliases into the one the models
-          // measurably reach for -- so from that release onwards every `load_skill`
-          // call was counted and none was attributed to a skill, and the report's
-          // "unused skills" section was answering from an empty list.
-          skill = JSON.parse(call.function?.arguments ?? "{}").skill_name;
-        } catch {
-          /* a malformed load_skill is counted as a call and named by no skill */
-        }
-      } else if (tool.endsWith("shell_execute")) {
-        try {
-          const command = JSON.parse(call.function?.arguments ?? "{}").command ?? "";
-          act = shellAct(command);
-        } catch {
-          act = "other";
-        }
-      }
+      const { skill, act } = classifyCall(tool, call.function?.arguments ?? "{}");
       calls.push({
         tool,
         agent,
@@ -220,6 +199,50 @@ function shellAct(command: string): CallRecord["act"] {
   }
   const classified = classifyShellAct(command);
   return classified === "other" ? "other" : classified;
+}
+
+/**
+ * What one call contributes beyond its name: the skill it loaded, and what it was doing.
+ *
+ * Split out from the parse loop because both branches are keyed on the tool's name, and
+ * a name this file gets wrong fails silently in the direction that matters. The `act`
+ * branch did exactly that: it tested `endsWith("shell_execute")` — the name the shell
+ * server used before it was renamed — so after the rename no call set an act, `byAct`
+ * came back empty, and the report dropped its section on what the guard argued about
+ * without anything failing. Holding this function to a call it can read is what makes
+ * that a test failure rather than a table going quiet.
+ *
+ * The two names are asked for in the two ways each is actually known:
+ *
+ * - `load_skill` is atoma's own tool, registered as `atoma_builtin__load_skill`. The
+ *   prefix belongs to the core, so this matches on the suffix; the core renaming it is
+ *   the core's business and this keeps working if it does.
+ * - `bash` is this repository's shell server's tool, and every shipped server sets
+ *   `unprefixed: true`, so the call arrives as exactly `bash`. An equality, because
+ *   there is no prefix to straddle and a looser test is what let the old one rot.
+ */
+export function classifyCall(tool: string, args: string): { skill?: string; act?: CallRecord["act"] } {
+  if (tool.endsWith("load_skill")) {
+    try {
+      // `skill_name`, which is what the tool takes. This read `name`, the spelling
+      // atoma#24 removed when it collapsed five aliases into the one the models
+      // measurably reach for -- so from that release onwards every `load_skill` call
+      // was counted and none was attributed to a skill, and the report's "unused
+      // skills" section was answering from an empty list.
+      return { skill: JSON.parse(args).skill_name };
+    } catch {
+      // A malformed `load_skill` is counted as a call and named by no skill.
+      return {};
+    }
+  }
+  if (tool === "bash") {
+    try {
+      return { act: shellAct(JSON.parse(args).command ?? "") };
+    } catch {
+      return { act: "other" };
+    }
+  }
+  return {};
 }
 
 /**

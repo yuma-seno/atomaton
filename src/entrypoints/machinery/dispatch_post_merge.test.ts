@@ -6,7 +6,7 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 /**
  * `dispatch_post_merge.ts` is the workflow half of the post-merge judgement: it reads
- * the same two body tags `github__merge_pr` reads, applies the same
+ * the same two body tags `merge_pr` reads, applies the same
  * `decidePostMergeHandoff`, and dispatches the same `dispatchPostMergeAgent`. The
  * tests here pin that it decides the same way the tool does — a person's merge used to
  * skip the judgement entirely, aggregating the parent with the sub-issue still open.

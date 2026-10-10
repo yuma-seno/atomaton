@@ -124,8 +124,8 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     mcpFail(
       "launch_sub_agent is for an issue run that is decomposing work into sub-issues. " +
         "This run is on a pull request, which reviews or fixes one pull request rather than " +
-        "decomposing it. Use github__create_pr to hand this pull request to a reviewer, or " +
-        "atomaton__request_close_issue to conclude it.",
+        "decomposing it. Use create_pr to hand this pull request to a reviewer, or " +
+        "request_close_issue to conclude it.",
     );
   }
 
@@ -185,7 +185,7 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
       `not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` +
         "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " +
         "sub-issue links — an issue not linked under this one is never counted, so a dispatch onto " +
-        "it would leave this issue waiting forever. Create it with `github__create_issue` " +
+        "it would leave this issue waiting forever. Create it with `create_issue` " +
         "(`sub_issue: true`, the default) so the link exists.",
     );
   }
@@ -275,7 +275,7 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
       note: complete
         ? "Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed."
         : "Some sub-agents were NOT dispatched, and nothing will retry them. This session stays open: " +
-          "re-dispatch the failures with atomaton__launch_sub_agent, or the parent waits forever for sub-issues " +
+          "re-dispatch the failures with launch_sub_agent, or the parent waits forever for sub-issues " +
           "nobody is working on.",
     }),
     meta: complete ? { session_ends: true } : {},
@@ -454,7 +454,7 @@ const { tools: TOOLS, dispatch } = buildMcpTools([
     description:
       "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " +
       "correct way for the atomaton to finish an issue -- do NOT call " +
-      "github__close_issue yourself, and do NOT just stop responding without calling " +
+      "close_issue yourself, and do NOT just stop responding without calling " +
       "this. Your reason and summary are posted to the issue, and phase-gating/" +
       "aggregation is triggered for its parent when this is a sub-issue. Whether the " +
       "close happens now or the issue's author is asked to make it is this tool's " +

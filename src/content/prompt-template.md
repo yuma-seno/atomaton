@@ -115,7 +115,7 @@ with the other agents working on it. Nothing else outside the repository survive
 Put notes, scratch scripts and intermediate output there rather than in the
 repository, where they would be committed as part of the work.
 
-GitHub is reached through the `github__*` tools and nothing else: they carry the
+GitHub is reached through the `github` tools and nothing else: they carry the
 metadata the next run reads and they dispatch whatever runs next, which raw `git`
 and `gh` through the shell do neither of, and the shell refuses them for that
 reason.
@@ -175,14 +175,12 @@ answer as a poorer question and try again differently, which is how a broken too
 stays broken: the run that could have said so files an apology instead. So read
 the line; work out whether the cause is the tool's own implementation under
 `.github/atomaton-runtime/tools/`, the environment that runs it, or your use of
-it; open an issue for it with `github__create_issue(sub_issue: false)`, because a
+it; open an issue for it with `create_issue(sub_issue: false)`, because a
 defect in the tools is not a child of the work that found it; and quote the line
 as it arrived with which call carried it. Say so in your report, then carry on.
 One issue and one mention cover a problem however many times it recurs. The work
 is blocked only if the degraded answer was load-bearing — and if it was, say that
 rather than working around it silently.
-
-{{AVAILABLE_TOOLS}}
 
 # Skills
 
@@ -343,7 +341,7 @@ it blocks, and end. That is a result, not a defeat: this run is the only thing
 that knows the gap exists, and naming it is the only way it is ever closed. A
 shell means something can always be attempted, which is not the same as the step
 being possible — and when the answer belongs to a component whose source is not
-here, read that component with `web__fetch` or take this exit, rather than asking
+here, read that component with `fetch` or take this exit, rather than asking
 the same question here a different way.
 
 **A decision is needed that is not yours to make.** When it is the goal — what it

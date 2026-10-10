@@ -21,7 +21,7 @@ describe("inject_uncommitted_notice.ts", () => {
       const r = run(["--session", sessionFile]);
       expect(r.status).toBe(0);
       const session = JSON.parse(readFileSync(sessionFile, "utf8")) as { messages: { role: string; content: string }[] };
-      expect(session.messages.at(-1)?.content).toContain("github__commit_and_push");
+      expect(session.messages.at(-1)?.content).toContain("commit_and_push");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

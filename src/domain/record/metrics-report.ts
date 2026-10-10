@@ -10,9 +10,11 @@
  * ## Everything is asked of a window
  *
  * An all-time table says what this repository has ever done and nothing about whether
- * last week was worse. It also keeps answering for a world that no longer exists:
- * `shell__terminal_operate` sat in the tools table with 333 failures, from a server this
- * repository stopped running, reading as though something were broken right now.
+ * last week was worse. It also keeps answering for a world that no longer exists: a
+ * tool from a server this repository stopped running sat in the tools table with 333
+ * failures, reading as though something were broken right now. The name is not repeated
+ * here — it is a spelling nothing can call any more, and a reader who went looking for
+ * it would find the report was the last place still saying it.
  *
  * Windows fix both, and nothing has to detect a retired tool. Time removes it, while an
  * agent that invents a tool name still appears — which a retired-tool rule would have

@@ -45,7 +45,7 @@
  *
  * # What clears it, and the run this cost before it did
  *
- * A read through the `filesystem` server clears the streak, the same as `sed -n` does.
+ * A read through the `files` server clears the streak, the same as `sed -n` does.
  * It did not always, and that is worth writing down because the reasoning that left it
  * out was careful and wrong. It said: this is a hook on `shell`, those runs opened 0,
  * 11 and 17 files that way against 124-188 searches, so the over-count is small — and
@@ -56,14 +56,15 @@
  * over-count was never the mechanism. This was:
  *
  *   1. the streak reaches the limit, and the search is refused
- *   2. the refusal says to open a file — **naming `filesystem__read_text_file`**
- *   3. the agent does exactly that, and the streak does not move
+ *   2. the refusal says to open a file — **naming a tool that no longer existed**
+ *   3. the agent tries exactly that, and the streak does not move
  *   4. the next search is refused identically, because a refusal is deterministic
  *   5. `MAX_IDENTICAL_TOOL_FAILURES` stops the run
  *
- * The streak went 15, 16, 17 ... 27 with `filesystem__read_text_file` and
- * `read_multiple_files` in between. The guard had told the agent to do the one thing
- * that could not satisfy it.
+ * The streak went 15, 16, 17 ... 27 with reads attempted in between. The guard had told
+ * the agent to do the one thing that could not satisfy it. The name it gave is not
+ * written here on purpose: that it named something uncallable is the whole account, and
+ * a spelling this repository no longer ships would invite a reader to go and look for it.
  *
  * The note above about `MAX_IDENTICAL_TOOL_FAILURES` was written for an agent that
  * **ignores** the refusal, and for that agent it is right. What it missed is that an
@@ -71,7 +72,7 @@
  * asks for; if it is not, it is not a guard, it is a countdown.
  *
  * So the streak is cleared by the tool that read, whichever server it came from —
- * `toolOpens` below — and a hook on the filesystem servers reports it.
+ * `toolOpens` below — and `note_file_opened`, a hook on the files servers, reports it.
  */
 
 /**
@@ -122,9 +123,9 @@ export function classifyShellAct(command: string): ShellAct {
 /**
  * Whether this tool, named as the agent calls it, returned the content of a file.
  *
- * The prefix is the server, so this is deliberately not anchored to `filesystem`: a
- * read is a read whichever server performed it, and the failure this repairs came from
- * a rule that knew about one server's reads and not another's.
+ * The prefix is the server, so this is deliberately not anchored to one name: read is
+ * a read whichever server performed it, and the failure this repairs came from a rule
+ * that knew about one server's reads and not another's.
  *
  * Listing is not opening. `list_directory` and `directory_tree` answer where things
  * are, which is what a search answers, and clearing the streak on them would let a run
@@ -132,17 +133,11 @@ export function classifyShellAct(command: string): ShellAct {
  * catch. Neither is `grep` or `glob`, for the same reason.
  *
  * `read` is what the shipped `files` server calls it, and it is the only name left.
- *
- * `read_text_file`, `read_media_file`, `read_multiple_files` and `read_file` were
- * here too — `@modelcontextprotocol/server-filesystem`'s vocabulary. That server is
- * gone from the deliverable: `tools/packages.json` installs no npm package, and no
- * agent definition declares `filesystem`. `read` was ADDED beside the four when
- * `files` arrived rather than replacing them, and leaving them is what kept a
- * now-false invariant looking true — see `refusalReason`, which named one of them for
- * two releases after nothing could call it.
- *
- * `(^|__)` stays, and is what makes the four unnecessary rather than merely dead: a
- * prefixed server's `read` matches it already.
+ * The four that `@modelcontextprotocol/server-filesystem` used are gone with that
+ * server: `tools/packages.json` installs no npm package, and no agent definition
+ * declares it. They were kept beside `read` when `files` arrived rather than replaced
+ * by it, which is what kept a now-false invariant looking true — see `refusalReason`,
+ * which named one of them for two releases after nothing could call it.
  */
 const TOOLS_THAT_OPEN = /(^|__)read$/;
 
@@ -179,7 +174,7 @@ export function refusalReason(streak: number, limit = MAX_SEARCHES_WITHOUT_OPENI
     "where something is, not what it is, so nothing found so far has been read. Do one of two " +
     "things before searching again: open the most promising result — with `read`, or `sed -n` " +
     "for a range — or, if you are guessing at what the thing is called, ask " +
-    "search__search_code the same question in a sentence. Measured, that finds the right file " +
+    "search_code the same question in a sentence. Measured, that finds the right file " +
     "in the top five 70% of the time, against 41.5% for the regex patterns agents search with."
   );
 }

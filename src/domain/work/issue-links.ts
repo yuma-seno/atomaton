@@ -210,7 +210,7 @@ export function closingKeywordRefusal(found: readonly string[], what: string): s
     `This ${what} contains ${quoted}, which GitHub acts on: merging would close ` +
     "whatever issue that names, without going through the path that cleans up labels and " +
     "tells a parent its child is done. Remove it and try again. To close an issue, call " +
-    "github__close_issue; to link this work to the issue it belongs to, do nothing -- " +
+    "close_issue; to link this work to the issue it belongs to, do nothing -- " +
     "that link is added for you."
   );
 }

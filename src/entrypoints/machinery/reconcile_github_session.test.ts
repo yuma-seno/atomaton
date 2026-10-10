@@ -110,7 +110,7 @@ describe("reconcile_github_session.ts", () => {
     const agentHistory = [
       {
         role: "assistant",
-        tool_calls: [{ id: "call-1", type: "function", function: { name: "github__get_issue", arguments: "{\"number\":1}" } }],
+        tool_calls: [{ id: "call-1", type: "function", function: { name: "get_issue", arguments: "{\"number\":1}" } }],
       },
       { role: "tool", tool_call_id: "call-1", content: "Issue details" },
       { role: "assistant", content: "Initial response" },

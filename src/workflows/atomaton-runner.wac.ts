@@ -92,7 +92,7 @@ const SESSION_MODE_INPUT_DESC = "Session mode: continue restores history; recove
  * How many environment rebuilds this work has already had.
  *
  * An input rather than something the run works out, because there is nothing to
- * work it out from: `atomaton_env__reload_environment` leaves no comment, so unlike the
+ * work it out from: `reload_environment` leaves no comment, so unlike the
  * handoff tally in `domain/work/dispatch-chain.ts` there is no record on the issue to
  * count. The number has to be carried by whoever dispatches.
  *
@@ -100,7 +100,7 @@ const SESSION_MODE_INPUT_DESC = "Session mode: continue restores history; recove
  * with it, so an unbounded chain of reloads is an unbounded budget. That
  * is what this tool was blocked on.
  */
-const RELOAD_COUNT_INPUT_DESC = "How many times this work has already rebuilt its environment (set by atomaton_env__reload_environment; leave at 0)";
+const RELOAD_COUNT_INPUT_DESC = "How many times this work has already rebuilt its environment (set by reload_environment; leave at 0)";
 
 /**
  * The agent that started this run, so the run knows who to report back to.
@@ -741,7 +741,7 @@ const runAgentStep = new TypedOutputsStep(
       // creates a branch on an issue run and never on a pull request run, where
       // the checkout is already the branch under review.
       ATOMATON_RUN_TYPE: "${{ inputs.type }}",
-      // The tally this run arrived with. `atomaton_env__reload_environment` reads it to
+      // The tally this run arrived with. `reload_environment` reads it to
       // decide whether it may rebuild again -- and a contract test requires every
       // `process.env` a tool server reads to appear in AGENT_ENV, because a missing
       // one reads as zero and silently buys extra reloads.
@@ -931,7 +931,7 @@ ${scriptCommandWithArgs(extractDirectiveRef, { "output-file": `${RUN_DIR}/atomat
 
 # Detect whether a tool call already triggered an automatic follow-up
 # dispatch ON THIS NODE during this run (a hand-off to a colleague:
-# github__merge_pr -> re-invoked agent), as opposed to the agent genuinely
+# merge_pr -> re-invoked agent), as opposed to the agent genuinely
 # finishing with nothing further happening.
 #
 # A dispatch onto a DIFFERENT node -- launch_sub_agent starting children,
@@ -1761,7 +1761,7 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
   //   without listing -- on each directory down to the workspace, and `rwX` inside
   //   it including as a DEFAULT so files and directories created later inherit it.
   //   Measured: the user creates a file, the runner then edits it IN PLACE, which
-  //   is what `filesystem__edit_file` does and what a shared group with umask 002
+  //   is what the `files` server's `edit` does and what a shared group with umask 002
   //   could not guarantee -- a command can call `umask` and undo that.
   //
   //   A writable cache. $HOME stays read-only to this user, uniformly for every
@@ -1890,7 +1890,7 @@ done
 #
 # \`actions/checkout\` writes this into the runner's own gitconfig, which the tool
 # user can read through the traversal granted above -- but that is a default of a
-# third-party action, and \`github__commit_and_push\` and every \`git\` the agent runs
+# third-party action, and \`commit_and_push\` and every \`git\` the agent runs
 # depend on it. Said explicitly, at system level, so it does not.
 sudo git config --system --add safe.directory "$GITHUB_WORKSPACE" 2>/dev/null || true
 

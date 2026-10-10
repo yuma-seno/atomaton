@@ -54,7 +54,7 @@ sibling field is what a caller forgets to read.
 
 **3. Think about which end you keep.**
 
-`shell_execute` kept the first million bytes of its output. A build log that
+`bash` kept the first million bytes of its output. A build log that
 overran therefore returned its banner and dropped the compiler error — the only
 part worth returning. A log is truncated from the front; a listing, a document or
 a diff from the back; command output from the middle, keeping both ends.
@@ -77,7 +77,7 @@ and say what to do about it.
 Atomaton's own tools share one budget, `TOOL_OUTPUT_BUDGET`: 50,000 characters, about
 12.5k tokens, a tenth of the smallest context window worth designing for. It was
 four numbers in three units before — 1,000,000 **bytes** in the shell, 60,000
-characters in `web_fetch`, 50,000 in two GitHub tools, and nothing anywhere else.
+characters in `fetch`, 50,000 in two GitHub tools, and nothing anywhere else.
 
 That number is compiled into the servers you receive. There is no file in your tree
 holding it and nothing to override, so for a server of your own it is a number to
@@ -87,7 +87,7 @@ copy rather than one to look up.
 its output, so a third-party server's cap is whatever that server decided. This
 used to be the hole under `@modelcontextprotocol/server-filesystem`, whose
 `read_file` had no cap this project could impose and no way to ask for part of a
-file; the answer was to have the agent read a range with `shell_execute`. The
+file; the answer was to have the agent read a range with `bash`. The
 shipped `files` server replaced it, and its `read` takes `offset` and `limit` and
 names the offset to continue from — so the workaround is gone along with the
 server that needed it. The hole itself remains for anything else you add.

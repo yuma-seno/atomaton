@@ -38,9 +38,8 @@ const NAMED = 3;
  *
  * Three ways to be refused and they are one thing: a `before_tool` hook saying no, and
  * atoma's own denylist and allowlist. All three arrive as an error, which is how they
- * were counted as failures — so the metrics report said `filesystem__search_files`
- * fails 97.7% of the time, when what it actually says is that a denylist works 43
- * times out of 43.
+ * were counted as failures — so the metrics report said a search tool fails 97.7% of the
+ * time, when what it actually says is that a denylist works 43 times out of 43.
  *
  * A guard doing its job is not a tool breaking, and a reader cannot act on the two the
  * same way. Checked before `looksFailed`, because every refusal also looks like one.

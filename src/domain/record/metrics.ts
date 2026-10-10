@@ -316,8 +316,8 @@ function tally(names: readonly string[]): Tally[] {
  *
  * Servers rather than individual tools, because `tools.yaml` declares servers and only a
  * running server can list its tools. Comparing the declared names against call names
- * directly is what the first version did, and since a call is `filesystem__read_text_file`
- * and the declaration is `filesystem`, it reported every server as unused.
+ * directly is what the first version did, and since a prefixed call is `server__tool`
+ * and the declaration is `server`, it reported every server as unused.
  */
 export function metricsOf(
   sessions: readonly SessionRecord[],

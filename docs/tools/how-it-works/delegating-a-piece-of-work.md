@@ -1,6 +1,6 @@
 # Delegating a piece of work
 
-`delegate__run` does one small piece of work in a separate run of `atoma` and
+`delegate` does one small piece of work in a separate run of `atoma` and
 returns what it found. It is for the work whose transcript you do not want in your
 own session: reading four files to find where a symbol is defined, searching a tree
 for a call site, running one command to answer a question.
@@ -75,7 +75,7 @@ name in one that is not in the other is a server that does not start.
 The sub-run's tools file is its own, and is **not** selected out of
 `tools/defaults.yaml`. That file is the servers every agent run starts with, hooks
 and all, and a sub-run that inherited them would inherit the next routing rule
-added there — `shell_guard` sends `gh` to `github__*`, which a delegate does not
+added there — `shell_guard` sends `gh` to the `github` server's tools, which a delegate does not
 have, so the first such rule would break every delegate.
 
 ## The credentials

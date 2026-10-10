@@ -5,7 +5,7 @@
  *
  * ## Why this exists as a job of its own
  *
- * `github__merge_pr` (the agent's own merge) already does this: `decidePostMergeHandoff`
+ * `merge_pr` (the agent's own merge) already does this: `decidePostMergeHandoff`
  * names the `atomaton:origin-agent` tagged in the pull request body, and
  * `dispatchPostMergeAgent` re-invokes it. But a merge made by a PERSON — the only
  * route under `merge.policy: manual`, and always available — goes through

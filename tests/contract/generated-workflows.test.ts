@@ -428,8 +428,8 @@ describe("generated workflows", () => {
    * had exactly this bug. `sudo` resets the environment, so the agent step now
    * enumerates what to pass — and the first version of that list was assembled from
    * the step's own `env:` block rather than from what the servers read.
-   * `GITHUB_REPOSITORY` was missing, which makes every `search__*` call answer
-   * "there is no repository to search" and stops `atomaton__request_close_issue`
+   * `GITHUB_REPOSITORY` was missing, which makes every `search_remote_code` call answer
+   * "there is no repository to search" and stops `request_close_issue`
    * outright; `GITHUB_RUN_ID` was present while nothing read it. Both mistakes are
    * invisible until an agent runs.
    *

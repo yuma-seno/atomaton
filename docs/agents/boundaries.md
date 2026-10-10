@@ -15,4 +15,4 @@ tool dispatch. They used to declare `openrouter:web_search` and
 `openrouter:web_fetch`, and both were removed: a provider-side tool reaches the
 web outside the run's own `web` server, so the request is not logged, the
 response is not capped, and what an agent fetched cannot be read back from the
-run log. Reaching the web through `web__fetch` is all three of those things.
+run log. Reaching the web through `fetch` is all three of those things.

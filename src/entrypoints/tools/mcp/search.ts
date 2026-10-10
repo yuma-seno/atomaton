@@ -89,7 +89,7 @@ const DOCUMENT_BUDGET = 1800;
  *
  * Enough to tell whether it is worth opening, not enough to be a substitute for
  * opening it. The excerpt's job is to carry the reader to
- * `github__get_issue_comments`, not to replace it.
+ * `get_issue_comments`, not to replace it.
  */
 const EXCERPT_BUDGET = 700;
 
@@ -383,8 +383,8 @@ async function searchIssues(a: z.infer<typeof SEARCH_SCHEMA>): Promise<string> {
       state: issue.state,
       url: `https://github.com/${REPO}/issues/${match.issue}`,
       // Where the match is, said in the terms the reader can act on: the number
-      // to hand to `github__get_issue_comments`, or the body to read with
-      // `github__get_issue`.
+      // to hand to `get_issue_comments`, or the body to read with
+      // `get_issue`.
       matched_in: locationOf(chunk?.source),
       comment: typeof chunk?.source === "number" ? chunk.source : undefined,
       excerpt: (chunk?.text ?? "").slice(0, EXCERPT_BUDGET).trim(),
@@ -526,7 +526,18 @@ const { tools, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
     name: "search_code",
     description:
-      "Find the code that answers a question about what this project does, by meaning rather than by matching text. Ask a whole question — 'how does a run decide the base branch for a stacked pull request' — and the files that answer it come back, most relevant first, each with the line range and an excerpt, so the next step is reading forty lines rather than a whole file. Use it when you do not know where something lives or what it is called; use a `grep` when you know the exact string and want every place it appears. Read `query` before calling: how the question is phrased decides whether the answer comes back at all, and listing synonyms because you do not know the name is the one phrasing that fails. The index is built from the tracked files at the moment you call, so a file this run has already edited is current.",
+      "Find the code that answers a question about what this project does, by meaning rather than by matching text. " +
+      "Ask a whole question — 'how does a run decide the base branch for a stacked pull request' — " +
+      "and the files that answer it come back, most relevant first, each with the line range and an excerpt, " +
+      "so the next step is reading forty lines rather than a whole file. " +
+      "Use it when you do not know where something lives or what it is called; use a `grep` when you know the exact string " +
+      "and want every place it appears. " +
+      "Read `query` before calling: how the question is phrased decides whether the answer comes back at all, " +
+      "and listing synonyms because you do not know the name is the one phrasing that fails. " +
+      "The corpus is THIS REPOSITORY'S TRACKED FILES, and nothing else — a checkout, a dependency or a download " +
+      "somewhere else on the disk is invisible here and returns nothing rather than saying so. " +
+      "Searching outside the repository means `grep` through the shell. " +
+      "The index is built from the tracked files at the moment you call, so a file this run has already edited is current.",
     schema: CODE_SCHEMA,
     handler: searchCode,
   }),

@@ -11,7 +11,7 @@
  * `to = 4`, `from = 10`, an empty selection, and the sentence
  * "comment(s) 10-4 of 4; pass from/to to read the rest" — a backwards range, no
  * comments, and an invitation to read the rest of nothing. That case is real:
- * `search__search_issues` reports a comment number, and comments get deleted
+ * `search_issues` reports a comment number, and comments get deleted
  * between the index being built and the read happening.
  *
  * The rule this module keeps is the one already stated at the call site: always
@@ -26,7 +26,7 @@
  *
  * Small on purpose. An unbounded read is how a single lookup buries a run's
  * context under a conversation it did not need, and the whole reason
- * `search__search_issues` reports which comment it matched is so that a caller
+ * `search_issues` reports which comment it matched is so that a caller
  * with a specific question asks a specific range.
  */
 export const DEFAULT_COMMENT_WINDOW = 5;
