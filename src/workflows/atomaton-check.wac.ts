@@ -263,6 +263,29 @@ const toolsJob = new DefinedJob(
       env: { ATOMA_BIN: "/usr/local/bin/atoma" },
       run: `bun run test:e2e\n`,
     }),
+    // The live tool check, on the tree this pull request would ship.
+    //
+    // `check_live_tools.ts` above is the check an ADOPTER runs: for them `.github/`
+    // IS the deliverable, and the `machineryPath()` default resolves to it correctly.
+    // In this repository `.github/` is the LAST RELEASE -- put there by self-deploy --
+    // so that check has never seen a pull request's tree. It reports on a release
+    // that already passed, which reads exactly like a release that passes.
+    //
+    // This runs the same script the deploy job runs, on `dist/` built from the
+    // checkout. It is the check that was missing when two `unprefixed` servers began
+    // offering one tool name: the release could not be published, and nothing on the
+    // pull request that caused it said so.
+    //
+    // AFTER the end-to-end suite, and that ordering is load-bearing for the first
+    // pull request that adds this line. `pretest:e2e` runs `synth`, so `dist/` exists
+    // by then -- which means the PREVIOUS release's copy of this script, the one in
+    // `.github/`, finds a tree to check instead of failing on a missing one. The
+    // script builds `dist/` itself from here on, so the dependency only matters once.
+    new TypedOutputsStep({
+      name: "Check the tool servers this pull request would ship",
+      shell: "bash",
+      run: `bash .github/atomaton/scripts/check-live-tools.sh\n`,
+    }),
   ],
 );
 
