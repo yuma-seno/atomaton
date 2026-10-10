@@ -2,7 +2,7 @@
   "name": "atomaton",
   "private": true,
   "type": "module",
-  "version": "0.20.6",
+  "version": "0.20.7",
   "engines": {
     "bun": ">=1.2.0"
   },
