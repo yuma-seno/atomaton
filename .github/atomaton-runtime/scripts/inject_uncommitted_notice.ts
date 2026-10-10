@@ -46,7 +46,7 @@ function main() {
   const messages = session.messages ?? [];
   messages.push({
     role: "user",
-    content: "Uncommitted changes exist. Use github__commit_and_push."
+    content: "Uncommitted changes exist. Use commit_and_push."
   });
   session.messages = messages;
   writeFileSync(path, JSON.stringify(session, null, 2));

@@ -1,5 +1,5 @@
 {
-  "version": "v0.20.4",
+  "version": "v0.20.6",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -71,6 +71,7 @@
     ".github/atomaton-runtime/tools/hooks/shell_guard.ts",
     ".github/atomaton-runtime/tools/hooks/workspace_guard.ts",
     ".github/atomaton-runtime/tools/mcp/atomaton.ts",
+    ".github/atomaton-runtime/tools/mcp/attachments.ts",
     ".github/atomaton-runtime/tools/mcp/delegate.ts",
     ".github/atomaton-runtime/tools/mcp/files.ts",
     ".github/atomaton-runtime/tools/mcp/github.ts",

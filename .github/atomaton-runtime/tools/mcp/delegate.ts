@@ -14897,7 +14897,7 @@ var ZodObject2 = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
   inst.partial = (...args) => partial(ZodOptional2, inst, args[0]);
   inst.required = (...args) => required(ZodNonOptional, inst, args[0]);
 });
-function object3(shape, params) {
+function object2(shape, params) {
   const def = {
     type: "object",
     get shape() {
@@ -15222,31 +15222,31 @@ var TaskCreationParamsSchema = looseObject({
   ttl: number3().optional(),
   pollInterval: number3().optional()
 });
-var TaskMetadataSchema = object3({
+var TaskMetadataSchema = object2({
   ttl: number3().optional()
 });
-var RelatedTaskMetadataSchema = object3({
+var RelatedTaskMetadataSchema = object2({
   taskId: string3()
 });
 var RequestMetaSchema = looseObject({
   progressToken: ProgressTokenSchema.optional(),
   [RELATED_TASK_META_KEY]: RelatedTaskMetadataSchema.optional()
 });
-var BaseRequestParamsSchema = object3({
+var BaseRequestParamsSchema = object2({
   _meta: RequestMetaSchema.optional()
 });
 var TaskAugmentedRequestParamsSchema = BaseRequestParamsSchema.extend({
   task: TaskMetadataSchema.optional()
 });
 var isTaskAugmentedRequestParams = (value) => TaskAugmentedRequestParamsSchema.safeParse(value).success;
-var RequestSchema = object3({
+var RequestSchema = object2({
   method: string3(),
   params: BaseRequestParamsSchema.loose().optional()
 });
-var NotificationsParamsSchema = object3({
+var NotificationsParamsSchema = object2({
   _meta: RequestMetaSchema.optional()
 });
-var NotificationSchema = object3({
+var NotificationSchema = object2({
   method: string3(),
   params: NotificationsParamsSchema.loose().optional()
 });
@@ -15254,18 +15254,18 @@ var ResultSchema = looseObject({
   _meta: RequestMetaSchema.optional()
 });
 var RequestIdSchema = union2([string3(), number3().int()]);
-var JSONRPCRequestSchema = object3({
+var JSONRPCRequestSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   id: RequestIdSchema,
   ...RequestSchema.shape
 }).strict();
 var isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success;
-var JSONRPCNotificationSchema = object3({
+var JSONRPCNotificationSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   ...NotificationSchema.shape
 }).strict();
 var isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success;
-var JSONRPCResultResponseSchema = object3({
+var JSONRPCResultResponseSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   id: RequestIdSchema,
   result: ResultSchema
@@ -15282,10 +15282,10 @@ var ErrorCode;
   ErrorCode[ErrorCode["InternalError"] = -32603] = "InternalError";
   ErrorCode[ErrorCode["UrlElicitationRequired"] = -32042] = "UrlElicitationRequired";
 })(ErrorCode || (ErrorCode = {}));
-var JSONRPCErrorResponseSchema = object3({
+var JSONRPCErrorResponseSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   id: RequestIdSchema.optional(),
-  error: object3({
+  error: object2({
     code: number3().int(),
     message: string3(),
     data: unknown2().optional()
@@ -15308,16 +15308,16 @@ var CancelledNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/cancelled"),
   params: CancelledNotificationParamsSchema
 });
-var IconSchema = object3({
+var IconSchema = object2({
   src: string3(),
   mimeType: string3().optional(),
   sizes: array2(string3()).optional(),
   theme: _enum(["light", "dark"]).optional()
 });
-var IconsSchema = object3({
+var IconsSchema = object2({
   icons: array2(IconSchema).optional()
 });
-var BaseMetadataSchema = object3({
+var BaseMetadataSchema = object2({
   name: string3(),
   title: string3().optional()
 });
@@ -15328,7 +15328,7 @@ var ImplementationSchema = BaseMetadataSchema.extend({
   websiteUrl: string3().optional(),
   description: string3().optional()
 });
-var FormElicitationCapabilitySchema = intersection2(object3({
+var FormElicitationCapabilitySchema = intersection2(object2({
   applyDefaults: boolean3().optional()
 }), record2(string3(), unknown2()));
 var ElicitationCapabilitySchema = preprocess((value) => {
@@ -15338,7 +15338,7 @@ var ElicitationCapabilitySchema = preprocess((value) => {
     }
   }
   return value;
-}, intersection2(object3({
+}, intersection2(object2({
   form: FormElicitationCapabilitySchema.optional(),
   url: AssertObjectSchema.optional()
 }), record2(string3(), unknown2()).optional()));
@@ -15363,14 +15363,14 @@ var ServerTasksCapabilitySchema = looseObject({
     }).optional()
   }).optional()
 });
-var ClientCapabilitiesSchema = object3({
+var ClientCapabilitiesSchema = object2({
   experimental: record2(string3(), AssertObjectSchema).optional(),
-  sampling: object3({
+  sampling: object2({
     context: AssertObjectSchema.optional(),
     tools: AssertObjectSchema.optional()
   }).optional(),
   elicitation: ElicitationCapabilitySchema.optional(),
-  roots: object3({
+  roots: object2({
     listChanged: boolean3().optional()
   }).optional(),
   tasks: ClientTasksCapabilitySchema.optional(),
@@ -15385,18 +15385,18 @@ var InitializeRequestSchema = RequestSchema.extend({
   method: literal2("initialize"),
   params: InitializeRequestParamsSchema
 });
-var ServerCapabilitiesSchema = object3({
+var ServerCapabilitiesSchema = object2({
   experimental: record2(string3(), AssertObjectSchema).optional(),
   logging: AssertObjectSchema.optional(),
   completions: AssertObjectSchema.optional(),
-  prompts: object3({
+  prompts: object2({
     listChanged: boolean3().optional()
   }).optional(),
-  resources: object3({
+  resources: object2({
     subscribe: boolean3().optional(),
     listChanged: boolean3().optional()
   }).optional(),
-  tools: object3({
+  tools: object2({
     listChanged: boolean3().optional()
   }).optional(),
   tasks: ServerTasksCapabilitySchema.optional(),
@@ -15416,12 +15416,12 @@ var PingRequestSchema = RequestSchema.extend({
   method: literal2("ping"),
   params: BaseRequestParamsSchema.optional()
 });
-var ProgressSchema = object3({
+var ProgressSchema = object2({
   progress: number3(),
   total: optional2(number3()),
   message: optional2(string3())
 });
-var ProgressNotificationParamsSchema = object3({
+var ProgressNotificationParamsSchema = object2({
   ...NotificationsParamsSchema.shape,
   ...ProgressSchema.shape,
   progressToken: ProgressTokenSchema
@@ -15440,7 +15440,7 @@ var PaginatedResultSchema = ResultSchema.extend({
   nextCursor: CursorSchema.optional()
 });
 var TaskStatusSchema = _enum(["working", "input_required", "completed", "failed", "cancelled"]);
-var TaskSchema = object3({
+var TaskSchema = object2({
   taskId: string3(),
   status: TaskStatusSchema,
   ttl: union2([number3(), _null3()]),
@@ -15484,7 +15484,7 @@ var CancelTaskRequestSchema = RequestSchema.extend({
   })
 });
 var CancelTaskResultSchema = ResultSchema.merge(TaskSchema);
-var ResourceContentsSchema = object3({
+var ResourceContentsSchema = object2({
   uri: string3(),
   mimeType: optional2(string3()),
   _meta: record2(string3(), unknown2()).optional()
@@ -15504,12 +15504,12 @@ var BlobResourceContentsSchema = ResourceContentsSchema.extend({
   blob: Base64Schema
 });
 var RoleSchema = _enum(["user", "assistant"]);
-var AnnotationsSchema = object3({
+var AnnotationsSchema = object2({
   audience: array2(RoleSchema).optional(),
   priority: number3().min(0).max(1).optional(),
   lastModified: datetime2({ offset: true }).optional()
 });
-var ResourceSchema = object3({
+var ResourceSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   uri: string3(),
@@ -15519,7 +15519,7 @@ var ResourceSchema = object3({
   annotations: AnnotationsSchema.optional(),
   _meta: optional2(looseObject({}))
 });
-var ResourceTemplateSchema = object3({
+var ResourceTemplateSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   uriTemplate: string3(),
@@ -15572,12 +15572,12 @@ var ResourceUpdatedNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/resources/updated"),
   params: ResourceUpdatedNotificationParamsSchema
 });
-var PromptArgumentSchema = object3({
+var PromptArgumentSchema = object2({
   name: string3(),
   description: optional2(string3()),
   required: optional2(boolean3())
 });
-var PromptSchema = object3({
+var PromptSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   description: optional2(string3()),
@@ -15598,34 +15598,34 @@ var GetPromptRequestSchema = RequestSchema.extend({
   method: literal2("prompts/get"),
   params: GetPromptRequestParamsSchema
 });
-var TextContentSchema = object3({
+var TextContentSchema = object2({
   type: literal2("text"),
   text: string3(),
   annotations: AnnotationsSchema.optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
-var ImageContentSchema = object3({
+var ImageContentSchema = object2({
   type: literal2("image"),
   data: Base64Schema,
   mimeType: string3(),
   annotations: AnnotationsSchema.optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
-var AudioContentSchema = object3({
+var AudioContentSchema = object2({
   type: literal2("audio"),
   data: Base64Schema,
   mimeType: string3(),
   annotations: AnnotationsSchema.optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
-var ToolUseContentSchema = object3({
+var ToolUseContentSchema = object2({
   type: literal2("tool_use"),
   name: string3(),
   id: string3(),
   input: record2(string3(), unknown2()),
   _meta: record2(string3(), unknown2()).optional()
 });
-var EmbeddedResourceSchema = object3({
+var EmbeddedResourceSchema = object2({
   type: literal2("resource"),
   resource: union2([TextResourceContentsSchema, BlobResourceContentsSchema]),
   annotations: AnnotationsSchema.optional(),
@@ -15641,7 +15641,7 @@ var ContentBlockSchema = union2([
   ResourceLinkSchema,
   EmbeddedResourceSchema
 ]);
-var PromptMessageSchema = object3({
+var PromptMessageSchema = object2({
   role: RoleSchema,
   content: ContentBlockSchema
 });
@@ -15653,26 +15653,26 @@ var PromptListChangedNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/prompts/list_changed"),
   params: NotificationsParamsSchema.optional()
 });
-var ToolAnnotationsSchema = object3({
+var ToolAnnotationsSchema = object2({
   title: string3().optional(),
   readOnlyHint: boolean3().optional(),
   destructiveHint: boolean3().optional(),
   idempotentHint: boolean3().optional(),
   openWorldHint: boolean3().optional()
 });
-var ToolExecutionSchema = object3({
+var ToolExecutionSchema = object2({
   taskSupport: _enum(["required", "optional", "forbidden"]).optional()
 });
-var ToolSchema = object3({
+var ToolSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   description: string3().optional(),
-  inputSchema: object3({
+  inputSchema: object2({
     type: literal2("object"),
     properties: record2(string3(), AssertObjectSchema).optional(),
     required: array2(string3()).optional()
   }).catchall(unknown2()),
-  outputSchema: object3({
+  outputSchema: object2({
     type: literal2("object"),
     properties: record2(string3(), AssertObjectSchema).optional(),
     required: array2(string3()).optional()
@@ -15707,7 +15707,7 @@ var ToolListChangedNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/tools/list_changed"),
   params: NotificationsParamsSchema.optional()
 });
-var ListChangedOptionsBaseSchema = object3({
+var ListChangedOptionsBaseSchema = object2({
   autoRefresh: boolean3().default(true),
   debounceMs: number3().int().nonnegative().default(300)
 });
@@ -15728,23 +15728,23 @@ var LoggingMessageNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/message"),
   params: LoggingMessageNotificationParamsSchema
 });
-var ModelHintSchema = object3({
+var ModelHintSchema = object2({
   name: string3().optional()
 });
-var ModelPreferencesSchema = object3({
+var ModelPreferencesSchema = object2({
   hints: array2(ModelHintSchema).optional(),
   costPriority: number3().min(0).max(1).optional(),
   speedPriority: number3().min(0).max(1).optional(),
   intelligencePriority: number3().min(0).max(1).optional()
 });
-var ToolChoiceSchema = object3({
+var ToolChoiceSchema = object2({
   mode: _enum(["auto", "required", "none"]).optional()
 });
-var ToolResultContentSchema = object3({
+var ToolResultContentSchema = object2({
   type: literal2("tool_result"),
   toolUseId: string3().describe("The unique identifier for the corresponding tool call."),
   content: array2(ContentBlockSchema).default([]),
-  structuredContent: object3({}).loose().optional(),
+  structuredContent: object2({}).loose().optional(),
   isError: boolean3().optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
@@ -15756,7 +15756,7 @@ var SamplingMessageContentBlockSchema = discriminatedUnion("type", [
   ToolUseContentSchema,
   ToolResultContentSchema
 ]);
-var SamplingMessageSchema = object3({
+var SamplingMessageSchema = object2({
   role: RoleSchema,
   content: union2([SamplingMessageContentBlockSchema, array2(SamplingMessageContentBlockSchema)]),
   _meta: record2(string3(), unknown2()).optional()
@@ -15789,13 +15789,13 @@ var CreateMessageResultWithToolsSchema = ResultSchema.extend({
   role: RoleSchema,
   content: union2([SamplingMessageContentBlockSchema, array2(SamplingMessageContentBlockSchema)])
 });
-var BooleanSchemaSchema = object3({
+var BooleanSchemaSchema = object2({
   type: literal2("boolean"),
   title: string3().optional(),
   description: string3().optional(),
   default: boolean3().optional()
 });
-var StringSchemaSchema = object3({
+var StringSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
@@ -15804,7 +15804,7 @@ var StringSchemaSchema = object3({
   format: _enum(["email", "uri", "date", "date-time"]).optional(),
   default: string3().optional()
 });
-var NumberSchemaSchema = object3({
+var NumberSchemaSchema = object2({
   type: _enum(["number", "integer"]),
   title: string3().optional(),
   description: string3().optional(),
@@ -15812,24 +15812,24 @@ var NumberSchemaSchema = object3({
   maximum: number3().optional(),
   default: number3().optional()
 });
-var UntitledSingleSelectEnumSchemaSchema = object3({
+var UntitledSingleSelectEnumSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
   enum: array2(string3()),
   default: string3().optional()
 });
-var TitledSingleSelectEnumSchemaSchema = object3({
+var TitledSingleSelectEnumSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
-  oneOf: array2(object3({
+  oneOf: array2(object2({
     const: string3(),
     title: string3()
   })),
   default: string3().optional()
 });
-var LegacyTitledEnumSchemaSchema = object3({
+var LegacyTitledEnumSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
@@ -15838,26 +15838,26 @@ var LegacyTitledEnumSchemaSchema = object3({
   default: string3().optional()
 });
 var SingleSelectEnumSchemaSchema = union2([UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema]);
-var UntitledMultiSelectEnumSchemaSchema = object3({
+var UntitledMultiSelectEnumSchemaSchema = object2({
   type: literal2("array"),
   title: string3().optional(),
   description: string3().optional(),
   minItems: number3().optional(),
   maxItems: number3().optional(),
-  items: object3({
+  items: object2({
     type: literal2("string"),
     enum: array2(string3())
   }),
   default: array2(string3()).optional()
 });
-var TitledMultiSelectEnumSchemaSchema = object3({
+var TitledMultiSelectEnumSchemaSchema = object2({
   type: literal2("array"),
   title: string3().optional(),
   description: string3().optional(),
   minItems: number3().optional(),
   maxItems: number3().optional(),
-  items: object3({
-    anyOf: array2(object3({
+  items: object2({
+    anyOf: array2(object2({
       const: string3(),
       title: string3()
     }))
@@ -15870,7 +15870,7 @@ var PrimitiveSchemaDefinitionSchema = union2([EnumSchemaSchema, BooleanSchemaSch
 var ElicitRequestFormParamsSchema = TaskAugmentedRequestParamsSchema.extend({
   mode: literal2("form").optional(),
   message: string3(),
-  requestedSchema: object3({
+  requestedSchema: object2({
     type: literal2("object"),
     properties: record2(string3(), PrimitiveSchemaDefinitionSchema),
     required: array2(string3()).optional()
@@ -15898,21 +15898,21 @@ var ElicitResultSchema = ResultSchema.extend({
   action: _enum(["accept", "decline", "cancel"]),
   content: preprocess((val) => val === null ? undefined : val, record2(string3(), union2([string3(), number3(), boolean3(), array2(string3())])).optional())
 });
-var ResourceTemplateReferenceSchema = object3({
+var ResourceTemplateReferenceSchema = object2({
   type: literal2("ref/resource"),
   uri: string3()
 });
-var PromptReferenceSchema = object3({
+var PromptReferenceSchema = object2({
   type: literal2("ref/prompt"),
   name: string3()
 });
 var CompleteRequestParamsSchema = BaseRequestParamsSchema.extend({
   ref: union2([PromptReferenceSchema, ResourceTemplateReferenceSchema]),
-  argument: object3({
+  argument: object2({
     name: string3(),
     value: string3()
   }),
-  context: object3({
+  context: object2({
     arguments: record2(string3(), string3()).optional()
   }).optional()
 });
@@ -15927,7 +15927,7 @@ var CompleteResultSchema = ResultSchema.extend({
     hasMore: optional2(boolean3())
   })
 });
-var RootSchema = object3({
+var RootSchema = object2({
   uri: string3().startsWith("file://"),
   name: string3().optional(),
   _meta: record2(string3(), unknown2()).optional()
@@ -17840,6 +17840,25 @@ hardenCredentialHolder(log);
 function defaultDelegatesDir() {
   return join(dirname(fileURLToPath(import.meta.url)), "..", "delegates");
 }
+function readDefinition(defPath) {
+  try {
+    return readFileSync(defPath, "utf8");
+  } catch (e) {
+    console.error(`[atomaton-delegate] could not read ${defPath}: ${e.message}`);
+    process.exit(2);
+  }
+}
+function serverNames(tools, toolsPath) {
+  const servers = Object.keys(tools).filter((name) => name !== "hooks");
+  if (servers.length === 0) {
+    console.error(`[atomaton-delegate] ${toolsPath} declares no servers; refusing to start`);
+    process.exit(2);
+  }
+  return servers;
+}
+function rolePrompt(text) {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+}
 function readToolsFile(path) {
   let parsed;
   try {
@@ -17861,28 +17880,38 @@ function readToolsFile(path) {
 var { values } = parseArgs({
   args: Bun.argv.slice(2),
   options: {
-    "agent-def": { type: "string" },
-    "tools-file": { type: "string" },
+    "agent-defs": { type: "string", multiple: true },
     "delegates-dir": { type: "string" }
   }
 });
 var DELEGATES_DIR2 = values["delegates-dir"] ? resolve(machineryPath(values["delegates-dir"])) : defaultDelegatesDir();
-var AGENT_DEF_FILE = values["agent-def"] ?? "delegate.md";
-var TOOLS_FILE = values["tools-file"] ? resolve(machineryPath(values["tools-file"])) : join(DELEGATES_DIR2, `${AGENT_DEF_FILE.replace(/\.md$/, "")}.tools.yaml`);
-var SUB_RUN_TOOLS = readToolsFile(TOOLS_FILE);
-var SUB_RUN_SERVERS = Object.keys(SUB_RUN_TOOLS).filter((name) => name !== "hooks");
-if (SUB_RUN_SERVERS.length === 0) {
-  console.error(`[atomaton-delegate] ${TOOLS_FILE} declares no servers; refusing to start`);
+var AGENT_DEF_FILES = values["agent-defs"] ?? [];
+if (AGENT_DEF_FILES.length === 0) {
+  console.error("[atomaton-delegate] no --agent-defs given. Pass the definition file(s) this server should " + "offer, naming one tool each; there is no default, because which definitions a server " + "offers is what tells the writing pair from the read-only pair.");
   process.exit(2);
 }
-var CAN_WRITE = SUB_RUN_SERVERS.includes("files");
+var DEFAULTS = AGENT_DEF_FILES.map((file) => {
+  const name = file.replace(/\.md$/, "");
+  const toolsFile = join(DELEGATES_DIR2, `${name}.tools.yaml`);
+  const tools = readToolsFile(toolsFile);
+  const servers = serverNames(tools, toolsFile);
+  return { file, name, toolsFile, tools, servers, canWrite: servers.includes("files"), role: rolePrompt(readDefinition(join(DELEGATES_DIR2, file))) };
+});
+var seenNames = new Set;
+for (const def of DEFAULTS) {
+  if (seenNames.has(def.name)) {
+    console.error(`[atomaton-delegate] '${def.name}' is offered twice by --agent-defs, so this server would ` + "advertise two tools with one name. atoma refuses that at registration and names the " + "server rather than the list; fix the list.");
+    process.exit(2);
+  }
+  seenNames.add(def.name);
+}
 var SUB_RUN_MAX_RUNTIME_SECS = 600;
 var WRAPPER_TIMEOUT_MS = (SUB_RUN_MAX_RUNTIME_SECS + 60) * 1000;
 var PROVIDER_CREDENTIALS = RUN_CREDENTIALS.filter((name) => name !== "GH_TOKEN");
 var SECRET_LITERALS = literalsFrom(process.env, RUN_CREDENTIALS);
 var DELEGATE_RUN_SCHEMA = objectType({
-  task: stringType().min(1).describe("What to do, as an instruction to the delegate. One small piece of work: read and report, " + "search and report, make one change, run one command. It cannot reach GitHub, cannot open " + "an issue or a pull request, and cannot delegate further."),
-  context: stringType().optional().describe("Background the delegate needs and cannot find for itself: which files to look at, what is " + "already known, what has been ruled out. It starts with no memory of this conversation.")
+  task: stringType().min(1).describe("What to do, as an instruction to the delegate. One small piece of work: read and report, " + "search and report, make one change, run one command. It cannot reach GitHub, cannot open " + "an issue or a pull request, and cannot delegate further. " + "It CAN look around on its own, so a task that is a question rather than a file is " + "delegatable too \u2014 and that is often the better call, because the searching is what fills " + "this session with transcripts. Write four things: WHAT you want to know, in the words of " + "the answer you are hoping for; WHERE it may be (a directory, a file, the whole tree) if " + "you know, and say so when you do not; WHAT counts as an answer, so a partial one is not " + "mistaken for a complete one; and WHEN to stop \u2014 for a search, say outright that finding " + "nothing is a useful report, because a delegate that has not found something will " + "otherwise keep looking until its ten minutes are gone."),
+  context: stringType().optional().describe("What the delegate should start from: files and line numbers you already know are " + "relevant, what is already known, what has been ruled out, and anything about the " + "repository it would otherwise have to rediscover. It starts with no memory of this " + "conversation, so anything you do not write here it has to find or do without.")
 });
 function buildPrompt(task, context) {
   const trimmed = (context ?? "").trim();
@@ -17921,7 +17950,7 @@ function reportFrom(envelope) {
   const because = envelope.ended_because ?? "failed";
   return `The delegate produced no report: the sub-run ended because of \`${because}\` ` + `after ${envelope.seconds ?? 0}s and ${envelope.iterations ?? 0} iteration(s). ` + "Nothing was returned to report. If the task needs longer than the sub-run's limit, " + "do the work here instead.";
 }
-async function handleDelegateRun(args) {
+async function handleDelegateRun(def, args) {
   const credentials = providerCredentials(process.env);
   if (Object.keys(credentials).length === 0) {
     throw new Error("Cannot delegate: this run holds no provider credential, so the sub-run could not call a model. " + "Do the work here instead.");
@@ -17930,9 +17959,9 @@ async function handleDelegateRun(args) {
   const toolsFile = join(dir, "tools.yaml");
   const credentialsFile = join(dir, "credentials.json");
   try {
-    writeFileSync(toolsFile, Bun.YAML.stringify(SUB_RUN_TOOLS, null, 2));
+    writeFileSync(toolsFile, Bun.YAML.stringify(def.tools, null, 2));
     writeFileSync(credentialsFile, JSON.stringify(credentials), { mode: 384 });
-    const agentDef = join(DELEGATES_DIR2, AGENT_DEF_FILE);
+    const agentDef = join(DELEGATES_DIR2, def.file);
     const prompt = buildPrompt(args.task, args.context);
     log(`delegating: ${args.task.slice(0, 120).replace(/\s+/g, " ")}`);
     const child = Bun.spawn([
@@ -17998,16 +18027,24 @@ async function handleDelegateRun(args) {
     }
   }
 }
-var { tools, dispatch } = buildMcpTools([
-  defineMcpTool({
-    name: "run",
-    description: "Do one small piece of work in a separate run and return what it found. Use it for reading, " + "searching and changing files, and for running one command to answer a question \u2014 the work " + "whose transcript you do not want in this session. " + "The delegate starts with NO memory of this conversation: put everything it needs in `task` " + "and `context`, including which files to look at. " + "It CANNOT reach GitHub \u2014 no issues, no pull requests, no comments \u2014 cannot dispatch anything, " + "and cannot delegate further. " + (CAN_WRITE ? "It works in the same tree, so a change it makes is a change you will commit. " : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " + "comes back as a description rather than as an edit. ") + "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " + "resumes it. If the task is larger than that, do it here instead.",
+function delegateDescription(def, shared) {
+  return "Do one small piece of work in a separate run and return what it found. Use it for reading, " + "searching and changing files, and for running one command to answer a question \u2014 the work " + "whose transcript you do not want in this session. " + "The investigation you do not know how to start is the case it is most for: it does have " + 'its own `grep`, `glob` and `read`, so "find where X is defined and everywhere it is ' + 'called" is a task you can hand over rather than a search you have to do first. Say what ' + "an answer looks like and when to stop looking, and read `task` before calling. " + "It starts with NO memory of this conversation: put everything it needs in `task` and " + "`context`. Name the files when you already know them; when you do not, say so and give " + "it the ground to cover. " + "It CANNOT reach GitHub \u2014 no issues, no pull requests, no comments \u2014 cannot dispatch anything, " + "and cannot delegate further. " + (def.canWrite ? "It works in the same tree, so a change it makes is a change you will commit. " : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " + "comes back as a description rather than as an edit. ") + "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " + "resumes it. If the task is larger than that, or needs a decision, do it here instead." + shared;
+}
+function distinguishingText(role) {
+  const firstParagraph = role.split(/\n\s*\n/)[0]?.trim() ?? "";
+  return firstParagraph ? ` ${firstParagraph.replace(/\s+/g, " ")}` : "";
+}
+function definitionTool(def) {
+  return defineMcpTool({
+    name: def.name,
+    description: delegateDescription(def, distinguishingText(def.role)),
     schema: DELEGATE_RUN_SCHEMA,
-    handler: handleDelegateRun
-  })
-]);
+    handler: (args) => handleDelegateRun(def, args)
+  });
+}
+var { tools, dispatch } = buildMcpTools(DEFAULTS.map(definitionTool));
 async function main() {
-  log(`Starting atomaton-delegate-mcp-server (stdio transport): servers=${SUB_RUN_SERVERS.join(",")} def=${AGENT_DEF_FILE}`);
+  log(`Starting atomaton-delegate-mcp-server (stdio transport): ` + DEFAULTS.map((def) => `${def.name}=${def.servers.join("+")}`).join(", "));
   await serveMcpServer({ name: "atomaton-delegate-mcp", version: "1.0.0", tools, dispatch, log });
 }
 if (import.meta.main)

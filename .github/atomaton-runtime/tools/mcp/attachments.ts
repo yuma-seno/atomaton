@@ -6600,10 +6600,9 @@ var require_dist = __commonJS(function(exports, module) {
   exports.default = formatsPlugin;
 });
 
-// src/entrypoints/tools/mcp/files.ts
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync as statSync2, existsSync } from "fs";
-import { isAbsolute, resolve, relative, sep, dirname } from "path";
-import { spawnSync } from "child_process";
+// src/entrypoints/tools/mcp/attachments.ts
+import { readFileSync, statSync as statSync2 } from "fs";
+import { basename } from "path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -10415,6 +10414,16 @@ var optionalType = ZodOptional.create;
 var nullableType = ZodNullable.create;
 var preprocessType = ZodEffects.createWithPreprocess;
 var pipelineType = ZodPipeline.create;
+var coerce = {
+  string: (arg) => ZodString.create({ ...arg, coerce: true }),
+  number: (arg) => ZodNumber.create({ ...arg, coerce: true }),
+  boolean: (arg) => ZodBoolean.create({
+    ...arg,
+    coerce: true
+  }),
+  bigint: (arg) => ZodBigInt.create({ ...arg, coerce: true }),
+  date: (arg) => ZodDate.create({ ...arg, coerce: true })
+};
 // node_modules/zod-to-json-schema/dist/esm/Options.js
 var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
@@ -17564,6 +17573,9 @@ class StdioServerTransport {
 }
 
 // src/adapters/mcp/mcp-tool.ts
+function positiveInt(description) {
+  return coerce.number().int().positive().describe(description);
+}
 function normalizeResult(result) {
   return typeof result === "string" ? { text: result } : result;
 }
@@ -17636,28 +17648,28 @@ async function serveMcpServer(options) {
   await server.connect(new StdioServerTransport);
 }
 
-// src/shared/tool-output.ts
-var TOOL_OUTPUT_BUDGET = 50000;
-var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
-
-// src/domain/work/workspace.ts
-var WORKSPACE_PATH = "/tmp/atomaton-workspace";
-var WORKSPACE_SENTENCE = `Anything under ${WORKSPACE_PATH} survives into the next run on this issue and is shared with the other ` + `agents working on it. Nothing else outside the repository survives. Put notes, scratch scripts and ` + `intermediate output there rather than in the repository, where they would be committed as part of the work.`;
-
-// src/adapters/github/issue-images.ts
-var MAX_IMAGE_BYTES = 4000000;
-function sniffMimeType(bytes) {
-  const starts = (...sig) => sig.every((b, i) => bytes[i] === b);
-  if (starts(137, 80, 78, 71))
-    return "image/png";
-  if (starts(255, 216, 255))
-    return "image/jpeg";
-  if (starts(71, 73, 70, 56))
-    return "image/gif";
-  if (starts(82, 73, 70, 70) && [87, 69, 66, 80].every((b, i) => bytes[8 + i] === b)) {
-    return "image/webp";
-  }
-  return "";
+// src/adapters/github/gh.ts
+function run(cmd) {
+  const proc = Bun.spawnSync({
+    cmd,
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : ""
+  };
+}
+function ghCommand() {
+  const fake = (process.env.ATOMATON_FAKE_GH ?? "").trim();
+  return fake ? [process.execPath, fake] : ["gh"];
+}
+function gh(...args) {
+  return run([...ghCommand(), ...args]);
+}
+function gitRun(...args) {
+  return run(["git", ...args]);
 }
 
 // src/entrypoints/tools/lib/harden.ts
@@ -17728,289 +17740,208 @@ function hardenCredentialHolder(log) {
     log(`also removed ${unreadable.length} PATH entries this process cannot inspect`);
 }
 
-// src/entrypoints/tools/mcp/files.ts
+// src/entrypoints/tools/mcp/attachments.ts
 function log(message) {
-  console.error(`[atomaton-files] ${message}`);
+  console.error(`[atomaton-attachments] ${message}`);
 }
 hardenCredentialHolder(log);
-var ROOTS = [resolve(process.cwd()), WORKSPACE_PATH];
-var DEFAULT_READ_LINES = 400;
-var DEFAULT_MAX_MATCHES = 60;
-function within(path) {
-  const full = isAbsolute(path) ? resolve(path) : resolve(process.cwd(), path);
-  const inside = ROOTS.some((root) => full === root || full.startsWith(root.endsWith(sep) ? root : root + sep));
-  if (!inside) {
-    throw new Error(`'${path}' is outside the directories this tool can reach. They are: ${ROOTS.join(", ")}.`);
-  }
-  return full;
-}
-function shown(full) {
-  const rel = relative(process.cwd(), full);
-  return rel && !rel.startsWith("..") ? rel.split(sep).join("/") : full;
-}
-var READ_SCHEMA = objectType({
-  path: stringType().describe("File to read. Relative to the working directory, or absolute."),
-  offset: numberType().int().min(1).optional().describe("First line to return, counting from 1. Default 1. To continue a read that stopped early, pass the offset its result named."),
-  limit: numberType().int().min(1).optional().describe(`How many lines to return. Default ${DEFAULT_READ_LINES}. A larger number is clipped by the size budget, and the result says how far it actually got.`)
+var UPLOAD_ENDPOINT = "https://uploads.github.com/user-attachments/assets";
+var UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
+var MAX_READ_BYTES = 128 * 1024 * 1024;
+var REQUEST_ABORT_MS = 120000;
+var BODY_EXCERPT_CHARS = 2000;
+var PROBE_SCHEMA = objectType({
+  mode: enumType(["routing", "endpoint", "oversize", "upload"]).optional().default("endpoint").describe("What to measure. `endpoint` (default): POST with repository_id and an empty name \u2014 a request that cannot store, whose 400 proves the endpoint is real and the credential was accepted. " + "`routing`: the same without repository_id \u2014 the 404 shape gh's source predicts. " + "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " + "`upload`: the only mode that stores \u2014 one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent."),
+  file: stringType().optional().describe("Path to the file to send. Required for oversize and upload; ignored by the other two."),
+  content_type: stringType().optional().default("application/octet-stream").describe("Content-Type declared for the body. Defaults to application/octet-stream, which is what gh sends."),
+  repository_id: positiveInt("Numeric REST id of the repository to upload against. Looked up from the current repository when omitted.").optional()
 });
-function readFile(a) {
-  const full = within(a.path);
-  if (!existsSync(full))
-    throw new Error(`'${a.path}' does not exist.`);
-  if (statSync2(full).isDirectory())
-    throw new Error(`'${a.path}' is a directory. Use list.`);
-  const bytes = new Uint8Array(readFileSync(full));
-  const mimeType = sniffMimeType(bytes);
-  if (mimeType) {
-    const data = Buffer.from(bytes).toString("base64");
-    if (data.length > MAX_IMAGE_BYTES) {
-      throw new Error(`'${a.path}' is too large an image to include (${bytes.length} bytes).`);
-    }
-    log(`read ${shown(full)} as ${mimeType}, ${bytes.length}B`);
-    return { text: `Image ${shown(full)} (${mimeType}).`, images: [{ type: "image", data, mimeType }] };
+function credential() {
+  const token = (process.env.GH_TOKEN ?? "").trim();
+  if (!token) {
+    throw new Error("GH_TOKEN was not delivered to this server. It reaches the server only through its `env:` entry " + '(`GH_TOKEN: "${GH_TOKEN}"` under tools.servers) \u2014 check the entry this server is declared by.');
   }
-  const lines = readFileSync(full, "utf8").split(`
-`);
-  if (lines.length > 0 && lines[lines.length - 1] === "")
-    lines.pop();
-  const total = lines.length;
-  const from = a.offset ?? 1;
-  if (total === 0)
-    return { text: `${shown(full)} is empty.` };
-  if (from > total)
-    throw new Error(`'${a.path}' has ${total} lines; offset ${from} is past the end.`);
-  const wanted = Math.min(a.limit ?? DEFAULT_READ_LINES, total - from + 1);
-  const out = [];
-  let used = 0;
-  for (let i = 0;i < wanted; i += 1) {
-    const numbered = `${from + i}	${lines[from + i - 1]}`;
-    if (used + numbered.length + 1 > TOOL_OUTPUT_BUDGET)
-      break;
-    out.push(numbered);
-    used += numbered.length + 1;
-  }
-  const last = from + out.length - 1;
-  const more = last < total ? `
-
-[${total - last} more lines. Read again with offset: ${last + 1}.]` : "";
-  log(`read ${shown(full)} ${from}-${last}/${total}`);
-  return { text: `${shown(full)} lines ${from}-${last} of ${total}
-
-${out.join(`
-`)}${more}` };
+  return { token, kind: token.slice(0, 4) };
 }
-function serialisedPathList(value) {
-  if (typeof value !== "string")
-    return value;
-  const text = value.trim();
-  if (!text.startsWith("[") || !text.endsWith("]"))
-    return value;
+function resolveRepo() {
+  const fromEnv = (process.env.GITHUB_REPOSITORY ?? "").trim();
+  if (fromEnv)
+    return fromEnv;
+  const { code, stdout } = gitRun("remote", "get-url", "origin");
+  if (code === 0 && stdout) {
+    const match = /github\.com[/:](.+\/.+?)(?:\.git)?$/.exec(stdout.trim());
+    if (match)
+      return match[1];
+  }
+  throw new Error("GITHUB_REPOSITORY is unset and no GitHub remote could be read, so there is no repository to upload against.");
+}
+function resolveRepositoryId(repo) {
+  const { code, stdout, stderr } = gh("api", `repos/${repo}`, "--jq", ".id");
+  if (code !== 0) {
+    throw new Error(`could not read the repository id for ${repo}: ${stderr || stdout}`);
+  }
+  const id = Number(stdout.trim());
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error(`could not read the repository id for ${repo}: got ${stdout.trim().slice(0, 80)}`);
+  }
+  return id;
+}
+function requestUrlFor(mode, parts) {
+  const query = new URLSearchParams;
+  query.set("name", parts.name ?? "");
+  query.set("content_type", parts.contentType);
+  if (parts.repositoryId !== undefined)
+    query.set("repository_id", String(parts.repositoryId));
+  return `${UPLOAD_ENDPOINT}?${query.toString()}`;
+}
+function readFileFor(mode, path) {
+  let size;
   try {
-    const parsed = JSON.parse(text);
-    return Array.isArray(parsed) && parsed.every((one) => typeof one === "string") ? parsed : value;
+    size = statSync2(path).size;
   } catch {
-    return value;
+    throw new Error(`could not read ${path}: no such file`);
   }
+  if (mode === "upload" && size > UPLOAD_LIMIT_BYTES) {
+    throw new Error(`${path} is ${size} bytes, over the ${UPLOAD_LIMIT_BYTES}-byte attachment ceiling. ` + "upload mode is for a file that fits; run probe with mode oversize to measure how the endpoint refuses a larger one.");
+  }
+  if (mode === "oversize" && size <= UPLOAD_LIMIT_BYTES) {
+    throw new Error(`${path} is ${size} bytes, at or under the ${UPLOAD_LIMIT_BYTES}-byte ceiling, so an oversize run would measure nothing. ` + "Make a file over the limit first, or run probe with mode upload.");
+  }
+  if (size > MAX_READ_BYTES) {
+    throw new Error(`${path} is ${size} bytes, past the ${MAX_READ_BYTES}-byte ceiling this tool reads into memory.`);
+  }
+  const bytes = new Uint8Array(readFileSync(path));
+  return { bytes, size };
 }
-var GREP_SCHEMA = objectType({
-  pattern: stringType().describe("Extended regular expression, as `grep -E` reads it."),
-  path: preprocessType(serialisedPathList, unionType([stringType(), arrayType(stringType()).min(1)])).optional().describe("File or directory to search, or several of them. Default: the working directory."),
-  glob: stringType().optional().describe("Only search files whose name matches this shell glob, such as `*.ts`. Matched against the file name, not the whole path."),
-  exclude: arrayType(stringType()).optional().describe("Skip files and directories whose name matches any of these globs, such as `node_modules` or `*.min.js`."),
-  context: numberType().int().min(0).max(20).optional().describe("Lines of surrounding context to include with each match. Default 0."),
-  max_matches: numberType().int().min(1).optional().describe(`How many lines to return. Default ${DEFAULT_MAX_MATCHES}. With context set, the surrounding lines count towards it. The result says when it stopped early.`),
-  case_sensitive: booleanType().optional().default(true).describe("Match case. Default true.")
-});
-function grepFiles(a) {
-  const asked = a.path === undefined ? ["."] : Array.isArray(a.path) ? a.path : [a.path];
-  const limit = a.max_matches ?? DEFAULT_MAX_MATCHES;
-  const targets = asked.map((one) => {
-    const full = within(one);
-    const rel = relative(process.cwd(), full);
-    return rel === "" ? "." : rel.startsWith("..") ? full : rel.split(sep).join("/");
-  });
-  const args = ["-E", "-n", "-I", "-r"];
-  if (!a.case_sensitive)
-    args.push("-i");
-  if (a.context)
-    args.push(`-C${a.context}`);
-  if (a.glob)
-    args.push(`--include=${a.glob}`);
-  for (const skip of a.exclude ?? []) {
-    args.push(`--exclude=${skip}`, `--exclude-dir=${skip}`);
+function interpret(mode, status, body, location) {
+  if (status >= 300 && status < 400) {
+    return `redirected (${status}): the endpoint did not answer the POST directly${location ? ` \u2014 Location: ${location}` : ""}. Record this as a route that moves rather than one that answers.`;
   }
-  args.push(`-m${limit + 1}`, "-e", a.pattern, "--", ...targets);
-  const run = spawnSync("grep", args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  if (run.error)
-    throw new Error(`grep could not be run: ${run.error.message}`);
-  if (run.status !== null && run.status > 1) {
-    throw new Error(`grep failed (exit ${run.status}): ${(run.stderr || "").trim() || "no output"}`);
+  if (status === 429) {
+    return "rate limited: wait and run the same probe again. The answer it exists for has not arrived yet.";
   }
-  const found = (run.stdout || "").split(`
-`).filter((line) => line.length > 0);
-  if (found.length === 0) {
-    return {
-      text: `No match for ${a.pattern}${a.glob ? ` in ${a.glob} files` : ""} under ${targets.join(", ")}.`
-    };
-  }
-  const kept = [];
-  let used = 0;
-  for (const line of found.slice(0, limit)) {
-    if (used + line.length + 1 > TOOL_OUTPUT_BUDGET)
-      break;
-    kept.push(line);
-    used += line.length + 1;
-  }
-  const dropped = found.length - kept.length;
-  const note = dropped > 0 ? `
-
-[${dropped} or more further lines. Narrow the pattern, set glob, or raise max_matches.]` : "";
-  const what = a.context ? "line(s), match and context," : "matching line(s)";
-  log(`grep ${a.pattern} -> ${kept.length} line(s)${dropped > 0 ? `, ${dropped} dropped` : ""}`);
-  return { text: `${kept.length} ${what} under ${targets.join(", ")}:
-
-${kept.join(`
-`)}${note}` };
-}
-var GLOB_SCHEMA = objectType({
-  pattern: stringType().describe("Glob over paths, such as `src/**/*.ts`. Matched against the path relative to `path`."),
-  path: stringType().optional().describe("Directory to search under. Default: the working directory.")
-});
-function globFiles(a) {
-  const root = within(a.path ?? ".");
-  const found = [];
-  for (const hit of new Bun.Glob(a.pattern).scanSync({ cwd: root, onlyFiles: true, dot: false })) {
-    const full = resolve(root, hit);
-    try {
-      found.push({ path: shown(full), at: statSync2(full).mtimeMs });
-    } catch {}
-  }
-  if (found.length === 0)
-    return { text: `No file matches ${a.pattern} under ${shown(root)}.` };
-  found.sort((x, y) => y.at - x.at);
-  const kept = [];
-  let used = 0;
-  for (const { path } of found) {
-    if (used + path.length + 1 > TOOL_OUTPUT_BUDGET)
-      break;
-    kept.push(path);
-    used += path.length + 1;
-  }
-  const dropped = found.length - kept.length;
-  const note = dropped > 0 ? `
-
-[${dropped} more. Narrow the pattern.]` : "";
-  log(`glob ${a.pattern} -> ${kept.length}/${found.length}`);
-  return { text: `${found.length} file(s), most recently changed first:
-
-${kept.join(`
-`)}${note}` };
-}
-var EDIT_SCHEMA = objectType({
-  path: stringType().describe("File to change."),
-  old_string: stringType().describe("Exact text to replace, including its indentation. Must appear exactly once unless replace_all is set."),
-  new_string: stringType().describe("Text to put in its place."),
-  replace_all: booleanType().optional().default(false).describe("Replace every occurrence instead of requiring exactly one.")
-});
-function editFile(a) {
-  const full = within(a.path);
-  if (!existsSync(full))
-    throw new Error(`'${a.path}' does not exist. Use write to create it.`);
-  const before = readFileSync(full, "utf8");
-  const count = before.split(a.old_string).length - 1;
-  if (count === 0) {
-    throw new Error(`That text is not in '${a.path}'. Read the file and copy the text exactly, including indentation.`);
-  }
-  if (count > 1 && !a.replace_all) {
-    throw new Error(`That text appears ${count} times in '${a.path}'. Include enough surrounding lines to make it unique, or set replace_all.`);
-  }
-  const after = a.replace_all ? before.split(a.old_string).join(a.new_string) : before.replace(a.old_string, a.new_string);
-  writeFileSync(full, after);
-  const changed = a.replace_all ? count : 1;
-  log(`edit ${shown(full)} x${changed}`);
-  return { text: `Replaced ${changed} occurrence(s) in ${shown(full)}.` };
-}
-var WRITE_SCHEMA = objectType({
-  path: stringType().describe("File to write. Parent directories are created."),
-  content: stringType().describe("The whole contents of the file. This replaces what is there.")
-});
-function writeWholeFile(a) {
-  const full = within(a.path);
-  mkdirSync(dirname(full), { recursive: true });
-  const existed = existsSync(full);
-  writeFileSync(full, a.content);
-  log(`write ${shown(full)} ${a.content.length}B`);
-  return { text: `${existed ? "Replaced" : "Wrote"} ${shown(full)} (${a.content.length} characters).` };
-}
-var LIST_SCHEMA = objectType({
-  path: stringType().optional().describe("Directory to list. Default: the working directory.")
-});
-function listDirectory(a) {
-  const asked = a.path ?? ".";
-  const full = within(asked);
-  if (!existsSync(full))
-    throw new Error(`'${asked}' does not exist.`);
-  if (!statSync2(full).isDirectory())
-    throw new Error(`'${asked}' is a file. Use read.`);
-  const rows = [];
-  const entries = readdirSync(full, { withFileTypes: true }).sort((x, y) => x.name.localeCompare(y.name));
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      rows.push(`${entry.name}/`);
-      continue;
+  if (mode === "routing") {
+    if (status === 404) {
+      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists \u2014 endpoint mode's 400 is that proof.";
     }
-    let size = "";
-    try {
-      size = ` (${statSync2(resolve(full, entry.name)).size}B)`;
-    } catch {}
-    rows.push(`${entry.name}${size}`);
+    return "unexpected: the measured expectation for a request without repository_id is 404. Record the status and body.";
   }
-  log(`list ${shown(full)} -> ${rows.length}`);
-  return { text: `${shown(full)}:
-
-${rows.join(`
-`) || "(empty)"}` };
+  if (mode === "endpoint") {
+    if (status === 400) {
+      const exact = body.includes("Invalid name for request") ? " \u2014 the body matches the message measured by hand" : "";
+      return "matches the measured expectation: the endpoint is real and the credential was accepted. " + "A rejected credential would be 401, and a token without write access would be 404 (gh's source says READ and TRIAGE get 404, not 403). " + `Nothing was stored: name was empty${exact}.`;
+    }
+    if (status === 401) {
+      return "the credential was rejected by the endpoint. gh already refuses a ghs_ token client-side; an endpoint-side rejection closes the direct-POST path too, and the design needs a different credential (a PAT declared in tools.secrets). This is the answer that reopens #12's design.";
+    }
+    if (status === 403) {
+      return "the credential is recognised but forbidden. gh's source says a token without write access gets 404 here, so a 403 points at policy \u2014 an app not authorised, or SSO \u2014 rather than at the repository role.";
+    }
+    if (status === 404) {
+      return "the endpoint did not route for this credential. gh's source says READ and TRIAGE roles get 404 \u2014 check the token's permission on the repository before concluding the endpoint is gone.";
+    }
+    if (status === 201) {
+      return "the endpoint ignored the empty name and stored an asset anyway. There is no documented deletion API for a user-attachment asset \u2014 record the URL and treat the file as permanent.";
+    }
+    return "unexpected: the measured expectation is 400. Record the status and body.";
+  }
+  if (mode === "upload") {
+    if (status === 201) {
+      return "stored: the URL in the result is the attachment reference for markdown. There is no documented API to delete a user-attachment asset, so this URL is permanent \u2014 weigh that before the next upload.";
+    }
+    if (status === 413) {
+      return "over the size ceiling: the upload was refused and nothing was stored.";
+    }
+    if (status === 404) {
+      return "the endpoint did not route for this credential: gh's source says a token without write access on the repository gets 404, not 403.";
+    }
+    if (status === 401) {
+      return "the credential was rejected by the endpoint \u2014 the direct-POST design needs a different credential, and #12's design reopens.";
+    }
+    if (status === 403) {
+      return "the credential is recognised but forbidden \u2014 policy rather than role, since a low role gets 404 here.";
+    }
+    if (status === 422) {
+      return "refused as unprocessable \u2014 the endpoint's own message is in the body. This is the shape a validation rule (a format the endpoint rejects) takes.";
+    }
+    return "unexpected: the measured expectation is 201 with an asset URL. Record the status and body.";
+  }
+  if (status === 413) {
+    return "the ceiling is enforced server-side: a file over 25MB cannot be attached whole. The design question \u2014 split the artifact, or regenerate a smaller one from the source \u2014 is settled toward pieces at or under the limit.";
+  }
+  if (status === 201) {
+    return "the over-limit file WAS stored: the documented 25MB ceiling did not fire for this content type. Record the URL \u2014 this contradicts the premise the design rests on, and #12's design reopens.";
+  }
+  if (status === 422 || status === 400) {
+    return `refused with ${status}: the ceiling may be reported as a validation message rather than 413. The body is the record; either way the file was not stored whole.`;
+  }
+  if (status === 404) {
+    return "the endpoint did not route for this credential: gh's source says a token without write access on the repository gets 404. The size question was not reached.";
+  }
+  if (status === 401) {
+    return "the credential was rejected before the size question was reached \u2014 the direct-POST design needs a different credential, and #12's design reopens.";
+  }
+  return "unexpected: the measured expectation is a refusal (413, or 422 carrying the ceiling as a validation message). Record the status and body.";
+}
+async function probe(a) {
+  const { token, kind } = credential();
+  const mode = a.mode;
+  const contentType = a.content_type ?? "application/octet-stream";
+  const needsRepo = mode !== "routing";
+  const repositoryId = a.repository_id ?? (needsRepo ? resolveRepositoryId(resolveRepo()) : undefined);
+  const name = mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined;
+  let body;
+  if (mode === "upload" || mode === "oversize") {
+    if (!a.file)
+      throw new Error(`mode ${mode} needs a file to send`);
+    ({ bytes: body } = readFileFor(mode, a.file));
+  }
+  const url = requestUrlFor(mode, { repositoryId, name, contentType });
+  const started = Date.now();
+  log(`probe ${mode} ${body ? `${body.length}B` : "(no body)"}`);
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `token ${token}`,
+      "Content-Type": contentType,
+      Accept: "application/vnd.github+json"
+    },
+    ...body ? { body } : {},
+    redirect: "manual",
+    signal: AbortSignal.timeout(REQUEST_ABORT_MS)
+  });
+  const responseText = await response.text();
+  const location = response.headers.get("location") ?? undefined;
+  log(`probe ${mode} -> ${response.status} in ${Date.now() - started}ms`);
+  const interpretation = interpret(mode, response.status, responseText, location);
+  return JSON.stringify({
+    mode,
+    sent: url,
+    content_length: body ? body.length : 0,
+    credential: `present, prefix ${kind}`,
+    status: response.status,
+    location: location ?? null,
+    body_excerpt: responseText.slice(0, BODY_EXCERPT_CHARS) || null,
+    interpretation
+  }, null, 2);
 }
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
-    name: "read",
-    description: "Read a range of lines from a file, numbered. Give offset and limit to read part of a large file; a result that stopped early names the offset to continue from, so a file of any size can be read in order without guessing. A file that holds an image comes back as an image, for an agent whose definition sets vision. Prefer this over cat, head, tail or sed through the shell, which return unnumbered text and cost a round trip.",
-    schema: READ_SCHEMA,
-    handler: readFile
-  }),
-  defineMcpTool({
-    name: "grep",
-    description: "Search file contents for an extended regular expression, returning file, line number and the matching line. path takes one place to look or several. Set glob to restrict which files are searched, exclude to skip directories such as node_modules, and context to include surrounding lines. Prefer this over grep through the shell. A search says where something is, not what it means: when it finds the place, read the file around it rather than searching again with a different pattern.",
-    schema: GREP_SCHEMA,
-    handler: grepFiles
-  }),
-  defineMcpTool({
-    name: "glob",
-    description: "Find files by a glob over their paths, such as src/**/*.ts, most recently changed first. Use this to find where something lives by name, and grep to find it by content.",
-    schema: GLOB_SCHEMA,
-    handler: globFiles
-  }),
-  defineMcpTool({
-    name: "edit",
-    description: "Replace an exact piece of text in a file. The text must appear exactly once unless replace_all is set, so include enough surrounding lines to make it unique. Text that is absent, or found more than once, is an error rather than a guess at what was meant.",
-    schema: EDIT_SCHEMA,
-    handler: editFile
-  }),
-  defineMcpTool({
-    name: "write",
-    description: "Write a whole file, creating parent directories. This replaces the file's contents; to change part of an existing file use edit, which cannot discard the rest by accident.",
-    schema: WRITE_SCHEMA,
-    handler: writeWholeFile
-  }),
-  defineMcpTool({
-    name: "list",
-    description: "List a directory's entries, directories marked with a trailing slash and files with their size. Listing says where things are, which is what a search says; it is not a substitute for reading one.",
-    schema: LIST_SCHEMA,
-    handler: listDirectory
+    name: "probe",
+    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted \u2014 without saving a file. " + "Mode `routing` omits repository_id; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
+    schema: PROBE_SCHEMA,
+    handler: probe
   })
 ]);
 async function main() {
-  await serveMcpServer({ name: "atomaton-files-mcp", version: "1.0.0", tools, dispatch, log });
+  await serveMcpServer({ name: "atomaton-attachments-mcp", version: "1.0.0", tools, dispatch, log });
 }
 if (import.meta.main)
   main();
+export {
+  REQUEST_ABORT_MS,
+  UPLOAD_LIMIT_BYTES,
+  interpret,
+  readFileFor,
+  requestUrlFor
+};

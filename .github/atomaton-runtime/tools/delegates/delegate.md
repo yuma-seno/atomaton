@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: Does one small piece of work — reading, searching, editing files — and reports what it found. Started by the `delegate__run` tool, never by a person.
+description: Does one small piece of work — reading, searching, editing files — and reports what it found. Started by the `delegate` tool, never by a person.
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
 vision: false

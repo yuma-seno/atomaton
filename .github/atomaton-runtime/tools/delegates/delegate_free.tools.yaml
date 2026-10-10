@@ -6,7 +6,7 @@
 #
 # ## Why the hooks are absent, which is the part worth explaining
 #
-# `shell_guard` routes `gh` and `curl` to `github__*` and `web__fetch`, and this
+# `shell_guard` routes `gh` and `curl` to the `github` and `web` tools, and this
 # sub-run has neither — so the guard would refuse a command and name a tool that is
 # not there. `files_guard` counts a search streak, which is a run-level concern a
 # ten-minute sub-run does not have. And the file-wide `workspace_guard` reports on a

@@ -595,20 +595,7 @@ function sessionFrom(path, raw) {
       if (!tool)
         continue;
       const result = results.get(call.id ?? "") ?? "";
-      let skill;
-      let act;
-      if (tool.endsWith("load_skill")) {
-        try {
-          skill = JSON.parse(call.function?.arguments ?? "{}").skill_name;
-        } catch {}
-      } else if (tool.endsWith("shell_execute")) {
-        try {
-          const command = JSON.parse(call.function?.arguments ?? "{}").command ?? "";
-          act = shellAct(command);
-        } catch {
-          act = "other";
-        }
-      }
+      const { skill, act } = classifyCall(tool, call.function?.arguments ?? "{}");
       calls.push({
         tool,
         agent,
@@ -635,6 +622,23 @@ function shellAct(command) {
   }
   const classified = classifyShellAct(command);
   return classified === "other" ? "other" : classified;
+}
+function classifyCall(tool, args) {
+  if (tool.endsWith("load_skill")) {
+    try {
+      return { skill: JSON.parse(args).skill_name };
+    } catch {
+      return {};
+    }
+  }
+  if (tool === "bash") {
+    try {
+      return { act: shellAct(JSON.parse(args).command ?? "") };
+    } catch {
+      return { act: "other" };
+    }
+  }
+  return {};
 }
 function tokensReported(repo) {
   const comments = ghPaginated("api", `repos/${repo}/issues/comments?per_page=100`);
@@ -754,6 +758,7 @@ export {
   REPORT_PATH,
   ROWS_PATH,
   agentOf,
+  classifyCall,
   ref,
   skillsUnder
 };
