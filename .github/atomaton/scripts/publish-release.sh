@@ -56,12 +56,6 @@ fi
 echo "$TAG has no release yet; building it."
 
 bun install --frozen-lockfile
-bun run synth
-
-if [ ! -d dist/.github ]; then
-  echo "::error::synth produced no dist/.github; nothing to package."
-  exit 1
-fi
 
 # Before the artifact is packaged and published, ask the servers it would ship
 # what they advertise, and hold that against the guards and the names its
@@ -69,19 +63,26 @@ fi
 # tools, two `unprefixed` servers claiming one name, and a server that will not
 # start are all invisible to a file check and all fatal to a run.
 #
-# HERE rather than on the pull request, and that is the whole decision: this
-# starts processes, and `tools.servers` lets a pull request name any `command`.
-# The deliverable check reads a pull request's `.github/atomaton/` as data and runs
-# nothing under `--root`; giving it this would make it execute the thing it is
-# judging. So the live half runs against `dist/` -- the artifact built by the lines
-# above and about to be published by the lines below.
+# This is the same script a pull request's own check runs, from the same file. It
+# starts processes, and the distinction that once kept it off a pull request was
+# between a check that starts what a pull request DECLARED -- `tools.servers` lets a
+# pull request name any `command`, and `checks.from_pull_request` is where such a
+# thing would run -- and one that starts the pull request's own tree and asks it for
+# its tools. Only the first is executing the change under review in the job that
+# decides whether it may merge, and no repository secret reaches that job either
+# way.
 #
 # Below the early exit above, so it runs when a release is being CUT rather than on
 # every tag. A tag that is already released rebuilds nothing and checks nothing,
 # which is what makes a re-run cheap.
 #
-# See the script's header for what it can and cannot see.
+# It builds `dist/` itself, so `bun run synth` is not repeated here.
 bash .github/atomaton/scripts/check-live-tools.sh
+
+if [ ! -d dist/.github ]; then
+  echo "::error::no dist/.github after the live tool check; nothing to package."
+  exit 1
+fi
 
 # `zip` from inside dist/ so the archive holds `.github/...` and not
 # `dist/.github/...`, and an adopter extracts it at their repository root.

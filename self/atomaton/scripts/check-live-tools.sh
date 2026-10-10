@@ -23,28 +23,36 @@
 #
 # ## Why it runs here, and not on the pull request
 #
-# `validate_deliverable.ts` reads a pull request's `.github/atomaton/` as DATA and
-# runs nothing under `--root`, and that is not a preference to be traded away:
-# `tools.servers` lets a project -- or an agent -- name any `command`, so a check
-# that started a pull request's declared servers would execute the pull request
-# inside the job that decides whether it may merge. The live half therefore cannot
-# go there. It goes to the other end of the same pipeline instead: the deployment
-# job, on the default branch, after the artifact is built and before it is
-# published.
+# It does both now, and the history is the reason. `validate_deliverable.ts` reads a
+# pull request's `.github/atomaton/` as DATA and runs nothing under `--root`, and that
+# is not a preference to be traded away: `tools.servers` lets a project -- or an
+# agent -- name any `command`, so a check that started a pull request's declared
+# servers would execute the pull request inside the job that decides whether it may
+# merge. So the live half went to the other end of the pipeline: the deployment job,
+# on the default branch, after the artifact is built and before it is published.
 #
-# What that costs is that a guard which has stopped guarding is found after the
-# merge that broke it rather than as a red check on its pull request. What it buys
-# is that no pull request decides what runs -- the half that cannot be given up.
+# What that cost was the whole of it. A defect this script catches -- two
+# `unprefixed` servers offering one tool name -- was found after the merge that
+# caused it rather than as a red check on its pull request, and the release that
+# would have shipped it could not be published. The distinction the original
+# argument missed: `checks.from_pull_request` starts nothing the pull request
+# DECLARED, because the commands are the repository's own and no repository secret
+# reaches that job. Starting the pull request's own tree is what every job in that
+# workflow already does -- `tests/e2e` has been spawning `dist/`'s servers there
+# since it was written.
 #
-# ## Which tree, and who declared the servers
+# So it runs in both places, from this one file. The pull-request job calls it with
+# `dist/` built from the pull request's tree; the deploy job calls it with `dist/`
+# built from the default branch. Neither names a server of its own.
 #
-# `dist/` -- the artifact this run is about to publish -- and never `.github/`.
+# ## Which tree, and who builds it
+#
+# `dist/` -- the artifact a run is about to be handed, and never `.github/`.
 # `.github/` in this repository is the LAST RELEASE, put there by the self-deploy
-# workflow, so it is a copy of something that already passed this check. `dist/`
-# is built from the default branch by the step above, and is what an adopter
-# receives. So every server started below is declared by the artifact itself: the
-# shipped `atomaton-runtime/tools/defaults.yaml`, plus `tools.servers` in the
-# shipped `atomaton/config.yaml`. No pull request's tree is read anywhere.
+# workflow, so a check that read it would be checking something that already
+# passed. This script BUILDS `dist/` from the checkout it is run in -- see the
+# `bun run synth` below -- so "the tree being checked" is unambiguous: it is the
+# one this process is standing in.
 #
 # ## What it does not install, and what that leaves unchecked
 #
@@ -61,11 +69,20 @@
 # ## What it cannot see
 #
 # A duplicate tool name between two servers no single definition names. Each
-# definition is validated against the servers IT names, and `atoma` refuses two
-# `unprefixed` servers offering one name -- which is exactly why `files` and
-# `files_readonly`, the same program both offering `read`, are never named by one
-# agent. A definition naming both is itself the defect, and `atoma validate`
-# rejects it. This is not a gap this script can close.
+# definition is validated against the servers IT names, so a pair that no agent
+# would ever be handed both of is not asked about.
+#
+# This used to say that the check was therefore unclosable, and that was wrong. The
+# defect that took the release down was exactly this shape -- `delegate` and
+# `delegate_free`, both `unprefixed`, both offering `delegate`, named TOGETHER by
+# `atomaton.md` and `engineer.md` -- and `atoma validate` reports it as a fatal
+# `duplicate_tool` finding. What hid it was not the check's reach but its INPUT: see
+# "Why it runs here" above, where the pull-request job was reading `.github/`.
+#
+# What a definition naming both does NOT cover is a pair no agent is given together:
+# `files` and `files_readonly` are the same program and both offer `read`, and no
+# definition names both. That is by design, and `atoma validate` would reject a
+# definition that did.
 #
 # Usage:
 #   bash .github/atomaton/scripts/check-live-tools.sh
@@ -117,6 +134,22 @@ if [ -z "$BIN" ]; then
   chmod +x "$BIN"
 fi
 echo "Checking with $("$BIN" --version 2>&1 | head -1) (pin ${VERSION})"
+
+# The deliverable, built here rather than expected from the caller.
+#
+# This script's whole subject is `dist/`, so building it is this script's job: a
+# caller that has to remember `bun run synth` first is a caller that can forget, and
+# a stale `dist/` reads exactly like a correct one. That is not hypothetical -- the
+# pull-request job ran a check against the LAST RELEASE for as long as it existed,
+# found nothing, and passed, because nothing had built `dist/` and the check fell
+# back to `.github/`. Building it here means there is no such thing as a `dist/`
+# this script did not just make.
+#
+# `synth` is a pure function of `src/`, which is why this is safe to run twice: the
+# deploy job's step before this one builds the same tree, and the second build
+# produces the same bytes.
+echo "Building the deliverable ..."
+bun run synth
 
 MACHINERY="$REPO_ROOT/dist"
 RUNTIME_TOOLS="$MACHINERY/.github/atomaton-runtime/tools"
