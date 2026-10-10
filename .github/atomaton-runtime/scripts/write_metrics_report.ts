@@ -225,7 +225,18 @@ function metricsOf(sessions, declaredServers, declaredSkills, tokens) {
       }
     }
   }
-  const usedServers = new Set(calls.map((c) => c.tool.split("__")[0] ?? ""));
+  const usedServers = new Set;
+  let sawServerCalls = false;
+  for (const session of sessions) {
+    for (const run of session.runs) {
+      if (!run.server_calls)
+        continue;
+      sawServerCalls = true;
+      for (const server of Object.keys(run.server_calls))
+        usedServers.add(server);
+    }
+  }
+  const serverUsageKnown = sawServerCalls;
   const loaded = new Set(calls.flatMap((c) => c.skill ? [c.skill] : []));
   return {
     sessions: sessions.length,
@@ -234,8 +245,7 @@ function metricsOf(sessions, declaredServers, declaredSkills, tokens) {
     byTool: [...byTool.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     bySkill: tally(calls.flatMap((c) => c.skill ? [c.skill] : [])),
     byAct: tally(calls.flatMap((c) => c.act ? [c.act] : [])),
-    neverUsedServers: declaredServers?.filter((s) => !s.unprefixed && !usedServers.has(s.name)).map((s) => s.name).sort(),
-    unrecognisableServers: declaredServers?.filter((s) => s.unprefixed).map((s) => s.name).sort(),
+    neverUsedServers: declaredServers && serverUsageKnown ? declaredServers.filter((s) => !usedServers.has(s.name)).map((s) => s.name).sort() : undefined,
     neverLoaded: declaredSkills?.filter((s) => !loaded.has(s)).sort(),
     refusals: calls.filter((c) => c.refused).length,
     completions: completionsOf(sessions),
@@ -507,10 +517,6 @@ function renderReport(all, forWindow, now) {
 
 ` + all.neverUsedServers.map((t) => `- \`${t}\``).join(`
 `));
-  if (all.unrecognisableServers?.length) {
-    out.push("");
-    out.push("Not checked, because a call does not name them: " + all.unrecognisableServers.map((s) => `\`${s}\``).join(", ") + ". Their tools are declared without a server prefix, so they arrive under their " + "own names and nothing in a call says which server answered. Unused and heavily " + "used look identical from here.");
-  }
   out.push("");
   out.push(all.neverLoaded === undefined ? "The declared skills could not be read, so this cannot say which are unloaded." : all.neverLoaded.length === 0 ? "Every skill has been loaded at least once." : `Skills never loaded:
 
@@ -670,10 +676,7 @@ function declared() {
   let tools;
   try {
     const config = Bun.YAML.parse(readFileSync(machineryPath(CONFIG_FILE), "utf8"));
-    tools = Object.entries(config.tools?.servers ?? {}).map(([name, server]) => ({
-      name,
-      unprefixed: server?.unprefixed === true
-    }));
+    tools = Object.keys(config.tools?.servers ?? {}).map((name) => ({ name }));
   } catch {
     log("could not read the tool servers from config.yaml; the report will not name unused tools");
   }
