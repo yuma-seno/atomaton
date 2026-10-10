@@ -23,7 +23,7 @@ import type { ContentBlock, ImageBlock } from "../../domain/work/session.ts";
 /**
  * Largest image to inline, in bytes of base64.
  *
- * Exported because `web__fetch` applies the same ceiling and had its own copy of the
+ * Exported because `fetch` applies the same ceiling and had its own copy of the
  * number. Diverge and one path inlines an image the other refuses, for a limit that exists
  * to keep one request under a provider's cap.
  */

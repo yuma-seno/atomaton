@@ -55,6 +55,17 @@ import { TypedOutputsStep } from "./base.ts";
  * loads a reranker measured at 63.9s, so under a binary without this the first search
  * of every run fails. Nothing says so; the declaration is simply not in effect.
  *
+ * **The names `tool_allowlist` and `tool_denylist` are written in.** A list lives
+ * inside one server's entry, so it is written in the names that server itself uses —
+ * `read`, `grep` — and the prefix `atoma` assembles afterwards is not part of what a
+ * reader there could know. An older binary compares the list against the prefixed
+ * name instead, so `read` matches `files_readonly__read` and every pattern matches
+ * nothing. This is the raise that cannot be deferred by a run being quiet: a
+ * non-empty `tool_allowlist` that matches nothing refuses EVERY tool on that server,
+ * so `files_readonly`, whose whole purpose is reading, refuses all 64 of its calls.
+ * The pin and `defaults.yaml` therefore move together, and the older of the two is
+ * the one that breaks a run.
+ *
  * **`agent-definitions/*.md`.** The provider names in them are this repository's, and
  * a dialect's name is a row in the core's provider table. A name the installed binary
  * does not have resolves to nothing.
@@ -113,10 +124,10 @@ import { TypedOutputsStep } from "./base.ts";
  * measures the binary, and a repository whose probes and whose runs are on different
  * builds is one where a green probe means less than it looks.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.1.2";
+export const ATOMA_DEFAULT_VERSION = "v0.3.0";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.1.2). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.3.0). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead

@@ -86,7 +86,7 @@ export const TOOL_RESULT_CAP = 4_000;
  * Far higher than the result cap because the arguments are what the agent ASKED
  * for, and a truncated request reads as a different request. Measured, they are
  * small: `p50 114  p90 362  p99 3,828`. Exactly one call in 5,666 exceeded 20,000
- * characters — a `filesystem__write_file`.
+ * characters — a `files__write`.
  *
  * So this is not a compression measure. It is a bound, so that one pathological
  * call cannot defeat everything else here.

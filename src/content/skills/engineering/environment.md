@@ -52,7 +52,7 @@ You added a dependency to a manifest and want it installed by the project's own
 command. Or you deleted `node_modules` and want it back. Or an install left
 something half-done.
 
-**`atomaton_env__reload_environment`.** It re-runs `environment.setup_commands` as a
+**`reload_environment`.** It re-runs `environment.setup_commands` as a
 privileged step against your current work tree, then starts a new run.
 
 The split is what makes it safe and what makes it useful: **the commands come from

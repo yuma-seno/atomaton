@@ -7,7 +7,7 @@ description: Load when the answer is not in this repository — fetching a page 
 
 ## A page whose address you already have
 
-`web__fetch` retrieves it. HTML comes back as Markdown, so the result is prose
+`fetch` retrieves it. HTML comes back as Markdown, so the result is prose
 rather than markup; pass `raw: true` when the markup itself is what you need. A
 URL that resolves to an image comes back as an image, so a screenshot or a
 diagram can be looked at rather than described.
@@ -20,7 +20,7 @@ know the address. Reach for this first — it is exact, and it costs one call.
 When you cannot name the page, fetch a search engine's results:
 
 ```text
-web__fetch(
+fetch(
   url: "https://lite.duckduckgo.com/lite/",
   method: "POST",
   body: "q=<your query, url-encoded>"
@@ -38,10 +38,10 @@ or three terms for the first, a whole question for the second.
 ## Judgement
 
 Search the repository's own history before searching the web.
-`search__search_issues` answers "why is it like this" better than any external
+`search_issues` answers "why is it like this" better than any external
 page, because the reason was written down here at the time it was decided — and
 usually in a comment, which is why that tool reports which comment it matched.
-Read that comment with `github__get_issue_comments` before reaching outward.
+Read that comment with `get_issue_comments` before reaching outward.
 
 Say where a claim came from. Something read off a web page is worth less than
 something read out of the code, and whoever reads your report needs to know

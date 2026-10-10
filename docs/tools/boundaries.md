@@ -70,7 +70,7 @@ therefore hold no credential, exactly as they do in the outer run. See
 ### Not protected, deliberately
 
 **`GH_TOKEN`, from the shell tool.** It expires when the job ends, the agent can
-already use it through the `github__*` tools, and `actions/checkout` leaves the
+already use it through the github server's tools, and `actions/checkout` leaves the
 same value in `.git/config` inside the work tree — so a boundary around the
 server's environment would not have covered it anyway.
 

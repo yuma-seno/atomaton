@@ -104,7 +104,7 @@ export const EXACT_TOOL_SETS: readonly ExactToolSet[] = [
     // `mcp/atomaton.ts` also offers `launch_sub_agent` and `request_close_issue`.
     // Withholding them is what keeps an engineer from closing the issue it is
     // working on.
-    tools: ["atomaton_env__reload_environment"],
+    tools: ["reload_environment"],
     promise:
       "atomaton_env is the atomaton server with its other two tools withheld, so an engineer can rebuild " +
       "its environment and cannot close its own issue or dispatch another agent.",

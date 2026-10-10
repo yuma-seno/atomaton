@@ -9,7 +9,7 @@
  * somewhere else: read four files and say which one defines a symbol, run one
  * command and report its output, search a tree for a call site. Doing it in the
  * agent's own session means the reading, the searching and the dead ends all stay
- * in that session and are resent on every later inference. `delegate__run` does it
+ * in that session and are resent on every later inference. `delegate` does it
  * in a separate run whose transcript is thrown away, and hands back one paragraph.
  *
  * ## What it is not
@@ -271,14 +271,24 @@ const DELEGATE_RUN_SCHEMA = z.object({
     .describe(
       "What to do, as an instruction to the delegate. One small piece of work: read and report, " +
         "search and report, make one change, run one command. It cannot reach GitHub, cannot open " +
-        "an issue or a pull request, and cannot delegate further.",
+        "an issue or a pull request, and cannot delegate further. " +
+        "It CAN look around on its own, so a task that is a question rather than a file is " +
+        "delegatable too — and that is often the better call, because the searching is what fills " +
+        "this session with transcripts. Write four things: WHAT you want to know, in the words of " +
+        "the answer you are hoping for; WHERE it may be (a directory, a file, the whole tree) if " +
+        "you know, and say so when you do not; WHAT counts as an answer, so a partial one is not " +
+        "mistaken for a complete one; and WHEN to stop — for a search, say outright that finding " +
+        "nothing is a useful report, because a delegate that has not found something will " +
+        "otherwise keep looking until its ten minutes are gone.",
     ),
   context: z
     .string()
     .optional()
     .describe(
-      "Background the delegate needs and cannot find for itself: which files to look at, what is " +
-        "already known, what has been ruled out. It starts with no memory of this conversation.",
+      "What the delegate should start from: files and line numbers you already know are " +
+        "relevant, what is already known, what has been ruled out, and anything about the " +
+        "repository it would otherwise have to rediscover. It starts with no memory of this " +
+        "conversation, so anything you do not write here it has to find or do without.",
     ),
 });
 
@@ -387,7 +397,7 @@ async function handleDelegateRun(args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Pro
     // It is NOT selected out of `tools/defaults.yaml`. That file is the servers
     // every agent run starts with, hooks and all, and a sub-run that inherited
     // them would inherit the next routing rule added there — `shell_guard` sends
-    // `gh` to `github__*`, which a delegate does not have, so the first such rule
+    // `gh` to `github`, which a delegate does not have, so the first such rule
     // would break every delegate. The sub-run's surface is its own file, and the
     // core's output cap is added by `readToolsFile` from the module that owns it.
     writeFileSync(toolsFile, Bun.YAML.stringify(SUB_RUN_TOOLS, null, 2));
@@ -506,13 +516,18 @@ async function handleDelegateRun(args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Pro
 
 const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
-    name: "run",
+    name: "delegate",
     description:
       "Do one small piece of work in a separate run and return what it found. Use it for reading, " +
       "searching and changing files, and for running one command to answer a question — the work " +
       "whose transcript you do not want in this session. " +
-      "The delegate starts with NO memory of this conversation: put everything it needs in `task` " +
-      "and `context`, including which files to look at. " +
+      "The investigation you do not know how to start is the case it is most for: it does have " +
+      "its own `grep`, `glob` and `read`, so \"find where X is defined and everywhere it is " +
+      "called\" is a task you can hand over rather than a search you have to do first. Say what " +
+      "an answer looks like and when to stop looking, and read `task` before calling. " +
+      "It starts with NO memory of this conversation: put everything it needs in `task` and " +
+      "`context`. Name the files when you already know them; when you do not, say so and give " +
+      "it the ground to cover. " +
       "It CANNOT reach GitHub — no issues, no pull requests, no comments — cannot dispatch anything, " +
       "and cannot delegate further. " +
       (CAN_WRITE
@@ -520,7 +535,7 @@ const { tools, dispatch } = buildMcpTools([
         : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " +
           "comes back as a description rather than as an edit. ") +
       "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " +
-      "resumes it. If the task is larger than that, do it here instead.",
+      "resumes it. If the task is larger than that, or needs a decision, do it here instead.",
     schema: DELEGATE_RUN_SCHEMA,
     handler: handleDelegateRun,
   }),

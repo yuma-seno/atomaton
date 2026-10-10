@@ -154,10 +154,11 @@ export const TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
  * Packages the SHIPPED tool servers need, installed before a run.
  *
  * Here rather than in `.github/atomaton/` because both entries exist for a shipped
- * server -- `@modelcontextprotocol/server-filesystem` is what `filesystem` runs, and
- * `@huggingface/transformers` is what `search` reranks with. Neither is a project's
- * decision, and a project that adds a server of its own declares what it needs in
- * `tools.packages`, beside the server itself.
+ * server -- `@huggingface/transformers` is what `search` reranks with, and it is the
+ * one entry left: the npm filesystem server this once also carried is gone with the
+ * `filesystem` server it ran. A package that is not a project's decision belongs here;
+ * a project that adds a server of its own declares what it needs in `tools.packages`,
+ * beside the server itself.
  *
  * The install step hashes BOTH files for its cache key. Hashing one would let a
  * project add a package, hit a cache keyed on the other, and get a runner without

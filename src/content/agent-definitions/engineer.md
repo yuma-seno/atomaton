@@ -51,10 +51,10 @@ If it is not engineer-ready, do not edit. Return `/atomaton` on the first line, 
 3. Run focused validation, then the repository's broader required checks.
 4. Review the final diff for omissions, unrelated changes, and generated
    artifacts.
-5. Call `github__commit_and_push(message=...)`. Work that is written but not
+5. Call `commit_and_push(message=...)`. Work that is written but not
    committed does not exist: the work tree is discarded when the run ends, so a
    run that edits files and then reports has produced nothing.
-6. Call `github__create_pr(title=..., body=..., reviewer="reviewer")`, with the
+6. Call `create_pr(title=..., body=..., reviewer="reviewer")`, with the
    behaviour and the verification in the body. Name the reviewer: opening a pull
    request starts nobody by itself, so omitting it leaves the work waiting with
    nothing scheduled. Then read `validation_dispatched` in the result — when it is
@@ -70,11 +70,11 @@ The three outcomes every role shares are in `Ending a run` above, and they apply
 
 | Situation | Outcome |
 | --- | --- |
-| The work is implemented and validated | `github__commit_and_push`, then `github__create_pr` |
+| The work is implemented and validated | `commit_and_push`, then `create_pr` |
 | The deliverable is not code — an explanation, an answer, a report | write it as your report, then end with `/atomaton` so the agent that started you is told the work is done |
 | The issue is not engineer-ready | begin the response with `/atomaton`, then name the unresolved concerns |
 | Validation fails for a reason in the issue's own premise | report the contradiction and what you tried, and end — do not implement around it |
-| A pull request you opened has merged and what merged satisfies the issue | `github__close_issue` |
+| A pull request you opened has merged and what merged satisfies the issue | `close_issue` |
 | A pull request you opened has merged and the issue is not satisfied | name the criterion that is still unmet, implement the remainder, and deliver it as the next pull request |
 
 ## Where each thing you write goes
@@ -101,10 +101,10 @@ the only place it can live.
 
 ## Tool Constraints
 
-- `github__commit_and_push` puts the work on the right branch, creating one on the first commit if this run started from the base. Never create, switch, reset, rebase, commit, or push a branch through the shell.
-- If a push is rejected as non-fast-forward, call `github__sync_branch`. Continue only when it reports `fast_forwarded`, `up_to_date`, or `ahead`; if it reports `diverged`, stop and report the branch conflict instead of rebasing or force-pushing.
+- `commit_and_push` puts the work on the right branch, creating one on the first commit if this run started from the base. Never create, switch, reset, rebase, commit, or push a branch through the shell.
+- If a push is rejected as non-fast-forward, call `sync_branch`. Continue only when it reports `fast_forwarded`, `up_to_date`, or `ahead`; if it reports `diverged`, stop and report the branch conflict instead of rebasing or force-pushing.
 - Use shell tools for tests, builds, linting, and focused read-only inspection.
-- Searching finds the file to read; it does not answer the question. Open the most promising file the searches pointed at, and read it.
+- Searching finds the file to read; it does not answer the question. `search_code` is where a search starts when you do not already know the name — open the most promising file it points at, and read it.
 - Never hand-edit or commit a file that a build produces. Change the source the generator reads. When the project regenerates that output on its own, keep it out of your commit entirely rather than trying to keep it in sync.
 
 ## Re-entry
@@ -113,7 +113,7 @@ the only place it can live.
   concrete findings, then validate, commit, and update the same pull request.
 - If the pull request merged, make no further code changes to what merged. Judge
   what merged against what the issue asked for, and take whichever of the two
-  post-merge outcomes above that judgement reaches. Whether `github__close_issue`
+  post-merge outcomes above that judgement reaches. Whether `close_issue`
   closes the issue itself or asks the person who opened it to close it is the
   tool's own decision: it succeeds either way, and there is nothing there to work
   around.

@@ -12,20 +12,20 @@
  * The caps were four numbers in three units, none of them related to the thing
  * that decides whether a request succeeds at all — the model's context window:
  *
- *   shell_execute          1,000,000 BYTES   (~250k tokens)
- *   web_fetch                 60,000 chars   (~15k tokens)
- *   github__get_pr_diff       50,000 chars   (~12.5k tokens)
- *   github__search_code       50,000 chars   (~12.5k tokens)
+ *   bash                   1,000,000 BYTES   (~250k tokens)
+ *   fetch                     60,000 chars   (~15k tokens)
+ *   get_pr_diff       50,000 chars   (~12.5k tokens)
+ *   search_remote_code       50,000 chars   (~12.5k tokens)
  *   everything else           no cap at all
  *
- * `shell_execute`'s was the outlier by twenty times, and on its own it exceeds a
+ * `bash`'s was the outlier by twenty times, and on its own it exceeds a
  * 200k window — measured: the largest single tool result in this repository's
  * stored sessions is ~206k tokens, and one session reached ~672k of which the
  * conversation was 9k.
  *
  * ## Truncation is the second-best answer
  *
- * A cap loses information. A PROJECTION does not: `github__get_check_runs`
+ * A cap loses information. A PROJECTION does not: `get_check_runs`
  * returned 24,954 bytes of REST for eight check runs, of which ~18k was the same
  * GitHub App description repeated once per run, and the four fields an agent can
  * act on came to 1,363 bytes. Eighteen times smaller, nothing lost.
@@ -69,7 +69,7 @@ export const TOOL_OUTPUT_BUDGET = 50_000;
  * arrives, which for a server returning JSON is that content escaped and inside an
  * envelope.
  *
- * Measured: `shell_execute` on a `git log -p` long enough to fill both streams
+ * Measured: `bash` on a `git log -p` long enough to fill both streams
  * spends exactly 50,000 characters of budget and returns 51,412 — the envelope and
  * the escaped newlines are 1,412 of it. Across the 39 files in this repository over
  * 20KB the worst was 53,879. So a backstop AT 50,000 cuts results this repository
@@ -121,10 +121,10 @@ export interface CappedText {
  * The marker is inside the returned text rather than only in a sibling field,
  * because the sibling field is what a caller forgets to read. A truncated result
  * that looks complete is how an agent concludes something is absent when it was
- * merely not shown — the failure `github__get_issue_comments`' `showing` header
+ * merely not shown — the failure `get_issue_comments`' `showing` header
  * exists to prevent, generalised.
  *
- * `keep: "tail"` is not a preference. `shell_execute` kept the HEAD of a
+ * `keep: "tail"` is not a preference. `bash` kept the HEAD of a
  * million-byte output, so a build log that overran lost the compiler error and
  * kept the banner. The end of a log is the part that was worth returning.
  */

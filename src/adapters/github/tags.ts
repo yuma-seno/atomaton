@@ -136,7 +136,7 @@ export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting"
 // carries the measurement and the argument.
 
 /**
- * PR -> the issue it was created to deliver (set via `github__create_pr`).
+ * PR -> the issue it was created to deliver (set via `create_pr`).
  *
  * ## Why this one stays when the issue-to-issue tag went
  *

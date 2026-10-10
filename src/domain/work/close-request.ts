@@ -8,16 +8,16 @@
  * anything. A person's issue is not closed by an agent — that part was never in
  * question. What they did with the answer was:
  *
- * - `atomaton__request_close_issue` posted its comment and returned a normal
+ * - `request_close_issue` posted its comment and returned a normal
  *   result explaining that it had NOT closed the issue.
- * - `github__close_issue` returned a tool ERROR — "Refusing to close issue #N:
+ * - `close_issue` returned a tool ERROR — "Refusing to close issue #N:
  *   opened by a human, not a bot" — and posted nothing at all.
  *
  * Measured across the runs held at the time: 30 refusals, 22 of them the last
  * act of the run. The agent, handed a refusal at the moment it had decided it
  * was finished, wrote the refusal into its report — so the person reading the
  * thread got a paragraph of tool mechanics they had not asked about, and in the
- * `github__close_issue` half got no request to close anything either, because an
+ * `close_issue` half got no request to close anything either, because an
  * error posts no comment. #933 is one of those reports.
  *
  * ## The rule

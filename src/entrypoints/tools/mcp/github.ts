@@ -184,7 +184,7 @@ const ISSUE_COMMENTS_SCHEMA = z.object({
   ).optional(),
   from: positiveInt(
     "First comment to return, counting from 1 in the order they were posted. " +
-      "This is the number `search__search_issues` reports as `comment`, so a match can be read directly.",
+      "This is the number `search_issues` reports as `comment`, so a match can be read directly.",
   ).optional(),
   to: positiveInt("Last comment to return, inclusive. Defaults to `from`, so passing only `from` reads one comment.").optional(),
 });
@@ -360,8 +360,8 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
     mcpFail(
       "create_issue is for an issue run that is decomposing work into sub-issues. " +
         "This run is on a pull request, which reviews or fixes one pull request rather than " +
-        "decomposing it. Use github__create_pr to hand this pull request to a reviewer, or " +
-        "atomaton__request_close_issue to conclude it.",
+        "decomposing it. Use create_pr to hand this pull request to a reviewer, or " +
+        "request_close_issue to conclude it.",
     );
   }
 
@@ -372,7 +372,7 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   refuseCommandLines(
     body,
     "issue body",
-    "Use `atomaton__launch_sub_agent` to start an agent on a sub-issue.",
+    "Use `launch_sub_agent` to start an agent on a sub-issue.",
   );
   body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
   if (sub) {
@@ -581,7 +581,7 @@ function getIssueComments(a: z.infer<typeof ISSUE_COMMENTS_SCHEMA>): string {
  * comment, nobody was ever asked to close anything. The issue just stayed open
  * with a merged pull request against it.
  *
- * `atomaton__request_close_issue` had already settled the shape for the same
+ * `request_close_issue` had already settled the shape for the same
  * question and this tool disagreed with it. It is the canonical one: the tool
  * decides, it does not fail, and it leaves the request where a person will read
  * it.
@@ -788,8 +788,8 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     mcpFail(
       "create_pr opens the pull request for an ISSUE's branch. This run is on a pull " +
         "request, which is a leaf of the tree -- it reviews or fixes one pull request rather " +
-        "than opening another. Use github__commit_and_push to push a fix onto this pull " +
-        "request's branch, or atomaton__request_close_issue to conclude it.",
+        "than opening another. Use commit_and_push to push a fix onto this pull " +
+        "request's branch, or request_close_issue to conclude it.",
     );
   }
 
@@ -812,7 +812,7 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   const worktree = gitRun("status", "--porcelain");
   if (worktree.code) mcpFail(worktree.stderr || worktree.stdout);
   if (worktree.stdout.trim()) {
-    mcpFail("Cannot create a PR with uncommitted changes. Call github__commit_and_push first.");
+    mcpFail("Cannot create a PR with uncommitted changes. Call commit_and_push first.");
   }
   const head = gitRun("rev-parse", "HEAD");
   if (head.code) mcpFail(`Cannot resolve local HEAD: ${head.stderr || head.stdout}`);
@@ -820,12 +820,12 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   if (remote.code) mcpFail(`Cannot inspect remote branch '${branch}': ${remote.stderr || remote.stdout}`);
   const remoteHead = remote.stdout.trim().split(/\s+/, 1)[0] ?? "";
   if (!remoteHead) {
-    mcpFail(`Remote branch '${branch}' does not exist. Call github__commit_and_push before creating the PR.`);
+    mcpFail(`Remote branch '${branch}' does not exist. Call commit_and_push before creating the PR.`);
   }
   if (remoteHead !== head.stdout.trim()) {
     mcpFail(
-      `Remote branch '${branch}' is not at local HEAD. Call github__sync_branch and inspect its status; ` +
-      `if it reports 'ahead', call github__commit_and_push before creating the PR.`,
+      `Remote branch '${branch}' is not at local HEAD. Call sync_branch and inspect its status; ` +
+      `if it reports 'ahead', call commit_and_push before creating the PR.`,
     );
   }
 
@@ -939,7 +939,7 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
         : {
             note:
               "The pull request exists, but CI could not be started, so no required check will be written " +
-              "and no agent is scheduled to continue. Retry with github__commit_and_push, which dispatches " +
+              "and no agent is scheduled to continue. Retry with commit_and_push, which dispatches " +
               "validation again, or report this so a person can start it.",
           }),
     }),
@@ -1185,7 +1185,7 @@ function searchCode(a: z.infer<typeof SEARCH_CODE_SCHEMA>): string {
     if (waited + delay > SEARCH_WAIT_BUDGET_MS) {
       mcpFail(
         `GitHub's code search quota is still exhausted after waiting ${Math.round(waited / 1000)}s, ` +
-          "so this search did not run. For code in this repository use search__search_code, " +
+          "so this search did not run. For code in this repository use search_code, " +
           "which reads the checkout and has no quota. This tool is the one to use for a " +
           "repository that is not checked out, and it will be available again shortly.",
       );
@@ -1464,7 +1464,7 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
       closed_issue: null,
       parent_issue: parentIssue,
       parent_outcome: "close-failed",
-      note: `The pull request merged, but issue #${parentIssue} could not be closed: ${why}. It is still open and nothing will retry. Close it with github__close_issue, or report it.`,
+      note: `The pull request merged, but issue #${parentIssue} could not be closed: ${why}. It is still open and nothing will retry. Close it with close_issue, or report it.`,
     });
   }
 }
@@ -1484,8 +1484,8 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
   defineMcpTool({ name: "list_prs", description: "List pull request summaries in the current repository, optionally filtered by state. Use this to discover PRs; use get_pr for full metadata. Returns a JSON array and does not mutate GitHub.", schema: LIST_PRS_SCHEMA, handler: listPrs }),
-  defineMcpTool({ name: "search_code", description: "Search code through GitHub within the current repository. Use this for remote repository text or symbol discovery when local filesystem search is unavailable; do not use it for uncommitted changes. Returns GitHub CLI search text; a long result is truncated and says so where the cut falls.", schema: SEARCH_CODE_SCHEMA, handler: searchCode }),
-  defineMcpTool({ name: "get_branch", description: "Retrieve GitHub's branch metadata for an exact branch name, or report that no such branch exists. Use this to inspect remote branch identity and protection information, not local worktree state. A branch that is not there is an answer, not an error: it returns `{branch, exists: false}`, so this is the tool for checking before you create one. When the branch does exist it returns `branch`, `exists`, `sha` and `protected` -- the head commit's SHA, not the commit itself; use get_pr_diff or shell__shell_execute git log for commit content. Does not mutate GitHub.", schema: GET_BRANCH_SCHEMA, handler: getBranch }),
+  defineMcpTool({ name: "search_remote_code", description: "Search code through GitHub within the current repository. Use this for remote repository text or symbol discovery when local filesystem search is unavailable; do not use it for uncommitted changes. Returns GitHub CLI search text; a long result is truncated and says so where the cut falls.", schema: SEARCH_CODE_SCHEMA, handler: searchCode }),
+  defineMcpTool({ name: "get_branch", description: "Retrieve GitHub's branch metadata for an exact branch name, or report that no such branch exists. Use this to inspect remote branch identity and protection information, not local worktree state. A branch that is not there is an answer, not an error: it returns `{branch, exists: false}`, so this is the tool for checking before you create one. When the branch does exist it returns `branch`, `exists`, `sha` and `protected` -- the head commit's SHA, not the commit itself; use get_pr_diff or bash git log for commit content. Does not mutate GitHub.", schema: GET_BRANCH_SCHEMA, handler: getBranch }),
   defineMcpTool({
     name: "sync_branch",
     description: "Synchronize the checked-out branch with its remote counterpart and report ahead/behind status. Use this after a non-fast-forward push failure or before retrying branch publication; it fast-forwards only when safe. It never rebases or force-pushes, and reports diverged branches for explicit resolution.",
@@ -1496,7 +1496,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
     name: "check_merge_readiness",
     description:
-      "Report whether a pull request can be merged right now, and every reason it cannot. Read the `blockers` array rather than assuming a fixed set: kinds include failing, pending and absent required checks, merge conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. Call this before github__merge_pr, and to explain a refused merge. When the only thing missing is a CI run on the head commit, this dispatches CI and says so — re-check afterwards rather than merging blind. Read-only apart from that dispatch.",
+      "Report whether a pull request can be merged right now, and every reason it cannot. Read the `blockers` array rather than assuming a fixed set: kinds include failing, pending and absent required checks, merge conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. Call this before merge_pr, and to explain a refused merge. When the only thing missing is a CI run on the head commit, this dispatches CI and says so — re-check afterwards rather than merging blind. Read-only apart from that dispatch.",
     schema: PR_CONTEXT_NUMBER_ARG_SCHEMA,
     handler: checkMergeReadiness,
   }),
@@ -1510,7 +1510,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "merge_pr",
-    description: "Merge a pull request, then continue Atomaton's issue handoff. Refuses and returns merged:false with a `blockers` list whenever the PR is not mergeable. The list is open-ended, so read it rather than assuming a fixed set: it covers failing, pending and absent required checks, conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. A refusal is a decision or a real defect, never a condition to retry around — read `blockers`, and use github__check_merge_readiness for detail. On success this may merge the PR, close its linked issue, and dispatch follow-up work.",
+    description: "Merge a pull request, then continue Atomaton's issue handoff. Refuses and returns merged:false with a `blockers` list whenever the PR is not mergeable. The list is open-ended, so read it rather than assuming a fixed set: it covers failing, pending and absent required checks, conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. A refusal is a decision or a real defect, never a condition to retry around — read `blockers`, and use check_merge_readiness for detail. On success this may merge the PR, close its linked issue, and dispatch follow-up work.",
     schema: PR_NUMBER_ARG_SCHEMA,
     guidance: omittedNumberGuidance("pull request"),
     handler: mergePr,

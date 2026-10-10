@@ -24,7 +24,7 @@ tools:
 ```
 
 **A timeout argument in your tool's own schema does not raise this.** That is the trap,
-and it is not hypothetical — it is how the shell server shipped. Its `shell_execute`
+and it is not hypothetical — it is how the shell server shipped. Its `bash` tool
 advertised `timeout_seconds` up to 3600 and defaulted to 300, so the agent was told it
 could run a long build. Atoma cut the call off at 60, and the error named the server
 rather than the limit.

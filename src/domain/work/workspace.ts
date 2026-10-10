@@ -64,7 +64,7 @@ export const WORKSPACE_PATH = "/tmp/atomaton-workspace";
 /**
  * What an agent is told about it. One sentence, and this is the whole contract.
  *
- * Goes in the prompt template AND in `shell_execute`'s description. Both, because
+ * Goes in the prompt template AND in `bash`'s description. Both, because
  * a tool's own description was measured to carry more weight than the same words
  * in the system prompt -- and this sentence has to hold at the moment the
  * agent is choosing where to put a file, which is when it is reading the tool.

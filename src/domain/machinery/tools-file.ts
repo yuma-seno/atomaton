@@ -107,7 +107,7 @@ export function toolsFileFrom(
  * argv the project has no reason to know.
  *
  * One level deep, and deliberately: `hooks` is replaced rather than merged into,
- * because a project narrowing `filesystem`'s `tool_allowlist` means the list it wrote
+ * because a project narrowing a server's `tool_allowlist` means the list it wrote
  * and not the union — a union could only ever widen, which is the wrong direction for
  * something whose purpose is to restrict.
  */

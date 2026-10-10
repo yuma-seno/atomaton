@@ -19,7 +19,7 @@ before a single tool starts.
 
 ## Why these rather than off-the-shelf servers
 
-`files` replaces `@modelcontextprotocol/server-filesystem`, which has no line
+`files` replaces `@modelcontextprotocol/server-filesystem`, which had no line
 range and no content search. Measured over two runs of these agents, 202 tool
 calls: 37 of the 63 shell calls were `sed -n A,Bp` and `grep -rn`, rebuilding
 both by hand. The reviewer, which has no shell, could not — it read one

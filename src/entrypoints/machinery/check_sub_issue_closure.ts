@@ -56,7 +56,7 @@ function main(): void {
   // fire for one completion turns on WHO performed the merge, because GitHub
   // suppresses the event cascade only for actions taken with GITHUB_TOKEN:
   //
-  // - An agent merge (`github__merge_pr`, which the shipped `merge.policy:
+  // - An agent merge (`merge_pr`, which the shipped `merge.policy:
   //   auto` permits) runs as GITHUB_TOKEN, so the auto-close fires no
   //   `issues: closed` event and this workflow never starts. The guard below
   //   costs nothing.

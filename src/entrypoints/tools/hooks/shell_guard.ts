@@ -48,13 +48,13 @@ import { readStreak, streakFile, writeStreak } from "../lib/search-streak-file.t
  * bearing for safety: the `shell` server declares no credentials in
  * `tools.servers`, so `GH_TOKEN` is stripped from it and `gh pr merge` fails with
  * 401 whether or not this rule exists. What the rule saves is the iterations
- * the agent would spend discovering that. The `github__*` tools hold the token
- * and enforce merge readiness; that enforcement lives there, not here.
+ * the agent would spend discovering that. The `github` server's tools hold the
+ * token and enforce merge readiness; that enforcement lives there, not here.
  */
 const ROUTING_RULES: Record<string, string> = {
-  gh: "gh CLI is disabled. Use the github__* MCP tools (github__create_pr, github__create_issue, etc.) for GitHub operations.",
-  curl: "curl is disabled. Use web__fetch, which returns the page as text.",
-  wget: "wget is disabled. Use web__fetch.",
+  gh: "gh CLI is disabled. Use the github tools -- create_pr, create_issue, merge_pr and the rest -- for GitHub operations.",
+  curl: "curl is disabled. Use fetch, which returns the page as text.",
+  wget: "wget is disabled. Use fetch.",
   ssh: "ssh is disabled: this run works on the checked-out repository, not on other hosts.",
   scp: "scp is disabled: this run works on the checked-out repository, not on other hosts.",
   rsync: "rsync is disabled: this run works on the checked-out repository, not on other hosts.",
@@ -159,15 +159,15 @@ const PROCESS_ENVIRONMENT_READ: [RegExp, string] = [
 /**
  * Git subcommands that change something, as opposed to reporting it.
  *
- * Routing, like the rules above: `github__create_pr` and `github__sync_branch`
+ * Routing, like the rules above: `create_pr` and `sync_branch`
  * check that HEAD is pushed and the branch is current before they act, and a
  * worktree the agent mutated by hand is one `create_pr` then refuses. Read-only
  * inspection (`status`, `diff`, `log`, `rev-parse`) is how the agent orients
  * itself and stays allowed.
  */
 /**
- * The subset that really does have a github__* replacement, so the refusal can
- * name one truthfully.
+ * The subset that really does have a `github` tool standing in for it, so the refusal
+ * can name one truthfully.
  */
 const ROUTED_GIT_COMMANDS = new Set([
   "add", "am", "apply", "cherry-pick", "commit", "fetch", "merge", "mv", "pull", "push", "rebase",
@@ -308,9 +308,9 @@ function checkInvocation(invocation: ShellInvocation): GuardVerdict {
     return {
       allow: false,
       reason: routed
-        ? `Raw 'git ${gitCommand}' is disabled. Use the github__* MCP tools for Git mutations and branch synchronization.`
+        ? `Raw 'git ${gitCommand}' is disabled. Use the github tools for Git mutations and branch synchronization.`
         : `Raw 'git ${gitCommand}' is disabled, and there is no MCP tool for it: this run does not do that. `
-          + `Commit with github__commit_and_push; read-only inspection (status, diff, log) runs normally.`,
+          + `Commit with commit_and_push; read-only inspection (status, diff, log) runs normally.`,
     };
   }
 

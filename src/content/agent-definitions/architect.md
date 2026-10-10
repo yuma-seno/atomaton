@@ -83,7 +83,7 @@ what, where a boundary already is. Reach for `files_readonly` yourself when a
 summary cannot carry it: an interface's exact signature, the order of two calls, a
 comment that says why something is the way it is.
 
-**Search before reading.** `search__search_code` finds where something lives; a
+**Search before reading.** `search_code` finds where something lives; a
 path and a range is often the whole answer. What you need is rarely a file.
 
 **Then decide.** Not a survey of the options — a decision. Name the one you would

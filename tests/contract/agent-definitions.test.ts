@@ -113,7 +113,7 @@ describe("agent definitions", () => {
  * starts.
  *
  * `attachments` was added to `tools/defaults.yaml` with a test file of its own and
- * named by no definition, so `attachments__probe` was uncallable and the post-merge
+ * named by no definition, so `probe` was uncallable and the post-merge
  * measurement the server exists for could not be taken at all. Nothing reported it,
  * and that is the shape: `atoma` starts only the servers a definition's
  * `mcp_servers` names, so an unreferenced server is not an error anywhere — it is a
@@ -131,14 +131,14 @@ describe("a server that exists for a call an agent must make", () => {
     expect(
       namers,
       "no agent definition lists `attachments` in mcp_servers, so the server never starts and " +
-        "`attachments__probe` cannot be called by any run. Name it in the definition(s) that need it.",
+        "`probe` cannot be called by any run. Name it in the definition(s) that need it.",
     ).not.toEqual([]);
     // And in the one a person dispatches a measurement on: the probe is run from an
     // issue, and `atomaton` is the agent a `/atomaton` on that issue starts.
     expect(
       namers,
       "`atomaton` does not list `attachments`, so a run started by a person on an issue cannot call " +
-        "`attachments__probe` — the run this server was added to make the measurement possible in.",
+        "`probe` — the run this server was added to make the measurement possible in.",
     ).toContain("atomaton.md");
   });
 });

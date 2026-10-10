@@ -31,7 +31,7 @@ describe("leftClosingReport", () => {
         sessionOf(
           { role: "assistant", content: "" },
           { role: "tool", content: "ok" },
-          { role: "assistant", content: "", tool_calls: [{ function: { name: "shell__shell_execute" } }] },
+          { role: "assistant", content: "", tool_calls: [{ function: { name: "bash" } }] },
           { role: "tool", content: "ok" },
         ),
       ),
@@ -50,7 +50,7 @@ describe("leftClosingReport", () => {
         sessionOf(
           { role: "assistant", content: "Right, the failure is in the parser." },
           { role: "tool", content: "ok" },
-          { role: "assistant", content: "", tool_calls: [{ function: { name: "filesystem__read_text_file" } }] },
+          { role: "assistant", content: "", tool_calls: [{ function: { name: "read" } }] },
         ),
       ),
     ).toBe(false);

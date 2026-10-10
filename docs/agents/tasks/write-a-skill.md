@@ -3,7 +3,7 @@
 A skill is a set of instructions this project has written for a particular kind of
 work, loaded on demand rather than carried by every run. It lives under
 `.github/atomaton/skills/<category>/<name>.md`, and `<category>/<name>` is the
-name an agent asks for with `atoma_builtin__load_skill`.
+name an agent asks for with `load_skill`.
 
 ## When a skill rather than the role prompt
 

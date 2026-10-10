@@ -58,11 +58,10 @@ export interface Window {
  * is the only honest place for a session that predates any record of when it ran.
  *
  * What a window is for beyond trend: a tool that no longer exists drops out of the
- * recent ones on its own. `shell__terminal_operate` was 333 failures of a server this
- * repository stopped running, sitting in the same table as tools it still uses and
- * reading as though something were broken. Nothing has to detect a retired tool — time
- * removes it, and an agent that invents a tool name still shows up, which a
- * retired-tool rule would have hidden.
+ * recent ones on its own. 333 failures from a server this repository stopped running
+ * sat in the same table as tools it still uses, reading as though something were broken.
+ * Nothing has to detect a retired tool — time removes it, and an agent that invents a
+ * tool name still shows up, which a retired-tool rule would have hidden.
  */
 export const WINDOWS: Window[] = [
   { label: "Last 7 days", days: 7 },

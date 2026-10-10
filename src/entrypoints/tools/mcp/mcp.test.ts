@@ -127,7 +127,7 @@ describe("mcp/github.ts", () => {
       jsonrpc: "2.0", id: 2, method: "tools/list", params: {},
     });
     const names = r.result.tools.map((t: { name: string }) => t.name);
-    for (const tool of ["create_issue", "create_pr", "get_issue", "search_code", "get_pr_diff", "sync_branch"]) {
+    for (const tool of ["create_issue", "create_pr", "get_issue", "search_remote_code", "get_pr_diff", "sync_branch"]) {
       expect(names).toContain(tool);
     }
   });
@@ -170,7 +170,7 @@ describe("mcp/github.ts", () => {
         work,
       );
       expect(response.result.isError).toBe(true);
-      expect(response.result.content[0].text).toContain("Call github__sync_branch");
+      expect(response.result.content[0].text).toContain("Call sync_branch");
       expect(git(work, "rev-parse", "HEAD")).toBe(localHead);
     } finally {
       removeTemp(root);
@@ -773,7 +773,7 @@ describe("mcp/github.ts", () => {
           "github.ts",
           {
             jsonrpc: "2.0", id: 45, method: "tools/call",
-            params: { name: "search_code", arguments: { query: "atomaton_github" } },
+            params: { name: "search_remote_code", arguments: { query: "atomaton_github" } },
           },
           {
             ...fakeGhSeam(),
@@ -1060,7 +1060,7 @@ describe("mcp/shell.ts", () => {
   test("executes a foreground command and returns its output", async () => {
     const response = await sendRequest("shell.ts", {
       jsonrpc: "2.0", id: 1, method: "tools/call",
-      params: { name: "shell_execute", arguments: { command: "printf hello", timeout_seconds: 5 } },
+      params: { name: "bash", arguments: { command: "printf hello", timeout_seconds: 5 } },
     });
     const result = JSON.parse(response.result.content[0].text);
     expect(result).toMatchObject({ status: "completed", exit_code: 0, stdout: "hello", stderr: "" });
@@ -1075,7 +1075,7 @@ describe("mcp/shell.ts", () => {
       {
         jsonrpc: "2.0", id: 3, method: "tools/call",
         params: {
-          name: "shell_execute",
+          name: "bash",
           arguments: { command: 'printf "key=$OPENAI_API_KEY shape=ghp_abcdefghijklmnopqrstuvwx"', timeout_seconds: 5 },
         },
       },
@@ -1088,7 +1088,7 @@ describe("mcp/shell.ts", () => {
   test("terminates commands that exceed their timeout", async () => {
     const response = await sendRequest("shell.ts", {
       jsonrpc: "2.0", id: 2, method: "tools/call",
-      params: { name: "shell_execute", arguments: { command: "sleep 2", timeout_seconds: 1 } },
+      params: { name: "bash", arguments: { command: "sleep 2", timeout_seconds: 1 } },
     });
     const result = JSON.parse(response.result.content[0].text);
     expect(result.status).toBe("timeout");
@@ -1420,12 +1420,12 @@ describe("mcp/delegate.ts", () => {
     expect(r.result.serverInfo.name).toBe("atomaton-delegate-mcp");
   });
 
-  test("advertises one tool, `run`, taking task and context", async () => {
+  test("advertises one tool, `delegate`, taking task and context", async () => {
     const r = await sendRequest("delegate.ts", {
       jsonrpc: "2.0", id: 2, method: "tools/list", params: {},
     });
     const names = r.result.tools.map((t: { name: string }) => t.name);
-    expect(names).toEqual(["run"]);
+    expect(names).toEqual(["delegate"]);
     const tool = r.result.tools[0];
     expect(tool.inputSchema.required).toEqual(["task"]);
     expect(tool.inputSchema.properties).toHaveProperty("task");
@@ -1470,7 +1470,7 @@ describe("mcp/delegate.ts", () => {
   });
 
   /**
-   * #25: the sub-run the reviewer's `delegate_readonly__run` starts must actually carry
+   * #25: the sub-run the reviewer's `delegate` starts must actually carry
    * `files_readonly`.
    *
    * A sub-run with no tools answers every task with "I could not read it", which reads

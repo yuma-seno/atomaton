@@ -135,7 +135,7 @@ describe("hook paths", () => {
    * the core then refuses to find.
    */
   test("allow and deny lists are left alone", () => {
-    const hooks = { tool_denylist: ["filesystem__directory_tree"], tool_allowlist: ["a__b"] };
+    const hooks = { tool_denylist: ["files__directory_tree"], tool_allowlist: ["a__b"] };
     const out = toolsFileFrom({ servers: { fs: { command: "x", hooks } } }, HOOK_BASE);
     expect((out.fs as { hooks: unknown }).hooks).toEqual(hooks);
   });

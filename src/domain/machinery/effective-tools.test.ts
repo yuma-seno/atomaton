@@ -44,7 +44,7 @@ describe("the table itself", () => {
 describe("compareToolSet", () => {
   test("the shipped set passes", () => {
     expect(compareToolSet(READONLY, ["read", "grep", "glob", "list"])).toBeUndefined();
-    expect(compareToolSet(ENV, ["atomaton_env__reload_environment"])).toBeUndefined();
+    expect(compareToolSet(ENV, ["reload_environment"])).toBeUndefined();
   });
 
   test("order is not part of the promise", () => {
@@ -106,11 +106,11 @@ describe("compareToolSet", () => {
 
   test("a prefixed server's withheld tools are caught the same way", () => {
     const mismatch = compareToolSet(ENV, [
-      "atomaton_env__reload_environment",
-      "atomaton_env__launch_sub_agent",
-      "atomaton_env__request_close_issue",
+      "reload_environment",
+      "launch_sub_agent",
+      "request_close_issue",
     ]);
-    expect(mismatch?.unexpected).toEqual(["atomaton_env__launch_sub_agent", "atomaton_env__request_close_issue"]);
+    expect(mismatch?.unexpected).toEqual(["launch_sub_agent", "request_close_issue"]);
   });
 
   test("the message says what the set is for, not only what is wrong", () => {

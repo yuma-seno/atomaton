@@ -24,7 +24,7 @@ So a server says so, and Atoma attaches what it says to that server's next tool
 result:
 
 ```
-search__search_issues → [results]
+search_issues → [results]
 
 --- 1 problem reported by the 'search' server, not part of the answer above ---
 warning: reranking failed (EACCES); these results are first-stage ordered, not reranked

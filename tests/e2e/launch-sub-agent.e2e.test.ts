@@ -1,6 +1,6 @@
 /**
  * launch-sub-agent.e2e.test.ts — real end-to-end test for the
- * `atomaton__launch_sub_agent` tool: the actual `atoma` binary, its real
+ * `launch_sub_agent` tool: the actual `atoma` binary, its real
  * inference loop and real MCP client, driven against the REAL, compiled
  * `dist/.github/atomaton-runtime/tools/mcp/atomaton.ts` MCP server over real
  * stdio JSON-RPC, with a fake `gh` CLI so the real dispatch chain
@@ -22,11 +22,11 @@ import { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from "./run-atoma.ts";
 const ATOMA_MCP_SCRIPT = join(REPO_ROOT, "dist/.github/atomaton-runtime/tools/mcp/atomaton.ts");
 
 describe.skipIf(!atomaAvailable)("E2E: real atoma binary + real mcp/atomaton.ts", () => {
-  test("agent calls atomaton__launch_sub_agent through the real MCP server", async () => {
+  test("agent calls launch_sub_agent through the real MCP server", async () => {
     const mock = startMockLlmServer([
       {
         toolCalls: [
-          { id: "call_1", name: "atomaton__launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
+          { id: "call_1", name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
         ],
       },
     ]);
@@ -87,6 +87,9 @@ You are a test orchestrator agent.
       writeFileSync(
         join(dir, "tools.yaml"),
         `atomaton:
+  # Every shipped server is unprefixed, so launch_sub_agent is the name the
+  # model sees and the name the core dispatches on.
+  unprefixed: true
   command: bun
   args: ["run", "${posixPath(ATOMA_MCP_SCRIPT)}"]
 `,

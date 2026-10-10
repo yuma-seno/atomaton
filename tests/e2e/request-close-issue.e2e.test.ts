@@ -1,6 +1,6 @@
 /**
  * request-close-issue.e2e.test.ts — real end-to-end test for the
- * `atomaton__request_close_issue` tool's human-authored-issue path: the actual
+ * `request_close_issue` tool's human-authored-issue path: the actual
  * `atoma` binary, its real inference loop and real MCP client, against the
  * REAL, compiled `dist/.github/atomaton-runtime/tools/mcp/atomaton.ts` MCP server,
  * with a fake `gh` CLI so the real chain (mcp/atomaton.ts ->
@@ -26,9 +26,9 @@ import { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from "./run-atoma.ts";
 const ATOMA_MCP_SCRIPT = join(REPO_ROOT, "dist/.github/atomaton-runtime/tools/mcp/atomaton.ts");
 
 describe.skipIf(!atomaAvailable)("E2E: real atoma binary + real mcp/atomaton.ts", () => {
-  test("agent calls atomaton__request_close_issue for a human-authored issue", async () => {
+  test("agent calls request_close_issue for a human-authored issue", async () => {
     const mock = startMockLlmServer([
-      { toolCalls: [{ id: "call_1", name: "atomaton__request_close_issue", arguments: { reason: "All done", summary: "Shipped it." } }] },
+      { toolCalls: [{ id: "call_1", name: "request_close_issue", arguments: { reason: "All done", summary: "Shipped it." } }] },
     ]);
     const fakeGh = setupFakeGh([
       // concludeIssue: `gh issue view 99 --repo ... --json author`
@@ -56,6 +56,9 @@ You are a test orchestrator agent.
       writeFileSync(
         join(dir, "tools.yaml"),
         `atomaton:
+  # Every shipped server is unprefixed, so request_close_issue is the name
+  # the model sees and the name the core dispatches on.
+  unprefixed: true
   command: bun
   args: ["run", "${posixPath(ATOMA_MCP_SCRIPT)}"]
 `,

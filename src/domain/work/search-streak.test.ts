@@ -102,7 +102,7 @@ describe("the refusal", () => {
    */
   test("it points at the tool for the case that caused it", () => {
     const reason = refusalReason(MAX_SEARCHES_WITHOUT_OPENING);
-    expect(reason).toContain("search__search_code");
+    expect(reason).toContain("search_code");
     expect(reason).toContain("in a sentence");
   });
 
@@ -114,10 +114,10 @@ describe("the refusal", () => {
 /**
  * The rule that was missing, and the one the refusal depends on being true.
  *
- * `shell_guard` sees shell commands. A read through the filesystem server is not one,
- * so until `toolOpens` existed the streak climbed straight through it -- while the
- * refusal was telling the agent to read a file that way. See `search-streak.ts` for
- * the run that cost.
+ * `shell_guard` sees shell commands. A read through a files server is not one, so until
+ * `toolOpens` existed the streak climbed straight through it -- while the refusal was
+ * telling the agent to read a file that way. See `search-streak.ts` for the run that
+ * cost.
  */
 describe("a read that did not go through the shell", () => {
   test("the files server's read counts as opening", () => {
@@ -135,6 +135,12 @@ describe("a read that did not go through the shell", () => {
    * package and no agent declares `filesystem` — and leaving its names in the
    * alternation is what kept `refusalReason` naming an uncallable tool while a test
    * asserted the refusal was satisfiable.
+   *
+   * The four names are spelled out here rather than described, and that is the one place
+   * a retired name is worth writing down: this test IS the guard against their coming
+   * back, and a guard that does not say what it is holding out cannot do that. It is the
+   * ordinary case for a test — a fixture says a string and asserts on it — and the
+   * string is a spelling, not a call anybody can make.
    */
   test("a server that is no longer shipped is not still recognised", () => {
     for (const tool of [
@@ -153,7 +159,7 @@ describe("a read that did not go through the shell", () => {
    * is the shape the whole rule exists to catch.
    */
   test("listing is not opening", () => {
-    for (const tool of ["list", "files__list", "grep", "glob", "shell__shell_execute", "github__create_pr"]) {
+    for (const tool of ["list", "files__list", "grep", "glob", "bash", "create_pr"]) {
       expect(toolOpens(tool), tool).toBe(false);
     }
   });
@@ -169,7 +175,7 @@ describe("a read that did not go through the shell", () => {
    * before this, obeying and ignoring ended the same way -- three identical refusals
    * and a dead run.
    *
-   * It came back. The refusal went on naming `filesystem__read_text_file` after that
+   * It came back. The refusal went on naming a tool from the retired server after that
    * server left the deliverable, and this test stayed green because the dead name was
    * still in the alternation — the invariant was false and the check that exists to
    * prove it was true was passing on the tolerance. So it asserts the name is one a

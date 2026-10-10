@@ -13,15 +13,26 @@ watch:
   after_tool:
     - ./hooks/workspace_guard.ts
 servers:
-  # `unprefixed`, so these arrive as `read`, `grep`, `glob`, `edit`, `write`, `list` --
-  # the names every mature harness uses and the ones a model has seen most. At most one
-  # server per agent may set it; the core refuses two that claim the same name. No agent
-  # declares both of these, so neither ever meets the other.
+  # Every server here is `unprefixed`, so a tool is called by its own name -- `read`,
+  # `bash`, `create_pr` -- rather than by `server__name`. Those are the names every
+  # mature harness uses and the ones a model has seen most, and a name it has seen is
+  # a call it makes correctly on the first try.
   #
-  # They replace `@modelcontextprotocol/server-filesystem`, which has no line range and
-  # no content search: measured over two runs, 37 of 63 shell calls were `sed -n A,Bp`
-  # and `grep -rn`, rebuilding both by hand. See `tools/mcp/files.ts` for what was
-  # evaluated before writing one.
+  # It is a setting rather than the only behaviour because a second server could then
+  # claim a name the first already has, and the core refuses two that do. Naming a
+  # tool is therefore also what decides which server a call reaches, which is why the
+  # pairs below that share an implementation -- `atomaton` with `atomaton_env`, the
+  # four delegate entries -- are still separate entries: each names a different set of
+  # tools, and no agent is given two servers that claim one.
+  #
+  # A `tool_allowlist` or `tool_denylist` is written with these same bare names. The
+  # list sits inside one server's entry, so a pattern naming that server would be the
+  # entry repeating a label atoma assembles afterwards.
+  #
+  # `files` and `files_readonly` replace `@modelcontextprotocol/server-filesystem`,
+  # which has no line range and no content search: measured over two runs, 37 of 63
+  # shell calls were `sed -n A,Bp` and `grep -rn`, rebuilding both by hand. See
+  # `tools/mcp/files.ts` for what was evaluated before writing one.
   files:
     description: Reads, searches and changes files in the work tree.
     unprefixed: true
@@ -73,6 +84,7 @@ servers:
       after_tool: ./hooks/note_file_opened.ts
   shell:
     description: "Runs one foreground command. Guarded, and holds no credentials of its own."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -84,6 +96,7 @@ servers:
       before_tool: ./hooks/shell_guard.ts
   github:
     description: "Issues, pull requests, comments, and every Git mutation."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -94,6 +107,7 @@ servers:
       {}
   web:
     description: "Fetches a URL. Searching the web is a skill, not a tool."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -104,6 +118,7 @@ servers:
       {}
   search:
     description: "Ranked search over this repository's issues and code."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -117,6 +132,7 @@ servers:
       reranker_model: onnx-community/bge-reranker-v2-m3-ONNX
   atomaton:
     description: "Atomaton's own operations: sub-issues, handoffs, stopping a run."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -139,6 +155,7 @@ servers:
   # permanent file on GitHub's CDN with no documented way to delete it.
   attachments:
     description: "Probes and uses GitHub's user-asset upload endpoint (the one `gh --attach` posts to). Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -156,6 +173,7 @@ servers:
       {}
   atomaton_env:
     description: "Rebuilding the run's environment, and nothing else."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -163,8 +181,12 @@ servers:
     env:
       GH_TOKEN: "${GH_TOKEN}"
     hooks:
+      # The same program as `atomaton`, with two tools withheld -- so an engineer can
+      # rebuild its environment and cannot close its own issue or dispatch an agent.
+      # `launch_sub_agent` and `request_close_issue` are what the core's own
+      # `duplicate_tool` check would otherwise see this server claim a second time.
       tool_allowlist:
-        - atomaton_env__reload_environment
+        - reload_environment
   # The one server that starts another `atoma`. It holds the provider keys because
   # a tool server receives a credential only through its `env:` block, and it hands
   # them to the sub-run through `--credentials-file` rather than the environment --
@@ -179,6 +201,7 @@ servers:
   # overwrite the inherited value.
   delegate:
     description: "Runs one small piece of work in a sub-run and returns what it found."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -211,6 +234,7 @@ servers:
   # `files_readonly` and no `shell`, because a shell is a way to write.
   delegate_readonly:
     description: "Runs one small piece of reading or searching in a sub-run and returns what it found, changing nothing."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -250,6 +274,7 @@ servers:
   # fallback chain would leave.
   delegate_free:
     description: "The same work as `delegate`, run on a free model. Prefer it: a task that fits the free tier costs nothing, and one that does not says so."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -268,6 +293,7 @@ servers:
     hooks: {}
   delegate_readonly_free:
     description: "The same reading as `delegate_readonly`, run on a free model. Prefer it for the same reason: only the price differs."
+    unprefixed: true
     command: bun
     args:
       - run

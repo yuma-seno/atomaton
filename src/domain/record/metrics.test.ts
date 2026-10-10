@@ -29,23 +29,33 @@ const SESSIONS: SessionRecord[] = [
     runs: [],
     reported: true,
     calls: [
-      call("shell__shell_execute", { act: "search" }),
-      call("shell__shell_execute", { act: "open" }),
-      call("filesystem__read_text_file"),
+      call("bash", { act: "search" }),
+      call("bash", { act: "open" }),
+      call("acme__read_text_file"),
       call("atoma_builtin__load_skill", { skill: "engineering/tdd" }),
-      call("github__create_pr", { failed: true }),
-      call("shell__shell_execute", { act: "edit", refused: true }),
+      call("create_pr", { failed: true }),
+      call("bash", { act: "edit", refused: true }),
     ],
   },
-  { path: "sessions/issue-2/reviewer.json", agent: "reviewer", messages: 40, runs: [], reported: true, calls: [call("github__get_pr")] },
+  { path: "sessions/issue-2/reviewer.json", agent: "reviewer", messages: 40, runs: [], reported: true, calls: [call("get_pr")] },
 ];
 
+/**
+ * Every shipped server sets `unprefixed: true`, so a call names no server at all.
+ *
+ * `acme` and `slack` are declared WITHOUT it, which is what a third-party server looks
+ * like. Two of them so that the two answers a report can give -- judged and found used,
+ * judged and found unused -- both have an example to be tested against. Neither name is
+ * one this repository has ever shipped: a retired server's name in a fixture reads as a
+ * server that is still there.
+ */
 const SERVERS = [
-  { name: "shell" },
-  { name: "filesystem" },
-  { name: "github" },
-  { name: "web" },
-  { name: "search" },
+  { name: "shell", unprefixed: true },
+  { name: "acme" },
+  { name: "slack" },
+  { name: "github", unprefixed: true },
+  { name: "web", unprefixed: true },
+  { name: "search", unprefixed: true },
 ];
 const SKILLS = ["engineering/tdd", "delivery/pipeline-setup"];
 const TOKENS = [
@@ -70,11 +80,16 @@ describe("metricsOf", () => {
 
   /**
    * The defect the first run against real data exposed. `tools.yaml` declares servers
-   * (`filesystem`) and a call names a tool (`filesystem__read_text_file`), so comparing
-   * the two directly reported every server as unused -- a section of confident nonsense.
+   * (`acme`) and a call names a tool (`acme__read_text_file`), so comparing the two
+   * directly reported every server as unused -- a section of confident nonsense.
+   *
+   * `acme` is judged and found used; `slack` is judged and found unused; the four that
+   * this repository actually ships set `unprefixed`, so no call can name them and they
+   * belong to the other list.
    */
   test("an unused server is one whose tools nothing called", () => {
-    expect(metrics.neverUsedServers).toEqual(["search", "web"]);
+    expect(metrics.neverUsedServers).toEqual(["slack"]);
+    expect(metrics.unrecognisableServers).toEqual(["github", "search", "shell", "web"]);
   });
 
   test("an unloaded skill is named, since it is described in every prompt", () => {
@@ -106,16 +121,20 @@ describe("metricsOf", () => {
    * An unprefixed server's tools arrive under their own names -- `read`, `grep` --
    * so no call names the server. Calling that unused would state the opposite of the
    * truth about the most-used server there is.
+   *
+   * Its own two servers rather than `SERVERS` plus one, because what is asserted is the
+   * whole of both lists and a shared fixture would make this test move every time one
+   * is added.
    */
   test("a server a call cannot name is not reported as one nothing called", () => {
-    const servers = [...SERVERS, { name: "files", unprefixed: true }];
+    const servers = [{ name: "files", unprefixed: true }, { name: "acme" }];
     const sessions: SessionRecord[] = [
       {
         path: "sessions/issue-1/engineer.json",
         agent: "engineer",
         messages: 10,
         runs: [],
-        calls: [call("read"), call("grep"), call("github__get_pr")],
+        calls: [call("read"), call("grep"), call("get_pr")],
         reported: true,
       },
     ];
@@ -134,7 +153,7 @@ describe("metricsOf", () => {
   });
 
   test("failures and refusals are counted apart", () => {
-    expect(metrics.byTool.find((t) => t.name === "github__create_pr")?.failed).toBe(1);
+    expect(metrics.byTool.find((t) => t.name === "create_pr")?.failed).toBe(1);
     expect(metrics.refusals).toBe(1);
   });
 
@@ -234,11 +253,16 @@ describe("renderReport", () => {
   /**
    * Named, not counted: the point is that somebody can go and delete them. The heading
    * they sit under has moved once already, so the assertion is on the names.
+   *
+   * `slack` and not `web`, because `web` sets `unprefixed` and is therefore in the
+   * not-checked line rather than this one. The two lists are the whole distinction the
+   * metric draws, so the test reads both.
    */
   test("it names the servers and skills nothing used", () => {
-    expect(report).toContain("- `web`");
+    expect(report).toContain("- `slack`");
     expect(report).toContain("- `delivery/pipeline-setup`");
     expect(report).toContain("never");
+    expect(report).toContain("Not checked, because a call does not name them");
   });
 
   /** No money, deliberately: see the module comment. */
@@ -474,7 +498,7 @@ describe("what a window is for, beyond trend", () => {
       agent: "engineer",
       messages: 300,
       runs: [],
-      calls: [call("shell__terminal_operate", { failed: true }), call("filesystem__search_files", { refused: true })],
+      calls: [call("bash", { failed: true, act: "search" }), call("acme__search_files", { refused: true })],
     },
     {
       path: "new",
@@ -484,7 +508,7 @@ describe("what a window is for, beyond trend", () => {
       runs: [
         { started: "2026-09-13T00:00:00Z", ended: "2026-09-13T00:01:00Z", seconds: 60, ended_because: "completed", messages: 10 },
       ],
-      calls: [call("search__search_issues")],
+      calls: [call("search_issues")],
     },
   ];
   const forWindow = (window: Window) =>
@@ -497,13 +521,13 @@ describe("what a window is for, beyond trend", () => {
   };
 
   /**
-   * `shell__terminal_operate` was 333 failures from a server this repository stopped
-   * running, sitting in the same table as tools it still uses. Nothing detects a retired
-   * tool — time removes it, which also leaves a hallucinated tool name visible.
+   * A tool from a server this repository stopped running was 333 failures, sitting in the
+   * same table as tools it still uses. Nothing detects a retired tool — time removes it,
+   * which also leaves a hallucinated tool name visible.
    */
   test("a tool nothing has called lately falls out of the recent windows", () => {
-    expect(section("Last 7 days")).not.toContain("terminal_operate");
-    expect(section("All time")).toContain("terminal_operate");
+    expect(section("Last 7 days")).not.toContain("search_files");
+    expect(section("All time")).toContain("search_files");
   });
 
   /**
@@ -511,9 +535,9 @@ describe("what a window is for, beyond trend", () => {
    * as a broken tool rather than as a guard doing its job.
    */
   test("a guard refusing a call is not counted as the tool failing", () => {
-    const row = metricsOf(sessions, [], [], []).byTool.find((t) => t.name === "filesystem__search_files");
+    const row = metricsOf(sessions, [], [], []).byTool.find((t) => t.name === "acme__search_files");
     expect([row?.failed, row?.refused]).toEqual([0, 1]);
-    expect(section("All time")).toContain("| `filesystem__search_files` | 1 | 0 | 1 | 0% |");
+    expect(section("All time")).toContain("| `acme__search_files` | 1 | 0 | 1 | 0% |");
   });
 });
 
@@ -539,7 +563,7 @@ describe("degraded answers", () => {
 
   test("a problem reported beside a successful answer is counted", () => {
     const m = metricsOf(
-      [session("a", [withProblem("search__search_code", "search", "reranking failed")], "2026-09-13T00:00:00Z")],
+      [session("a", [withProblem("search_code", "search", "reranking failed")], "2026-09-13T00:00:00Z")],
       [],
       [],
       [],
@@ -556,8 +580,8 @@ describe("degraded answers", () => {
     const m = metricsOf(
       [
         session("a", [
-          withProblem("github__get_pr", "github", "x", { failed: true }),
-          withProblem("github__close_issue", "github", "y", { refused: true }),
+          withProblem("get_pr", "github", "x", { failed: true }),
+          withProblem("close_issue", "github", "y", { refused: true }),
         ]),
       ],
       [],
@@ -590,10 +614,10 @@ describe("degraded answers", () => {
     const m = metricsOf(
       [
         session("a", [
-          withProblem("search__search_code", "search", "same"),
-          withProblem("search__search_code", "search", "same"),
+          withProblem("search_code", "search", "same"),
+          withProblem("search_code", "search", "same"),
         ]),
-        session("b", [withProblem("search__search_code", "search", "same")]),
+        session("b", [withProblem("search_code", "search", "same")]),
       ],
       [],
       [],
@@ -611,8 +635,8 @@ describe("degraded answers", () => {
   test("the most recently seen problem is listed first", () => {
     const m = metricsOf(
       [
-        session("old", Array.from({ length: 40 }, () => withProblem("search__search_code", "search", "loud but old")), "2026-08-01T00:00:00Z"),
-        session("new", [withProblem("github__get_pr", "github", "quiet but current")], "2026-09-14T00:00:00Z"),
+        session("old", Array.from({ length: 40 }, () => withProblem("search_code", "search", "loud but old")), "2026-08-01T00:00:00Z"),
+        session("new", [withProblem("get_pr", "github", "quiet but current")], "2026-09-14T00:00:00Z"),
       ],
       [],
       [],
