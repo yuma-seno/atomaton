@@ -17,7 +17,7 @@ var EXACT_TOOL_SETS = [
   },
   {
     server: "atomaton_env",
-    tools: ["atomaton_env__reload_environment"],
+    tools: ["reload_environment"],
     promise: "atomaton_env is the atomaton server with its other two tools withheld, so an engineer can rebuild " + "its environment and cannot close its own issue or dispatch another agent."
   }
 ];

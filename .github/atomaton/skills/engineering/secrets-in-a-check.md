@@ -23,7 +23,7 @@ Three walls, and the first two are what you will hit:
   runs for one holds a secret.** That is not a rule you can work around: the step
   that runs a pull request's declared commands has *nowhere to write a credential*,
   which is a property of the workflow rather than today's configuration.
-- **`web__fetch` is text only.** It can POST a form-encoded body and nothing else —
+- **`fetch` is text only.** It can POST a form-encoded body and nothing else —
   no binary payload and no `Authorization` header.
 
 Do not look for a way past these. Asking for a tool that would make the check

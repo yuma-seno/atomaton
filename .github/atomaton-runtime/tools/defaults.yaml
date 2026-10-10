@@ -13,15 +13,26 @@ watch:
   after_tool:
     - ./hooks/workspace_guard.ts
 servers:
-  # `unprefixed`, so these arrive as `read`, `grep`, `glob`, `edit`, `write`, `list` --
-  # the names every mature harness uses and the ones a model has seen most. At most one
-  # server per agent may set it; the core refuses two that claim the same name. No agent
-  # declares both of these, so neither ever meets the other.
+  # Every server here is `unprefixed`, so a tool is called by its own name -- `read`,
+  # `bash`, `create_pr` -- rather than by `server__name`. Those are the names every
+  # mature harness uses and the ones a model has seen most, and a name it has seen is
+  # a call it makes correctly on the first try.
   #
-  # They replace `@modelcontextprotocol/server-filesystem`, which has no line range and
-  # no content search: measured over two runs, 37 of 63 shell calls were `sed -n A,Bp`
-  # and `grep -rn`, rebuilding both by hand. See `tools/mcp/files.ts` for what was
-  # evaluated before writing one.
+  # It is a setting rather than the only behaviour because a second server could then
+  # claim a name the first already has, and the core refuses two that do. Naming a
+  # tool is therefore also what decides which server a call reaches, which is why the
+  # pairs below that share an implementation -- `atomaton` with `atomaton_env`, the
+  # four delegate entries -- are still separate entries: each names a different set of
+  # tools, and no agent is given two servers that claim one.
+  #
+  # A `tool_allowlist` or `tool_denylist` is written with these same bare names. The
+  # list sits inside one server's entry, so a pattern naming that server would be the
+  # entry repeating a label atoma assembles afterwards.
+  #
+  # `files` and `files_readonly` replace `@modelcontextprotocol/server-filesystem`,
+  # which has no line range and no content search: measured over two runs, 37 of 63
+  # shell calls were `sed -n A,Bp` and `grep -rn`, rebuilding both by hand. See
+  # `tools/mcp/files.ts` for what was evaluated before writing one.
   files:
     description: Reads, searches and changes files in the work tree.
     unprefixed: true
@@ -73,6 +84,7 @@ servers:
       after_tool: ./hooks/note_file_opened.ts
   shell:
     description: "Runs one foreground command. Guarded, and holds no credentials of its own."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -84,6 +96,7 @@ servers:
       before_tool: ./hooks/shell_guard.ts
   github:
     description: "Issues, pull requests, comments, and every Git mutation."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -94,6 +107,7 @@ servers:
       {}
   web:
     description: "Fetches a URL. Searching the web is a skill, not a tool."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -104,6 +118,7 @@ servers:
       {}
   search:
     description: "Ranked search over this repository's issues and code."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -117,6 +132,7 @@ servers:
       reranker_model: onnx-community/bge-reranker-v2-m3-ONNX
   atomaton:
     description: "Atomaton's own operations: sub-issues, handoffs, stopping a run."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -125,8 +141,39 @@ servers:
       GH_TOKEN: "${GH_TOKEN}"
     hooks:
       {}
+  # The user-asset upload endpoint — what `gh --attach` posts to — is reached
+  # only from here. `gh` refuses the Actions token client-side before any
+  # request is built (`gho_`/`ghp_`/`github_pat_` are its allowlist; a `ghs_`
+  # is not on it, measured on the cli/cli source at v2.101.0), and `curl` is
+  # routed away from the shell, which holds no credential to send anyway. So
+  # the POST lives where the token lives, and `probe` is the endpoint check
+  # that could not run anywhere else — the check `engineering/secrets-in-a-check`
+  # says belongs after a merge, in the tool that a merge puts into runs.
+  #
+  # Added as its own server rather than a tool on `github`: an agent that
+  # reaches for an upload should have to name it, because `upload` stores a
+  # permanent file on GitHub's CDN with no documented way to delete it.
+  attachments:
+    description: "Probes and uses GitHub's user-asset upload endpoint (the one `gh --attach` posts to). Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion."
+    unprefixed: true
+    command: bun
+    args:
+      - run
+      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/attachments.ts"
+    env:
+      GH_TOKEN: "${GH_TOKEN}"
+    # Above the server's own 120-second abort, so a POST that never answers is
+    # reported BY the server rather than cut off here. At the 60-second default the
+    # `tools/call` is discarded while the server keeps working -- and in `upload`
+    # mode it may still store the file, retiring exactly the one outcome this probe
+    # must never produce without saying so. The same shape as `delegate`'s 660 over
+    # its sub-run's 600-second limit.
+    request_timeout_secs: 180
+    hooks:
+      {}
   atomaton_env:
     description: "Rebuilding the run's environment, and nothing else."
+    unprefixed: true
     command: bun
     args:
       - run
@@ -134,8 +181,12 @@ servers:
     env:
       GH_TOKEN: "${GH_TOKEN}"
     hooks:
+      # The same program as `atomaton`, with two tools withheld -- so an engineer can
+      # rebuild its environment and cannot close its own issue or dispatch an agent.
+      # `launch_sub_agent` and `request_close_issue` are what the core's own
+      # `duplicate_tool` check would otherwise see this server claim a second time.
       tool_allowlist:
-        - atomaton_env__reload_environment
+        - reload_environment
   # The one server that starts another `atoma`. It holds the provider keys because
   # a tool server receives a credential only through its `env:` block, and it hands
   # them to the sub-run through `--credentials-file` rather than the environment --
@@ -149,13 +200,22 @@ servers:
   # would expand it against the credentials (where it is not) to an empty string and
   # overwrite the inherited value.
   delegate:
-    description: "Runs one small piece of work in a sub-run and returns what it found."
+    description: "Runs one small piece of work in a sub-run and returns what it found. Offers the writing pair: `delegate` and `delegate_free`."
+    unprefixed: true
     command: bun
     args:
       - run
       - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
+      - --agent-defs
       - delegate.md
+      # Half of a pair that exists because the free tier is rate-limited rather than
+      # metered. Reach for the free one first: a task that fits the free tier costs
+      # nothing, and one that does not says so. See `delegates/delegate_free.md`.
+      #
+      # The flag repeats because that is how `parseArgs` takes a list, and one
+      # `--agent-defs a b` is a positional argument it refuses.
+      - --agent-defs
+      - delegate_free.md
       # Layout-relative, NOT root-prefixed. `delegate.ts` resolves this with
       # `machineryPath()`, which is the one place that reads
       # `ATOMATON_MACHINERY_ROOT`; prefixing it here as well produced
@@ -180,71 +240,31 @@ servers:
   # that is a configuration fact rather than something a runtime check can see.
   #
   # `files_readonly` and no `shell`, because a shell is a way to write.
+  # One program, started twice: the entry above offers the writing pair and this one
+  # offers the read-only pair. What tells them apart is the definition list, not the
+  # program.
+  #
+  # Each definition becomes one tool, named after its file, so a caller chooses
+  # between `delegate_readonly` and `delegate_readonly_free` as TOOLS -- which is
+  # what they are: the same offer at two prices, differing in one line of a
+  # definition.
+  #
+  # Two servers rather than one offering all four, and that is the point of the
+  # split: an agent given the writing delegate can reach a write through it, so an
+  # agent that must not write must not be given it. Which definitions a server
+  # offers IS the confinement.
   delegate_readonly:
-    description: "Runs one small piece of reading or searching in a sub-run and returns what it found, changing nothing."
+    description: "Runs one small piece of reading or searching in a sub-run and returns what it found, changing nothing. Offers `delegate_readonly` and `delegate_readonly_free`."
+    unprefixed: true
     command: bun
     args:
       - run
       - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
+      - --agent-defs
       - delegate_readonly.md
-      # Layout-relative, for the same reason as `delegate` above.
-      - --delegates-dir
-      - ".github/atomaton-runtime/tools/delegates"
-    env:
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-      ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-      ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
-    request_timeout_secs: 660
-    hooks: {}
-  # The same two entries again, with the sub-run on the free router. Nothing differs
-  # but `--agent-def`, and that is the point: which model runs a delegated task is a
-  # property of the definition, so it is one more pair of entries here rather than a
-  # model argument a caller could pass. See `delegates/delegate_free.md`.
-  #
-  # ## Why both halves, when the free one is cheaper
-  #
-  # The free tier is rate-limited rather than metered, and its limits are per
-  # ACCOUNT rather than per task: what it will carry is not knowable from here, and
-  # the only way to find out is to send something. These entries are that probe,
-  # made cheap — a task a caller has already decided is small.
-  #
-  # ## What a caller does with the pair
-  #
-  # Reach for `delegate_free` first. The two are the same program, the same servers
-  # and the same role prompt; only the price differs, so the free one is the right
-  # default and the paid one is for a task that has failed on cost rather than on
-  # content. A free sub-run that dies does so with a report — the caller reads what
-  # it said, narrows the task or pays for it — which is different from the silence a
-  # fallback chain would leave.
-  delegate_free:
-    description: "The same work as `delegate`, run on a free model. Prefer it: a task that fits the free tier costs nothing, and one that does not says so."
-    command: bun
-    args:
-      - run
-      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
-      - delegate_free.md
-      - --delegates-dir
-      - ".github/atomaton-runtime/tools/delegates"
-    env:
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-      ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-      ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
-    request_timeout_secs: 660
-    hooks: {}
-  delegate_readonly_free:
-    description: "The same reading as `delegate_readonly`, run on a free model. Prefer it for the same reason: only the price differs."
-    command: bun
-    args:
-      - run
-      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
+      - --agent-defs
       - delegate_readonly_free.md
+      # Layout-relative, for the same reason as `delegate` above.
       - --delegates-dir
       - ".github/atomaton-runtime/tools/delegates"
     env:

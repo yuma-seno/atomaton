@@ -14889,7 +14889,7 @@ var ZodObject2 = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
   inst.partial = (...args) => partial(ZodOptional2, inst, args[0]);
   inst.required = (...args) => required(ZodNonOptional, inst, args[0]);
 });
-function object3(shape, params) {
+function object2(shape, params) {
   const def = {
     type: "object",
     get shape() {
@@ -15214,31 +15214,31 @@ var TaskCreationParamsSchema = looseObject({
   ttl: number3().optional(),
   pollInterval: number3().optional()
 });
-var TaskMetadataSchema = object3({
+var TaskMetadataSchema = object2({
   ttl: number3().optional()
 });
-var RelatedTaskMetadataSchema = object3({
+var RelatedTaskMetadataSchema = object2({
   taskId: string3()
 });
 var RequestMetaSchema = looseObject({
   progressToken: ProgressTokenSchema.optional(),
   [RELATED_TASK_META_KEY]: RelatedTaskMetadataSchema.optional()
 });
-var BaseRequestParamsSchema = object3({
+var BaseRequestParamsSchema = object2({
   _meta: RequestMetaSchema.optional()
 });
 var TaskAugmentedRequestParamsSchema = BaseRequestParamsSchema.extend({
   task: TaskMetadataSchema.optional()
 });
 var isTaskAugmentedRequestParams = (value) => TaskAugmentedRequestParamsSchema.safeParse(value).success;
-var RequestSchema = object3({
+var RequestSchema = object2({
   method: string3(),
   params: BaseRequestParamsSchema.loose().optional()
 });
-var NotificationsParamsSchema = object3({
+var NotificationsParamsSchema = object2({
   _meta: RequestMetaSchema.optional()
 });
-var NotificationSchema = object3({
+var NotificationSchema = object2({
   method: string3(),
   params: NotificationsParamsSchema.loose().optional()
 });
@@ -15246,18 +15246,18 @@ var ResultSchema = looseObject({
   _meta: RequestMetaSchema.optional()
 });
 var RequestIdSchema = union2([string3(), number3().int()]);
-var JSONRPCRequestSchema = object3({
+var JSONRPCRequestSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   id: RequestIdSchema,
   ...RequestSchema.shape
 }).strict();
 var isJSONRPCRequest = (value) => JSONRPCRequestSchema.safeParse(value).success;
-var JSONRPCNotificationSchema = object3({
+var JSONRPCNotificationSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   ...NotificationSchema.shape
 }).strict();
 var isJSONRPCNotification = (value) => JSONRPCNotificationSchema.safeParse(value).success;
-var JSONRPCResultResponseSchema = object3({
+var JSONRPCResultResponseSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   id: RequestIdSchema,
   result: ResultSchema
@@ -15274,10 +15274,10 @@ var ErrorCode;
   ErrorCode[ErrorCode["InternalError"] = -32603] = "InternalError";
   ErrorCode[ErrorCode["UrlElicitationRequired"] = -32042] = "UrlElicitationRequired";
 })(ErrorCode || (ErrorCode = {}));
-var JSONRPCErrorResponseSchema = object3({
+var JSONRPCErrorResponseSchema = object2({
   jsonrpc: literal2(JSONRPC_VERSION),
   id: RequestIdSchema.optional(),
-  error: object3({
+  error: object2({
     code: number3().int(),
     message: string3(),
     data: unknown2().optional()
@@ -15300,16 +15300,16 @@ var CancelledNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/cancelled"),
   params: CancelledNotificationParamsSchema
 });
-var IconSchema = object3({
+var IconSchema = object2({
   src: string3(),
   mimeType: string3().optional(),
   sizes: array2(string3()).optional(),
   theme: _enum(["light", "dark"]).optional()
 });
-var IconsSchema = object3({
+var IconsSchema = object2({
   icons: array2(IconSchema).optional()
 });
-var BaseMetadataSchema = object3({
+var BaseMetadataSchema = object2({
   name: string3(),
   title: string3().optional()
 });
@@ -15320,7 +15320,7 @@ var ImplementationSchema = BaseMetadataSchema.extend({
   websiteUrl: string3().optional(),
   description: string3().optional()
 });
-var FormElicitationCapabilitySchema = intersection2(object3({
+var FormElicitationCapabilitySchema = intersection2(object2({
   applyDefaults: boolean3().optional()
 }), record2(string3(), unknown2()));
 var ElicitationCapabilitySchema = preprocess((value) => {
@@ -15330,7 +15330,7 @@ var ElicitationCapabilitySchema = preprocess((value) => {
     }
   }
   return value;
-}, intersection2(object3({
+}, intersection2(object2({
   form: FormElicitationCapabilitySchema.optional(),
   url: AssertObjectSchema.optional()
 }), record2(string3(), unknown2()).optional()));
@@ -15355,14 +15355,14 @@ var ServerTasksCapabilitySchema = looseObject({
     }).optional()
   }).optional()
 });
-var ClientCapabilitiesSchema = object3({
+var ClientCapabilitiesSchema = object2({
   experimental: record2(string3(), AssertObjectSchema).optional(),
-  sampling: object3({
+  sampling: object2({
     context: AssertObjectSchema.optional(),
     tools: AssertObjectSchema.optional()
   }).optional(),
   elicitation: ElicitationCapabilitySchema.optional(),
-  roots: object3({
+  roots: object2({
     listChanged: boolean3().optional()
   }).optional(),
   tasks: ClientTasksCapabilitySchema.optional(),
@@ -15377,18 +15377,18 @@ var InitializeRequestSchema = RequestSchema.extend({
   method: literal2("initialize"),
   params: InitializeRequestParamsSchema
 });
-var ServerCapabilitiesSchema = object3({
+var ServerCapabilitiesSchema = object2({
   experimental: record2(string3(), AssertObjectSchema).optional(),
   logging: AssertObjectSchema.optional(),
   completions: AssertObjectSchema.optional(),
-  prompts: object3({
+  prompts: object2({
     listChanged: boolean3().optional()
   }).optional(),
-  resources: object3({
+  resources: object2({
     subscribe: boolean3().optional(),
     listChanged: boolean3().optional()
   }).optional(),
-  tools: object3({
+  tools: object2({
     listChanged: boolean3().optional()
   }).optional(),
   tasks: ServerTasksCapabilitySchema.optional(),
@@ -15408,12 +15408,12 @@ var PingRequestSchema = RequestSchema.extend({
   method: literal2("ping"),
   params: BaseRequestParamsSchema.optional()
 });
-var ProgressSchema = object3({
+var ProgressSchema = object2({
   progress: number3(),
   total: optional2(number3()),
   message: optional2(string3())
 });
-var ProgressNotificationParamsSchema = object3({
+var ProgressNotificationParamsSchema = object2({
   ...NotificationsParamsSchema.shape,
   ...ProgressSchema.shape,
   progressToken: ProgressTokenSchema
@@ -15432,7 +15432,7 @@ var PaginatedResultSchema = ResultSchema.extend({
   nextCursor: CursorSchema.optional()
 });
 var TaskStatusSchema = _enum(["working", "input_required", "completed", "failed", "cancelled"]);
-var TaskSchema = object3({
+var TaskSchema = object2({
   taskId: string3(),
   status: TaskStatusSchema,
   ttl: union2([number3(), _null3()]),
@@ -15476,7 +15476,7 @@ var CancelTaskRequestSchema = RequestSchema.extend({
   })
 });
 var CancelTaskResultSchema = ResultSchema.merge(TaskSchema);
-var ResourceContentsSchema = object3({
+var ResourceContentsSchema = object2({
   uri: string3(),
   mimeType: optional2(string3()),
   _meta: record2(string3(), unknown2()).optional()
@@ -15496,12 +15496,12 @@ var BlobResourceContentsSchema = ResourceContentsSchema.extend({
   blob: Base64Schema
 });
 var RoleSchema = _enum(["user", "assistant"]);
-var AnnotationsSchema = object3({
+var AnnotationsSchema = object2({
   audience: array2(RoleSchema).optional(),
   priority: number3().min(0).max(1).optional(),
   lastModified: datetime2({ offset: true }).optional()
 });
-var ResourceSchema = object3({
+var ResourceSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   uri: string3(),
@@ -15511,7 +15511,7 @@ var ResourceSchema = object3({
   annotations: AnnotationsSchema.optional(),
   _meta: optional2(looseObject({}))
 });
-var ResourceTemplateSchema = object3({
+var ResourceTemplateSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   uriTemplate: string3(),
@@ -15564,12 +15564,12 @@ var ResourceUpdatedNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/resources/updated"),
   params: ResourceUpdatedNotificationParamsSchema
 });
-var PromptArgumentSchema = object3({
+var PromptArgumentSchema = object2({
   name: string3(),
   description: optional2(string3()),
   required: optional2(boolean3())
 });
-var PromptSchema = object3({
+var PromptSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   description: optional2(string3()),
@@ -15590,34 +15590,34 @@ var GetPromptRequestSchema = RequestSchema.extend({
   method: literal2("prompts/get"),
   params: GetPromptRequestParamsSchema
 });
-var TextContentSchema = object3({
+var TextContentSchema = object2({
   type: literal2("text"),
   text: string3(),
   annotations: AnnotationsSchema.optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
-var ImageContentSchema = object3({
+var ImageContentSchema = object2({
   type: literal2("image"),
   data: Base64Schema,
   mimeType: string3(),
   annotations: AnnotationsSchema.optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
-var AudioContentSchema = object3({
+var AudioContentSchema = object2({
   type: literal2("audio"),
   data: Base64Schema,
   mimeType: string3(),
   annotations: AnnotationsSchema.optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
-var ToolUseContentSchema = object3({
+var ToolUseContentSchema = object2({
   type: literal2("tool_use"),
   name: string3(),
   id: string3(),
   input: record2(string3(), unknown2()),
   _meta: record2(string3(), unknown2()).optional()
 });
-var EmbeddedResourceSchema = object3({
+var EmbeddedResourceSchema = object2({
   type: literal2("resource"),
   resource: union2([TextResourceContentsSchema, BlobResourceContentsSchema]),
   annotations: AnnotationsSchema.optional(),
@@ -15633,7 +15633,7 @@ var ContentBlockSchema = union2([
   ResourceLinkSchema,
   EmbeddedResourceSchema
 ]);
-var PromptMessageSchema = object3({
+var PromptMessageSchema = object2({
   role: RoleSchema,
   content: ContentBlockSchema
 });
@@ -15645,26 +15645,26 @@ var PromptListChangedNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/prompts/list_changed"),
   params: NotificationsParamsSchema.optional()
 });
-var ToolAnnotationsSchema = object3({
+var ToolAnnotationsSchema = object2({
   title: string3().optional(),
   readOnlyHint: boolean3().optional(),
   destructiveHint: boolean3().optional(),
   idempotentHint: boolean3().optional(),
   openWorldHint: boolean3().optional()
 });
-var ToolExecutionSchema = object3({
+var ToolExecutionSchema = object2({
   taskSupport: _enum(["required", "optional", "forbidden"]).optional()
 });
-var ToolSchema = object3({
+var ToolSchema = object2({
   ...BaseMetadataSchema.shape,
   ...IconsSchema.shape,
   description: string3().optional(),
-  inputSchema: object3({
+  inputSchema: object2({
     type: literal2("object"),
     properties: record2(string3(), AssertObjectSchema).optional(),
     required: array2(string3()).optional()
   }).catchall(unknown2()),
-  outputSchema: object3({
+  outputSchema: object2({
     type: literal2("object"),
     properties: record2(string3(), AssertObjectSchema).optional(),
     required: array2(string3()).optional()
@@ -15699,7 +15699,7 @@ var ToolListChangedNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/tools/list_changed"),
   params: NotificationsParamsSchema.optional()
 });
-var ListChangedOptionsBaseSchema = object3({
+var ListChangedOptionsBaseSchema = object2({
   autoRefresh: boolean3().default(true),
   debounceMs: number3().int().nonnegative().default(300)
 });
@@ -15720,23 +15720,23 @@ var LoggingMessageNotificationSchema = NotificationSchema.extend({
   method: literal2("notifications/message"),
   params: LoggingMessageNotificationParamsSchema
 });
-var ModelHintSchema = object3({
+var ModelHintSchema = object2({
   name: string3().optional()
 });
-var ModelPreferencesSchema = object3({
+var ModelPreferencesSchema = object2({
   hints: array2(ModelHintSchema).optional(),
   costPriority: number3().min(0).max(1).optional(),
   speedPriority: number3().min(0).max(1).optional(),
   intelligencePriority: number3().min(0).max(1).optional()
 });
-var ToolChoiceSchema = object3({
+var ToolChoiceSchema = object2({
   mode: _enum(["auto", "required", "none"]).optional()
 });
-var ToolResultContentSchema = object3({
+var ToolResultContentSchema = object2({
   type: literal2("tool_result"),
   toolUseId: string3().describe("The unique identifier for the corresponding tool call."),
   content: array2(ContentBlockSchema).default([]),
-  structuredContent: object3({}).loose().optional(),
+  structuredContent: object2({}).loose().optional(),
   isError: boolean3().optional(),
   _meta: record2(string3(), unknown2()).optional()
 });
@@ -15748,7 +15748,7 @@ var SamplingMessageContentBlockSchema = discriminatedUnion("type", [
   ToolUseContentSchema,
   ToolResultContentSchema
 ]);
-var SamplingMessageSchema = object3({
+var SamplingMessageSchema = object2({
   role: RoleSchema,
   content: union2([SamplingMessageContentBlockSchema, array2(SamplingMessageContentBlockSchema)]),
   _meta: record2(string3(), unknown2()).optional()
@@ -15781,13 +15781,13 @@ var CreateMessageResultWithToolsSchema = ResultSchema.extend({
   role: RoleSchema,
   content: union2([SamplingMessageContentBlockSchema, array2(SamplingMessageContentBlockSchema)])
 });
-var BooleanSchemaSchema = object3({
+var BooleanSchemaSchema = object2({
   type: literal2("boolean"),
   title: string3().optional(),
   description: string3().optional(),
   default: boolean3().optional()
 });
-var StringSchemaSchema = object3({
+var StringSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
@@ -15796,7 +15796,7 @@ var StringSchemaSchema = object3({
   format: _enum(["email", "uri", "date", "date-time"]).optional(),
   default: string3().optional()
 });
-var NumberSchemaSchema = object3({
+var NumberSchemaSchema = object2({
   type: _enum(["number", "integer"]),
   title: string3().optional(),
   description: string3().optional(),
@@ -15804,24 +15804,24 @@ var NumberSchemaSchema = object3({
   maximum: number3().optional(),
   default: number3().optional()
 });
-var UntitledSingleSelectEnumSchemaSchema = object3({
+var UntitledSingleSelectEnumSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
   enum: array2(string3()),
   default: string3().optional()
 });
-var TitledSingleSelectEnumSchemaSchema = object3({
+var TitledSingleSelectEnumSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
-  oneOf: array2(object3({
+  oneOf: array2(object2({
     const: string3(),
     title: string3()
   })),
   default: string3().optional()
 });
-var LegacyTitledEnumSchemaSchema = object3({
+var LegacyTitledEnumSchemaSchema = object2({
   type: literal2("string"),
   title: string3().optional(),
   description: string3().optional(),
@@ -15830,26 +15830,26 @@ var LegacyTitledEnumSchemaSchema = object3({
   default: string3().optional()
 });
 var SingleSelectEnumSchemaSchema = union2([UntitledSingleSelectEnumSchemaSchema, TitledSingleSelectEnumSchemaSchema]);
-var UntitledMultiSelectEnumSchemaSchema = object3({
+var UntitledMultiSelectEnumSchemaSchema = object2({
   type: literal2("array"),
   title: string3().optional(),
   description: string3().optional(),
   minItems: number3().optional(),
   maxItems: number3().optional(),
-  items: object3({
+  items: object2({
     type: literal2("string"),
     enum: array2(string3())
   }),
   default: array2(string3()).optional()
 });
-var TitledMultiSelectEnumSchemaSchema = object3({
+var TitledMultiSelectEnumSchemaSchema = object2({
   type: literal2("array"),
   title: string3().optional(),
   description: string3().optional(),
   minItems: number3().optional(),
   maxItems: number3().optional(),
-  items: object3({
-    anyOf: array2(object3({
+  items: object2({
+    anyOf: array2(object2({
       const: string3(),
       title: string3()
     }))
@@ -15862,7 +15862,7 @@ var PrimitiveSchemaDefinitionSchema = union2([EnumSchemaSchema, BooleanSchemaSch
 var ElicitRequestFormParamsSchema = TaskAugmentedRequestParamsSchema.extend({
   mode: literal2("form").optional(),
   message: string3(),
-  requestedSchema: object3({
+  requestedSchema: object2({
     type: literal2("object"),
     properties: record2(string3(), PrimitiveSchemaDefinitionSchema),
     required: array2(string3()).optional()
@@ -15890,21 +15890,21 @@ var ElicitResultSchema = ResultSchema.extend({
   action: _enum(["accept", "decline", "cancel"]),
   content: preprocess((val) => val === null ? undefined : val, record2(string3(), union2([string3(), number3(), boolean3(), array2(string3())])).optional())
 });
-var ResourceTemplateReferenceSchema = object3({
+var ResourceTemplateReferenceSchema = object2({
   type: literal2("ref/resource"),
   uri: string3()
 });
-var PromptReferenceSchema = object3({
+var PromptReferenceSchema = object2({
   type: literal2("ref/prompt"),
   name: string3()
 });
 var CompleteRequestParamsSchema = BaseRequestParamsSchema.extend({
   ref: union2([PromptReferenceSchema, ResourceTemplateReferenceSchema]),
-  argument: object3({
+  argument: object2({
     name: string3(),
     value: string3()
   }),
-  context: object3({
+  context: object2({
     arguments: record2(string3(), string3()).optional()
   }).optional()
 });
@@ -15919,7 +15919,7 @@ var CompleteResultSchema = ResultSchema.extend({
     hasMore: optional2(boolean3())
   })
 });
-var RootSchema = object3({
+var RootSchema = object2({
   uri: string3().startsWith("file://"),
   name: string3().optional(),
   _meta: record2(string3(), unknown2()).optional()
@@ -17804,8 +17804,8 @@ async function executeShell(args) {
 }
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
-    name: "shell_execute",
-    description: "Execute one foreground bash command and return its exit code, stdout, stderr, and duration. Use this for tests, builds, linting, and focused read-only inspection. Set timeout_seconds for commands that may run longer than five minutes. Commands run on the same machine, as the same user, and with the same filesystem as every other tool: a file you write in the repository is the same file github__* commits and the files server reads, at the same path. Writes OUTSIDE the repository mostly fail rather than silently not persisting: $HOME is not writable and system packages cannot be installed. $HOME itself also cannot be LISTED -- `ls ~` is refused -- while paths under it can be read and executed, so use `command -v` or a direct path rather than listing the home directory to find a toolchain. /tmp is writable. Within it, `/tmp/atomaton-workspace` is the one place that SURVIVES: anything you leave there is restored on the next run on this issue and is shared with the other agents working on it. Put notes, scratch scripts and intermediate output there rather than in the repository, where they would be committed as part of the work. Elsewhere under /tmp is fine for scratch that does not need to outlive the run. That is a real error you can read, not a write that looks like it worked. If something must persist, add it to `environment.setup_commands` in .github/atomaton/config.yaml and say so in your report; a person merges that and the next run has it. Some commands are routed to MCP tools instead of running here -- Git mutations, `gh`, `curl`, `wget`, `ssh`, `scp`, `rsync` -- and the set may grow, so read the refusal rather than assuming a fixed list: each one names the tool to use in its place. Read-only Git inspection (status, diff, log) runs normally. Output is capped: a long stdout or stderr keeps its beginning and its END, with a marker naming how much was dropped from the middle, and `output_truncated` set. So a build log keeps its failure -- but if you see that marker, narrow the command (a specific test, `grep`, `tail`) rather than re-running the same one and expecting more.",
+    name: "bash",
+    description: "Execute one foreground bash command and return its exit code, stdout, stderr, and duration. Use this for tests, builds, linting, and focused read-only inspection. Set timeout_seconds for commands that may run longer than five minutes. Commands run on the same machine, as the same user, and with the same filesystem as every other tool: a file you write in the repository is the same file `github` commits and the files server reads, at the same path. Writes OUTSIDE the repository mostly fail rather than silently not persisting: $HOME is not writable and system packages cannot be installed. $HOME itself also cannot be LISTED -- `ls ~` is refused -- while paths under it can be read and executed, so use `command -v` or a direct path rather than listing the home directory to find a toolchain. /tmp is writable. Within it, `/tmp/atomaton-workspace` is the one place that SURVIVES: anything you leave there is restored on the next run on this issue and is shared with the other agents working on it. Put notes, scratch scripts and intermediate output there rather than in the repository, where they would be committed as part of the work. Elsewhere under /tmp is fine for scratch that does not need to outlive the run. That is a real error you can read, not a write that looks like it worked. If something must persist, add it to `environment.setup_commands` in .github/atomaton/config.yaml and say so in your report; a person merges that and the next run has it. Some commands are routed to MCP tools instead of running here -- Git mutations, `gh`, `curl`, `wget`, `ssh`, `scp`, `rsync` -- and the set may grow, so read the refusal rather than assuming a fixed list: each one names the tool to use in its place. Read-only Git inspection (status, diff, log) runs normally. Output is capped: a long stdout or stderr keeps its beginning and its END, with a marker naming how much was dropped from the middle, and `output_truncated` set. So a build log keeps its failure -- but if you see that marker, narrow the command (a specific test, `grep`, `tail`) rather than re-running the same one and expecting more.",
     schema: SHELL_EXECUTE_SCHEMA,
     handler: executeShell
   })

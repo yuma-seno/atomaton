@@ -29,7 +29,7 @@ function nextStreak(streak, act) {
 function refusalReason(streak, limit = MAX_SEARCHES_WITHOUT_OPENING) {
   if (streak < limit)
     return;
-  return `${streak} searches in a row without opening any of the files they found. A search returns ` + "where something is, not what it is, so nothing found so far has been read. Do one of two " + "things before searching again: open the most promising result \u2014 with `read`, or `sed -n` " + "for a range \u2014 or, if you are guessing at what the thing is called, ask " + "search__search_code the same question in a sentence. Measured, that finds the right file " + "in the top five 70% of the time, against 41.5% for the regex patterns agents search with.";
+  return `${streak} searches in a row without opening any of the files they found. A search returns ` + "where something is, not what it is, so nothing found so far has been read. Do one of two " + "things before searching again: open the most promising result \u2014 with `read`, or `sed -n` " + "for a range \u2014 or, if you are guessing at what the thing is called, ask " + "search_code the same question in a sentence. Measured, that finds the right file " + "in the top five 70% of the time, against 41.5% for the regex patterns agents search with.";
 }
 
 // src/entrypoints/tools/lib/search-streak-file.ts
@@ -61,9 +61,9 @@ function writeStreak(file, streak) {
 
 // src/entrypoints/tools/hooks/shell_guard.ts
 var ROUTING_RULES = {
-  gh: "gh CLI is disabled. Use the github__* MCP tools (github__create_pr, github__create_issue, etc.) for GitHub operations.",
-  curl: "curl is disabled. Use web__fetch, which returns the page as text.",
-  wget: "wget is disabled. Use web__fetch.",
+  gh: "gh CLI is disabled. Use the github tools -- create_pr, create_issue, merge_pr and the rest -- for GitHub operations.",
+  curl: "curl is disabled. Use fetch, which returns the page as text.",
+  wget: "wget is disabled. Use fetch.",
   ssh: "ssh is disabled: this run works on the checked-out repository, not on other hosts.",
   scp: "scp is disabled: this run works on the checked-out repository, not on other hosts.",
   rsync: "rsync is disabled: this run works on the checked-out repository, not on other hosts."
@@ -208,7 +208,7 @@ function checkInvocation(invocation) {
     const routed = ROUTED_GIT_COMMANDS.has(gitCommand);
     return {
       allow: false,
-      reason: routed ? `Raw 'git ${gitCommand}' is disabled. Use the github__* MCP tools for Git mutations and branch synchronization.` : `Raw 'git ${gitCommand}' is disabled, and there is no MCP tool for it: this run does not do that. ` + `Commit with github__commit_and_push; read-only inspection (status, diff, log) runs normally.`
+      reason: routed ? `Raw 'git ${gitCommand}' is disabled. Use the github tools for Git mutations and branch synchronization.` : `Raw 'git ${gitCommand}' is disabled, and there is no MCP tool for it: this run does not do that. ` + `Commit with commit_and_push; read-only inspection (status, diff, log) runs normally.`
     };
   }
   const [environPattern, environReason] = PROCESS_ENVIRONMENT_READ;

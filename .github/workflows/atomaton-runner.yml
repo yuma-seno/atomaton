@@ -37,12 +37,12 @@ name: Atomaton Runner
         type: string
         default: continue
       atoma_version:
-        description: Atoma CLI version tag to install (e.g. v0.1.2). Use `source` to build from a checkout of yuma-seno/atoma@main.
+        description: Atoma CLI version tag to install (e.g. v0.3.0). Use `source` to build from a checkout of yuma-seno/atoma@main.
         required: false
         type: string
-        default: v0.1.2
+        default: v0.3.0
       reload_count:
-        description: How many times this work has already rebuilt its environment (set by atomaton_env__reload_environment; leave at 0)
+        description: How many times this work has already rebuilt its environment (set by reload_environment; leave at 0)
         required: false
         type: string
         default: '0'
@@ -82,12 +82,12 @@ name: Atomaton Runner
           - recover
         default: continue
       atoma_version:
-        description: Atoma CLI version tag to install (e.g. v0.1.2). Use `source` to build from a checkout of yuma-seno/atoma@main.
+        description: Atoma CLI version tag to install (e.g. v0.3.0). Use `source` to build from a checkout of yuma-seno/atoma@main.
         required: false
         type: string
-        default: v0.1.2
+        default: v0.3.0
       reload_count:
-        description: How many times this work has already rebuilt its environment (set by atomaton_env__reload_environment; leave at 0)
+        description: How many times this work has already rebuilt its environment (set by reload_environment; leave at 0)
         required: false
         type: string
         default: '0'
@@ -640,7 +640,7 @@ jobs:
           #
           # `actions/checkout` writes this into the runner's own gitconfig, which the tool
           # user can read through the traversal granted above -- but that is a default of a
-          # third-party action, and `github__commit_and_push` and every `git` the agent runs
+          # third-party action, and `commit_and_push` and every `git` the agent runs
           # depend on it. Said explicitly, at system level, so it does not.
           sudo git config --system --add safe.directory "$GITHUB_WORKSPACE" 2>/dev/null || true
 
@@ -879,7 +879,7 @@ jobs:
 
           # Detect whether a tool call already triggered an automatic follow-up
           # dispatch ON THIS NODE during this run (a hand-off to a colleague:
-          # github__merge_pr -> re-invoked agent), as opposed to the agent genuinely
+          # merge_pr -> re-invoked agent), as opposed to the agent genuinely
           # finishing with nothing further happening.
           #
           # A dispatch onto a DIFFERENT node -- launch_sub_agent starting children,

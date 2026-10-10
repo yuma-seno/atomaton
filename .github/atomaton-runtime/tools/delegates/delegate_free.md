@@ -1,6 +1,6 @@
 ---
 name: delegate_free
-description: The same work as `delegate`, run on a free model. Started by the `delegate_free__run` tool, never by a person.
+description: The same work as `delegate`, run on a free model. Started by the `delegate_free` tool, never by a person.
 # The same router the `free` agent used to run on, and the only place it is still
 # used. Nothing was changed here but the model line and the name: this file is
 # `delegate.md` with one substitution, and that is the whole of the difference.
