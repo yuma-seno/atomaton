@@ -1,0 +1,31 @@
+# Line endings, decided once here rather than inferred per file.
+#
+# Git treats a file as binary when it cannot be sure it is text, and a file it has
+# decided is binary is stored EXACTLY as it is on disk — no normalisation. On a
+# Windows checkout with `core.autocrlf=true` every other file is stored LF and
+# converted both ways; a "binary" source file keeps its CRLF inside the repository.
+#
+# That is not cosmetic, and it cost a real defect. `src/entrypoints/tools/mcp/shell.ts`
+# was recorded that way. A tool that rewrote the file rather than appending to it
+# produced a diff of the entire file — every line added and every line removed —
+# and a real defect travelled inside that noise unremarked: a sentence in the shell
+# tool's own description had lost the word that made it mean anything, and no
+# reviewer could see it. A 3-line change arrived as 192 lines.
+#
+# `text=auto` is the rule that already applies to every other file here, written
+# down so it applies to all of them: decide from the content, and normalise.
+* text=auto
+
+# Not text, and never normalised. A PNG is a test fixture whose bytes ARE the test
+# input, so a rewritten file is a different fixture rather than the same one stored
+# differently.
+*.png -text
+
+# Text, said outright. `text=auto` ASKS, and its answer for this file is wrong: the
+# file has no NUL byte and is valid UTF-8, yet git recorded it as binary and
+# `text=auto` honours that. Without this line the rule above changes nothing here.
+#
+# A pattern rather than the single path, because the detection that went wrong is
+# about content and would go wrong for the next such file too. Nothing else under
+# `tools/mcp/` is anything but UTF-8 source.
+src/entrypoints/tools/mcp/*.ts text eol=lf
