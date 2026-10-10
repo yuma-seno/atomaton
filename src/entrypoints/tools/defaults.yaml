@@ -200,14 +200,22 @@ servers:
   # would expand it against the credentials (where it is not) to an empty string and
   # overwrite the inherited value.
   delegate:
-    description: "Runs one small piece of work in a sub-run and returns what it found."
+    description: "Runs one small piece of work in a sub-run and returns what it found. Offers the writing pair: `delegate` and `delegate_free`."
     unprefixed: true
     command: bun
     args:
       - run
       - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
+      - --agent-defs
       - delegate.md
+      # Half of a pair that exists because the free tier is rate-limited rather than
+      # metered. Reach for the free one first: a task that fits the free tier costs
+      # nothing, and one that does not says so. See `delegates/delegate_free.md`.
+      #
+      # The flag repeats because that is how `parseArgs` takes a list, and one
+      # `--agent-defs a b` is a positional argument it refuses.
+      - --agent-defs
+      - delegate_free.md
       # Layout-relative, NOT root-prefixed. `delegate.ts` resolves this with
       # `machineryPath()`, which is the one place that reads
       # `ATOMATON_MACHINERY_ROOT`; prefixing it here as well produced
@@ -232,74 +240,31 @@ servers:
   # that is a configuration fact rather than something a runtime check can see.
   #
   # `files_readonly` and no `shell`, because a shell is a way to write.
+  # One program, started twice: the entry above offers the writing pair and this one
+  # offers the read-only pair. What tells them apart is the definition list, not the
+  # program.
+  #
+  # Each definition becomes one tool, named after its file, so a caller chooses
+  # between `delegate_readonly` and `delegate_readonly_free` as TOOLS -- which is
+  # what they are: the same offer at two prices, differing in one line of a
+  # definition.
+  #
+  # Two servers rather than one offering all four, and that is the point of the
+  # split: an agent given the writing delegate can reach a write through it, so an
+  # agent that must not write must not be given it. Which definitions a server
+  # offers IS the confinement.
   delegate_readonly:
-    description: "Runs one small piece of reading or searching in a sub-run and returns what it found, changing nothing."
+    description: "Runs one small piece of reading or searching in a sub-run and returns what it found, changing nothing. Offers `delegate_readonly` and `delegate_readonly_free`."
     unprefixed: true
     command: bun
     args:
       - run
       - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
+      - --agent-defs
       - delegate_readonly.md
-      # Layout-relative, for the same reason as `delegate` above.
-      - --delegates-dir
-      - ".github/atomaton-runtime/tools/delegates"
-    env:
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-      ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-      ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
-    request_timeout_secs: 660
-    hooks: {}
-  # The same two entries again, with the sub-run on the free router. Nothing differs
-  # but `--agent-def`, and that is the point: which model runs a delegated task is a
-  # property of the definition, so it is one more pair of entries here rather than a
-  # model argument a caller could pass. See `delegates/delegate_free.md`.
-  #
-  # ## Why both halves, when the free one is cheaper
-  #
-  # The free tier is rate-limited rather than metered, and its limits are per
-  # ACCOUNT rather than per task: what it will carry is not knowable from here, and
-  # the only way to find out is to send something. These entries are that probe,
-  # made cheap — a task a caller has already decided is small.
-  #
-  # ## What a caller does with the pair
-  #
-  # Reach for `delegate_free` first. The two are the same program, the same servers
-  # and the same role prompt; only the price differs, so the free one is the right
-  # default and the paid one is for a task that has failed on cost rather than on
-  # content. A free sub-run that dies does so with a report — the caller reads what
-  # it said, narrows the task or pays for it — which is different from the silence a
-  # fallback chain would leave.
-  delegate_free:
-    description: "The same work as `delegate`, run on a free model. Prefer it: a task that fits the free tier costs nothing, and one that does not says so."
-    unprefixed: true
-    command: bun
-    args:
-      - run
-      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
-      - delegate_free.md
-      - --delegates-dir
-      - ".github/atomaton-runtime/tools/delegates"
-    env:
-      OPENAI_API_KEY: "${OPENAI_API_KEY}"
-      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
-      ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
-      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
-      ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
-    request_timeout_secs: 660
-    hooks: {}
-  delegate_readonly_free:
-    description: "The same reading as `delegate_readonly`, run on a free model. Prefer it for the same reason: only the price differs."
-    unprefixed: true
-    command: bun
-    args:
-      - run
-      - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
-      - --agent-def
+      - --agent-defs
       - delegate_readonly_free.md
+      # Layout-relative, for the same reason as `delegate` above.
       - --delegates-dir
       - ".github/atomaton-runtime/tools/delegates"
     env:

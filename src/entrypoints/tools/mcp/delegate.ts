@@ -54,7 +54,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { buildMcpTools, defineMcpTool, serveMcpServer, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
+import { buildMcpTools, defineMcpTool, serveMcpServer, z, type BuiltMcpTool, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 import { machineryPath } from "../../../adapters/runner/machinery.ts";
 import { TOOL_OUTPUT_BACKSTOP } from "../../../shared/tool-output.ts";
@@ -92,6 +92,77 @@ function defaultDelegatesDir(): string {
 }
 
 /**
+ * Everything one definition contributes: its sub-run's servers and its role prompt.
+ *
+ * The servers decide whether the description promises a change, and the role prompt
+ * is where the case for this delegate over another is argued, so both are read from
+ * the files the definition names rather than restated here.
+ *
+ * A file that cannot be read is fatal rather than defaulted. A sub-run with no
+ * tools looks like a confused delegate rather than a broken configuration, and the
+ * log line here names the path.
+ */
+function readDefinition(defPath: string): string {
+  try {
+    return readFileSync(defPath, "utf8");
+  } catch (e) {
+    console.error(`[atomaton-delegate] could not read ${defPath}: ${(e as Error).message}`);
+    process.exit(2);
+  }
+}
+
+/**
+ * The servers a sub-run is given, from its tools file.
+ *
+ * A sub-run with no servers is a run with no tools, which looks like a confused
+ * delegate rather than a broken configuration. Fail at startup, where the log line
+ * names the cause.
+ */
+function serverNames(tools: Record<string, unknown>, toolsPath: string): string[] {
+  const servers = Object.keys(tools).filter((name) => name !== "hooks");
+  if (servers.length === 0) {
+    console.error(`[atomaton-delegate] ${toolsPath} declares no servers; refusing to start`);
+    process.exit(2);
+  }
+  return servers;
+}
+
+/**
+ * The definition's frontmatter, as the pairs it is written in.
+ *
+ * A small reader rather than a YAML parse: the frontmatter of every definition here
+ * is `key: value` with no nesting, and parsing it as YAML would make a role prompt
+ * that contains `---` an error about a document rather than about this file. A
+ * malformed block is fatal, for the same reason a missing tools file is.
+ */
+function frontmatter(text: string, defPath: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!block) {
+    console.error(`[atomaton-delegate] ${defPath} has no frontmatter block`);
+    process.exit(2);
+  }
+  for (const line of (block[1] ?? "").split(/\r?\n/)) {
+    const at = line.indexOf(":");
+    if (at === -1) continue;
+    out.set(line.slice(0, at).trim(), line.slice(at + 1).trim());
+  }
+  return out;
+}
+
+/**
+ * The body of the definition: the role prompt, with the frontmatter removed.
+ *
+ * This is what the tool's description is built from, so it is the part of the
+ * definition a model reads when it is choosing between delegates. The frontmatter
+ * above it is metadata for `atoma`, and repeating it here would spend the tool
+ * schema on something the caller is not choosing by.
+ */
+function rolePrompt(text: string): string {
+  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+}
+
+/**
  * The sub-run's tools file, read and given the core's output cap.
  *
  * The cap is added here rather than written into the YAML, for the reason
@@ -99,10 +170,6 @@ function defaultDelegatesDir(): string {
  * spend `TOOL_OUTPUT_BUDGET` from `shared/tool-output.ts`, and a YAML copy of the
  * number the core is asked for is the same fact spelled twice, agreeing until
  * somebody changes one.
- *
- * A file that cannot be read is fatal rather than defaulted. A sub-run with no
- * tools looks like a confused delegate rather than a broken configuration, and the
- * log line here names the path.
  */
 function readToolsFile(path: string): Record<string, unknown> {
   let parsed: { watch?: Record<string, unknown>; servers?: Record<string, unknown> };
@@ -163,8 +230,7 @@ function readToolsFile(path: string): Record<string, unknown> {
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
   options: {
-    "agent-def": { type: "string" },
-    "tools-file": { type: "string" },
+    "agent-defs": { type: "string", multiple: true },
     "delegates-dir": { type: "string" },
   },
 });
@@ -180,55 +246,81 @@ const DELEGATES_DIR = values["delegates-dir"]
   ? resolve(machineryPath(values["delegates-dir"]))
   : defaultDelegatesDir();
 
-const AGENT_DEF_FILE = values["agent-def"] ?? "delegate.md";
-
 /**
- * The tools file the sub-run is handed, as a path.
+ * The agent definitions this server offers, each becoming one tool.
  *
- * `--tools-file` names one of the files under `delegates/`, and the default is
- * derived from the definition's name so the two cannot drift: `delegate.md` reads
- * `delegate.tools.yaml`, `delegate_readonly.md` reads
- * `delegate_readonly.tools.yaml`. A caller that passes one and not the other is
- * naming a definition and a server list that may not agree, which is the failure
- * this derivation removes for the two entries that ship.
+ * Required, and there is no default. A default would be the name of one
+ * definition, which is a choice only a caller can make: this program is four
+ * servers in `tools/defaults.yaml` — a writing pair and a read-only pair — and
+ * which of those a caller wants is the whole of what tells them apart. Guessing
+ * wrong starts a server with the wrong reach.
+ *
+ * A list rather than one name, because two entries that differ only in the model
+ * are the same offer at two prices, and an agent choosing between them should be
+ * choosing between two tools rather than between two servers it cannot compare.
+ * It is also what makes each tool's name distinct: `unprefixed` means a tool is
+ * known by its own name, so two servers offering one name are fatal, and a single
+ * hard-coded name here was exactly that.
  */
-const TOOLS_FILE = values["tools-file"]
-  ? resolve(machineryPath(values["tools-file"]))
-  : join(DELEGATES_DIR, `${AGENT_DEF_FILE.replace(/\.md$/, "")}.tools.yaml`);
-
-/**
- * The sub-run's tools file, read once at startup.
- *
- * Read here rather than per call, and read at all rather than passed through as a
- * path, for two reasons. The core's output cap has to be added from the module that
- * owns it — see `readToolsFile` — and the server list is what decides the tool
- * description below, so it has to be known before the tool is defined.
- *
- * There is no `--servers` argument. There was, and it was a second spelling of what
- * this file already says: the two could disagree, and the disagreement would be a
- * sub-run whose servers were not the ones the description promised. The file is the
- * one source, and the names come out of it.
- */
-const SUB_RUN_TOOLS = readToolsFile(TOOLS_FILE);
-const SUB_RUN_SERVERS = Object.keys(SUB_RUN_TOOLS).filter((name) => name !== "hooks");
-
-if (SUB_RUN_SERVERS.length === 0) {
-  // A sub-run with no servers is a run with no tools, which looks like a confused
-  // delegate rather than a broken configuration. Fail at startup, where the log
-  // line names the cause.
-  console.error(`[atomaton-delegate] ${TOOLS_FILE} declares no servers; refusing to start`);
+const AGENT_DEF_FILES = values["agent-defs"] ?? [];
+if (AGENT_DEF_FILES.length === 0) {
+  console.error(
+    "[atomaton-delegate] no --agent-defs given. Pass the definition file(s) this server should " +
+      "offer, naming one tool each; there is no default, because which definitions a server " +
+      "offers is what tells the writing pair from the read-only pair.",
+  );
   process.exit(2);
 }
 
 /**
- * Whether the sub-run may change the tree.
+ * One definition this server offers, with the files derived from its name.
  *
- * Derived from the server list rather than passed as its own flag, so the two
- * cannot disagree: `files` is the writing server and `files_readonly` is the same
- * program with the three that write withheld. What this decides is only the
- * wording of the tool description — the confinement itself is the server list.
+ * The tools file is derived from the definition name so the two cannot drift:
+ * `delegate.md` reads `delegate.tools.yaml`, `delegate_readonly.md` reads
+ * `delegate_readonly.tools.yaml`. There is no `--tools-file`: it named one of the
+ * files under `delegates/`, and a caller that passed a definition and a server
+ * list that disagreed was naming a delegate neither file described.
  */
-const CAN_WRITE = SUB_RUN_SERVERS.includes("files");
+interface DelegateDef {
+  /** The definition's file name, as passed — `delegate_readonly.md`. */
+  file: string;
+  /** The tool's name and the server's own word for it: the file name without `.md`. */
+  name: string;
+  /** Absolute path to the sub-run's tools file. */
+  toolsFile: string;
+  /** That file, read at startup and handed to the sub-run as it is. */
+  tools: Record<string, unknown>;
+  /** The servers the sub-run gets, read from that file. */
+  servers: string[];
+  /** Whether the sub-run may change the tree — see `CAN_WRITE`. */
+  canWrite: boolean;
+  /** The role prompt in the definition, which the tool's description is built from. */
+  role: string;
+}
+
+const DEFAULTS: DelegateDef[] = AGENT_DEF_FILES.map((file) => {
+  const name = file.replace(/\.md$/, "");
+  const toolsFile = join(DELEGATES_DIR, `${name}.tools.yaml`);
+  const tools = readToolsFile(toolsFile);
+  const servers = serverNames(tools, toolsFile);
+  return { file, name, toolsFile, tools, servers, canWrite: servers.includes("files"), role: rolePrompt(readDefinition(join(DELEGATES_DIR, file))) };
+});
+
+// Two definitions of one name would be two tools of one name, which the core refuses
+// at registration with a message about the SERVER — `delegate` and `delegate` — that
+// says nothing about this file. Named here, where the list that caused it is.
+const seenNames = new Set<string>();
+for (const def of DEFAULTS) {
+  if (seenNames.has(def.name)) {
+    console.error(
+      `[atomaton-delegate] '${def.name}' is offered twice by --agent-defs, so this server would ` +
+        "advertise two tools with one name. atoma refuses that at registration and names the " +
+        "server rather than the list; fix the list.",
+    );
+    process.exit(2);
+  }
+  seenNames.add(def.name);
+}
 
 /**
  * How long the sub-run may take, in seconds.
@@ -375,7 +467,7 @@ function reportFrom(envelope: RunEnvelope): string {
   );
 }
 
-async function handleDelegateRun(args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Promise<McpToolResult> {
+async function handleDelegateRun(def: DelegateDef, args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Promise<McpToolResult> {
   const credentials = providerCredentials(process.env);
   if (Object.keys(credentials).length === 0) {
     // A sub-run with no provider key fails at its first inference with a message
@@ -400,13 +492,13 @@ async function handleDelegateRun(args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Pro
     // `gh` to `github`, which a delegate does not have, so the first such rule
     // would break every delegate. The sub-run's surface is its own file, and the
     // core's output cap is added by `readToolsFile` from the module that owns it.
-    writeFileSync(toolsFile, Bun.YAML.stringify(SUB_RUN_TOOLS, null, 2));
+    writeFileSync(toolsFile, Bun.YAML.stringify(def.tools, null, 2));
 
     // Mode 0600, and it is not only a gesture: atoma deletes this file before
     // starting any server, and until then it is the only place the keys are.
     writeFileSync(credentialsFile, JSON.stringify(credentials), { mode: 0o600 });
 
-    const agentDef = join(DELEGATES_DIR, AGENT_DEF_FILE);
+    const agentDef = join(DELEGATES_DIR, def.file);
     const prompt = buildPrompt(args.task, args.context);
 
     log(`delegating: ${args.task.slice(0, 120).replace(/\s+/g, " ")}`);
@@ -514,35 +606,72 @@ async function handleDelegateRun(args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Pro
   }
 }
 
-const { tools, dispatch } = buildMcpTools([
-  defineMcpTool({
-    name: "delegate",
-    description:
-      "Do one small piece of work in a separate run and return what it found. Use it for reading, " +
-      "searching and changing files, and for running one command to answer a question — the work " +
-      "whose transcript you do not want in this session. " +
-      "The investigation you do not know how to start is the case it is most for: it does have " +
-      "its own `grep`, `glob` and `read`, so \"find where X is defined and everywhere it is " +
-      "called\" is a task you can hand over rather than a search you have to do first. Say what " +
-      "an answer looks like and when to stop looking, and read `task` before calling. " +
-      "It starts with NO memory of this conversation: put everything it needs in `task` and " +
-      "`context`. Name the files when you already know them; when you do not, say so and give " +
-      "it the ground to cover. " +
-      "It CANNOT reach GitHub — no issues, no pull requests, no comments — cannot dispatch anything, " +
-      "and cannot delegate further. " +
-      (CAN_WRITE
-        ? "It works in the same tree, so a change it makes is a change you will commit. "
-        : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " +
-          "comes back as a description rather than as an edit. ") +
-      "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " +
-      "resumes it. If the task is larger than that, or needs a decision, do it here instead.",
+/**
+ * The description a model reads when it is choosing between this delegate and another.
+ *
+ * Written once and shared by every delegate this server offers, because the
+ * differences that matter are facts about the definition rather than about the
+ * program: `canWrite` decides two sentences, and the role prompt says the rest. A
+ * description per definition would be four copies of this drifting apart.
+ *
+ * The middle sentence — what the sub-run holds — is the one a caller cannot see for
+ * itself, and the `canWrite` branch is why it is here rather than in the definition:
+ * the servers decide the reach, and the servers come from the tools file.
+ */
+function delegateDescription(def: DelegateDef, shared: string): string {
+  return (
+    "Do one small piece of work in a separate run and return what it found. Use it for reading, " +
+    "searching and changing files, and for running one command to answer a question — the work " +
+    "whose transcript you do not want in this session. " +
+    "The investigation you do not know how to start is the case it is most for: it does have " +
+    "its own `grep`, `glob` and `read`, so \"find where X is defined and everywhere it is " +
+    "called\" is a task you can hand over rather than a search you have to do first. Say what " +
+    "an answer looks like and when to stop looking, and read `task` before calling. " +
+    "It starts with NO memory of this conversation: put everything it needs in `task` and " +
+    "`context`. Name the files when you already know them; when you do not, say so and give " +
+    "it the ground to cover. " +
+    "It CANNOT reach GitHub — no issues, no pull requests, no comments — cannot dispatch anything, " +
+    "and cannot delegate further. " +
+    (def.canWrite
+      ? "It works in the same tree, so a change it makes is a change you will commit. "
+      : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " +
+        "comes back as a description rather than as an edit. ") +
+    "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " +
+    "resumes it. If the task is larger than that, or needs a decision, do it here instead." +
+    shared
+  );
+}
+
+/**
+ * How this delegate differs from the others this server offers.
+ *
+ * Read from the definition's own body rather than written here, so adding a delegate
+ * is adding a file. That body is a role prompt for the sub-run, so its first
+ * paragraph is a fair description of what the caller would get — which is what a
+ * model needs to choose between this one and its siblings.
+ */
+function distinguishingText(role: string): string {
+  const firstParagraph = role.split(/\n\s*\n/)[0]?.trim() ?? "";
+  return firstParagraph ? ` ${firstParagraph.replace(/\s+/g, " ")}` : "";
+}
+
+/** One definition as the MCP tool a model calls. */
+function definitionTool(def: DelegateDef): BuiltMcpTool {
+  return defineMcpTool({
+    name: def.name,
+    description: delegateDescription(def, distinguishingText(def.role)),
     schema: DELEGATE_RUN_SCHEMA,
-    handler: handleDelegateRun,
-  }),
-]);
+    handler: (args) => handleDelegateRun(def, args),
+  });
+}
+
+const { tools, dispatch } = buildMcpTools(DEFAULTS.map(definitionTool));
 
 async function main(): Promise<void> {
-  log(`Starting atomaton-delegate-mcp-server (stdio transport): servers=${SUB_RUN_SERVERS.join(",")} def=${AGENT_DEF_FILE}`);
+  log(
+    `Starting atomaton-delegate-mcp-server (stdio transport): ` +
+      DEFAULTS.map((def) => `${def.name}=${def.servers.join("+")}`).join(", "),
+  );
   await serveMcpServer({ name: "atomaton-delegate-mcp", version: "1.0.0", tools, dispatch, log });
 }
 

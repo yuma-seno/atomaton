@@ -31,8 +31,15 @@ delegate again, because it has no `delegate` tool of its own.
 
 | Entry | Sub-run gets | Started with |
 | --- | --- | --- |
-| `delegate` | `files`, `shell` | `delegate.md` |
-| `delegate_readonly` | `files_readonly` | `delegate_readonly.md` |
+| server | sub-run's servers | definitions it offers |
+| --- | --- | --- |
+| `delegate` | `files`, `shell` | `delegate.md`, `delegate_free.md` |
+| `delegate_readonly` | `files_readonly` | `delegate_readonly.md`, `delegate_readonly_free.md` |
+
+Each definition becomes one TOOL, named after its file, so `delegate` advertises
+`delegate` and `delegate_free` and the read-only one advertises its own pair. That
+is how the free and paid variants are chosen between: they are two tools, not two
+servers.
 
 They are one program, `mcp/delegate.ts`, started with a different definition and a
 different tools file. The pair exists because **a sub-run's servers must be a

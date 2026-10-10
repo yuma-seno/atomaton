@@ -39,7 +39,6 @@ mcp_servers:
   # the free tier could not carry the task: what it delegates is a diff or a stretch
   # of source, which is the shape the tier measures.
   - delegate_readonly
-  - delegate_readonly_free
 ---
 
 You are the pull-request quality gate. Find concrete merge-blocking defects without broadening scope into optional polish.

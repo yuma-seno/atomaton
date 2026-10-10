@@ -1,6 +1,6 @@
 ---
 name: delegate_readonly
-description: Does one small piece of reading or searching and reports what it found, changing nothing. Started by the `delegate` tool, never by a person.
+description: Does one small piece of reading or searching and reports what it found, changing nothing. Started by the `delegate_readonly` tool, never by a person.
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
 vision: false

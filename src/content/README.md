@@ -102,24 +102,32 @@ every run.
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. |
 | `attachments` | Probes and uses GitHub's user-asset upload endpoint, the one `gh --attach` posts to. Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion. |
 | `atomaton_env` | Rebuilding the run's environment, and nothing else. |
-| `delegate` | Runs one small piece of work in a sub-run and returns what it found. |
-| `delegate_free` | The same, on a free model. Prefer it — only the price differs. |
+| `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers the writing pair as two tools. |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. |
-| `delegate_readonly_free` | The same read-only sub-run on a free model. Prefer it for the same reason. |
 
 An agent gets the ones its own `mcp_servers` names, and only those. A server
 nobody names is never started, so there is nothing to gain by removing one — which
 is why there is no way to.
 
-Each of the four is one program started with a different definition and a
-different tools file, both under `atomaton-runtime/tools/delegates/`. They are not
-agent definitions: a delegate is started by the tool and never by a person, so it
-is deliberately outside `agent-definitions/`, which is the namespace `/<name>`
-dispatches from.
+The two delegate servers are one program, `mcp/delegate.ts`, each started with the
+definition files it should offer. **Each definition becomes one tool, named after
+its file**, so the writing server advertises `delegate` and `delegate_free` and the
+read-only one advertises `delegate_readonly` and `delegate_readonly_free`. A caller
+therefore chooses between the free and paid variants as tools — which is what they
+are: the same sub-run, the same servers, one line of a definition different.
 
-The `_free` pairs exist because a delegated task is the one place the free tier can
-be used at all: a top-level run starts from the issue, every comment and the pull
-request's diff, which exceeds the tier's per-request cap before the model says
+The definitions live under `atomaton-runtime/tools/delegates/`, beside the server
+that reads them. They are not agent definitions: a delegate is started by the tool
+and never by a person, so it is deliberately outside `agent-definitions/`, which is
+the namespace `/<name>` dispatches from.
+
+Two servers rather than one offering all four, and the split is the confinement:
+an agent given the writing delegate can reach a write through it, so an agent that
+must not write must not be given it.
+
+The `_free` variants exist because a delegated task is the one place the free tier
+can be used at all: a top-level run starts from the issue, every comment and the
+pull request's diff, which exceeds the tier's per-request cap before the model says
 anything, whereas a delegate is handed only the task its caller wrote. The choice
 between the two is a price and nothing else, which is why an agent is told to reach
 for the free one and fall back only when it says the task did not fit.
