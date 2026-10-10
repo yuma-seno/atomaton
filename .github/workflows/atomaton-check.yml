@@ -223,6 +223,10 @@ jobs:
           ATOMA_BIN: /usr/local/bin/atoma
         run: |
           bun run test:e2e
+      - name: Check the tool servers this pull request would ship
+        shell: bash
+        run: |
+          bash .github/atomaton/scripts/check-live-tools.sh
   atomaton-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
