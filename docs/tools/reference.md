@@ -29,26 +29,37 @@ second entry for a server above with tools withheld — an allowlist, and
 [a pattern with a reason](overview.md#one-server-two-entries).
 
 `delegate` and `delegate_readonly` are the same arrangement for a different
-reason. They are one program, `mcp/delegate.ts`, started with a different
-definition and a different tools file. What differs is what the sub-run may reach:
-`delegate` gives it `files` and `shell`, `delegate_readonly` gives it
-`files_readonly` and nothing else. The pair exists because a sub-run's servers must
-be a subset of its caller's — the reviewer holds `files_readonly`, and a delegate
-that could write would put a writing server one tool call away from an agent whose
-whole tool set says it cannot change anything. Their definitions and tools files
-live under `.github/atomaton-runtime/tools/delegates/`, **not** under
-`agent-definitions/`, which is the namespace a person dispatches from. See
+reason. They are one program, `mcp/delegate.ts`, started with a different roster key.
+What differs is what the sub-run may reach: `delegate` gives it `files` and `shell`,
+`delegate_readonly` gives it `files_readonly` and nothing else. The pair exists
+because a sub-run's servers must be a subset of its caller's — the reviewer holds
+`files_readonly`, and a delegate that could write would put a writing server one
+tool call away from an agent whose whole tool set says it cannot change anything.
+Their definitions and tools files live under `.github/atomaton/delegates/`, **not**
+under `agent-definitions/`, which is the namespace a person dispatches from. See
 [delegating a piece of work](how-it-works/delegating-a-piece-of-work.md).
 
-The two `_free` entries are those same servers again, with the sub-run on a free
-model. Nothing differs but the definition's `model:` line, and they are the ones an
-agent is told to reach for first, because a delegated task is the only place the
-free tier can be used at all: a top-level run starts from the issue, every comment
-and the pull request's diff, which exceeds the tier's per-request cap before the
-model says anything — while a delegate is handed only the task its caller wrote, so
-the caller decides how much context it carries. A task the tier refuses comes back
-as an error saying the prompt was too big, which is an answer about the task's size;
-the agent narrows it or uses the paid entry for that one call.
+`delegates.yaml` in that directory is the roster: which server offers which folders.
+It is under `.github/atomaton/` rather than in `tools/defaults.yaml` because which
+delegates exist, what they are called and what each runs on is one decision in one
+place — and a `model:` line is the thing a project most wants to change.
+
+Each server offers two of them, and the difference is the model the folder names.
+Nothing else differs, and they are the ones an agent is told to reach for first,
+because a delegated task is the only place a free tier can be used at all: a
+top-level run starts from the issue, every comment and the pull request's diff, which
+exceeds the tier's per-request cap before the model says anything — while a delegate
+is handed only the task its caller wrote, so the caller decides how much context it
+carries. A task the tier refuses comes back as an error saying the prompt was too
+big, which is an answer about the task's size; the agent narrows it or uses the other
+folder for that one call.
+
+**Which of the two is free is read from the `model:` line, not from the name.** A
+folder whose model ends in `/free` is described to the caller as free, with a limit
+shared across every agent on that tier, and the caller is told to try it and read a
+refusal as an answer. Point the folder at another model and the description moves
+with it, without an agent definition being edited — which is why the instruction
+lives in the tool description rather than in an agent's prompt.
 
 What each server's tools do in a run is in
 [searching your repository's issues](how-it-works/searching-the-issues.md) and

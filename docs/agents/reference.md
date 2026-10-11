@@ -63,6 +63,32 @@ definitions use it for OpenRouter's provider routing; pinning an endpoint is in
 There is no `tools:` block in the shipped definitions, and
 [that is deliberate](boundaries.md#why-there-is-no-provider-side-tool-block).
 
+## `extra_headers`
+
+Extra request headers, by name:
+
+```yaml
+extra_headers:
+  X-OrcaRouter-Session-Id: atomaton-architect
+```
+
+Atoma sends them with every request this agent makes, and it refuses a name it sets
+itself — `AUTHORIZATION` and `CONTENT_TYPE` among them — because a definition that
+overrode one would break the call rather than customise it.
+
+The shipped use is a session id: OrcaRouter keeps consecutive requests on one
+deployment while the header is the same, which is what lets the provider's prompt
+cache still hold the conversation. Without it a long agent was measured alternating
+between a 98% cache hit and a fall back to the shared prefix.
+
+One value per agent rather than per conversation, and that is enough: what matters
+is that consecutive requests land together, and a cache is keyed by content, so two
+conversations sharing a deployment do not read each other's.
+
+This is one of the four fields a delegate folder's `agent.md` accepts, and it is
+there for the same reason — [delegating a piece of
+work](../tools/how-it-works/delegating-a-piece-of-work.md#setting-the-model).
+
 ## `mcp_servers`
 
 The tool servers this agent gets, and only these:

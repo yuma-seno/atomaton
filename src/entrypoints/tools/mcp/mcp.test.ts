@@ -1400,40 +1400,44 @@ describe("mcp/atomaton.ts", () => {
 
 /**
  * The delegate server, which is one program behind two entries and offers one tool
- * per definition it is given.
+ * per folder its roster key names.
  *
  * What is checked here is the part that is a promise rather than an
- * implementation detail: a tool exists per definition, its name is the definition's,
- * its arguments are the two the design settled on, and the server refuses to start
- * when it is told to run with no servers — a sub-run with no tools looks like a
- * confused delegate rather than a broken configuration, so it fails at startup
- * where the log line names the cause.
+ * implementation detail: a tool exists per folder, its name is the folder's, its
+ * arguments are the two the design settled on, the tier is described from the
+ * `model:` line rather than from the folder name, and the server refuses to start
+ * when the roster would give it nothing — a server with no tools starts and offers
+ * nothing, which is worse than not starting.
  *
  * The sub-run itself is not started here. It needs an `atoma` binary and a
  * provider key, neither of which a laptop running `bun test` has, and a test that
  * skipped itself in the environment it runs in would be a test that never runs.
- * What the sub-run does is covered by the design in issue #965 and by the
- * `delegate.md`/`delegate_readonly.md` definitions, which the contract tests hold
- * to the servers `tools.yaml` defines.
+ * What the sub-run does is covered by the `agent.md` definitions, which the contract
+ * tests hold to the servers their `tools.yaml` declares.
  */
 describe("mcp/delegate.ts", () => {
+  /** The roster this repository ships, as both servers are pointed at it. */
+  const ROSTER_DIR = "src/content/delegates";
+
   test("initialize returns server info", async () => {
-    const r = await sendRequest("delegate.ts", INIT_REQUEST, {}, process.cwd(), ["--agent-defs", "delegate.md"]);
+    const r = await sendRequest("delegate.ts", INIT_REQUEST, {}, process.cwd(), [
+      "--roster", "delegate", "--delegates-dir", ROSTER_DIR,
+    ]);
     expect(r.result.serverInfo.name).toBe("atomaton-delegate-mcp");
   });
 
-  test("advertises one tool per definition, named after it, taking task and context", async () => {
+  test("advertises one tool per folder the roster names, taking task and context", async () => {
     const r = await sendRequest(
       "delegate.ts",
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
       {},
       process.cwd(),
-      ["--agent-defs", "delegate.md"],
+      ["--roster", "delegate", "--delegates-dir", ROSTER_DIR],
     );
-    // The names are the definition file names, which is what makes two definitions
-    // two tools rather than two servers claiming one name.
+    // The names are the FOLDER names, which is what makes two definitions two tools
+    // rather than two servers claiming one name.
     const names = r.result.tools.map((t: { name: string }) => t.name);
-    expect(names).toEqual(["delegate"]);
+    expect(names).toEqual(["delegate", "delegate_large"]);
     const tool = r.result.tools[0];
     expect(tool.inputSchema.required).toEqual(["task"]);
     expect(tool.inputSchema.properties).toHaveProperty("task");
@@ -1441,20 +1445,23 @@ describe("mcp/delegate.ts", () => {
   });
 
   /**
-   * Two definitions in one server are two tools, and each is named after its own
-   * file. This is the promise `unprefixed` rests on: a tool is known by its own
-   * name, so the writing pair and the free variants cannot collide.
+   * Every roster entry gets its own server, and neither sees the other's folders.
+   *
+   * This is the confinement, and it is why the roster is keyed by server rather
+   * than being one flat list: an agent holding `files_readonly` is given
+   * `delegate_readonly`, and a writing delegate on the same server would be one tool
+   * call away from the reach that agent's whole tool set says it does not have.
    */
-  test("offers one tool per definition, and names it after the file", async () => {
+  test("each roster key offers only its own folders", async () => {
     const r = await sendRequest(
       "delegate.ts",
       { jsonrpc: "2.0", id: 20, method: "tools/list", params: {} },
       {},
       process.cwd(),
-      ["--agent-defs", "delegate.md", "--agent-defs", "delegate_free.md"],
+      ["--roster", "delegate_readonly", "--delegates-dir", ROSTER_DIR],
     );
     const names = r.result.tools.map((t: { name: string }) => t.name).sort();
-    expect(names).toEqual(["delegate", "delegate_free"]);
+    expect(names).toEqual(["delegate_readonly", "delegate_readonly_large"]);
   });
 
   /**
@@ -1467,21 +1474,46 @@ describe("mcp/delegate.ts", () => {
       { jsonrpc: "2.0", id: 3, method: "tools/list", params: {} },
       {},
       process.cwd(),
-      ["--agent-defs", "delegate_readonly.md"],
+      ["--roster", "delegate_readonly", "--delegates-dir", ROSTER_DIR],
     );
     expect(r.result.tools[0].description).toContain("CANNOT change anything");
   });
 
-  test("refuses to start when its tools file declares no servers", async () => {
-    // Spawned directly rather than through `sendRequest`: this process exits before
-    // it writes a response, so the harness would wait for a line that never comes
-    // and report a timeout instead of the refusal. What is being checked is the
-    // exit, and the message on stderr that names the cause.
-    const dir = mkdtempSync(join(tmpdir(), "atomaton-delegate-empty-"));
-    writeFileSync(join(dir, "empty.md"), "---\nname: empty\n---\nbody\n");
-    writeFileSync(join(dir, "empty.tools.yaml"), "watch: {}\nservers: {}\n");
+  /**
+   * Which delegate is free is read from the `model:` line, not from the folder name.
+   *
+   * This is the whole reason the tier is in the description rather than in the
+   * caller's prompt: a project that points a folder at a paid model, or renames one,
+   * changes what the caller is told without touching an agent definition. A folder
+   * named for a tier its model does not belong to would be the drift this catches.
+   */
+  test("the tier a caller is told about comes from the model, not from the name", async () => {
+    const r = await sendRequest(
+      "delegate.ts",
+      { jsonrpc: "2.0", id: 4, method: "tools/list", params: {} },
+      {},
+      process.cwd(),
+      ["--roster", "delegate", "--delegates-dir", ROSTER_DIR],
+    );
+    const byName = new Map(
+      (r.result.tools as { name: string; description: string }[]).map((t) => [t.name, t.description]),
+    );
+    expect(byName.get("delegate")).toContain("FREE");
+    expect(byName.get("delegate_large")).toContain("PAID");
+    // And the shared-limit consequence, which is what makes a refusal readable
+    // rather than a failure: the caller is told to try it and read the answer.
+    expect(byName.get("delegate")).toContain("shared with every other agent");
+  });
+
+  test("refuses to start when the roster names no folders for this server", async () => {
+    // A real roster whose key is absent, rather than an empty one: the failure this
+    // guards is a `tools/defaults.yaml` that disagrees with `delegates.yaml` about
+    // which servers exist, and an absent roster would be a different fault. The
+    // other key's list is empty so nothing else has to exist on disk.
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-delegate-roster-"));
+    writeFileSync(join(dir, "delegates.yaml"), "someone_else: []\n");
     try {
-      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-defs", "empty.md", "--delegates-dir", dir], {
+      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--roster", "delegate", "--delegates-dir", dir], {
         env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
         cwd: process.cwd(),
       });
@@ -1489,18 +1521,44 @@ describe("mcp/delegate.ts", () => {
       child.stderr.on("data", (d) => (stderr += d.toString()));
       const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
       expect(code).toBe(2);
-      expect(stderr).toContain("declares no servers");
+      expect(stderr).toContain("declares no folders under");
     } finally {
       removeTemp(dir);
     }
   });
 
   /**
-   * No `--agent-defs` at all is a configuration error, not a default. A default
-   * would be one definition's name, and guessing it starts a server with the wrong
-   * reach — the read-only pair and the writing pair are told apart by this list.
+   * A folder the roster lists but that is missing a file is fatal, and the message
+   * names the path. The alternative — starting and offering a tool whose sub-run then
+   * fails — reports it as a tool that would not answer, at the moment an agent tried
+   * to delegate, which is the worst place to learn about a typo.
    */
-  test("refuses to start with no --agent-defs", async () => {
+  test("refuses to start when a listed folder is missing its tools file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-delegate-incomplete-"));
+    writeFileSync(join(dir, "delegates.yaml"), "delegate:\n  - half\n");
+    mkdirSync(join(dir, "half"), { recursive: true });
+    writeFileSync(join(dir, "half", "agent.md"), "---\nname: half\nmcp_servers:\n  - files\n---\nbody\n");
+    try {
+      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--roster", "delegate", "--delegates-dir", dir], {
+        env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
+        cwd: process.cwd(),
+      });
+      let stderr = "";
+      child.stderr.on("data", (d) => (stderr += d.toString()));
+      const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
+      expect(code).toBe(2);
+      expect(stderr).toContain("half/tools.yaml");
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  /**
+   * No `--roster` at all is a configuration error, not a default. A default would be
+   * one server's key, and guessing it starts a server with the wrong reach — the
+   * read-only entry and the writing entry are told apart by this flag.
+   */
+  test("refuses to start with no --roster", async () => {
     const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`], {
       env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
       cwd: process.cwd(),
@@ -1509,7 +1567,7 @@ describe("mcp/delegate.ts", () => {
     child.stderr.on("data", (d) => (stderr += d.toString()));
     const code = await new Promise<number | null>((resolve) => child.on("exit", resolve));
     expect(code).toBe(2);
-    expect(stderr).toContain("no --agent-defs");
+    expect(stderr).toContain("no --roster");
   });
 
   /**
@@ -1520,20 +1578,20 @@ describe("mcp/delegate.ts", () => {
    * as a refusal rather than as the environment being wrong — and the reviewer has no
    * shell, so this is the one path it has for offloading a large read.
    *
-   * The check is on the tools file the server hands the sub-run, because that is the
-   * thing that decides it: `readToolsFile` writes `SUB_RUN_TOOLS` into a temp file and
-   * passes `--tools-file`. Its servers come from `--agent-def`'s sibling
-   * `delegate_readonly.tools.yaml`, resolved through `--delegates-dir`.
-   *
    * Both spellings of the path are tried — layout-relative (what `defaults.yaml` passes,
    * resolved by `machineryPath`) and absolute (what a caller with no
    * `ATOMATON_MACHINERY_ROOT` gets) — because a path that resolves to nothing is fatal
    * at startup and looks from the outside like the entry not being wired at all.
+   *
+   * The third case is the one a workflow hits: no flag, and the layout constant
+   * resolved against the machinery root. It is pointed at `dist`, because
+   * `.github/atomaton/delegates/` is a build output — it exists in the deployed tree a
+   * run works in, and in this checkout only after the build.
    */
   test("the read-only delegate's sub-run is given files_readonly, both ways the path resolves", async () => {
-    const start = async (delegatesDir: string) => {
-      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-defs", "delegate_readonly.md", "--delegates-dir", delegatesDir], {
-        env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
+    const start = async (args: string[], env: Record<string, string> = {}) => {
+      const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, ...args], {
+        env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo", ...env },
         cwd: process.cwd(),
       });
       let stderr = "";
@@ -1558,41 +1616,23 @@ describe("mcp/delegate.ts", () => {
 
     // Layout-relative, which is what `tools/defaults.yaml` passes. `machineryPath`
     // resolves it against ATOMATON_MACHINERY_ROOT, and with that unset the cwd is the
-    // job's own checkout — which is exactly the case this has to survive.
-    const relative = await start("src/entrypoints/tools/delegates");
+    // job's own checkout — which is exactly the case a `bun test` run is in.
+    const relative = await start(["--roster", "delegate_readonly", "--delegates-dir", ROSTER_DIR]);
     expect(relative).toContain("delegate_readonly=files_readonly");
 
-    // And the fallback, with no `--delegates-dir` at all: the directory beside the
-    // script. A run whose caller forgot the flag must still start, or the reviewer's
-    // only read path is dead for a reason nothing names.
-    const fallback = await start(join(process.cwd(), "src/entrypoints/tools/delegates"));
-    expect(fallback).toContain("delegate_readonly=files_readonly");
+    // And an absolute path, which is what a caller with no machinery root gets.
+    const absolute = await start([
+      "--roster", "delegate_readonly", "--delegates-dir", join(process.cwd(), ROSTER_DIR),
+    ]);
+    expect(absolute).toContain("delegate_readonly=files_readonly");
 
-    // No flag: `defaultDelegatesDir()` resolves relative to the script, which is the
-    // src tree here. Asserted last because it is the one that has to work with nothing
-    // telling it where to look.
-    const child = spawn("bun", ["run", `${SCRIPTS_DIR}/delegate.ts`, "--agent-defs", "delegate_readonly.md"], {
-      env: { ...hermeticEnv(), GITHUB_REPOSITORY: "owner/repo" },
-      cwd: process.cwd(),
-    });
-    let stderr = "";
-    const asked = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`no-default server did not start: ${stderr}`)), 5000);
-      child.stderr.on("data", (d) => {
-        stderr += d.toString();
-        if (stderr.includes("Starting atomaton-delegate-mcp-server")) {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-      child.on("exit", (code) => {
-        clearTimeout(timer);
-        reject(new Error(`no-default delegate exited ${code}: ${stderr}`));
-      });
-    });
-    await asked;
-    child.kill();
-    expect(stderr).toContain("delegate_readonly=files_readonly");
+    // No flag: `defaultDelegatesDir()` resolves the layout constant against the
+    // machinery root, which is the shape a workflow runs in — the flag is what a
+    // caller passes precisely BECAUSE the root supplies the rest. Pointed at `dist`,
+    // because `.github/atomaton/delegates/` is a build output and exists in the
+    // deployed tree rather than in this checkout.
+    const deployed = await start(["--roster", "delegate_readonly"], { ATOMATON_MACHINERY_ROOT: "dist" });
+    expect(deployed).toContain("delegate_readonly=files_readonly");
   }, 20_000);
 });
 

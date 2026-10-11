@@ -28,9 +28,9 @@ mcp_servers:
   # The writing delegate, for the investigation that would otherwise fill this
   # session: where a symbol is defined, what calls it, what a change would touch.
   #
-  # `delegate_free` is the same sub-run on a free model and is the one to reach for
-  # first; `delegate` is for a task the free tier refuses as too large. Both are
-  # tools on this one server, named after the definitions.
+  # See `delegates.yaml` for what this server offers and on which model — that is a
+  # project's setting rather than a fact about this agent — and read the tool
+  # descriptions for which of them to reach for. They say which one is free.
   - delegate
 ---
 
