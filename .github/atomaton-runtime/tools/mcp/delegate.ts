@@ -6603,8 +6603,8 @@ var require_dist = __commonJS(function(exports, module) {
 // src/entrypoints/tools/mcp/delegate.ts
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { dirname, join, resolve } from "path";
-import { fileURLToPath } from "url";
+import { join } from "path";
+import { existsSync } from "fs";
 import { parseArgs } from "util";
 
 // node_modules/zod/v3/helpers/util.js
@@ -17715,7 +17715,8 @@ var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
 var SKILLS_DIR = `${USER_ROOT}/skills`;
 var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
 var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
+var DELEGATES_DIR = `${USER_ROOT}/delegates`;
+var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
 var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
 var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
 var RULESETS_DIR = `${USER_ROOT}/rulesets`;
@@ -17729,6 +17730,82 @@ function machineryRoot() {
 function machineryPath(relative) {
   const root = machineryRoot();
   return root ? `${root}/${relative}` : relative;
+}
+
+// src/domain/machinery/delegates.ts
+function serverNamesOf(tools) {
+  if (!tools || typeof tools !== "object")
+    return [];
+  return Object.keys(tools).filter((name) => name !== "hooks" && name !== "watch");
+}
+function requestedServersIn(agentText) {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(agentText);
+  if (!block)
+    return [];
+  const lines = (block[1] ?? "").split(/\r?\n/);
+  const at = lines.findIndex((line) => /^mcp_servers:\s*$/.test(line));
+  if (at === -1)
+    return [];
+  const names = [];
+  for (const line of lines.slice(at + 1)) {
+    if (/^\s*(#.*)?$/.test(line))
+      continue;
+    const item = /^\s+-\s*([^\s#]+)/.exec(line);
+    if (!item)
+      break;
+    names.push(item[1] ?? "");
+  }
+  return names.filter(Boolean);
+}
+function resolveRoster(rosterPath, read, exists) {
+  const problems = [];
+  const defs = [];
+  let parsed;
+  try {
+    parsed = Bun.YAML.parse(read(rosterPath));
+  } catch (error) {
+    return { defs, problems: [`${rosterPath} is not valid YAML: ${error.message}`] };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      defs,
+      problems: [`${rosterPath} must be a map of server name to the folders it offers.`]
+    };
+  }
+  const dir = rosterPath.replace(/[\\/][^\\/]*$/, "");
+  for (const [server, value] of Object.entries(parsed)) {
+    if (!Array.isArray(value) || value.some((name) => typeof name !== "string" || name.trim() === "")) {
+      problems.push(`${rosterPath}: \`${server}\` must be a list of folder names.`);
+      continue;
+    }
+    for (const raw of value) {
+      const name = raw.trim();
+      const agentFile = `${dir}/${name}/agent.md`;
+      const toolsFile = `${dir}/${name}/tools.yaml`;
+      if (!exists(agentFile) || !exists(toolsFile)) {
+        problems.push(`${rosterPath} names \`${server}: ${name}\`, but ${!exists(agentFile) ? agentFile : toolsFile} ` + "does not exist. A delegate folder holds agent.md and tools.yaml.");
+        continue;
+      }
+      const requested = requestedServersIn(read(agentFile)).sort();
+      const parsedTools = Bun.YAML.parse(read(toolsFile));
+      const declared = serverNamesOf(parsedTools?.servers).sort();
+      if (requested.join(",") !== declared.join(",")) {
+        problems.push(`${agentFile} asks for [${requested.join(", ")}] and ${toolsFile} declares ` + `[${declared.join(", ")}]. They must name the same servers.`);
+        continue;
+      }
+      defs.push({ name, server, agentFile, toolsFile });
+    }
+  }
+  const seen = new Map;
+  for (const def of defs) {
+    const previous = seen.get(def.name);
+    if (previous) {
+      problems.push(`${rosterPath}: \`${def.name}\` is offered by both \`${previous}\` and \`${def.server}\`, ` + "so two tools would carry one name. atoma refuses that at registration.");
+      continue;
+    }
+    seen.set(def.name, def.server);
+  }
+  return { defs, problems };
 }
 
 // src/shared/tool-output.ts
@@ -17838,23 +17915,22 @@ function log(message) {
 }
 hardenCredentialHolder(log);
 function defaultDelegatesDir() {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "delegates");
+  return machineryPath(DELEGATES_DIR);
 }
-function readDefinition(defPath) {
-  try {
-    return readFileSync(defPath, "utf8");
-  } catch (e) {
-    console.error(`[atomaton-delegate] could not read ${defPath}: ${e.message}`);
+function frontmatter(text, defPath) {
+  const out = new Map;
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!block) {
+    console.error(`[atomaton-delegate] ${defPath} has no frontmatter block`);
     process.exit(2);
   }
-}
-function serverNames(tools, toolsPath) {
-  const servers = Object.keys(tools).filter((name) => name !== "hooks");
-  if (servers.length === 0) {
-    console.error(`[atomaton-delegate] ${toolsPath} declares no servers; refusing to start`);
-    process.exit(2);
+  for (const line of (block[1] ?? "").split(/\r?\n/)) {
+    const at = line.indexOf(":");
+    if (at === -1)
+      continue;
+    out.set(line.slice(0, at).trim(), line.slice(at + 1).trim());
   }
-  return servers;
+  return out;
 }
 function rolePrompt(text) {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
@@ -17880,31 +17956,33 @@ function readToolsFile(path) {
 var { values } = parseArgs({
   args: Bun.argv.slice(2),
   options: {
-    "agent-defs": { type: "string", multiple: true },
+    roster: { type: "string" },
     "delegates-dir": { type: "string" }
   }
 });
-var DELEGATES_DIR2 = values["delegates-dir"] ? resolve(machineryPath(values["delegates-dir"])) : defaultDelegatesDir();
-var AGENT_DEF_FILES = values["agent-defs"] ?? [];
-if (AGENT_DEF_FILES.length === 0) {
-  console.error("[atomaton-delegate] no --agent-defs given. Pass the definition file(s) this server should " + "offer, naming one tool each; there is no default, because which definitions a server " + "offers is what tells the writing pair from the read-only pair.");
+var DELEGATES_ROOT = values["delegates-dir"] ? machineryPath(values["delegates-dir"]) : defaultDelegatesDir();
+var ROSTER_KEY = values["roster"] ?? "";
+if (!ROSTER_KEY) {
+  console.error("[atomaton-delegate] no --roster given. Pass the roster key this server should offer, " + "which is its own name in `tools/defaults.yaml`: `delegate` offers the writing folders " + "and `delegate_readonly` the read-only ones. There is no default, because which entry is " + "wanted is what tells the two apart.");
   process.exit(2);
 }
-var DEFAULTS = AGENT_DEF_FILES.map((file) => {
-  const name = file.replace(/\.md$/, "");
-  const toolsFile = join(DELEGATES_DIR2, `${name}.tools.yaml`);
-  const tools = readToolsFile(toolsFile);
-  const servers = serverNames(tools, toolsFile);
-  return { file, name, toolsFile, tools, servers, canWrite: servers.includes("files"), role: rolePrompt(readDefinition(join(DELEGATES_DIR2, file))) };
-});
-var seenNames = new Set;
-for (const def of DEFAULTS) {
-  if (seenNames.has(def.name)) {
-    console.error(`[atomaton-delegate] '${def.name}' is offered twice by --agent-defs, so this server would ` + "advertise two tools with one name. atoma refuses that at registration and names the " + "server rather than the list; fix the list.");
-    process.exit(2);
-  }
-  seenNames.add(def.name);
+var { defs, problems } = resolveRoster(join(DELEGATES_ROOT, "delegates.yaml"), (path) => readFileSync(path, "utf8"), (path) => existsSync(path));
+if (problems.length > 0) {
+  for (const problem of problems)
+    console.error(`[atomaton-delegate] ${problem}`);
+  process.exit(2);
 }
+var MINE = defs.filter((def) => def.server === ROSTER_KEY);
+if (MINE.length === 0) {
+  console.error(`[atomaton-delegate] the roster declares no folders under \`${ROSTER_KEY}\`, so this server ` + `would offer no tools. Declared: ${[...new Set(defs.map((d) => d.server))].join(", ") || "(nothing)"}. ` + "Add the entry to delegates.yaml, or take the server out of tools/defaults.yaml.");
+  process.exit(2);
+}
+var DEFAULTS = MINE.map((def) => {
+  const tools = readToolsFile(def.toolsFile);
+  const servers = serverNamesOf(tools);
+  const canWrite = servers.includes("files");
+  return { ...def, tools, servers, canWrite, role: rolePrompt(readFileSync(def.agentFile, "utf8")) };
+});
 var SUB_RUN_MAX_RUNTIME_SECS = 600;
 var WRAPPER_TIMEOUT_MS = (SUB_RUN_MAX_RUNTIME_SECS + 60) * 1000;
 var PROVIDER_CREDENTIALS = RUN_CREDENTIALS.filter((name) => name !== "GH_TOKEN");
@@ -17961,7 +18039,7 @@ async function handleDelegateRun(def, args) {
   try {
     writeFileSync(toolsFile, Bun.YAML.stringify(def.tools, null, 2));
     writeFileSync(credentialsFile, JSON.stringify(credentials), { mode: 384 });
-    const agentDef = join(DELEGATES_DIR2, def.file);
+    const agentDef = def.agentFile;
     const prompt = buildPrompt(args.task, args.context);
     log(`delegating: ${args.task.slice(0, 120).replace(/\s+/g, " ")}`);
     const child = Bun.spawn([
@@ -18030,14 +18108,19 @@ async function handleDelegateRun(def, args) {
 function delegateDescription(def, shared) {
   return "Do one small piece of work in a separate run and return what it found. Use it for reading, " + "searching and changing files, and for running one command to answer a question \u2014 the work " + "whose transcript you do not want in this session. " + "The investigation you do not know how to start is the case it is most for: it does have " + 'its own `grep`, `glob` and `read`, so "find where X is defined and everywhere it is ' + 'called" is a task you can hand over rather than a search you have to do first. Say what ' + "an answer looks like and when to stop looking, and read `task` before calling. " + "It starts with NO memory of this conversation: put everything it needs in `task` and " + "`context`. Name the files when you already know them; when you do not, say so and give " + "it the ground to cover. " + "It CANNOT reach GitHub \u2014 no issues, no pull requests, no comments \u2014 cannot dispatch anything, " + "and cannot delegate further. " + (def.canWrite ? "It works in the same tree, so a change it makes is a change you will commit. " : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " + "comes back as a description rather than as an edit. ") + "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " + "resumes it. If the task is larger than that, or needs a decision, do it here instead." + shared;
 }
+function tierText(frontmatter) {
+  const free = (frontmatter.get("model") ?? "").endsWith("/free");
+  return free ? " This one is FREE, and its request limit is shared with every other agent using that tier " + "\u2014 so the way to find out whether a task fits is to try it. A refusal before you get an " + "answer means the task was too large for the tier, not that the task was wrong: use the " + "other delegate, or ask for less." : " This one is PAID, so reach for the free delegate first and come here when it has said the " + "task is too large \u2014 or when the task is obviously big enough that the refusal is certain.";
+}
 function distinguishingText(role) {
   const firstParagraph = role.split(/\n\s*\n/)[0]?.trim() ?? "";
   return firstParagraph ? ` ${firstParagraph.replace(/\s+/g, " ")}` : "";
 }
 function definitionTool(def) {
+  const front = frontmatter(readFileSync(def.agentFile, "utf8"), def.agentFile);
   return defineMcpTool({
     name: def.name,
-    description: delegateDescription(def, distinguishingText(def.role)),
+    description: delegateDescription(def, distinguishingText(def.role) + tierText(front)),
     schema: DELEGATE_RUN_SCHEMA,
     handler: (args) => handleDelegateRun(def, args)
   });

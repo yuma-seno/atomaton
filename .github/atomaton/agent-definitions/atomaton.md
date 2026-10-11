@@ -36,11 +36,8 @@ mcp_servers:
   - attachments
   # The writing delegate: a sub-run holding `files` and `shell`, for the reading
   # and searching that would otherwise fill this session with transcripts. See
-  # `delegate.md` for what it is and is not for.
-  #
-  # It carries the pair as two TOOLS -- `delegate_free` is the same sub-run on a free
-  # model, and only the price differs -- so the free one is what to reach for first,
-  # and the paid one is where a task the free tier refuses has to go.
+  # `delegates.yaml` for what it offers and on which model — that is a project's
+  # setting, and the tool descriptions say which one to reach for.
   - delegate
 ---
 
@@ -123,8 +120,9 @@ ways in, and they are different jobs:
 
 - `search_code` for "where is this" in this repository's own code, when
   you do not know the name.
-- `delegate_free` for the finding and reading through to an answer. Read `task`
-  before calling it: what to write is in that description.
+- a delegate, for the finding and reading through to an answer. Read `task` before
+  calling it: what to write is in that description, and so is which of the delegates
+  to reach for.
 
 ## Outcome
 
