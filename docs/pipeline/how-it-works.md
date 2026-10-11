@@ -68,6 +68,13 @@ for other reasons costs you a few seconds and no red run.
 merge the branch, and the tag now points inside the protected one though no tag
 was ever pushed. The merge's own event carries both ends of what arrived, so that
 tag deploys at the moment its commit becomes reviewed — with nothing anywhere
-holding a list of tags waiting their turn. Note that a **squash** merge writes a
-new commit, so a tag on the branch's own commits never becomes reachable that
-way: tag what you merged, or merge without squashing.
+holding a list of tags waiting their turn.
+
+This only holds for the merge method that keeps the branch's commits. Squash and
+rebase both write **new** commits: a squash collapses the branch into one, and a
+rebase re-creates each of its commits with a new SHA, so neither puts the commits
+you tagged in the base and a tag on one of them stays unreachable for good. A merge
+commit does — which is why Atomaton's own merge asks for one and the ruleset allows
+no other. [That method is a setting, and
+why](../github/tasks/merge-with-a-merge-commit.md). Tag what you merged, and merge
+with a method that keeps it.

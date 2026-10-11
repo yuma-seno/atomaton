@@ -81,9 +81,12 @@ export function commitsAdded(repo: string, before: string, after: string): strin
  *
  * `behind` means the head is an ancestor of the base, `identical` that they are the
  * same commit; both mean the commit is inside the branch. Measured against this
- * repository: `main...v0.1.157` answers `behind`, and a squash-merged pull request's
- * own head answers `diverged`, because a squash writes a new commit and leaves the
- * branch's commits outside.
+ * repository: `main...v0.1.157` answers `behind`. The answer is `diverged` for a
+ * commit that was only ever on a pull request's head branch, because neither of the
+ * two rewritten merge methods puts the branch's own commits in the base — a squash
+ * collapses them into one and a rebase re-creates them with new SHAs. With the
+ * merge commit this repository uses they do arrive, which is the point of using it:
+ * a tag placed on one of them deploys.
  */
 export function isContained(repo: string, branch: string, commit: string): boolean | null {
   const { code, stdout } = gh("api", `repos/${repo}/compare/${branch}...${commit}`, "--jq", ".status");

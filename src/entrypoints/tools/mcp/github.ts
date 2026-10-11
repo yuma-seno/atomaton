@@ -1324,8 +1324,11 @@ function checkMergeReadiness(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): s
  * Deletes the branch a merged pull request came from.
  *
  * A branch now appears only when a run commits, but an implemented issue still
- * leaves one behind for good, and they accumulate one per issue. Its work is in
- * the base by the time this runs, so the branch holds nothing the base does not.
+ * leaves one behind for good, and they accumulate one per issue. Every CHANGE the
+ * branch introduced is in the base by the time this runs -- not in the form of the
+ * branch's own commits, because the merge commits them under `--merge` and the merge
+ * commit's tree is what the base holds, but nothing the branch carried is left out
+ * of it.
  *
  * Deleting it is also what lets the next piece of work on the same issue take
  * the plain `atomaton/issue-N` name again: with the merged branch gone, nothing is
@@ -1370,7 +1373,17 @@ async function mergePr(a: z.infer<typeof PR_NUMBER_ARG_SCHEMA>): Promise<string>
     });
   }
 
-  const { code, stdout, stderr } = gh("pr", "merge", String(num), "--repo", REPO, "--squash");
+  // A merge commit, so the commit that is released is the commit that was
+  // reviewed. Squashing and rebasing both write a NEW commit: the branch's own
+  // SHAs never become reachable from the base, which is why a tag on one of them
+  // would not deploy (docs/pipeline/how-it-works.md) and why the approval recorded
+  // on the pull request is attached to a commit that is not in the tree that ships.
+  // The repository is configured to permit only this method -- the ruleset pins it
+  // (`allowed_merge_methods`) and the squash and rebase switches are off -- so this
+  // flag and that configuration say the same thing and either one alone would be
+  // enough. It is passed explicitly because this is the only merge site; a person
+  // merging from the web UI is constrained by the ruleset instead.
+  const { code, stdout, stderr } = gh("pr", "merge", String(num), "--repo", REPO, "--merge");
   log(`mergePr: gh pr merge rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
   if (code) mcpFail(`gh pr merge failed (rc=${code}): ${stderr || stdout}`);
   logOp("merge_pr", { number: num });

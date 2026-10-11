@@ -1505,4 +1505,50 @@ describe("generated workflows", () => {
         "needs.<job>.outputs.<name>.",
     ).toEqual([]);
   });
+
+  /**
+   * The merge method is declared in two places that cannot see each other, and a
+   * disagreement between them is a hard failure rather than a silent one.
+   *
+   * GitHub blocks a merge outright when the method a caller asks for is not one the
+   * ruleset allows -- "if you do not allow rebase merging for the repository, and
+   * the merge rule only allows rebase on a branch, that merge will not be
+   * possible". So a tool that asks for `--squash` while the ruleset pins `["merge"]`
+   * does not merge badly; it stops merging, in the one place an agent has no way to
+   * work around it.
+   *
+   * `--merge` is the method that keeps the released commit the reviewed one. It was
+   * `--squash`, which wrote a new commit for every pull request -- measured on this
+   * repository, PR #133's `625a156` landed as `2f208c8` with an identical tree and a
+   * new committer and timestamp -- so a tag placed on the branch's commits never
+   * became reachable, the caveat in `docs/pipeline/how-it-works.md` finally caught up
+   * with us, and the approval was attached to a commit that was not released.
+   */
+  test("the merge the shipped tool asks for is the merge the shipped ruleset allows", () => {
+    type Ruleset = {
+      rules?: { type?: string; parameters?: { allowed_merge_methods?: string[] } }[];
+    };
+    const ruleset = JSON.parse(readFileSync("dist/.github/atomaton/rulesets/main.json", "utf8")) as Ruleset;
+    const allowed = (ruleset.rules ?? [])
+      .filter((rule) => rule.type === "pull_request")
+      .flatMap((rule) => rule.parameters?.allowed_merge_methods ?? []);
+
+    expect(allowed, "the shipped ruleset must pin a merge method, or the file cannot be the arbiter").not.toEqual([]);
+
+    // The tool is TypeScript in the deliverable and git sees one line per statement,
+    // which detection can take for a binary. The gate is that the match COUNT is the
+    // flag's, not the file's.
+    const tool = readFileSync("dist/.github/atomaton-runtime/tools/mcp/github.ts", "utf8");
+    const flags = [...tool.matchAll(/"--(merge|squash|rebase)"/g)]
+      .map((m) => m[1] ?? "")
+      .filter((method) => method !== "");
+    expect(flags, "exactly one merge method must be asked for").toHaveLength(1);
+    const method = flags[0] ?? "";
+
+    expect(
+      allowed,
+      `the tool merges with --${method} and the ruleset allows [${allowed}]. GitHub refuses ` +
+        "a pull request whose method is not allowed, so this stops every agent merge.",
+    ).toContain(method);
+  });
 });
