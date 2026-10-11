@@ -37,10 +37,13 @@ function log(message: string): void {
  * `atomaton/issue-120` — and `branch-names.ts` settles ownership below, before
  * anything asks whether a branch merged.
  *
- * Merged is read from the pull requests rather than from git ancestry: a squash
- * merge leaves no ancestry to follow, so a branch whose work is in the base
- * would still look unmerged — and a run that believed that would resume a branch
- * whose commits are already released.
+ * Merged is read from the pull requests rather than from git ancestry: neither of
+ * the two rewritten merge methods leaves ancestry to follow — a squash collapses the
+ * branch into one new commit and a rebase re-creates each commit with a new SHA — so
+ * a branch whose work is in the base would still look unmerged, and a run that
+ * believed that would resume a branch whose commits are already released. Reading
+ * `merged_at` holds whatever method was used, which is why it is the question asked
+ * here rather than an ancestry walk.
  *
  * ## Why it says whether it knows
  *

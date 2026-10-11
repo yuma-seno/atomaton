@@ -40,12 +40,20 @@ in [the README](../README.md).
    file to import and the two settings that have to be right for agents. This
    step is not conditional on already having rules: it is how you get them.
 
-6. **Record the version you adopted.** `latest` is the convenient path; name a
+6. **Set the merge methods, and turn on branch cleanup.** Under **Settings >
+   General > Pull Requests**: allow merge commits, and switch off squash and
+   rebase. A merge commit is the only method that puts the reviewed commit in the
+   base — see [merge with a merge commit](github/tasks/merge-with-a-merge-commit.md)
+   for what the other two cost. Also enable **Automatically delete head
+   branches**: a repository that merges a pull request per issue accumulates one
+   branch per issue, and nothing else removes them.
+
+7. **Record the version you adopted.** `latest` is the convenient path; name a
    version instead when you want to know what you took and diff it later.
    Getting to the next one is vendoring rather than installing — [move to a
    newer release](runtime/tasks/move-to-a-newer-release.md).
 
-7. **Open the first issue.** Its first visible line is a bare agent name, and
+8. **Open the first issue.** Its first visible line is a bare agent name, and
    the request goes on the lines below. **Start with `atomaton`** — it is the
    agent a person reaches first, and it decides whether what you described is a
    question to answer, one leaf to do, or work to split into sub-issues. The

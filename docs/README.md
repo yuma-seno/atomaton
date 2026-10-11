@@ -50,6 +50,7 @@ only: the reason behind a step is at the other end of that step's link.
 | [change what a delegate may reach](tools/tasks/change-what-a-delegate-may-reach.md) | the `servers:` block in its tools file |
 | [write a tool of your own](tools/tasks/write-a-tool.md) | a new MCP server |
 | [make a branch ruleset work with agents](github/tasks/make-a-branch-ruleset-work-with-agents.md) | a server-side setting on GitHub, declared by `.github/atomaton/rulesets/main.json` |
+| [merge with a merge commit](github/tasks/merge-with-a-merge-commit.md) | three repository settings, one of them restated in the ruleset |
 | [move to a newer release](runtime/tasks/move-to-a-newer-release.md) | nothing — a vendoring procedure |
 | [have something happen every week](work/tasks/have-something-happen-every-week.md) | a workflow you copy in |
 
