@@ -1,7 +1,9 @@
 # When a check will not settle
 
 Two of these are GitHub's own behaviour rather than Atomaton's, and neither is
-fixable from `config.yaml`.
+fixable from `config.yaml`. The first is also not fixable from the repository at
+all, which is why it is the one that looks like a fault and is not — [what
+GitHub's own settings protect](boundaries.md).
 
 | Symptom | Likely cause | What to do |
 | --- | --- | --- |

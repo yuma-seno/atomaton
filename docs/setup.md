@@ -12,6 +12,9 @@ in [the README](../README.md).
    and approve pull requests**. Without it the engineer agent cannot open one,
    and [the `permissions` the generated workflows declare are not evidence this
    is done](github/boundaries.md#a-workflow-cannot-grant-itself-what-the-repository-withholds).
+   The same page is where you set **Read and write permissions** — a repository
+   left on read-only refuses the pull request however the workflow's own
+   `permissions` block reads.
 
 3. **Add the repository secret `ORCAROUTER_API_KEY`.** **Settings > Secrets and
    variables > Actions > New repository secret**, under that name. It is the one
