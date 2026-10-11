@@ -44,6 +44,82 @@ function describeMismatch(expected, mismatch) {
   return `${expected.server} ${parts.join("; and ")}. Expected exactly {${expected.tools.join(", ")}}. ` + expected.promise;
 }
 
+// src/domain/machinery/delegates.ts
+function serverNamesOf(tools) {
+  if (!tools || typeof tools !== "object")
+    return [];
+  return Object.keys(tools).filter((name) => name !== "hooks" && name !== "watch");
+}
+function requestedServersIn(agentText) {
+  const block = /^---\r?\n([\s\S]*?)\r?\n---/.exec(agentText);
+  if (!block)
+    return [];
+  const lines = (block[1] ?? "").split(/\r?\n/);
+  const at = lines.findIndex((line) => /^mcp_servers:\s*$/.test(line));
+  if (at === -1)
+    return [];
+  const names = [];
+  for (const line of lines.slice(at + 1)) {
+    if (/^\s*(#.*)?$/.test(line))
+      continue;
+    const item = /^\s+-\s*([^\s#]+)/.exec(line);
+    if (!item)
+      break;
+    names.push(item[1] ?? "");
+  }
+  return names.filter(Boolean);
+}
+function resolveRoster(rosterPath, read, exists) {
+  const problems = [];
+  const defs = [];
+  let parsed;
+  try {
+    parsed = Bun.YAML.parse(read(rosterPath));
+  } catch (error) {
+    return { defs, problems: [`${rosterPath} is not valid YAML: ${error.message}`] };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      defs,
+      problems: [`${rosterPath} must be a map of server name to the folders it offers.`]
+    };
+  }
+  const dir = rosterPath.replace(/[\\/][^\\/]*$/, "");
+  for (const [server, value] of Object.entries(parsed)) {
+    if (!Array.isArray(value) || value.some((name) => typeof name !== "string" || name.trim() === "")) {
+      problems.push(`${rosterPath}: \`${server}\` must be a list of folder names.`);
+      continue;
+    }
+    for (const raw of value) {
+      const name = raw.trim();
+      const agentFile = `${dir}/${name}/agent.md`;
+      const toolsFile = `${dir}/${name}/tools.yaml`;
+      if (!exists(agentFile) || !exists(toolsFile)) {
+        problems.push(`${rosterPath} names \`${server}: ${name}\`, but ${!exists(agentFile) ? agentFile : toolsFile} ` + "does not exist. A delegate folder holds agent.md and tools.yaml.");
+        continue;
+      }
+      const requested = requestedServersIn(read(agentFile)).sort();
+      const parsedTools = Bun.YAML.parse(read(toolsFile));
+      const declared = serverNamesOf(parsedTools?.servers).sort();
+      if (requested.join(",") !== declared.join(",")) {
+        problems.push(`${agentFile} asks for [${requested.join(", ")}] and ${toolsFile} declares ` + `[${declared.join(", ")}]. They must name the same servers.`);
+        continue;
+      }
+      defs.push({ name, server, agentFile, toolsFile });
+    }
+  }
+  const seen = new Map;
+  for (const def of defs) {
+    const previous = seen.get(def.name);
+    if (previous) {
+      problems.push(`${rosterPath}: \`${def.name}\` is offered by both \`${previous}\` and \`${def.server}\`, ` + "so two tools would carry one name. atoma refuses that at registration.");
+      continue;
+    }
+    seen.set(def.name, def.server);
+  }
+  return { defs, problems };
+}
+
 // src/domain/machinery/machinery-layout.ts
 var USER_ROOT = ".github/atomaton";
 var RUNTIME_ROOT = ".github/atomaton-runtime";
@@ -53,7 +129,8 @@ var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
 var SKILLS_DIR = `${USER_ROOT}/skills`;
 var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
 var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
+var DELEGATES_DIR = `${USER_ROOT}/delegates`;
+var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
 var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
 var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
 var RULESETS_DIR = `${USER_ROOT}/rulesets`;
@@ -242,6 +319,19 @@ async function main() {
     process.exit(1);
   }
   console.log(`${EXACT_TOOL_SETS.length} server(s) advertise exactly the tools they promise.`);
+  const rosterProblems = checkRoster();
+  if (rosterProblems.length > 0) {
+    for (const problem of rosterProblems)
+      console.error(`::error::${problem}`);
+    process.exit(1);
+  }
+  console.log("The delegate roster names only folders that exist and agree with their tools files.");
+}
+function checkRoster() {
+  const roster = machineryPath(DELEGATES_FILE);
+  if (!existsSync(roster))
+    return [];
+  return [...resolveRoster(roster, (path) => readFileSync(path, "utf8"), existsSync).problems];
 }
 if (import.meta.main) {
   main().catch((e) => {

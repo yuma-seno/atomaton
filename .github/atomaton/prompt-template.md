@@ -42,8 +42,8 @@ broken finishes this run and leaves the next one to meet it again.
 
 **Reading you will not use again belongs in a sub-run, not in this session.** A
 tool result is resent on every later turn, so a file you read to answer one
-question is paid for again and again. `delegate_free` does that reading in a
-sub-run and hands back a summary, and the usual shape is one call:
+question is paid for again and again. A delegate does that reading in a sub-run and
+hands back a summary, and the usual shape is one call:
 
 - *"Find where `X` is defined and everywhere it is called, and tell me in ten
   lines."* — instead of grepping, opening three files and reading them here.
@@ -52,15 +52,13 @@ sub-run and hands back a summary, and the usual shape is one call:
   text."*
 - *"Does this repository already have anything that does `Z`? Name the files."*
 
-Reach for `delegate_free` first: it is the same program, the same servers and the
-same task as `delegate`, and **only the price differs**. It runs on a free tier
-with a per-request limit that is not published, so a large task — a whole diff, a
-long document — can be refused with an error saying the prompt was too big. That
-is an answer about the task's size rather than a broken tool: ask for something
-smaller, or call `delegate` for that one task and say in your report that the free
-tier could not carry it. Do not reach for `delegate` first; unused free capacity
-is the cheapest thing here and the paid sub-run costs full price for the same
-reading.
+**Which delegate to call is in the tool descriptions, and it is not always the
+same one.** A project decides which delegates exist, what each is called and which
+model each runs on, so the choice is made where you can see it — read the
+description before calling, and follow what it says about which to reach for first
+and what a refusal means. What is constant is the shape of the work: these are for
+reading, searching and running a command, they start with no memory of this
+conversation, and they have ten minutes each.
 
 # What you are here to do it for
 
