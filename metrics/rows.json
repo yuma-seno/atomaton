@@ -27,9 +27,7 @@
       "search__search_issues": 2,
       "atomaton__request_close_issue": 1
     },
-    "acts": {
-      "other": 6
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T13:49:25Z",
@@ -68,13 +66,7 @@
       "github__get_issue": 2,
       "github__list_prs": 1
     },
-    "acts": {
-      "other": 13,
-      "search": 9,
-      "open": 2,
-      "edit": 2,
-      "verify": 4
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-10-07T02:25:36Z",
@@ -97,10 +89,10 @@
   {
     "path": "sessions/issue-109/atomaton.json",
     "agent": "atomaton",
-    "messages": 700,
-    "calls": 362,
+    "messages": 715,
+    "calls": 369,
     "failed": 6,
-    "refused": 2,
+    "refused": 0,
     "skills": [
       "project/conventions",
       "engineering/environment",
@@ -124,14 +116,14 @@
       "github__create_pr": 1,
       "github__get_pr": 1,
       "github__get_branch": 1,
-      "github__get_check_runs": 1
+      "github__get_check_runs": 1,
+      "bash": 2,
+      "probe": 3,
+      "request_close_issue": 1,
+      "create_issue": 1
     },
     "acts": {
-      "other": 51,
-      "open": 49,
-      "search": 145,
-      "verify": 13,
-      "edit": 7
+      "other": 2
     },
     "runs": [
       {
@@ -149,6 +141,28 @@
         "messages": 700,
         "seconds": 506,
         "started": "2026-10-08T18:26:15Z"
+      },
+      {
+        "ended": "2026-10-11T17:29:37Z",
+        "ended_because": "completed",
+        "iterations": 5,
+        "messages": 715,
+        "seconds": 455,
+        "server_calls": {
+          "atomaton": {
+            "request_close_issue": 1
+          },
+          "attachments": {
+            "probe": 3
+          },
+          "github": {
+            "create_issue": 1
+          },
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-10-11T17:22:02Z"
       }
     ]
   },
@@ -182,11 +196,7 @@
       "github__check_merge_readiness": 2,
       "web__fetch": 1
     },
-    "acts": {
-      "other": 232,
-      "edit": 6,
-      "open": 1
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-10-08T17:38:04Z",
@@ -279,9 +289,7 @@
       "web__fetch": 1,
       "atomaton__request_close_issue": 1
     },
-    "acts": {
-      "other": 7
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-10-07T02:48:05Z",
@@ -327,11 +335,7 @@
       "github__get_issue_comments": 1,
       "atomaton__launch_sub_agent": 1
     },
-    "acts": {
-      "other": 6,
-      "search": 6,
-      "open": 2
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-10-07T01:15:06Z",
@@ -383,11 +387,7 @@
       "github__commit_and_push": 1,
       "github__create_pr": 1
     },
-    "acts": {
-      "other": 148,
-      "open": 2,
-      "edit": 15
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T17:26:43Z",
@@ -484,13 +484,7 @@
       "grep": 4,
       "web__fetch": 1
     },
-    "acts": {
-      "other": 40,
-      "verify": 1,
-      "edit": 4,
-      "open": 2,
-      "search": 2
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T19:09:38Z",
@@ -540,13 +534,7 @@
       "web__fetch": 9,
       "github__get_pr_diff": 1
     },
-    "acts": {
-      "verify": 6,
-      "other": 151,
-      "search": 2,
-      "edit": 14,
-      "open": 2
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T17:36:07Z",
@@ -659,11 +647,7 @@
       "github__sync_branch": 1,
       "github__list_issues": 1
     },
-    "acts": {
-      "other": 174,
-      "edit": 24,
-      "open": 1
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T21:14:33Z",
@@ -713,11 +697,7 @@
       "github__get_branch": 1,
       "github__check_merge_readiness": 1
     },
-    "acts": {
-      "edit": 18,
-      "verify": 1,
-      "other": 90
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T18:04:21Z",
@@ -759,9 +739,7 @@
       "atoma_builtin__load_skill": 1,
       "atomaton__request_close_issue": 1
     },
-    "acts": {
-      "other": 3
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T14:03:11Z",
@@ -790,11 +768,7 @@
       "web__fetch": 2,
       "search__search_issues": 1
     },
-    "acts": {
-      "search": 15,
-      "other": 11,
-      "open": 3
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T13:59:56Z",
@@ -841,10 +815,7 @@
       "github__close_issue": 1,
       "github__list_issues": 1
     },
-    "acts": {
-      "other": 138,
-      "edit": 22
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T22:28:22Z",
@@ -932,9 +903,7 @@
       "atomaton__request_close_issue": 1,
       "atomaton__launch_sub_agent": 1
     },
-    "acts": {
-      "other": 6
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T14:11:30Z",
@@ -969,10 +938,7 @@
       "search__search_issues": 2,
       "github__create_issue": 1
     },
-    "acts": {
-      "search": 4,
-      "other": 38
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T14:02:45Z",
@@ -1001,9 +967,7 @@
       "web__fetch": 1,
       "atomaton__request_close_issue": 2
     },
-    "acts": {
-      "other": 3
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T14:04:39Z",
@@ -1037,11 +1001,7 @@
       "github__create_issue": 1,
       "web__fetch": 3
     },
-    "acts": {
-      "search": 23,
-      "other": 14,
-      "open": 11
-    },
+    "acts": {},
     "runs": [
       {
         "ended": "2026-09-27T14:02:16Z",
