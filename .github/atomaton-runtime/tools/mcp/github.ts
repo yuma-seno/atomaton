@@ -20454,7 +20454,7 @@ async function mergePr(a) {
 ${formatBlockers(readiness.blockers)}`
     });
   }
-  const { code, stdout, stderr } = gh("pr", "merge", String(num), "--repo", REPO, "--squash");
+  const { code, stdout, stderr } = gh("pr", "merge", String(num), "--repo", REPO, "--merge");
   log7(`mergePr: gh pr merge rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
   if (code)
     mcpFail(`gh pr merge failed (rc=${code}): ${stderr || stdout}`);
