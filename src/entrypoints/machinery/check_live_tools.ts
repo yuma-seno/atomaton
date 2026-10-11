@@ -69,9 +69,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compareToolSet, describeMismatch, EXACT_TOOL_SETS } from "../../domain/machinery/effective-tools.ts";
+import { resolveRoster } from "../../domain/machinery/delegates.ts";
 import {
   AGENT_DEFINITIONS_DIR,
   CONFIG_FILE,
+  DELEGATES_FILE,
   MACHINERY_ROOT_VAR,
   SCRIPTS_DIR,
   TOOL_DEFAULTS_FILE,
@@ -350,6 +352,34 @@ export async function main(): Promise<void> {
     process.exit(1);
   }
   console.log(`${EXACT_TOOL_SETS.length} server(s) advertise exactly the tools they promise.`);
+
+  // Third, and it is the one check here that reads a file rather than starting
+  // something: the roster, and the folders it names. It is in this script because
+  // this script is the one that already runs the deliverable against itself on a
+  // pull request, and a roster that is wrong fails every sub-run the moment an agent
+  // delegates — which is late, in a run nobody is watching, reported as a tool that
+  // would not start rather than as a file that disagrees.
+  const rosterProblems = checkRoster();
+  if (rosterProblems.length > 0) {
+    for (const problem of rosterProblems) console.error(`::error::${problem}`);
+    process.exit(1);
+  }
+  console.log("The delegate roster names only folders that exist and agree with their tools files.");
+}
+
+/**
+ * Every way the shipped delegate roster is wrong, as sentences naming the file.
+ *
+ * Missing is not one of them. A project that ships no `delegates.yaml` has to have
+ * a `tools/defaults.yaml` without the delegate servers too, which is a coherent
+ * choice rather than a fault — so an absent roster is not this phase's business.
+ * An absent roster beside a `--roster` flag is, and that is caught at startup by
+ * `mcp/delegate.ts`, where the server that would offer nothing can say so.
+ */
+function checkRoster(): string[] {
+  const roster = machineryPath(DELEGATES_FILE);
+  if (!existsSync(roster)) return [];
+  return [...resolveRoster(roster, (path) => readFileSync(path, "utf8"), existsSync).problems];
 }
 
 // Awaited rather than fired. `main` became async for the second phase, and an

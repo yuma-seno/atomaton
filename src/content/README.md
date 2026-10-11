@@ -27,6 +27,9 @@ Then the paths, because the path of each thing here is how you know what it is.
 | `prompt-template.md` | The system prompt each role prompt is placed into. |
 | `skills/<category>/<name>.md` | Instructions loaded on demand. `<category>/<name>` is the name an agent asks for. |
 | `rulesets/main.json` | Branch protection, in GitHub's import format rather than ours. |
+| `delegates/delegates.yaml` | Which server offers which delegate folders. Edit it to add one, or to change what they are called. |
+| `delegates/<name>/agent.md` | One delegate: the provider, the model, and the role prompt its sub-run is started with. **The model is the field you are most likely to want.** |
+| `delegates/<name>/tools.yaml` | What that sub-run may reach. Narrowing it here is what makes a delegate safe to give to an agent that must not write. |
 | `scripts/` | Yours to create: the commands `config.yaml` names under `checks` and `deploy`. Nothing ships here, and nothing replaces it on upgrade. |
 
 A command may of course live anywhere in your repository — `config.yaml` names a
@@ -102,35 +105,41 @@ every run.
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. |
 | `attachments` | Probes and uses GitHub's user-asset upload endpoint, the one `gh --attach` posts to. Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion. |
 | `atomaton_env` | Rebuilding the run's environment, and nothing else. |
-| `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers the writing pair as two tools. |
+| `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers the writing folders from `delegates.yaml`. |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. |
 
 An agent gets the ones its own `mcp_servers` names, and only those. A server
 nobody names is never started, so there is nothing to gain by removing one — which
 is why there is no way to.
 
-The two delegate servers are one program, `mcp/delegate.ts`, each started with the
-definition files it should offer. **Each definition becomes one tool, named after
-its file**, so the writing server advertises `delegate` and `delegate_free` and the
-read-only one advertises `delegate_readonly` and `delegate_readonly_free`. A caller
-therefore chooses between the free and paid variants as tools — which is what they
-are: the same sub-run, the same servers, one line of a definition different.
+The two delegate servers are one program, `mcp/delegate.ts`, each started with a
+roster key. **Each folder under `delegates/` becomes one tool, named after the
+folder**, so the writing server advertises `delegate` and `delegate_large` and the
+read-only one advertises its own pair. A caller therefore chooses between them as
+tools, and `delegates.yaml` is what says which folders each server offers.
 
-The definitions live under `atomaton-runtime/tools/delegates/`, beside the server
-that reads them. They are not agent definitions: a delegate is started by the tool
-and never by a person, so it is deliberately outside `agent-definitions/`, which is
-the namespace `/<name>` dispatches from.
+The folders live under `delegates/`, with that roster. They are not agent
+definitions: a delegate is started by the tool and never by a person, so it is
+deliberately outside `agent-definitions/`, which is the namespace `/<name>`
+dispatches from.
 
 Two servers rather than one offering all four, and the split is the confinement:
 an agent given the writing delegate can reach a write through it, so an agent that
 must not write must not be given it.
 
-The `_free` variants exist because a delegated task is the one place the free tier
-can be used at all: a top-level run starts from the issue, every comment and the
-pull request's diff, which exceeds the tier's per-request cap before the model says
-anything, whereas a delegate is handed only the task its caller wrote. The choice
-between the two is a price and nothing else, which is why an agent is told to reach
-for the free one and fall back only when it says the task did not fit.
+The second folder of each pair exists because a delegated task is the one place a
+free tier can be used at all: a top-level run starts from the issue, every comment
+and the pull request's diff, which exceeds the tier's per-request cap before the
+model says anything, whereas a delegate is handed only the task its caller wrote.
+
+**Which of the two is free is read from the `model:` line, not from the name.** A
+folder whose model ends in `/free` is described to the caller as free, with a limit
+shared across every agent on that tier, and the caller is told to try it and read a
+refusal as an answer. Point the folder at another model and the description moves
+with it, without an agent definition being edited — which is why the instruction is
+in the tool description rather than in a prompt. That is also the field a project
+most wants to change here, and it is why these folders are under `.github/atomaton/`
+rather than under `.github/atomaton-runtime/`, which an upgrade replaces.
 
 **Why they are not in the file you edit.** Deleting one takes a capability from
 every agent that named it, and `atoma` stops the run before a single tool starts

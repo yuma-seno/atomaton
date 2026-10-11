@@ -185,15 +185,20 @@ function copyStaticAtomatonContent(): void {
   for (const file of ["defaults.yaml", "packages.json"]) {
     cpSync(join(srcRuntimeTools, file), join(distRuntimeTools, file));
   }
-  // The delegate's own files: the agent definitions and the tools files its
-  // sub-runs are handed. Copied rather than bundled, because they are data the
-  // server reads at run time.
+  // The delegate's own files: the roster, and each definition's `agent.md` and
+  // `tools.yaml`. Copied rather than bundled, because they are data the server reads
+  // at run time.
   //
-  // They are here and NOT under `.github/atomaton/agent-definitions/`, which is the
-  // namespace a person dispatches from. A definition there is a `/<name>` a person
-  // can type, an entry in every agent's colleague list, and a valid value for
+  // They come from `content/` and land under `.github/atomaton/`, which is the
+  // directory an upgrade does not overwrite without a person deciding: a `model:`
+  // line is the thing a project most wants to change about a delegate, and it used to
+  // be in a file the next release replaced. See `DELEGATES_DIR` in
+  // `domain/machinery/machinery-layout.ts`.
+  copyDirectoryFresh(join(srcAtomatonDir, "delegates"), join(distAtomatonDir, "delegates"));
+  // And NOT under `.github/atomaton/agent-definitions/`, which is the namespace a
+  // person dispatches from. A definition there is a `/<name>` a person can type, an
+  // entry in every agent's colleague list, and a valid value for
   // `agents.on_config_finding` — none of which a delegate is. See `mcp/delegate.ts`.
-  copyDirectoryFresh(join(srcRuntimeTools, "delegates"), join(distRuntimeTools, "delegates"));
   // The tools file is NOT built here and does NOT ship. `write_tools_file.ts` writes
   // it per run, from the config, into the runner's temp directory.
   //

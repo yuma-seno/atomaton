@@ -126,20 +126,28 @@ export const TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
 export const TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
 
 /**
- * The delegate definitions and their tools files.
+ * The delegate definitions, their tools files, and the roster that names them.
  *
- * Under [`TOOLS_DIR`] rather than [`AGENT_DEFINITIONS_DIR`], and that is the whole
- * point of the directory: `agent-definitions/` is the namespace a PERSON dispatches
- * from, so a delegate sitting there became a `/delegate` command that would fail on
- * its first turn, an entry in every agent's colleague list, and a legal value for
- * `agents.on_config_finding`. A delegate is started by `mcp/delegate.ts` and by
- * nothing else, so it lives beside the server that reads it.
+ * Under [`USER_ROOT`] rather than under [`TOOLS_DIR`], and the move is the point of
+ * this constant. The `model:` line is what a project most wants to change here —
+ * one provider is not another's, and neither is one model — and this directory was
+ * under `.github/atomaton-runtime/`, which an upgrade replaces wholesale. A model
+ * edited there was gone at the next release, with nothing to say so.
  *
- * `mcp/delegate.ts` resolves `--delegates-dir` against this layout with
- * `machineryPath()`, so the value in `defaults.yaml` is this constant and not a
- * root-prefixed path — prefixing it there as well produced `<root>/<root>/...`.
+ * What each server offers is `delegates.yaml`: a map from a server name — the name
+ * an agent's `mcp_servers` lists — to the folders under this directory whose
+ * `agent.md` becomes a tool. One folder per definition, holding `agent.md` and
+ * `tools.yaml`, so neither is derived from the other's name.
+ *
+ * The roster is under [`USER_ROOT`] with the definitions rather than in
+ * `tools/defaults.yaml`, because which delegates exist and what they run on is one
+ * decision made in one place, and that place is a project's.
  */
-export const DELEGATES_DIR = `${TOOLS_DIR}/delegates`;
+export const DELEGATES_DIR = `${USER_ROOT}/delegates`;
+
+/** The roster: server name -> the folders under [`DELEGATES_DIR`] it offers. */
+export const DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
+
 
 /**
  * Hook scripts.

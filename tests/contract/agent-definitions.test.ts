@@ -154,52 +154,97 @@ describe("a server that exists for a call an agent must make", () => {
  * them — it is started by `mcp/delegate.ts` and by nothing else, and it has no
  * `task` argument a person could supply.
  *
- * So they live under the runtime root, beside the server that reads them, and this
- * test is what keeps them there. It is a test rather than a comment because the
- * failure is silent in both directions: a definition moved back would start
- * appearing in colleague lists and as a dispatchable name, and nothing else in the
- * repository would report it.
+ * So they live under `.github/atomaton/delegates/`, with the roster that names
+ * them, and this test is what keeps them there. It is a test rather than a comment
+ * because the failure is silent in both directions: a definition moved back would
+ * start appearing in colleague lists and as a dispatchable name, and nothing else in
+ * the repository would report it.
+ *
+ * They moved there from `.github/atomaton-runtime/tools/delegates/`, which is a
+ * build output an upgrade replaces wholesale — and `model:` is the field a project
+ * most wants to change about a delegate. The second half of each message below is
+ * what makes the next move fail loudly.
  */
 describe("the delegate's definitions are not in the agent namespace", () => {
-  const DELEGATES_DIR = join(process.cwd(), "src/entrypoints/tools/delegates");
+  const DELEGATES_DIR = join(process.cwd(), "src/content/delegates");
+  const ROSTER = join(DELEGATES_DIR, "delegates.yaml");
 
-  test("no delegate definition is under agent-definitions/", () => {
+  /**
+   * Every folder the roster names, resolved — so a folder that exists and is not
+   * listed is not checked, which is the same rule `resolveRoster` applies.
+   */
+  const listed = (): { server: string; name: string }[] => {
+    const parsed = Bun.YAML.parse(readFileSync(ROSTER, "utf8")) as Record<string, string[]>;
+    return Object.entries(parsed).flatMap(([server, names]) => names.map((name) => ({ server, name })));
+  };
+
+  test("no delegate folder is under agent-definitions/", () => {
     const strays = agentFiles.filter((f) => f.startsWith("delegate"));
     expect(
       strays,
       "a delegate definition under agent-definitions/ becomes a /<name> a person can dispatch, " +
         "an entry in every colleague list, and a valid agents.on_config_finding value. " +
-        "Move it to src/entrypoints/tools/delegates/.",
+        "Move it to src/content/delegates/.",
     ).toEqual([]);
   });
 
-  test("each delegate definition is beside the tools file its sub-run is handed", () => {
-    const defs = readdirSync(DELEGATES_DIR).filter((f) => f.endsWith(".md"));
-    expect(defs.length, "the delegate definitions must exist").toBeGreaterThan(0);
-    for (const def of defs) {
-      const tools = join(DELEGATES_DIR, `${def.replace(/\.md$/, "")}.tools.yaml`);
-      expect(
-        existsSync(tools),
-        `${def} has no ${def.replace(/\.md$/, "")}.tools.yaml beside it. ` +
-          "mcp/delegate.ts derives the tools file from the definition's name, so a missing one " +
-          "is a sub-run that refuses to start.",
-      ).toBe(true);
+  test("the roster names folders that exist, each holding agent.md and tools.yaml", () => {
+    expect(existsSync(ROSTER), "the roster must exist, or nothing starts a delegate").toBe(true);
+    const entries = listed();
+    expect(entries.length, "the roster must name at least one folder").toBeGreaterThan(0);
+    for (const { server, name } of entries) {
+      for (const file of ["agent.md", "tools.yaml"]) {
+        expect(
+          existsSync(join(DELEGATES_DIR, name, file)),
+          `the roster lists \`${server}: ${name}\`, but ${name}/${file} does not exist. ` +
+            "mcp/delegate.ts refuses to start on this, after the run has begun.",
+        ).toBe(true);
+      }
     }
   });
 
-  test("a delegate's mcp_servers are the servers its tools file declares", () => {
-    for (const def of readdirSync(DELEGATES_DIR).filter((f) => f.endsWith(".md"))) {
-      const requested = requestedServersIn(join(DELEGATES_DIR, def));
+  test("each delegate's mcp_servers are the servers its tools file declares", () => {
+    for (const { name } of listed()) {
+      const requested = requestedServersIn(join(DELEGATES_DIR, name, "agent.md"));
       const tools = Bun.YAML.parse(
-        readFileSync(join(DELEGATES_DIR, `${def.replace(/\.md$/, "")}.tools.yaml`), "utf8"),
+        readFileSync(join(DELEGATES_DIR, name, "tools.yaml"), "utf8"),
       ) as { servers?: Record<string, unknown> };
       const declared = Object.keys(tools.servers ?? {});
       expect(
         [...requested].sort(),
-        `${def} and its tools file disagree. Atoma resolves the definition's mcp_servers against ` +
-          "the tools file the sub-run is handed, and a name in one that is not in the other is a " +
-          "server that does not start.",
+        `${name}/agent.md and ${name}/tools.yaml disagree. Atoma resolves the definition's ` +
+          "mcp_servers against the tools file the sub-run is handed, and a name in one that is " +
+          "not in the other is a server that does not start.",
       ).toEqual([...declared].sort());
+    }
+  });
+
+  /**
+   * The free tier is a property of the model a folder names, and the description a
+   * caller reads is built from that field — not from the folder name. A pair whose
+   * two folders name the same model would offer one tool at two prices and describe
+   * both as free, which is the drift this checks for.
+   */
+  test("a writing folder and its read-only sibling declare the same servers", () => {
+    const byName = new Map(listed().map((entry) => [entry.name, entry]));
+    for (const [plain, large] of [
+      ["delegate", "delegate_large"],
+      ["delegate_readonly", "delegate_readonly_large"],
+    ] as const) {
+      expect(byName.has(plain), `${plain} must be in the roster`).toBe(true);
+      expect(byName.has(large), `${large} must be in the roster`).toBe(true);
+      const servers = (name: string): string[] =>
+        Object.keys(
+          (Bun.YAML.parse(readFileSync(join(DELEGATES_DIR, name, "tools.yaml"), "utf8")) as {
+            servers?: Record<string, unknown>;
+          }).servers ?? {},
+        ).sort();
+      expect(
+        servers(large),
+        `${plain} and ${large} are one role at two tiers, so they must reach the same servers. ` +
+          "A caller told to try one and fall back to the other would get a different reach by " +
+          "falling back, which is not the choice it was offered.",
+      ).toEqual(servers(plain));
     }
   });
 });

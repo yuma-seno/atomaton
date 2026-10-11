@@ -51,12 +51,14 @@
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { buildMcpTools, defineMcpTool, serveMcpServer, z, type BuiltMcpTool, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 import { machineryPath } from "../../../adapters/runner/machinery.ts";
+import { DELEGATES_DIR } from "../../../domain/machinery/machinery-layout.ts";
+import { requestedServersIn, resolveRoster, serverNamesOf, type DelegateDef } from "../../../domain/machinery/delegates.ts";
 import { TOOL_OUTPUT_BACKSTOP } from "../../../shared/tool-output.ts";
 import { RUN_CREDENTIALS } from "../../../domain/delivery/declared-secrets.ts";
 import { literalsFrom, redact } from "../../../shared/redaction.ts";
@@ -73,22 +75,19 @@ function log(message: string): void {
 hardenCredentialHolder(log);
 
 /**
- * Where this server's own files are, when nothing says otherwise.
+ * Where the delegates are, when nothing says otherwise.
  *
- * `delegates/` sits beside `mcp/` in the deployed tree, and beside it in `src/`
- * too — `entrypoints/tools/delegates/` — so one relative step reaches it from
- * either. That is the same trick `shipped-servers.ts` documents getting wrong once:
- * the deployed tree flattens `src/domain/` into the script that imports it, so a
- * path derived from `import.meta.url` is right in one layout and wrong in the
- * other. Here the two DO agree, because `mcp/delegate.ts` deploys to
- * `tools/mcp/delegate.ts` and `delegates/` deploys to `tools/delegates/` — the
- * parent is `tools/` in both.
+ * `DELEGATES_DIR` from the layout, resolved through `machineryPath` — the same
+ * mechanism every other layout path uses, and what makes this correct in both trees
+ * without a relative step from `import.meta.url`. That trick worked while the
+ * definitions were beside this script under the runtime root, and stopped working
+ * when they moved under `.github/atomaton/`, which is a different tree entirely.
  *
- * A caller that knows better passes `--delegates-dir`, and the workflow does: the
- * machinery root is not always the working directory.
+ * A caller passes `--delegates-dir` when the machinery root is not the working
+ * directory, and the workflow does.
  */
 function defaultDelegatesDir(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "delegates");
+  return machineryPath(DELEGATES_DIR);
 }
 
 /**
@@ -193,12 +192,10 @@ function readToolsFile(path: string): Record<string, unknown> {
 /**
  * Which servers the sub-run is given, and which definition it is started with.
  *
- * Both come from the command line rather than from a table here, because the
- * distinction between the two entries this server backs is a CONFIGURATION
- * distinction and belongs in `defaults.yaml` where a reader can see it:
+ * The roster decides, and it lives with the definitions rather than here:
  *
- *   `delegate`          --servers files,shell        --agent-def delegate.md
- *   `delegate_readonly` --servers files_readonly     --agent-def delegate_readonly.md
+ *   delegate:          [delegate, delegate_large]
+ *   delegate_readonly: [delegate_readonly, delegate_readonly_large]
  *
  * The implementation is one program. What differs is what the sub-run may reach,
  * and that is the whole of the confinement: `delegate_readonly` exists so an agent
@@ -207,12 +204,12 @@ function readToolsFile(path: string): Record<string, unknown> {
  * making that a second entry rather than a runtime check is what keeps the rule
  * visible in the file a person reads.
  *
- * The agent definition is named here too, and not derived from the server list,
+ * The definition and its tools file are checked against each other at startup,
  * because atoma resolves the definition's `mcp_servers` against the tools file it
- * is handed: the two have to agree, and naming both in one place is what makes
- * that agreement checkable rather than hoped for.
+ * is handed: a name in one that is not in the other is a server that does not start,
+ * reported as a missing tool rather than as a file that disagrees.
  *
- * ## Why the definition and the tools file are NOT in `agent-definitions/`
+ * ## Why the definitions are NOT in `agent-definitions/`
  *
  * They were, and it was wrong. `agent-definitions/` is the namespace a PERSON
  * dispatches from: `/<name>` on an issue starts a run, `{{COLLEAGUES_LIST}}` is
@@ -224,103 +221,112 @@ function readToolsFile(path: string): Record<string, unknown> {
  * turn, put it in every agent's colleague list, and offered it as a value for a
  * config key that starts a run.
  *
- * So both live under the runtime root, beside the server that reads them, and
- * neither is in the namespace a person or a workflow resolves names against.
+ * ## Why they are under `.github/atomaton/` rather than the runtime root
+ *
+ * They were under the runtime root, beside this script, and that was wrong too —
+ * for the reason `docs/runtime/boundaries.md` gives. `.github/atomaton-runtime/` is
+ * a build output: an upgrade replaces it wholesale. A `model:` line is the single
+ * thing a project most wants to change about a delegate, and it was in a file that
+ * the next release overwrote.
  */
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
   options: {
-    "agent-defs": { type: "string", multiple: true },
+    roster: { type: "string" },
     "delegates-dir": { type: "string" },
   },
 });
 
 /**
- * Where the delegate's own files are.
+ * Where the delegates are, and the roster that names them.
  *
- * `--delegates-dir` when given, resolved against the machinery root so a workflow
- * can pass the layout-relative path; otherwise the directory beside this script.
- * The two agree in both layouts — see `defaultDelegatesDir`.
+ * `--delegates-dir` when given, resolved through `machineryPath` so a workflow can
+ * pass the layout-relative path; otherwise the layout constant. The roster is
+ * `delegates.yaml` inside it, so one flag moves both.
  */
-const DELEGATES_DIR = values["delegates-dir"]
-  ? resolve(machineryPath(values["delegates-dir"]))
+const DELEGATES_ROOT = values["delegates-dir"]
+  ? machineryPath(values["delegates-dir"])
   : defaultDelegatesDir();
 
 /**
- * The agent definitions this server offers, each becoming one tool.
+ * Which of them this server offers.
  *
- * Required, and there is no default. A default would be the name of one
- * definition, which is a choice only a caller can make: this program is four
- * servers in `tools/defaults.yaml` — a writing pair and a read-only pair — and
- * which of those a caller wants is the whole of what tells them apart. Guessing
- * wrong starts a server with the wrong reach.
- *
- * A list rather than one name, because two entries that differ only in the model
- * are the same offer at two prices, and an agent choosing between them should be
- * choosing between two tools rather than between two servers it cannot compare.
- * It is also what makes each tool's name distinct: `unprefixed` means a tool is
- * known by its own name, so two servers offering one name are fatal, and a single
- * hard-coded name here was exactly that.
+ * Required, and there is no default. A default would be a name, and this program is
+ * two servers in `tools/defaults.yaml` — a writing one and a read-only one — so
+ * which roster entry is wanted is the whole of what tells them apart. Guessing wrong
+ * starts a server with the wrong reach.
  */
-const AGENT_DEF_FILES = values["agent-defs"] ?? [];
-if (AGENT_DEF_FILES.length === 0) {
+const ROSTER_KEY = values["roster"] ?? "";
+if (!ROSTER_KEY) {
   console.error(
-    "[atomaton-delegate] no --agent-defs given. Pass the definition file(s) this server should " +
-      "offer, naming one tool each; there is no default, because which definitions a server " +
-      "offers is what tells the writing pair from the read-only pair.",
+    "[atomaton-delegate] no --roster given. Pass the roster key this server should offer, " +
+      "which is its own name in `tools/defaults.yaml`: `delegate` offers the writing folders " +
+      "and `delegate_readonly` the read-only ones. There is no default, because which entry is " +
+      "wanted is what tells the two apart.",
   );
   process.exit(2);
 }
 
 /**
- * One definition this server offers, with the files derived from its name.
+ * One definition this server offers, with its two files read.
  *
- * The tools file is derived from the definition name so the two cannot drift:
- * `delegate.md` reads `delegate.tools.yaml`, `delegate_readonly.md` reads
- * `delegate_readonly.tools.yaml`. There is no `--tools-file`: it named one of the
- * files under `delegates/`, and a caller that passed a definition and a server
- * list that disagreed was naming a delegate neither file described.
+ * The roster resolves the paths and checks that the pair exists; this adds what the
+ * server needs to run one, which is the parsed tools file and the role prompt. The
+ * division is deliberate: what a roster MEANS is `domain/machinery/delegates.ts` and
+ * is tested there, and this file only does the reading.
  */
-interface DelegateDef {
-  /** The definition's file name, as passed — `delegate_readonly.md`. */
-  file: string;
-  /** The tool's name and the server's own word for it: the file name without `.md`. */
-  name: string;
-  /** Absolute path to the sub-run's tools file. */
-  toolsFile: string;
-  /** That file, read at startup and handed to the sub-run as it is. */
+interface ResolvedDelegate extends DelegateDef {
+  /** The sub-run's tools file, read at startup and handed over as it is. */
   tools: Record<string, unknown>;
   /** The servers the sub-run gets, read from that file. */
   servers: string[];
-  /** Whether the sub-run may change the tree — see `CAN_WRITE`. */
+  /** Whether the sub-run may change the tree — see the `canWrite` branch below. */
   canWrite: boolean;
-  /** The role prompt in the definition, which the tool's description is built from. */
+  /** The role prompt, which the tool's description is built from. */
   role: string;
 }
 
-const DEFAULTS: DelegateDef[] = AGENT_DEF_FILES.map((file) => {
-  const name = file.replace(/\.md$/, "");
-  const toolsFile = join(DELEGATES_DIR, `${name}.tools.yaml`);
-  const tools = readToolsFile(toolsFile);
-  const servers = serverNames(tools, toolsFile);
-  return { file, name, toolsFile, tools, servers, canWrite: servers.includes("files"), role: rolePrompt(readDefinition(join(DELEGATES_DIR, file))) };
-});
+const { defs, problems } = resolveRoster(
+  join(DELEGATES_ROOT, "delegates.yaml"),
+  (path) => readFileSync(path, "utf8"),
+  (path) => existsSync(path),
+);
 
-// Two definitions of one name would be two tools of one name, which the core refuses
-// at registration with a message about the SERVER — `delegate` and `delegate` — that
-// says nothing about this file. Named here, where the list that caused it is.
-const seenNames = new Set<string>();
-for (const def of DEFAULTS) {
-  if (seenNames.has(def.name)) {
-    console.error(
-      `[atomaton-delegate] '${def.name}' is offered twice by --agent-defs, so this server would ` +
-        "advertise two tools with one name. atoma refuses that at registration and names the " +
-        "server rather than the list; fix the list.",
-    );
-    process.exit(2);
-  }
-  seenNames.add(def.name);
+// Every problem at once, then stop. A roster is read once at startup, so the log is
+// the only place a person will see this, and one round trip per mistake in a file
+// they are editing is the difference between a fix and a guess.
+if (problems.length > 0) {
+  for (const problem of problems) console.error(`[atomaton-delegate] ${problem}`);
+  process.exit(2);
 }
+
+/**
+ * The definitions this server's roster entry names, in roster order.
+ *
+ * Empty is fatal here where an unlisted FOLDER is not: the roster deliberately does
+ * not care about folders nobody offers, but a server that was started with a key
+ * this project does not declare is a `tools/defaults.yaml` that disagrees with
+ * `delegates.yaml`, and a server with no tools starts and offers nothing.
+ */
+const MINE = defs.filter((def) => def.server === ROSTER_KEY);
+if (MINE.length === 0) {
+  console.error(
+    `[atomaton-delegate] the roster declares no folders under \`${ROSTER_KEY}\`, so this server ` +
+      `would offer no tools. Declared: ${[...new Set(defs.map((d) => d.server))].join(", ") || "(nothing)"}. ` +
+      "Add the entry to delegates.yaml, or take the server out of tools/defaults.yaml.",
+  );
+  process.exit(2);
+}
+
+const DEFAULTS: ResolvedDelegate[] = MINE.map((def) => {
+  const tools = readToolsFile(def.toolsFile);
+  const servers = serverNamesOf(tools);
+  // `files` and not `files_readonly`: the writing delegate is the one that can change
+  // the tree, and the allowlist is what makes the other read-only rather than the
+  // program being different.
+  const canWrite = servers.includes("files");
+  return { ...def, tools, servers, canWrite, role: rolePrompt(readFileSync(def.agentFile, "utf8")) };
+});
 
 /**
  * How long the sub-run may take, in seconds.
@@ -467,7 +473,7 @@ function reportFrom(envelope: RunEnvelope): string {
   );
 }
 
-async function handleDelegateRun(def: DelegateDef, args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Promise<McpToolResult> {
+async function handleDelegateRun(def: ResolvedDelegate, args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Promise<McpToolResult> {
   const credentials = providerCredentials(process.env);
   if (Object.keys(credentials).length === 0) {
     // A sub-run with no provider key fails at its first inference with a message
@@ -498,7 +504,7 @@ async function handleDelegateRun(def: DelegateDef, args: z.infer<typeof DELEGATE
     // starting any server, and until then it is the only place the keys are.
     writeFileSync(credentialsFile, JSON.stringify(credentials), { mode: 0o600 });
 
-    const agentDef = join(DELEGATES_DIR, def.file);
+    const agentDef = def.agentFile;
     const prompt = buildPrompt(args.task, args.context);
 
     log(`delegating: ${args.task.slice(0, 120).replace(/\s+/g, " ")}`);
@@ -617,8 +623,21 @@ async function handleDelegateRun(def: DelegateDef, args: z.infer<typeof DELEGATE
  * The middle sentence — what the sub-run holds — is the one a caller cannot see for
  * itself, and the `canWrite` branch is why it is here rather than in the definition:
  * the servers decide the reach, and the servers come from the tools file.
+ *
+ * ## Why the tier is described here rather than in the caller's prompt
+ *
+ * The caller is told which delegate to reach for by THIS text, and not by a line in
+ * its own role prompt, for a reason that is the whole point of the roster: which
+ * delegates exist is a project's decision. A prompt that named `delegate_free`
+ * said something that stopped being true the moment that project renamed a folder,
+ * changed `provider:`, or pointed both entries at one model — and a prompt cannot be
+ * edited without editing an agent definition, which is the file a project least
+ * wants to fork.
+ *
+ * So the caller's prompt says "delegate this" and this text says "which one", and
+ * the roster is what keeps the second sentence honest.
  */
-function delegateDescription(def: DelegateDef, shared: string): string {
+function delegateDescription(def: ResolvedDelegate, shared: string): string {
   return (
     "Do one small piece of work in a separate run and return what it found. Use it for reading, " +
     "searching and changing files, and for running one command to answer a question — the work " +
@@ -643,6 +662,35 @@ function delegateDescription(def: DelegateDef, shared: string): string {
 }
 
 /**
+ * The tier this definition runs on, said in the words a caller chooses by.
+ *
+ * Read from the definition's frontmatter rather than written here, because the
+ * frontmatter is what a project edits: a folder that has been pointed at a paid
+ * model must stop being offered as the free one, and that is a change to the file
+ * that says `model:`, not to this program.
+ *
+ * `orcarouter/free` is the one value that means the shared tier. It is a literal
+ * rather than a classifier of the model name because the tier is not a property of
+ * a name — it is what this particular deployment serves without charge and with a
+ * request cap shared by every agent using it.
+ *
+ * A caller told "try the free one and read a refusal as an answer" needs to know
+ * which tool that is, and this is where it finds out. Nothing else about the
+ * difference is here: that a paid model also costs more is something a caller does
+ * not spend, so it is not something the caller is asked to weigh.
+ */
+function tierText(frontmatter: Map<string, string>): string {
+  const free = (frontmatter.get("model") ?? "").endsWith("/free");
+  return free
+    ? " This one is FREE, and its request limit is shared with every other agent using that tier " +
+        "— so the way to find out whether a task fits is to try it. A refusal before you get an " +
+        "answer means the task was too large for the tier, not that the task was wrong: use the " +
+        "other delegate, or ask for less."
+    : " This one is PAID, so reach for the free delegate first and come here when it has said the " +
+        "task is too large — or when the task is obviously big enough that the refusal is certain.";
+}
+
+/**
  * How this delegate differs from the others this server offers.
  *
  * Read from the definition's own body rather than written here, so adding a delegate
@@ -656,10 +704,11 @@ function distinguishingText(role: string): string {
 }
 
 /** One definition as the MCP tool a model calls. */
-function definitionTool(def: DelegateDef): BuiltMcpTool {
+function definitionTool(def: ResolvedDelegate): BuiltMcpTool {
+  const front = frontmatter(readFileSync(def.agentFile, "utf8"), def.agentFile);
   return defineMcpTool({
     name: def.name,
-    description: delegateDescription(def, distinguishingText(def.role)),
+    description: delegateDescription(def, distinguishingText(def.role) + tierText(front)),
     schema: DELEGATE_RUN_SCHEMA,
     handler: (args) => handleDelegateRun(def, args),
   });

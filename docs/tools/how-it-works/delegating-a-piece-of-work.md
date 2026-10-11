@@ -29,55 +29,59 @@ delegate again, because it has no `delegate` tool of its own.
 
 ## The two entries
 
-| Entry | Sub-run gets | Started with |
+| Server | Sub-run gets | Offers |
 | --- | --- | --- |
-| server | sub-run's servers | definitions it offers |
-| --- | --- | --- |
-| `delegate` | `files`, `shell` | `delegate.md`, `delegate_free.md` |
-| `delegate_readonly` | `files_readonly` | `delegate_readonly.md`, `delegate_readonly_free.md` |
+| `delegate` | `files`, `shell` | `delegate`, `delegate_large` |
+| `delegate_readonly` | `files_readonly` | `delegate_readonly`, `delegate_readonly_large` |
 
-Each definition becomes one TOOL, named after its file, so `delegate` advertises
-`delegate` and `delegate_free` and the read-only one advertises its own pair. That
-is how the free and paid variants are chosen between: they are two tools, not two
-servers.
+Each FOLDER the roster names becomes one TOOL, named after the folder. That is how
+the two tiers are chosen between: they are two tools, not two servers.
 
-They are one program, `mcp/delegate.ts`, started with a different definition and a
-different tools file. The pair exists because **a sub-run's servers must be a
-subset of its caller's**. The reviewer holds `files_readonly` and nothing that
-writes; if it could delegate to a sub-run holding `files`, the read-only promise
-would be one tool call away from being false. So the reviewer is given
-`delegate_readonly`, and the rule is visible in `tools/defaults.yaml` rather than
-enforced by a check at run time.
+They are one program, `mcp/delegate.ts`, started with a different roster key. The
+pair exists because **a sub-run's servers must be a subset of its caller's**. The
+reviewer holds `files_readonly` and nothing that writes; if it could delegate to a
+sub-run holding `files`, the read-only promise would be one tool call away from
+being false. So the reviewer is given `delegate_readonly`, and the rule is visible
+in `tools/defaults.yaml` rather than enforced by a check at run time.
 
 `delegate_readonly`'s sub-run has no `shell` either, and that is the same rule
 rather than an omission: a shell is a way to write.
 
 ## Where the delegate's own files live
 
-Under the runtime root, beside the server that reads them:
+Under `.github/atomaton/`, which is **yours** — one folder per delegate, holding
+`agent.md` and `tools.yaml`, with a roster beside them that says which server offers
+which:
 
 ```
-.github/atomaton-runtime/tools/delegates/
-  delegate.md
-  delegate.tools.yaml
-  delegate_readonly.md
-  delegate_readonly.tools.yaml
+.github/atomaton/delegates/
+  delegates.yaml            which server offers which folders
+  delegate/
+    agent.md                the model, and the role prompt
+    tools.yaml              the servers this sub-run is handed
+  delegate_large/…
+  delegate_readonly/…
+  delegate_readonly_large/…
 ```
 
-**Not** under `.github/atomaton/agent-definitions/`, and that is deliberate.
-`agent-definitions/` is the namespace a PERSON dispatches from: a `.md` file there
-is a `/<name>` a person can type on an issue, an entry in every agent's
-`{{COLLEAGUES_LIST}}`, a name `extract_directive.ts` accepts as a handoff, and a
-valid value for `agents.on_config_finding`. A delegate is none of those — it is
-started by `mcp/delegate.ts` and by nothing else, and it has no `task` argument a
-person could supply. Sitting in that directory made `/delegate` a dispatchable
-agent that would fail on its first turn.
+A folder is the unit because **its name is the tool name**: `delegate/tools.yaml`
+cannot disagree with `delegate/agent.md` about which delegate they describe, where a
+`.tools.yaml` beside a `.md` had to be derived from it and could be derived wrongly.
 
-Each definition has a `.tools.yaml` beside it, and `mcp/delegate.ts` derives the
-tools file from the definition's name — `delegate.md` reads
-`delegate.tools.yaml`. The two have to agree, because atoma resolves the
-definition's `mcp_servers` against the tools file the sub-run is handed, and a
-name in one that is not in the other is a server that does not start.
+They are **not** under `.github/atomaton-runtime/`, which is a build output an
+upgrade replaces wholesale. A `model:` line is the thing a project most wants to
+change about a delegate, and it used to be in a file the next release overwrote.
+
+And they are not under `agent-definitions/` either. That is the namespace a PERSON
+dispatches from: a `.md` file there is a `/<name>` a person can type on an issue, an
+entry in every agent's `{{COLLEAGUES_LIST}}`, a name `extract_directive.ts` accepts as
+a handoff, and a valid value for `agents.on_config_finding`. A delegate is none of
+those — it is started by `mcp/delegate.ts` and by nothing else.
+
+The two files have to agree, because atoma resolves the definition's `mcp_servers`
+against the tools file the sub-run is handed, and a name in one that is not in the
+other is a server that does not start. `mcp/delegate.ts` checks this at startup and
+names both files when they disagree.
 
 The sub-run's tools file is its own, and is **not** selected out of
 `tools/defaults.yaml`. That file is the servers every agent run starts with, hooks
@@ -124,12 +128,43 @@ nothing to say.
 
 ## Changing it
 
+- **The model a delegate runs on** — `provider:` and `model:` in
+  `delegates/<name>/agent.md`. This is the field a project most wants to change, and
+  it is why the folder is under `.github/atomaton/` rather than under the runtime
+  root. `extra_headers:` and `extra_body:` are the same file and are passed through
+  to the provider untouched — see [every setting in an agent
+  definition](../../agents/reference.md), which is the same frontmatter.
+- **The tier a caller is told about** — nothing. It is read from the `model:` line:
+  a folder whose model ends in `/free` is described as free, with a shared limit, and
+  the caller is told to try it and read a refusal as an answer. Point the folder at
+  another model and the description moves with it, without an agent definition being
+  edited.
 - **Which servers a sub-run gets** — the `servers:` block in
-  `delegates/<name>.tools.yaml`, and the matching `mcp_servers` in the definition
-  beside it. The two have to agree: atoma resolves the definition's list against
-  the tools file it is handed, and a name in one that is not in the other is a
-  server that does not start.
-- **What the delegate is told it is for** — `delegate.md` or
-  `delegate_readonly.md` under `.github/atomaton-runtime/tools/delegates/`.
+  `delegates/<name>/tools.yaml`, and the matching `mcp_servers` in the `agent.md`
+  beside it. The two have to agree, and `mcp/delegate.ts` refuses to start when they
+  do not.
+- **Which delegates a server offers, and what they are called** — `delegates.yaml`.
+  The folder name is the tool name, so adding a delegate is a folder and a line.
+- **What the delegate is told it is for** — the role prompt in
+  `delegates/<name>/agent.md`.
 - **The time limit** — `SUB_RUN_MAX_RUNTIME_SECS` in `mcp/delegate.ts`, and the
   `request_timeout_secs` beside the entry in `tools/defaults.yaml`.
+
+## Setting the model
+
+One provider is not another's. Which provider you can reach is decided by the key
+you hold, and which model is worth paying for is your call rather than this
+template's. What ships is OrcaRouter because that is what the template was built
+against, and both tiers are one line each to move:
+
+```yaml
+# .github/atomaton/delegates/delegate/agent.md
+provider: orcarouter          # or `openai`, `anthropic`, `openrouter` — the
+model: orcarouter/free        # credential you hold decides
+```
+
+[Every setting in an agent definition](../../agents/reference.md) lists the
+providers, what each one's credential is named, and the two extra keys
+(`extra_headers`, `extra_body`) that go straight to the request. Nothing about the
+delegate changes any of it: the frontmatter is the same format an agent under
+`agent-definitions/` uses, read by the same core.

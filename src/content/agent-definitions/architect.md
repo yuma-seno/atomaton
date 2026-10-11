@@ -40,9 +40,9 @@ mcp_servers:
   # The read-only delegate, and not `delegate`. Agent definitions are matched to
   # their caller's reach, and this agent holds nothing that writes.
   #
-  # It carries the pair as two TOOLS: `delegate_readonly_free` is the same sub-run
-  # on a free model, and only the price differs, so that is the one to reach for
-  # first.
+  # See `delegates.yaml` for what this server offers and on which model — that is a
+  # project's setting rather than a fact about this agent — and read the tool
+  # descriptions for which of them to reach for. They say which one is free.
   - delegate_readonly
 ---
 
