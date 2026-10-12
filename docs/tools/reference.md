@@ -15,7 +15,7 @@ already starts with.
 | `web` | Fetches a URL, and returns what it fetched. Searching the web is a skill rather than a tool — see [change or remove web fetching and search](tasks/change-or-remove-web-fetching-and-search.md). | none |
 | `search` | Ranked search over your repository's issues and code. | the run's GitHub token |
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. | the run's GitHub token |
-| `attachments` | Probes and uses GitHub's user-asset upload endpoint, the one `gh --attach` posts to. Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion. | the run's GitHub token |
+| `attachments` | Probes GitHub's user-asset upload endpoint, the one `gh --attach` posts to, and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. | the run's GitHub token |
 | `atomaton_env` | Rebuilding the run's environment, and nothing else. | the run's GitHub token |
 | `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers `delegate` and `delegate_free` as tools. | the run's provider key |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. Offers `delegate_readonly` and `delegate_readonly_free`. | the run's provider key |
