@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 19 | 10.5% | 1,123 | 8,481 | 32 | 40.5 |
-| Last 30 days | 42 | 7.1% | 1,123 | 10,246 | 37 | 36.1 |
-| Last year | 42 | 7.1% | 1,123 | 10,246 | 37 | 36.1 |
-| All time | 42 | 7.1% | 1,123 | 10,246 | 37 | 36.1 |
+| Last 7 days | 20 | 10% | 1,123 | 8,481 | 32 | 44.3 |
+| Last 30 days | 43 | 7% | 1,078 | 10,246 | 36 | 36.1 |
+| Last year | 43 | 7% | 1,078 | 10,246 | 36 | 36.1 |
+| All time | 43 | 7% | 1,078 | 10,246 | 36 | 36.1 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 39 |
+| `completed` | 40 |
 | `failed` | 3 |
 
 ## Last 7 days
@@ -37,7 +37,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,244,375 | 27,846,035 | 73,718,100 | 73,718,100 | 135,829,252 |
-| messages per session | 242 | 705 | 715 | 715 | 3,408 |
+| messages per session | 242 | 705 | 715 | 715 | 3,417 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -74,10 +74,10 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `get_branch` | 6 | 0 | 0 | 0% |
 | `create_issue` | 5 | 1 | 0 | 20% |
 | `github__get_pr_reviews` | 5 | 0 | 0 | 0% |
+| `get_check_runs` | 4 | 0 | 0 | 0% |
 | `github__check_merge_readiness` | 4 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 4 | 0 | 0 | 0% |
 | `commit_and_push` | 3 | 2 | 0 | 66.7% |
-| `get_check_runs` | 3 | 0 | 0 | 0% |
 | `github__commit_and_push` | 3 | 0 | 0 | 0% |
 | `github__list_issues` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
@@ -85,15 +85,16 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `create_pr` | 2 | 1 | 0 | 50% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `delegate_readonly` | 2 | 0 | 0 | 0% |
+| `get_pr` | 2 | 0 | 0 | 0% |
+| `get_pr_reviews` | 2 | 0 | 0 | 0% |
 | `github__create_pr` | 2 | 0 | 0 | 0% |
 | `github__list_pr_review_comments` | 2 | 0 | 0 | 0% |
+| `request_close_issue` | 2 | 0 | 0 | 0% |
 | `atomaton__request_close_issue` | 1 | 0 | 0 | 0% |
 | `check_merge_readiness` | 1 | 0 | 0 | 0% |
 | `delegate_readonly__run` | 1 | 0 | 0 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
-| `get_pr` | 1 | 0 | 0 | 0% |
 | `get_pr_diff` | 1 | 0 | 0 | 0% |
-| `get_pr_reviews` | 1 | 0 | 0 | 0% |
 | `github__close_issue` | 1 | 0 | 0 | 0% |
 | `github__merge_pr` | 1 | 0 | 0 | 0% |
 | `launch_sub_agent` | 1 | 0 | 0 | 0% |
@@ -101,7 +102,6 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `list_pr_review_comments` | 1 | 0 | 0 | 0% |
 | `list_prs` | 1 | 0 | 0 | 0% |
 | `merge_pr` | 1 | 0 | 0 | 0% |
-| `request_close_issue` | 1 | 0 | 0 | 0% |
 | `search__search_code` | 1 | 0 | 0 | 0% |
 | `sync_branch` | 1 | 0 | 0 | 0% |
 
@@ -135,7 +135,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,260,768 | 16,895,165 | 73,718,100 | 73,718,100 | 205,755,076 |
-| messages per session | 152 | 583 | 715 | 715 | 6,577 |
+| messages per session | 152 | 583 | 715 | 715 | 6,586 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -181,21 +181,22 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `create_issue` | 5 | 1 | 0 | 20% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
+| `get_check_runs` | 4 | 0 | 0 | 0% |
 | `commit_and_push` | 3 | 2 | 0 | 66.7% |
-| `get_check_runs` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `create_pr` | 2 | 1 | 0 | 50% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `delegate_readonly` | 2 | 0 | 0 | 0% |
+| `get_pr` | 2 | 0 | 0 | 0% |
+| `get_pr_reviews` | 2 | 0 | 0 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
 | `github__merge_pr` | 2 | 0 | 0 | 0% |
 | `github__search_code` | 2 | 0 | 0 | 0% |
+| `request_close_issue` | 2 | 0 | 0 | 0% |
 | `check_merge_readiness` | 1 | 0 | 0 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
-| `get_pr` | 1 | 0 | 0 | 0% |
 | `get_pr_diff` | 1 | 0 | 0 | 0% |
-| `get_pr_reviews` | 1 | 0 | 0 | 0% |
 | `github__sync_branch` | 1 | 0 | 0 | 0% |
 | `launch_sub_agent` | 1 | 0 | 0 | 0% |
 | `list_issues` | 1 | 0 | 0 | 0% |
@@ -204,7 +205,6 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `merge_pr` | 1 | 0 | 0 | 0% |
 | `render</｜｜DSML｜｜ parameter>
 <｜｜DSML｜｜ parameter name=` | 1 | 1 | 0 | 100% |
-| `request_close_issue` | 1 | 0 | 0 | 0% |
 | `shell__execute_code` | 1 | 1 | 0 | 100% |
 | `shell_execute` | 1 | 1 | 0 | 100% |
 | `sync_branch` | 1 | 0 | 0 | 0% |
@@ -240,7 +240,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,260,768 | 16,895,165 | 73,718,100 | 73,718,100 | 205,755,076 |
-| messages per session | 152 | 583 | 715 | 715 | 6,577 |
+| messages per session | 152 | 583 | 715 | 715 | 6,586 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -286,21 +286,22 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `create_issue` | 5 | 1 | 0 | 20% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
+| `get_check_runs` | 4 | 0 | 0 | 0% |
 | `commit_and_push` | 3 | 2 | 0 | 66.7% |
-| `get_check_runs` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `create_pr` | 2 | 1 | 0 | 50% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `delegate_readonly` | 2 | 0 | 0 | 0% |
+| `get_pr` | 2 | 0 | 0 | 0% |
+| `get_pr_reviews` | 2 | 0 | 0 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
 | `github__merge_pr` | 2 | 0 | 0 | 0% |
 | `github__search_code` | 2 | 0 | 0 | 0% |
+| `request_close_issue` | 2 | 0 | 0 | 0% |
 | `check_merge_readiness` | 1 | 0 | 0 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
-| `get_pr` | 1 | 0 | 0 | 0% |
 | `get_pr_diff` | 1 | 0 | 0 | 0% |
-| `get_pr_reviews` | 1 | 0 | 0 | 0% |
 | `github__sync_branch` | 1 | 0 | 0 | 0% |
 | `launch_sub_agent` | 1 | 0 | 0 | 0% |
 | `list_issues` | 1 | 0 | 0 | 0% |
@@ -309,7 +310,6 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `merge_pr` | 1 | 0 | 0 | 0% |
 | `render</｜｜DSML｜｜ parameter>
 <｜｜DSML｜｜ parameter name=` | 1 | 1 | 0 | 100% |
-| `request_close_issue` | 1 | 0 | 0 | 0% |
 | `shell__execute_code` | 1 | 1 | 0 | 100% |
 | `shell_execute` | 1 | 1 | 0 | 100% |
 | `sync_branch` | 1 | 0 | 0 | 0% |
@@ -345,7 +345,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,260,768 | 16,895,165 | 73,718,100 | 73,718,100 | 205,755,076 |
-| messages per session | 152 | 583 | 715 | 715 | 6,577 |
+| messages per session | 152 | 583 | 715 | 715 | 6,586 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -391,21 +391,22 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `create_issue` | 5 | 1 | 0 | 20% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
+| `get_check_runs` | 4 | 0 | 0 | 0% |
 | `commit_and_push` | 3 | 2 | 0 | 66.7% |
-| `get_check_runs` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `create_pr` | 2 | 1 | 0 | 50% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `delegate_readonly` | 2 | 0 | 0 | 0% |
+| `get_pr` | 2 | 0 | 0 | 0% |
+| `get_pr_reviews` | 2 | 0 | 0 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
 | `github__merge_pr` | 2 | 0 | 0 | 0% |
 | `github__search_code` | 2 | 0 | 0 | 0% |
+| `request_close_issue` | 2 | 0 | 0 | 0% |
 | `check_merge_readiness` | 1 | 0 | 0 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
-| `get_pr` | 1 | 0 | 0 | 0% |
 | `get_pr_diff` | 1 | 0 | 0 | 0% |
-| `get_pr_reviews` | 1 | 0 | 0 | 0% |
 | `github__sync_branch` | 1 | 0 | 0 | 0% |
 | `launch_sub_agent` | 1 | 0 | 0 | 0% |
 | `list_issues` | 1 | 0 | 0 | 0% |
@@ -414,7 +415,6 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `merge_pr` | 1 | 0 | 0 | 0% |
 | `render</｜｜DSML｜｜ parameter>
 <｜｜DSML｜｜ parameter name=` | 1 | 1 | 0 | 100% |
-| `request_close_issue` | 1 | 0 | 0 | 0% |
 | `shell__execute_code` | 1 | 1 | 0 | 100% |
 | `shell_execute` | 1 | 1 | 0 | 100% |
 | `sync_branch` | 1 | 0 | 0 | 0% |
