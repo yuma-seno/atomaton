@@ -379,6 +379,80 @@
     ]
   },
   {
+    "path": "sessions/issue-152/engineer.json",
+    "agent": "engineer",
+    "messages": 705,
+    "calls": 385,
+    "failed": 6,
+    "refused": 8,
+    "skills": [
+      "project/conventions",
+      "engineering/secrets-in-a-check",
+      "research/web-search",
+      "engineering/environment"
+    ],
+    "reported": true,
+    "tools": {
+      "atoma_builtin__load_skill": 4,
+      "bash": 249,
+      "read": 42,
+      "get_issue": 2,
+      "get_issue_comments": 3,
+      "edit": 54,
+      "write": 4,
+      "search_issues": 15,
+      "commit_and_push": 2,
+      "get_branch": 3,
+      "sync_branch": 1,
+      "list_prs": 1,
+      "fetch": 2,
+      "grep": 1,
+      "list_issues": 1,
+      "create_issue": 1
+    },
+    "acts": {
+      "other": 195,
+      "edit": 54
+    },
+    "runs": [
+      {
+        "ended": "2026-10-12T15:33:56Z",
+        "ended_because": "completed",
+        "iterations": 317,
+        "messages": 705,
+        "seconds": 8481,
+        "server_calls": {
+          "files": {
+            "edit": 54,
+            "grep": 1,
+            "read": 42,
+            "write": 4
+          },
+          "github": {
+            "commit_and_push": 2,
+            "create_issue": 1,
+            "get_branch": 3,
+            "get_issue": 2,
+            "get_issue_comments": 3,
+            "list_issues": 1,
+            "list_prs": 1,
+            "sync_branch": 1
+          },
+          "search": {
+            "search_issues": 15
+          },
+          "shell": {
+            "bash": 249
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-10-12T13:12:35Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-16/atomaton.json",
     "agent": "atomaton",
     "messages": 388,
