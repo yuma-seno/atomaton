@@ -807,6 +807,14 @@ function mostRecentAgentOn(repo, number) {
   }
 }
 
+// src/adapters/github/work-tree.ts
+function commentOnWithId(repo, number, body) {
+  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
+  if (code !== 0)
+    return null;
+  return stdout.trim() || null;
+}
+
 // src/app/aggregation.ts
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -833,7 +841,7 @@ function describeGateResult(result, closedNum, parent) {
     case "parent-closed":
       return `All sub-tasks of ${which} complete, but ${which} is closed, so no agent was started. ` + `The aggregation marker is already written, so no other caller will retry: ` + `reopen it and run the parent's agent by hand. Whoever asked for the run has been told on the issue.`;
     case "parent-busy":
-      return `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` + `so no second one was started. The aggregation marker was removed, so this completion can be ` + `aggregated once that run is done: the run that was asked for first is the one to wait for.`;
+      return `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` + `so no second one was started. The aggregation marker was removed, so closing a sub-issue ` + `again retries it once that run is done: the run that was asked for first is the one to ` + `wait for.`;
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;
   }
@@ -853,7 +861,7 @@ async function dispatchOrchestratorIfReady(opts) {
   } catch (error) {
     const why = `could not count #${opts.parent}'s open sub-issues: ${error.message}`;
     console.error(why);
-    return { kind: "undetermined", why };
+    return withNotice(opts, { kind: "undetermined", why });
   }
   if (remaining > 0) {
     if (opts.progressMessage) {
@@ -867,21 +875,20 @@ ${opts.progressMessage(remaining)}`);
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
-    return { kind: "undetermined", why };
+    return withNotice(opts, { kind: "undetermined", why });
   }
   if (commentsOut.includes(AGGREGATED_TAG.write(opts.closedNum))) {
     return { kind: "already-aggregated" };
   }
   if (opts.beforeDispatch)
     await opts.beforeDispatch();
-  const marker = gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", `${AGGREGATED_TAG.write(opts.closedNum)}
-Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`, "--jq", ".id");
-  if (marker.code !== 0) {
-    const why = `could not write the aggregation marker on #${opts.parent}: ${marker.stderr.trim() || marker.stdout.trim()}`;
+  const markerId = commentOnWithId(opts.repo, opts.parent, `${AGGREGATED_TAG.write(opts.closedNum)}
+Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
+  if (markerId === null) {
+    const why = `could not write the aggregation marker on #${opts.parent} (the comment POST failed)`;
     console.error(`${why}; not dispatching, because without the marker a second caller would dispatch too`);
-    return { kind: "undetermined", why };
+    return withNotice(opts, { kind: "undetermined", why });
   }
-  const markerId = marker.stdout.trim();
   const outcome = dispatchRunner({
     context: `all sub-issues of #${opts.parent} are complete, so the agent that was on it was to be re-invoked`,
     agent: parentAgent(opts.repo, opts.parent),
@@ -908,6 +915,18 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
   }
   takeBackMarker(`the dispatch of ${parentAgent(opts.repo, opts.parent) || "(no agent)"} onto #${opts.parent} failed`);
   return { kind: "dispatch-failed" };
+}
+function withNotice(opts, result) {
+  if (result.kind !== "undetermined")
+    return result;
+  const body = `${LLM_CONTEXT_TAG.write("exclude")}
+` + `Atomaton: this sub-issue's completion could not be aggregated into this issue \u2014 ` + `${result.why}.
+
+` + `Nothing will retry on its own, and the work under this issue is done. ` + `Fix the cause and comment \`/atomaton\` here to continue, or close one of the ` + `sub-issues again to retry the aggregation.`;
+  try {
+    gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", body);
+  } catch {}
+  return result;
 }
 
 // src/adapters/atoma/inject-sub-results.ts
