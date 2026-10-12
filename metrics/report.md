@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 23 | 8.7% | 1,109 | 8,481 | 32 | 40.2 |
-| Last 30 days | 46 | 6.5% | 1,109 | 10,246 | 36 | 36.1 |
-| Last year | 46 | 6.5% | 1,109 | 10,246 | 36 | 36.1 |
-| All time | 46 | 6.5% | 1,109 | 10,246 | 36 | 36.1 |
+| Last 7 days | 24 | 8.3% | 1,109 | 8,481 | 32 | 40.2 |
+| Last 30 days | 47 | 6.4% | 1,078 | 10,246 | 35 | 34.2 |
+| Last year | 47 | 6.4% | 1,078 | 10,246 | 35 | 34.2 |
+| All time | 47 | 6.4% | 1,078 | 10,246 | 35 | 34.2 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,23 +21,23 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 43 |
+| `completed` | 44 |
 | `failed` | 3 |
 
 ## Last 7 days
 
 13 sessions.
 
-**Ran to an end without a report:** 5 of 12 sessions whose last run the core recorded as `completed` — 41.7%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 4 of 12 sessions whose last run the core recorded as `completed` — 33.3%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**138,674,163 tokens** over 12 runs that reported them, **97.6% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**139,685,343 tokens** over 13 runs that reported them, **97.7% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
-**97.6% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
+**97.5% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 4,244,375 | 27,846,035 | 73,718,100 | 73,718,100 | 138,674,163 |
-| messages per session | 208 | 705 | 715 | 715 | 3,806 |
+| tokens per run | 3,047,517 | 27,846,035 | 73,718,100 | 73,718,100 | 139,685,343 |
+| messages per session | 234 | 705 | 715 | 715 | 3,832 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -51,39 +51,40 @@ What is left over is not the same as work delivered. `completed` is the core say
 | --- | ---: | ---: | ---: | ---: |
 | `shell__shell_execute` | 720 | 10 | 11 | 1.4% |
 | `read` | 422 | 2 | 2 | 0.5% |
-| `bash` | 367 | 7 | 9 | 1.9% |
+| `bash` | 369 | 8 | 9 | 2.2% |
 | `grep` | 281 | 6 | 4 | 2.1% |
 | `edit` | 98 | 1 | 0 | 1% |
 | `web__fetch` | 78 | 7 | 0 | 9% |
 | `list` | 41 | 0 | 0 | 0% |
+| `fetch` | 24 | 0 | 0 | 0% |
 | `github__get_issue` | 24 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 23 | 0 | 0 | 0% |
-| `fetch` | 22 | 0 | 0 | 0% |
 | `glob` | 21 | 0 | 0 | 0% |
 | `atoma_builtin__load_skill` | 20 | 0 | 0 | 0% |
 | `search_issues` | 18 | 0 | 2 | 0% |
 | `write` | 18 | 0 | 0 | 0% |
-| `get_issue` | 13 | 0 | 0 | 0% |
+| `get_issue` | 14 | 0 | 0 | 0% |
 | `github__get_branch` | 12 | 0 | 0 | 0% |
 | `github__list_prs` | 12 | 0 | 0 | 0% |
 | `search__search_issues` | 12 | 0 | 0 | 0% |
+| `get_branch` | 11 | 0 | 0 | 0% |
 | `get_issue_comments` | 10 | 0 | 0 | 0% |
-| `get_branch` | 9 | 0 | 0 | 0% |
+| `get_check_runs` | 9 | 1 | 0 | 11.1% |
 | `github__get_pr` | 9 | 1 | 0 | 11.1% |
+| `get_pr` | 8 | 2 | 0 | 25% |
 | `github__get_check_runs` | 8 | 0 | 0 | 0% |
-| `get_pr` | 7 | 2 | 0 | 28.6% |
 | `github__create_issue` | 7 | 0 | 0 | 0% |
 | `create_issue` | 6 | 1 | 0 | 16.7% |
-| `get_check_runs` | 6 | 0 | 0 | 0% |
 | `github__get_pr_reviews` | 5 | 0 | 0 | 0% |
 | `commit_and_push` | 4 | 2 | 0 | 50% |
+| `get_pr_reviews` | 4 | 0 | 0 | 0% |
 | `github__check_merge_readiness` | 4 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 4 | 0 | 0 | 0% |
 | `create_pr` | 3 | 1 | 0 | 33.3% |
 | `delegate_readonly` | 3 | 0 | 0 | 0% |
-| `get_pr_reviews` | 3 | 0 | 0 | 0% |
 | `github__commit_and_push` | 3 | 0 | 0 | 0% |
 | `github__list_issues` | 3 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 2 | 0 | 0 | 0% |
 | `check_merge_readiness` | 2 | 0 | 0 | 0% |
@@ -92,11 +93,11 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `github__create_pr` | 2 | 0 | 0 | 0% |
 | `github__list_pr_review_comments` | 2 | 0 | 0 | 0% |
 | `launch_sub_agent` | 2 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 2 | 0 | 0 | 0% |
 | `list_prs` | 2 | 0 | 0 | 0% |
 | `merge_pr` | 2 | 0 | 0 | 0% |
 | `request_close_issue` | 2 | 0 | 0 | 0% |
 | `atomaton__request_close_issue` | 1 | 0 | 0 | 0% |
+| `close_issue` | 1 | 0 | 0 | 0% |
 | `delegate_readonly__run` | 1 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 1 | 0 | 1 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
@@ -111,8 +112,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 298 | 81.2% |
-| `edit` | 57 | 15.5% |
+| `other` | 300 | 81.3% |
+| `edit` | 57 | 15.4% |
 | `verify` | 8 | 2.2% |
 | `search` | 3 | 0.8% |
 | `open` | 1 | 0.3% |
@@ -129,16 +130,16 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 27 sessions.
 
-**Ran to an end without a report:** 9 of 26 sessions whose last run the core recorded as `completed` — 34.6%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 8 of 26 sessions whose last run the core recorded as `completed` — 30.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**208,599,987 tokens** over 24 runs that reported them, **97.1% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**209,611,167 tokens** over 25 runs that reported them, **97.1% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **97.5% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 4,260,768 | 16,895,165 | 73,718,100 | 73,718,100 | 208,599,987 |
-| messages per session | 157 | 583 | 715 | 715 | 6,975 |
+| tokens per run | 4,244,375 | 16,895,165 | 73,718,100 | 73,718,100 | 209,611,167 |
+| messages per session | 157 | 583 | 715 | 715 | 7,001 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -153,7 +154,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `shell__shell_execute` | 1,548 | 19 | 23 | 1.2% |
 | `read` | 871 | 3 | 3 | 0.3% |
 | `grep` | 526 | 10 | 4 | 1.9% |
-| `bash` | 367 | 7 | 9 | 1.9% |
+| `bash` | 369 | 8 | 9 | 2.2% |
 | `edit` | 179 | 1 | 0 | 0.6% |
 | `web__fetch` | 148 | 11 | 0 | 7.4% |
 | `list` | 85 | 1 | 0 | 1.2% |
@@ -167,29 +168,30 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `glob` | 31 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
-| `fetch` | 22 | 0 | 0 | 0% |
+| `fetch` | 24 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `search_issues` | 18 | 0 | 2 | 0% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
-| `get_issue` | 13 | 0 | 0 | 0% |
+| `get_issue` | 14 | 0 | 0 | 0% |
+| `get_branch` | 11 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 11 | 0 | 0 | 0% |
 | `github__list_issues` | 11 | 0 | 0 | 0% |
 | `get_issue_comments` | 10 | 0 | 0 | 0% |
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
-| `get_branch` | 9 | 0 | 0 | 0% |
+| `get_check_runs` | 9 | 1 | 0 | 11.1% |
+| `get_pr` | 8 | 2 | 0 | 25% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
-| `get_pr` | 7 | 2 | 0 | 28.6% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `create_issue` | 6 | 1 | 0 | 16.7% |
-| `get_check_runs` | 6 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `commit_and_push` | 4 | 2 | 0 | 50% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
+| `get_pr_reviews` | 4 | 0 | 0 | 0% |
 | `create_pr` | 3 | 1 | 0 | 33.3% |
 | `delegate_readonly` | 3 | 0 | 0 | 0% |
-| `get_pr_reviews` | 3 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `check_merge_readiness` | 2 | 0 | 0 | 0% |
@@ -199,10 +201,10 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__merge_pr` | 2 | 0 | 0 | 0% |
 | `github__search_code` | 2 | 0 | 0 | 0% |
 | `launch_sub_agent` | 2 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 2 | 0 | 0 | 0% |
 | `list_prs` | 2 | 0 | 0 | 0% |
 | `merge_pr` | 2 | 0 | 0 | 0% |
 | `request_close_issue` | 2 | 0 | 0 | 0% |
+| `close_issue` | 1 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 1 | 0 | 1 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
 | `github__sync_branch` | 1 | 0 | 0 | 0% |
@@ -218,8 +220,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 298 | 81.2% |
-| `edit` | 57 | 15.5% |
+| `other` | 300 | 81.3% |
+| `edit` | 57 | 15.4% |
 | `verify` | 8 | 2.2% |
 | `search` | 3 | 0.8% |
 | `open` | 1 | 0.3% |
@@ -236,16 +238,16 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 27 sessions.
 
-**Ran to an end without a report:** 9 of 26 sessions whose last run the core recorded as `completed` — 34.6%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 8 of 26 sessions whose last run the core recorded as `completed` — 30.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**208,599,987 tokens** over 24 runs that reported them, **97.1% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**209,611,167 tokens** over 25 runs that reported them, **97.1% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **97.5% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 4,260,768 | 16,895,165 | 73,718,100 | 73,718,100 | 208,599,987 |
-| messages per session | 157 | 583 | 715 | 715 | 6,975 |
+| tokens per run | 4,244,375 | 16,895,165 | 73,718,100 | 73,718,100 | 209,611,167 |
+| messages per session | 157 | 583 | 715 | 715 | 7,001 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -260,7 +262,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `shell__shell_execute` | 1,548 | 19 | 23 | 1.2% |
 | `read` | 871 | 3 | 3 | 0.3% |
 | `grep` | 526 | 10 | 4 | 1.9% |
-| `bash` | 367 | 7 | 9 | 1.9% |
+| `bash` | 369 | 8 | 9 | 2.2% |
 | `edit` | 179 | 1 | 0 | 0.6% |
 | `web__fetch` | 148 | 11 | 0 | 7.4% |
 | `list` | 85 | 1 | 0 | 1.2% |
@@ -274,29 +276,30 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `glob` | 31 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
-| `fetch` | 22 | 0 | 0 | 0% |
+| `fetch` | 24 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `search_issues` | 18 | 0 | 2 | 0% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
-| `get_issue` | 13 | 0 | 0 | 0% |
+| `get_issue` | 14 | 0 | 0 | 0% |
+| `get_branch` | 11 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 11 | 0 | 0 | 0% |
 | `github__list_issues` | 11 | 0 | 0 | 0% |
 | `get_issue_comments` | 10 | 0 | 0 | 0% |
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
-| `get_branch` | 9 | 0 | 0 | 0% |
+| `get_check_runs` | 9 | 1 | 0 | 11.1% |
+| `get_pr` | 8 | 2 | 0 | 25% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
-| `get_pr` | 7 | 2 | 0 | 28.6% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `create_issue` | 6 | 1 | 0 | 16.7% |
-| `get_check_runs` | 6 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `commit_and_push` | 4 | 2 | 0 | 50% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
+| `get_pr_reviews` | 4 | 0 | 0 | 0% |
 | `create_pr` | 3 | 1 | 0 | 33.3% |
 | `delegate_readonly` | 3 | 0 | 0 | 0% |
-| `get_pr_reviews` | 3 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `check_merge_readiness` | 2 | 0 | 0 | 0% |
@@ -306,10 +309,10 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__merge_pr` | 2 | 0 | 0 | 0% |
 | `github__search_code` | 2 | 0 | 0 | 0% |
 | `launch_sub_agent` | 2 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 2 | 0 | 0 | 0% |
 | `list_prs` | 2 | 0 | 0 | 0% |
 | `merge_pr` | 2 | 0 | 0 | 0% |
 | `request_close_issue` | 2 | 0 | 0 | 0% |
+| `close_issue` | 1 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 1 | 0 | 1 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
 | `github__sync_branch` | 1 | 0 | 0 | 0% |
@@ -325,8 +328,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 298 | 81.2% |
-| `edit` | 57 | 15.5% |
+| `other` | 300 | 81.3% |
+| `edit` | 57 | 15.4% |
 | `verify` | 8 | 2.2% |
 | `search` | 3 | 0.8% |
 | `open` | 1 | 0.3% |
@@ -343,16 +346,16 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 27 sessions.
 
-**Ran to an end without a report:** 9 of 26 sessions whose last run the core recorded as `completed` — 34.6%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 8 of 26 sessions whose last run the core recorded as `completed` — 30.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**208,599,987 tokens** over 24 runs that reported them, **97.1% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**209,611,167 tokens** over 25 runs that reported them, **97.1% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **97.5% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 4,260,768 | 16,895,165 | 73,718,100 | 73,718,100 | 208,599,987 |
-| messages per session | 157 | 583 | 715 | 715 | 6,975 |
+| tokens per run | 4,244,375 | 16,895,165 | 73,718,100 | 73,718,100 | 209,611,167 |
+| messages per session | 157 | 583 | 715 | 715 | 7,001 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -367,7 +370,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `shell__shell_execute` | 1,548 | 19 | 23 | 1.2% |
 | `read` | 871 | 3 | 3 | 0.3% |
 | `grep` | 526 | 10 | 4 | 1.9% |
-| `bash` | 367 | 7 | 9 | 1.9% |
+| `bash` | 369 | 8 | 9 | 2.2% |
 | `edit` | 179 | 1 | 0 | 0.6% |
 | `web__fetch` | 148 | 11 | 0 | 7.4% |
 | `list` | 85 | 1 | 0 | 1.2% |
@@ -381,29 +384,30 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `glob` | 31 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
-| `fetch` | 22 | 0 | 0 | 0% |
+| `fetch` | 24 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `search_issues` | 18 | 0 | 2 | 0% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
-| `get_issue` | 13 | 0 | 0 | 0% |
+| `get_issue` | 14 | 0 | 0 | 0% |
+| `get_branch` | 11 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 11 | 0 | 0 | 0% |
 | `github__list_issues` | 11 | 0 | 0 | 0% |
 | `get_issue_comments` | 10 | 0 | 0 | 0% |
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
-| `get_branch` | 9 | 0 | 0 | 0% |
+| `get_check_runs` | 9 | 1 | 0 | 11.1% |
+| `get_pr` | 8 | 2 | 0 | 25% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
-| `get_pr` | 7 | 2 | 0 | 28.6% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `create_issue` | 6 | 1 | 0 | 16.7% |
-| `get_check_runs` | 6 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `commit_and_push` | 4 | 2 | 0 | 50% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
+| `get_pr_reviews` | 4 | 0 | 0 | 0% |
 | `create_pr` | 3 | 1 | 0 | 33.3% |
 | `delegate_readonly` | 3 | 0 | 0 | 0% |
-| `get_pr_reviews` | 3 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 3 | 0 | 0 | 0% |
 | `probe` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `check_merge_readiness` | 2 | 0 | 0 | 0% |
@@ -413,10 +417,10 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__merge_pr` | 2 | 0 | 0 | 0% |
 | `github__search_code` | 2 | 0 | 0 | 0% |
 | `launch_sub_agent` | 2 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 2 | 0 | 0 | 0% |
 | `list_prs` | 2 | 0 | 0 | 0% |
 | `merge_pr` | 2 | 0 | 0 | 0% |
 | `request_close_issue` | 2 | 0 | 0 | 0% |
+| `close_issue` | 1 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 1 | 0 | 1 | 0% |
 | `dev_null` | 1 | 1 | 0 | 100% |
 | `github__sync_branch` | 1 | 0 | 0 | 0% |
@@ -432,8 +436,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 298 | 81.2% |
-| `edit` | 57 | 15.5% |
+| `other` | 300 | 81.3% |
+| `edit` | 57 | 15.4% |
 | `verify` | 8 | 2.2% |
 | `search` | 3 | 0.8% |
 | `open` | 1 | 0.3% |
