@@ -5,21 +5,18 @@ import { join } from "node:path";
 import { parseGithubOutput, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 /**
- * Two GraphQL calls now, told apart by what they ask for: the parent comes from
- * GitHub's own sub-issue link (the `atomaton:parent` tag it used to read out of the
- * webhook payload is gone — see `adapters/github/parent-issue.ts`), and the second asks whether a
- * merged pull request already closed it.
+ * One GraphQL call now, not two. The parent comes from GitHub's own sub-issue link
+ * (the `atomaton:parent` tag it used to read out of the webhook payload is gone --
+ * see `adapters/github/parent-issue.ts`).
+ *
+ * The second call it used to make -- `closedByPullRequestsReferences`, to skip the
+ * aggregation when a merged PR linked the issue -- is gone with the guard it fed.
+ * It asked a question one level below the one that matters and answered it wrong for
+ * an agent's merge; see the script's header and #150.
  */
 const parentIs = (parent: number | null) => ({
   match: ["graphql", "parent{number}"],
   stdout: JSON.stringify({ data: { repository: { issue: { parent: parent === null ? null : { number: parent } } } } }),
-});
-
-const closedByPr = (pr: number | null) => ({
-  match: ["graphql", "closedByPullRequestsReferences"],
-  stdout: JSON.stringify({
-    data: { repository: { issue: { closedByPullRequestsReferences: { nodes: pr === null ? [] : [{ number: pr }] } } } },
-  }),
 });
 
 function run(rules: { match: string[]; stdout?: string; code?: number }[]) {
@@ -38,21 +35,28 @@ function run(rules: { match: string[]; stdout?: string; code?: number }[]) {
 }
 
 describe("check_sub_issue_closure.ts", () => {
-  test("detects a sub-issue and reports closed_via_pr=false when not closed via PR", () => {
-    const { out } = run([parentIs(3), closedByPr(null)]);
+  test("detects a sub-issue and reports its parent", () => {
+    const { out } = run([parentIs(3)]);
     expect(out.is_sub_issue).toBe("true");
     expect(out.parent_number).toBe("3");
-    expect(out.closed_via_pr).toBe("false");
-  });
-
-  test("reports closed_via_pr=true when the sub-issue was already closed by a merged PR", () => {
-    const { out } = run([parentIs(3), closedByPr(12)]);
-    expect(out.closed_via_pr).toBe("true");
   });
 
   test("reports is_sub_issue=false when GitHub says the issue has no parent", () => {
     const { out } = run([parentIs(null)]);
     expect(out.is_sub_issue).toBe("false");
+  });
+
+  /**
+   * The guard this used to carry is gone, and its absence is the contract: no second
+   * call, and no `closed_via_pr` for the workflow's `if:` to read. Whether a
+   * completion has already been aggregated is the gate's decision, on the parent's
+   * thread (`aggregation.ts`'s `atomaton:aggregated` marker) -- the level where the
+   * identity lives. Re-adding a skip here would make #150's silent loss possible again.
+   */
+  test("does not ask whether a merged PR closed the issue, and writes no closed_via_pr", () => {
+    const { out, ghCalls } = run([parentIs(3)]);
+    expect(out.closed_via_pr).toBeUndefined();
+    expect(ghCalls.some((c) => c.join(" ").includes("closedByPullRequestsReferences"))).toBe(false);
   });
 
   /**
