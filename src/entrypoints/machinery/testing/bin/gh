@@ -60,6 +60,56 @@ function matches(rule: Rule): boolean {
   return rule.attempt === history.filter((argv) => argvMatches(rule, argv)).length;
 }
 
+/**
+ * The flags each subcommand accepts, for the ones this repository calls with flags that
+ * do not exist.
+ *
+ * A fake that answers any argv is a fake that accepts any argv, and that is how a real
+ * defect hid here for a release: `aggregation.ts` wrote its marker with
+ * `gh issue comment ... --jq .id`, which the real CLI refuses —
+ *
+ *     unknown flag: --jq
+ *     Usage: gh issue comment {<number> | <url>} [flags]
+ *
+ * — and exited before posting anything. The fixture replied happily, because no rule
+ * needed to be more specific than `issue comment`, so the test passed and the parent
+ * issues stopped being aggregated (#143).
+ *
+ * Only the entries that have actually bitten are listed. This is not a model of gh's
+ * argument parser; it is the small set of flags a mistake has already been made with,
+ * so the mistake fails here instead of in a run.
+ */
+const KNOWN_FLAGS: Record<string, ReadonlySet<string>> = {
+  // `gh issue comment` takes a body and a repo, and nothing that formats output.
+  // `gh issue view` is where `--json`/`--jq` belong, which is the confusion.
+  "issue comment": new Set(["--repo", "--body", "--body-file", "--edit-last", "--create-if-none", "-F", "-b"]),
+  "pr comment": new Set(["--repo", "--body", "--body-file", "--edit-last", "--create-if-none", "-F", "-b"]),
+};
+
+/**
+ * The first unknown flag for this subcommand, or null when there is none.
+ *
+ * Only the first two argv words are used, because those are the subcommand: the flags
+ * can appear in any order after them, and a value may itself begin with `--`.
+ */
+function unknownFlag(args: string[]): string | null {
+  const known = KNOWN_FLAGS[`${args[0] ?? ""} ${args[1] ?? ""}`];
+  if (!known) return null;
+  for (const a of args.slice(2)) {
+    if (!a.startsWith("--")) continue;
+    const name = a.includes("=") ? a.slice(0, a.indexOf("=")) : a;
+    if (!known.has(name)) return name;
+  }
+  return null;
+}
+
+const bogus = unknownFlag(args);
+if (bogus) {
+  console.error(`unknown flag: ${bogus}`);
+  console.error(`Usage: gh ${args[0]} ${args[1]} {<number> | <url>} [flags]`);
+  process.exit(1);
+}
+
 const found = rules.find(matches);
 if (found) {
   console.log(found.stdout ?? "");

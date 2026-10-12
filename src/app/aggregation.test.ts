@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeConfigDir, runWithFakeGh, type FakeGhRule, importable } from "../entrypoints/machinery/testing/harness.ts";
+import { describeGateResult, type DispatchGateResult } from "./aggregation.ts";
 
 const LIB_DIR = import.meta.dir;
 
@@ -38,7 +39,12 @@ const dispatched = (calls: string[][]) => calls.some((c) => c.includes("workflow
 
 /** Did it claim the completion by writing the idempotency marker? */
 const wroteMarker = (calls: string[][]) =>
-  calls.some((c) => c.includes("comment") && c.some((a) => a.includes("atomaton:aggregated")));
+  calls.some(
+    (c) =>
+      c.includes("api") &&
+      c.some((a) => a.includes("issues/5/comments")) &&
+      c.some((a) => a.includes("atomaton:aggregated")),
+  );
 
 /**
  * The sub-issue links, which is where siblings come from now -- `atomaton:parent=N
@@ -81,12 +87,18 @@ const NO_SIBLINGS: FakeGhRule[] = subIssues();
 // freshness probe, and a read that omits it is retried and then refused as
 // `unconfirmed`.
 //
-// The POST rule comes FIRST, before `NO_MARKER` below. The post carries `--jq .id`,
-// which `NO_MARKER`'s `["api", "comments", "--jq"]` also matches -- so with the other
-// order the post returned the marker read's body and the probe never saw its id.
+// Both markers are written through `gh api --method POST`, so the two POST rules are told
+// apart by what the BODY says -- `atomaton:dispatch` here, `atomaton:aggregated` for the
+// aggregation marker below. A rule matching only the path and the method answers whichever
+// write runs first, and did: it gave the aggregation marker the dispatch marker's id 555,
+// so the take-back tests deleted the wrong comment.
+//
+// The read rule carries `--paginate` for the same reason: `checkDispatchMarker` lists the
+// thread with it, and the write does not. Without that, this rule answers the POST too and
+// hands back a comment OBJECT where an id belongs.
 const DISPATCH_MARKER: FakeGhRule[] = [
-  { match: ["api", "issues/5/comments", "POST"], stdout: "555" },
-  { match: ["api", "issues/5/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
+  { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:dispatch"], stdout: "555" },
+  { match: ["api", "issues/5/comments", "--paginate"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
 ];
 
 // The parent's own thread, read by `mostRecentAgentOn` to name the agent to re-invoke.
@@ -104,15 +116,32 @@ const PARENT_AGENT: FakeGhRule = {
 
 // The aggregation marker read is `gh api .../comments --paginate --jq '.[].body'`, so
 // the fake answers with a JSON array of bodies rather than the `gh issue view` shape.
-// The `--jq` is what tells this apart from the dispatch thread read above, which asks
-// for the same path without it.
-const NO_MARKER: FakeGhRule = { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["some unrelated comment"]) };
+//
+// Matched on `--paginate` AND the jq expression, and not on the path alone. The marker
+// WRITE goes to the same path, so a rule keyed on `["api", "comments", "--jq"]` answers
+// the write too — and did: it returned the read's body as the new comment's id, which
+// made the take-back delete a comment that does not exist while the tests still passed.
+const NO_MARKER: FakeGhRule = {
+  match: ["api", "comments", "--paginate", ".[].body"],
+  stdout: JSON.stringify(["some unrelated comment"]),
+};
 
-// The fake `gh` exits 1 for any call no rule matches, which is the right
-// default -- a test should not accidentally succeed through a call it never
-// described. These two are the calls the happy path makes after the checks:
-// claiming the completion, and starting the atomaton.
-const MARKER_WRITES: FakeGhRule = { match: ["issue", "comment"], stdout: "777", code: 0 };
+/**
+ * The fake `gh` exits 1 for any call no rule matches, which is the right
+ * default -- a test should not accidentally succeed through a call it never
+ * described. These two are the calls the happy path makes after the checks:
+ * claiming the completion, and starting the atomaton.
+ *
+ * The marker is written with `gh api --method POST ... --jq .id`, which is the only
+ * way to learn the new comment's id -- `gh issue comment` has no `--jq` flag and exits
+ * on it before posting anything (#143). The id the fake returns is 777, and the
+ * take-back tests below delete exactly that.
+ */
+const AGGREGATION_MARKER_POST: FakeGhRule = {
+  match: ["api", "issues/5/comments", "--method", "POST", "atomaton:aggregated"],
+  stdout: "777",
+  code: 0,
+};
 const DISPATCH_WORKS: FakeGhRule = { match: ["workflow", "run"], code: 0 };
 // Two calls read the parent through this endpoint, and only one of them is
 // optional. `resolveNotify` looks it up to find someone to mention and tolerates
@@ -123,7 +152,7 @@ const PARENT_IS_OPEN: FakeGhRule = { match: ["api", "issues"], stdout: JSON.stri
 
 describe("aggregation.ts dispatch gate", () => {
   test("dispatches once when the siblings are done and nobody claimed it", () => {
-    const { kind, ghCalls } = runGate([...NO_SIBLINGS, PARENT_AGENT, ...DISPATCH_MARKER, NO_MARKER, MARKER_WRITES, DISPATCH_WORKS, PARENT_IS_OPEN]);
+    const { kind, ghCalls } = runGate([...NO_SIBLINGS, PARENT_AGENT, ...DISPATCH_MARKER, NO_MARKER, AGGREGATION_MARKER_POST, DISPATCH_WORKS, PARENT_IS_OPEN]);
     expect(kind).toBe("dispatched");
     expect(wroteMarker(ghCalls)).toBe(true);
     expect(dispatched(ghCalls)).toBe(true);
@@ -143,7 +172,7 @@ describe("aggregation.ts dispatch gate", () => {
       PARENT_AGENT,
       ...DISPATCH_MARKER,
       NO_MARKER,
-      MARKER_WRITES,
+      AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
       { match: ["api", "issues"], stdout: JSON.stringify({ state: "closed" }) },
     ]);
@@ -180,8 +209,10 @@ describe("aggregation.ts dispatch gate", () => {
   test("a failed marker write stops the dispatch rather than racing on", () => {
     const { kind, ghCalls, stderr } = runGate([
       ...NO_SIBLINGS,
+      // Listed before the read rule, and keyed on the body: the write and the read share
+      // a path, so a rule that matches either must say which one it is for.
+      { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:aggregated"], code: 1, stdout: "API rate limit exceeded" },
       NO_MARKER,
-      { match: ["issue", "comment"], code: 1, stdout: "API rate limit exceeded" },
     ]);
     expect(kind).toBe("undetermined");
     expect(dispatched(ghCalls)).toBe(false);
@@ -204,7 +235,7 @@ describe("aggregation.ts dispatch gate", () => {
       PARENT_AGENT,
       ...DISPATCH_MARKER,
       NO_MARKER,
-      MARKER_WRITES,
+      AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
       PARENT_IS_OPEN,
     ]);
@@ -224,7 +255,7 @@ describe("aggregation.ts dispatch gate", () => {
       { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
       ...DISPATCH_MARKER,
       NO_MARKER,
-      MARKER_WRITES,
+      AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
       PARENT_IS_OPEN,
     ]);
@@ -247,7 +278,7 @@ describe("aggregation.ts dispatch gate", () => {
       { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
       ...DISPATCH_MARKER,
       NO_MARKER,
-      MARKER_WRITES,
+      AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
       PARENT_IS_OPEN,
     ]);
@@ -266,7 +297,7 @@ describe("aggregation.ts dispatch gate", () => {
       PARENT_AGENT,
       ...DISPATCH_MARKER,
       NO_MARKER,
-      MARKER_WRITES,
+      AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
       { match: ["api", "issues"], stdout: JSON.stringify({ state: "closed" }) },
     ]);
@@ -293,5 +324,59 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([{ match: ["graphql"], code: 1, stdout: "gh: not found" }]);
     expect(kind).toBe("undetermined");
     expect(dispatched(ghCalls)).toBe(false);
+  });
+});
+
+/**
+ * What each outcome tells a READER, which is a different question from what the gate
+ * did, and the one that misled a model into a second comment on #109.
+ *
+ * Two readers: the run log, and — for three of these — the model that called
+ * `request_close_issue`, which is handed `describeGateResult`'s sentence in the tool
+ * result. When the sentence said "closing a sub-issue again retries it" and the run was
+ * an `undetermined`, the model acted on a retry that the marker's absence of a take-back
+ * had already ruled out.
+ *
+ * The invariant is narrow and worth stating: **a sentence may promise a retry only for
+ * the outcomes whose marker is actually taken back.**
+ */
+describe("describeGateResult", () => {
+  /**
+   * The retry is real for these two, and the gate's own body is the evidence: both
+   * reach `takeBackMarker`, which DELETEs the comment so the idempotency read finds
+   * nothing next time. A sentence promising a retry is a claim about that DELETE.
+   */
+  test("the two outcomes that take the marker back promise a retry", () => {
+    for (const kind of ["dispatch-failed", "parent-busy"] as const) {
+      const text = describeGateResult({ kind } as DispatchGateResult, 10, 5);
+      expect(text, `${kind} takes the marker back, so a retry does happen`).toMatch(/retr/i);
+    }
+  });
+
+  /**
+   * And these two must NOT, because nothing takes the marker back — `undetermined`
+   * returns before the write, and `parent-closed` returns with the marker deliberately
+   * left in place. A reader told "close it again to retry" would close it again and
+   * find the same answer, forever.
+   */
+  test("the two outcomes that keep the marker never promise one", () => {
+    const closed = describeGateResult({ kind: "parent-closed" }, 10, 5);
+    expect(closed, "the marker stays, so nothing retries").toContain("no other caller will retry");
+    expect(closed, "and the reader is told what to do instead").toMatch(/reopen it and run .* by hand/);
+
+    const unknown = describeGateResult({ kind: "undetermined", why: "gh failed" }, 10, 5);
+    expect(unknown, "the reason travels, or the sentence is not actionable").toContain("gh failed");
+    expect(unknown, "nothing was written, so nothing retries").toContain("nothing will retry");
+  });
+
+  /**
+   * `which` is what a reader locates the problem by. `close_issue` cannot know the
+   * parent's number -- it reaches the gate through the sub-issue's own link -- so it
+   * passes none, and printing `#undefined` or `#0` would name a different issue.
+   */
+  test("a caller that does not know the parent names it in words", () => {
+    expect(describeGateResult({ kind: "dispatched" }, 10)).toContain("the parent issue");
+    expect(describeGateResult({ kind: "dispatched" }, 10)).not.toContain("#undefined");
+    expect(describeGateResult({ kind: "dispatched" }, 10, 5)).toContain("#5");
   });
 });

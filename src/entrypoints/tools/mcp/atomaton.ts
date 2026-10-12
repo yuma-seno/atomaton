@@ -330,13 +330,32 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
       concluded,
       aggregation ? describeGateResult(aggregation, issueNumber) : "",
       stalled
-        ? "This session is staying open because you are the last thing able to act on that: report it on the parent issue so a person sees it."
+        ? "The parent was not re-invoked, and that is not yours to fix from here: the " +
+          "parent's thread is not yours to comment on, and this issue's own report is " +
+          "already posted. The reason is in the run log. End your turn without repeating it."
         : "Nothing else is yours to do here.",
     ]
       .filter(Boolean)
       .join(" "),
     // Ends only when something is going to happen next, matching create_pr and
     // launch_sub_agent.
+    //
+    // ## Why `stalled` keeps the session open, and what it does NOT do
+    //
+    // Keeping it open gives the model one more turn, and that is the whole of what it
+    // does. The turn used to be justified as "you are the last thing able to act on
+    // that: report it on the parent issue" -- and there is no such tool. `close_issue`
+    // acts on the issue the run is already on; nothing in this server comments on an
+    // arbitrary one. The instruction asked for something the tool set cannot do, and
+    // the run that closed #109 did the only thing left to it: posted a second comment
+    // on its own thread saying the parent was out of reach (#143).
+    //
+    // So the message says what is true instead. `session_ends: true` on every outcome
+    // would also be defensible -- nothing is waiting on this node, and the human-facing
+    // sentence is already in the tool result for whoever reads the log -- but that is a
+    // control-flow change rather than a wording one, and the failing path is now the
+    // one thing #143 removed: the marker write cannot report `undetermined` on a
+    // transient failure without also failing its own take-back.
     meta: stalled ? {} : { session_ends: true },
   };
 }
