@@ -18,9 +18,14 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 // This is the PRIMARY mechanism for sub-issue aggregation. It fires reliably
 // regardless of who/what merged the PR. The `issues: closed` event that also
 // fires when the merge auto-closes the linked issue is handled by
-// atomaton-sub-issue-closed.wac.ts, which explicitly skips issues closed via a
-// merged PR (see its "Check if closed via a merged PR" step) to avoid
-// dispatching the atomaton twice for the same completion.
+// atomaton-sub-issue-closed.wac.ts, which aggregates the same completion if it
+// gets there first.
+//
+// Both paths landing on one completion is expected, not a fault: the shared gate
+// in `lib/aggregation.ts` posts an `atomaton:aggregated` marker on the parent, and
+// whichever caller arrives second reads it and stands down. That guard lives on the
+// parent's own thread because the identity it decides is the parent's -- see
+// check_sub_issue_closure.ts's header for why the level below cannot answer it (#150).
 //
 // Two things happen for a merged pull request, and the order between them is the
 // point:
@@ -35,6 +40,12 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 //      did, the judgement runs, closes the sub-issue if the criteria are met, and THAT
 //      close aggregates the parent -- so aggregating here would race it and start the
 //      parent on a subtree that is not finished.
+//
+// NOTE: this workflow does not run for an agent's merge at all -- GITHUB_TOKEN's own
+// actions raise no event cascade, so `pull_request_target: closed` never fires. The
+// agent's `merge_pr` takes these two decisions in-process instead
+// (`decidePostMergeHandoff` + the close path's own gate). That is why the aggregation
+// cannot be assumed to have happened merely because a merged PR links an issue (#150).
 //
 // Job graph:
 //   parse --> resolve-parent --> notify-parent

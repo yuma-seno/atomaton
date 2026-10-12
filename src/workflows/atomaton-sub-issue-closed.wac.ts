@@ -77,7 +77,7 @@ const stopOnCloseStep = new TypedOutputsStep(
 
 const checkStep = new TypedOutputsStep(
   {
-    name: "Check sub-issue closure (native parent link + already-handled-via-PR?)",
+    name: "Check sub-issue closure (native parent link)",
     id: "check",
     shell: "bash",
     env: {
@@ -88,7 +88,7 @@ const checkStep = new TypedOutputsStep(
     },
     run: `${scriptCommand(checkSubIssueClosureRef)}\n`,
   },
-  ["is_sub_issue", "parent_number", "closed_via_pr"] as const,
+  ["is_sub_issue", "parent_number"] as const,
 );
 
 export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
@@ -117,7 +117,6 @@ export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
       outputs: {
         is_sub_issue: checkStep.outputs.is_sub_issue,
         parent_number: checkStep.outputs.parent_number,
-        closed_via_pr: checkStep.outputs.closed_via_pr,
       },
     },
     [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), checkStep],
@@ -128,9 +127,7 @@ export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
           "aggregate",
           {
             "runs-on": "ubuntu-latest",
-            if: JobCondition.is(checkJob.rawOutputs.is_sub_issue, "true").and(
-              JobCondition.isNot(checkJob.rawOutputs.closed_via_pr, "true"),
-            ),
+            if: JobCondition.is(checkJob.rawOutputs.is_sub_issue, "true"),
             needs: [checkJob],
           },
           [
