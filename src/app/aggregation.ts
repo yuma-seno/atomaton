@@ -193,8 +193,9 @@ export function describeGateResult(result: DispatchGateResult, closedNum: number
     case "parent-busy":
       return (
         `All sub-tasks of ${which} complete, but ${which} already had an agent asked for on it, ` +
-        `so no second one was started. The aggregation marker was removed, so this completion can be ` +
-        `aggregated once that run is done: the run that was asked for first is the one to wait for.`
+        `so no second one was started. The aggregation marker was removed, so closing a sub-issue ` +
+        `again retries it once that run is done: the run that was asked for first is the one to ` +
+        `wait for.`
       );
     case "undetermined":
       return `Did not aggregate #${closedNum}: ${result.why}. Nothing was dispatched, and nothing will retry.`;

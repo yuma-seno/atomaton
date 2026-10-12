@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeConfigDir, runWithFakeGh, type FakeGhRule, importable } from "../entrypoints/machinery/testing/harness.ts";
+import { describeGateResult, type DispatchGateResult } from "./aggregation.ts";
 
 const LIB_DIR = import.meta.dir;
 
@@ -323,5 +324,59 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([{ match: ["graphql"], code: 1, stdout: "gh: not found" }]);
     expect(kind).toBe("undetermined");
     expect(dispatched(ghCalls)).toBe(false);
+  });
+});
+
+/**
+ * What each outcome tells a READER, which is a different question from what the gate
+ * did, and the one that misled a model into a second comment on #109.
+ *
+ * Two readers: the run log, and — for three of these — the model that called
+ * `request_close_issue`, which is handed `describeGateResult`'s sentence in the tool
+ * result. When the sentence said "closing a sub-issue again retries it" and the run was
+ * an `undetermined`, the model acted on a retry that the marker's absence of a take-back
+ * had already ruled out.
+ *
+ * The invariant is narrow and worth stating: **a sentence may promise a retry only for
+ * the outcomes whose marker is actually taken back.**
+ */
+describe("describeGateResult", () => {
+  /**
+   * The retry is real for these two, and the gate's own body is the evidence: both
+   * reach `takeBackMarker`, which DELETEs the comment so the idempotency read finds
+   * nothing next time. A sentence promising a retry is a claim about that DELETE.
+   */
+  test("the two outcomes that take the marker back promise a retry", () => {
+    for (const kind of ["dispatch-failed", "parent-busy"] as const) {
+      const text = describeGateResult({ kind } as DispatchGateResult, 10, 5);
+      expect(text, `${kind} takes the marker back, so a retry does happen`).toMatch(/retr/i);
+    }
+  });
+
+  /**
+   * And these two must NOT, because nothing takes the marker back — `undetermined`
+   * returns before the write, and `parent-closed` returns with the marker deliberately
+   * left in place. A reader told "close it again to retry" would close it again and
+   * find the same answer, forever.
+   */
+  test("the two outcomes that keep the marker never promise one", () => {
+    const closed = describeGateResult({ kind: "parent-closed" }, 10, 5);
+    expect(closed, "the marker stays, so nothing retries").toContain("no other caller will retry");
+    expect(closed, "and the reader is told what to do instead").toMatch(/reopen it and run .* by hand/);
+
+    const unknown = describeGateResult({ kind: "undetermined", why: "gh failed" }, 10, 5);
+    expect(unknown, "the reason travels, or the sentence is not actionable").toContain("gh failed");
+    expect(unknown, "nothing was written, so nothing retries").toContain("nothing will retry");
+  });
+
+  /**
+   * `which` is what a reader locates the problem by. `close_issue` cannot know the
+   * parent's number -- it reaches the gate through the sub-issue's own link -- so it
+   * passes none, and printing `#undefined` or `#0` would name a different issue.
+   */
+  test("a caller that does not know the parent names it in words", () => {
+    expect(describeGateResult({ kind: "dispatched" }, 10)).toContain("the parent issue");
+    expect(describeGateResult({ kind: "dispatched" }, 10)).not.toContain("#undefined");
+    expect(describeGateResult({ kind: "dispatched" }, 10, 5)).toContain("#5");
   });
 });
