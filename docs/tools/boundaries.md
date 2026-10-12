@@ -53,10 +53,10 @@ documented limit rather than a guarantee.
 **The provider API key.** It is never in a tool server at all. Atoma holds it, and
 makes itself unreadable to processes of the same user, so no tool can reach it.
 
-**Credentials in the servers this project ships** — `github`, `web`, `search`,
-`atoma`, `delegate`. Each makes itself unreadable at startup and removes
-world-writable directories from its own PATH, so neither reading its environment
-nor planting a binary it would run works.
+**Credentials in the servers this project ships** — `files`, `github`, `web`,
+`search`, `atomaton`, `attachments`, `delegate`. Each makes itself unreadable at
+startup and removes world-writable directories from its own PATH, so neither
+reading its environment nor planting a binary it would run works.
 
 **The provider key in a delegated sub-run.** `delegate` holds the provider keys,
 because a tool server receives a credential only through its `env:` block. It
