@@ -223,7 +223,7 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   } catch (error) {
     const why = `could not count #${opts.parent}'s open sub-issues: ${(error as Error).message}`;
     console.error(why);
-    return { kind: "undetermined", why };
+    return withNotice(opts, { kind: "undetermined", why });
   }
 
   if (remaining > 0) {
@@ -253,7 +253,7 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
-    return { kind: "undetermined", why };
+    return withNotice(opts, { kind: "undetermined", why });
   }
   if (commentsOut.includes(AGGREGATED_TAG.write(opts.closedNum))) {
     // Another caller already handled this exact completion (see module doc
@@ -293,7 +293,7 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
     const why =
       `could not write the aggregation marker on #${opts.parent} (the comment POST failed)`;
     console.error(`${why}; not dispatching, because without the marker a second caller would dispatch too`);
-    return { kind: "undetermined", why };
+    return withNotice(opts, { kind: "undetermined", why });
   }
 
   const outcome = dispatchRunner({
@@ -343,6 +343,53 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   }
   takeBackMarker(`the dispatch of ${parentAgent(opts.repo, opts.parent) || "(no agent)"} onto #${opts.parent} failed`);
   return { kind: "dispatch-failed" };
+}
+
+/**
+ * An `undetermined` result, with a comment left on the parent when the caller asked for
+ * one.
+ *
+ * ## The gap this closes
+ *
+ * Every other `needsAttention` outcome tells somebody. `dispatch-failed` and
+ * `parent-busy` take the marker back, so closing the sub-issue again retries and the
+ * retry speaks. `parent-closed` posts a refusal notice on the parent through
+ * `dispatchRunner`. `undetermined` did neither: it wrote to the log and returned — and
+ * the log of a job that nobody was watching is not a place a person finds out.
+ *
+ * Measured, on the release whose marker write was broken (#143): three runs closed
+ * their sub-issues, the gate answered `undetermined` every time, the parent was never
+ * aggregated, and **nothing in the thread said so**. The only reason it was found is
+ * that a person read the sub-issue's own close comment and noticed the sentence about
+ * aggregation was missing.
+ *
+ * The notice says what could not be read or written, in the words of the machine that
+ * failed, and names the two things a person can do: fix the cause and comment
+ * `/atomaton` on the parent, or close a sub-issue again. It carries
+ * `llm-context=exclude`, because it is bookkeeping about a failure rather than a turn:
+ * it must not be read as somebody having asked the parent for work.
+ *
+ * Best-effort, and never changes the answer. A comment that cannot be posted leaves
+ * the run exactly where it was — `needsAttention` still true, the exit code still
+ * non-zero, the log line still written.
+ */
+function withNotice(opts: DispatchGateOptions, result: DispatchGateResult): DispatchGateResult {
+  if (result.kind !== "undetermined") return result;
+  const body =
+    `${LLM_CONTEXT_TAG.write("exclude")}\n` +
+    `Atomaton: this sub-issue's completion could not be aggregated into this issue — ` +
+    `${result.why}.\n\n` +
+    `Nothing will retry on its own, and the work under this issue is done. ` +
+    `Fix the cause and comment \`/atomaton\` here to continue, or close one of the ` +
+    `sub-issues again to retry the aggregation.`;
+  try {
+    gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", body);
+  } catch {
+    // Deliberately swallowed. `gh` here does not throw, so this guards only against a
+    // future change to that, and the loud failure is already the `::warning::`-less
+    // stderr line `dispatchOrchestratorIfReady` wrote above.
+  }
+  return result;
 }
 
 /**

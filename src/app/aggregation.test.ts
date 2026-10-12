@@ -325,6 +325,60 @@ describe("aggregation.ts dispatch gate", () => {
     expect(kind).toBe("undetermined");
     expect(dispatched(ghCalls)).toBe(false);
   });
+
+  /**
+   * #143, from the side that made it invisible.
+   *
+   * `undetermined` is the one `needsAttention` outcome that told nobody. It wrote a log
+   * line and returned; `dispatch-failed` and `parent-busy` take their marker back so a
+   * retry speaks, and `parent-closed` posts a refusal notice on the parent. Three runs
+   * hit `undetermined` on the release whose marker write was broken, the parent was
+   * never aggregated, and the thread said nothing — a person found it by noticing an
+   * ABSENT sentence on the sub-issue.
+   *
+   * So the notice is asserted against the fake's call log: a comment on the PARENT,
+   * carrying the reason, and tagged so it cannot be read as a turn.
+   */
+  test("an undetermined gate leaves a notice on the parent, so a person finds out", () => {
+    const { kind, ghCalls } = runGate([
+      ...NO_SIBLINGS,
+      NO_MARKER,
+      { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:aggregated"], code: 1, stdout: "API rate limit exceeded" },
+    ]);
+    expect(kind).toBe("undetermined");
+
+    const notice = ghCalls.find(
+      (c) => c[0] === "issue" && c[1] === "comment" && c.join(" ").includes("aggregation marker"),
+    );
+    expect(notice, "the parent must be told, or nothing says the work is stuck").toBeDefined();
+    const text = notice?.join(" ") ?? "";
+    expect(text, "it goes on the PARENT, which is where the stuck work is").toContain("issue comment 5");
+    expect(text, "the reason travels, so it is actionable").toContain("aggregation marker");
+    expect(text, "it tells a person what to do").toContain("/atomaton");
+    expect(text, "and it is not a turn: a reader must not take it for a request").toContain("llm-context=exclude");
+  });
+
+  /**
+   * The other side of the same rule: an outcome that tells somebody is not told twice.
+   * `dispatch-failed` already speaks through the marker take-back, and a notice here
+   * would be a second comment about one failure.
+   */
+  test("an outcome that already speaks does not also post a notice", () => {
+    const { kind, ghCalls } = runGate([
+      ...NO_SIBLINGS,
+      { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
+      ...DISPATCH_MARKER,
+      NO_MARKER,
+      AGGREGATION_MARKER_POST,
+      DISPATCH_WORKS,
+      PARENT_IS_OPEN,
+    ]);
+    expect(kind).toBe("dispatch-failed");
+    expect(
+      ghCalls.some((c) => c[0] === "issue" && c[1] === "comment" && c.join(" ").includes("could not be aggregated")),
+      "the take-back already says what happened; a notice would be a second comment",
+    ).toBe(false);
+  });
 });
 
 /**
