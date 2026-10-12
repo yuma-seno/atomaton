@@ -312,19 +312,20 @@
   {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
-    "messages": 106,
-    "calls": 61,
+    "messages": 132,
+    "calls": 72,
     "failed": 1,
     "refused": 1,
     "skills": [
-      "research/web-search"
+      "research/web-search",
+      "project/conventions"
     ],
     "reported": false,
     "tools": {
       "github__get_issue": 2,
       "search__search_issues": 1,
       "list": 8,
-      "atoma_builtin__load_skill": 1,
+      "atoma_builtin__load_skill": 2,
       "web__fetch": 9,
       "read": 12,
       "glob": 2,
@@ -333,7 +334,11 @@
       "github__create_issue": 4,
       "github__list_issues": 1,
       "github__get_issue_comments": 1,
-      "atomaton__launch_sub_agent": 1
+      "atomaton__launch_sub_agent": 1,
+      "get_issue": 4,
+      "get_issue_comments": 3,
+      "create_issue": 2,
+      "launch_sub_agent": 1
     },
     "acts": {},
     "runs": [
@@ -352,6 +357,24 @@
         "messages": 106,
         "seconds": 308,
         "started": "2026-10-07T02:05:55Z"
+      },
+      {
+        "ended": "2026-10-12T13:12:08Z",
+        "ended_because": "completed",
+        "iterations": 8,
+        "messages": 132,
+        "seconds": 406,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_issue": 2,
+            "get_issue": 4,
+            "get_issue_comments": 3
+          }
+        },
+        "started": "2026-10-12T13:05:22Z"
       }
     ]
   },
