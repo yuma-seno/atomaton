@@ -301,6 +301,45 @@ export function commentOn(repo: string, number: number, body: string): boolean {
   return gh("issue", "comment", String(number), "--repo", repo, "--body", body).code === 0;
 }
 
+/**
+ * Post one comment and return the new comment's id, or null when it did not land.
+ *
+ * Through `gh api --method POST /issues/{n}/comments`, and NOT `gh issue comment`,
+ * because the id is the whole point: a caller that writes a comment it may have to take
+ * back needs to know which one to delete, and `gh issue comment` prints the comment's URL
+ * and nothing else.
+ *
+ * It used to be `gh issue comment ... --jq .id`, which cannot work. `--jq` belongs to
+ * `gh api` and the list commands; `gh issue comment` has no such flag and exits before
+ * posting:
+ *
+ *     unknown flag: --jq
+ *     Usage: gh issue comment {<number> | <url>} [flags]
+ *
+ * Measured on the sub-issue close that filed this (#143): the comment was never written,
+ * so the aggregation marker gating every later caller was missing from a parent whose
+ * work was already done.
+ *
+ * The call is spelled the same way as `adapters/actions/dispatch.ts`'s
+ * `postDispatchMarker`, which has returned an id this way since it was written — the two
+ * write the same kind of marker for the same reason, and the aggregation one was the only
+ * place that tried to get an id out of `gh issue comment`.
+ */
+export function commentOnWithId(repo: string, number: number, body: string): string | null {
+  const { code, stdout } = gh(
+    "api",
+    `repos/${repo}/issues/${number}/comments`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+    "--jq",
+    ".id",
+  );
+  if (code !== 0) return null;
+  return stdout.trim() || null;
+}
+
 /** What a subtree-wide stop did, in the words its caller reports with. */
 export interface SubtreeStop {
   /** The nodes a stop request was posted on, the root included when it was running. */

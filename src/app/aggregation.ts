@@ -26,6 +26,7 @@ import { resolveNotify } from "../adapters/github/notify.ts";
 import { AGGREGATED_TAG, LLM_CONTEXT_TAG, SUB_RESULT_TAG } from "../adapters/github/tags.ts";
 import { parentIssueOf } from "../adapters/github/parent-issue.ts";
 import { mostRecentAgentOn } from "../adapters/github/agent-on-issue.ts";
+import { commentOnWithId } from "../adapters/github/work-tree.ts";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -277,18 +278,22 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   //
   // `--jq .id` so the marker can be taken back below. The id is what `/issues/comments/{id}`
   // deletes, and a marker this function cannot remove is one it can only apologise for.
-  const marker = gh(
-    "issue", "comment", String(opts.parent), "--repo", opts.repo,
-    "--body", `${AGGREGATED_TAG.write(opts.closedNum)}\nAtomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`,
-    "--jq", ".id",
+  // `commentOnWithId` and not `gh issue comment ... --jq .id`, which cannot work:
+  // `--jq` belongs to `gh api` and the list commands, and `gh issue comment` exits on
+  // the unknown flag before writing anything. Measured on the first close that reached
+  // this line — the marker was never written, so every later caller's idempotency read
+  // found nothing and the parent aggregated twice (#143).
+  const markerId = commentOnWithId(
+    opts.repo,
+    opts.parent,
+    `${AGGREGATED_TAG.write(opts.closedNum)}\nAtomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`,
   );
-  if (marker.code !== 0) {
+  if (markerId === null) {
     const why =
-      `could not write the aggregation marker on #${opts.parent}: ${marker.stderr.trim() || marker.stdout.trim()}`;
+      `could not write the aggregation marker on #${opts.parent} (the comment POST failed)`;
     console.error(`${why}; not dispatching, because without the marker a second caller would dispatch too`);
     return { kind: "undetermined", why };
   }
-  const markerId = marker.stdout.trim();
 
   const outcome = dispatchRunner({
     context: `all sub-issues of #${opts.parent} are complete, so the agent that was on it was to be re-invoked`,

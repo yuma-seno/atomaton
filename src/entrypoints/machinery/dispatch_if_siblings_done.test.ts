@@ -47,19 +47,25 @@ describe("dispatch_if_siblings_done.ts", () => {
           cwd: configDir,
           rules: [
             ...subIssues(),
-            // The dispatch marker and the thread read that follows. The read must show
-            // the marker (555) -- the freshness probe. The POST rule comes first: it
-            // carries `--jq .id`, which the aggregation read's `--jq` also matches.
-            { match: ["api", "issues/5/comments", "POST"], stdout: "555" },
-            // The parent's own thread, read by `mostRecentAgentOn` to name the agent to
-            // re-invoke. `--jq "[.[].body]"` asks for bodies as strings, so this answers
-            // with a string array -- the rule below answers with comment objects, and the
-            // two must not be confused. Listed first, because that rule matches this path
-            // too.
+            // The dispatch marker and the aggregation marker, then the thread read that
+            // follows. Every write goes through `gh api --method POST .../comments`, so
+            // each POST rule is keyed on the BODY it carries -- `atomaton:dispatch` here,
+            // `atomaton:aggregated` below. A rule matching only the path and method
+            // answers whichever write runs first, and did.
+            //
+            // The read rules carry `--paginate` (the thread listing, made by
+            // `checkDispatchMarker`) or `[.[].body]` (the bodies-only read made by
+            // `mostRecentAgentOn`); the writes carry neither, which is what tells the
+            // three apart on one path.
+            { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:dispatch"], stdout: "555" },
+            { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:aggregated"], stdout: "556" },
+            // `[.[].body]` BEFORE the plain `--paginate` rule, because both reads carry
+            // `--paginate` and only this one carries the jq expression. Listing the
+            // broader rule first answers the bodies read with comment OBJECTS where the
+            // code expects strings, and the agent name comes out empty.
             { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["<!-- atomaton:dispatch=atomaton -->"]) },
-            { match: ["api", "issues/5/comments"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
-            { match: ["api", "comments", "--jq"], stdout: JSON.stringify([]) },
-            { match: ["issue", "comment"] },
+            { match: ["api", "issues/5/comments", "--paginate"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
+            { match: ["api", "comments", "--paginate", ".[].body"], stdout: JSON.stringify([]) },
             { match: ["workflow", "run"] },
             // The parent's state. `dispatchRunner` refuses to start an agent on
             // anything it cannot confirm is open, so the happy path has to say so.
@@ -68,7 +74,13 @@ describe("dispatch_if_siblings_done.ts", () => {
         },
       );
       expect(r.status).toBe(0);
-      expect(r.ghCalls.some((c) => c.includes("comment"))).toBe(true);
+      // The aggregation marker, written as a body on the parent. Asserted on the body
+      // rather than on a `comment` argv element: the write is `api .../comments
+      // -f body=...` now, which is the only form that returns the new comment's id.
+      expect(
+        r.ghCalls.some((c) => c.some((a) => a.includes("atomaton:aggregated"))),
+        "the completion must be claimed by writing the aggregation marker",
+      ).toBe(true);
       expect(r.ghCalls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(true);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
