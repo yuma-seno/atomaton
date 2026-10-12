@@ -27,14 +27,13 @@ jobs:
     outputs:
       is_sub_issue: ${{ steps.check.outputs.is_sub_issue }}
       parent_number: ${{ steps.check.outputs.parent_number }}
-      closed_via_pr: ${{ steps.check.outputs.closed_via_pr }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
           bun-version: latest
         uses: oven-sh/setup-bun@v2
-      - name: Check sub-issue closure (native parent link + already-handled-via-PR?)
+      - name: Check sub-issue closure (native parent link)
         id: check
         shell: bash
         env:
@@ -46,7 +45,7 @@ jobs:
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_sub_issue_closure.ts"
   aggregate:
     runs-on: ubuntu-latest
-    if: (needs.check.outputs.is_sub_issue == 'true') && (needs.check.outputs.closed_via_pr != 'true')
+    if: needs.check.outputs.is_sub_issue == 'true'
     needs:
       - check
     steps:
