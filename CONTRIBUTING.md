@@ -286,6 +286,51 @@ compares the count against anything — nobody knows what the number should be.
 `test` scripts name actually exists, which is the check that has an answer. If you
 move test files, update the `test` script in the same change.
 
+### Green does not mean it was tested
+
+The same failure one layer up, and it has cost this repository twice.
+
+`tests/e2e/` runs the real `atoma` binary against the compiled servers with a fake
+`gh`, so `gh` is stubbed everywhere the code reaches it. That makes the suite's
+value precise and narrow: it proves the **contract at that seam** — that a tool is
+reached, that `_meta.session_ends` is honoured, that the argv carries the shape the
+real CLI accepts. It cannot prove anything about GitHub, because nothing in it
+holds state.
+
+Measured, on the release that wrote the aggregation marker with
+`gh issue comment ... --jq .id`:
+
+- the **unit tests passed**, because the fake `gh` answered any argv it was asked
+  about — including one the real CLI refuses;
+- the **e2e suite passed**, because the only test covering `request_close_issue`
+  walked the human-authored branch, and aggregation runs only on the bot-authored
+  one;
+- **production failed**, and a person found it.
+
+So: a test that exists is not a test that covers the path. When you add a branch
+to a tool, check that something reaches it — `grep` for the branch's own guard, and
+if nothing does, say so in the issue rather than assuming a nearby test is it.
+
+### What each layer can see
+
+| Layer | `gh` | What it proves | What it cannot |
+| --- | --- | --- | --- |
+| `src/**/*.test.ts` | faked | This repository's logic | Any argv the fake accepts |
+| `tests/e2e/` | faked, real `atoma` | The MCP contract, end to end through the binary | GitHub; ordering; state |
+| a dogfooding run | real | All of it | Nothing — it is the only layer that sees the far end |
+
+**There is no OSS substitute for the third row**, and it is worth writing down
+before somebody spends a week on one. `gh` reaches `github.com` and a subdomain of
+`ghe.com`; a GitHub-compatible forge implements REST but not the GraphQL
+sub-issue link, not the `user-attachments` endpoint, and not Actions; and some
+failures are in `gh` itself rather than in any server — `uploadTokenTypes` refuses
+an Actions `ghs_` token client-side, so no server can make that call work.
+
+Which leaves dogfooding as the acceptance test, and it is the one this repository
+already relies on. What it needs from a change is therefore not more CI: it is that
+a failure is **readable** when it arrives. See `docs/pipeline/` for how a run
+reports, and prefer a message a person can act on over a green that proves nothing.
+
 ### What `synth` reads
 
 Workflow generation reads `src/workflows/` and nothing else on the disk, which is
