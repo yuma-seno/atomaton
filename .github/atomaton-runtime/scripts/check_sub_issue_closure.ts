@@ -58,9 +58,6 @@ function graphqlResult({ code, stdout, stderr }) {
   }
   return result.data;
 }
-function ghGraphql(query, variables = {}) {
-  return graphqlResult(gh(...graphqlArgs(query, variables)));
-}
 function ghGraphqlRead(query, variables = {}) {
   return graphqlResult(ghRead(...graphqlArgs(query, variables)));
 }
@@ -131,17 +128,8 @@ function main() {
     return;
   }
   console.error(`Sub-issue #${closedNum} closed \u2014 parent #${parent}`);
-  let closedViaPr = false;
-  try {
-    const data = ghGraphql("query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){issue(number:$num){closedByPullRequestsReferences(first: 1) { nodes { number } }}}}", { owner, repo, num: Number(closedNum) });
-    const mergedPr = data.repository.issue.closedByPullRequestsReferences.nodes[0]?.number;
-    if (mergedPr) {
-      console.error(`Closed via merged PR #${mergedPr} \u2014 already handled by atomaton-pr-merged.yml. Skipping.`);
-      closedViaPr = true;
-    }
-  } catch {}
   if (githubOutput) {
-    appendFileSync(githubOutput, ["is_sub_issue=true", `parent_number=${parent}`, `closed_via_pr=${closedViaPr}`].join(`
+    appendFileSync(githubOutput, ["is_sub_issue=true", `parent_number=${parent}`].join(`
 `) + `
 `);
   }
