@@ -9,8 +9,8 @@ A document this run was asked to produce is delivered in three layers:
 
 | Layer | Format | Where it lives |
 | --- | --- | --- |
-| 原稿 (the draft) | Markdown, tables as CSV sidecars | an orphan branch, via `attachments__publish_draft` |
-| 原本 (the originals) | xlsx / docx / pptx | user-attachment upload, via `attachments__probe` mode `upload` |
+| 原稿 (the draft) | Markdown, tables as CSV sidecars | an orphan branch, via the `attachments` server's `publish_draft` |
+| 原本 (the originals) | xlsx / docx / pptx | user-attachment upload, via its `probe` tool, mode `upload` |
 | 閲覧用 (the reading copy) | PDF | user-attachment upload, same route |
 
 **The draft is the deliverable.** The originals and the PDF are how it is shown.
@@ -30,10 +30,17 @@ through as text.
 Lay the files out on the branch as `designs/<issue-number>/<slug>.md`, with
 tables under `designs/<issue-number>/tables/`.
 
-## 2. Publishing the draft — `attachments__publish_draft`
+## 2. Publishing the draft — `publish_draft` (the `attachments` server)
+
+Tool names here are bare: `publish_draft`, `probe`, `bash`, `read`. Every shipped
+server is `unprefixed: true`, so a tool is called by its own name, and a name carrying
+its server as a prefix is one no run has — the call fails as an unknown tool, and the
+"not among your tools" branch below then reads as a deployment gap about a tool that is
+right there. `<server>__<tool>` is the spelling for a server a project adds, not for
+these.
 
 ```json
-attachments__publish_draft({
+publish_draft({
   "files": [
     { "path": "draft/design.md", "target": "designs/111/design.md" },
     { "path": "draft/tables/layers.csv", "target": "designs/111/tables/layers.csv" }
@@ -58,8 +65,8 @@ attachments__publish_draft({
   checked out, is refused by the tool. That is the design, not an obstacle:
   a document lands on the orphan branch or nowhere.
 
-**If `attachments__publish_draft` is not among your tools**, the running layer
-predates the server's publish capability — record that, publish nothing, and
+**If `publish_draft` is not among your tools**, the running layer predates the
+server's publish capability — record that, publish nothing, and
 do not route around it. The shell cannot push (`git push` and every other
 mutating git subcommand are refused there, by design), and `commit_and_push`
 can only create a run's own work branch, which is exactly where a document
@@ -71,9 +78,13 @@ procedure and mark the draft URL as not yet available.
 Next to this skill file sits `generate.mjs`. Run it with bun (or node):
 
 ```bash
-bun "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/skills/docs/generate.mjs" \
+bun "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton/skills/docs/generate.mjs" \
   <draft.md> --outdir <output-dir>
 ```
+
+`ATOMATON_MACHINERY_ROOT` is where the run's own copy of the machinery is; the
+`:-.` is the repository-relative fallback every other script here uses, so an
+unset variable points at the checkout rather than at `/`.
 
 It produces, into the output directory: `<slug>.docx` (the document), an xlsx
 holding one sheet per referenced CSV, and `<slug>.pdf` (converted from the
@@ -92,19 +103,23 @@ after that skips the install and says so in its output:
   `dpkg-deb -x` — no root, tens of seconds, and the conversion itself is a
   couple of seconds;
 - CJK fonts, best-effort (`fonts-noto-cjk`, extracted the same way), so a
-  Japanese document does not convert to tofu. If this one fails the PDF still
-  converts — the glyphs are the only casualty, and quality is not this
-  procedure's concern.
+  Japanese document does not convert to tofu. They are installed into
+  `<cache>/atomaton-docgen/.fonts`, which is what LibreOffice reads as `~/.fonts`
+  during the conversion. If this one fails the PDF still converts — the glyphs
+  are the only casualty, and quality is not this procedure's concern.
 
 The script's JSON output names every dependency `installed` or `cached` with
 its seconds — quote that in the report when the run was the first on the
-machine. If an install fails, the script still exits with a summary of what it
-did produce; deliver that, plus the draft URL, and say which layer is missing.
+machine. A second run on the same machine says `cached` for every one of them
+and takes under a second, which is the record that the install is on demand
+rather than repeated. If an install fails, the script still exits with a summary
+of what it did produce; deliver that, plus the draft URL, and say which layer is
+missing.
 
 ## 4. Attaching the originals and the PDF — `probe` mode `upload`
 
 ```json
-attachments__probe({ "mode": "upload", "file": "<output-dir>/design.docx" })
+probe({ "mode": "upload", "file": "<output-dir>/design.docx" })
 ```
 
 One file per call, at or under 25 MB; the result carries the permanent asset

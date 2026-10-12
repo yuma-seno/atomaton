@@ -104,10 +104,21 @@ if (needPy) {
     }
   }
   if (venvPython) {
-    const packages = ["openpyxl", "python-docx", ...(wantPptx ? ["python-pptx"] : [])];
-    for (const pkg of packages) {
+    // The distribution name pip installs is not the name the module imports under, and
+    // for these three the two never agree: `python-docx` imports as `docx` and
+    // `python-pptx` as `pptx`. Deriving the import from the pip name by replacing `-`
+    // with `_` therefore probes `python_docx`, which is not importable even when the
+    // package is installed -- so the probe failed every run and the package was
+    // reinstalled every run. Measured: the second run reported `python-docx: installed
+    // (0.2s)` where the whole point of the install step is that it says `cached`.
+    const packages = [
+      { pip: "openpyxl", module: "openpyxl" },
+      { pip: "python-docx", module: "docx" },
+      ...(wantPptx ? [{ pip: "python-pptx", module: "pptx" }] : []),
+    ];
+    for (const { pip: pkg, module } of packages) {
       const t1 = Date.now();
-      const probe = spawnSync(venvPython, ["-c", `import ${pkg.replace(/-/g, "_")}`], { encoding: "utf8" });
+      const probe = spawnSync(venvPython, ["-c", `import ${module}`], { encoding: "utf8" });
       if (probe.status === 0) {
         record(pkg, "cached", secondsSince(t1));
         continue;
@@ -167,12 +178,29 @@ function soffice() {
 }
 const sofficePath = soffice();
 
-/** CJK fonts, best effort: without them a Japanese PDF is tofu, which is a quality problem, not a delivery problem. */
+/**
+ * CJK fonts, best effort: without them a Japanese PDF is tofu, which is a quality
+ * problem, not a delivery problem.
+ *
+ * They go into `$DOCGEN_CACHE/.fonts`, which is `~/.fonts` for the conversion below --
+ * the one place LibreOffice is guaranteed to look. It also reads
+ * `$XDG_DATA_HOME/fonts`, and that is the path this used to install into; a live run
+ * sets `XDG_DATA_HOME` to the runner's own cache (`atomaton-runner.yml`), where nothing
+ * here writes, so the fonts were installed, reported `installed`, and never read.
+ * Measured on a draft with Japanese text: all 74 CJK characters came out through a
+ * single glyph code of `BAAAAA+NotoSans-Bold`, a Latin-only face, where the same
+ * conversion with the fonts on the path LibreOffice reads embeds
+ * `NotoSansCJKhk-Regular`. Text still extracted correctly -- the glyphs are what broke.
+ */
 function cjkFonts() {
   if (!formats.includes("pdf")) return;
-  const haveCjk = existsSync("/usr/share/fonts/opentype/noto") || existsSync(join(DOCGEN_CACHE, "fonts"));
-  if (haveCjk) {
-    record("fonts-noto-cjk", haveCjk && existsSync(join(DOCGEN_CACHE, "fonts")) ? "cached" : "system", 0);
+  const fontsDir = join(DOCGEN_CACHE, ".fonts");
+  if (existsSync(fontsDir)) {
+    record("fonts-noto-cjk", "cached", 0);
+    return;
+  }
+  if (existsSync("/usr/share/fonts/opentype/noto")) {
+    record("fonts-noto-cjk", "system", 0);
     return;
   }
   const t0 = Date.now();
@@ -184,18 +212,11 @@ function cjkFonts() {
   }
   const root = join(DOCGEN_CACHE, "font-root");
   spawnSync("dpkg-deb", ["-x", join(DOCGEN_CACHE, deb), root]);
-  const fontsDir = join(DOCGEN_CACHE, "fonts");
   mkdirSync(fontsDir, { recursive: true });
   for (const f of readdirSync(join(root, "usr/share/fonts/opentype/noto"))) {
     copyFileSync(join(root, "usr/share/fonts/opentype/noto", f), join(fontsDir, f));
   }
   rmSync(root, { recursive: true, force: true });
-  // LibreOffice honours ~/.fonts and XDG_DATA_HOME/fonts. $HOME is read-only in a run,
-  // so the data dir goes beside the cache and is pointed at per conversion.
-  const dataDir = join(DOCGEN_CACHE, "xdg-data");
-  const dataFonts = join(dataDir, "fonts");
-  mkdirSync(dataFonts, { recursive: true });
-  for (const f of readdirSync(fontsDir)) copyFileSync(join(fontsDir, f), join(dataFonts, f));
   record("fonts-noto-cjk", "installed", secondsSince(t0));
 }
 cjkFonts();
@@ -305,7 +326,10 @@ function convertToPdf() {
   const docx = join(outdir, `${slug}.docx`);
   if (!existsSync(docx)) return false;
   const t0 = Date.now();
-  const user = process.env.XDG_DATA_HOME ?? join(DOCGEN_CACHE, "xdg-data");
+  // `HOME` is `$DOCGEN_CACHE`, which is where `cjkFonts` above puts the fonts. Nothing
+  // else is redirected: the caller's `XDG_DATA_HOME` and `XDG_CACHE_HOME` are inherited,
+  // because a run sets them to directories it owns and LibreOffice's own profile is
+  // already pinned by `-env:UserInstallation` below.
   const r = spawnSync(
     sofficePath,
     [
@@ -318,7 +342,7 @@ function convertToPdf() {
       outdir,
       docx,
     ],
-    { encoding: "utf8", env: { ...process.env, HOME: DOCGEN_CACHE, XDG_DATA_HOME: user, XDG_CACHE_HOME: CACHE } },
+    { encoding: "utf8", env: { ...process.env, HOME: DOCGEN_CACHE } },
   );
   const ok = r.status === 0 && existsSync(join(outdir, `${slug}.pdf`));
   record("pdf-convert", ok ? "done" : "failed", secondsSince(t0));
