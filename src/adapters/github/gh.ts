@@ -204,6 +204,48 @@ export function gitRun(...args: string[]): RunResult {
   return run(["git", ...args]);
 }
 
+/** What a caller of `gitRunWith` may add to one invocation. */
+export interface GitRunOptions {
+  /** Variables added to the inherited environment, for this one process. */
+  env: Record<string, string>;
+  /** Text for the command's stdin, for the commands that take one (`hash-object --stdin`). */
+  stdin?: string;
+}
+
+/**
+ * Run one `git` command with variables added to its environment.
+ *
+ * There is one caller: `mcp/attachments.ts`, publishing drafts onto an orphan branch.
+ * It builds the tree out of plumbing rather than checking anything out, which means
+ * `GIT_INDEX_FILE` has to point at a temporary index — and it must NOT mean assigning
+ * to `process.env`, because that variable would stay set for every later `git` in the
+ * same server process: the next tool call's `git` would read and write an index that
+ * holds only drafts, and the run's own checkout would be the thing that broke. The
+ * environment is built for one process and dies with it.
+ *
+ * It lives here rather than as a local `Bun.spawnSync` in that server because it is
+ * `gitRun` with one more thing added, and a second copy of the spawn-and-trim would
+ * be a second place for the two to disagree about what a `RunResult` is.
+ *
+ * The environment is ADDED to rather than replacing it. A command that had to restate
+ * PATH, HOME and whatever `actions/checkout` left in `.git/config` is a command that
+ * will eventually restate one of them wrongly.
+ */
+export function gitRunWith(options: GitRunOptions, ...args: string[]): RunResult {
+  const proc = Bun.spawnSync({
+    cmd: ["git", ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(options.stdin !== undefined ? { stdin: Buffer.from(options.stdin) } : {}),
+    env: { ...process.env, ...options.env },
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : "",
+  };
+}
+
 /**
  * Splits a string of one or more back-to-back, complete top-level JSON
  * values (objects or arrays, no separator between them) into an array of

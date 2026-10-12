@@ -31,12 +31,34 @@
  * A stored user-attachment asset has no documented deletion API. The URL is
  * the artifact and it is permanent; that is part of why storing is not the
  * default.
+ *
+ * ## Why an orphan branch is published from here too
+ *
+ * The other half of the same design question — where a document that is not a
+ * deliverable lives — is an orphan branch, and it is reached from here for the
+ * same reason the POST is: the shell cannot do it. `git switch`, `git push` and
+ * every other mutating subcommand are refused by `shell_guard`, and
+ * `commit_and_push` names a branch from the work-branch convention and can
+ * build no other. Measured, both, rather than reasoned about.
+ *
+ * What makes it a *credential* question at all is that this server is a tool
+ * server: it runs `git` in its own process, and the checkout it inherits
+ * already carries the credential `actions/checkout` wrote into `.git/config`.
+ * No token is read here and none is passed — the point is that the command
+ * runs where the run's own credential is, rather than in a shell that has
+ * none. `GH_TOKEN` is declared for `probe` alone.
  */
-import { readFileSync, statSync } from "node:fs";
-import { basename } from "node:path";
+import { readFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z } from "../../../adapters/mcp/mcp-tool.ts";
-import { gh, gitRun } from "../../../adapters/github/gh.ts";
+import { gh, gitRun, gitRunWith } from "../../../adapters/github/gh.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
+
+/** The environment that puts one `git` command in this call's index rather than the run's. */
+function indexEnv(indexPath: string): { env: Record<string, string> } {
+  return { env: { GIT_INDEX_FILE: indexPath } };
+}
 
 function log(message: string): void {
   console.error(`[atomaton-attachments] ${message}`);
@@ -53,7 +75,14 @@ const UPLOAD_ENDPOINT = "https://uploads.github.com/user-attachments/assets";
 /** The documented ceiling for Office, PDF and zip attachments; images and video are lower. */
 export const UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 
-/** Past this size the file is not read into memory at all, whatever the mode. */
+/**
+ * The largest file either tool will handle at all.
+ *
+ * For `probe` it is the point past which the file is not read into memory; for
+ * `publish_draft` it is the point past which it is not handed to `git`. Both are far
+ * above the 25MB attachment ceiling, so this bound is about not being handed an
+ * accident — a log, an image dump — rather than about either limit.
+ */
 const MAX_READ_BYTES = 128 * 1024 * 1024;
 
 /**
@@ -69,6 +98,216 @@ export const REQUEST_ABORT_MS = 120_000;
 
 /** How much of a response body reaches the result. The status decides the design; the body records why. */
 const BODY_EXCERPT_CHARS = 2_000;
+
+/** The branch `publish_draft` writes to when the caller does not name one. */
+export const DEFAULT_DOCS_BRANCH = "business-docs";
+
+/** The blob mode every published draft gets: an ordinary, non-executable file. */
+const DRAFT_FILE_MODE = "100644";
+
+/**
+ * The commit identity for a published draft, as `git -c` pairs.
+ *
+ * Passed per command rather than read from configuration, because the runner's own
+ * `git config user.name` is a shell step that may or may not have run by the time a
+ * server is started — and a commit that cannot be created for want of an identity is
+ * work silently not published. The value is the one that step writes, so a run that
+ * built the commit on the command line and one that did not are the same commit
+ * either way.
+ */
+function commitIdentity(): string[] {
+  const agent = (process.env.AGENT ?? "").trim() || "engineer";
+  const name = `atomaton-${agent}`;
+  return ["-c", `user.name=${name}`, "-c", `user.email=${name}@users.noreply.github.com`];
+}
+
+/**
+ * A path a caller wants on the branch, resolved against a local original.
+ *
+ * `path` and `target` are separate because they are different questions: where the
+ * draft is on disk (which the run's own tools can reach) and where it goes on the
+ * branch (which is a URL a person reads).
+ */
+const DRAFT_FILE_SCHEMA = z.object({
+  path: z
+    .string()
+    .min(1)
+    .describe("A local draft file: a path inside this run's checkout, or an absolute one under /tmp."),
+  target: z
+    .string()
+    .min(1)
+    .describe("Where it goes on the branch, such as `designs/12/overview.md`. A relative path; no leading slash and no `..`."),
+});
+
+export const PUBLISH_DRAFT_SCHEMA = z.object({
+  files: z
+    .array(DRAFT_FILE_SCHEMA)
+    .min(1)
+    .describe("The drafts to publish, each as a local `path` and the `target` it takes on the branch."),
+  message: z.string().min(1).describe("Commit message for this publication."),
+  branch: z
+    .string()
+    .optional()
+    .describe(`Branch to publish onto. Default \`${DEFAULT_DOCS_BRANCH}\`.`),
+});
+
+/**
+ * Where a published draft is read as a document: the blob URL a person pastes.
+ *
+ * Deliberately not the raw URL. A raw URL is for a program to fetch; what goes into
+ * an issue comment is a link somebody clicks, and the blob view renders the markdown.
+ * Measured on #12's thread against a real file on `main`.
+ *
+ * The path is percent-encoded per segment. A target is allowed to contain a space and
+ * a `#`, both of which end the path in a URL — an unencoded `#` would make the link
+ * open the branch at a fragment that does not exist, and a space is not even a legal
+ * URL character. `encodeURIComponent` per segment rather than once over the whole
+ * path, so the `/` separators survive.
+ */
+export function blobUrlFor(repo: string, branch: string, target: string): string {
+  const path = target
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `https://github.com/${repo}/blob/${encodeURIComponent(branch)}/${path}`;
+}
+
+/**
+ * What `git update-index --index-info` is fed, in the `-z` form.
+ *
+ * Exported because it is the one string whose exact shape decides what lands on the
+ * branch: a tab between the object id and the path, a NUL after each record. The `-z`
+ * form is what makes a path with a space survive — the newline form would split it.
+ */
+export function indexInfoFor(entries: { blob: string; target: string }[]): string {
+  return entries.map((entry) => `${DRAFT_FILE_MODE} blob ${entry.blob}\t${entry.target}\0`).join("");
+}
+
+/**
+ * The default branch of `origin`, read from `ls-remote --symref origin HEAD`.
+ *
+ * `origin/HEAD` is not set in a run's checkout — measured, it is not a symbolic ref
+ * there — so the name has to be asked of the remote. It is asked because publishing
+ * onto it is refused: the whole point of an orphan branch is that a document does not
+ * reach the branch people review, and a publish that could land there would be a way
+ * around every review rule with none of the machinery that makes a pull request one.
+ */
+export function defaultBranchFrom(lsRemoteSymref: string): string | undefined {
+  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
+}
+
+/** What one published draft resolves to before anything is pushed. */
+export interface DraftFile {
+  /** Absolute path of the local original, checked for readability. */
+  source: string;
+  /** Path on the branch, checked for the shape git accepts. */
+  target: string;
+}
+
+/**
+ * Resolve the drafts a caller named, or say which one is unusable.
+ *
+ * Every refusal below is a hole that would otherwise be found after a push: a path
+ * resolved against the wrong directory, a target that git will not accept, and two
+ * drafts writing the same path — which would publish one file and report two.
+ *
+ * A relative `path` is resolved against `process.cwd()`, which is the work tree for
+ * the same reason it is in `mcp/files.ts`: atoma starts every server as a child of the
+ * run and inherits the directory the run was started in, which the runner starts at
+ * the workspace root. A server started anywhere else resolves relative paths there,
+ * and the refusal below says which directory that was rather than leaving the caller
+ * to guess.
+ */
+export function resolveDraftFiles(files: { path: string; target: string }[]): DraftFile[] {
+  const base = resolve(process.cwd());
+  // The work tree and /tmp — the pinned interface: a draft is either a file in the
+  // checkout or an absolute path under /tmp, which is where a conversion step puts its
+  // output. `/tmp/atomaton-workspace` is the one subdirectory of it that survives a run.
+  const roots = [base, "/tmp"];
+  const seen = new Set<string>();
+  const out: DraftFile[] = [];
+
+  for (const file of files) {
+    const source = isAbsolute(file.path) ? resolve(file.path) : resolve(base, file.path);
+    if (!roots.some((root) => source === root || source.startsWith(root + sep))) {
+      throw new Error(
+        `'${file.path}' resolves to '${source}', which is outside the places a draft may be read from ` +
+          `(${roots.join(", ")}). Pass an absolute path, or one relative to ${base}.`,
+      );
+    }
+    let size: number;
+    try {
+      const stats = statSync(source);
+      if (!stats.isFile()) {
+        throw new Error(`'${file.path}' is not a file (${source}); a draft is one file per target.`);
+      }
+      size = stats.size;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("is not a file")) throw error;
+      throw new Error(`could not read '${file.path}': no such file at ${source}`);
+    }
+    if (size > MAX_READ_BYTES) {
+      throw new Error(`${source} is ${size} bytes, past the ${MAX_READ_BYTES}-byte ceiling this tool publishes.`);
+    }
+    const target = normalizeTarget(file.target);
+    if (seen.has(target)) {
+      throw new Error(`two drafts target '${target}'; one would overwrite the other and the result would report both.`);
+    }
+    seen.add(target);
+    out.push({ source, target });
+  }
+  return out;
+}
+
+/**
+ * The target as git will accept it, or the reason it will not.
+ *
+ * Checked here rather than left to `git update-index`, because git's answer to a bad
+ * path is a warning on stderr and exit code 0 in one case (`Ignoring path /etc/x`):
+ * the push would then succeed with the file simply absent, and the tool would report
+ * a URL for a document that is not on the branch.
+ */
+function normalizeTarget(target: string): string {
+  const trimmed = target.replace(/^\/+/, "");
+  if (!trimmed) throw new Error("a draft's target cannot be empty.");
+  if (isAbsolute(target) || target.startsWith("/")) {
+    throw new Error(`target '${target}' must be relative to the branch, not absolute.`);
+  }
+  if (trimmed.startsWith("-")) {
+    throw new Error(`target '${target}' starts with '-', which the index listing would read as an argument.`);
+  }
+  if (trimmed.includes("\\")) {
+    throw new Error(`target '${target}' contains a backslash; branch paths are separated by '/'.`);
+  }
+  if (/[\t\n\r\0]/.test(trimmed)) {
+    throw new Error(`target '${target}' contains a tab, newline or NUL, which the index listing cannot express.`);
+  }
+  const parts = trimmed.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) {
+    throw new Error(`target '${target}' has an empty, '.' or '..' path segment, which git will not accept.`);
+  }
+  if (parts.some((part) => part.toLowerCase() === ".git")) {
+    throw new Error(`target '${target}' is under .git, which git refuses to write a blob into.`);
+  }
+  return trimmed;
+}
+
+/**
+ * Build the tree this call pushes, in an index of its own.
+ *
+ * `GIT_INDEX_FILE` is set for these commands and never on `process.env`: the run's own
+ * checkout has an index, and a tool call that left the variable set would silently
+ * redirect the next `git` in the same process — a `commit_and_push`, say — at a tree
+ * holding nothing but drafts. Each helper below is one step of the same shape: read a
+ * tree into the temporary index, change one thing, write it back out.
+ */
+function gitInIndex(indexPath: string, args: string[]): ReturnType<typeof gitRunWith> {
+  return gitRunWith(indexEnv(indexPath), ...args);
+}
+
+function gitInIndexStdin(indexPath: string, args: string[], input: string): ReturnType<typeof gitRunWith> {
+  return gitRunWith({ ...indexEnv(indexPath), stdin: input }, ...args);
+}
 
 export type ProbeMode = "routing" | "endpoint" | "oversize" | "upload";
 
@@ -95,6 +334,16 @@ const PROBE_SCHEMA = z.object({
   repository_id: positiveInt(
     "Numeric REST id of the repository to upload against. Looked up from the current repository when omitted.",
   ).optional(),
+  name: z
+    .string()
+    .optional()
+    .describe(
+      "The `name` parameter to send, when a probe needs a specific one. Omitted entirely leaves the name the mode " +
+        "decides: empty for `routing` and `endpoint` — which is what makes their 400 the endpoint's answer rather " +
+        "than a missing parameter — and the file's basename for `oversize` and `upload`. Set it on `routing` to " +
+        "measure the route with a valid name and no `repository_id`, which is the only way that measurement is " +
+        "reachable: a non-empty name on the other modes is the file's, and those modes require one.",
+    ),
 });
 
 /**
@@ -215,6 +464,13 @@ export function interpret(mode: ProbeMode, status: number, body: string, locatio
     if (status === 404) {
       return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists — endpoint mode's 400 is that proof.";
     }
+    if (status === 400 && body.includes("Invalid name for request")) {
+      return (
+        "the request was rejected for its name before it ever routed, so this measured nothing about routing. " +
+        "Measured: an empty `name` is answered 400 this way whether or not repository_id is present. Send this mode " +
+        "with a non-empty `name` to reach the routing question."
+      );
+    }
     return "unexpected: the measured expectation for a request without repository_id is 404. Record the status and body.";
   }
 
@@ -275,7 +531,21 @@ export function interpret(mode: ProbeMode, status: number, body: string, locatio
     return `refused with ${status}: the ceiling may be reported as a validation message rather than 413. The body is the record; either way the file was not stored whole.`;
   }
   if (status === 404) {
-    return "the endpoint did not route for this credential: gh's source says a token without write access on the repository gets 404. The size question was not reached.";
+    // Measured on #12's thread, and it is the answer oversize actually gets: a
+    // 27MB body came back 404 `Not Found` and nothing was stored. The same
+    // session's `endpoint` 400 proves the route exists and the credential was
+    // accepted, so this is NOT the permission-shaped 404 the `upload` mode
+    // describes. What it cannot separate is the size from the token: a body
+    // under the ceiling posted with the same credential is the one trial that
+    // would, and it stores, which is why this reads as the shape rather than the
+    // cause.
+    return (
+      "the shape the ceiling takes here: a body over 25MB is refused with 404 `Not Found` and nothing was stored — " +
+      "measured, and not the 413 the documented ceiling would suggest. The same session's `endpoint` 400 already " +
+      "proved the route and the credential, so this is not the permission-shaped 404 that `upload` mode describes. " +
+      "Whether the size or the credential's kind at the body stage is the cause cannot be separated without a " +
+      "storing trial at or under the ceiling, which this mode deliberately does not do. Split or regenerate the artifact."
+    );
   }
   if (status === 401) {
     return "the credential was rejected before the size question was reached — the direct-POST design needs a different credential, and #12's design reopens.";
@@ -290,7 +560,12 @@ async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
 
   const needsRepo = mode !== "routing";
   const repositoryId = a.repository_id ?? (needsRepo ? resolveRepositoryId(resolveRepo()) : undefined);
-  const name = mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined;
+  // A caller's own `name` wins; without one the mode decides, which is what keeps
+  // every existing call identical. `routing` with a name and no repository_id is the
+  // measurement the empty-name form could not reach — measured, the endpoint answers
+  // `Invalid name for request` 400 for an empty one before it ever routes, so the
+  // routing question was never asked.
+  const name = a.name ?? (mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined);
 
   let body: Uint8Array | undefined;
   if (mode === "upload" || mode === "oversize") {
@@ -338,16 +613,216 @@ async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
   );
 }
 
+/** The branch's current tip on the remote, or `undefined` when it does not exist yet. */
+function remoteTip(branch: string): string | undefined {
+  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+  if (code !== 0) {
+    throw new Error(
+      `could not read '${branch}' from origin, so it is unknown whether publishing would create it or append to ` +
+        `it: ${stderr || stdout || `git ls-remote exited ${code}`}`,
+    );
+  }
+  return stdout ? stdout.split(/\s+/)[0] : undefined;
+}
+
+/** The commit that a leaf tree names, so its contents can be carried onto the new one. */
+function commitAt(treeish: string): string {
+  const { code, stdout, stderr } = gitRun("rev-parse", `${treeish}^{commit}`);
+  if (code !== 0) throw new Error(`could not resolve '${treeish}': ${stderr || stdout}`);
+  return stdout.trim();
+}
+
+/**
+ * Publish drafts onto a branch, creating it as an orphan the first time.
+ *
+ * ## Why plumbing, and why this does not check anything out
+ *
+ * A run's checkout is the work tree the pull request is about. A branch switch in
+ * it — `git switch --orphan`, or a second worktree rooted at the same place — is a
+ * way to lose uncommitted work that has nothing to do with this call. So the commit
+ * is built out of objects instead: `hash-object -w` for each draft,
+ * `update-index --index-info -z` into a temporary index for the tree,
+ * `commit-tree` for the commit, and one `push` of a raw refspec. Nothing touches
+ * HEAD, the shared index, or the working tree — the second index has its own path
+ * and `GIT_INDEX_FILE` is set for those commands alone.
+ *
+ * ## Creating versus appending
+ *
+ * The branch exists → its remote tip is the parent, and the push is a fast-forward,
+ * so the drafts accumulate as history rather than replacing each other. It does not
+ * exist → the commit has no parent and the push creates a root commit on a branch
+ * unrelated to `main`, which is what keeps documents out of the tree people review.
+ *
+ * Publishing onto the remote's default branch is refused outright. An orphan branch
+ * is safe precisely because it is not the reviewed one; a tool that could write to
+ * `main` would be a way around every rule that guards it.
+ */
+async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<string> {
+  // The same resolution `probe` uses, and used here only to spell the URLs: `git`
+  // finds its own remote. `GITHUB_REPOSITORY` is what the runner sets; the fallback
+  // reads the checkout's remote for a hand-run server.
+  const repo = resolveRepo();
+  // `refs/heads/x` and `x` are the same branch, and the refspec below adds the prefix
+  // itself — so the longer spelling would push `refs/heads/refs/heads/x`, a branch
+  // nobody would look at again. Normalised rather than refused, because it is the
+  // spelling somebody reading `ls-remote` output has in front of them.
+  const requested = (a.branch ?? "").trim().replace(/^refs\/heads\//, "");
+  const branch = requested || DEFAULT_DOCS_BRANCH;
+
+  // git's own rule, asked rather than restated: it refuses `HEAD`, a name with a space,
+  // a trailing `.lock` and the rest, and its message says which.
+  const format = gitRun("check-ref-format", "--branch", branch);
+  if (format.code !== 0) {
+    throw new Error(`'${branch}' is not a branch name git accepts: ${format.stderr || format.stdout}`);
+  }
+
+  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
+  if (symref.code !== 0) {
+    throw new Error(`could not read origin, so the default branch could not be checked: ${symref.stderr || symref.stdout}`);
+  }
+  const defaultBranch = defaultBranchFrom(symref.stdout);
+  if (defaultBranch && branch === defaultBranch) {
+    throw new Error(
+      `'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` +
+        `review, which is the one thing an orphan branch exists to avoid — and nothing here opens a pull request. ` +
+        `Name another branch, or omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`,
+    );
+  }
+
+  // And the branch this run is checked out on, for the same reason one step closer: a
+  // document pushed onto the work branch is a document in the pull request being
+  // reviewed, which is the outcome an orphan branch was chosen to avoid. `refs/remotes/`
+  // and a detached HEAD answer nothing here, which is right — neither is a work branch.
+  const current = gitRun("branch", "--show-current").stdout.trim();
+  if (current && current === branch) {
+    throw new Error(
+      `'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` +
+        `this run is delivering. Omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`,
+    );
+  }
+
+  const drafts = resolveDraftFiles(a.files);
+
+  const tmp = mkdtempSync(join(tmpdir(), "atomaton-publish-"));
+  try {
+    const index = join(tmp, "index");
+
+    // Omit `--no-filters` and git would apply `.gitattributes` and `core.autocrlf`
+    // to the blob, so a document published from a Windows-configured checkout would
+    // arrive with its bytes rewritten. The document is the artifact here, not a
+    // source file, so the bytes on disk are the bytes on the branch. Measured: a
+    // `\r\n` file under `core.autocrlf=true` hashes to a different object with and
+    // without this flag, and only one of the two round-trips byte for byte.
+    const blobs: { blob: string; target: string }[] = [];
+    for (const draft of drafts) {
+      const hashed = gitRun("hash-object", "-w", "--no-filters", "--", draft.source);
+      if (hashed.code !== 0) {
+        throw new Error(`could not write ${draft.source} into the object store: ${hashed.stderr || hashed.stdout}`);
+      }
+      blobs.push({ blob: hashed.stdout.trim(), target: draft.target });
+    }
+
+    const parent = remoteTip(branch);
+    let base: string | undefined;
+    if (parent) {
+      const fetched = gitRun("fetch", "--no-tags", "--no-write-fetch-head", "origin", `refs/heads/${branch}`);
+      if (fetched.code !== 0) {
+        throw new Error(`could not fetch '${branch}' from origin: ${fetched.stderr || fetched.stdout}`);
+      }
+      base = commitAt(parent);
+      const read = gitInIndex(index, ["read-tree", base]);
+      if (read.code !== 0) throw new Error(`could not read the tip of '${branch}': ${read.stderr || read.stdout}`);
+    } else {
+      const read = gitInIndex(index, ["read-tree", "--empty"]);
+      if (read.code !== 0) throw new Error(`could not start an empty tree: ${read.stderr || read.stdout}`);
+    }
+
+    const staged = gitInIndexStdin(index, ["update-index", "-z", "--index-info"], indexInfoFor(blobs));
+    if (staged.code !== 0) {
+      throw new Error(`could not stage the drafts: ${staged.stderr || staged.stdout}`);
+    }
+    const tree = gitInIndex(index, ["write-tree"]);
+    if (tree.code !== 0) throw new Error(`could not write the tree: ${tree.stderr || tree.stdout}`);
+
+    // Every target is read back out of the tree that is about to be pushed, because
+    // `git update-index` reports some unwritable paths with a warning on stderr and
+    // exit code 0. A push that dropped a file would otherwise be reported as success,
+    // with a URL for a document that is not on the branch.
+    //
+    // One `cat-file -e` per target rather than a listing of the tree: the question is
+    // "is this exact path in there", and a NUL-separated listing read back through
+    // `gitRun` — which trims its stdout and hands it back as one string — is a
+    // re-encoding of the answer rather than the answer.
+    const missing = drafts.filter((draft) => gitRun("cat-file", "-e", `${tree.stdout}:${draft.target}`).code !== 0);
+    if (missing.length > 0) {
+      throw new Error(
+        `git did not accept ${missing.map((draft) => `'${draft.target}'`).join(", ")} into the tree, so nothing ` +
+          `was pushed. A target must be a relative path with no '..' and nothing under .git.`,
+      );
+    }
+
+    const commitArgs = [
+      ...commitIdentity(),
+      "commit-tree",
+      tree.stdout,
+      ...(base ? ["-p", base] : []),
+      "-m",
+      a.message,
+    ];
+    const commit = gitRun(...commitArgs);
+    if (commit.code !== 0) throw new Error(`could not create the commit: ${commit.stderr || commit.stdout}`);
+    const commitSha = commit.stdout.trim();
+
+    const pushed = gitRun("push", "origin", `${commitSha}:refs/heads/${branch}`);
+    if (pushed.code !== 0) {
+      const raced = /non-fast-forward|fetch first|rejected/i.test(`${pushed.stderr} ${pushed.stdout}`);
+      throw new Error(
+        raced
+          ? `something else pushed to '${branch}' between the read and the write, so this commit was refused ` +
+              `rather than dropping theirs. Run it again; the drafts are still on disk.`
+          : `could not push '${branch}': ${pushed.stderr || pushed.stdout}`,
+      );
+    }
+
+    log(`publish ${branch} ${commitSha.slice(0, 12)} ${drafts.length} file(s)`);
+    return JSON.stringify(
+      {
+        branch,
+        commit_sha: commitSha,
+        created: base === undefined,
+        files: drafts.map((draft) => ({ target: draft.target, blob_url: blobUrlFor(repo, branch, draft.target) })),
+      },
+      null,
+      2,
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+const PUBLISH_DRAFT_DESCRIPTION =
+  "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " +
+  "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " +
+  "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " +
+  "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " +
+  "refused — an orphan branch is safe because it is not the reviewed one.";
+
 const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "probe",
     description:
       "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " +
       "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted — without saving a file. " +
-      "Mode `routing` omits repository_id; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL. " +
+      "Mode `routing` omits repository_id — an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL. " +
       "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
     schema: PROBE_SCHEMA,
     handler: probe,
+  }),
+  defineMcpTool({
+    name: "publish_draft",
+    description: PUBLISH_DRAFT_DESCRIPTION,
+    schema: PUBLISH_DRAFT_SCHEMA,
+    handler: publishDraft,
   }),
 ]);
 
