@@ -312,8 +312,8 @@
   {
     "path": "sessions/issue-111/atomaton.json",
     "agent": "atomaton",
-    "messages": 274,
-    "calls": 140,
+    "messages": 331,
+    "calls": 167,
     "failed": 8,
     "refused": 5,
     "skills": [
@@ -321,21 +321,25 @@
     ],
     "reported": false,
     "tools": {
-      "bash": 116,
-      "get_issue": 7,
-      "get_issue_comments": 4,
+      "bash": 133,
+      "get_issue": 8,
+      "get_issue_comments": 5,
       "atoma_builtin__load_skill": 1,
       "grep": 1,
       "get_branch": 3,
       "close_issue": 1,
-      "write": 2,
+      "write": 3,
       "edit": 2,
       "commit_and_push": 1,
-      "create_pr": 2
+      "create_pr": 2,
+      "list_prs": 1,
+      "probe": 4,
+      "fetch": 1,
+      "request_close_issue": 1
     },
     "acts": {
-      "other": 72,
-      "open": 18,
+      "other": 88,
+      "open": 19,
       "search": 18,
       "verify": 5,
       "edit": 3
@@ -366,6 +370,36 @@
           }
         },
         "started": "2026-10-12T16:45:28Z"
+      },
+      {
+        "ended": "2026-10-12T20:09:41Z",
+        "ended_because": "completed",
+        "iterations": 23,
+        "messages": 331,
+        "seconds": 426,
+        "server_calls": {
+          "atomaton": {
+            "request_close_issue": 1
+          },
+          "attachments": {
+            "probe": 4
+          },
+          "files": {
+            "write": 1
+          },
+          "github": {
+            "get_issue": 1,
+            "get_issue_comments": 1,
+            "list_prs": 1
+          },
+          "shell": {
+            "bash": 17
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-10-12T20:02:35Z"
       }
     ]
   },
