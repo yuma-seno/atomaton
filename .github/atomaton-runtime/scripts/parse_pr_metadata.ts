@@ -4,13 +4,6 @@
 // src/entrypoints/machinery/parse_pr_metadata.ts
 import { appendFileSync } from "fs";
 
-// src/domain/work/issue-links.ts
-var CLOSING_KEYWORDS = "close[sd]?|fix(?:e[sd])?|resolve[sd]?";
-function closedIssueNumber(body) {
-  const match = new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+#(\\d+)\\b`, "i").exec(body);
-  return match ? Number(match[1]) : undefined;
-}
-
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
@@ -90,18 +83,12 @@ function main() {
   const parentIssue = PARENT_ISSUE_TAG.read(body);
   const parent = parentIssue === undefined ? "" : String(parentIssue);
   if (parent)
-    console.error(`PR #${prNumber} is linked to parent issue #${parent}`);
+    console.error(`PR #${prNumber} belongs to issue #${parent}`);
   else
     console.error(`PR #${prNumber} has no parent-issue metadata`);
-  const closed = closedIssueNumber(body);
-  const sub = closed === undefined ? "" : String(closed);
-  if (sub)
-    console.error(`PR closes sub-issue #${sub}`);
-  if (githubOutput) {
+  if (githubOutput)
     appendFileSync(githubOutput, `parent_number=${parent}
-sub_number=${sub}
 `);
-  }
 }
 if (import.meta.main)
   main();
