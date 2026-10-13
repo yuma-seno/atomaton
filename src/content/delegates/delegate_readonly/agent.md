@@ -6,6 +6,11 @@ description: Does one small piece of reading or searching and reports what it fo
 provider: orcarouter
 model: orcarouter/free
 vision: false
+# Keeps consecutive requests on one deployment, so the provider's prompt cache still
+# holds the conversation. See `delegate/agent.md` — and as there, this name belongs to
+# the provider on the two lines above and goes with them.
+extra_headers:
+  X-OrcaRouter-Session-Id: atomaton-delegate-readonly
 knows_about: []
 mcp_servers:
   # The read-only half of the pair. `files_readonly` is the same program as `files`

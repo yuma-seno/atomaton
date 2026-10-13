@@ -9,6 +9,15 @@ description: Does one small piece of work — reading, searching, editing files 
 provider: orcarouter
 model: orcarouter/free
 vision: false
+# Keeps consecutive requests on one deployment, so the provider's prompt cache still
+# holds the conversation. Measured on `reviewer` first: without it a run alternates
+# between a 98% hit and a fallback to the shared prefix — and a delegate reads more
+# per call than anything else here, so the prefix is most of what it pays.
+#
+# This name is the provider's, so it travels with the two lines above: change the
+# provider and this header must change or go with it.
+extra_headers:
+  X-OrcaRouter-Session-Id: atomaton-delegate
 knows_about: []
 mcp_servers:
   # The two servers a delegated task needs, and no others. There is no `github`
