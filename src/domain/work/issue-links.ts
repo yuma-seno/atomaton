@@ -104,56 +104,40 @@ export interface IssueLinks {
 const CLOSING_KEYWORDS = "close[sd]?|fix(?:e[sd])?|resolve[sd]?";
 
 /**
- * Whether a pull request body claims to close this issue.
+ * The line that names the issue a pull request belongs to, without asking GitHub
+ * to act on it.
  *
- * Used to tell the pull request doing the work from one that merely mentioned
- * the issue in passing — a distinction the cross-reference timeline does not
- * make, and `willCloseTarget` does not answer either: it reports `false` for
- * #284 despite the `Closes #281` in its body.
- */
-export function claimsToClose(body: string, issue: number): boolean {
-  return new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+#${issue}\\b`, "i").test(body);
-}
-
-/**
- * The line that makes GitHub link a pull request to the issue it closes.
+ * `Closes #N` used to be written here, for a reason that was correct and is now
+ * gone: GitHub forms its own closing link only for a pull request aimed at the
+ * default branch, so a sub-issue's stacked pull request appeared linked by
+ * nothing — and the keyword was the only thing that made a link at all. It also
+ * closed the issue whenever the pull request was aimed at the default branch,
+ * which is not the same thing as linking and is not always wanted. On #167 that
+ * closed #166, whose own close condition was unmet (#171).
  *
- * The writer to [`closedIssueNumber`]'s reader. It was a template literal in
- * `mcp/github.ts` and a literal in the tests, and the two had to agree with a regex
- * in a third file for the link to work at all — the exact shape of the bug that
- * function's comment describes. Spelling it once means the reader and the writer
- * cannot drift.
- */
-export function closesLine(issue: number): string {
-  return `Closes #${issue}`;
-}
-
-/**
- * The issue a pull request body claims to close, if it claims to close one.
+ * GitHub has no keyword that links without closing. Measured against its
+ * documentation: the closing keywords are interpreted **only** when the pull
+ * request targets the default branch, and for any other branch "these keywords
+ * are ignored, no links are created". So a link and a close cannot be separated
+ * by choosing a keyword — only by not using one.
  *
- * The same keywords as [`claimsToClose`], asked the other way round: that one is given
- * a number, this one finds it. Both exist because two callers need different questions
- * of one rule, and until now the second caller wrote its own `/Closes #(\d+)/` —
- * case-sensitive, one space, one keyword. A body saying `closes #12` matched the
- * injector that decides whether to ADD such a line (case-insensitive, so it added
- * nothing) and did not match the parser, so `sub_number` came out empty and every job
- * gated on it was skipped: the parent was never notified and the sub-issue's results
- * never reached the atomaton's session. Green, and silent.
+ * `Part of #N` is not a keyword, so GitHub acts on it in neither direction and
+ * the two paths agree for the first time: a pull request aimed anywhere carries
+ * the same line, and merging closes nothing by itself. The link a person sees is
+ * the cross-reference this produces — "referenced this issue" in the timeline —
+ * and the machine's link is `PARENT_ISSUE_TAG`, which every reader here already
+ * prefers. See `parent-issue.ts` for why the tag is what decides.
  */
-export function closedIssueNumber(body: string): number | undefined {
-  const match = new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+#(\\d+)\\b`, "i").exec(body);
-  return match ? Number(match[1]) : undefined;
+export function partOfLine(issue: number): string {
+  return `Part of #${issue}`;
 }
 
 /**
  * Every closing reference in a piece of text, in the order they appear.
  *
- * Asked of text an agent wrote, before it becomes something GitHub will act on. The two
- * readers above take a body that already exists and ask what it links to; this asks
- * whether a body should be allowed to exist as written, so it has to catch forms those
- * two deliberately do not.
+ * Asked of text an agent wrote, before it becomes something GitHub will act on.
  *
- * ## Why this one matches more than the others
+ * ## Why this one matches more than a reader
  *
  * GitHub documents two reference syntaxes after a keyword:
  *
@@ -162,18 +146,19 @@ export function closedIssueNumber(body: string): number | undefined {
  *   Fixes octo-org/octo-repo#100        another repository
  * ```
  *
- * `claimsToClose` and `closedIssueNumber` read only the first, correctly: they answer
- * questions about issues in *this* repository, and a cross-repository reference is not
- * one. A guard cannot share that blind spot. A closing keyword aimed at another
- * repository is the more dangerous of the two, because nothing in this repository shows
- * it happened — measured here, the form has never been written, which is exactly the
- * kind of thing that is true until it is not.
+ * A reader asking "which issue does this close" reads only the first, correctly: it
+ * answers a question about issues in *this* repository, and a cross-repository
+ * reference is not one. A guard cannot share that blind spot. A closing keyword
+ * aimed at another repository is the more dangerous of the two, because nothing in
+ * this repository shows it happened — measured here, the form has never been
+ * written, which is exactly the kind of thing that is true until it is not.
  *
  * ## What is skipped
  *
- * Code spans and fenced blocks, because GitHub does not act on a keyword inside one and
- * neither should a rule about it. Documentation explaining `Closes #N` is not an attempt
- * to close anything, and refusing it would make the rule unwritable in its own docs.
+ * Code spans and fenced blocks, because GitHub does not act on a keyword inside one
+ * and neither should a rule about it. Documentation explaining `Closes #N` is not an
+ * attempt to close anything, and refusing it would make the rule unwritable in its
+ * own docs.
  */
 export function closingReferences(text: string): string[] {
   const pattern = new RegExp(

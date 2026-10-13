@@ -54,7 +54,7 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 const parseMetadataStep = new TypedOutputsStep(
   {
-    name: "Parse parent-issue / sub-issue metadata from PR body",
+    name: "Parse the parent-issue tag from the PR body",
     id: "parse-metadata",
     shell: "bash",
     env: {
@@ -63,7 +63,7 @@ const parseMetadataStep = new TypedOutputsStep(
     },
     run: `${scriptCommand(parsePrMetadataRef)}\n`,
   },
-  ["parent_number", "sub_number"] as const,
+  ["parent_number"] as const,
 );
 
 const parseJob = new DefinedJob(
@@ -71,9 +71,16 @@ const parseJob = new DefinedJob(
   {
     "runs-on": "ubuntu-latest",
     if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),
+    // One output, where there used to be two.
+    //
+    // `sub_issue` was read from the body's `Closes #N` line and `parent_issue` from
+    // its tag — and the two were the same number every time, because `create_pr`
+    // wrote both from one `ISSUE_NUMBER` (measured on #157, #162 and #167). Every
+    // use below was `sub_issue` fed to something that then asked GitHub for ITS
+    // parent, which the tag answers on its own. The line is gone (#171) and the
+    // duplicate with it.
     outputs: {
       parent_issue: parseMetadataStep.outputs.parent_number,
-      sub_issue: parseMetadataStep.outputs.sub_number,
     },
   },
   [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), parseMetadataStep],
@@ -87,7 +94,7 @@ const resolveStep = new TypedOutputsStep(
     env: {
       GH_TOKEN: "${{ github.token }}",
       REPO: "${{ github.repository }}",
-      SUB: parseJob.outputs.sub_issue,
+      SUB: parseJob.outputs.parent_issue,
     },
     run: `PARENT=$(${scriptCommandWithArgs(resolveOrchestratorParentRef, { repo: "\${REPO}", sub: "\${SUB}" })})
 echo "parent_issue=\${PARENT}" >> "$GITHUB_OUTPUT"
@@ -100,7 +107,7 @@ const resolveParentJob = new DefinedJob(
   "resolve-parent",
   {
     "runs-on": "ubuntu-latest",
-    if: JobCondition.isNot(parseJob.rawOutputs.sub_issue, ""),
+    if: JobCondition.isNot(parseJob.rawOutputs.parent_issue, ""),
     needs: [parseJob],
     outputs: {
       parent_issue: resolveStep.outputs.parent_issue,
@@ -110,8 +117,8 @@ const resolveParentJob = new DefinedJob(
 );
 
 // Both terminal jobs below depend on the exact same pair -- resolve-parent
-// (for the resolved parent issue number) and parse (for the raw sub-issue
-// number) -- so this is the one place that lists that dependency.
+// (for the resolved parent issue number) and parse (for the issue the pull
+// request belongs to) -- so this is the one place that lists that dependency.
 const NOTIFY_AND_AGGREGATE_NEEDS = [resolveParentJob, parseJob];
 
 /**
@@ -229,7 +236,10 @@ PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
           OWNER: "${{ github.repository_owner }}",
           REPO: githubEvent<PullRequestClosedEvent>((e) => e.repository.name),
           PARENT: resolveParentJob.outputs.parent_issue,
-          CLOSED_NUM: parseJob.outputs.sub_issue,
+          // The issue this pull request belongs to, not a second number read from
+          // its body. The two were the same value (see `parseJob`); this is the
+          // one that survives the `Closes` line's removal.
+          CLOSED_NUM: parseJob.outputs.parent_issue,
         },
         run: `${scriptCommandWithArgs(aggregateSubIssuesRef, { repo: "\${OWNER}/\${REPO}", parent: "\${PARENT}", "closed-num": "\${CLOSED_NUM}" })}
 `,

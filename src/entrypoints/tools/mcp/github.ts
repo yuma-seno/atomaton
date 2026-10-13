@@ -29,7 +29,7 @@ import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
 import { LLM_CONTEXT_TAG, NOTIFY_TAG, ORIGIN_AGENT_TAG, PARENT_ISSUE_TAG } from "../../../adapters/github/tags.ts";
-import { closingKeywordRefusal, closingReferences, closesLine } from "../../../domain/work/issue-links.ts";
+import { closingKeywordRefusal, closingReferences, partOfLine } from "../../../domain/work/issue-links.ts";
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
@@ -762,14 +762,26 @@ function injectParentIssue(body: string, reviewer: string): string {
   if (PARENT_ISSUE_TAG.has(body)) {
     mcpFail("PR body already contains a parent-issue tag; refusing to add another");
   }
-  // Unconditionally, now that `refuseClosingKeywords` above guarantees the agent wrote
-  // none of its own. This used to check first, because a second "Closes #N" made
-  // downstream parsing match twice and corrupted $GITHUB_OUTPUT -- a duplicate that can
-  // no longer arrive, since a body carrying one never reaches this line.
-  const closes = `${closesLine(Number(parent))}\n`;
+  // `Part of #N`, not `Closes #N`, and written the same way for every pull request
+  // — stacked or aimed at the default branch — so there is one rule rather than a
+  // choice that depends on the base branch.
+  //
+  // `Closes` closed the issue whenever the base was the default branch, which is
+  // not what this line is for: it is here to say which issue the work belongs to.
+  // GitHub has no keyword that links without closing, so the answer is to use no
+  // keyword at all; the cross-reference `Part of #N` produces is what a person
+  // sees, and `PARENT_ISSUE_TAG` is what the machinery reads. Measured cost: the
+  // Development sidebar's "linked pull requests" no longer lists it, which is a
+  // thing to know rather than a thing that breaks — no reader in this repository
+  // used it, and stacked pull requests were never in it. See #171.
+  //
+  // Unconditionally, now that `refuseClosingKeywords` above guarantees the agent
+  // wrote none of its own — the two now agree instead of one forbidding what the
+  // other did.
+  const line = `${partOfLine(Number(parent))}\n`;
   const originAgent = (process.env.AGENT ?? "").trim();
   const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}\n` : "";
-  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${closes}${body}`;
+  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${line}${body}`;
 }
 
 function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
