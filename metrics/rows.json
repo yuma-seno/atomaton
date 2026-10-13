@@ -1385,6 +1385,76 @@
     ]
   },
   {
+    "path": "sessions/issue-166/reviewer.json",
+    "agent": "reviewer",
+    "messages": 126,
+    "calls": 88,
+    "failed": 2,
+    "refused": 1,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "read": 14,
+      "list_pr_review_comments": 1,
+      "get_pr_reviews": 1,
+      "get_pr": 1,
+      "grep": 31,
+      "list": 11,
+      "get_pr_diff": 2,
+      "get_check_runs": 2,
+      "glob": 5,
+      "list_prs": 2,
+      "search_issues": 1,
+      "get_branch": 5,
+      "check_merge_readiness": 1,
+      "get_issue": 3,
+      "get_issue_comments": 3,
+      "fetch": 3,
+      "atoma_builtin__load_skill": 1,
+      "list_issues": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-13T03:05:27Z",
+        "ended_because": "completed",
+        "iterations": 34,
+        "messages": 126,
+        "seconds": 529,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 5,
+            "grep": 31,
+            "list": 11,
+            "read": 14
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 5,
+            "get_check_runs": 2,
+            "get_issue": 3,
+            "get_issue_comments": 3,
+            "get_pr": 1,
+            "get_pr_diff": 2,
+            "get_pr_reviews": 1,
+            "list_issues": 1,
+            "list_pr_review_comments": 1,
+            "list_prs": 2
+          },
+          "search": {
+            "search_issues": 1
+          },
+          "web": {
+            "fetch": 3
+          }
+        },
+        "started": "2026-10-13T02:56:38Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-17/atomaton.json",
     "agent": "atomaton",
     "messages": 152,
