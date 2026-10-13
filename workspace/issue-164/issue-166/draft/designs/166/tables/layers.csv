@@ -1,0 +1,4 @@
+layer,format,where_it_lives
+原稿,Markdown + CSV sidecars,orphan branch business-docs via publish_draft
+原本,docx / xlsx,same orphan branch via publish_draft (second call)
+閲覧用,PDF,same orphan branch via publish_draft (second call)
