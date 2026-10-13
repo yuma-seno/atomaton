@@ -111,8 +111,14 @@ describe("what each status means, per mode", () => {
     expect(other).not.toContain("matches the message measured by hand");
   });
 
-  test("endpoint: the statuses that would reopen the design are distinct", () => {
-    expect(interpret("endpoint", 401, "")).toContain("reopens");
+  test("endpoint: the statuses that change the answer are distinct", () => {
+    const rejected = interpret("endpoint", 401, "");
+    expect(rejected).toContain("rejected by the endpoint");
+    // The design does not reopen on a 401 any more: the route was settled on
+    // the orphan branch, and a 401 is a credential fact inside a closed
+    // question. Held so the "reopens" wording cannot drift back.
+    expect(rejected).not.toContain("reopens");
+    expect(rejected).toContain("publish_draft");
     expect(interpret("endpoint", 404, "")).toContain("did not route");
     expect(interpret("endpoint", 403, "")).toContain("policy");
     expect(interpret("endpoint", 201, "")).toContain("no documented deletion API");
@@ -141,30 +147,55 @@ describe("what each status means, per mode", () => {
 
   test("oversize: 413 settles the ceiling as server-side, 201 contradicts it", () => {
     expect(interpret("oversize", 413, "")).toContain("enforced server-side");
-    expect(interpret("oversize", 201, "")).toContain("reopens");
+    const stored = interpret("oversize", 201, "");
+    expect(stored).toContain("WAS stored");
+    expect(stored).not.toContain("reopens");
     expect(interpret("oversize", 422, "")).toContain("validation message");
   });
 
   /**
-   * The correction #109's measurement forced, held so it cannot drift back.
+   * The correction #109's measurement started and #111's contrast trial settled,
+   * held so it cannot drift back.
    *
-   * A 27MB body came back 404 `Not Found`, not 413. The old text read that as "a token
-   * without write access" — which the same session had already ruled out, because its
-   * `endpoint` call got a 400 from the same credential, and a rejected credential is
-   * 401 while a route-less one is 404 for both. What a 404 here can and cannot settle
-   * is the whole of the correction: the shape is measured, the cause is not, and
-   * separating size from token would take a storing trial this mode refuses to do.
+   * A 27MB body came back 404 `Not Found`, not 413 — the old text read that as
+   * "a token without write access", which its own `endpoint` 400 already ruled
+   * out. #111 then posted bodies UNDER the ceiling with the same write-capable
+   * `ghs_` token and got the same 404, at three sizes and MIME types: so the
+   * cause is the credential's kind, the size reading is dead, and what a reader
+   * does with any 404 on this endpoint is deliver by `publish_draft` instead.
    */
-  test("oversize: the measured 404 is the ceiling's shape, not a permission answer", () => {
+  test("oversize: the measured 404 is the credential kind, settled by the under-ceiling trial", () => {
     const text = interpret("oversize", 404, '{"message":"Not Found"}');
     expect(text, "the measured status is named").toContain("404 `Not Found`");
-    expect(text, "and the permission reading it replaces is ruled out").toContain("not the permission-shaped 404");
-    expect(text, "with the limit on what it settles stated too").toContain("cannot be separated");
-    expect(text, "and the design consequence, which is what the reader acts on").toContain("Split or regenerate");
+    expect(text, "the settled cause is the credential's kind").toContain("credential kind, not the size");
+    expect(text, "the trial that settled it is named").toContain("issues #111 and #164");
+    expect(text, "the design consequence, which is what the reader acts on").toContain("publish_draft");
+    expect(text, "the old cannot-tell reading is gone").not.toContain("cannot be separated");
+    expect(text, "the old size reading is gone").not.toContain("Split or regenerate");
   });
 
   test("upload: 201 is the only storing answer, and says the URL is permanent", () => {
     expect(interpret("upload", 201, "")).toContain("permanent");
+  });
+
+  /**
+   * The same contrast trial, on the mode a delivery would have used: a write-capable
+   * `ghs_` token gets 404 on every body-bearing POST, so the gh-source role reading
+   * is not just uncertain but false, and the text says where files go instead.
+   */
+  test("upload: the measured 404 is the credential kind, and points at the file route", () => {
+    const text = interpret("upload", 404, '{"message":"Not Found"}');
+    expect(text, "the settled cause").toContain("refuses real uploads from this credential kind");
+    expect(text, "the write access that rules the role reading out is stated").toContain("with write access");
+    expect(text, "the delivery route is named").toContain("publish_draft");
+    expect(text, "the gh-source reading is gone").not.toContain("without write access on the repository gets 404");
+  });
+
+  test("upload: a 401 names the closed route rather than a reopening", () => {
+    const text = interpret("upload", 401, "");
+    expect(text).toContain("rejected by the endpoint");
+    expect(text, "the design does not reopen on a credential fact").not.toContain("reopens");
+    expect(text).toContain("publish_draft");
   });
 
   test("a redirect is reported as a route that moves, and 429 as not-yet", () => {
