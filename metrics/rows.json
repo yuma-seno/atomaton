@@ -1219,25 +1219,38 @@
   {
     "path": "sessions/issue-164/atomaton.json",
     "agent": "atomaton",
-    "messages": 40,
-    "calls": 25,
-    "failed": 1,
-    "refused": 0,
-    "skills": [],
+    "messages": 91,
+    "calls": 54,
+    "failed": 2,
+    "refused": 1,
+    "skills": [
+      "docs/design-doc"
+    ],
     "reported": false,
     "tools": {
-      "get_issue": 2,
+      "get_issue": 3,
       "read": 6,
       "list": 3,
-      "get_issue_comments": 1,
+      "get_issue_comments": 3,
       "grep": 7,
       "glob": 2,
-      "bash": 1,
-      "create_issue": 2,
-      "launch_sub_agent": 1
+      "bash": 12,
+      "create_issue": 3,
+      "launch_sub_agent": 1,
+      "get_pr": 3,
+      "get_branch": 3,
+      "list_prs": 1,
+      "atoma_builtin__load_skill": 1,
+      "write": 2,
+      "publish_draft": 2,
+      "fetch": 1,
+      "create_pr": 1
     },
     "acts": {
-      "other": 1
+      "other": 8,
+      "open": 1,
+      "verify": 1,
+      "edit": 2
     },
     "runs": [
       {
@@ -1266,6 +1279,37 @@
           }
         },
         "started": "2026-10-13T01:29:11Z"
+      },
+      {
+        "ended": "2026-10-13T18:46:16Z",
+        "ended_because": "completed",
+        "iterations": 16,
+        "messages": 91,
+        "seconds": 1500,
+        "server_calls": {
+          "attachments": {
+            "publish_draft": 2
+          },
+          "files": {
+            "write": 2
+          },
+          "github": {
+            "create_issue": 1,
+            "create_pr": 1,
+            "get_branch": 3,
+            "get_issue": 1,
+            "get_issue_comments": 2,
+            "get_pr": 3,
+            "list_prs": 1
+          },
+          "shell": {
+            "bash": 11
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-10-13T18:21:16Z"
       }
     ]
   },
