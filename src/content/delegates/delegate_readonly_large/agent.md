@@ -13,6 +13,11 @@ description: The same reading as `delegate_readonly`, on a model with no per-req
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
 vision: false
+# Keeps consecutive requests on one deployment, so the provider's prompt cache still
+# holds the conversation. See `delegate/agent.md` — and as there, this name belongs to
+# the provider on the two lines above and goes with them.
+extra_headers:
+  X-OrcaRouter-Session-Id: atomaton-delegate-readonly-large
 knows_about: []
 mcp_servers:
   # The read-only half of the pair. `files_readonly` is the same program as `files`

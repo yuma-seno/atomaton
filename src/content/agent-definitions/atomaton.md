@@ -15,6 +15,17 @@ model: z-ai/glm-5.3-flash
 # So an atomaton does not look at screenshots. `reviewer` does, and that is where a
 # visual defect is caught: it holds `vision: true` on a Responses provider.
 vision: false
+# Keeps consecutive requests on one deployment, so the provider's prompt cache still
+# holds the conversation from one inference to the next. `reviewer` and `architect`
+# were the first two to carry one and measured what its absence costs — a run
+# alternating between a 98% hit and a fallback to the shared prefix — and this agent
+# was the third that needed it rather than the control it was measured against.
+#
+# One value per agent, not per conversation: a cache is keyed by content, so two
+# conversations sharing a deployment do not read each other's, and what has to hold is
+# that one agent's consecutive requests land together.
+extra_headers:
+  X-OrcaRouter-Session-Id: atomaton-atomaton
 knows_about:
   - engineer
   - reviewer
