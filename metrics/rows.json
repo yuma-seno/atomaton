@@ -1426,8 +1426,8 @@
   {
     "path": "sessions/issue-165/reviewer.json",
     "agent": "reviewer",
-    "messages": 146,
-    "calls": 104,
+    "messages": 182,
+    "calls": 129,
     "failed": 2,
     "refused": 6,
     "skills": [
@@ -1435,25 +1435,26 @@
     ],
     "reported": true,
     "tools": {
-      "get_pr": 2,
-      "list": 2,
-      "read": 26,
+      "get_pr": 3,
+      "list": 4,
+      "read": 37,
       "glob": 4,
-      "grep": 41,
+      "grep": 46,
       "atoma_builtin__load_skill": 1,
       "delegate_readonly": 2,
-      "get_check_runs": 2,
-      "get_pr_diff": 1,
+      "get_check_runs": 4,
+      "get_pr_diff": 2,
       "get_pr_reviews": 1,
       "get_issue": 5,
       "get_issue_comments": 6,
-      "get_branch": 2,
-      "check_merge_readiness": 2,
+      "get_branch": 3,
+      "check_merge_readiness": 3,
       "list_pr_review_comments": 1,
       "search_code": 2,
       "search_issues": 2,
       "create_issue": 1,
-      "delegate_readonly_large": 1
+      "delegate_readonly_large": 1,
+      "merge_pr": 1
     },
     "acts": {},
     "runs": [
@@ -1492,6 +1493,29 @@
           }
         },
         "started": "2026-10-13T17:26:23Z"
+      },
+      {
+        "ended": "2026-10-13T18:16:35Z",
+        "ended_because": "completed",
+        "iterations": 10,
+        "messages": 182,
+        "seconds": 303,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 5,
+            "list": 2,
+            "read": 11
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 2,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "merge_pr": 1
+          }
+        },
+        "started": "2026-10-13T18:11:32Z"
       }
     ]
   },
