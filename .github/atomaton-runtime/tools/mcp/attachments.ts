@@ -6601,8 +6601,9 @@ var require_dist = __commonJS(function(exports, module) {
 });
 
 // src/entrypoints/tools/mcp/attachments.ts
-import { readFileSync, statSync as statSync2 } from "fs";
-import { basename } from "path";
+import { readFileSync, mkdtempSync, rmSync, statSync as statSync2 } from "fs";
+import { tmpdir } from "os";
+import { basename, isAbsolute, join, resolve, sep } from "path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -17671,6 +17672,20 @@ function gh(...args) {
 function gitRun(...args) {
   return run(["git", ...args]);
 }
+function gitRunWith(options, ...args) {
+  const proc = Bun.spawnSync({
+    cmd: ["git", ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+    ...options.stdin !== undefined ? { stdin: Buffer.from(options.stdin) } : {},
+    env: { ...process.env, ...options.env }
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : ""
+  };
+}
 
 // src/entrypoints/tools/lib/harden.ts
 import { statSync } from "fs";
@@ -17741,6 +17756,9 @@ function hardenCredentialHolder(log) {
 }
 
 // src/entrypoints/tools/mcp/attachments.ts
+function indexEnv(indexPath) {
+  return { env: { GIT_INDEX_FILE: indexPath } };
+}
 function log(message) {
   console.error(`[atomaton-attachments] ${message}`);
 }
@@ -17750,11 +17768,103 @@ var UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 var MAX_READ_BYTES = 128 * 1024 * 1024;
 var REQUEST_ABORT_MS = 120000;
 var BODY_EXCERPT_CHARS = 2000;
+var DEFAULT_DOCS_BRANCH = "business-docs";
+var DRAFT_FILE_MODE = "100644";
+function commitIdentity() {
+  const agent = (process.env.AGENT ?? "").trim() || "engineer";
+  const name = `atomaton-${agent}`;
+  return ["-c", `user.name=${name}`, "-c", `user.email=${name}@users.noreply.github.com`];
+}
+var DRAFT_FILE_SCHEMA = objectType({
+  path: stringType().min(1).describe("A local draft file: a path inside this run's checkout, or an absolute one under /tmp."),
+  target: stringType().min(1).describe("Where it goes on the branch, such as `designs/12/overview.md`. A relative path; no leading slash and no `..`.")
+});
+var PUBLISH_DRAFT_SCHEMA = objectType({
+  files: arrayType(DRAFT_FILE_SCHEMA).min(1).describe("The drafts to publish, each as a local `path` and the `target` it takes on the branch."),
+  message: stringType().min(1).describe("Commit message for this publication."),
+  branch: stringType().optional().describe(`Branch to publish onto. Default \`${DEFAULT_DOCS_BRANCH}\`.`)
+});
+function blobUrlFor(repo, branch, target) {
+  const path = target.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+  return `https://github.com/${repo}/blob/${encodeURIComponent(branch)}/${path}`;
+}
+function indexInfoFor(entries) {
+  return entries.map((entry) => `${DRAFT_FILE_MODE} blob ${entry.blob}	${entry.target}\x00`).join("");
+}
+function defaultBranchFrom(lsRemoteSymref) {
+  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
+}
+function resolveDraftFiles(files) {
+  const base = resolve(process.cwd());
+  const roots = [base, "/tmp"];
+  const seen = new Set;
+  const out = [];
+  for (const file of files) {
+    const source = isAbsolute(file.path) ? resolve(file.path) : resolve(base, file.path);
+    if (!roots.some((root) => source === root || source.startsWith(root + sep))) {
+      throw new Error(`'${file.path}' resolves to '${source}', which is outside the places a draft may be read from ` + `(${roots.join(", ")}). Pass an absolute path, or one relative to ${base}.`);
+    }
+    let size;
+    try {
+      const stats = statSync2(source);
+      if (!stats.isFile()) {
+        throw new Error(`'${file.path}' is not a file (${source}); a draft is one file per target.`);
+      }
+      size = stats.size;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("is not a file"))
+        throw error;
+      throw new Error(`could not read '${file.path}': no such file at ${source}`);
+    }
+    if (size > MAX_READ_BYTES) {
+      throw new Error(`${source} is ${size} bytes, past the ${MAX_READ_BYTES}-byte ceiling this tool publishes.`);
+    }
+    const target = normalizeTarget(file.target);
+    if (seen.has(target)) {
+      throw new Error(`two drafts target '${target}'; one would overwrite the other and the result would report both.`);
+    }
+    seen.add(target);
+    out.push({ source, target });
+  }
+  return out;
+}
+function normalizeTarget(target) {
+  const trimmed = target.replace(/^\/+/, "");
+  if (!trimmed)
+    throw new Error("a draft's target cannot be empty.");
+  if (isAbsolute(target) || target.startsWith("/")) {
+    throw new Error(`target '${target}' must be relative to the branch, not absolute.`);
+  }
+  if (trimmed.startsWith("-")) {
+    throw new Error(`target '${target}' starts with '-', which the index listing would read as an argument.`);
+  }
+  if (trimmed.includes("\\")) {
+    throw new Error(`target '${target}' contains a backslash; branch paths are separated by '/'.`);
+  }
+  if (/[\t\n\r\0]/.test(trimmed)) {
+    throw new Error(`target '${target}' contains a tab, newline or NUL, which the index listing cannot express.`);
+  }
+  const parts = trimmed.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) {
+    throw new Error(`target '${target}' has an empty, '.' or '..' path segment, which git will not accept.`);
+  }
+  if (parts.some((part) => part.toLowerCase() === ".git")) {
+    throw new Error(`target '${target}' is under .git, which git refuses to write a blob into.`);
+  }
+  return trimmed;
+}
+function gitInIndex(indexPath, args) {
+  return gitRunWith(indexEnv(indexPath), ...args);
+}
+function gitInIndexStdin(indexPath, args, input) {
+  return gitRunWith({ ...indexEnv(indexPath), stdin: input }, ...args);
+}
 var PROBE_SCHEMA = objectType({
   mode: enumType(["routing", "endpoint", "oversize", "upload"]).optional().default("endpoint").describe("What to measure. `endpoint` (default): POST with repository_id and an empty name \u2014 a request that cannot store, whose 400 proves the endpoint is real and the credential was accepted. " + "`routing`: the same without repository_id \u2014 the 404 shape gh's source predicts. " + "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " + "`upload`: the only mode that stores \u2014 one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent."),
   file: stringType().optional().describe("Path to the file to send. Required for oversize and upload; ignored by the other two."),
   content_type: stringType().optional().default("application/octet-stream").describe("Content-Type declared for the body. Defaults to application/octet-stream, which is what gh sends."),
-  repository_id: positiveInt("Numeric REST id of the repository to upload against. Looked up from the current repository when omitted.").optional()
+  repository_id: positiveInt("Numeric REST id of the repository to upload against. Looked up from the current repository when omitted.").optional(),
+  name: stringType().optional().describe("The `name` parameter to send, when a probe needs a specific one. Omitted entirely leaves the name the mode " + "decides: empty for `routing` and `endpoint` \u2014 which is what makes their 400 the endpoint's answer rather " + "than a missing parameter \u2014 and the file's basename for `oversize` and `upload`. Set it on `routing` to " + "measure the route with a valid name and no `repository_id`, which is the only way that measurement is " + "reachable: a non-empty name on the other modes is the file's, and those modes require one.")
 });
 function credential() {
   const token = (process.env.GH_TOKEN ?? "").trim();
@@ -17824,6 +17934,9 @@ function interpret(mode, status, body, location) {
     if (status === 404) {
       return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists \u2014 endpoint mode's 400 is that proof.";
     }
+    if (status === 400 && body.includes("Invalid name for request")) {
+      return "the request was rejected for its name before it ever routed, so this measured nothing about routing. " + "Measured: an empty `name` is answered 400 this way whether or not repository_id is present. Send this mode " + "with a non-empty `name` to reach the routing question.";
+    }
     return "unexpected: the measured expectation for a request without repository_id is 404. Record the status and body.";
   }
   if (mode === "endpoint") {
@@ -17876,7 +17989,7 @@ function interpret(mode, status, body, location) {
     return `refused with ${status}: the ceiling may be reported as a validation message rather than 413. The body is the record; either way the file was not stored whole.`;
   }
   if (status === 404) {
-    return "the endpoint did not route for this credential: gh's source says a token without write access on the repository gets 404. The size question was not reached.";
+    return "the shape the ceiling takes here: a body over 25MB is refused with 404 `Not Found` and nothing was stored \u2014 " + "measured, and not the 413 the documented ceiling would suggest. The same session's `endpoint` 400 already " + "proved the route and the credential, so this is not the permission-shaped 404 that `upload` mode describes. " + "Whether the size or the credential's kind at the body stage is the cause cannot be separated without a " + "storing trial at or under the ceiling, which this mode deliberately does not do. Split or regenerate the artifact.";
   }
   if (status === 401) {
     return "the credential was rejected before the size question was reached \u2014 the direct-POST design needs a different credential, and #12's design reopens.";
@@ -17889,7 +18002,7 @@ async function probe(a) {
   const contentType = a.content_type ?? "application/octet-stream";
   const needsRepo = mode !== "routing";
   const repositoryId = a.repository_id ?? (needsRepo ? resolveRepositoryId(resolveRepo()) : undefined);
-  const name = mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined;
+  const name = a.name ?? (mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined);
   let body;
   if (mode === "upload" || mode === "oversize") {
     if (!a.file)
@@ -17925,12 +18038,119 @@ async function probe(a) {
     interpretation
   }, null, 2);
 }
+function remoteTip(branch) {
+  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+  if (code !== 0) {
+    throw new Error(`could not read '${branch}' from origin, so it is unknown whether publishing would create it or append to ` + `it: ${stderr || stdout || `git ls-remote exited ${code}`}`);
+  }
+  return stdout ? stdout.split(/\s+/)[0] : undefined;
+}
+function commitAt(treeish) {
+  const { code, stdout, stderr } = gitRun("rev-parse", `${treeish}^{commit}`);
+  if (code !== 0)
+    throw new Error(`could not resolve '${treeish}': ${stderr || stdout}`);
+  return stdout.trim();
+}
+async function publishDraft(a) {
+  const repo = resolveRepo();
+  const requested = (a.branch ?? "").trim().replace(/^refs\/heads\//, "");
+  const branch = requested || DEFAULT_DOCS_BRANCH;
+  const format = gitRun("check-ref-format", "--branch", branch);
+  if (format.code !== 0) {
+    throw new Error(`'${branch}' is not a branch name git accepts: ${format.stderr || format.stdout}`);
+  }
+  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
+  if (symref.code !== 0) {
+    throw new Error(`could not read origin, so the default branch could not be checked: ${symref.stderr || symref.stdout}`);
+  }
+  const defaultBranch = defaultBranchFrom(symref.stdout);
+  if (defaultBranch && branch === defaultBranch) {
+    throw new Error(`'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` + `review, which is the one thing an orphan branch exists to avoid \u2014 and nothing here opens a pull request. ` + `Name another branch, or omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`);
+  }
+  const current = gitRun("branch", "--show-current").stdout.trim();
+  if (current && current === branch) {
+    throw new Error(`'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` + `this run is delivering. Omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`);
+  }
+  const drafts = resolveDraftFiles(a.files);
+  const tmp = mkdtempSync(join(tmpdir(), "atomaton-publish-"));
+  try {
+    const index = join(tmp, "index");
+    const blobs = [];
+    for (const draft of drafts) {
+      const hashed = gitRun("hash-object", "-w", "--no-filters", "--", draft.source);
+      if (hashed.code !== 0) {
+        throw new Error(`could not write ${draft.source} into the object store: ${hashed.stderr || hashed.stdout}`);
+      }
+      blobs.push({ blob: hashed.stdout.trim(), target: draft.target });
+    }
+    const parent = remoteTip(branch);
+    let base;
+    if (parent) {
+      const fetched = gitRun("fetch", "--no-tags", "--no-write-fetch-head", "origin", `refs/heads/${branch}`);
+      if (fetched.code !== 0) {
+        throw new Error(`could not fetch '${branch}' from origin: ${fetched.stderr || fetched.stdout}`);
+      }
+      base = commitAt(parent);
+      const read = gitInIndex(index, ["read-tree", base]);
+      if (read.code !== 0)
+        throw new Error(`could not read the tip of '${branch}': ${read.stderr || read.stdout}`);
+    } else {
+      const read = gitInIndex(index, ["read-tree", "--empty"]);
+      if (read.code !== 0)
+        throw new Error(`could not start an empty tree: ${read.stderr || read.stdout}`);
+    }
+    const staged = gitInIndexStdin(index, ["update-index", "-z", "--index-info"], indexInfoFor(blobs));
+    if (staged.code !== 0) {
+      throw new Error(`could not stage the drafts: ${staged.stderr || staged.stdout}`);
+    }
+    const tree = gitInIndex(index, ["write-tree"]);
+    if (tree.code !== 0)
+      throw new Error(`could not write the tree: ${tree.stderr || tree.stdout}`);
+    const missing = drafts.filter((draft) => gitRun("cat-file", "-e", `${tree.stdout}:${draft.target}`).code !== 0);
+    if (missing.length > 0) {
+      throw new Error(`git did not accept ${missing.map((draft) => `'${draft.target}'`).join(", ")} into the tree, so nothing ` + `was pushed. A target must be a relative path with no '..' and nothing under .git.`);
+    }
+    const commitArgs = [
+      ...commitIdentity(),
+      "commit-tree",
+      tree.stdout,
+      ...base ? ["-p", base] : [],
+      "-m",
+      a.message
+    ];
+    const commit = gitRun(...commitArgs);
+    if (commit.code !== 0)
+      throw new Error(`could not create the commit: ${commit.stderr || commit.stdout}`);
+    const commitSha = commit.stdout.trim();
+    const pushed = gitRun("push", "origin", `${commitSha}:refs/heads/${branch}`);
+    if (pushed.code !== 0) {
+      const raced = /non-fast-forward|fetch first|rejected/i.test(`${pushed.stderr} ${pushed.stdout}`);
+      throw new Error(raced ? `something else pushed to '${branch}' between the read and the write, so this commit was refused ` + `rather than dropping theirs. Run it again; the drafts are still on disk.` : `could not push '${branch}': ${pushed.stderr || pushed.stdout}`);
+    }
+    log(`publish ${branch} ${commitSha.slice(0, 12)} ${drafts.length} file(s)`);
+    return JSON.stringify({
+      branch,
+      commit_sha: commitSha,
+      created: base === undefined,
+      files: drafts.map((draft) => ({ target: draft.target, blob_url: blobUrlFor(repo, branch, draft.target) }))
+    }, null, 2);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " + "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " + "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " + "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " + "refused \u2014 an orphan branch is safe because it is not the reviewed one.";
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "probe",
-    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted \u2014 without saving a file. " + "Mode `routing` omits repository_id; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
+    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted \u2014 without saving a file. " + "Mode `routing` omits repository_id \u2014 an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
     schema: PROBE_SCHEMA,
     handler: probe
+  }),
+  defineMcpTool({
+    name: "publish_draft",
+    description: PUBLISH_DRAFT_DESCRIPTION,
+    schema: PUBLISH_DRAFT_SCHEMA,
+    handler: publishDraft
   })
 ]);
 async function main() {
@@ -17939,9 +18159,15 @@ async function main() {
 if (import.meta.main)
   main();
 export {
+  DEFAULT_DOCS_BRANCH,
+  PUBLISH_DRAFT_SCHEMA,
   REQUEST_ABORT_MS,
   UPLOAD_LIMIT_BYTES,
+  blobUrlFor,
+  defaultBranchFrom,
+  indexInfoFor,
   interpret,
   readFileFor,
-  requestUrlFor
+  requestUrlFor,
+  resolveDraftFiles
 };

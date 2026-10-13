@@ -171,10 +171,6 @@ function saysOpen(state) {
 }
 
 // src/domain/work/issue-links.ts
-var CLOSING_KEYWORDS = "close[sd]?|fix(?:e[sd])?|resolve[sd]?";
-function claimsToClose(body, issue) {
-  return new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+#${issue}\\b`, "i").test(body);
-}
 function dedupeByNumber(...lists) {
   const seen = new Map;
   for (const list of lists)
@@ -249,7 +245,7 @@ function issueLinks(repo, number) {
     };
   }
   const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
-  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && claimsToClose(source?.body ?? "", number)).map(asPr);
+  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number).map(asPr);
   return {
     parent: issue.parent ? normalise(issue.parent) : undefined,
     children: (issue.subIssues?.nodes ?? []).map(asChild),

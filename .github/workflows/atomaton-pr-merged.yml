@@ -26,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       parent_issue: ${{ steps.parse-metadata.outputs.parent_number }}
-      sub_issue: ${{ steps.parse-metadata.outputs.sub_number }}
     if: github.event.pull_request.merged == true
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +33,7 @@ jobs:
         with:
           bun-version: latest
         uses: oven-sh/setup-bun@v2
-      - name: Parse parent-issue / sub-issue metadata from PR body
+      - name: Parse the parent-issue tag from the PR body
         id: parse-metadata
         shell: bash
         env:
@@ -46,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       parent_issue: ${{ steps.resolve.outputs.parent_issue }}
-    if: needs.parse.outputs.sub_issue != ''
+    if: needs.parse.outputs.parent_issue != ''
     needs:
       - parse
     steps:
@@ -61,7 +60,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SUB: ${{ needs.parse.outputs.sub_issue }}
+          SUB: ${{ needs.parse.outputs.parent_issue }}
         run: |
           PARENT=$(bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/resolve_orchestrator_parent.ts" --repo "${REPO}" --sub "${SUB}")
           echo "parent_issue=${PARENT}" >> "$GITHUB_OUTPUT"
@@ -133,6 +132,6 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
           PARENT: ${{ needs.resolve-parent.outputs.parent_issue }}
-          CLOSED_NUM: ${{ needs.parse.outputs.sub_issue }}
+          CLOSED_NUM: ${{ needs.parse.outputs.parent_issue }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/aggregate_sub_issues.ts" --repo "${OWNER}/${REPO}" --parent "${PARENT}" --closed-num "${CLOSED_NUM}"

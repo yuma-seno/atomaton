@@ -153,8 +153,16 @@ servers:
   # Added as its own server rather than a tool on `github`: an agent that
   # reaches for an upload should have to name it, because `upload` stores a
   # permanent file on GitHub's CDN with no documented way to delete it.
+  #
+  # `publish_draft` is here for the same credential reason, one layer over: the
+  # shell cannot run `git push` (the guard refuses it) and `commit_and_push` names
+  # a branch from the work-branch convention and can build no other, so the process
+  # that can reach an orphan branch is one that runs `git` itself. That process
+  # inherits the checkout's own `.git/config`, where `actions/checkout` left the
+  # credential — no token is read here and none is passed. The server also reads
+  # `AGENT` (for the commit identity), which the runner passes to it already.
   attachments:
-    description: "Probes and uses GitHub's user-asset upload endpoint (the one `gh --attach` posts to). Its `probe` tool reports the status and body the endpoint returned; only mode `upload` stores anything, and a stored asset has no documented deletion."
+    description: "Probes GitHub's user-asset upload endpoint (the one `gh --attach` posts to) and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each."
     unprefixed: true
     command: bun
     args:
@@ -168,6 +176,12 @@ servers:
     # mode it may still store the file, retiring exactly the one outcome this probe
     # must never produce without saying so. The same shape as `delegate`'s 660 over
     # its sub-run's 600-second limit.
+    #
+    # `publish_draft` is served by the same value. Its work is a handful of `git`
+    # commands over the network (two `ls-remote`s, a `fetch`, a `push`), which is
+    # seconds on a repository of any ordinary size -- and unlike `upload` it is
+    # safe to be cut off, because a push either happened or did not and the answer
+    # is in the ref. The number is not raised again for it.
     request_timeout_secs: 180
     hooks:
       {}

@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.3",
+  "version": "v0.21.5",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -89,6 +89,8 @@
     ".github/atomaton/prompt-template.md",
     ".github/atomaton/rulesets/main.json",
     ".github/atomaton/skills/delivery/pipeline-setup.md",
+    ".github/atomaton/skills/docs/design-doc.md",
+    ".github/atomaton/skills/docs/generate.mjs",
     ".github/atomaton/skills/engineering/environment.md",
     ".github/atomaton/skills/engineering/secrets-in-a-check.md",
     ".github/atomaton/skills/research/web-search.md",

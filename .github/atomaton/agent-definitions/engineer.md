@@ -4,6 +4,12 @@ description: Implements one engineer-ready leaf task, validates it, and opens a 
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
 vision: true
+# Keeps consecutive requests on one deployment, so the provider's prompt cache still
+# holds the conversation from one inference to the next. Measured on `reviewer`, which
+# carried one first: without it a run alternates between a 98% hit and a fallback to
+# the shared prefix.
+extra_headers:
+  X-OrcaRouter-Session-Id: atomaton-engineer
 knows_about:
   - reviewer
   - atomaton

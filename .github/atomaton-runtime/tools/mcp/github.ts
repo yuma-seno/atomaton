@@ -7489,11 +7489,8 @@ function saysOpen(state) {
 
 // src/domain/work/issue-links.ts
 var CLOSING_KEYWORDS = "close[sd]?|fix(?:e[sd])?|resolve[sd]?";
-function claimsToClose(body, issue) {
-  return new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+#${issue}\\b`, "i").test(body);
-}
-function closesLine(issue) {
-  return `Closes #${issue}`;
+function partOfLine(issue) {
+  return `Part of #${issue}`;
 }
 function closingReferences(text) {
   const pattern = new RegExp(`\\b(?:${CLOSING_KEYWORDS})\\s*:?\\s+((?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#\\d+)\\b`, "gi");
@@ -7599,7 +7596,7 @@ function issueLinks(repo, number) {
     };
   }
   const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
-  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && claimsToClose(source?.body ?? "", number)).map(asPr);
+  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number).map(asPr);
   return {
     parent: issue.parent ? normalise(issue.parent) : undefined,
     children: (issue.subIssues?.nodes ?? []).map(asChild),
@@ -20160,13 +20157,13 @@ function injectParentIssue(body, reviewer) {
   if (PARENT_ISSUE_TAG.has(body)) {
     mcpFail("PR body already contains a parent-issue tag; refusing to add another");
   }
-  const closes = `${closesLine(Number(parent))}
+  const line = `${partOfLine(Number(parent))}
 `;
   const originAgent = (process.env.AGENT ?? "").trim();
   const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}
 ` : "";
   return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}
-${originLine}${closes}${body}`;
+${originLine}${line}${body}`;
 }
 function createPr(a) {
   const title = a.title;
