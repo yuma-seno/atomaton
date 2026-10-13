@@ -26,6 +26,38 @@ import {
  * server rather than a shell: it runs `git` in a process that inherited the checkout's
  * own `.git/config`. That is why this test can run on a pull request while the upload
  * endpoint's cannot.
+ *
+ * ## Windows: nine tests here are expected to fail there
+ *
+ * Not a defect left for later, and not a platform licence either — a decision, with
+ * its reason, so the next person on Windows does not repeat this investigation.
+ *
+ * `resolveDraftFiles` accepts a draft under the work tree or under **`/tmp`**, which
+ * it holds as a string literal. The fixture here builds its directories in
+ * `os.tmpdir()`, which on Windows is `C:\Users\...\AppData\Local\Temp`. The two can
+ * never meet: the check compares a `resolve()`d path against that literal, and on
+ * Windows `resolve("/tmp/x")` is `C:\tmp\x` while the root it is compared to is still
+ * `"/tmp"`. So the tool refuses every draft the fixture publishes, and the nine tests
+ * that publish something fail on the refusal. Measured:
+ *
+ * ```
+ * roots[1] (the literal)          = "/tmp"
+ * resolve('/tmp/….md')            = "C:\\tmp\\….md"
+ * source === roots[1]             ? false
+ * source.startsWith(roots[1]+sep) ? false
+ * ```
+ *
+ * Neither half is wrong. `/tmp` is the pinned interface — `/tmp/atomaton-workspace` is
+ * the one directory of it that survives a run — and `os.tmpdir()` is the portable way
+ * for a test to ask for a temporary directory. What makes it not worth reconciling is
+ * **where the tool runs**: `publish_draft` is reached from an agent's run, and an
+ * agent's run is a GitHub-hosted Ubuntu runner. A Windows-shaped fixture would arrange
+ * for the test to pass in an environment the tool is never in, which is the one thing
+ * a test must not do.
+ *
+ * `CONTRIBUTING.md`'s "Supported platform" states the same rule from the other side:
+ * `bun run test` having failures on Windows is expected, and a Windows failure
+ * **without** a reason written down is still a bug. See #169.
  */
 const SCRIPTS_DIR = join(process.cwd(), "src/entrypoints/tools/mcp");
 

@@ -276,6 +276,35 @@ change caused. `tests/contract/test-builds-first.test.ts` is the guard: it fails
 fails on a `pre` hook that is present but does not build. The `synth` check command CI
 runs stays, because it is what proves the build works before the tests read it.
 
+### Supported platform
+
+**Linux.** CI runs on `ubuntu-latest` and the agents run on GitHub-hosted runners,
+so that is the environment these commands are expected to be green in. `typecheck`
+and `synth` work anywhere; **`test` is expected to have failures on Windows.**
+
+Exactly one file does, and its header says so:
+`tests/contract/attachments-publish.test.ts`, nine tests. The cause is a path that
+is POSIX by design rather than by oversight — `attachments.ts` accepts a draft under
+the work tree or under `/tmp`, and `/tmp/atomaton-workspace` is the one directory of
+it that survives a run — while the fixture builds its directories in `os.tmpdir()`.
+`resolveDraftFiles` compares a `resolve()`d path against that literal, and on Windows
+`resolve("/tmp/x")` is `C:\tmp\x` while the root it is compared to is still `/tmp`,
+so nothing under it can ever match. The tool is not broken there; it is unreachable
+there, which is the same thing for this purpose: `publish_draft` is reached from an
+agent's run, and an agent's run is a GitHub-hosted runner.
+
+**The exceptions are deliberate, and must stay deliberate rather than accumulate.**
+A test that fails on Windows names its reason in its own comment, the way
+`skill-catalog.test.ts` does for CRLF — a choice made in the opposite direction for
+the same reason: it failed for anyone on Windows while passing in CI, which is the
+least useful place for a check to disagree with the person it is checking. A Windows
+failure **without** a reason written down is a bug in the test, not a platform
+licence.
+
+The rule that matters is not "it is green here" but that a reader can tell the two
+apart. `bun run test` failing on Windows in `attachments-publish.test.ts` is the
+expected result; failing anywhere else is not. See #169.
+
 ### Green does not mean it ran
 
 `bun test <path that does not exist>` does not fail: it runs the paths it finds,
