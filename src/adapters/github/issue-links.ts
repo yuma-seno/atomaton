@@ -5,16 +5,19 @@
  * from GitHub's sub-issues, which `create_issue` establishes through
  * `addSubIssue` and which a person gets for free by using the sub-issue control
  * in the web UI; the pull requests come from two places that have to be unioned,
- * for the reason `claimsToClose` explains.
+ * for the reason the comment at that union explains.
  *
- * Nothing here reads an Atomaton marker. The relationships have to survive an
- * issue a person opened, decomposed and closed without an agent ever touching
- * it, and markers only exist where an agent has been.
+ * The second of those two places reads `PARENT_ISSUE_TAG`, not a closing keyword.
+ * That is the one relationship here that IS an Atomaton marker, and it is read
+ * because GitHub offers nothing else: a sub-issue's stacked pull request gets no
+ * native closing link, so the tag is what says the two belong together. A cross-
+ * referenced event, filtered to the pull requests whose tag names this issue, is
+ * the only way such a pull request appears at all.
  */
 import { ghGraphqlRead } from "./gh.ts";
+import { PARENT_ISSUE_TAG } from "./tags.ts";
 import { issueOutcome, pullRequestOutcome, saysOpen } from "./outcome.ts";
 import {
-  claimsToClose,
   dedupeByNumber,
   type IssueLinks,
   type LinkedChild,
@@ -175,13 +178,23 @@ export function issueLinks(repo: string, number: number): IssueLinks {
   }
 
   // GitHub's own closing links first — where they exist they are authoritative.
-  // Then the cross-reference timeline, filtered to pull requests that say they
-  // close this issue, which is the only way a sub-issue's stacked pull request
-  // appears at all.
+  // Then the cross-reference timeline, filtered to the pull requests whose body
+  // tag names this issue, which is the only way a sub-issue's stacked pull request
+  // appears at all: GitHub forms a closing link only for a pull request aimed at
+  // the default branch, and those are aimed at their parent's branch.
+  //
+  // This filter used to be `claimsToClose`, and it had to change with the line
+  // that fed it: `create_pr` writes `Part of #N` now, not `Closes #N` (#171), so a
+  // keyword is no longer there to match. The tag it reads instead is the same one
+  // `parse_pr_metadata.ts` and `parent-issue.ts` read, which is the point — one
+  // fact, one spelling.
   const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
   const referenced = (issue.timelineItems?.nodes ?? [])
     .map((node) => node.source)
-    .filter((source): source is GqlPr => Boolean(source?.number) && claimsToClose(source?.body ?? "", number))
+    .filter(
+      (source): source is GqlPr =>
+        Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number,
+    )
     .map(asPr);
 
   return {
