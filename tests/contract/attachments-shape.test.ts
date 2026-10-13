@@ -146,7 +146,15 @@ describe("what each status means, per mode", () => {
   });
 
   test("oversize: 413 settles the ceiling as server-side, 201 contradicts it", () => {
-    expect(interpret("oversize", 413, "")).toContain("enforced server-side");
+    const over = interpret("oversize", 413, "");
+    expect(over).toContain("enforced server-side");
+    // The ceiling is a fact about this endpoint, not a plan for how a document
+    // is delivered: the upload route carries no files, so nothing published is
+    // weighed against 25MB. Held so the split-or-regenerate reading — which
+    // named an action no run takes any more — cannot drift back.
+    expect(over).not.toContain("settled toward pieces");
+    expect(over).toContain("carries no files");
+    expect(over).toContain("publish_draft");
     const stored = interpret("oversize", 201, "");
     expect(stored).toContain("WAS stored");
     expect(stored).not.toContain("reopens");

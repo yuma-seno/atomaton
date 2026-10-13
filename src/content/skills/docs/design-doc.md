@@ -137,15 +137,19 @@ publish_draft({
   (`DRAFT_FILE_SCHEMA`, in the attachments server), so the binaries go up as
   they are. One call per publication; the result's `blob_url` per file is what
   the report carries.
-- A file on the branch is an ordinary git object — replaceable by publishing
-  over it, unlike a user-attachment asset, which has no documented deletion
-  API. That difference is the reason the originals take this route at all.
+- A file on the branch is an ordinary git object — publishing over it replaces
+  it, so a corrected original goes up as another call to the same `target`.
+  That is a property of this route, not the reason it was chosen.
 - **The upload route is closed, and measured so.** GitHub's user-asset upload
   endpoint refuses every body-bearing POST from the Actions token (`ghs_`),
-  whatever the size or MIME type — a 20KB PDF, a 5-byte text and a 27MB
-  archive all came back 404, while the same session's credential passed the
-  endpoint's own validation. The `probe` tool remains as the instrument that
-  measured this; do not reach for it to deliver a file.
+  whatever the size or MIME type — a 20KB PDF, a 5-byte text and a 27MB random
+  `.bin` all came back 404, while the same session's credential passed the
+  endpoint's own validation. That refusal is why the originals and the PDF go
+  onto the branch: for this run's credential it is the route that is left. The
+  route's own limits stay its own — a body over 25MB is refused there, and a
+  stored asset has no documented deletion API — so nothing published is weighed
+  against either. The `probe` tool remains as the instrument that measured
+  this; do not reach for it to deliver a file.
 - If the attachments server is not among your tools, the same rule as the
   publish leg applies: record it, publish nothing, do not route around it.
 

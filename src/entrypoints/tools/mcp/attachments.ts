@@ -554,7 +554,11 @@ export function interpret(mode: ProbeMode, status: number, body: string, locatio
 
   // oversize
   if (status === 413) {
-    return "the ceiling is enforced server-side: a file over 25MB cannot be attached whole. The design question — split the artifact, or regenerate a smaller one from the source — is settled toward pieces at or under the limit.";
+    // A fact about this endpoint, and only this one: the upload route carries no
+    // files any more (`upload` mode's 404 says why), so the ceiling bounds
+    // nothing a run delivers. Sizes are bounded where the files actually go —
+    // `publish_draft`'s own read ceiling, MAX_READ_BYTES.
+    return "the ceiling is enforced server-side: a body over 25MB is not attached whole. That is a fact about this endpoint alone — the upload route carries no files any more, so nothing delivered is weighed against it. A published document is bounded by `publish_draft`'s own read ceiling instead.";
   }
   if (status === 201) {
     return "the over-limit file WAS stored: the documented 25MB ceiling did not fire for this content type. Record the URL — the premise is contradicted, and the finding goes to the attachment design's thread rather than reopening it.";
