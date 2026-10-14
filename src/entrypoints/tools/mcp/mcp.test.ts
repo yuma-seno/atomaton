@@ -430,7 +430,7 @@ describe("mcp/github.ts", () => {
       "github.ts",
       {
         jsonrpc: "2.0", id: 3, method: "tools/call",
-        params: { name: "create_issue", arguments: { title: "Test", sub_issue: false } },
+        params: { name: "create_issue", arguments: { title: "Test" } },
       },
       {
         ...fakeGhSeam(),
@@ -467,7 +467,7 @@ describe("mcp/github.ts", () => {
           jsonrpc: "2.0", id: 41, method: "tools/call",
           params: {
             name: "create_issue",
-            arguments: { title: "A defect", body: "Looks right. @torvalds should see this.", sub_issue: false },
+            arguments: { title: "A defect", body: "Looks right. @torvalds should see this." },
           },
         },
         {
@@ -478,11 +478,14 @@ describe("mcp/github.ts", () => {
       );
       // The argv as issued, rather than the log as text: what matters is the string gh
       // was handed, and reading it back through JSON is how every other test here does it.
+      // The element AFTER `--body`: the sub-issue label is appended after the body, and
+      // `gh label create` runs first and carries no `--body`.
       const calls = readFileSync(log, "utf8")
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as string[]);
-      const body = calls.find((argv) => argv.includes("--body"))?.at(-1) ?? "";
+      const create = calls.find((argv) => argv.includes("--body"));
+      const body = create ? (create[create.indexOf("--body") + 1] ?? "") : "";
       // Backticked, so GitHub sends no notification and the name still reads.
       expect(body).toContain("Looks right. `@torvalds` should see this.");
       // And the notice the other three paths add, so a person reading the review can see
@@ -500,7 +503,7 @@ describe("mcp/github.ts", () => {
         jsonrpc: "2.0", id: 31, method: "tools/call",
         params: {
           name: "create_issue",
-          arguments: { title: "Test", body: "<!-- atomaton:notify=someone-else -->", sub_issue: false },
+          arguments: { title: "Test", body: "<!-- atomaton:notify=someone-else -->" },
         },
       },
       {
@@ -526,7 +529,7 @@ describe("mcp/github.ts", () => {
         jsonrpc: "2.0", id: 32, method: "tools/call",
         params: {
           name: "create_issue",
-          arguments: { title: "Test", body: "Do the thing.\n\n/engineer", sub_issue: false },
+          arguments: { title: "Test", body: "Do the thing.\n\n/engineer" },
         },
       },
       {
@@ -547,7 +550,7 @@ describe("mcp/github.ts", () => {
         jsonrpc: "2.0", id: 33, method: "tools/call",
         params: {
           name: "create_issue",
-          arguments: { title: "Test", body: "Comment /engineer to start one.", sub_issue: false },
+          arguments: { title: "Test", body: "Comment /engineer to start one." },
         },
       },
       {

@@ -185,8 +185,8 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
       `not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` +
         "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " +
         "sub-issue links — an issue not linked under this one is never counted, so a dispatch onto " +
-        "it would leave this issue waiting forever. Create it with `create_issue` " +
-        "(`sub_issue: true`, the default) so the link exists.",
+        "it would leave this issue waiting forever. `create_issue` links a child under the issue its " +
+        "run is on, so create it from a run on this issue.",
     );
   }
 
