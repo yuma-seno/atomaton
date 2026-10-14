@@ -274,10 +274,6 @@ const CREATE_ISSUE_SCHEMA = z.object({
   title: z.string().min(1).describe("Concise issue title."),
   body: z.string().optional().describe("Issue body in GitHub-flavored Markdown. Defaults to an empty body."),
   labels: stringArray("Existing repository label names to apply. Defaults to no extra labels.").optional(),
-  sub_issue: z
-    .boolean()
-    .optional()
-    .describe("Set sub_issue=true to automatically link it to the current issue as a child task. Defaults to true."),
 });
 
 const LIST_ISSUES_SCHEMA = z.object({
@@ -347,7 +343,6 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   const title = a.title;
   let body = a.body ?? "";
   let labels = a.labels ?? [];
-  const sub = a.sub_issue ?? true;
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
 
   // A pull request run does not create sub-issues. It reviews or fixes one pull
@@ -375,18 +370,16 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
     "Use `launch_sub_agent` to start an agent on a sub-issue.",
   );
   body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
-  if (sub) {
-    const subIssueLabel = getLabel("sub_issue");
-    const ensured = gh(
-      "label", "create", subIssueLabel,
-      "--repo", REPO,
-      "--force",
-      "--color", "8250df",
-      "--description", "Child delivery task managed by Atomaton",
-    );
-    if (ensured.code) mcpFail(`Failed to ensure sub-issue label '${subIssueLabel}': ${ensured.stderr || ensured.stdout}`);
-    if (!labels.includes(subIssueLabel)) labels = [...labels, subIssueLabel];
-  }
+  const subIssueLabel = getLabel("sub_issue");
+  const ensured = gh(
+    "label", "create", subIssueLabel,
+    "--repo", REPO,
+    "--force",
+    "--color", "8250df",
+    "--description", "Child delivery task managed by Atomaton",
+  );
+  if (ensured.code) mcpFail(`Failed to ensure sub-issue label '${subIssueLabel}': ${ensured.stderr || ensured.stdout}`);
+  if (!labels.includes(subIssueLabel)) labels = [...labels, subIssueLabel];
 
   const cmd = ["issue", "create", "--repo", REPO, "--title", title];
   if (body) cmd.push("--body", body);
@@ -407,7 +400,7 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   //
   // The issue exists by this point and cannot be un-created, so the failure names it:
   // an agent that is told only "create_issue failed" would file it again.
-  if (sub && parentNum) {
+  if (parentNum) {
     try {
       const pid = await resolveIssueId(Number(parentNum));
       const sid = await resolveIssueId(num);
@@ -425,28 +418,28 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
     }
   }
 
-  logOp("create_issue", { number: num, title, sub_issue: sub });
+  logOp("create_issue", { number: num, title });
   // `parent` is returned because asking for a sub-issue does not guarantee getting
-  // one. With `sub_issue: true` and no `ISSUE_NUMBER` -- a run that is not working on
-  // an issue -- the label goes on and there is no parent to link it under, producing
-  // an issue that looks like a child and that no aggregation will ever pick up.
-  // `{number, url}` reported that as plain success.
+  // one. With no `ISSUE_NUMBER` -- a run that is not working on an issue -- the label
+  // goes on and there is no parent to link it under, producing an issue that looks
+  // like a child and that no aggregation will ever pick up. `{number, url}` reported
+  // that as plain success.
   //
   // The other way of ending up here is gone: a failed link is now a failed call, so
   // reaching this line with `parent` set means the link exists.
-  const parent = sub && parentNum ? Number(parentNum) : null;
+  const parent = parentNum ? Number(parentNum) : null;
   return JSON.stringify({
     number: num,
     url: stdout.trim(),
     parent,
-    ...(sub && !parent
-      ? {
+    ...(parent
+      ? {}
+      : {
           note:
             "Labelled as a sub-issue, but this run has no current issue, so no parent was recorded. " +
             "Nothing will aggregate it. Create it from a run that is working on the parent, or treat it " +
             "as a root issue.",
-        }
-      : {}),
+        }),
   });
 }
 

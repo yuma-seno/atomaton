@@ -385,7 +385,7 @@ describe("agent prompt contracts", () => {
     );
     // And the procedure has to travel with it, or the attribution is advice with
     // nowhere to go.
-    expect(text, "the run that saw it is the only one that can file it").toContain("sub_issue: false");
+    expect(text, "the run that saw it is the only one that can file it").toContain("create_issue");
   });
 
   /**
@@ -457,19 +457,14 @@ describe("agent prompt contracts", () => {
    * cannot propose the fix, so it waits until someone else notices." The run that saw
    * the warning is the only one holding it, so filing is part of seeing it.
    *
-   * `sub_issue: false` because the default is true: a defect in the tools would
-   * otherwise be filed as a child of whatever the agent happened to be working on,
-   * and disappear when that issue closed.
-   *
    * This read `engineering/environment`, which held the procedure until the template
    * absorbed it -- see the test above for why. It reads the template now, and what it
-   * guards is unchanged: the filing call, and the argument that keeps the issue from
-   * being buried under the work that found it.
+   * guards is unchanged: the filing call, and that the run says so where the next
+   * reader looks.
    */
   test("a reported problem turns into a filed issue that outlives the work", () => {
     const prompt = readFileSync("src/content/prompt-template.md", "utf8");
     expect(prompt).toContain("create_issue");
-    expect(prompt, "a tool defect is not a child of the current issue").toContain("sub_issue: false");
     expect(prompt, "and the run has to say so where the next reader looks").toContain(
       "Say so in your report",
     );
