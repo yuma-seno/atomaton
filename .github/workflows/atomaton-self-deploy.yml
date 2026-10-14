@@ -197,7 +197,7 @@ jobs:
             echo "\`.github/\` was **deleted and rebuilt** from two sources:"
             echo
             echo "1. the release archive"
-            echo "2. \`self/\` copied over it — this repository's own four files"
+            echo "2. \`self/\` copied over it — this repository's own files, the ones that are not the template's"
             echo
             echo "So a file the release no longer contains is **gone from the diff**, rather than sitting in the tree with nothing to notice it by. That is what \`self/\` bought."
             echo

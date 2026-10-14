@@ -88,11 +88,15 @@ file.
 
 ## The tool servers a run starts with
 
-Thirteen, and they are not in `config.yaml`. They are in
+Every one of them, and they are not in `config.yaml`. They are in
 `.github/atomaton-runtime/tools/defaults.yaml`, in the same schema as `tools.servers`
 in your config, and that file is the one to read when you are about to override
 one. What it declares is written into the file `atoma` is handed at the start of
 every run.
+
+The table below is what that file declares, and it is a list rather than a count on
+purpose: the number was written down once and went stale the first time a server was
+added.
 
 | Server | What it is for |
 | --- | --- |
