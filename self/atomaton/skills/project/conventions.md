@@ -18,7 +18,7 @@ and it is deliberately absent from `src/` so adopters never receive it.
 | --- | --- | --- |
 | `src/**` | Source of the deliverable | You |
 | `dist/.github/**` | The deliverable adopters receive | The build |
-| `self/**` | This repository's own four files | You |
+| `self/**` | This repository's own files, the ones that are not the template's | You |
 | `.github/**` | This repository's running configuration | The self-deploy job, from a release plus `self/` |
 
 Two different activities live in this table, and which one you are doing decides

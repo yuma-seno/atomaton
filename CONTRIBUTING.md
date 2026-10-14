@@ -13,16 +13,19 @@ The deliverable:
 - `dist/.github/`: generated from `src/` by `bun run synth`. This is what adopters
   receive. **Not tracked in git** — it is a pure function of `src/`, and the
   release deployment publishes it as a release asset rather than committing it.
-- `scripts/`: this project's own pipeline. `tag-release.sh` is what `deploy.on_merge`
-  names, and they are the reason there are no hand-written workflows left.
-  Governed, like `.github/`. The secret scan used to live here too and now ships to
-  every adopter as `.github/atomaton-runtime/scripts/scan_secrets.ts`; this repository
-  runs the shipped one, so a defect in it fails here before it reaches anybody else.
+- `self/atomaton/scripts/`: this project's own pipeline. `tag-release.sh` is what
+  `deploy.on_merge` names. These are the reason there are no hand-written workflows
+  left, and they live under `self/` because they are this repository's rather than the
+  template's — the self-deploy copies them to `.github/atomaton/scripts/`, where the
+  workflows name them. Governed, like `.github/`. The secret scan used to live here
+  too and now ships to every adopter as
+  `.github/atomaton-runtime/scripts/scan_secrets.ts`; this repository runs the shipped
+  one, so a defect in it fails here before it reaches anybody else.
 
 This repository's own:
 
-- `self/`: the four files that are this repository's rather than the template's,
-  laid out to mirror `.github/`. Nothing else in `.github/` is ours. See
+- `self/`: this repository's own files rather than the template's, laid out to mirror
+  `.github/`. Nothing else in `.github/` is ours. See
   [Applying a release](#applying-a-release-to-this-repository).
 - top-level `.github/`: this repository's adoption of the deliverable. Exactly two
   sources, and nothing kept alive by remembering: a release archive, with `self/`
