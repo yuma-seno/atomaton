@@ -120,10 +120,9 @@ describe("shell_guard.ts", () => {
      * streak was at the limit the agent could not run its tests, could not check
      * `git status`, could not do anything that was neither a search nor an open. And
      * a command that is neither does not move the streak, so the refusal came back
-     * word for word -- three of which is what the core stops a run for.
-     *
-     * Measured on #706: four consecutive refusals all reading "18 searches". Searches
-     * would have counted 18, 19, 20, 21.
+     * word for word -- three of which is what the core stops a run for. The
+     * measured run is #706's: four consecutive refusals all reading "18 searches",
+     * where searches would have counted 18, 19, 20, 21.
      */
     test("past the limit, work that is not searching is still allowed", () => {
       const run = ownRun();

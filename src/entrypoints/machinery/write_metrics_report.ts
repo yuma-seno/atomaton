@@ -225,7 +225,7 @@ export function classifyCall(tool: string, args: string): { skill?: string; act?
   if (tool.endsWith("load_skill")) {
     try {
       // `skill_name`, which is what the tool takes. This read `name`, the spelling
-      // atoma#24 removed when it collapsed five aliases into the one the models
+      // that atoma#24 removed when it collapsed five aliases into the one the models
       // measurably reach for -- so from that release onwards every `load_skill` call
       // was counted and none was attributed to a skill, and the report's "unused
       // skills" section was answering from an empty list.

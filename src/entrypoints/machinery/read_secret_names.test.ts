@@ -108,10 +108,10 @@ describe("read_secret_names.ts", () => {
 
   // Requiring the argument made a deployment break itself: the release that
   // first passed `--config` met the previous release's workflow, which did not.
-  // The record of that incident (issue #353) describes the failing run as
-  // reading its workflow YAML from the base branch and its scripts from the pull
-  // request, which did not reproduce for a `pull_request` event — what holds is
-  // the ordering, not the event-specific mechanism.
+  // The record of that incident is issue #353: the failing run read its workflow
+  // YAML from the base branch and its scripts from the pull request, which did not
+  // reproduce for a `pull_request` event — what holds is the ordering, not the
+  // event-specific mechanism.
   //
   // Failing closed instead is safe in the direction that matters -- no argument,
   // no credentials -- and never reaches for the working tree, which is the thing

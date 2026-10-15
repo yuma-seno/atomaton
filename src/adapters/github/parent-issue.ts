@@ -16,10 +16,8 @@
  * parent while `sibling-check.ts` and `work-tree.ts` went on counting under the old
  * one — two answers, both confident.
  *
- * Measured on this repository before choosing: of the eight issues carrying the tag,
- * six agreed with the native link and two had no link at all — one typed in by hand,
- * one an issue merely filed DURING a run on #42 rather than a child of it, which is
- * the other thing the tag had come to mean. Nothing disagreed. So the link is what
+ * The two were counted against each other before the link was chosen, and nothing
+ * disagreed; the count is on the thread that chose it. So the link is what
  * survives, and `addSubIssue` is no longer best-effort: `create_issue` fails if it
  * cannot establish one, because there is now nothing else recording the edge.
  *

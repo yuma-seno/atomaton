@@ -83,6 +83,12 @@ what, where a boundary already is. Reach for `files_readonly` yourself when a
 summary cannot carry it: an interface's exact signature, the order of two calls, a
 comment that says why something is the way it is.
 
+The reach of that last one ends where the decision's history begins: a comment
+holds the alternative that was ruled out, in a line or two. When it was decided,
+what it measured, which thread argued it -- that is the issue's, and it is why
+the decision you write goes back to the thread rather than into the code. The
+code keeps the shape and the trap; the thread keeps the story.
+
 **Search before reading.** `search_code` finds where something lives; a
 path and a range is often the whole answer. What you need is rarely a file.
 

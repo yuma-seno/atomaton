@@ -97,8 +97,9 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
     // open, and the ball is with the person who was just asked to close it. Leaving it
     // out left the node's last turn event as the `asked` that started the run, so the
     // guard read "the ball is with an agent" and DELETED the person's next comment —
-    // which, on this path, is their agreement to close the issue. #90 on the failure
-    // notice, and the same defect here, in code written to fix #90. See `turn-comment.ts`.
+    // which, on this path, is their agreement to close the issue. The failure notice's
+    // half is #90's; this is the same defect here, in code written to fix #90. See
+    // `turn-comment.ts`.
     const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
     mustSucceed(
       gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request })),

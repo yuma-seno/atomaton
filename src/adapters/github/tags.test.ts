@@ -104,8 +104,8 @@ describe("withoutTags", () => {
  * Measured the hard way: a work-tree walk searched for `write()`'s output and found
  * none of its children, on a repository where every one of them carried the tag.
  * GitHub does not match `<!-- ... -->`, so the search form is the tag text alone —
- * and it lives here rather than being typed out at each call site, which is where the
- * literal `atomaton:parent=` had reached four files.
+ * and it lives here rather than being typed out at each call site, which is the
+ * duplication the literal `atomaton:parent=` had reached across the callers.
  */
 describe("search", () => {
   test("is the tag text without the comment wrapper", () => {

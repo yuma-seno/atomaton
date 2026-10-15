@@ -6,7 +6,7 @@
  * ## What this is for
  *
  * An agent holding a large task often has a part of it that is cheaper to do
- * somewhere else: read four files and say which one defines a symbol, run one
+ * somewhere else: read a handful of files and say which one defines a symbol, run one
  * command and report its output, search a tree for a call site. Doing it in the
  * agent's own session means the reading, the searching and the dead ends all stay
  * in that session and are resent on every later inference. `delegate` does it

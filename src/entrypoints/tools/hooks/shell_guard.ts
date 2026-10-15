@@ -340,9 +340,8 @@ function checkInvocation(invocation: ShellInvocation): GuardVerdict {
  * Measured on #706 after the filesystem blind spot was closed: the streak cleared
  * correctly on every read, and the run still died on four consecutive refusals all
  * reading "18 searches". A search would have counted 18, 19, 20, 21. They were not
- * searches. The rule exists to say "open something before searching again", and it was
- * answering "open something" to an agent that had stopped searching and was trying to
- * get on with the work.
+ * searches — the rule was answering "open something" to an agent that had stopped
+ * searching and was trying to get on with the work. #706 holds the run's account.
  */
 function streakRefusal(command: string): string | undefined {
   const file = streakFile();

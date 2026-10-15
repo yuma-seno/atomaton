@@ -612,10 +612,11 @@ function main(): void {
     // It is wrong for a run that was cut short, and this is the common shape rather
     // than the odd one. A stop lands at the next turn boundary, so a run reading
     // files when it arrives has said nothing at all and there is nothing to salvage
-    // -- measured on #831, which spent nine iterations in tool calls and produced no
-    // assistant text. Skipping there drops the machinery's own sentence along with
-    // the agent's silence: that it stopped, that the session survived, and how to
-    // resume. None of those are the agent's to say, and the footer below says them.
+    // — a run that spent nine iterations in tool calls and produced no assistant
+    // text is the observed case (#831). Skipping there drops the machinery's own
+    // sentence along with the agent's silence: that it stopped, that the session
+    // survived, and how to resume. None of those are the agent's to say, and the
+    // footer below says them.
     wroteNothing = true;
     output = values["ended-because"] === "stopped"
       ? "_This run was stopped before it said anything._"

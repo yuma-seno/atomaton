@@ -1225,14 +1225,11 @@ describe("mcp/atomaton.ts", () => {
   });
 
   /**
-   * #29. `launch_sub_agent` used to dispatch whatever number it was handed, and the
+   * `launch_sub_agent` used to dispatch whatever number it was handed, and the
    * dispatch comment says "sub-task" whatever the truth is — so an issue that is not
    * under this one was announced, counted and waited on as a child. The aggregation
    * counts GitHub's sub-issue links, so a dispatch onto an unlinked issue leaves the
-   * parent waiting forever.
-   *
-   * #16 is the observed case: #18 was created with `sub_issue: false`, dispatched
-   * anyway, and the parent never woke when everything closed.
+   * parent waiting forever. The observed case and the numbers are #29's and #16's.
    */
   test("launch_sub_agent refuses an issue that is not a child of this one", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-parent-"));

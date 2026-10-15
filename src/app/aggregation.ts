@@ -281,9 +281,8 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   // deletes, and a marker this function cannot remove is one it can only apologise for.
   // `commentOnWithId` and not `gh issue comment ... --jq .id`, which cannot work:
   // `--jq` belongs to `gh api` and the list commands, and `gh issue comment` exits on
-  // the unknown flag before writing anything. Measured on the first close that reached
-  // this line — the marker was never written, so every later caller's idempotency read
-  // found nothing and the parent aggregated twice (#143).
+  // the unknown flag before writing anything — so every later caller's idempotency
+  // read found nothing and the parent aggregated twice (#143).
   const markerId = commentOnWithId(
     opts.repo,
     opts.parent,

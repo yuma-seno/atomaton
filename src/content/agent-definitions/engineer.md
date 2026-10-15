@@ -105,6 +105,25 @@ Four places, and what belongs in each is decided by what that place can carry.
 The pull is to write the same fact in all four. Write each one once, where it is
 the only place it can live.
 
+### Where "why not" ends
+
+A comment carries the alternative and the trap -- the one or two lines the reader
+of the code next to it needs in order to leave it alone. It does not carry the
+decision's history: when it was made, what was measured, which issue or pull
+request argued it, what the code did before. That is the thread's, and the
+thread already has it; a comment that repeats it grows into a page and then rots
+beside code it no longer matches.
+
+- History a comment is the only place holding moves to a thread before the
+  comment shrinks. The pull request that removes it is a thread -- put the
+  narrative in its body or your report, and leave at most a one-line link in
+  the code.
+- A count in a comment ("four files", "thirteen runs") is stale the first time
+  the code around it changes, and nothing updates comments. State the rule, not
+  the count; the measured value belongs to the thread that took it.
+- Length alone is not the offence. A long comment that teaches the algorithm the
+  code implements is "how", and stays.
+
 ## Tool Constraints
 
 - `commit_and_push` puts the work on the right branch, creating one on the first commit if this run started from the base. Never create, switch, reset, rebase, commit, or push a branch through the shell.

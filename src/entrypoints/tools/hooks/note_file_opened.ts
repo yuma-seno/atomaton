@@ -13,8 +13,8 @@
  * That is not a small over-count. The refusal names the read tool by name as the
  * thing to do next, so an obedient agent is sent to the one act the counter cannot
  * see; the next search is refused identically, and the core stops the run after three
- * identical failures. Measured on issue #706: the streak went 15 to 27, with two
- * reads in the middle, and the run died. See `domain/work/search-streak.ts` for the full
+ * identical failures. The measured run that died this way -- streak 15 to 27, two
+ * reads in the middle -- is issue #706's. See `domain/work/search-streak.ts` for the full
  * account -- including the second time the refusal came to name a tool nothing could
  * call, after `@modelcontextprotocol/server-filesystem` left the deliverable.
  *
