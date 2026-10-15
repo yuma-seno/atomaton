@@ -2063,6 +2063,68 @@
     ]
   },
   {
+    "path": "sessions/issue-185/atomaton.json",
+    "agent": "atomaton",
+    "messages": 259,
+    "calls": 163,
+    "failed": 12,
+    "refused": 6,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "atoma_builtin__load_skill": 1,
+      "read": 64,
+      "bash": 27,
+      "list": 2,
+      "get_issue": 10,
+      "list_prs": 1,
+      "get_issue_comments": 1,
+      "edit": 29,
+      "search_issues": 25,
+      "commit_and_push": 1,
+      "create_pr": 2
+    },
+    "acts": {
+      "other": 10,
+      "edit": 2,
+      "search": 7,
+      "open": 2,
+      "verify": 6
+    },
+    "runs": [
+      {
+        "ended": "2026-10-15T22:04:45Z",
+        "ended_because": "completed",
+        "iterations": 93,
+        "messages": 259,
+        "seconds": 1997,
+        "server_calls": {
+          "files": {
+            "edit": 29,
+            "list": 2,
+            "read": 64
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 2,
+            "get_issue": 10,
+            "get_issue_comments": 1,
+            "list_prs": 1
+          },
+          "search": {
+            "search_issues": 25
+          },
+          "shell": {
+            "bash": 27
+          }
+        },
+        "started": "2026-10-15T21:31:28Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-2/atomaton.json",
     "agent": "atomaton",
     "messages": 27,
