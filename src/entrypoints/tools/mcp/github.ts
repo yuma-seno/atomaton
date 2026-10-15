@@ -285,7 +285,6 @@ const LIST_ISSUES_SCHEMA = z.object({
 const CREATE_PR_SCHEMA = z.object({
   title: z.string().min(1).describe("Concise pull request title."),
   body: z.string().optional().describe("Pull request body in GitHub-flavored Markdown. Atomaton adds issue traceability metadata automatically."),
-  base: z.string().optional().describe("Target branch name. Omit and this is resolved in three steps: the parent's branch when this run is a sub-issue whose parent branch exists, so sibling work stacks and integrates once; otherwise the repository's configured base branch; otherwise its default branch. The resolved value is returned as `base`, and it decides whether merging this deploys."),
   reviewer: z
     .string()
     .optional()
@@ -798,15 +797,13 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     );
   }
 
-  // Three answers, most specific first.
-  //
-  // An explicit `base` wins. Otherwise a sub-issue aims at its parent's branch,
-  // so the parent's work accumulates in one place and reaches the base as a
-  // single reviewed change. Otherwise `base_branch` — how an adopter says where
-  // day-to-day work lands, since a repo that develops on `develop` cannot have
-  // every agent PR aimed at the default branch. With none set, `gh` targets the
-  // default branch.
-  const base = a.base ?? stackedPrBase(REPO) ?? getBaseBranch();
+  // Where this pull request aims is part of the tree, not a choice. A sub-issue's
+  // pull request targets its parent's branch, so the parent's work accumulates in
+  // one place and reaches the base as a single reviewed change; anything else
+  // targets the configured base branch — how an adopter says where day-to-day work
+  // lands, since a repo that develops on `develop` cannot have every agent PR aimed
+  // at the default branch. With none set, `gh` targets the default branch.
+  const base = stackedPrBase(REPO) ?? getBaseBranch();
   const reviewer = (a.reviewer ?? "").trim();
   body = injectParentIssue(body, reviewer);
   log(`createPr: title=${JSON.stringify(title)}, base=${JSON.stringify(base)}, REPO=${JSON.stringify(REPO)}`);
@@ -930,9 +927,9 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   // until a person finds it. The engineer is the only thing still able to fix
   // that, and it was the thing being told to stop.
   //
-  // `base` is returned for the same reason. It is resolved from three places
-  // (the argument, the parent's branch when this is a sub-issue, the project's
-  // configured base), and which one won decides whether merging this deploys.
+  // `base` is returned because it is resolved from the tree and the configured
+  // base rather than chosen, and which one won decides whether merging this
+  // deploys. See `stackedPrBase`.
   return {
     text: JSON.stringify({
       number: num,
@@ -1498,7 +1495,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),
   defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
   defineMcpTool({ name: "close_issue", description: "Conclude an issue whose work is complete, and trigger Atomaton parent-task aggregation when applicable. Whether the issue is closed now or the person who opened it is asked on the thread to close it is this tool's decision and not yours; it does not fail on either. Returns JSON and mutates GitHub.", schema: ISSUE_NUMBER_ARG_SCHEMA, guidance: omittedNumberGuidance("issue"), handler: closeIssueAndDispatch }),
-  defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and resolved base. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
+  defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
   defineMcpTool({ name: "list_prs", description: "List pull request summaries in the current repository, optionally filtered by state. Use this to discover PRs; use get_pr for full metadata. Returns a JSON array and does not mutate GitHub.", schema: LIST_PRS_SCHEMA, handler: listPrs }),

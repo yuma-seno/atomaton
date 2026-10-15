@@ -225,7 +225,7 @@ export function stackedPrBase(repo: string): string | undefined {
   if (!found.known) {
     throw new Error(
       `Cannot tell whether issue #${issue} is a sub-issue, so the base branch for its pull request is unknown: ` +
-        `${found.why}. Retry, or pass \`base\` explicitly.`,
+        `${found.why}. Retry the call.`,
     );
   }
   if (!found.parent) return undefined;
