@@ -118,9 +118,17 @@ beside code it no longer matches.
   comment shrinks. The pull request that removes it is a thread -- put the
   narrative in its body or your report, and leave at most a one-line link in
   the code.
-- A count in a comment ("four files", "thirteen runs") is stale the first time
-  the code around it changes, and nothing updates comments. State the rule, not
-  the count; the measured value belongs to the thread that took it.
+- A pointer in a comment names the file, issue or pull request that holds the
+  thing promised. "The thread that chose it" is not a pointer -- it is a sentence
+  about a page the reader has to go and find; a number or a path is one, and a
+  number is only worth writing if the thread behind it carries the narrative.
+- A count in a comment about the code around it ("four files", "Thirteen") is
+  stale the first time that code changes, and nothing updates comments. State
+  the rule, not the count.
+- The measurement behind a limit is not a count of the code and stays: it is the
+  alternative that was ruled out, and the numbers are why. Where no thread holds
+  it, the comment is the only copy, and a pointer to a page that does not have it
+  is worse than the table.
 - Length alone is not the offence. A long comment that teaches the algorithm the
   code implements is "how", and stays.
 

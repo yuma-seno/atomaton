@@ -133,7 +133,7 @@ export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting"
 // sub-issue link answers the same question and a person can change it, while this was
 // written once at creation and never rewritten -- so re-parenting in the web UI left
 // two answers in the system with nothing to say they differed. `adapters/github/parent-issue.ts`
-// carries the measurement and the argument.
+// carries the argument.
 
 /**
  * PR -> the issue it was created to deliver (set via `create_pr`).

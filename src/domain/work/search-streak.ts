@@ -1,15 +1,36 @@
 /**
  * search-streak.ts — refusing a search when nothing the last ones found has been opened.
  *
- * The three most expensive sessions in the store share one shape and only one:
- * long stretches of search with nothing opened. The session transcripts, the
- * per-session counts and the distribution they were measured against are in the
- * thread that set this limit; what carries here is the shape and the threshold.
+ * # The failure this exists for
  *
- * What separates those runs is semantic: **a search returns where something is,
- * not what it is.** A run that has searched many times without opening anything
- * has not used a single thing it found. That is not an expensive run, it is not
- * a run at all.
+ * Measured over 341 stored sessions and 5,746 tool calls, the three most expensive
+ * runs in the repository share one shape and only one:
+ *
+ * ```text
+ *   session               longest run   searches   opens   prompt tokens
+ *   issue-492/engineer            85         188      26           9.6M
+ *   issue-200/engineer            44         124      37          13.0M
+ *   issue-399                     30         173      62          19.7M
+ * ```
+ *
+ * "longest run" is searches in a row with nothing opened between them. Across all
+ * sessions the distribution was `p50 0, p75 0, p90 1, p95 3, p99 8`. Those three
+ * are not a tail, they are a different animal.
+ *
+ * `issue-492` is a `sessions/` directory name, not an issue of this repository, so
+ * no number in the table opens anything. The measurement was taken for the rule
+ * rather than for an issue, which is why it is written out here.
+ *
+ * # Why this is the signal and repetition is not
+ *
+ * Every other candidate was measured and thrown out. Those runs have no repeated
+ * calls, no cycles, no identical answers; they get new information nearly every
+ * call. Nothing about *repetition* separates them, because they were not
+ * repeating — they were enumerating.
+ *
+ * What separates them is semantic: **a search returns where something is, not what
+ * it is.** A run that has searched many times without opening anything has not used
+ * a single thing it found. That is not an expensive run, it is not a run at all.
  *
  * # Why it refuses the act and not the run
  *
@@ -21,20 +42,21 @@
  * # What clears it
  *
  * A read through the `files` server clears the streak, the same as `sed -n` does.
- * It did not always: a guard has to be satisfiable by the act it asks for, and an
- * agent that OBEYS a refusal naming a tool that cannot satisfy the streak reaches
- * the same end as one that ignores it — refused again, identically, until the core
- * stops the run. The streak is therefore cleared by the tool that read, whichever
- * server it came from — `toolOpens` below — and `note_file_opened`, a hook on the
- * files servers, reports it.
+ * It did not always, and that is the trap this section exists to keep: a guard has
+ * to be satisfiable by the act it asks for. One that names a tool which cannot
+ * clear it is obeyed and ignored to the same end — the run went 15, 16, 17 ... 27
+ * with reads attempted in between, until the core stopped it for repeating itself.
+ * So a read is counted by the tool that performed it, whichever server it came
+ * from — `toolOpens` below — and `note_file_opened`, a hook on the files servers,
+ * reports it.
  */
 
 /**
  * Searches in a row, with nothing opened, before one is refused.
  *
- * Set above the measured distribution so only the pathological sessions it was taken
- * against touch it: the per-session counts, the percentiles and the transcripts are
- * in the thread that set this limit, not here.
+ * Set above the measured distribution — near double its `p99`, far above its `p95` —
+ * so only the pathological runs it was taken against touch it. The percentiles
+ * themselves are in the header above, so the number here cannot rot away from them.
  */
 export const MAX_SEARCHES_WITHOUT_OPENING = 15;
 

@@ -21,7 +21,7 @@
  * the pull request's own merge closes the issue, and this design does that twice —
  * a sub-issue's pull request merges into its PARENT's branch, so the auto-close
  * never fires, and the post-merge agent closes the sub-issue itself. The count that
- * measured the drop is on the thread that chose the tag.
+ * measured the drop is `adapters/github/tags.ts`'s.
  *
  * ## The pull request search is a prefilter, never the answer
  *

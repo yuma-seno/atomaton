@@ -117,7 +117,7 @@ describe("the refusal", () => {
  * `shell_guard` sees shell commands. A read through a files server is not one, so until
  * `toolOpens` existed the streak climbed straight through it -- while the refusal was
  * telling the agent to read a file that way. See `search-streak.ts` for the run that
- * cost.
+ * cost: the streak it reached, and the trap it left behind.
  */
 describe("a read that did not go through the shell", () => {
   test("the files server's read counts as opening", () => {

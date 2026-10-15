@@ -43,7 +43,7 @@ describe("shell_guard.ts", () => {
   /**
    * The measured failure this exists for: three sessions searched 124-188 times while
    * opening almost nothing, one of them 85 times in a row. See
-   * `domain/work/search-streak.ts` for the numbers and for why repetition was not the
+   * `domain/work/search-streak.ts` for the table and for why repetition was not the
    * signal.
    */
   /**
