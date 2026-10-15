@@ -59,6 +59,7 @@ import { hardenCredentialHolder } from "../lib/harden.ts";
 import { machineryPath } from "../../../adapters/runner/machinery.ts";
 import { DELEGATES_DIR } from "../../../domain/machinery/machinery-layout.ts";
 import { requestedServersIn, resolveRoster, serverNamesOf, type DelegateDef } from "../../../domain/machinery/delegates.ts";
+import { reportFrom } from "../../../domain/machinery/delegates.ts";
 import { TOOL_OUTPUT_BACKSTOP } from "../../../shared/tool-output.ts";
 import { RUN_CREDENTIALS } from "../../../domain/delivery/declared-secrets.ts";
 import { literalsFrom, redact } from "../../../shared/redaction.ts";
@@ -445,33 +446,7 @@ function subRunEnv(env: Record<string, string | undefined>): Record<string, stri
 }
 
 /** What the sub-run's `--output json` envelope carries that this tool reads. */
-interface RunEnvelope {
-  response?: string | null;
-  finish_reason?: string | null;
-  ended_because?: string;
-  seconds?: number;
-  iterations?: number;
-}
-
-/**
- * The text to hand back, from the sub-run's envelope.
- *
- * `response` is the delegate's report and is what the caller wants. It is `null`
- * on every ending that is not a completion — a time limit, a stop, a failure — and
- * there the envelope's own word for the ending is the honest answer, because the
- * delegate produced no report to return.
- */
-function reportFrom(envelope: RunEnvelope): string {
-  const response = (envelope.response ?? "").trim();
-  if (response) return response;
-  const because = envelope.ended_because ?? "failed";
-  return (
-    `The delegate produced no report: the sub-run ended because of \`${because}\` ` +
-    `after ${envelope.seconds ?? 0}s and ${envelope.iterations ?? 0} iteration(s). ` +
-    "Nothing was returned to report. If the task needs longer than the sub-run's limit, " +
-    "do the work here instead."
-  );
-}
+type RunEnvelope = Parameters<typeof reportFrom>[0];
 
 async function handleDelegateRun(def: ResolvedDelegate, args: z.infer<typeof DELEGATE_RUN_SCHEMA>): Promise<McpToolResult> {
   const credentials = providerCredentials(process.env);
@@ -589,7 +564,7 @@ async function handleDelegateRun(def: ResolvedDelegate, args: z.infer<typeof DEL
       return capText(redact(stdout, SECRET_LITERALS).trim(), TOOL_OUTPUT_BUDGET, "both").text;
     }
 
-    const report = reportFrom(envelope);
+    const report = reportFrom(envelope, safeErr, exitCode);
     log(`sub-run ended: ${envelope.ended_because ?? "?"} in ${envelope.seconds ?? 0}s`);
 
     // The report is the delegate's own text and is returned whole up to the shared

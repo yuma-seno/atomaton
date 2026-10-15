@@ -31,6 +31,7 @@
  * written, or one kept for reference, is an ordinary state — and a warning about it
  * would fire on every run of a project that has one.
  */
+import { capText } from "../../shared/tool-output.ts";
 
 /** One folder, resolved to the two files it must have. */
 export interface DelegateDef {
@@ -205,4 +206,57 @@ export function resolveRoster(
   }
 
   return { defs, problems };
+}
+
+/**
+ * What the sub-run's `--output json` envelope carries that a caller needs.
+ *
+ * Only the fields that decide what to say back. `response` is the report; the rest
+ * describe an ending that produced none.
+ */
+export interface RunEnvelope {
+  response?: string | null;
+  finish_reason?: string | null;
+  ended_because?: string;
+  seconds?: number;
+  iterations?: number;
+}
+
+/**
+ * The text to hand a caller, from the sub-run's envelope and what it printed on
+ * stderr.
+ *
+ * `response` is the delegate's report and is what the caller wants. It is `null` on
+ * every ending that is not a completion — a time limit, a stop, a failure — and
+ * there the envelope's own word for the ending is the honest answer, because the
+ * delegate produced no report to return.
+ *
+ * `stderr` is appended when there is one, and it is the only place the cause of a
+ * failure survives: the envelope says `failed` for a provider refusal, a missing
+ * server and everything else, and a caller handed only the word cannot tell a task
+ * that was too large from a tier that is not answering. The wrapper captures this
+ * stream already; discarding it was what made a provider refusal read as a timeout.
+ *
+ * The advice is conditional on the ending it fits. `iterations` of zero means the
+ * sub-run never reached a model, so nothing timed out and no prompt was measured —
+ * pointing the caller at the task's size there is the mistake #178 recorded.
+ */
+export function reportFrom(envelope: RunEnvelope, stderr = "", exitCode?: number | null): string {
+  const response = (envelope.response ?? "").trim();
+  if (response) return response;
+  const because = envelope.ended_because ?? "failed";
+  const why = stderr.trim() ? ` It reported: ${capText(stderr.trim(), 2_000, "tail").text}` : "";
+  const neverReachedAModel = (envelope.iterations ?? 0) === 0;
+  const advice = neverReachedAModel
+    ? " Nothing was returned to report. The sub-run never reached a model, so the task's size " +
+      "is not the answer; do the work here instead."
+    : " Nothing was returned to report. If the task needs longer than the sub-run's limit, " +
+      "do the work here instead.";
+  const status = exitCode === undefined || exitCode === null ? "" : ` (exit ${exitCode})`;
+  return (
+    `The delegate produced no report: the sub-run ended because of \`${because}\` ` +
+    `after ${envelope.seconds ?? 0}s and ${envelope.iterations ?? 0} iteration(s)${status}.` +
+    why +
+    advice
+  );
 }
