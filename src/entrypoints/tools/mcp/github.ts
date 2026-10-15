@@ -1487,7 +1487,7 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
 const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
     name: "create_issue",
-    description: "Create a GitHub issue in the current repository and return its number and URL. Use this for durable work items, especially delegated child tasks; sub_issue defaults to true and links the new issue to the current issue. This mutates GitHub and records the operation in Atomaton's audit log.",
+    description: "Create a GitHub issue in the current repository and return its number and URL. Use this for durable work items, especially delegated child tasks; the new issue is linked under the current issue as a sub-issue. This mutates GitHub and records the operation in Atomaton's audit log.",
     schema: CREATE_ISSUE_SCHEMA,
     handler: createIssue,
   }),
