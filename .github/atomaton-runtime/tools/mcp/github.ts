@@ -19424,7 +19424,7 @@ function stackedPrBase(repo) {
     return;
   const found = parentIssueOf(repo, issue);
   if (!found.known) {
-    throw new Error(`Cannot tell whether issue #${issue} is a sub-issue, so the base branch for its pull request is unknown: ` + `${found.why}. Retry, or pass \`base\` explicitly.`);
+    throw new Error(`Cannot tell whether issue #${issue} is a sub-issue, so the base branch for its pull request is unknown: ` + `${found.why}. Retry the call.`);
   }
   if (!found.parent)
     return;
@@ -19933,8 +19933,7 @@ function prContextNumber(args) {
 var CREATE_ISSUE_SCHEMA = objectType({
   title: stringType().min(1).describe("Concise issue title."),
   body: stringType().optional().describe("Issue body in GitHub-flavored Markdown. Defaults to an empty body."),
-  labels: stringArray("Existing repository label names to apply. Defaults to no extra labels.").optional(),
-  sub_issue: booleanType().optional().describe("Set sub_issue=true to automatically link it to the current issue as a child task. Defaults to true.")
+  labels: stringArray("Existing repository label names to apply. Defaults to no extra labels.").optional()
 });
 var LIST_ISSUES_SCHEMA = objectType({
   state: enumType(["open", "closed", "all"]).optional().describe("Issue state filter. Defaults to 'open'."),
@@ -19944,7 +19943,6 @@ var LIST_ISSUES_SCHEMA = objectType({
 var CREATE_PR_SCHEMA = objectType({
   title: stringType().min(1).describe("Concise pull request title."),
   body: stringType().optional().describe("Pull request body in GitHub-flavored Markdown. Atomaton adds issue traceability metadata automatically."),
-  base: stringType().optional().describe("Target branch name. Omit and this is resolved in three steps: the parent's branch when this run is a sub-issue whose parent branch exists, so sibling work stacks and integrates once; otherwise the repository's configured base branch; otherwise its default branch. The resolved value is returned as `base`, and it decides whether merging this deploys."),
   reviewer: stringType().optional().describe("Which agent should review this once CI passes, for example 'reviewer'. Nothing reviews a pull request " + "unless you ask: opening one no longer starts anyone by itself. Omit it only when a review is genuinely " + "not wanted -- a person is then told the pull request is waiting, by name, so it does not sit unnoticed.")
 });
 var LIST_PRS_SCHEMA = objectType({
@@ -19977,21 +19975,18 @@ async function createIssue(a) {
   const title = a.title;
   let body = a.body ?? "";
   let labels = a.labels ?? [];
-  const sub = a.sub_issue ?? true;
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
   if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
     mcpFail("create_issue is for an issue run that is decomposing work into sub-issues. " + "This run is on a pull request, which reviews or fixes one pull request rather than " + "decomposing it. Use create_pr to hand this pull request to a reviewer, or " + "request_close_issue to conclude it.");
   }
   refuseCommandLines(body, "issue body", "Use `launch_sub_agent` to start an agent on a sub-issue.");
   body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
-  if (sub) {
-    const subIssueLabel = getLabel("sub_issue");
-    const ensured = gh("label", "create", subIssueLabel, "--repo", REPO, "--force", "--color", "8250df", "--description", "Child delivery task managed by Atomaton");
-    if (ensured.code)
-      mcpFail(`Failed to ensure sub-issue label '${subIssueLabel}': ${ensured.stderr || ensured.stdout}`);
-    if (!labels.includes(subIssueLabel))
-      labels = [...labels, subIssueLabel];
-  }
+  const subIssueLabel = getLabel("sub_issue");
+  const ensured = gh("label", "create", subIssueLabel, "--repo", REPO, "--force", "--color", "8250df", "--description", "Child delivery task managed by Atomaton");
+  if (ensured.code)
+    mcpFail(`Failed to ensure sub-issue label '${subIssueLabel}': ${ensured.stderr || ensured.stdout}`);
+  if (!labels.includes(subIssueLabel))
+    labels = [...labels, subIssueLabel];
   const cmd = ["issue", "create", "--repo", REPO, "--title", title];
   if (body)
     cmd.push("--body", body);
@@ -20003,7 +19998,7 @@ async function createIssue(a) {
   const num = Number(stdout.trim().split("/").pop());
   if (!Number.isFinite(num))
     mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
-  if (sub && parentNum) {
+  if (parentNum) {
     try {
       const pid = await resolveIssueId(Number(parentNum));
       const sid = await resolveIssueId(num);
@@ -20013,15 +20008,15 @@ async function createIssue(a) {
       mcpFail(`Issue #${num} was created, but could not be linked under #${parentNum} as a sub-issue: ${e}. ` + `Nothing records that edge except the link, so #${num} is currently a root issue and no aggregation ` + `will pick it up. Do not create it again \u2014 add it under #${parentNum} in the web UI, or retry the link.`);
     }
   }
-  logOp("create_issue", { number: num, title, sub_issue: sub });
-  const parent = sub && parentNum ? Number(parentNum) : null;
+  logOp("create_issue", { number: num, title });
+  const parent = parentNum ? Number(parentNum) : null;
   return JSON.stringify({
     number: num,
     url: stdout.trim(),
     parent,
-    ...sub && !parent ? {
+    ...parent ? {} : {
       note: "Labelled as a sub-issue, but this run has no current issue, so no parent was recorded. " + "Nothing will aggregate it. Create it from a run that is working on the parent, or treat it " + "as a root issue."
-    } : {}
+    }
   });
 }
 function shownChildren(children) {
@@ -20171,7 +20166,7 @@ function createPr(a) {
   if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
     mcpFail("create_pr opens the pull request for an ISSUE's branch. This run is on a pull " + "request, which is a leaf of the tree -- it reviews or fixes one pull request rather " + "than opening another. Use commit_and_push to push a fix onto this pull " + "request's branch, or request_close_issue to conclude it.");
   }
-  const base = a.base ?? stackedPrBase(REPO) ?? getBaseBranch();
+  const base = stackedPrBase(REPO) ?? getBaseBranch();
   const reviewer = (a.reviewer ?? "").trim();
   body = injectParentIssue(body, reviewer);
   log7(`createPr: title=${JSON.stringify(title)}, base=${JSON.stringify(base)}, REPO=${JSON.stringify(REPO)}`);
@@ -20554,7 +20549,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),
   defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
   defineMcpTool({ name: "close_issue", description: "Conclude an issue whose work is complete, and trigger Atomaton parent-task aggregation when applicable. Whether the issue is closed now or the person who opened it is asked on the thread to close it is this tool's decision and not yours; it does not fail on either. Returns JSON and mutates GitHub.", schema: ISSUE_NUMBER_ARG_SCHEMA, guidance: omittedNumberGuidance("issue"), handler: closeIssueAndDispatch }),
-  defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and resolved base. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
+  defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
   defineMcpTool({ name: "list_prs", description: "List pull request summaries in the current repository, optionally filtered by state. Use this to discover PRs; use get_pr for full metadata. Returns a JSON array and does not mutate GitHub.", schema: LIST_PRS_SCHEMA, handler: listPrs }),
