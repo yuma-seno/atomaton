@@ -178,6 +178,83 @@ describe("mcp/github.ts", () => {
   });
 
   /**
+   * The base is the tree's, not the caller's. A sub-issue's pull request targets its
+   * parent's branch so the parent's work accumulates in one place; the branch is read
+   * from GitHub's own sub-issue link, and the resolved value comes back as `base`.
+   */
+  test("create_pr aims a sub-issue's pull request at its parent's branch", async () => {
+    const { root, seed, work } = makeRemoteBranchFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-stacked-pr-"));
+    const log = join(dir, "gh.log");
+    try {
+      // The parent branch has to exist on the remote: `stackedPrBase` checks with
+      // `ls-remote` and falls back to the base branch when it is not there.
+      git(seed, "branch", "atomaton/issue-12");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      git(work, "fetch", "origin");
+
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR" } },
+        },
+        {
+          BRANCH: "atomaton/issue-1",
+          ATOMATON_RUN_TYPE: "issue",
+          ISSUE_NUMBER: "1",
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // #1 is a sub-issue of #12, and #12's branch is the base.
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
+            { match: ["workflow", "run"], stdout: "" },
+            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
+            { match: ["issue", "comment"], stdout: "" },
+            { match: ["pr", "comment"], stdout: "" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(response.result.content[0].text).base).toBe("atomaton/issue-12");
+      const created = readFileSync(log, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[])
+        .find((argv) => argv.includes("pr") && argv.includes("create"));
+      expect(created, "the parent's branch is the base, and nothing else is").toContain("atomaton/issue-12");
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * `base` is not an argument any more. The base is resolved from the tree, so a
+   * caller that names one is refused rather than obeyed -- a schema that strips it
+   * would open the pull request somewhere else and report success.
+   */
+  test("create_pr refuses a base argument", async () => {
+    const response = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: { name: "create_pr", arguments: { title: "Test PR", base: "main" } },
+      },
+      { ...fakeGhSeam() },
+    );
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain("base");
+  });
+
+  /**
    * A `pr` run's worktree: checked out at `refs/pull/<n>/head` with no local branch,
    * which is what #803 hit. `git branch --points-at HEAD` prints git's own
    * description of the detached HEAD, and that description used to be handed to
