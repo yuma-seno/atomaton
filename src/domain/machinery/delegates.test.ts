@@ -10,6 +10,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   requestedServersIn,
+  reportFrom,
   resolveRoster,
   serverNamesOf,
 } from "./delegates.ts";
@@ -163,5 +164,51 @@ describe("serverNamesOf", () => {
 
   test("an empty file declares nothing", () => {
     expect(serverNamesOf({ watch: {} })).toEqual([]);
+  });
+});
+
+/**
+ * A sub-run that produced no report, and what the caller is told about it.
+ *
+ * The caller holds only this text, so what it omits is what the caller cannot find
+ * out. Two omissions were defects rather than brevity:
+ *
+ *   - the sub-run's stderr was discarded, so a provider refusal, a missing tool
+ *     server and a crash all read as one word, `failed`;
+ *   - the advice named a timeout on an ending with zero iterations, where nothing
+ *     timed out — which is the wrong lesson to take from a free-tier refusal.
+ */
+describe("reportFrom", () => {
+  test("a completed sub-run's own text is returned as it stands", () => {
+    expect(reportFrom({ response: "  the answer  " })).toBe("the answer");
+  });
+
+  test("a failure carries what the sub-run printed on stderr", () => {
+    const text = reportFrom(
+      { response: null, ended_because: "failed", seconds: 1, iterations: 0 },
+      "error: prompt exceeds the free tier's per-request cap (41234 > 16384)\n",
+    );
+    expect(text).toContain("prompt exceeds the free tier's per-request cap");
+  });
+
+  /**
+   * The distinction the summary used to lose. Zero iterations means the sub-run
+   * never reached a model, so no limit was hit and the task's size is not the
+   * answer — the caller is told to do the work here, not to narrow the task.
+   */
+  test("zero iterations points at the delegate rather than at the task's size", () => {
+    const text = reportFrom({ response: null, ended_because: "failed", seconds: 0, iterations: 0 });
+    expect(text).not.toContain("needs longer than the sub-run's limit");
+    expect(text).toContain("never reached a model");
+  });
+
+  test("an ending after real work keeps the time-limit advice", () => {
+    const text = reportFrom({ response: null, ended_because: "runtime", seconds: 600, iterations: 12 });
+    expect(text).toContain("needs longer than the sub-run's limit");
+  });
+
+  test("names the exit code when there was one", () => {
+    const text = reportFrom({ response: null, ended_because: "failed", iterations: 0 }, "", 3);
+    expect(text).toContain("exit 3");
   });
 });
