@@ -173,8 +173,10 @@ answer as a poorer question and try again differently, which is how a broken too
 stays broken: the run that could have said so files an apology instead. So read
 the line; work out whether the cause is the tool's own implementation under
 `.github/atomaton-runtime/tools/`, the environment that runs it, or your use of
-it; open an issue for it with `create_issue`, and quote the line as it arrived
-with which call carried it. Say so in your report, then carry on.
+it; open an issue for it with `create_root_issue` -- not `create_sub_issue`, which
+links its issue under this run's own and is refused on a pull request run -- and
+quote the line as it arrived with which call carried it. Say so in your report,
+then carry on.
 One issue and one mention cover a problem however many times it recurs. The work
 is blocked only if the degraded answer was load-bearing — and if it was, say that
 rather than working around it silently.

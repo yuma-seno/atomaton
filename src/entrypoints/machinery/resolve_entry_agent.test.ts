@@ -33,15 +33,15 @@ describe("resolve_entry_agent.ts", () => {
 
   // An HTML comment is invisible on the rendered issue, so a body carrying one
   // above the command looks exactly right and used to start nothing. Atomaton
-  // writes such comments itself — `create_issue` prepends the `atomaton:parent` tag
-  // to every sub-issue.
+  // writes such comments itself — the `atomaton:notify` tag `create_sub_issue`
+  // prefixes a body with is one.
   test("looks past an invisible tag above the command", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
     const eventFile = join(dir, "event.json");
     const outputFile = join(dir, "out");
     writeFileSync(
       eventFile,
-      JSON.stringify({ issue: { body: "<!-- atomaton:parent=280 -->\n\n/engineer\n\nDo the thing." } }),
+      JSON.stringify({ issue: { body: "<!-- atomaton:notify=280 -->\n\n/engineer\n\nDo the thing." } }),
     );
     writeFileSync(outputFile, "");
     spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {

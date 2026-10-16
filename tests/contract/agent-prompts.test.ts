@@ -384,8 +384,10 @@ describe("agent prompt contracts", () => {
       "not a failure of your work",
     );
     // And the procedure has to travel with it, or the attribution is advice with
-    // nowhere to go.
-    expect(text, "the run that saw it is the only one that can file it").toContain("create_issue");
+    // nowhere to go. The tool is the ROOT one: a defect is nobody's child, and the
+    // sub-issue tool is refused on a pull request run, which is where these are
+    // most often found (#178/#179/#192).
+    expect(text, "the run that saw it is the only one that can file it").toContain("create_root_issue");
   });
 
   /**
@@ -464,7 +466,7 @@ describe("agent prompt contracts", () => {
    */
   test("a reported problem turns into a filed issue that outlives the work", () => {
     const prompt = readFileSync("src/content/prompt-template.md", "utf8");
-    expect(prompt).toContain("create_issue");
+    expect(prompt).toContain("create_root_issue");
     expect(prompt, "and the run has to say so where the next reader looks").toContain(
       "Say so in your report",
     );

@@ -8,7 +8,7 @@
  *   - `parse_comment_command.ts` reads a person's comment to decide what to start
  *   - `domain/work/thread.ts`, through the thread reader, reads a thread to decide
  *     whose turn it is
- *   - `create_pr` and `create_issue` read an agent's body to refuse a command in it
+ *   - `create_pr`, `create_sub_issue` and `create_root_issue` read an agent's body to refuse one
  *
  * They used to be two: the parser had its own patterns, and `extract_directive.ts` had
  * another idea of what a command line looks like. Three readers with two definitions is

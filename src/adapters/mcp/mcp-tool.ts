@@ -170,7 +170,7 @@ export interface BuiltMcpTool {
  * Zod's default is to strip what it does not recognise, which turns a misspelled
  * argument into a different call that succeeds. `get_issue_comments({number: 42,
  * form: 3})` -- `from` mistyped -- silently returned the default last five
- * comments, and the agent read that as the three it asked for. `create_issue`
+ * comments, and the agent read that as the three it asked for. `create_sub_issue`
  * with `label` instead of `labels` created an issue with no labels and reported
  * success.
  *

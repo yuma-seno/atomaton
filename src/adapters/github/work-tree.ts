@@ -11,7 +11,7 @@
  * ## One source per kind of edge, and why they differ
  *
  * A sub-issue comes from GitHub's own link, which is the only record of that edge —
- * `create_issue` fails rather than leave one unmade. It also covers what no agent
+ * `create_sub_issue` fails rather than leave one unmade. It also covers what no agent
  * made: an issue a person opened, decomposed with the sub-issue control and closed is
  * a tree this would otherwise see as a single node, and closing it would leave its
  * children open. That argument is `issue-links.ts`'s.
@@ -157,7 +157,7 @@ function readNode(repo: string, number: number): { node?: WorkNode; problem?: st
  * the single record of that edge — see `adapters/github/parent-issue.ts`. There used to be a
  * search for `atomaton:parent=N in:body` beside it and a union afterwards, because
  * `addSubIssue` was best-effort and a sub-issue could carry the tag and no link. It
- * is not best-effort any more: `create_issue` fails if the link cannot be made, so
+ * is not best-effort any more: `create_sub_issue` fails if the link cannot be made, so
  * the link is what there is.
  *
  * Pull requests still come from their own tag. GitHub's PR-to-issue link is not
