@@ -559,7 +559,27 @@
       "role": "assistant",
       "content": "できません。今の機構では、枝の上の run からルート Issue は作れません。\n\n- **issue run**:`create_issue` は常に現在の Issue の下にリンクする。#184 で `sub_issue` 引数は消えたので、外す選択肢も無い\n- **PR run**:`create_issue` は呼んだ時点で拒否される(src/entrypoints/tools/mcp/github.ts:353)。何も作れない\n- 唯一の例外は `ISSUE_NUMBER` が空の run で、これは親リンク無しで作れる(github.ts:429)が、副作用であって手段ではない。枝の中で作業中の run は自分をそこに置けない\n\nだから欠陥報告・環境修整・判断を仰ぐ Issue は、**今は作る場所が無い**のが実態です。前回の提案は、これを埋める「常にルートとして作る」専用ツールの新設です。\n\nご了承いただければ #192 にこの方針を書いて leaf として切りますが、#192 への書き込み手段が私に無いので、了承の返信をこのスレッドでいただく形になります。",
       "atoma_metadata": {
-        "github_comment_id": 6208138005,
+        "agent": "atomaton",
+        "github_comment_id": 6208138005
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nなるほど。\nいいと思います。\ncreate_issueをサブイシュー専用にしたので、逆にルートイシュー専用のツールを作るってことですね。\nそれであれば、create_issueもcreate_sub_issueにするのがいいと思いました。どう思う？\n意見を聞かせて。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-16T04:37:06Z",
+        "event_type": "issue_comment",
+        "id": 6208186237,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "賛成です。#164 の失敗の形そのものを消す改名になります。\n\n- **#164 は名前が招いた誤読だった。** エージェントは `create_issue` を「一般的な起票ツール」と読み、sub-issue の振る舞いを「オプトアウトできるもの」と解釈した。#184 でフラグを消しても、名前だけは汎用のまま残っていた。`create_sub_issue` なら「子を作るツール」と説明文を読む前に分かる\n- **プロンプト:176 の誤爆が機械的に防げる。** 「欠陥は `create_issue` で起票せよ」という文は、名前が変われば書きようがなくなり、「欠陥は `open_root_issue`」と強制される\n- **2つの名前が行き先を全部分担する。** `create_sub_issue`(子)/ `open_root_issue`(根)で、汎用名が特定の動作をする隙間が無くなる\n\n1つだけ設計上の帰結があります。github.ts:429-442 に「`ISSUE_NUMBER` 空なら親リンク無しで作る」経路が残っていて、これを放置すると `create_sub_issue` という名前が嘘になります。改名とセットでここを**拒否に変え、`open_root_issue` を指す**のが正です。そうすると `create_sub_issue` は「PR run で拒否・親なしで拒否・常にリンク」の3条件で完全に専用になります。\n\n影響範囲は機械的です: スキーマとハンドラ名、prompt-template.md(src/content と配備コピー)、拒否メッセージ2箇所、atomaton.ts:185 のエラー文(「`create_issue` links a child...」)、docs/tools/reference.md、契約テスト。新規 run は実行時にツール定義が生成されるので、走りかけの run への互換性の懸念はありません。\n\n了承いただければ、#192 に「ルート用ツール新設 + `create_issue` を `create_sub_issue` に改名(無親ケースは拒否に変更)」の範囲でまとめて書きます。",
+      "atoma_metadata": {
+        "github_comment_id": 6208206550,
         "agent": "atomaton"
       }
     }
@@ -567,9 +587,9 @@
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 4,
+      "event_count": 5,
       "resolved_number": "182",
-      "snapshot_hash": "cf33c8d8ae83c0717d7a53071330ee2587c29aedeba9bab3d9d55d501a6d8df9",
+      "snapshot_hash": "970259023ecb22714cba9a78cbfcd0c3cac841794ee72c1427aef75274fbe258",
       "type": "issue",
       "version": 1
     }
@@ -609,6 +629,15 @@
       "seconds": 34,
       "server_calls": {},
       "started": "2026-10-16T04:32:11Z"
+    },
+    {
+      "ended": "2026-10-16T04:38:53Z",
+      "ended_because": "completed",
+      "iterations": 1,
+      "messages": 63,
+      "seconds": 60,
+      "server_calls": {},
+      "started": "2026-10-16T04:37:53Z"
     }
   ]
 }
