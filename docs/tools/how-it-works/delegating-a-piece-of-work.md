@@ -2,8 +2,8 @@
 
 `delegate` does one small piece of work in a separate run of `atoma` and
 returns what it found. It is for the work whose transcript you do not want in your
-own session: reading four files to find where a symbol is defined, searching a tree
-for a call site, running one command to answer a question.
+own session: reading a handful of files to find where a symbol is defined, searching
+a tree for a call site, running one command to answer a question.
 
 ## Why it exists
 

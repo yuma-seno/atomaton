@@ -142,11 +142,8 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   // `launch_sub_agent` used to dispatch whatever number it was handed, and the
   // dispatch comment says "sub-task" whatever the truth is — so a number that was
   // never a child of this issue was announced as one, counted as one, and waited on
-  // as one. #16 hit it: the atomaton created #18 with `sub_issue: false` (a genuine
-  // "stands alone" child), dispatched it anyway, and the parent's aggregation then
-  // waited for a child GitHub does not record it as having. Every sub-issue was
-  // closed and the parent still never woke (#29; the empty-agent crash beside it is
-  // #30).
+  // as one: the parent's aggregation then waited for a child GitHub does not record
+  // it as having. Every sub-issue closed and the parent still never woke (#29).
   //
   // Also catches the converse, which is the louder half: an issue that is a child of
   // SOME OTHER issue would be pulled into this subtree by a dispatch it does not

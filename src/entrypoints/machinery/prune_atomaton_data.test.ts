@@ -64,8 +64,9 @@ function run(rules: FakeGhRule[]) {
   // every run needs the comment reads answered. They go FIRST: the `["api", "issues"]`
   // rule a caller passes matches `issues/3/comments` too, and rules are first-match.
   //
-  // #3 is the closed issue a run is still working on -- a dispatch marker is the last
+  // A closed issue a run is still working on -- a dispatch marker is the last
   // turn-changing event, so `runInFlight` says yes and its files are left alone.
+  // The case is #3's.
   const comments: FakeGhRule[] = [
     {
       match: ["api", "issues/3/comments"],

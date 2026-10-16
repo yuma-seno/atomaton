@@ -30,10 +30,10 @@ function main(): void {
   // One output, where there used to be two.
   //
   // `sub_number` was `closedIssueNumber(body)` and `parent_number` was this tag —
-  // and measured on three real pull requests (#157, #162, #167) the two were the
-  // SAME NUMBER every time, because `injectParentIssue` wrote both from one
-  // `ISSUE_NUMBER`. The only consumer fed `sub_number` to `parentIssueOf` to find
-  // the issue's own parent, so which of the two it was handed made no difference.
+  // and the two were the SAME NUMBER every time, because `injectParentIssue` wrote
+  // both from one `ISSUE_NUMBER`. The only consumer fed `sub_number` to
+  // `parentIssueOf` to find the issue's own parent, so which of the two it was
+  // handed made no difference.
   //
   // Both halves of the old pair are gone with it: the `Closes` line no longer
   // exists to be read (#171), and a second spelling of one number is the shape

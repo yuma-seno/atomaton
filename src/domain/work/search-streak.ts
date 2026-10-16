@@ -4,37 +4,33 @@
  * # The failure this exists for
  *
  * Measured over 341 stored sessions and 5,746 tool calls, the three most expensive
- * sessions in the repository share one shape and only one:
+ * runs in the repository share one shape and only one:
  *
  * ```text
  *   session               longest run   searches   opens   prompt tokens
  *   issue-492/engineer            85         188      26           9.6M
  *   issue-200/engineer            44         124      37          13.0M
- *   issue-399              30         173      62          19.7M
+ *   issue-399                     30         173      62          19.7M
  * ```
  *
- * `issue-492` in full, `S` a search and `r` an open:
+ * "longest run" is searches in a row with nothing opened between them. Across all
+ * sessions the distribution was `p50 0, p75 0, p90 1, p95 3, p99 8`. Those three
+ * are not a tail, they are a different animal.
  *
- * ```text
- *   ___.rrr.rr.rSSrrrSSrrrSSSSSSrSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSrrSrSrSS...
- *   SSSSSSSSSSSSSrSSSSSSSSSSSSSSrSSrSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS...
- * ```
- *
- * **Eighty-five searches in a row without opening a single file.**
- *
- * Across all sessions the distribution is `p50 0, p75 0, p90 1, p95 3, p99 8`. Those
- * three are not a tail, they are a different animal.
+ * `issue-492` is a `sessions/` directory name, not an issue of this repository, so
+ * no number in the table opens anything. The measurement was taken for the rule
+ * rather than for an issue, which is why it is written out here.
  *
  * # Why this is the signal and repetition is not
  *
  * Every other candidate was measured and thrown out. Those runs have no repeated
- * calls, no cycles, no identical answers; they get new information nearly every call.
- * Nothing about *repetition* separates them, because they were not repeating — they
- * were enumerating.
+ * calls, no cycles, no identical answers; they get new information nearly every
+ * call. Nothing about *repetition* separates them, because they were not
+ * repeating — they were enumerating.
  *
- * What separates them is semantic: **a search returns where something is, not what it
- * is.** A run that has searched fifteen times without opening anything has not used a
- * single thing it found. That is not an expensive run, it is not a run at all.
+ * What separates them is semantic: **a search returns where something is, not what
+ * it is.** A run that has searched many times without opening anything has not used
+ * a single thing it found. That is not an expensive run, it is not a run at all.
  *
  * # Why it refuses the act and not the run
  *
@@ -43,43 +39,24 @@
  * gets the same refusal again — which the core's own `MAX_IDENTICAL_TOOL_FAILURES`
  * already stops. No new stopping rule anywhere.
  *
- * # What clears it, and the run this cost before it did
+ * # What clears it
  *
  * A read through the `files` server clears the streak, the same as `sed -n` does.
- * It did not always, and that is worth writing down because the reasoning that left it
- * out was careful and wrong. It said: this is a hook on `shell`, those runs opened 0,
- * 11 and 17 files that way against 124-188 searches, so the over-count is small — and
- * "a miss in either direction only makes the guard fire later or slightly sooner; it
- * cannot break a run."
- *
- * It broke a run: issue #706, an engineer, aborted at iteration 166. The size of the
- * over-count was never the mechanism. This was:
- *
- *   1. the streak reaches the limit, and the search is refused
- *   2. the refusal says to open a file — **naming a tool that no longer existed**
- *   3. the agent tries exactly that, and the streak does not move
- *   4. the next search is refused identically, because a refusal is deterministic
- *   5. `MAX_IDENTICAL_TOOL_FAILURES` stops the run
- *
- * The streak went 15, 16, 17 ... 27 with reads attempted in between. The guard had told
- * the agent to do the one thing that could not satisfy it. The name it gave is not
- * written here on purpose: that it named something uncallable is the whole account, and
- * a spelling this repository no longer ships would invite a reader to go and look for it.
- *
- * The note above about `MAX_IDENTICAL_TOOL_FAILURES` was written for an agent that
- * **ignores** the refusal, and for that agent it is right. What it missed is that an
- * agent which obeys reaches the same end. A guard has to be satisfiable by the act it
- * asks for; if it is not, it is not a guard, it is a countdown.
- *
- * So the streak is cleared by the tool that read, whichever server it came from —
- * `toolOpens` below — and `note_file_opened`, a hook on the files servers, reports it.
+ * It did not always, and that is the trap this section exists to keep: a guard has
+ * to be satisfiable by the act it asks for. One that names a tool which cannot
+ * clear it is obeyed and ignored to the same end — the run went 15, 16, 17 ... 27
+ * with reads attempted in between, until the core stopped it for repeating itself.
+ * So a read is counted by the tool that performed it, whichever server it came
+ * from — `toolOpens` below — and `note_file_opened`, a hook on the files servers,
+ * reports it.
  */
 
 /**
  * Searches in a row, with nothing opened, before one is refused.
  *
- * Fifteen, against a measured `p99` of 8 and a healthy `p95` of 3. Double the p99, so
- * the only sessions in the whole store it would have touched are the three above.
+ * Set above the measured distribution — near double its `p99`, far above its `p95` —
+ * so only the pathological runs it was taken against touch it. The percentiles
+ * themselves are in the header above, so the number here cannot rot away from them.
  */
 export const MAX_SEARCHES_WITHOUT_OPENING = 15;
 

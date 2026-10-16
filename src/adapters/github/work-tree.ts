@@ -17,11 +17,11 @@
  * children open. That argument is `issue-links.ts`'s.
  *
  * A pull request comes from its `atomaton:parent-issue` tag, because GitHub's own
- * PR-to-issue link does not survive here. Measured: of nine pull requests this
- * repository tagged, two carried a `closingIssuesReferences` entry. GitHub drops the
- * link once anything but that pull request's merge closes the issue, and this design
- * does that twice — a sub-issue's pull request merges into its PARENT's branch, so
- * the auto-close never fires, and the post-merge agent closes the sub-issue itself.
+ * PR-to-issue link does not survive here: GitHub drops that link once anything but
+ * the pull request's own merge closes the issue, and this design does that twice —
+ * a sub-issue's pull request merges into its PARENT's branch, so the auto-close
+ * never fires, and the post-merge agent closes the sub-issue itself. The count that
+ * measured the drop is `adapters/github/tags.ts`'s.
  *
  * ## The pull request search is a prefilter, never the answer
  *

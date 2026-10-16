@@ -29,18 +29,17 @@
  * agent's merge (`merge_pr`, permitted by the shipped `merge.policy: auto`) runs as
  * GITHUB_TOKEN, and GitHub raises no event cascade for its own token's actions — so
  * atomaton-pr-merged never fires for that merge, while the merged PR still appears
- * in `closedByPullRequestsReferences`. Measured on PR #124 (merged by
- * `app/github-actions`, parent #109 of #12): the guard answered `closed_via_pr=true`
- * and skipped, and `atomaton-pr-merged` had no run for that PR at all. #12 was never
- * aggregated, and the skip left no comment, no failure, and a green workflow — the
- * same silent-loss shape as #143.
+ * in `closedByPullRequestsReferences`. The guard answered `closed_via_pr=true` and
+ * skipped a close whose primary path had not run at all; the skip left no comment,
+ * no failure, and a green workflow — the same silent-loss shape as #143. The
+ * measured case and its numbers are #150's.
  *
  * The duplicate it was preventing is real but belongs one level up: two paths
  * aggregating the SAME parent node. `aggregation.ts`'s `atomaton:aggregated` marker
  * already answers that where the identity actually lives — on the parent's own
  * thread — and makes the second caller a no-op. A guard one level down cannot answer
- * it, which is why it was both unreliable and unnecessary. See #150, and #149 for the
- * sweep this is one instance of.
+ * it, which is why it was both unreliable and unnecessary. The sweep this is one
+ * instance of is #149; the guard's removal is #150.
  *
  * Env: CLOSED_NUM, OWNER, REPO
  * Writes to $GITHUB_OUTPUT: is_sub_issue, parent_number

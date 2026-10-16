@@ -762,10 +762,8 @@ function injectParentIssue(body: string, reviewer: string): string {
   // not what this line is for: it is here to say which issue the work belongs to.
   // GitHub has no keyword that links without closing, so the answer is to use no
   // keyword at all; the cross-reference `Part of #N` produces is what a person
-  // sees, and `PARENT_ISSUE_TAG` is what the machinery reads. Measured cost: the
-  // Development sidebar's "linked pull requests" no longer lists it, which is a
-  // thing to know rather than a thing that breaks — no reader in this repository
-  // used it, and stacked pull requests were never in it. See #171.
+  // sees, and `PARENT_ISSUE_TAG` is what the machinery reads. Cost, and the
+  // pull requests the choice was checked on: #171.
   //
   // Unconditionally, now that `refuseClosingKeywords` above guarantees the agent
   // wrote none of its own — the two now agree instead of one forbidding what the
