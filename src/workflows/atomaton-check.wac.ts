@@ -41,17 +41,20 @@ import { ref as planChecksRef } from "../entrypoints/machinery/plan_checks.ts";
 //
 // ## Two triggers, because the two kinds of pull request arrive differently
 //
-// An agent's pull request is opened with GITHUB_TOKEN, and GitHub starts no
-// workflow run for its own token's events -- so `pull_request` never fires for
-// it. `validate_pull_request.ts` dispatches this workflow instead and mirrors the
-// result onto the head commit where a ruleset can see it.
+// An agent's pull request is opened with GITHUB_TOKEN. For its own token's events
+// GitHub still creates the `pull_request` run, but an approval-required one: it sits
+// at `action_required`, never executes, and settles as `failure` if the pull request
+// merges unapproved. That run is not CI. The real check is the `workflow_dispatch`
+// run `validate_pull_request.ts` starts, mirrored onto the head commit where a
+// ruleset can see it; approving the held one just runs the same jobs again.
+// (GitHub Actions docs: "Triggering a workflow".)
 //
 // A person's pull request does fire `pull_request`, and nothing was dispatching
 // this workflow for one. Since this is what `checks.your_workflow` defaults to, that
 // left a repository with no CI at all for its human contributors -- a required check
 // that never ran, and a merge refused for a missing check until someone dispatched it
-// by hand. So `pull_request` is listed too, and it is inert for the agent case by the
-// same rule that made it necessary for the human one.
+// by hand. So `pull_request` stays listed: dropping `opened` would silence a person's
+// first check, the failure this workflow exists to prevent.
 
 /** The name a required status check refers to. Pinned to the shipped ruleset by a contract test. */
 export const CHECK_JOB_NAME = "atomaton-check";
