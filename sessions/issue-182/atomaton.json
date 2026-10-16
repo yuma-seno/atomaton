@@ -539,7 +539,27 @@
       "role": "assistant",
       "content": "`stackedBaseFor` は親なしで `\"\"` を返し(src/adapters/github/branch-placement.ts:126-130)、ブランチは base から切られる。`stackedPrBase` も親なしで `undefined`(src/adapters/github/branch-placement.ts:220-236)なので base は `getBaseBranch()`(src/entrypoints/tools/mcp/github.ts:804)— 設定された base、無ければ既定ブランチ。エージェントの推測が入る隙間はもう無い。\n\n- **逆流に見える差分は出ない**。#180 の差分が逆流に見えたのは「main から 23 コミット遅れた `atomaton/issue-12` をエージェントが明示した」から。ルート Issue のブランチは最初のコミットで base から新規に切られるので base の履歴を全部含む\n- **集約は黙って素通りする**。閉じた Issue の集約は親を読み、親が無ければ `not-tracked` で終わる(src/app/aggregation.ts:433 — `issue #N is not a sub-issue of anything, nothing to do`)。警告も失敗も出ない。「親を持たない Issue は追跡しない」という既定の解釈が、意図したルートに対してそのまま正しい\n- **兄弟の数え方も狂わない**。`countOpenSiblings` は親の native links から数える(src/adapters/github/sibling-check.ts:66-70)ので、どこにも link されていない Issue はそもそも誰の兄弟でもない\n\nつまり #182 の「害の全体」表の 4 行は、**#183/#184 以降、意図されたルート Issue には全て当たらない**。当たっていたのは「本文だけが親を主張し、構造は外れる」という #164 の矛盾状態で、新ツールは本文も構造も一貫して「親なし」を言うので、その矛盾が作れない。\n\n## 残る害と、その扱い\n\n1. **追跡されないこと自体は残る** — ルートを閉じても誰も起こされない。これは欠陥ではなく設計で、欠陥報告や判断の処理を決めるのは人だから。ただし「人が見落とす」は残るので、戻り値の note は「ルートとして起票した。木は追跡しない — 処理は人が決める」と**意図した状態として**言う。github.ts:437-441 の「Nothing will aggregate it」の警告文を流用しない。同じ事実でも、事故と意図で文言を分ける\n2. **ラベルを付けない実装が要る**。#184 後の `createIssue()` は `atomaton/sub-issue` を常時付与する(github.ts:381)ので丸ごと流用できない。共通化するならラベル/リンクを引数化した下位関数に分けて、新ツールは両方 off で呼ぶ\n3. **衛生処理は必ず流用**。`refuseCommandLines`(github.ts:366-370)— ルート Issue は親 run から launch されないので、本文のコマンド行が自己起動の経路になる。`withCheckedMentions` も同じ\n4. **既存の契約テストは温存**。PR run 拒否は `create_issue refuses on a pull request run`(src/entrypoints/tools/mcp/mcp.test.ts:648)で固定済み。新規は「PR run で通る」「ラベル無し・リンク無し・意図した note で作る」「コマンド行を拒否する」の 3 本\n\n## 名前は `report_tool_problem` より `open_root_issue`\n\n#192 案 B の名前は「ツール欠陥」に寄りすぎている。今回のご質問は **環境に関する修整** をも含むし、#164(判断を仰ぐ Issue)のような「人に決めてほしいこと」も正当なルート起票の用途。名前が狭いと「これは欠陥報告用で自分の用途は違う」という解釈の隙間がまた生まれ、その隙間が #164 の `sub_issue: false` と同じ失敗の入り口になる。**機構の名前(ルートを作る)**が解釈の余地を残さない。用途は説明文に書く:ツリーの下でなく人に属するもの — ツール欠陥、環境の修整、割り当てられていない判断。そして「作業が今の Issue の下に属するなら `create_issue` を使え」と同じ説明に置く。\n\n## プロンプト側の一手\n\nsrc/content/prompt-template.md:176 は run 種別を区別せず「`create_issue` で起票せよ」と書いており、#178/#179 の 3 run が拒否を踏んだ直接の原因。ここを新ツール名に変え、PR run の拒否メッセージ(github.ts:354-358)に「ツール欠陥の報告は `open_root_issue` へ」と一文足す。拒否自体は残す — `create_issue` が誤って呼ばれても、次に取る行動がそこに書いてある。#192 の「決めること 1」はこれで案 B 一点に、「2」(PR run の `ISSUE_NUMBER` の曖昧さ)は **ツールが `ISSUE_NUMBER` を一切読まない**ことで消える。\n\n## 次に何が起きるか\n\n1. この方向付けを #192 のスレッドに載せてください — 私には #192 へのコメント手段が無く(#182 上のこの報告が唯一の記録)、新規起票もしていない\n2. 方向が了承されれば #192 は leaf です: `src/entrypoints/tools/mcp/github.ts` に新ツール 1 本、`src/content/prompt-template.md` 1 箇所(配備コピー含む、#184 と同じ扱い)、テスト 3 本。その時点で #192 からそのまま engineer に渡せます\n\n余談: #164 は今も open で親を持たない判断 Issue として生きている。新ツールがあれば、あの形 — 「人に決めてほしいこと」の起票 — が構造的に正しい場所を持つことになる。",
       "atoma_metadata": {
-        "github_comment_id": 6206552126,
+        "agent": "atomaton",
+        "github_comment_id": 6206552126
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nごめん、理解できない。もっと簡潔に。\nそもそも枝の外に、つまりルートに新しいIssueを起票できるの？",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-16T04:31:28Z",
+        "event_type": "issue_comment",
+        "id": 6208122637,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "できません。今の機構では、枝の上の run からルート Issue は作れません。\n\n- **issue run**:`create_issue` は常に現在の Issue の下にリンクする。#184 で `sub_issue` 引数は消えたので、外す選択肢も無い\n- **PR run**:`create_issue` は呼んだ時点で拒否される(src/entrypoints/tools/mcp/github.ts:353)。何も作れない\n- 唯一の例外は `ISSUE_NUMBER` が空の run で、これは親リンク無しで作れる(github.ts:429)が、副作用であって手段ではない。枝の中で作業中の run は自分をそこに置けない\n\nだから欠陥報告・環境修整・判断を仰ぐ Issue は、**今は作る場所が無い**のが実態です。前回の提案は、これを埋める「常にルートとして作る」専用ツールの新設です。\n\nご了承いただければ #192 にこの方針を書いて leaf として切りますが、#192 への書き込み手段が私に無いので、了承の返信をこのスレッドでいただく形になります。",
+      "atoma_metadata": {
+        "github_comment_id": 6208138005,
         "agent": "atomaton"
       }
     }
@@ -547,11 +567,11 @@
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 3,
-      "snapshot_hash": "05bbb7506dad0d37bc3f0bece213da98d7ba06198d2a2c9d2cc201d082758df0",
-      "version": 1,
+      "event_count": 4,
+      "resolved_number": "182",
+      "snapshot_hash": "cf33c8d8ae83c0717d7a53071330ee2587c29aedeba9bab3d9d55d501a6d8df9",
       "type": "issue",
-      "resolved_number": "182"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -580,6 +600,15 @@
         }
       },
       "started": "2026-10-16T01:18:54Z"
+    },
+    {
+      "ended": "2026-10-16T04:32:45Z",
+      "ended_because": "completed",
+      "iterations": 1,
+      "messages": 61,
+      "seconds": 34,
+      "server_calls": {},
+      "started": "2026-10-16T04:32:11Z"
     }
   ]
 }
