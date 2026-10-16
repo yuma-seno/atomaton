@@ -26,8 +26,8 @@ interface GithubIssueOpenedEvent {
  * Blank lines and HTML comments are skipped because neither is visible on the
  * rendered issue, so requiring the command literally first would fail on a body
  * that looks exactly right. Atomaton writes such comments itself — the
- * `atomaton:parent` tag `create_issue` prepends to a sub-issue is one — and an
- * issue that carried one silently started nothing.
+ * `atomaton:notify` tag `create_sub_issue` prefixes a body with is one — and an issue
+ * that carried one silently started nothing.
  *
  * Nothing else is skipped. A command below a paragraph of prose is not a command
  * at the top, and reading further would turn any mention of `/engineer` in a

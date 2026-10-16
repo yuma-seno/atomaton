@@ -8,10 +8,11 @@
  * GitHub's own sub-issue links, through `issueLinks`, which is also where the tree,
  * the tools and the aggregation gate get them. It used to be a search for
  * `atomaton:parent=N in:body` — a second answer to "what is under this issue", read
- * out of a marker `create_issue` wrote once and nothing ever rewrote. A person
- * re-parenting a sub-issue in the web UI moved the native link and not the marker,
- * so this gate went on counting under the old parent while `parentIssueOf` followed
- * the new one. Both confident, neither aware of the other. See `adapters/github/parent-issue.ts`.
+ * out of a marker the sub-issue tool wrote once and nothing ever rewrote -- `create_issue`
+ * then, `create_sub_issue` now. A person re-parenting a sub-issue in the web UI moved
+ * the native link and not the marker, so this gate went on counting under the old parent
+ * while `parentIssueOf` followed the new one. Both confident, neither aware of the
+ * other. See `adapters/github/parent-issue.ts`.
  *
  * ## Why "launched" is read from the thread
  *

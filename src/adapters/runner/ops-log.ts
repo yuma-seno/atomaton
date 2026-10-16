@@ -2,7 +2,7 @@
  * ops-log.ts — Structured JSON-lines log of mutating operations Atomaton
  * performs during a run, written to $ATOMATON_OPS_LOG (default
  * /tmp/atomaton_ops.log). Two purposes:
- *   1. A general audit trail (create_issue, close_issue, create_pr,
+ *   1. A general audit trail (create_sub_issue, create_root_issue, close_issue, create_pr,
  *      merge_pr, etc. -- see mcp/github.ts's call sites).
  *   2. `logDispatch()`'s `"op":"dispatch"` entries are the canonical,
  *      STRUCTURED signal `atomaton-runner.wac.ts`'s `chain_continues`
