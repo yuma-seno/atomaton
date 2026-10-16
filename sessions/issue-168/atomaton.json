@@ -387,13 +387,99 @@
       "role": "tool",
       "content": "{\"number\":195,\"url\":\"https://github.com/yuma-seno/atomaton/pull/195\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_48c889456a334c598324127d"
+    },
+    {
+      "role": "user",
+      "content": "PR #195: Correct the atomaton-check comment: pull_request fires for agent PRs as an approval-required run\n**Labels:** atomaton/in-progress\n**Linked Issue:** #168\n\n/reviewer\n\nPart of #168\n**What changed** — the comment in `src/workflows/atomaton-check.wac.ts` above the `pull_request` trigger only.\n\nThe old comment said GitHub \"starts no workflow run\" for a GITHUB_TOKEN-opened PR, so \"`pull_request` never fires\" and is \"inert for the agent case\". The measurements on issue #168 disprove the second half: the event fires and creates a run, but an approval-required one — `action_required` while the PR is open, settled as `failure` if nobody approves before merge, `success` after an approval (5 jobs, run_attempt 2, logs 302).\n\nThe new comment states exactly that, plus:\n\n- that run is not CI — the real check is the `workflow_dispatch` run `validate_pull_request.ts` starts, mirrored onto the head commit;\n- why `opened` stays listed: dropping it would silence a person's first check (the #107-shaped failure this workflow exists to prevent).\n\nNo behaviour change, no reference to the issue in the code. Six lines, replacing nine.\n\n**Validation** — `bun run typecheck` exit 0; `bun run synth` exit 0 (generated YAML unchanged — comment only); `bun run test` 1676 pass / 0 fail across 135 files.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-16T01:26:46Z",
+        "event_type": "pr_opened",
+        "id": "pr-195",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/workflows/atomaton-check.wac.ts b/src/workflows/atomaton-check.wac.ts\nindex 8c88770..9aee4f4 100644\n--- a/src/workflows/atomaton-check.wac.ts\n+++ b/src/workflows/atomaton-check.wac.ts\n@@ -41,17 +41,20 @@ import { ref as planChecksRef } from \"../entrypoints/machinery/plan_checks.ts\";\n //\n // ## Two triggers, because the two kinds of pull request arrive differently\n //\n-// An agent's pull request is opened with GITHUB_TOKEN, and GitHub starts no\n-// workflow run for its own token's events -- so `pull_request` never fires for\n-// it. `validate_pull_request.ts` dispatches this workflow instead and mirrors the\n-// result onto the head commit where a ruleset can see it.\n+// An agent's pull request is opened with GITHUB_TOKEN. For its own token's events\n+// GitHub still creates the `pull_request` run, but an approval-required one: it sits\n+// at `action_required`, never executes, and settles as `failure` if the pull request\n+// merges unapproved. That run is not CI. The real check is the `workflow_dispatch`\n+// run `validate_pull_request.ts` starts, mirrored onto the head commit where a\n+// ruleset can see it; approving the held one just runs the same jobs again.\n+// (GitHub Actions docs: \"Triggering a workflow\".)\n //\n // A person's pull request does fire `pull_request`, and nothing was dispatching\n // this workflow for one. Since this is what `checks.your_workflow` defaults to, that\n // left a repository with no CI at all for its human contributors -- a required check\n // that never ran, and a merge refused for a missing check until someone dispatched it\n-// by hand. So `pull_request` is listed too, and it is inert for the agent case by the\n-// same rule that made it necessary for the human one.\n+// by hand. So `pull_request` stays listed: dropping `opened` would silence a person's\n+// first check, the failure this workflow exists to prevent.\n \n /** The name a required status check refers to. Pinned to the shipped ruleset by a contract test. */\n export const CHECK_JOB_NAME = \"atomaton-check\";\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-16T01:47:29Z",
+        "event_type": "pr_diff",
+        "id": "pr-195-diff",
+        "layer": "github-context",
+        "sha": "7dc20050",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-16T01:47:31Z",
+        "event_type": "issue_comment",
+        "id": 6206168581,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_107999e6ee294019b7bccd06",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\":195}"
+          }
+        },
+        {
+          "id": "call_832711695680453ba4780148",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git rev-parse HEAD && git log --oneline -1 && sed -n '42,58p' src/workflows/atomaton-check.wac.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"main\",\"createdAt\":\"2026-10-16T01:26:46Z\",\"headRefName\":\"atomaton/issue-168\",\"number\":195,\"state\":\"MERGED\",\"title\":\"Correct the atomaton-check comment: pull_request fires for agent PRs as an approval-required run\",\"body\":\"/reviewer\\n\\nPart of #168\\n**What changed** — the comment in `src/workflows/atomaton-check.wac.ts` above the `pull_request` trigger only.\\n\\nThe old comment said GitHub \\\"starts no workflow run\\\" for a GITHUB_TOKEN-opened PR, so \\\"`pull_request` never fires\\\" and is \\\"inert for the agent case\\\". The measurements on issue #168 disprove the second half: the event fires and creates a run, but an approval-required one — `action_required` while the PR is open, settled as `failure` if nobody approves before merge, `success` after an approval (5 jobs, run_attempt 2, logs 302).\\n\\nThe new comment states exactly that, plus:\\n\\n- that run is not CI — the real check is the `workflow_dispatch` run `validate_pull_request.ts` starts, mirrored onto the head commit;\\n- why `opened` stays listed: dropping it would silence a person's first check (the #107-shaped failure this workflow exists to prevent).\\n\\nNo behaviour change, no reference to the issue in the code. Six lines, replacing nine.\\n\\n**Validation** — `bun run typecheck` exit 0; `bun run synth` exit 0 (generated YAML unchanged — comment only); `bun run test` 1676 pass / 0 fail across 135 files.\"}",
+      "tool_call_id": "call_107999e6ee294019b7bccd06"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"0addba9713e6c34de9b26d952494e785f4b67b9f\\n0addba9 Merge pull request #195 from yuma-seno/atomaton/issue-168\\n// ## Two triggers, because the two kinds of pull request arrive differently\\n//\\n// An agent's pull request is opened with GITHUB_TOKEN. For its own token's events\\n// GitHub still creates the `pull_request` run, but an approval-required one: it sits\\n// at `action_required`, never executes, and settles as `failure` if the pull request\\n// merges unapproved. That run is not CI. The real check is the `workflow_dispatch`\\n// run `validate_pull_request.ts` starts, mirrored onto the head commit where a\\n// ruleset can see it; approving the held one just runs the same jobs again.\\n// (GitHub Actions docs: \\\"Triggering a workflow\\\".)\\n//\\n// A person's pull request does fire `pull_request`, and nothing was dispatching\\n// this workflow for one. Since this is what `checks.your_workflow` defaults to, that\\n// left a repository with no CI at all for its human contributors -- a required check\\n// that never ran, and a merge refused for a missing check until someone dispatched it\\n// by hand. So `pull_request` stays listed: dropping `opened` would silence a person's\\n// first check, the failure this workflow exists to prevent.\\n\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":182}",
+      "tool_call_id": "call_832711695680453ba4780148"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_1e6afd314a6e49b6bcc91aea",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"reason\":\"PR #195 のマージ済みヘッド（0addba9）で、#168 の残作業「ソースのコメントに反映する」がユーザーの制約（簡潔・Issue 参照なし）どおりに満たされていることを確認したため。\",\"summary\":\"**結論：コードコメントとして記録すべきであり、記録した。** PR #195 がマージされ、main に訂正済みコメントが入っています。\\n\\n**なぜ記録する判断か（この Issue の問いへの答え）** — 間違ったコメント（「`pull_request` never fires」「inert」）が、この Issue に記録された誤読1〜3の直接の発端でした。次に読む人が同じ誤読をする確率を下げる場所は Issue ではなく、トリガーの直です。挙動は変えず（案B）、案C が人の初回 CI を消す（#107 と同型）こともコメントに理由として残しました。\\n\\n**確認したこと** — マージヘッド `0addba9` の `src/workflows/atomaton-check.wac.ts:44-58` に、承認実験で確定した4点がすべて並んでいます：run は作られる（approval-required・`action_required` のまま実行されない）／未承認のままマージすると `failure` に確定／承認すれば同じジョブが再実行される／この run は CI ではなく、実チェックは `validate_pull_request.ts` の dispatch。Issue への参照はコードになく、GitHub Actions ドキュメント名のみ。6行で9行を置き換え。\\n\\n**検証** — `bun run typecheck` / `bun run synth` exit 0（コメントのみで生成 YAML に差分なし）、`bun run test` 1676 pass / 0 fail。\\n\\n**次に起こること** — なし。挙動変更がないためリリース適用も追加作業も不要です。\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Issue #168 is concluded: your reason and summary are on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "call_1e6afd314a6e49b6bcc91aea"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 3,
-      "snapshot_hash": "ce64f4e1a3ef848ed0608b701707dcee3ad50b3bbf0a6d29503750256f93f12d",
+      "event_count": 6,
+      "snapshot_hash": "95f02115e8ecfc85015d04d1efa1d2b4ace507dd63043f8c2cca634a223408fd",
       "version": 1
     }
   },
@@ -420,6 +506,25 @@
         }
       },
       "started": "2026-10-16T01:14:46Z"
+    },
+    {
+      "ended": "2026-10-16T01:50:42Z",
+      "ended_because": "completed",
+      "iterations": 2,
+      "messages": 48,
+      "seconds": 165,
+      "server_calls": {
+        "atomaton": {
+          "request_close_issue": 1
+        },
+        "github": {
+          "get_pr": 1
+        },
+        "shell": {
+          "bash": 1
+        }
+      },
+      "started": "2026-10-16T01:47:57Z"
     }
   ]
 }
