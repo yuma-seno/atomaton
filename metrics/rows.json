@@ -2229,9 +2229,9 @@
   {
     "path": "sessions/issue-185/reviewer.json",
     "agent": "reviewer",
-    "messages": 181,
-    "calls": 141,
-    "failed": 22,
+    "messages": 256,
+    "calls": 200,
+    "failed": 25,
     "refused": 0,
     "skills": [
       "project/conventions"
@@ -2239,23 +2239,25 @@
     "reported": true,
     "tools": {
       "get_pr": 1,
-      "get_issue": 15,
+      "get_issue": 22,
       "atoma_builtin__load_skill": 1,
-      "get_issue_comments": 3,
+      "get_issue_comments": 4,
       "list_pr_review_comments": 1,
-      "list": 2,
-      "read": 41,
-      "grep": 35,
-      "get_branch": 1,
+      "list": 4,
+      "read": 62,
+      "grep": 47,
+      "get_branch": 2,
       "list_issues": 1,
-      "get_check_runs": 1,
+      "get_check_runs": 2,
       "get_pr_reviews": 1,
-      "fetch": 28,
-      "search_issues": 5,
+      "fetch": 36,
+      "search_issues": 6,
       "glob": 2,
-      "delegate_readonly": 1,
+      "delegate_readonly": 3,
       "list_prs": 1,
-      "check_merge_readiness": 1
+      "check_merge_readiness": 2,
+      "get_pr_diff": 1,
+      "merge_pr": 1
     },
     "acts": {},
     "runs": [
@@ -2295,6 +2297,39 @@
           }
         },
         "started": "2026-10-15T22:06:36Z"
+      },
+      {
+        "ended": "2026-10-16T00:32:55Z",
+        "ended_because": "completed",
+        "iterations": 13,
+        "messages": 256,
+        "seconds": 1023,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 2
+          },
+          "files_readonly": {
+            "grep": 12,
+            "list": 2,
+            "read": 21
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 1,
+            "get_issue": 7,
+            "get_issue_comments": 1,
+            "get_pr_diff": 1,
+            "merge_pr": 1
+          },
+          "search": {
+            "search_issues": 1
+          },
+          "web": {
+            "fetch": 8
+          }
+        },
+        "started": "2026-10-16T00:15:52Z"
       }
     ]
   },
