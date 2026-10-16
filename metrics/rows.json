@@ -2412,6 +2412,68 @@
     ]
   },
   {
+    "path": "sessions/issue-182/reviewer.json",
+    "agent": "reviewer",
+    "messages": 178,
+    "calls": 124,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "grep": 60,
+      "get_pr": 1,
+      "get_pr_diff": 1,
+      "list": 9,
+      "read": 33,
+      "atoma_builtin__load_skill": 1,
+      "glob": 2,
+      "get_issue": 2,
+      "get_issue_comments": 5,
+      "get_branch": 1,
+      "fetch": 5,
+      "get_check_runs": 2,
+      "delegate_readonly": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-16T18:53:55Z",
+        "ended_because": "completed",
+        "iterations": 37,
+        "messages": 178,
+        "seconds": 1750,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1
+          },
+          "files_readonly": {
+            "glob": 2,
+            "grep": 60,
+            "list": 9,
+            "read": 33
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 2,
+            "get_issue": 2,
+            "get_issue_comments": 5,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          },
+          "web": {
+            "fetch": 5
+          }
+        },
+        "started": "2026-10-16T18:24:45Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-185/atomaton.json",
     "agent": "atomaton",
     "messages": 293,
