@@ -950,13 +950,170 @@
     {
       "role": "user",
       "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
+    },
+    {
+      "role": "user",
+      "content": "/atomaton",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-16T02:00:26Z",
+        "event_type": "issue_comment",
+        "id": 6206333166,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_28e27974f4d84bbfb5725115",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":200,\"offset\":100,\"path\":\"/home/runner/work/atomaton/atomaton/src/adapters/github/work-tree.ts\"}"
+          }
+        },
+        {
+          "id": "call_5a45f5d442b9490b84666e97",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":130,\"offset\":100,\"path\":\"/home/runner/work/atomaton/atomaton/src/adapters/actions/dispatch-targets.ts\"}"
+          }
+        },
+        {
+          "id": "call_802661a5bf494e93b7a9f346",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\":4,\"issue_number\":193,\"to\":6}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/adapters/github/work-tree.ts lines 100-299 of 433\n\n100\t  }\n101\t}\n102\t\n103\t/** One node, read through the endpoint that answers for an issue and a pull request alike. */\n104\tfunction readNode(repo: string, number: number): { node?: WorkNode; problem?: string } {\n105\t  const { code, stdout, stderr } = ghRead(\"api\", `repos/${repo}/issues/${number}`);\n106\t  if (code !== 0) {\n107\t    return { problem: `could not read #${number}: ${(stderr || stdout).trim().split(\"\\n\")[0] ?? \"\"}` };\n108\t  }\n109\t  let raw: {\n110\t    state?: string;\n111\t    state_reason?: string | null;\n112\t    body?: string;\n113\t    labels?: { name?: string }[];\n114\t    pull_request?: { merged_at?: string | null };\n115\t  };\n116\t  try {\n117\t    raw = JSON.parse(stdout) as typeof raw;\n118\t  } catch {\n119\t    return { problem: `the response for #${number} was not JSON` };\n120\t  }\n121\t\n122\t  const isPr = raw.pull_request !== undefined;\n123\t  if (raw.state !== \"open\" && raw.state !== \"closed\") {\n124\t    return {\n\n[4742 characters dropped from the middle; 4000 shown]\n\n reads GitHub.s reason and\n224\t      // answers in it, so there is nothing left here to decide.\n225\t      state: child.state,\n226\t      parent,\n227\t      running,\n228\t    });\n229\t  }\n230\t  for (const linked of links.pullRequests) {\n231\t    if (already.has(linked.number)) continue;\n232\t    const { node, problem } = readNode(repo, linked.number);\n233\t    if (!node) {\n234\t      problems.push(problem ?? `could not read #${linked.number}`);\n235\t      continue;\n236\t    }\n237\t    already.add(linked.number);\n238\t    nodes.push({ ...node, parent });\n239\t  }\n240\t\n241\t  return { nodes, problems };\n242\t}\n243\t\n244\t/**\n245\t * `root` and everything under it.\n246\t *\n247\t * `problems` is not decoration: a caller that closes a subtree has to know whether the\n248\t * subtree it is closing is the whole one.\n249\t */\n250\texport function readWorkTree(repo: string, root: number): { nodes: WorkNode[]; problems: string[] } {\n251\t  const { node, problem } = readNode(repo, root);\n252\t  if (!node) return { nodes: [], problems: [problem ?? `could not read #${root}`] };\n253\t\n254\t  const nodes: WorkNode[] = [node];\n255\t  const problems: string[] = [];\n256\t  const seen = new Set<number>([root]);\n257\t  let frontier = [root];\n258\t\n259\t  for (let depth = 0; depth < MAX_DEPTH && frontier.length > 0; depth += 1) {\n260\t    const next: number[] = [];\n261\t    for (const parent of frontier) {\n262\t      const found = readChildren(repo, parent);\n263\t      problems.push(...found.problems);\n264\t      for (const child of found.nodes) {\n265\t        if (seen.has(child.number)) continue;\n266\t        seen.add(child.number);\n267\t        nodes.push(child);\n268\t        // A merged pull request is a leaf that has left the tree, and nothing is ever\n269\t        // filed under one, so it is not descended into.\n270\t        if (child.kind === \"issue\") next.push(child.number);\n271\t      }\n272\t    }\n273\t    frontier = next;\n274\t  }\n275\t\n276\t  return { nodes, problems };\n277\t}\n278\t\n279\t/**\n280\t * How the last run on `number` ended, from the most recent result comment that says.\n281\t *\n282\t * Read newest first, and `undefined` when nothing says — an issue whose runs all\n283\t * predate `ENDED_TAG`, or one that has never run. `/resume` treats that as \"nothing\n284\t * interrupted here\", which is the answer that starts no work it was not asked for.\n285\t */\n286\texport function lastEnding(repo: string, number: number): string | undefined {\n287\t  const { code, stdout } = ghRead(\n288\t    \"api\", `repos/${repo}/issues/${number}/comments`, \"--paginate\", \"--jq\", \".[].body\",\n289\t  );\n290\t  if (code !== 0) return undefined;\n291\t  const bodies = stdout.split(\"\\n\");\n292\t  for (let i = bodies.length - 1; i >= 0; i -= 1) {\n293\t    const ended = ENDED_TAG.read(bodies[i] ?? \"\");\n294\t    if (ended) return ended;\n295\t  }\n296\t  return undefined;\n297\t}\n298\t\n299\t/** Post one comment, and say whether it landed. Used by every subtree-wide action. */\n\n[134 more lines. Read again with offset: 300.]",
+      "tool_call_id": "call_28e27974f4d84bbfb5725115"
+    },
+    {
+      "role": "tool",
+      "content": "src/adapters/actions/dispatch-targets.ts lines 100-229 of 258\n\n100\t      \"-f\", `asked_by_person=${options.askedByPerson === true ? \"true\" : \"false\"}`,\n101\t    ],\n102\t    log,\n103\t  );\n104\t}\n105\t\n106\t/**\n107\t * After a pull request merges, re-invoke the agent that created it on the linked\n108\t * sub-issue, instead of silently closing that sub-issue here.\n109\t *\n110\t * The agent is named by the `atomaton:origin-agent` tag the pull request body\n111\t * carries. Returns whether the dispatch was sent; the caller falls back to\n112\t * closing the issue directly when it was not.\n113\t *\n114\t * ## The comment asks for a judgement, not for a closure\n115\t *\n116\t * It said \"Please confirm completion and close this sub-task\", and that is the\n117\t * first user message the re-invoked agent reads -- ahead of its system prompt in\n118\t * the only ordering a model has. So whatever the prompt layer says about weighing\n119\t * what merged against what the issue asked for, this line told it the \n\n[2650 characters dropped from the middle; 4000 shown]\n\now: a dispatch that starts a runner\n173\t * only to discover that nothing deploys on merge is a wasted run on every single\n174\t * merge, and this is the one trigger where the question can be answered before\n175\t * starting anything. The tag trigger has no such luxury -- `on:` takes no expression\n176\t * -- so that one filters after the fact.\n177\t *\n178\t * It asks the weaker of the two questions -- `mergeMightDeploy`, not\n179\t * `selectDeployJobs` -- because it knows less than the run does: the config it reads\n180\t * predates the merge it is reacting to, and the repository's default branch is not\n181\t * visible from here. An entry that might apply counts as one that does.\n182\t *\n183\t * A declaration that does not parse is not this function's to report. It fails\n184\t * loudly inside the deploy run, where the log belongs to the deployment; here it\n185\t * would fail a merge that is otherwise complete.\n186\t */\n187\texport function dispatchCd(baseRef: string): boolean {\n188\t  // Only a merge that actually lands work deploys. A sub-issue's pull request\n189\t  // merges into its parent's branch, which is still in progress — deploying\n190\t  // there would ship half a feature, once per child.\n191\t  if (isIssueBranch(baseRef)) {\n192\t    log(`dispatchCd: merged into ${baseRef}, which is work in progress; not deploying`);\n193\t    return false;\n194\t  }\n195\t\n196\t  // Asked only when Atomaton's own workflow is the one that would run: a project\n197\t  // naming its own deployment workflow has told us nothing about when it deploys,\n198\t  // so there is no question to answer here and the dispatch goes out.\n199\t  if (!getWorkflowName(\"cd\")) {\n200\t    const { jobs, problems } = resolveDeployJobs(getDeploySection());\n201\t    if (problems.length === 0 && !mergeMightDeploy(jobs, baseRef)) {\n202\t      log(\n203\t        `dispatchCd: nothing in deploy.on_merge covers ${baseRef || \"this branch\"}, and deploy.your_workflow is unset; nothing to dispatch`,\n204\t      );\n205\t      return false;\n206\t    }\n207\t  }\n208\t\n209\t  return dispatchDeploy(\"dispatchCd\", \"merge\", baseRef);\n210\t}\n211\t\n212\t/**\n213\t * Deploy a tag one of this run's deployments just created.\n214\t *\n215\t * The same hole as `dispatchCd`, one event along: a deployment that cuts a release\n216\t * creates its tag with GITHUB_TOKEN, so no `push` arrives for it and `on_tag` never\n217\t * fires. See `scripts/dispatch_new_tags.ts` for how a run knows which tags are new,\n218\t * and why the dispatching is a job of its own.\n219\t *\n220\t * `repo` is required rather than optional: the only caller runs in a job checked out\n221\t * for the scripts, not for the repository being deployed.\n222\t */\n223\texport function dispatchTagDeploy(repo: string, tag: string): boolean {\n224\t  return dispatchDeploy(`dispatchTagDeploy: ${tag}`, \"tag\", tag, repo);\n225\t}\n226\t\n227\t/**\n228\t * Start the deployment workflow for one ref, whatever stood in for the `push`.\n229\t *\n\n[29 more lines. Read again with offset: 230.]",
+      "tool_call_id": "call_5a45f5d442b9490b84666e97"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":193,\"title\":\"Draw the comment/thread boundary and move the design history out of the code\",\"state\":\"MERGED\",\"total_comments\":7,\"children\":[],\"pull_requests\":[]},\"showing\":\"comment(s) 4-6 of 7; pass from/to to read the rest\",\"comments\":[{\"index\":4,\"id\":\"IC_kwDOUudl8s8AAAABcdk2gQ\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"**What I concluded.** Every one of the review's three findings is already fixed on `atomaton/issue-185` at head `953f16f` — the restored measurement, the repointed citations and the two new boundary edges — and this run was dispatched to `engineer` with nothing left to act on, so it changes nothing and asks for the review of the fixed head instead. The work is committed and pushed (working tree clean, `HEAD == origin/atomaton/issue-185`), so there is nothing further to write.\\n\\n**How I know.**\\n- Defect 1 is back in the code: `src/domain/work/search-streak.ts:24-33` holds the section verbatim (\\\"…the\n\n[7609 characters dropped from the middle; 4000 shown]\n\nues/706` and `.../yuma-seno/atoma/issues/706` both 404. (For the record: `#150`, `#149`, `#143`, `#171`, `#90`, `#29`, `#18`, `#16` and `#3` all resolve here, and `#150`'s body does carry the `closed_via_pr` counterexample table and the `#124`/`#109`/`#12` numbers.) So `src/entrypoints/tools/hooks/shell_guard.ts:340-344`, `note_file_opened.ts:16` and the pre-existing `src/entrypoints/machinery/post_result_comment.test.ts:435` still cite a number I could not open, and `atoma#24` in `src/entrypoints/machinery/write_metrics_report.ts:228` does not resolve in `yuma-seno/atoma` (6 issues/PRs in total). These are pre-existing across the tree and this PR reduces them rather than adding them.\\n- One residual gap I did not treat as merge-blocking, but the thread should hold it: the deleted `search-streak.ts` section also carried the over-count measurement (\\\"those runs opened 0, 11 and 17 files that way against 124-188 searches\\\") and the five numbered steps of the `#706` failure. The replacement header keeps the trap and the 15→27 streak, and the PR body carries the table, the call string and the distribution, but I found neither the 0/11/17 figures nor the numbered steps in the body. The judgement they supported (\\\"the over-count is small\\\") is now known false, so what is missing is the refuted reasoning rather than a live constraint.\\n- `delegate_readonly` failed twice on read-only git/search work — \\\"the sub-run ended because of `failed` after 1s and 0 iteration(s)\\\"; the same shape for the second. That is the failure the previous round attributed to the pre-#191 delegate, and it is still there at head `951…`-era code; I did every read through `read`/`grep`/`fetch` instead.\\n\\n**What happens next.** The merge reinvoked `atomaton` on #185, which now judges the merged head against the issue's three completion conditions — the boundary in both definitions, the long citing blocks reduced to algorithm or a single citation, and the moved judgements readable on a thread — and may close #185 or carry the remainder. One tangent, nothing changed: `src/entrypoints/tools/hooks/note_file_opened.ts:19` says \\\"the four names\\\", which is the shape of count-in-a-comment the section it was written beside now forbids, and this repository's own agents keep reading `.github/atomaton/agent-definitions/`, where the new section will not appear until the next self-deploy.\\n\\n\\n\\n---\\n_Tokens: 1251353 total (1110536 prompt + 140817 completion, 1009408 of the prompt cached)_\\n---\\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/38828430441) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\\n_Counted from the session: 3 refused or errored tool calls._\",\"createdAt\":\"2026-10-16T00:32:56Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/pull/193#issuecomment-6205256763\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_802661a5bf494e93b7a9f346"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_6f3b03fbf5fc4b469da35f86",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":100,\"offset\":1,\"path\":\"/home/runner/work/atomaton/atomaton/src/adapters/github/work-tree.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/adapters/github/work-tree.ts lines 1-100 of 433\n\n1\t/**\n2\t * work-tree.ts — read the work tree out of GitHub, so `domain/work/work-tree.ts` can do\n3\t * arithmetic on it.\n4\t *\n5\t * ## Why a walk rather than one query\n6\t *\n7\t * There is no single query for \"everything under #803\", so the tree is found by\n8\t * descending one level at a time. The trees this builds are shallow — an issue, its\n9\t * sub-issues, their pull requests.\n10\t *\n11\t * ## One source per kind of edge, and why they differ\n12\t *\n13\t * A sub-issue comes from GitHub's own link, which is the only record of that edge —\n14\t * `create_issue` fails rather than leave one unmade. It also covers what no agent\n15\t * made: an issue a person opened, decomposed with the sub-issue control and closed is\n16\t * a tree this would otherwise see as a single node, and closing it would leave its\n17\t * children open. That argument is `issue-links.ts`'s.\n18\t *\n19\t * A pull request comes from its `atomaton:parent-issue` tag, bec\n\n[609 characters dropped from the middle; 4000 shown]\n\nvery result is checked against the tag reader before it is\n30\t * believed — the same trap `aggregate_sub_issues.ts` used to document, and the reason\n31\t * it re-read the body it had just searched on.\n32\t *\n33\t * ## What a failed read means here\n34\t *\n35\t * A subtree that could not be read in full is reported as such rather than returned\n36\t * short. The callers act on what they are given — a stop posts to every node, a close\n37\t * closes every node — and a partial tree silently treated as whole is a close that\n38\t * leaves work running with nobody told.\n39\t */\n40\timport { gh, ghRead } from \"./gh.ts\";\n41\timport { issueLinks } from \"./issue-links.ts\";\n42\timport { runInFlight } from \"./thread.ts\";\n43\timport { issueOutcome, pullRequestOutcome, saysOpen } from \"./outcome.ts\";\n44\timport { ENDED_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, STOP_TAG } from \"./tags.ts\";\n45\timport {\n46\t  closeReachedNotice,\n47\t  descendants,\n48\t  MAX_DEPTH,\n49\t  nodesToClose,\n50\t  nodesToStop,\n51\t  stopReachedNotice,\n52\t  subtree,\n53\t  type NodeState,\n54\t  type WorkNode,\n55\t} from \"../../domain/work/work-tree.ts\";\n56\t\n57\tinterface Listed {\n58\t  number: number;\n59\t  body?: string;\n60\t  state?: string;\n61\t  labels?: ({ name?: string } | string)[];\n62\t}\n63\t\n64\t/**\n65\t * The listing, or null when it could not be read as one.\n66\t *\n67\t * Null rather than `[]`, because the two answers travel to the same place and mean\n68\t * opposite things. `[]` is \"this parent has no children of that kind\"; an unreadable\n69\t * listing is \"nobody knows\", and a stop that walks a tree built from the second\n70\t * reaches whatever it happened to see and reports success.\n71\t *\n72\t * The failed CALL was already reported. This is the narrower case — `gh` exited zero\n73\t * and handed back something that is not JSON — and it was the one that answered\n74\t * \"none\".\n75\t */\n76\tfunction parseListed(stdout: string): Listed[] | null {\n77\t  try {\n78\t    return JSON.parse(stdout || \"[]\") as Listed[];\n79\t  } catch {\n80\t    return null;\n81\t  }\n82\t}\n83\t\n84\t/**\n85\t * Whether a run is in flight on a node, from its thread.\n86\t *\n87\t * The `atomaton/in-progress` label used to answer this, and it is a cache written\n88\t * late: the runner sets it after the job starts and clears it when the job ends, so a\n89\t * run that died leaves it set and a run that has been asked for but not yet started\n90\t * has none. The thread is the answer itself -- see `runInFlight`.\n91\t *\n92\t * A read that fails is a problem, not \"nothing is running\": a stop that read a failed\n93\t * read as idle would leave a live run going, and a resume would start a second one.\n94\t */\n95\tfunction runningOn(repo: string, number: number): { running: boolean; problem?: string } {\n96\t  try {\n97\t    return { running: runInFlight(repo, number) };\n98\t  } catch (e) {\n99\t    return { running: false, problem: `could not read the thread on #${number}: ${(e as Error).message}` };\n100\t  }\n\n[333 more lines. Read again with offset: 101.]",
+      "tool_call_id": "call_6f3b03fbf5fc4b469da35f86"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_be5234653e3f464a8943bc33",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":145,\"offset\":25,\"path\":\"/home/runner/work/atomaton/atomaton/src/adapters/github/thread.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/adapters/github/thread.ts lines 25-169 of 290\n\n25\t * is never removed by the shaping, and it is the fallback when no comment asks for an\n26\t * agent. See `latestRequestedAgent`.\n27\t *\n28\t * ## Why it lives here rather than in `entrypoints/`\n29\t *\n30\t * Two callers need it and they are in different trees: the guard\n31\t * (`entrypoints/machinery/guard_comment_during_run.ts`) and the sub-agent dispatch\n32\t * (`entrypoints/tools/lib/dispatch_sub_agent.ts`). A script may not import another\n33\t * script's `ref`, and the machinery scripts are bundled one per file — so the shared\n34\t * reader belongs beside the other modules that read a thread, not in either caller.\n35\t */\n36\timport { gh, ghRead } from \"./gh.ts\";\n37\timport { DISPATCH_TAG, ENDED_TAG } from \"./tags.ts\";\n38\timport { parseCommentCommand } from \"../../domain/work/comment-command.ts\";\n39\timport { isHumanActor } from \"../../domain/work/actor.ts\";\n40\timport {\n41\t  latestRequestedAgent,\n42\t  requestOutstanding,\n43\t  \n\n[3230 characters dropped from the middle; 4000 shown]\n\nerr || listed.stdout}`);\n118\t\n119\t  const excluded = String(excludeCommentId ?? \"\").trim();\n120\t  const comments: ThreadEntry[] = (JSON.parse(listed.stdout || \"[]\") as Comment[])\n121\t    .filter((comment) => String(comment.id) !== excluded)\n122\t    .map((comment) => ({ body: comment.body ?? \"\", isHuman: isHumanComment(comment) }));\n123\t\n124\t  return shapedThread(comments, readers);\n125\t}\n126\t\n127\t/**\n128\t * A node's body and its shaped comments, read from GitHub.\n129\t *\n130\t * The one read every question below starts from. `excludeCommentId` drops a comment\n131\t * from the read — the guard excludes the comment it is judging, so the question is\n132\t * whose turn it was BEFORE that comment arrived.\n133\t *\n134\t * Throws when either read fails. Every caller is deciding whether to keep a comment out\n135\t * of a race or whether to start a run, so an answer nobody could determine must not be\n136\t * the one that lets work through.\n137\t */\n138\tfunction readThread(repo: string, number: string | number, excludeCommentId?: string | number): { body: string; shaped: ShapedThread } {\n139\t  const issue = ghRead(\"api\", `repos/${repo}/issues/${number}`, \"--jq\", \".body\");\n140\t  if (issue.code !== 0) throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);\n141\t\n142\t  return { body: issue.stdout ?? \"\", shaped: readComments(repo, number, excludeCommentId) };\n143\t}\n144\t\n145\t/**\n146\t * Whether the guard's shaping removes a comment — the question the guard itself asks.\n147\t *\n148\t * The guard deletes a person's comment made while the ball is with an agent, and that\n149\t * rule is `shapedThread`'s. So the guard does not re-derive it: it reads the thread\n150\t * WITHOUT the comment it is judging, shapes what is left, and asks whose turn it was.\n151\t * One rule, one place, and the readers that run in the window before the deletion lands\n152\t * see the same answer.\n153\t *\n154\t * COMMENTS ONLY, never the body. A pull request body naming a reviewer is a request the\n155\t * validation dispatch is already handling, and counting it would delete a person's\n156\t * comment on the strength of a request their comment was not racing.\n157\t */\n158\texport function commentWouldBeRemoved(repo: string, number: string | number, commentId: string | number): boolean {\n159\t  return whoseTurn(readThread(repo, number, commentId).shaped.events) === \"agent\";\n160\t}\n161\t\n162\t/**\n163\t * Whether a run is in flight on a node, read from its thread.\n164\t *\n165\t * The `atomaton/in-progress` label is a cache of this answer, written late: the runner\n166\t * sets it after the job starts and clears it when the job ends, so between a person's\n167\t * command and the runner starting it is absent, and a run that died leaves it set. The\n168\t * thread is the answer itself, written when the turn changes -- the same argument\n169\t * `guard_comment_during_run.ts` makes for reading the thread rather than the label.\n\n[121 more lines. Read again with offset: 170.]",
+      "tool_call_id": "call_be5234653e3f464a8943bc33"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_34e833156bd845fdbaea0930",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":60,\"offset\":170,\"path\":\"/home/runner/work/atomaton/atomaton/src/adapters/github/thread.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/adapters/github/thread.ts lines 170-229 of 290\n\n170\t *\n171\t * The ball is with an agent exactly when the last turn-changing event was a request or\n172\t * a hand-off, which is `whoseTurn`'s rule. A request that no run has taken up yet still\n173\t * counts: a run is coming, and a stop should reach it and a resume should not start a\n174\t * second one.\n175\t *\n176\t * Throws when the thread cannot be read. A caller deciding whether to stop or resume\n177\t * work must not read a failed read as \"nothing is running\".\n178\t */\n179\texport function runInFlight(repo: string, number: string | number): boolean {\n180\t  return whoseTurn(readComments(repo, number).events) === \"agent\";\n181\t}\n182\t\n183\t/**\n184\t * Whether an agent was ever dispatched onto a node, read from its thread.\n185\t *\n186\t * The `atomaton/launched` label used to answer this, and it was written before the\n187\t * dispatch was attempted -- so a refused dispatch left it saying \"launched\" while\n188\t * nothing had been. The dispatch marker is written by `dispatchRunner` only when it is\n189\t * about to start a run, so the thread is the accurate record. See `wasLaunched`.\n190\t *\n191\t * Throws when the thread cannot be read, like every other reader here: a caller\n192\t * deciding whether a sub-issue has been started must not read a failed read as \"no\".\n193\t */\n194\texport function wasLaunchedOn(repo: string, number: string | number): boolean {\n195\t  return wasLaunched(readComments(repo, number).comments, readers);\n196\t}\n197\t\n198\t/**\n199\t * Whether a request for an agent is outstanding on a node, read from its comments.\n200\t *\n201\t * The node's BODY is deliberately not read, unlike `latestRequestedAgentOn`. A pull\n202\t * request body naming a reviewer is the request the validation dispatch exists to\n203\t * fulfil, so counting it would refuse the one dispatch that should happen. What this\n204\t * answers is \"has somebody asked, in the thread, and nobody taken it up\" — and a body\n205\t * is not a comment.\n206\t *\n207\t * Read from the SHAPED thread, so a comment the guard is removing cannot be the request\n208\t * this refuses a dispatch over: it is on its way out, and the guard's own notice tells\n209\t * its author it will not be acted on.\n210\t */\n211\texport function requestOutstandingOn(repo: string, number: string | number, excludeCommentId?: string | number): boolean {\n212\t  return requestOutstanding(readThread(repo, number, excludeCommentId).shaped.events);\n213\t}\n214\t\n215\t/** What a dispatch learns from one read of the thread after posting its marker. */\n216\texport interface MarkerCheck {\n217\t  /**\n218\t   * Whether the marker this dispatch just posted is visible in the thread yet.\n219\t   *\n220\t   * GitHub does not guarantee read-after-write: a comment can be missing from the\n221\t   * listing for a moment after it is created. This is the freshness probe -- if the\n222\t   * dispatch's OWN write is visible, the read has caught up at least that far, and a\n223\t   * write that happened before it is very likely visible too.\n224\t   */\n225\t  markerVisible: boolean;\n226\t  /** Whether a request for an agent was outstanding BEFORE that marker. */\n227\t  outstanding: boolean;\n228\t}\n229\t\n\n[61 more lines. Read again with offset: 230.]",
+      "tool_call_id": "call_34e833156bd845fdbaea0930"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_807050f21fd44af993548882",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":140,\"offset\":310,\"path\":\"/home/runner/work/atomaton/atomaton/src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        },
+        {
+          "id": "call_2f80e36b57cb4f1b9f87169d",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\":\"/home/runner/work/atomaton/atomaton/src/domain/work/turn.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 310-449 of 687\n\n310\t\n311\t/**\n312\t * The sentence that fetches a person, named by how the run actually ended.\n313\t *\n314\t * It used to say \"task completed\" whatever happened, which no one saw on a stopped\n315\t * run because a stopped run rarely got a mention at all -- and the moment it did, it\n316\t * was telling the person who had just stopped it that it had finished. \"Review the\n317\t * results\" is dropped for the same reason: a run cut short may have none.\n318\t *\n319\t * `no-report` is the third sentence, and it is here rather than sharing the ordinary\n320\t * one because the ordinary one is the false claim this change exists to stop making.\n321\t * A run that produced no closing text has no results to review; what it did is in a\n322\t * saved session, and the person is being told so they can go and look.\n323\t */\n324\tfunction mentionLine(\n325\t  ending: TurnEnding,\n326\t  args: { agent: string; notify?: string; endedBecaus\n\n[2887 characters dropped from the middle; 4000 shown]\n\n8\t  wroteNothing?: boolean;\n399\t  /**\n400\t   * Whether this run pushed a commit, opened a pull request or merged one.\n401\t   *\n402\t   * Written into the comment because that is where the next run can read it.\n403\t   * `domain/work/progress.ts` counts consecutive runs that changed nothing, and it\n404\t   * counts them from the thread rather than from a counter -- so the thread has to\n405\t   * carry the fact.\n406\t   */\n407\t  changed?: boolean;\n408\t  /**\n409\t   * What the tools did to this run, counted from its session by `tool-trouble.ts`.\n410\t   *\n411\t   * Measured over 396 sessions (#940): 30 runs carried a problem a server reported\n412\t   * about itself and 3 said so; 107 carried a refused or errored call and 33 said so.\n413\t   * The prompt asks for all of it by name, so what is left is to stop asking and\n414\t   * count -- and the count belongs in the footer, where every other thing the machine\n415\t   * knows about the run already is, rather than in the agent's text where a reader\n416\t   * would take it for something the agent chose to say.\n417\t   *\n418\t   * Absent when there was none, which is the ordinary run.\n419\t   */\n420\t  toolTrouble?: string;\n421\t}): string {\n422\t  // Once, and asked twice below. It was derived twice, which is one derivation more\n423\t  // than there are facts.\n424\t  const ending = endingHere(args);\n425\t\n426\t  // This comment is the agent's own report, not a turn comment of the kind\n427\t  // `turn-comment.ts` wraps: it carries `AGENT_TAG` and `CHANGED_TAG` as bookkeeping\n428\t  // (which `withoutBookkeeping` strips on the way back in) and it is deliberately NOT\n429\t  // `llm-context`-tagged, because it is the thing the next run is supposed to read. The\n430\t  // one thing it shares with every other turn-ending comment is the ending, so that is\n431\t  // what it has in common with them and nothing else.\n432\t  const lines = [\n433\t    AGENT_TAG.write(args.agent),\n434\t    CHANGED_TAG.write(args.changed === true ? \"yes\" : \"no\"),\n435\t    // How this run ended, so the thread can be asked later. `/resume` over a work tree\n436\t    // needs to know which nodes under the one it was given were interrupted, and the\n437\t    // alternative -- \"has a saved session\" -- is true of every node that ever ran.\n438\t    //\n439\t    // Three wire values rather than the domain's seven, because this tag answers one\n440\t    // question and `/resume` is its only reader. A projection, taken from the ending\n441\t    // rather than re-derived from the signals beside it -- which is what it was, in\n442\t    // this same file, twelve lines from the other copy.\n443\t    ENDED_TAG.write(endedTag(ending)),\n444\t  ];\n445\t  if (args.salvaged === true) {\n446\t    lines.push(\n447\t      \"> [!WARNING]\",\n448\t      \"> This run ended before it wrote a report. Below is the last thing it said,\",\n449\t      \"> from the middle of the work — not a conclusion, and not a summary of what it found.\",\n\n[238 more lines. Read again with offset: 450.]",
+      "tool_call_id": "call_807050f21fd44af993548882"
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/work/turn.ts lines 1-218 of 218\n\n1\t/**\n2\t * turn.ts — how one agent's attempt on one node ended, and what follows from it.\n3\t *\n4\t * A **turn** is one agent advancing one node: the unit the rest of this domain is\n5\t * written in terms of, and until this module the one it could not name. Its ending\n6\t * existed as six loose signals that three different places each derived their own\n7\t * answer from — one of them in GitHub Actions expression syntax, where nothing\n8\t * could test it.\n9\t *\n10\t * ## What this replaces\n11\t *\n12\t * `domain/work/serialization-guard.ts` held one of those answers, and its header\n13\t * recorded the same defect one level down: before it existed, the rule was\n14\t * \"a string-concatenated GitHub Actions `if:` expression inside\n15\t * atomaton-runner.wac.ts (`REMOVE_LABEL_GUARD`) -- untestable, unnamed, and only\n16\t * readable by parsing bash-adjacent expression syntax.\"\n17\t *\n18\t * That was fixed for the guard and not for its neighbour. `DIS\n\n[7265 characters dropped from the middle; 4000 shown]\n\ncision, so it stays on the word and is read by whatever\n166\t * writes that sentence — see the result comment.\n167\t *\n168\t * `no-report` sits BELOW `handed-off` on purpose, and that placement is most of what\n169\t * makes it usable. A run that ends by calling `create_pr`, `launch_sub_agent` or\n170\t * `request_close_issue` gets no further turn — atoma's loop stops the moment the tool\n171\t * returns — so \"the last thing it said\" is that tool call. Asked before the hand-off,\n172\t * this would label every one of those as having reported nothing. Asked after, it is\n173\t * left with exactly the runs where nothing continues AND nothing was said.\n174\t */\n175\texport function endingOf(signals: TurnSignals): TurnEnding {\n176\t  const named = signals.directive.trim();\n177\t  const next = named === \"\" ? undefined : { agent: named };\n178\t\n179\t  if (!signals.succeeded || signals.endedBecause === \"failed\") return { ended: \"failed\" };\n180\t  if (signals.endedBecause === \"loop\") return { ended: \"looped\" };\n181\t  if (signals.endedBecause === \"stopped\") return { ended: \"stopped\" };\n182\t  if (signals.endedBecause === \"iterations\" || signals.endedBecause === \"runtime\") return { ended: \"spent\" };\n183\t  if (signals.loopLimitReached) return { ended: \"chain-over\", ...(next ? { next } : {}) };\n184\t  if (next || signals.chainContinues) return { ended: \"handed-off\", ...(next ? { next } : {}) };\n185\t  if (!signals.reported) return { ended: \"no-report\" };\n186\t  return { ended: \"finished\" };\n187\t}\n188\t\n189\t/**\n190\t * Whether the at-most-one-turn-per-node guard should be released.\n191\t *\n192\t * One ending holds it: work is still actively going, possibly on a different node\n193\t * entirely, under this one. Every other ending has handed back — to a person, or to\n194\t * nobody — and a node nothing is working on must not stay locked.\n195\t *\n196\t * The mechanism that enacts this is the `atomaton/in-progress` label, in\n197\t * `entrypoints/machinery/manage_in_progress_label.ts`. It is deliberately not named\n198\t * here: the rule is about turns and the label is one way to persist it.\n199\t */\n200\texport function shouldReleaseGuard(ending: TurnEnding): boolean {\n201\t  return ending.ended !== \"handed-off\";\n202\t}\n203\t\n204\t/** Who to start now, when this turn handed off to somebody and the chain may continue. */\n205\texport function nextToDispatch(ending: TurnEnding): NextTurn | undefined {\n206\t  return ending.ended === \"handed-off\" ? ending.next : undefined;\n207\t}\n208\t\n209\t/**\n210\t * Who this turn named, when the chain's own limit is what stops them running.\n211\t *\n212\t * Separate from `nextToDispatch` because the two are what a person reads the\n213\t * difference between: one is a hand-off that happened, the other is a hand-off that\n214\t * was refused and is now somebody's to take by hand.\n215\t */\n216\texport function refusedByChainLimit(ending: TurnEnding): NextTurn | undefined {\n217\t  return ending.ended === \"chain-over\" ? ending.next : undefined;\n218\t}",
+      "tool_call_id": "call_2f80e36b57cb4f1b9f87169d"
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 2,
-      "snapshot_hash": "904332d8df2179a8287715f0a16352db2ed382869f9ce52866a59297bf6ab9fa",
+      "event_count": 3,
+      "snapshot_hash": "e8e81a72511c6ed94672a03883d8d06fac2340769e015f33fa97feed2cba08b3",
       "version": 1
     }
   },
@@ -988,6 +1145,22 @@
         }
       },
       "started": "2026-10-16T01:06:14Z"
+    },
+    {
+      "ended": "2026-10-16T02:39:07Z",
+      "ended_because": "failed",
+      "iterations": 5,
+      "messages": 123,
+      "seconds": 2279,
+      "server_calls": {
+        "files": {
+          "read": 7
+        },
+        "github": {
+          "get_issue_comments": 1
+        }
+      },
+      "started": "2026-10-16T02:01:08Z"
     }
   ]
 }
