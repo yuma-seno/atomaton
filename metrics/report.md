@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 40 | 5% | 1,115 | 8,481 | 29 | 37.8 |
-| Last 30 days | 77 | 6.5% | 1,115 | 10,246 | 34 | 35.0 |
-| Last year | 77 | 6.5% | 1,115 | 10,246 | 34 | 35.0 |
-| All time | 77 | 6.5% | 1,115 | 10,246 | 34 | 35.0 |
+| Last 7 days | 41 | 7.3% | 1,115 | 8,481 | 25 | 37.8 |
+| Last 30 days | 78 | 7.7% | 1,123 | 10,246 | 34 | 36.1 |
+| Last year | 78 | 7.7% | 1,123 | 10,246 | 34 | 36.1 |
+| All time | 78 | 7.7% | 1,123 | 10,246 | 34 | 36.1 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,7 +22,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 72 |
-| `failed` | 5 |
+| `failed` | 6 |
 
 ## Last 7 days
 
@@ -37,7 +37,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 3,311,047 | 28,119,706 | 73,718,100 | 73,718,100 | 203,120,636 |
-| messages per session | 168 | 571 | 715 | 715 | 5,846 |
+| messages per session | 168 | 571 | 715 | 715 | 5,864 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -50,13 +50,13 @@ What is left over is not the same as work delivered. `completed` is the core say
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 1,088 | 28 | 27 | 2.6% |
-| `read` | 617 | 6 | 2 | 1% |
+| `read` | 624 | 6 | 2 | 1% |
 | `grep` | 451 | 9 | 3 | 2% |
 | `shell__shell_execute` | 279 | 3 | 1 | 1.1% |
 | `edit` | 209 | 2 | 0 | 1% |
 | `fetch` | 177 | 26 | 0 | 14.7% |
 | `get_issue` | 97 | 13 | 0 | 13.4% |
-| `get_issue_comments` | 72 | 0 | 8 | 0% |
+| `get_issue_comments` | 73 | 0 | 8 | 0% |
 | `list` | 64 | 0 | 0 | 0% |
 | `search_issues` | 64 | 0 | 2 | 0% |
 | `get_branch` | 45 | 0 | 0 | 0% |
@@ -133,7 +133,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,244,375 | 16,895,165 | 73,718,100 | 73,718,100 | 322,939,313 |
-| messages per session | 167 | 557 | 715 | 715 | 10,527 |
+| messages per session | 167 | 557 | 715 | 715 | 10,545 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -146,7 +146,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `shell__shell_execute` | 1,548 | 19 | 23 | 1.2% |
-| `read` | 1,268 | 9 | 4 | 0.7% |
+| `read` | 1,275 | 9 | 4 | 0.7% |
 | `bash` | 1,088 | 28 | 27 | 2.6% |
 | `grep` | 835 | 17 | 7 | 2% |
 | `edit` | 316 | 2 | 0 | 0.6% |
@@ -154,7 +154,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `web__fetch` | 148 | 11 | 0 | 7.4% |
 | `list` | 121 | 1 | 0 | 0.8% |
 | `get_issue` | 97 | 13 | 0 | 13.4% |
-| `get_issue_comments` | 72 | 0 | 8 | 0% |
+| `get_issue_comments` | 73 | 0 | 8 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `search_issues` | 64 | 0 | 2 | 0% |
@@ -246,7 +246,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,244,375 | 16,895,165 | 73,718,100 | 73,718,100 | 322,939,313 |
-| messages per session | 167 | 557 | 715 | 715 | 10,527 |
+| messages per session | 167 | 557 | 715 | 715 | 10,545 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -259,7 +259,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `shell__shell_execute` | 1,548 | 19 | 23 | 1.2% |
-| `read` | 1,268 | 9 | 4 | 0.7% |
+| `read` | 1,275 | 9 | 4 | 0.7% |
 | `bash` | 1,088 | 28 | 27 | 2.6% |
 | `grep` | 835 | 17 | 7 | 2% |
 | `edit` | 316 | 2 | 0 | 0.6% |
@@ -267,7 +267,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `web__fetch` | 148 | 11 | 0 | 7.4% |
 | `list` | 121 | 1 | 0 | 0.8% |
 | `get_issue` | 97 | 13 | 0 | 13.4% |
-| `get_issue_comments` | 72 | 0 | 8 | 0% |
+| `get_issue_comments` | 73 | 0 | 8 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `search_issues` | 64 | 0 | 2 | 0% |
@@ -359,7 +359,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 4,244,375 | 16,895,165 | 73,718,100 | 73,718,100 | 322,939,313 |
-| messages per session | 167 | 557 | 715 | 715 | 10,527 |
+| messages per session | 167 | 557 | 715 | 715 | 10,545 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -372,7 +372,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `shell__shell_execute` | 1,548 | 19 | 23 | 1.2% |
-| `read` | 1,268 | 9 | 4 | 0.7% |
+| `read` | 1,275 | 9 | 4 | 0.7% |
 | `bash` | 1,088 | 28 | 27 | 2.6% |
 | `grep` | 835 | 17 | 7 | 2% |
 | `edit` | 316 | 2 | 0 | 0.6% |
@@ -380,7 +380,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `web__fetch` | 148 | 11 | 0 | 7.4% |
 | `list` | 121 | 1 | 0 | 0.8% |
 | `get_issue` | 97 | 13 | 0 | 13.4% |
-| `get_issue_comments` | 72 | 0 | 8 | 0% |
+| `get_issue_comments` | 73 | 0 | 8 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `search_issues` | 64 | 0 | 2 | 0% |
