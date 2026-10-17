@@ -1068,14 +1068,15 @@
   {
     "path": "sessions/issue-156/atomaton.json",
     "agent": "atomaton",
-    "messages": 13,
-    "calls": 2,
+    "messages": 20,
+    "calls": 4,
     "failed": 0,
     "refused": 0,
     "skills": [],
     "reported": true,
     "tools": {
-      "get_issue": 2
+      "get_issue": 3,
+      "get_issue_comments": 1
     },
     "acts": {},
     "runs": [
@@ -1091,6 +1092,20 @@
           }
         },
         "started": "2026-10-16T01:20:04Z"
+      },
+      {
+        "ended": "2026-10-17T07:05:57Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 20,
+        "seconds": 944,
+        "server_calls": {
+          "github": {
+            "get_issue": 1,
+            "get_issue_comments": 1
+          }
+        },
+        "started": "2026-10-17T06:50:13Z"
       }
     ]
   },
