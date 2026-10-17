@@ -271,13 +271,19 @@
   {
     "path": "sessions/issue-11/atomaton.json",
     "agent": "atomaton",
-    "messages": 12,
-    "calls": 0,
+    "messages": 21,
+    "calls": 5,
     "failed": 0,
     "refused": 0,
     "skills": [],
     "reported": false,
-    "tools": {},
+    "tools": {
+      "get_issue": 1,
+      "get_issue_comments": 1,
+      "search_issues": 1,
+      "grep": 1,
+      "read": 1
+    },
     "acts": {},
     "runs": [
       {
@@ -288,6 +294,27 @@
         "seconds": 1201,
         "server_calls": {},
         "started": "2026-10-17T06:14:16Z"
+      },
+      {
+        "ended": "2026-10-17T06:50:11Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 21,
+        "seconds": 711,
+        "server_calls": {
+          "files": {
+            "grep": 1,
+            "read": 1
+          },
+          "github": {
+            "get_issue": 1,
+            "get_issue_comments": 1
+          },
+          "search": {
+            "search_issues": 1
+          }
+        },
+        "started": "2026-10-17T06:38:20Z"
       }
     ]
   },
