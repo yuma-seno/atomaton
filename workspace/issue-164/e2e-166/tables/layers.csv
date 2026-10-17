@@ -1,5 +1,0 @@
-層,形式,行き先,根拠
-原稿,Markdown + CSV sidecar,orphan ブランチ（publish_draft）,#110 で実測
-原本,docx / xlsx / pptx,同じ orphan ブランチ（publish_draft・2 回目の呼び出し）,#164 で決定、この実験で実測
-閲覧用,PDF,同じ orphan ブランチ（blob URL でブラウザ表示）,#110 で実測
-upload 経路,user-attachment,閉鎖 — ghs_ の body 付き POST は全面 404（#111）,#164 の前提
