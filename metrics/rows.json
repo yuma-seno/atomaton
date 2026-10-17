@@ -604,15 +604,15 @@
   {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
-    "messages": 208,
+    "messages": 211,
     "calls": 103,
-    "failed": 2,
-    "refused": 2,
+    "failed": 1,
+    "refused": 0,
     "skills": [
       "research/web-search",
       "project/conventions"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
       "github__get_issue": 2,
       "search__search_issues": 1,
@@ -745,6 +745,15 @@
           }
         },
         "started": "2026-10-17T04:59:42Z"
+      },
+      {
+        "ended": "2026-10-17T05:11:26Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 211,
+        "seconds": 68,
+        "server_calls": {},
+        "started": "2026-10-17T05:10:18Z"
       }
     ]
   },
