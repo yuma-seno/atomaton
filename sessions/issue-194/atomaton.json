@@ -30,7 +30,7 @@
     },
     {
       "role": "user",
-      "content": "/atomaton recover\nこちら確認お願い。\nまだ対応には入らなくていい。調査できたら報告して。",
+      "content": "[ワークフローが壊れたので呼び出しコメントを無効化]/atomaton recover\nこちら確認お願い。\nまだ対応には入らなくていい。調査できたら報告して。",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-10-17T05:30:26Z",
@@ -1181,13 +1181,143 @@
     {
       "role": "assistant",
       "content": ""
+    },
+    {
+      "role": "user",
+      "content": "/atomaton",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T06:44:27Z",
+        "event_type": "issue_comment",
+        "id": 6230825721,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_fa25f90e703843e7b3da8f20",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":90,\"offset\":375,\"path\":\".github/atomaton-runtime/scripts/stop_on_close.ts\"}"
+          }
+        },
+        {
+          "id": "call_09779216252e44ad81ddcf84",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":100,\"offset\":465,\"path\":\".github/atomaton-runtime/scripts/stop_on_close.ts\"}"
+          }
+        },
+        {
+          "id": "call_a37b91f65d1346f2ab858aae",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":100,\"offset\":25,\"path\":\".github/workflows/atomaton-manual-comment.yml\"}"
+          }
+        },
+        {
+          "id": "call_e3acb12a8658414084d3252a",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"max_matches\":15,\"path\":\".github/atomaton-runtime\",\"pattern\":\"post_result_comment\"}"
+          }
+        },
+        {
+          "id": "call_aa1c784e309c4db5907cdfb6",
+          "type": "function",
+          "function": {
+            "name": "glob",
+            "arguments": "{\"pattern\":\"src/**/*.rs\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": ".github/atomaton-runtime/scripts/stop_on_close.ts lines 375-464 of 633\n\n375\tfunction readComments(repo, number, excludeCommentId) {\n376\t  const listed = ghRead(\"api\", `repos/${repo}/issues/${number}/comments`, \"--paginate\");\n377\t  if (listed.code !== 0)\n378\t    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);\n379\t  const excluded = String(excludeCommentId ?? \"\").trim();\n380\t  const comments = JSON.parse(listed.stdout || \"[]\").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? \"\", isHuman: isHumanComment(comment) }));\n381\t  return shapedThread(comments, readers);\n382\t}\n383\tfunction runInFlight(repo, number) {\n384\t  return whoseTurn(readComments(repo, number).events) === \"agent\";\n385\t}\n386\t\n387\t// src/adapters/github/work-tree.ts\n388\tfunction parseListed(stdout) {\n389\t  try {\n390\t    return JSON.parse(stdout || \"[]\");\n391\t  } catch {\n392\t    return null;\n393\t  }\n394\t}\n395\tfunction runningOn(repo, number) {\n396\t  try {\n397\t    return { running: runInFlight(repo, number) };\n398\t  } catch (e) {\n399\t    return { running: false, problem: `could not read the thread on #${number}: ${e.message}` };\n400\t  }\n401\t}\n402\tfunction readNode(repo, number) {\n403\t  const { code, stdout, stderr } = ghRead(\"api\", `repos/${repo}/issues/${number}`);\n404\t  if (code !== 0) {\n405\t    return { problem: `could not read #${number}: ${(stderr || stdout).trim().split(`\n406\t`)[0] ?? \"\"}` };\n407\t  }\n408\t  let raw;\n409\t  try {\n410\t    raw = JSON.parse(stdout);\n411\t  } catch {\n412\t    return { problem: `the response for #${number} was not JSON` };\n413\t  }\n414\t  const isPr = raw.pull_request !== undefined;\n415\t  if (raw.state !== \"open\" && raw.state !== \"closed\") {\n416\t    return { problem: `#${number} reported an unrecognised state ${JSON.stringify(raw.state ?? null)}` };\n417\t  }\n418\t  const state = raw.state === \"open\" ? \"open\" : isPr ? pullRequestOutcome(Boolean(raw.pull_request?.merged_at)) : issueOutcome(raw.state_reason);\n419\t  const { running, problem } = runningOn(repo, number);\n420\t  if (problem)\n421\t    return { problem };\n422\t  return {\n423\t    node: {\n424\t      number,\n425\t      kind: isPr ? \"pull-request\" : \"issue\",\n426\t      state,\n427\t      parent: isPr ? PARENT_ISSUE_TAG.read(raw.body ?? \"\") : undefined,\n428\t      running\n429\t    }\n430\t  };\n431\t}\n432\tfunction readChildren(repo, parent) {\n433\t  const nodes = [];\n434\t  const problems = [];\n435\t  const prs = ghRead(\"pr\", \"list\", \"--repo\", repo, \"--state\", \"all\", \"--limit\", \"200\", \"--search\", `${PARENT_ISSUE_TAG.search(parent)} in:body`, \"--json\", \"number,body,state,labels\");\n436\t  if (prs.code !== 0)\n437\t    problems.push(`could not list the pull requests for #${parent}`);\n438\t  const listedPrs = parseListed(prs.stdout);\n439\t  if (listedPrs === null)\n440\t    problems.push(`the pull request listing for #${parent} was not readable`);\n441\t  for (const found of listedPrs ?? []) {\n442\t    if (PARENT_ISSUE_TAG.read(found.body ?? \"\") !== parent)\n443\t      continue;\n444\t    const { running, problem } = runningOn(repo, found.number);\n445\t    if (problem) {\n446\t      problems.push(problem);\n447\t      continue;\n448\t    }\n449\t    nodes.push({\n450\t      number: found.number,\n451\t      kind: \"pull-request\",\n452\t      state: saysOpen(found.state) ? \"open\" : pullRequestOutcome(found.state === \"MERGED\"),\n453\t      parent,\n454\t      running\n455\t    });\n456\t  }\n457\t  const links = issueLinks(repo, parent);\n458\t  if (links.unavailable) {\n459\t    problems.push(`could not read GitHub's own links for #${parent}: ${links.unavailable}`);\n460\t  }\n461\t  const already = new Set(nodes.map((node) => node.number));\n462\t  for (const child of links.children) {\n463\t    if (already.has(child.number))\n464\t      continue;\n\n[169 more lines. Read again with offset: 465.]",
+      "tool_call_id": "call_fa25f90e703843e7b3da8f20"
+    },
+    {
+      "role": "tool",
+      "content": ".github/atomaton-runtime/scripts/stop_on_close.ts lines 465-564 of 633\n\n465\t    const { running, problem } = runningOn(repo, child.number);\n466\t    if (problem) {\n467\t      problems.push(problem);\n468\t      continue;\n469\t    }\n470\t    already.add(child.number);\n471\t    nodes.push({\n472\t      number: child.number,\n473\t      kind: \"issue\",\n474\t      state: child.state,\n475\t      parent,\n476\t      running\n477\t    });\n478\t  }\n479\t  for (const linked of links.pullRequests) {\n480\t    if (already.has(linked.number))\n481\t      continue;\n482\t    const { node, problem } = readNode(repo, linked.number);\n483\t    if (!node) {\n484\t      problems.push(problem ?? `could not read #${linked.number}`);\n485\t      continue;\n486\t    }\n487\t    already.add(linked.number);\n488\t    nodes.push({ ...node, parent });\n489\t  }\n490\t  return { nodes, problems };\n491\t}\n492\tfunction readWorkTree(repo, root) {\n493\t  const { node, problem } = readNode(repo, root);\n494\t  if (!node)\n495\t    return { nodes: [], problems: [problem ?? `could not read #${root}`] };\n496\t  const nodes = [node];\n497\t  const problems = [];\n498\t  const seen = new Set([root]);\n499\t  let frontier = [root];\n500\t  for (let depth = 0;depth < MAX_DEPTH && frontier.length > 0; depth += 1) {\n501\t    const next = [];\n502\t    for (const parent of frontier) {\n503\t      const found = readChildren(repo, parent);\n504\t      problems.push(...found.problems);\n505\t      for (const child of found.nodes) {\n506\t        if (seen.has(child.number))\n507\t          continue;\n508\t        seen.add(child.number);\n509\t        nodes.push(child);\n510\t        if (child.kind === \"issue\")\n511\t          next.push(child.number);\n512\t      }\n513\t    }\n514\t    frontier = next;\n515\t  }\n516\t  return { nodes, problems };\n517\t}\n518\tfunction commentOn(repo, number, body) {\n519\t  return gh(\"issue\", \"comment\", String(number), \"--repo\", repo, \"--body\", body).code === 0;\n520\t}\n521\tfunction closeSubtreeUnder(repo, root, rootBody) {\n522\t  const { nodes, problems } = readWorkTree(repo, root);\n523\t  const all = subtree(nodes, root);\n524\t  const stopped = [];\n525\t  const closed = [];\n526\t  const rootNotified = commentOn(repo, root, rootBody);\n527\t  if (!rootNotified)\n528\t    problems.push(`could not post the stop request on #${root}`);\n529\t  else if (all.find((node) => node.number === root)?.running)\n530\t    stopped.push(root);\n531\t  const under = descendants(all, root);\n532\t  for (const node of nodesToStop(under)) {\n533\t    const body = [LLM_CONTEXT_TAG.write(\"exclude\"), STOP_TAG.write(\"requested\"), closeReachedNotice(root)].join(`\n534\t`);\n535\t    if (commentOn(repo, node.number, body))\n536\t      stopped.push(node.number);\n537\t    else\n538\t      problems.push(`could not post the stop request on #${node.number}`);\n539\t  }\n540\t  for (const node of nodesToClose(under)) {\n541\t    const closeIt = node.kind === \"pull-request\" ? gh(\"pr\", \"close\", String(node.number), \"--repo\", repo) : gh(\"issue\", \"close\", String(node.number), \"--repo\", repo);\n542\t    if (closeIt.code === 0)\n543\t      closed.push(node.number);\n544\t    else\n545\t      problems.push(`could not close #${node.number}`);\n546\t  }\n547\t  return { stopped, closed, rootNotified, problems };\n548\t}\n549\t\n550\t// src/entrypoints/machinery/lib/script-ref.ts\n551\timport { basename } from \"path\";\n552\timport { fileURLToPath } from \"url\";\n553\t\n554\t// src/domain/machinery/machinery-layout.ts\n555\tvar USER_ROOT = \".github/atomaton\";\n556\tvar RUNTIME_ROOT = \".github/atomaton-runtime\";\n557\tvar CONFIG_FILE = `${USER_ROOT}/config.yaml`;\n558\tvar AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;\n559\tvar PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;\n560\tvar SKILLS_DIR = `${USER_ROOT}/skills`;\n561\tvar TOOLS_DIR = `${RUNTIME_ROOT}/tools`;\n562\tvar TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;\n563\tvar DELEGATES_DIR = `${USER_ROOT}/delegates`;\n564\tvar DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;\n\n[69 more lines. Read again with offset: 565.]",
+      "tool_call_id": "call_09779216252e44ad81ddcf84"
+    },
+    {
+      "role": "tool",
+      "content": ".github/workflows/atomaton-manual-comment.yml lines 25-124 of 178\n\n25\t  parse:\n26\t    runs-on: ubuntu-latest\n27\t    outputs:\n28\t      agent: ${{ steps.dispatch.outputs.agent }}\n29\t      session_mode: ${{ steps.command.outputs.session_mode }}\n30\t      number: ${{ steps.target.outputs.number }}\n31\t      type: ${{ steps.target.outputs.type }}\n32\t      notify: ${{ steps.target.outputs.notify }}\n33\t    if: (github.event.comment.user.type != 'Bot') || ((github.event.comment.user.type == 'Bot') && (contains(github.event.comment.body, 'atomaton:dispatch')))\n34\t    steps:\n35\t      - uses: actions/checkout@v4\n36\t      - name: Setup Bun\n37\t        with:\n38\t          bun-version: latest\n39\t        uses: oven-sh/setup-bun@v2\n40\t      - name: Parse slash command\n41\t        id: command\n42\t        shell: bash\n43\t        env:\n44\t          ATOMATON_COMMENT_BODY: ${{ github.event.comment.body }}\n45\t        run: |\n46\t          bun run \"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/\n\n[1556 characters dropped from the middle; 4000 shown]\n\nNERY_ROOT:-.}/.github/atomaton-runtime/scripts/guard_command_on_closed.ts\" --number \"${NUMBER}\" --commenter \"${COMMENTER}\" --command \"/${COMMAND}\"\n72\t        if: (github.event.comment.user.type != 'Bot') && steps.command.outputs.control != 'stop' && (steps.command.outputs.agent != '' || steps.command.outputs.control != '') && steps.guard.outputs.blocked != 'true'\n73\t      - name: Resolve target context\n74\t        id: target\n75\t        shell: bash\n76\t        env:\n77\t          NUMBER: ${{ github.event.issue.number }}\n78\t          IS_PR: ${{ toJSON(github.event.issue.pull_request != null) }}\n79\t          NOTIFY: ${{ github.event.comment.user.login }}\n80\t        run: |\n81\t          echo \"number=${NUMBER}\" >> \"$GITHUB_OUTPUT\"\n82\t          if [ \"$IS_PR\" = \"true\" ]; then\n83\t            echo \"type=pr\" >> \"$GITHUB_OUTPUT\"\n84\t          else\n85\t            echo \"type=issue\" >> \"$GITHUB_OUTPUT\"\n86\t          fi\n87\t          echo \"notify=${NOTIFY}\" >> \"$GITHUB_OUTPUT\"\n88\t      - name: Request a stop\n89\t        shell: bash\n90\t        env:\n91\t          GH_TOKEN: ${{ github.token }}\n92\t          NUMBER: ${{ github.event.issue.number }}\n93\t          COMMENT_ID: ${{ github.event.comment.id }}\n94\t          COMMENTER: ${{ github.event.comment.user.login }}\n95\t        run: |\n96\t          bun run \"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/request_stop.ts\" --number \"${NUMBER}\" --comment-id \"${COMMENT_ID}\" --commenter \"${COMMENTER}\"\n97\t        if: steps.command.outputs.control == 'stop'\n98\t      - name: Resolve the agent to resume\n99\t        id: resume\n100\t        shell: bash\n101\t        env:\n102\t          GH_TOKEN: ${{ github.token }}\n103\t          NUMBER: ${{ github.event.issue.number }}\n104\t        run: |\n105\t          bun run \"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/resolve_resume_agent.ts\" --number \"${NUMBER}\"\n106\t        if: steps.command.outputs.control == 'resume'\n107\t      - name: Resume the work this issue was stopped with\n108\t        shell: bash\n109\t        env:\n110\t          GH_TOKEN: ${{ github.token }}\n111\t          GITHUB_REPOSITORY: ${{ github.repository }}\n112\t          NUMBER: ${{ github.event.issue.number }}\n113\t          NOTIFY: ${{ github.event.comment.user.login }}\n114\t        run: |\n115\t          bun run \"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/resume_subtree.ts\" --number \"${NUMBER}\" --notify \"${NOTIFY}\"\n116\t        if: steps.command.outputs.control == 'resume' && steps.guard.outputs.blocked != 'true' && steps.closed-guard.outputs.blocked != 'true'\n117\t      - name: Decide what to dispatch\n118\t        id: dispatch\n119\t        shell: bash\n120\t        env:\n121\t          FROM_COMMAND: ${{ steps.command.outputs.agent }}\n122\t          FROM_RESUME: ${{ steps.resume.outputs.agent }}\n123\t          BLOCKED: ${{ steps.guard.outputs.blocked }}\n124\t          CLOSED: ${{ steps.closed-guard.outputs.blocked }}\n\n[54 more lines. Read again with offset: 125.]",
+      "tool_call_id": "call_a37b91f65d1346f2ab858aae"
+    },
+    {
+      "role": "tool",
+      "content": "4 matching line(s) under .github/atomaton-runtime:\n\n.github/atomaton-runtime/scripts/post_result_comment.ts:4:// src/entrypoints/machinery/post_result_comment.ts\n.github/atomaton-runtime/scripts/post_result_comment.ts:381:// src/entrypoints/machinery/post_result_comment.ts\n.github/atomaton-runtime/scripts/post_result_comment.ts:531:    console.error(\"usage: post_result_comment.ts --number N --agent NAME --run-url URL [...]\");\n.github/atomaton-runtime/scripts/post_result_comment.ts:536:    console.error(\"post_result_comment.ts: --output is required (the agent's stdout file)\");",
+      "tool_call_id": "call_e3acb12a8658414084d3252a"
+    },
+    {
+      "role": "tool",
+      "content": "No file matches src/**/*.rs under /home/runner/work/atomaton/atomaton.",
+      "tool_call_id": "call_aa1c784e309c4db5907cdfb6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a0de727bf784e626",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 200, \"offset\": 80, \"path\": \".github/atomaton-runtime/scripts/stop_on_close.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-aff3fed8147e9c56",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 120, \"offset\": 375, \"path\": \".github/atomaton-runtime/scripts/post_result_comment.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-9037a6558afd54ee",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\": 11, \"issue_number\": 182, \"to\": 18}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": ".github/atomaton-runtime/scripts/stop_on_close.ts lines 80-279 of 633\n\n80\t\n81\t// src/domain/work/work-tree.ts\n82\tvar MAX_DEPTH = 10;\n83\tfunction subtree(nodes, root) {\n84\t  const byParent = new Map;\n85\t  const byNumber = new Map;\n86\t  for (const node of nodes) {\n87\t    byNumber.set(node.number, node);\n88\t    if (node.parent === undefined)\n89\t      continue;\n90\t    const siblings = byParent.get(node.parent) ?? [];\n91\t    siblings.push(node);\n92\t    byParent.set(node.parent, siblings);\n93\t  }\n94\t  const start = byNumber.get(root);\n95\t  if (!start)\n96\t    return [];\n97\t  const found = [start];\n98\t  const seen = new Set([root]);\n99\t  let frontier = [root];\n100\t  for (let depth = 0;depth < MAX_DEPTH && frontier.length > 0; depth += 1) {\n101\t    const next = [];\n102\t    for (const parent of frontier) {\n103\t      for (const child of byParent.get(parent) ?? []) {\n104\t        if (seen.has(child.number))\n105\t          continue;\n106\t        seen.add(child.number);\n107\t        found\n\n[3463 characters dropped from the middle; 4000 shown]\n\nub/issue-links.ts\n214\tvar LINK_LIMIT = 50;\n215\tvar LABEL_LIMIT = 20;\n216\tvar QUERY = `\n217\tquery($owner:String!, $name:String!, $number:Int!, $limit:Int!, $labelLimit:Int!) {\n218\t  repository(owner:$owner, name:$name) {\n219\t    issueOrPullRequest(number:$number) {\n220\t      __typename\n221\t      ... on Issue {\n222\t        parent { number title state stateReason }\n223\t        subIssues(first:$limit) { nodes { number title state stateReason labels(first:$labelLimit) { nodes { name } } } }\n224\t        closedByPullRequestsReferences(first:$limit, includeClosedPrs:true) {\n225\t          nodes { number title state merged body }\n226\t        }\n227\t        timelineItems(last:$limit, itemTypes:[CROSS_REFERENCED_EVENT]) {\n228\t          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number title state merged body } } } }\n229\t        }\n230\t      }\n231\t      ... on PullRequest {\n232\t        closingIssuesReferences(first:$limit) { nodes { number title state stateReason } }\n233\t      }\n234\t    }\n235\t  }\n236\t}`;\n237\tfunction normalise(node) {\n238\t  return {\n239\t    number: node.number,\n240\t    title: node.title,\n241\t    state: saysOpen(node.state) ? \"open\" : issueOutcome(node.stateReason)\n242\t  };\n243\t}\n244\tfunction asChild(node) {\n245\t  return { ...normalise(node), labels: (node.labels?.nodes ?? []).map((label) => label.name) };\n246\t}\n247\tfunction asPr(node) {\n248\t  return {\n249\t    number: node.number,\n250\t    title: node.title,\n251\t    state: saysOpen(node.state) ? \"open\" : pullRequestOutcome(Boolean(node.merged))\n252\t  };\n253\t}\n254\tfunction issueLinks(repo, number) {\n255\t  const [owner, name] = repo.split(\"/\");\n256\t  if (!owner || !name) {\n257\t    return { children: [], pullRequests: [], unavailable: `\"${repo}\" is not an owner/name repository` };\n258\t  }\n259\t  let issue = null;\n260\t  try {\n261\t    issue = ghGraphqlRead(QUERY, { owner, name, number, limit: LINK_LIMIT, labelLimit: LABEL_LIMIT }).repository?.issueOrPullRequest ?? null;\n262\t  } catch (error) {\n263\t    const why = error.message;\n264\t    console.error(`[atomaton-github] WARN could not read links for #${number}: ${why}`);\n265\t    return { children: [], pullRequests: [], unavailable: `GitHub could not be reached: ${why}` };\n266\t  }\n267\t  if (!issue)\n268\t    return { children: [], pullRequests: [], unavailable: `#${number} was not found` };\n269\t  if (issue.__typename === \"PullRequest\") {\n270\t    const closes = issue.closingIssuesReferences?.nodes ?? [];\n271\t    return {\n272\t      parent: closes[0] ? normalise(closes[0]) : undefined,\n273\t      children: [],\n274\t      pullRequests: []\n275\t    };\n276\t  }\n277\t  const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);\n278\t  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? \"\") === number).map(asPr);\n279\t  return {\n\n[354 more lines. Read again with offset: 280.]",
+      "tool_call_id": "chatcmpl-tool-a0de727bf784e626"
+    },
+    {
+      "role": "tool",
+      "content": ".github/atomaton-runtime/scripts/post_result_comment.ts lines 375-494 of 600\n\n375\t\n376\t// src/entrypoints/machinery/lib/script-ref.ts\n377\tfunction defineScript(importMetaUrl) {\n378\t  return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };\n379\t}\n380\t\n381\t// src/entrypoints/machinery/post_result_comment.ts\n382\tvar ref = defineScript(import.meta.url);\n383\tfunction tokenUsageLines(logsFile) {\n384\t  if (!existsSync(logsFile))\n385\t    return [];\n386\t  const usageLine = readFileSync(logsFile, \"utf8\").split(`\n387\t`).find((l) => l.includes(\"ATOMA_TOKEN_USAGE:\"));\n388\t  if (!usageLine)\n389\t    return [];\n390\t  const prompt = /prompt=(\\d+)/.exec(usageLine)?.[1];\n391\t  const completion = /completion=(\\d+)/.exec(usageLine)?.[1];\n392\t  const total = /total=(\\d+)/.exec(usageLine)?.[1];\n393\t  const cached = /cached=(\\d+)/.exec(usageLine)?.[1];\n394\t  return [\"\", \"---\", renderTokenLine({ total, prompt, completion, cached })];\n395\t}\n396\tfunction subIssueState(nu\n\n[1335 characters dropped from the middle; 4000 shown]\n\n   return \"handoff\";\n437\t    case \"failed\":\n438\t    case \"chain-over\":\n439\t    case \"no-report\":\n440\t    case \"finished\":\n441\t      return \"done\";\n442\t  }\n443\t}\n444\tfunction cutShort(endedBecause) {\n445\t  return endedBecause === \"stopped\" || endedBecause === \"runtime\" || endedBecause === \"iterations\" || endedBecause === \"loop\";\n446\t}\n447\tfunction howItWasCutShort(endedBecause) {\n448\t  if (endedBecause === \"stopped\")\n449\t    return \"was stopped\";\n450\t  if (endedBecause === \"loop\")\n451\t    return \"got stuck repeating itself\";\n452\t  return endedBecause === \"iterations\" ? \"ran out of iterations\" : \"ran out of time\";\n453\t}\n454\tfunction mentionLine(ending, args) {\n455\t  if (cutShort(args.endedBecause)) {\n456\t    return `@${args.notify} \\u2014 **${args.agent}** ${howItWasCutShort(args.endedBecause)} ` + `before it finished, and no agent will run next. Resume it, or say what to do instead.`;\n457\t  }\n458\t  if (ending.ended === \"no-report\") {\n459\t    return `@${args.notify} \\u2014 **${args.agent}** ended without writing a report. Nothing interrupted it ` + `and nothing runs next; it simply left no closing text, so there is nothing here to review. ` + `What it did is in its saved session.`;\n460\t  }\n461\t  return `@${args.notify} \\u2014 **${args.agent}** task completed. No agent will be automatically executed next. Please review the results or provide instructions for the next step.`;\n462\t}\n463\tfunction endingHere(args) {\n464\t  return endingOf({\n465\t    succeeded: true,\n466\t    endedBecause: args.endedBecause ?? \"\",\n467\t    loopLimitReached: false,\n468\t    chainContinues: isTrue(args.chainContinues),\n469\t    directive: args.directive ?? \"\",\n470\t    reported: args.reported === true\n471\t  });\n472\t}\n473\tfunction buildCommentBody(args) {\n474\t  const ending = endingHere(args);\n475\t  const lines = [\n476\t    AGENT_TAG.write(args.agent),\n477\t    CHANGED_TAG.write(args.changed === true ? \"yes\" : \"no\"),\n478\t    ENDED_TAG.write(endedTag(ending))\n479\t  ];\n480\t  if (args.salvaged === true) {\n481\t    lines.push(\"> [!WARNING]\", \"> This run ended before it wrote a report. Below is the last thing it said,\", \"> from the middle of the work \\u2014 not a conclusion, and not a summary of what it found.\", \"\");\n482\t  } else if (args.wroteNothing === true) {\n483\t    lines.push(\"> [!WARNING]\", \"> This run ended before it said anything at all, so there is no report below \\u2014\", \"> not even a partial one. What it had done is in its saved session.\", \"\");\n484\t  }\n485\t  lines.push(args.output, \"\", ...args.usageLines);\n486\t  const escapedNotice = escapedMentionNotice(args.escapedMentions ?? []);\n487\t  if (escapedNotice !== undefined)\n488\t    lines.push(\"\", escapedNotice, \"\");\n489\t  if (shouldMentionOnCompletion({\n490\t    ending,\n491\t    chainContinues: isTrue(args.chainContinues),\n492\t    notify: args.notify,\n493\t    isSubIssue: args.isSubIssue ?? false,\n494\t    issueClosed: args.issueClosed ?? false\n\n[106 more lines. Read again with offset: 495.]",
+      "tool_call_id": "chatcmpl-tool-aff3fed8147e9c56"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":182,\"title\":\"create_issue に sub_issue: false を渡せてしまう — 木構造から外れた Issue が作れる\",\"state\":\"CLOSED\",\"total_comments\":18,\"children\":[{\"number\":196,\"title\":\"create_issue を create_sub_issue に改名し、ルート専用の create_root_issue を追加する\",\"state\":\"done\"}],\"pull_requests\":[{\"number\":198,\"title\":\"Rename create_issue → create_sub_issue and add create_root_issue (#182)\",\"state\":\"done\"}]},\"showing\":\"comment(s) 11-18 of 18; pass from/to to read the rest\",\"comments\":[{\"index\":11,\"id\":\"IC_kwDOUudl8s8AAAABchZiMw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: Launched sub-agent(s):\\n- #196→engineer\\n\\n<details><summary>Report</summary>\\n\\n#182（create_issue から sub_issue 引数を削除）の後続設計を確定し、実装を #196 として engineer に委譲した。\\n\\n## 経緯\\n- ユーザー承認済みの設計: `create_issue` を `create_sub_issue` に改名（サブイシュー専用を名前で固定）、ルート起票用の新ツール `create_root_issue` を追加（PR run からも可 — #192 の「欠陥報告の行き先が無い」を埋める）。\\n- 同内容の開いた Issue は無いことを確認済み（#192 は PR run 拒否の問題で近いが別論点、#194/#186 は無関係）。\\n\\n#\n\n[3162 characters dropped from the middle; 4000 shown]\n\nu agree that the work below is done.** Atomaton leaves that to you; comment with further instructions instead if it is not done.\\n\\nAtomaton: the agent on this issue considers its work complete.\\n\\n**Reason:** #182 の修正（create_sub_issue への改名と create_root_issue の追加）は PR #198 → main に届き、v0.21.7 として実稼働で確認できた。依頼された調査も完了し、判明した欠陥は #203 に起票済み。\\n\\n**クローズで問題ありません。** #182 の修正は main に届き、v0.21.7 として実稼働に乗っています。\\n\\n- PR #198 はマージ済み（merge commit `ce800af`、2026-10-17T02:51Z）。#196/#197 の内容（改名 + `create_root_issue` 新設 + 参照更新）を main へ配達するもので、内容はレビュー済み・ブロッカーなし。\\n- 実稼働の確認: 現在の main（`4e7c722` = v0.21.7 適用後）の `.github/atomaton-runtime/tools/mcp/github.ts` に `create_sub_issue`（20571 行、スキーマから `sub_issue` は消え、「PR run では拒否・run に Issue が無ければ拒否」が説明文に明記）と `create_root_issue`（19982–20040 行）の両方が存在します。\\n- 子 #196 は閉じ済み。開いている子はありません。\\n\\n## 別件の調査結果: PRマージ後の再起動が届かない件 — 不具合を確認。#203 に起票済み\\n\\n- ワークフロー自体は走っていました: \\\"Atomaton PR Merged\\\" run 126（`38996540784`、02:51:25、conclusion success）。\\n- job 単位: `parse` → success、`resolve-parent` → success（**出力は空**）、`notify-parent` / `reinvoke-origin-agent` / `aggregate-sub-issues` → 全部 **skipped**。\\n- 原因: `reinvoke-origin-agent` の起動条件が `needs.resolve-parent.outputs.parent_issue != ''`（`src/workflows/atomaton-pr-merged.wac.ts:152`）。`resolve-parent` はタグの Issue（#182）の**親**を GraphQL で解決するジョブで（`:88-103`）、#182 はルート Issue なので親が無く空 → 再起動ジョブごとスキップされます。\\n- 一方、そのジョブが実行するスクリプト `dispatch_post_merge.ts:56-67` はタグの Issue 自身（#182）に再起動する実装で、親の解決を必要としません。**ゲートと実体が別の対象を見ている**のが欠陥です。\\n- ツール経路（`merge_pr`）は親の有無に関係なくタグの Issue に再起動します（`src/entrypoints/tools/mcp/github.ts:1495-1527`）。つまり「**ルート Issue の配達 PR を人がマージしたときだけ**再起動が飛ばない」という条件付きの欠陥で、サブイシューの PR なら親が解決されるので再起動します。一般的な「通知されない」ではありません。\\n- 直すなら reinvoke ジョブの条件を `parse` の出力（タグの有無）に変える一行の可能性が高いですが、aggregate ジョブとの絡み（親が無いときの集約は元々無い）があるので、#203 で判断してください。\\n\\n## `create_root_issue` の動作確認\\n\\n今回の起票（#203）が初実用で、v0.21.7 適用後の実行環境から「by design で親なし」という戻り値付きで作成できています。ツールは生きてい��す。\\n\\n## Next\\n\\n1. #203 で上記の診断を出発点に修正要否を決める。\\n2. #182 はこれで閉じて問題ありません。\",\"createdAt\":\"2026-10-17T05:23:19Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/182#issuecomment-6230136528\",\"viewerDidAuthor\":true},{\"index\":18,\"id\":\"IC_kwDOUudl8s8AAAABc1id5Q\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: this issue was closed while an agent was working on it, so the run has been asked to stop.\\n\\nClosing does not stop a run by itself — it kept going until this request reached it. The run stops after its current step, so it may take a minute.\\n\\n#182 stays closed, and the run will report here when it has stopped.\\n\\nRuns were going on #196, and each has been asked to stop.\",\"createdAt\":\"2026-10-17T05:25:27Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/182#issuecomment-6230154725\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "chatcmpl-tool-9037a6558afd54ee"
+    },
+    {
+      "role": "assistant",
+      "content": ""
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 3,
-      "snapshot_hash": "11ea0bb585b5f88b471a320302e80c06a90a102f6cc0e437071a8edd1ad72ba0",
+      "event_count": 4,
+      "snapshot_hash": "f25307b6646fb723ea4af14654da7126e4214d1c8b20e71d9d9685a15cecb160",
       "version": 1
     }
   },
@@ -1210,6 +1340,24 @@
         }
       },
       "started": "2026-10-17T05:31:08Z"
+    },
+    {
+      "ended": "2026-10-17T06:52:48Z",
+      "ended_because": "completed",
+      "iterations": 3,
+      "messages": 139,
+      "seconds": 463,
+      "server_calls": {
+        "files": {
+          "glob": 1,
+          "grep": 1,
+          "read": 5
+        },
+        "github": {
+          "get_issue_comments": 1
+        }
+      },
+      "started": "2026-10-17T06:45:05Z"
     }
   ]
 }
