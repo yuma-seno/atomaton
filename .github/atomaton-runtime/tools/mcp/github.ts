@@ -19930,7 +19930,7 @@ function prContextNumber(args) {
   }
   return parsed;
 }
-var CREATE_ISSUE_SCHEMA = objectType({
+var ISSUE_ARGS_SCHEMA = objectType({
   title: stringType().min(1).describe("Concise issue title."),
   body: stringType().optional().describe("Issue body in GitHub-flavored Markdown. Defaults to an empty body."),
   labels: stringArray("Existing repository label names to apply. Defaults to no extra labels.").optional()
@@ -19971,16 +19971,21 @@ function notifyTagPrefix(body, what) {
   return login ? `${NOTIFY_TAG.write(login)}
 ` : "";
 }
-async function createIssue(a) {
+function checkedIssueBody(body, instead) {
+  refuseCommandLines(body, "issue body", instead);
+  return notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
+}
+async function createSubIssue(a) {
   const title = a.title;
-  let body = a.body ?? "";
-  let labels = a.labels ?? [];
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
   if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
-    mcpFail("create_issue is for an issue run that is decomposing work into sub-issues. " + "This run is on a pull request, which reviews or fixes one pull request rather than " + "decomposing it. Use create_pr to hand this pull request to a reviewer, or " + "request_close_issue to conclude it.");
+    mcpFail("create_sub_issue is for an issue run that is decomposing work into sub-issues. " + "This run is on a pull request, which reviews or fixes one pull request rather than " + "decomposing it. Use create_root_issue to report a defect that is nobody's child, " + "create_pr to hand this pull request to a reviewer, or request_close_issue to conclude it.");
   }
-  refuseCommandLines(body, "issue body", "Use `launch_sub_agent` to start an agent on a sub-issue.");
-  body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
+  if (!parentNum) {
+    mcpFail("create_sub_issue links its issue under the issue this run is working on, and this run " + "has no current issue to link it under. Use create_root_issue to file an issue that is " + "nobody's child.");
+  }
+  const body = checkedIssueBody(a.body ?? "", "Use `launch_sub_agent` to start an agent on a sub-issue.");
+  let labels = a.labels ?? [];
   const subIssueLabel = getLabel("sub_issue");
   const ensured = gh("label", "create", subIssueLabel, "--repo", REPO, "--force", "--color", "8250df", "--description", "Child delivery task managed by Atomaton");
   if (ensured.code)
@@ -19998,25 +20003,47 @@ async function createIssue(a) {
   const num = Number(stdout.trim().split("/").pop());
   if (!Number.isFinite(num))
     mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
-  if (parentNum) {
-    try {
-      const pid = await resolveIssueId(Number(parentNum));
-      const sid = await resolveIssueId(num);
-      ghGraphql("mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}", { parent: pid, sub: sid });
-      log7(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
-    } catch (e) {
-      mcpFail(`Issue #${num} was created, but could not be linked under #${parentNum} as a sub-issue: ${e}. ` + `Nothing records that edge except the link, so #${num} is currently a root issue and no aggregation ` + `will pick it up. Do not create it again \u2014 add it under #${parentNum} in the web UI, or retry the link.`);
-    }
+  try {
+    const pid = await resolveIssueId(Number(parentNum));
+    const sid = await resolveIssueId(num);
+    ghGraphql("mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}", { parent: pid, sub: sid });
+    log7(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
+  } catch (e) {
+    mcpFail(`Issue #${num} was created, but could not be linked under #${parentNum} as a sub-issue: ${e}. ` + `Nothing records that edge except the link, so #${num} is currently a root issue and no aggregation ` + `will pick it up. Do not create it again \u2014 add it under #${parentNum} in the web UI, or retry the link.`);
   }
-  logOp("create_issue", { number: num, title });
-  const parent = parentNum ? Number(parentNum) : null;
+  logOp("create_sub_issue", { number: num, title, parent: Number(parentNum) });
   return JSON.stringify({
     number: num,
     url: stdout.trim(),
-    parent,
-    ...parent ? {} : {
-      note: "Labelled as a sub-issue, but this run has no current issue, so no parent was recorded. " + "Nothing will aggregate it. Create it from a run that is working on the parent, or treat it " + "as a root issue."
-    }
+    parent: Number(parentNum)
+  });
+}
+async function createRootIssue(a) {
+  const title = a.title;
+  const labels = a.labels ?? [];
+  const body = checkedIssueBody(a.body ?? "", "A root issue is filed for a person to triage rather than dispatched from here, " + "so describe the work in prose.");
+  const subIssueLabel = getLabel("sub_issue");
+  if (labels.includes(subIssueLabel)) {
+    mcpFail(`create_root_issue creates an issue with no parent, so \`${subIssueLabel}\` -- the label a ` + "parent's aggregation counts its children by -- may not be applied to it. Call " + "create_sub_issue to file a child under this run's issue, or drop the label.");
+  }
+  const cmd = ["issue", "create", "--repo", REPO, "--title", title];
+  if (body)
+    cmd.push("--body", body);
+  for (const l of labels)
+    cmd.push("--label", l);
+  const { code, stdout, stderr } = gh(...cmd);
+  if (code)
+    mcpFail(stderr || stdout);
+  const num = Number(stdout.trim().split("/").pop());
+  if (!Number.isFinite(num))
+    mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
+  logOp("create_root_issue", { number: num, title });
+  return JSON.stringify({
+    number: num,
+    url: stdout.trim(),
+    parent: null,
+    root: true,
+    note: "Created as a root issue: it has no parent, by design rather than because a link failed."
   });
 }
 function shownChildren(children) {
@@ -20540,10 +20567,16 @@ async function closeParentAndReport(parentIssue) {
 }
 var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
-    name: "create_issue",
-    description: "Create a GitHub issue in the current repository and return its number and URL. Use this for durable work items, especially delegated child tasks; sub_issue defaults to true and links the new issue to the current issue. This mutates GitHub and records the operation in Atomaton's audit log.",
-    schema: CREATE_ISSUE_SCHEMA,
-    handler: createIssue
+    name: "create_sub_issue",
+    description: "Create a GitHub issue and link it under the issue THIS RUN is working on, as a child of it. Use this for durable work items and for the sub-issues a decomposition is made of; the new issue is always linked under the current issue and always carries the sub-issue label, and the call is refused on a pull request run and on a run with no current issue. To file an issue that is nobody's child -- a defect in the tools, or a decision somebody has to make -- use create_root_issue. This mutates GitHub and records the operation in Atomaton's audit log.",
+    schema: ISSUE_ARGS_SCHEMA,
+    handler: createSubIssue
+  }),
+  defineMcpTool({
+    name: "create_root_issue",
+    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. Returns {number, url, parent: null, root: true} and mutates GitHub.",
+    schema: ISSUE_ARGS_SCHEMA,
+    handler: createRootIssue
   }),
   defineMcpTool({ name: "get_issue", description: "Retrieve one issue's title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). It does NOT return the comments themselves \u2014 use get_issue_comments for those, which takes a range. Returns a JSON issue object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),

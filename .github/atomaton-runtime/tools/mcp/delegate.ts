@@ -17732,6 +17732,32 @@ function machineryPath(relative) {
   return root ? `${root}/${relative}` : relative;
 }
 
+// src/shared/tool-output.ts
+var TOOL_OUTPUT_BUDGET = 50000;
+var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
+function capText(text, budget = TOOL_OUTPUT_BUDGET, keep = "head") {
+  if (text.length <= budget)
+    return { text, dropped: 0 };
+  const note = (where, howMany) => `
+
+[${howMany} characters ${where}; ${budget} shown]
+
+`;
+  const room = budget - note("dropped from the middle", text.length).length;
+  const dropped = text.length - room;
+  if (room <= 0)
+    return { text: keep === "tail" ? text.slice(-budget) : text.slice(0, budget), dropped: text.length - budget };
+  if (keep === "tail") {
+    return { text: note("dropped from the start", dropped).trimStart() + text.slice(-room), dropped };
+  }
+  if (keep === "head") {
+    return { text: text.slice(0, room) + note("dropped from the end", dropped).trimEnd(), dropped };
+  }
+  const head = Math.floor(room / 4);
+  const tail = room - head;
+  return { text: text.slice(0, head) + note("dropped from the middle", dropped) + text.slice(-tail), dropped };
+}
+
 // src/domain/machinery/delegates.ts
 function serverNamesOf(tools) {
   if (!tools || typeof tools !== "object")
@@ -17807,31 +17833,16 @@ function resolveRoster(rosterPath, read, exists) {
   }
   return { defs, problems };
 }
-
-// src/shared/tool-output.ts
-var TOOL_OUTPUT_BUDGET = 50000;
-var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
-function capText(text, budget = TOOL_OUTPUT_BUDGET, keep = "head") {
-  if (text.length <= budget)
-    return { text, dropped: 0 };
-  const note = (where, howMany) => `
-
-[${howMany} characters ${where}; ${budget} shown]
-
-`;
-  const room = budget - note("dropped from the middle", text.length).length;
-  const dropped = text.length - room;
-  if (room <= 0)
-    return { text: keep === "tail" ? text.slice(-budget) : text.slice(0, budget), dropped: text.length - budget };
-  if (keep === "tail") {
-    return { text: note("dropped from the start", dropped).trimStart() + text.slice(-room), dropped };
-  }
-  if (keep === "head") {
-    return { text: text.slice(0, room) + note("dropped from the end", dropped).trimEnd(), dropped };
-  }
-  const head = Math.floor(room / 4);
-  const tail = room - head;
-  return { text: text.slice(0, head) + note("dropped from the middle", dropped) + text.slice(-tail), dropped };
+function reportFrom(envelope, stderr = "", exitCode) {
+  const response = (envelope.response ?? "").trim();
+  if (response)
+    return response;
+  const because = envelope.ended_because ?? "failed";
+  const why = stderr.trim() ? ` It reported: ${capText(stderr.trim(), 2000, "tail").text}` : "";
+  const neverReachedAModel = (envelope.iterations ?? 0) === 0;
+  const advice = neverReachedAModel ? " Nothing was returned to report. The sub-run never reached a model, so the task's size " + "is not the answer; do the work here instead." : " Nothing was returned to report. If the task needs longer than the sub-run's limit, " + "do the work here instead.";
+  const status = exitCode === undefined || exitCode === null ? "" : ` (exit ${exitCode})`;
+  return `The delegate produced no report: the sub-run ended because of \`${because}\` ` + `after ${envelope.seconds ?? 0}s and ${envelope.iterations ?? 0} iteration(s)${status}.` + why + advice;
 }
 
 // src/domain/delivery/declared-secrets.ts
@@ -18021,13 +18032,6 @@ function subRunEnv(env) {
   }
   return out;
 }
-function reportFrom(envelope) {
-  const response = (envelope.response ?? "").trim();
-  if (response)
-    return response;
-  const because = envelope.ended_because ?? "failed";
-  return `The delegate produced no report: the sub-run ended because of \`${because}\` ` + `after ${envelope.seconds ?? 0}s and ${envelope.iterations ?? 0} iteration(s). ` + "Nothing was returned to report. If the task needs longer than the sub-run's limit, " + "do the work here instead.";
-}
 async function handleDelegateRun(def, args) {
   const credentials = providerCredentials(process.env);
   if (Object.keys(credentials).length === 0) {
@@ -18093,7 +18097,7 @@ async function handleDelegateRun(def, args) {
       log(`sub-run exited ${exitCode} with unparseable output`);
       return capText(redact(stdout, SECRET_LITERALS).trim(), TOOL_OUTPUT_BUDGET, "both").text;
     }
-    const report = reportFrom(envelope);
+    const report = reportFrom(envelope, safeErr, exitCode);
     log(`sub-run ended: ${envelope.ended_because ?? "?"} in ${envelope.seconds ?? 0}s`);
     return capText(report, TOOL_OUTPUT_BUDGET, "both").text;
   } finally {
