@@ -627,7 +627,7 @@
   {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
-    "messages": 211,
+    "messages": 213,
     "calls": 103,
     "failed": 1,
     "refused": 0,
@@ -777,6 +777,15 @@
         "seconds": 68,
         "server_calls": {},
         "started": "2026-10-17T05:10:18Z"
+      },
+      {
+        "ended": "2026-10-17T06:37:33Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 213,
+        "seconds": 38,
+        "server_calls": {},
+        "started": "2026-10-17T06:36:55Z"
       }
     ]
   },
