@@ -269,6 +269,29 @@
     ]
   },
   {
+    "path": "sessions/issue-11/atomaton.json",
+    "agent": "atomaton",
+    "messages": 12,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-17T06:34:17Z",
+        "ended_because": "failed",
+        "iterations": 0,
+        "messages": 12,
+        "seconds": 1201,
+        "server_calls": {},
+        "started": "2026-10-17T06:14:16Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-110/atomaton.json",
     "agent": "atomaton",
     "messages": 91,
