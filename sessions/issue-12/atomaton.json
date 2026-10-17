@@ -2130,7 +2130,27 @@
       "role": "assistant",
       "content": "## #12 でできたもの — 要約\n\n**一言で:** エージェントが Markdown で設計書を書くと、それが orphan ブランチ `business-docs` に積まれ、Word / Excel / PDF が自動生成されて同じブランチに載り、その 3 つの URL を run の報告が載せる — という仕組みが完成し、サンプル 1 通で実物を通しました。メインのツリーと履歴は一切汚れていません。\n\n**1. attachments ツールサーバー**（PR #124, #157）\n資格情報を持つ新しいツールサーバーです。`publish_draft` は orphan ブランチへの push を行う（初回は root commit、以降 fast-forward で文書の履歴が積み上がる）もので、git plumbing で動くので run 自身の checkout は一切触りません。`probe` は uploads endpoint の測定器（4 モード）で、当初の「添付」路線の検証用に作りました。\n\n**2. docs/design-doc スキル + generate.mjs**（PR #163 → #176 → #200）\nスキル 1 つ読むだけで手順が再現できる形に束ねました。原稿は Markdown で、**表は CSV ファイルに分けて書く**のが契約 — これで差分が読めます。generate.mjs が docx / xlsx / pptx / PDF をオンデマンド生成し、LibreOffice 等の依存は初回だけ導入して以後キャッシュ（2 回目は 1 秒未満）。`environment.setup_commands` は重くしていません。\n\n**3. 途中で設計が変わり、それは実測によるものです**\n当初は GitHub への「添付」を本命にしていましたが、対照実験（#111）で **uploads endpoint が Actions トークンからのファイル POST を、サイズ・形式に関わらず全面 404 で拒否する**ことが分かりました。そこで #164 で **B（orphan-only）** と決定 — 原本と PDF も orphan ブランチに載せる形にしました。#12 本文の要件（メイン履歴を汚さない、Issue から辿れる、Office 形式も出せる）はこの形で全部満たしています。`probe` は測定器として残っています。\n\n**4. 実物（#166 の通し実験）**\n`business-docs`（tip `098d977`）にサンプル設計書 1 通分が実在します。全 blob URL が HTTP 200、PDF の magic bytes（`%PDF-1.7`）まで確認済み:\n\n- 原稿: https://github.com/yuma-seno/atomaton/blob/business-docs/designs/166/e2e-attachment.md\n- 原本: https://github.com/yuma-seno/atomaton/blob/business-docs/designs/166/e2e-attachment.docx ・ https://github.com/yuma-seno/atomaton/blob/business-docs/designs/166/e2e-attachment.xlsx\n- PDF: https://github.com/yuma-seno/atomaton/blob/business-docs/designs/166/e2e-attachment.pdf\n\n**残りは人の手順が 1 つ:** 走っている層は v0.21.2 で、B 確定後のスキルがまだ届いていません。リリース → セルフデプロイで `.github/atomaton/skills/docs/` に載り、以後どの run もスキルを読むだけでこの手順が使えます。\n\n副産物として、この過程で見つかった環境の欠陥も直っています（`create_issue` → `create_sub_issue` / `create_root_issue` への改名 #182/#184/#196、web-search スキルの修正など。ツリー途中の枝が親の新コミットを取り込む経路 #186 だけは open のままです）。",
       "atoma_metadata": {
-        "github_comment_id": 6230010082,
+        "agent": "atomaton",
+        "github_comment_id": 6230010082
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n設計書の図形とかをエージェントが編集して自由に資料を作成できるわけではなく、Markdownとcsvから自動でpdfを生成するツールを作ったみたいな話？\n顧客に出すにはクオリティ不足になる気がするけど…。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T06:36:04Z",
+        "event_type": "issue_comment",
+        "id": 6230748392,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "はい、その理解で正しいです。図形を自由に編集できる道は無く、できたのは **「Markdown + CSV → docx / xlsx / pptx / PDF を自動生成するパイプライン」** です。\n\n## 実際にできること（正確な境界）\n\n- 変換器が読むのは**見出し・箇条書き・段落・表（CSV）だけ**。それ以外はテキストとして素通りします — スキルの契約（`design-doc.md` §1）に明記してあります\n- **図・ダイアグラム・レイアウト制御の経路は無い**。mermaid 等の画像化もありません\n- xlsx は「CSV 1 ファイル = シート 1 枚」の素の表。書式・数式・結合セルは出ません\n- CJK フォントはベストエフォート（実測で一度、日本語全部が単一グリフに潰れる不具合が起きて直しましたが、スキルには「品質はこの手順の関心事ではない」と書いたままです）\n- PDF は docx を LibreOffice で headless 変換したもの。**「開けること」が保証で、「美しいこと」は保証していません**\n\n## クオリティの感覚は正しい\n\n顧客提出物には足りません。この仕組みが想定しているのは #12 の本文どおり **業務の履歴とナレッジを Issue に貯める** 方です:\n\n- **向いている**: 内部の設計メモ・判断記録を、差分が読める原稿のまま貯める。PDF でブラウザ表示できる。様式を要求されたとき「xlsx/docx が存在する」状態を作れる — ただしそれは**初稿**であって提出物ではない\n- **向いていない**: 見た目自体が要件になるもの（顧客提出、プレゼン、図面）\n\n## 顧客品質が要る場合\n\nそれは #12 の範囲外の、別の決定です。選択肢の形としては:\n\n1. **生成物を初稿として人間が仕上げる** — 現実的な線。docx/pptx で出るので手で直せるのがこの経路の利点\n2. **レンダリング経路を変える** — HTML スライドやレイアウト付き生成。品質は上がるが、検証コストも上がる\n3. **図だけ図形言語で書かせる**（mermaid / PlantUML → 画像埋め込み）— 中間案。図の品質はテンプレート頼み\n\n必要なら「顧客提出物の品質要件」として新しい issue に切り出せます。#12 自体は「ナレッジを貯める土壌」という目的では閉じていて、顧客品質はそこに書かれていなかった要件です。",
+      "atoma_metadata": {
+        "github_comment_id": 6230760616,
         "agent": "atomaton"
       }
     }
@@ -2138,9 +2158,9 @@
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 34,
+      "event_count": 35,
       "resolved_number": "12",
-      "snapshot_hash": "ff3dd99a312163f0dfe2709ead5d0231f4984519b3a5e890a1c7a400631622ca",
+      "snapshot_hash": "94450bed4977d28cf7a9a8807e547118bdd7bba8fa23d7bfc564819d256b997d",
       "type": "issue",
       "version": 1
     }
@@ -2258,6 +2278,15 @@
       "seconds": 68,
       "server_calls": {},
       "started": "2026-10-17T05:10:18Z"
+    },
+    {
+      "ended": "2026-10-17T06:37:33Z",
+      "ended_because": "completed",
+      "iterations": 1,
+      "messages": 213,
+      "seconds": 38,
+      "server_calls": {},
+      "started": "2026-10-17T06:36:55Z"
     }
   ]
 }
