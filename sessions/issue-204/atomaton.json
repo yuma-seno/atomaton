@@ -1588,14 +1588,308 @@
       "role": "tool",
       "content": "Issue #204 is concluded: your reason and summary are on the issue. Nothing else is yours to do here.",
       "tool_call_id": "chatcmpl-tool-ab265938164ebc88"
+    },
+    {
+      "role": "user",
+      "content": "#186で同様の現象が発生",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T07:04:50Z",
+        "event_type": "issue_comment",
+        "id": 6231005370,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nLLMのAPIが最終レスポンス空で返してきてるってこと？\nその場合にコメントの作成をしないのは仕様として自然だと思う？意見を聞かせて。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T08:11:32Z",
+        "event_type": "issue_comment",
+        "id": 6231585989,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e289be2a2f8549f58ba59dce",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/sessions/issue-186/atomaton.json\\\");\\nconst j = await r.json();\\nconst runs = j.atoma_runs ?? [];\\nconsole.log(\\\"runs:\\\", runs.length);\\nconst last = runs[runs.length - 1];\\nconsole.log(\\\"last run:\\\", JSON.stringify(last));\\nconst ms = j.messages ?? [];\\n// last assistant message\\nfor (let i = ms.length - 1; i >= 0; i--) {\\n  if (ms[i].role === \\\"assistant\\\") {\\n    const m = ms[i];\\n    console.log(\\\"last assistant idx:\\\", i, \\\"tool_calls:\\\", m.tool_calls ? \\\"present\\\" : (m.tool_calls === null ? \\\"null\\\" : \\\"undefined\\\"), \\\"content:\\\", JSON.stringify(m.content)?.slice(0, 120));\\n    break;\\n  }\\n}\\nconsole.log(\\\"total messages:\\\", ms.length);\\n' 2>&1 | tail -6\",\"timeout_seconds\":60}"
+          }
+        },
+        {
+          "id": "call_7664e1807d8c4a99a8b971d5",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\":186}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"3 | const j = await r.json();\\n                      ^\\nSyntaxError: JSON Parse error: Unable to parse JSON string\\n      at /home/runner/work/atomaton/atomaton/[eval]:3:19\\n\\nBun v1.4.3 (Linux x64)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":237}",
+      "tool_call_id": "call_e289be2a2f8549f58ba59dce"
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":null,\"createdAt\":\"2026-10-14T18:20:30Z\",\"labels\":[],\"number\":186,\"state\":\"OPEN\",\"title\":\"ツリーの途中の枝が、親の新しくなったコミットを取り込む経路が無い\",\"body\":\"# ツリーの途中の枝が、親の新しくなったコミットを取り込む経路が無い\\r\\n\\r\\n## 前提\\r\\n\\r\\nIssue ツリー ↔ ブランチツリー ↔ PR ツリーが対応している。子のブランチは親のブランチから切り、PR は親のブランチを向く。\\r\\n\\r\\n根の Issue のブランチは `main` から切る。ここまでは機構が守っている。\\r\\n\\r\\n## 問題\\r\\n\\r\\n**環境そのものを直す必要がある場合**（ツールの欠陥を直す、`main` にしかない修正を取り込む、など）、ツリーの途中の枝が `main` の新しいコミットを取り込む経路が無い。\\r\\n\\r\\n実際に起きたこと:\\r\\n\\r\\n- #164 は native link が無くツリーの外にいた。#180（その成果物の PR）は base をエージェントの推測で `atomaton/issue-12` に向けた。\\r\\n- `atomaton/issue-12` は **main より 23 コミット遅れていた** ため、#180 の差分は main の進んだ分が「逆流」に見えた。\\r\\n- #12 のブランチが main を取り込んでいれば、#164 の配下もそれを取り込んでいれば、この見え方は起きなかった。\\r\\n\\r\\nこれは #182 とは別の欠陥である。#182 は「ツリーの外に Issue が作れること」を消した。これが扱うのは **ツリーが正しく作られていても起きる** 「親が進んだのに子が古いまま」という状態。\\r\\n\\r\\n## 現在の経路が無いことの確認\\r\\n\\r\\n- `sync_branch`（`src/entrypoints/tools/mcp/github.ts:1508`）は **checked-out なブランチ** を remote と fast-forward するだけ。`diverged` は明示的に拒否し、rebase も force-push もしない。\\r\\n- 親ブランチの新しいコミットを子ブランチに取り込むには merge（または rebase）が要るが、その手段が無い。\\r\\n- `shell_guard` はすべての変更系 `git` サブコマンドを拒否する。エージェントは `git merge` を自分では実行できない。\\r\\n\\r\\nつまり **エージェントからは、親が進んだ後に子を追いつかせる方法が一つも無い。**\\r\\n\\r\\n## 提案：「ツリー全体で取り込む」手段を用意する\\r\\n\\r\\nツリーは一本なので、取り込みもツリーを歩いて行う。\\r\\n\\r\\n1. 根の Issue のブランチが `main` を取り込む。\\r\\n2. その直下の Issue のブランチが、根のブランチを取り込む。\\r\\n3. 以降、各子が親のブランチを取り込む。\\r\\n\\r\\nこれを **ツールとして用意する** か、**ワークフロー側で解決・または提案する**。\\r\\n\\r\\n### ツール案: `absorb_parent`\\r\\n\\r\\n- 引数は無し（どの Issue かは run から決まる。`create_issue` と `create_pr` が base を選ばないのと同じ理由で、対象を選ばせない）。\\r\\n- run の Issue の親 Issue を native link から読み、親のブランチを base に merge する。\\r\\n- 根の Issue なら `main` から取り込む。\\r\\n- 結果は `merged` / `up_to_date` / `conflict` の語彙で返す。`conflict` のときはエージェントに判断させず、人間に渡す（`sync_branch` が `diverged` を拒否するのと同じ姿勢）。\\r\\n- `commit_and_push` と同じく、エージェントが `git` を直接触らずに済む経路になる。\\r\\n\\r\\n### ワークフロー案\\r\\n\\r\\n- 子の run を始める前に、ワークフローが親ブランチの取り込みを試み、古ければ「親が進んでいる」ことをエージェントに通知する。\\r\\n- 取り込みは機械が行い、コンフリクトだけ人間に渡す。\\r\\n\\r\\nどちらがよいかは未定。ツールのほうが「エージェントが任意の時点で実行できる」利点がある。\\r\\n\\r\\n## 決めること\\r\\n\\r\\n- **手段**: `absorb_parent` ツール / ワークフロー / 提案のみ（`fatal` にはしない）\\r\\n- **拒否の扱い**: コンフリクト時にエージェントが強行できるようにするか、人間に渡して止めるか\\r\\n- **`sync_branch` との関係**: 統合するか、別の語彙として残すか\\r\\n- **範囲**: 1 段だけ取り込むか、`main` まで再帰的に取り込むか\\r\\n\\r\\n## 関連\\r\\n\\r\\n- #156 — 古い base からの push が拒否される問題。同じ「親が進んだ」状態の別の現れ方。\\r\\n- #182 — ツリーの外に Issue を作れる経路を消した。本件はツリーが正しくても起きる。\\r\\n- #96 — base が親ブランチの PR にマージ規則が効くか。ツリーの枝を扱う別の論点。\\r\\n- `src/entrypoints/tools/mcp/github.ts` — `sync_branch` の実装\\r\\n\",\"total_comments\":1,\"children\":[],\"pull_requests\":[]}",
+      "tool_call_id": "call_7664e1807d8c4a99a8b971d5"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-995ca565de463b13",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/sessions/issue-186/atomaton.json\\\");\\nconst t = await r.text();\\nconsole.log(\\\"first 200 chars:\\\", JSON.stringify(t.slice(0, 200)));\\nconsole.log(\\\"length:\\\", t.length);\\ntry { JSON.parse(t); console.log(\\\"parses OK\\\"); } catch (e) { console.log(\\\"PARSE ERROR:\\\", e.message); }\\n' 2>&1 | tail -5\", \"timeout_seconds\": 60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"first 200 chars: \\\"404: Not Found\\\"\\nlength: 14\\nPARSE ERROR: JSON Parse error: Unable to parse JSON string\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":105}",
+      "tool_call_id": "chatcmpl-tool-995ca565de463b13"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_14d0f8834d70489ea50fbec5",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"url\":\"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions?ref=atomaton-data\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[\n  {\n    \"name\": \"issue-1\",\n    \"path\": \"sessions/issue-1\",\n    \"sha\": \"e888c004b9cfc1da8e2ee7afcae32fad9a1908ef\",\n    \"size\": 0,\n    \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-1?ref=atomaton-data\",\n    \"html_url\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-1\",\n    \"git_url\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/e888c004b9cfc1da8e2ee7afcae32fad9a1908ef\",\n    \"download_url\": null,\n    \"type\": \"dir\",\n    \"_links\": {\n      \"self\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-1?ref=atomaton-data\",\n      \"git\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/e888c004b9cfc1da8e2ee7afcae32fad9a1908ef\",\n      \"html\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-1\"\n    }\n  },\n  {\n    \"name\": \"issue-109\",\n    \"path\": \"sessions/issue-109\",\n    \"sha\": \"102c849a266b8e1f6c40f29f5fcb5c82f047b0d9\",\n    \"size\": 0,\n    \"url\": \"https:/\n\n[17052 characters dropped from the middle; 4000 shown]\n\nseno/atomaton/git/trees/b938583f970135bfd1f9a28e8d4d44e3aa0e5af2\",\n    \"download_url\": null,\n    \"type\": \"dir\",\n    \"_links\": {\n      \"self\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-204?ref=atomaton-data\",\n      \"git\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/b938583f970135bfd1f9a28e8d4d44e3aa0e5af2\",\n      \"html\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-204\"\n    }\n  },\n  {\n    \"name\": \"issue-23\",\n    \"path\": \"sessions/issue-23\",\n    \"sha\": \"2e266ce3d4ec2484cc60940cb66d3b96d68c82aa\",\n    \"size\": 0,\n    \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-23?ref=atomaton-data\",\n    \"html_url\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-23\",\n    \"git_url\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/2e266ce3d4ec2484cc60940cb66d3b96d68c82aa\",\n    \"download_url\": null,\n    \"type\": \"dir\",\n    \"_links\": {\n      \"self\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-23?ref=atomaton-data\",\n      \"git\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/2e266ce3d4ec2484cc60940cb66d3b96d68c82aa\",\n      \"html\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-23\"\n    }\n  },\n  {\n    \"name\": \"issue-3\",\n    \"path\": \"sessions/issue-3\",\n    \"sha\": \"43a310d29dfb3084dde15ff36c8556acf8bece7e\",\n    \"size\": 0,\n    \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-3?ref=atomaton-data\",\n    \"html_url\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-3\",\n    \"git_url\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/43a310d29dfb3084dde15ff36c8556acf8bece7e\",\n    \"download_url\": null,\n    \"type\": \"dir\",\n    \"_links\": {\n      \"self\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-3?ref=atomaton-data\",\n      \"git\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/43a310d29dfb3084dde15ff36c8556acf8bece7e\",\n      \"html\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-3\"\n    }\n  },\n  {\n    \"name\": \"issue-4\",\n    \"path\": \"sessions/issue-4\",\n    \"sha\": \"02d4bb2006aee06f6a9ff655672aa909e11914af\",\n    \"size\": 0,\n    \"url\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-4?ref=atomaton-data\",\n    \"html_url\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-4\",\n    \"git_url\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/02d4bb2006aee06f6a9ff655672aa909e11914af\",\n    \"download_url\": null,\n    \"type\": \"dir\",\n    \"_links\": {\n      \"self\": \"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions/issue-4?ref=atomaton-data\",\n      \"git\": \"https://api.github.com/repos/yuma-seno/atomaton/git/trees/02d4bb2006aee06f6a9ff655672aa909e11914af\",\n      \"html\": \"https://github.com/yuma-seno/atomaton/tree/atomaton-data/sessions/issue-4\"\n    }\n  }\n]\n",
+      "tool_call_id": "call_14d0f8834d70489ea50fbec5"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_b9d9e0c9442b449b9a2319d8",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"issue_number\":186}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":186,\"title\":\"ツリーの途中の枝が、親の新しくなったコミットを取り込む経路が無い\",\"state\":\"OPEN\",\"total_comments\":1,\"children\":[],\"pull_requests\":[]},\"showing\":\"all 1 comment(s)\",\"comments\":[{\"index\":1,\"id\":\"IC_kwDOUudl8s8AAAABc2X4SQ\",\"author\":{\"login\":\"yuma-seno\"},\"authorAssociation\":\"OWNER\",\"body\":\"## #156 からの持ち越し(クローズにあたり追加)\\n\\n- **タイミング**: base は run の開始後にも動く。#156 の失敗は run 開始(`4dfb20d`)後に\\n  `main` が `1d5898da` へ進んだものなので、run 開始時の absorb だけでは防げない。\\n  push 直前の検知/再取り込みを範囲に含めるか、「決めること」に加える。\\n- **取り込みでも防げなかったとき**: push が拒否された場合の振る舞い。\\n  ① コミットの前に早期失敗し、base と動いた内容を名指す\\n  ② 成果を patch として issue か `atomaton-data` に永続化し、次の run が再適用する\\n  (#156 の候補①②。今日の挙動は run 終了時に成果ごと失われる)。\",\"createdAt\":\"2026-10-17T07:07:42Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/186#issuecomment-6231029833\",\"viewerDidAuthor\":false}]}",
+      "tool_call_id": "call_b9d9e0c9442b449b9a2319d8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a21a8e25978f6981",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git log --all --oneline --follow --format=\\\"%h %ad %s\\\" --date=iso -- src/entrypoints/machinery/post_result_comment.ts 2>/dev/null | head -20; echo ===; git log --all --oneline --format=\\\"%h %ad %s\\\" --date=iso -20 --since=\\\"2026-10-16\\\" | head -30\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"4e7c722 2026-10-17 14:06:16 +0900 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n===\\n8861323 2026-10-17 08:08:40 +0000 atomaton: metrics from 52 sessions\\n4e7c722 2026-10-17 14:06:16 +0900 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":96}",
+      "tool_call_id": "chatcmpl-tool-a21a8e25978f6981"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_9e194b8c77144cf0b7b039d1",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git log --oneline --all | head -5; echo ===; git show 4e7c722 --stat | head -10; echo ===; git log --format=\\\"%h %ad %s\\\" --date=iso --grep=\\\"post_result\\\\|result comment\\\\|no-report\\\" -i --all | head -10\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"8861323 atomaton: metrics from 52 sessions\\n4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n===\\ncommit 4e7c72261cb3c1db4ad096b0b3406d3924970330\\nAuthor: Yuma Seno <yuma.seno.se@gmail.com>\\nDate:   Sat Oct 17 14:06:16 2026 +0900\\n\\n    Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n    \\n    deploy: apply v0.21.7 to .github/\\n\\n .gitattributes                                     |    31 +\\n .github/atomaton-release.json                      |   106 +\\n===\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":165}",
+      "tool_call_id": "call_9e194b8c77144cf0b7b039d1"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_09360e6e36ac46f785555889",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":90,\"offset\":521,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 521-610 of 687\n\n521\t  const { values } = parseArgs({\n522\t    args: Bun.argv.slice(2),\n523\t    options: {\n524\t      number: { type: \"string\" },\n525\t      agent: { type: \"string\" },\n526\t      type: { type: \"string\" },\n527\t      notify: { type: \"string\" },\n528\t      directive: { type: \"string\" },\n529\t      \"chain-continues\": { type: \"string\" },\n530\t      \"ended-because\": { type: \"string\" },\n531\t      reported: { type: \"string\" },\n532\t      \"messages-before\": { type: \"string\" },\n533\t      \"run-url\": { type: \"string\" },\n534\t      changed: { type: \"string\" },\n535\t      session: { type: \"string\" },\n536\t      output: { type: \"string\" },\n537\t      \"logs-file\": { type: \"string\" },\n538\t    },\n539\t  });\n540\t\n541\t  if (!values.number || !values.agent || !values[\"run-url\"]) {\n542\t    console.error(\"usage: post_result_comment.ts --number N --agent NAME --run-url URL [...]\");\n543\t    process.exit(2);\n544\t  }\n545\t\n546\t  // Redacted o\n\n[771 characters dropped from the middle; 4000 shown]\n\nut the old relative path back and\n559\t  // restore the exact silence this is fixing: a caller that forgot the argument\n560\t  // would look in the work tree, find nothing, and report a session that ended via\n561\t  // a tool call.\n562\t  const outputFile = values.output;\n563\t  if (!outputFile) {\n564\t    console.error(\"post_result_comment.ts: --output is required (the agent's stdout file)\");\n565\t    process.exit(2);\n566\t  }\n567\t  const redacted = redact(existsSync(outputFile) ? readFileSync(outputFile, \"utf8\") : \"\");\n568\t\n569\t  // `atomaton_output.txt` is empty whenever the run ended via a session-ending\n570\t  // tool call (launch_sub_agent, request_close_issue, create_pr -- see\n571\t  // src/content/tools/scripts/mcp/{atoma,github}.ts's `_meta.session_ends`):\n572\t  // atoma's own inference loop stops immediately in that case, before the\n573\t  // model ever gets a further turn to produce text. Each of those tools\n574\t  // already posts its OWN dedicated, meaningful comment (e.g. \"Launched\n575\t  // sub-agent(s): ...\", \"PR #N created...\"), so posting a second, essentially\n576\t  // content-free \"run by [agent](url)\" comment here on top of that would\n577\t  // just be noise -- skip entirely rather than post an empty wrapper.\n578\t  // Empty output has two meanings, and they need opposite treatment.\n579\t  //\n580\t  // A session-ending tool call leaves it empty because atoma's loop stops the moment\n581\t  // that tool returns, before the model gets another turn -- and each of those tools\n582\t  // posts its own comment, so a second content-free one would be noise. That is the\n583\t  // skip below, and it is right.\n584\t  //\n585\t  // Reaching a limit leaves it empty too, and there nothing else speaks.\n586\t  // Measured: a run spent 17 minutes and 154k tokens, and the thread received\n587\t  // one notice saying the limit was reached. What it had worked out was in the\n588\t  // session and nowhere a person would look.\n589\t  // A run that was cut short did not choose to end, so the two empties are told\n590\t  // apart by how the run ended rather than by what it left behind.\n591\t  const endedEarly = cutShort(values[\"ended-because\"]);\n592\t\n593\t  let output = redacted;\n594\t  let salvaged = false;\n595\t  let wroteNothing = false;\n596\t  if (!output.trim() && endedEarly) {\n597\t    const last = lastAgentText(values.session, Number(values[\"messages-before\"]));\n598\t    if (last !== undefined) {\n599\t      output = redact(last);\n600\t      salvaged = true;\n601\t      console.error(\"salvaged the agent's last message from the session (cut short)\");\n602\t    }\n603\t  }\n604\t\n605\t  if (!output.trim()) {\n606\t    // The skip is right for a session-ending tool call: that tool posted its own\n607\t    // comment and a second content-free one is noise.\n608\t    if (!endedEarly) {\n609\t      console.error(\"atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.\");\n610\t      return;\n\n[77 more lines. Read again with offset: 611.]",
+      "tool_call_id": "call_09360e6e36ac46f785555889"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e4309f6557134ed68a568d9c",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":10,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\",\"pattern\":\"export function buildCommentBody\"}"
+          }
+        },
+        {
+          "id": "call_c5172c2c130f4e6e9caee469",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":12,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\",\"pattern\":\"no-report\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "21 line(s), match and context, under src/entrypoints/machinery/post_result_comment.ts:\n\n350-  return endingOf({\n351-    succeeded: true,\n352-    endedBecause: args.endedBecause ?? \"\",\n353-    loopLimitReached: false,\n354-    chainContinues: isTrue(args.chainContinues),\n355-    directive: args.directive ?? \"\",\n356-    reported: args.reported === true,\n357-  });\n358-}\n359-\n360:export function buildCommentBody(args: {\n361-  agent: string;\n362-  notify?: string;\n363-  directive?: string;\n364-  chainContinues?: string;\n365-  endedBecause?: string;\n366-  /**\n367-   * Whether the run left a report — its last assistant message had words in it.\n368-   *\n369-   * Absent means it did not, which is the direction that speaks up: an unobserved run\n370-   * is treated as one that said nothing, and the cost of being wrong is one mention",
+      "tool_call_id": "call_e4309f6557134ed68a568d9c"
+    },
+    {
+      "role": "tool",
+      "content": "60 line(s), match and context, under src/entrypoints/machinery/post_result_comment.ts:\n\n224-  return undefined;\n225-}\n226-\n227-/**\n228- * The ending as `atomaton:ended` spells it: what `/resume` asks the thread.\n229- *\n230- * `stopped` is the only value with a reader — `lastEnding` compares against it —\n231- * so the rest collapse to \"not interrupted\". Kept as its own function so the\n232- * projection is visible rather than inlined into a tag write.\n233- *\n234- * Written as an exhaustive switch rather than the two-line `if` it was, so that\n235- * adding an ending is a type error here instead of a silent landing on `done`. That\n236: * silence is what `no-report` cost: it reached this projection as \"not stopped, not\n237- * spent\" and was filed with the runs that finished.\n238- *\n239: * `no-report` still answers `done`, and that is a decision rather than a fall-through.\n240- * The tag says whether a node was INTERRUPTED, because `/resume` picks the nodes a\n241- * person can pick up where something left off. A run that reported nothing was not\n242- * interrupted — it ended believing itself finished — so resuming it would restart an\n243- * agent with nothing left to do. What that run needs is a person, and the mention\n244- * below is what fetches one.\n245- */\n246-function endedTag(ending: TurnEnding): string {\n247-  switch (ending.ended) {\n248-    case \"stopped\":\n249-      return \"stopped\";\n250-    case \"spent\":\n251-    case \"looped\":\n252-      return \"limit\";\n253-    // The one ending that leaves the node with an agent. `domain/work/thread.ts`\n254-    // reads it to tell a comment arriving mid-turn from one arriving after the work\n255-    // came back, which the three older values could not answer.\n256-    case \"handed-off\":\n257-      return \"handoff\";\n258-    case \"failed\":\n259-    case \"chain-over\":\n260:    case \"no-report\":\n261-    case \"finished\":\n262-      return \"done\";\n263-  }\n264-}\n265-\n266-/**\n267- * How this turn ended, as far as this comment can know.\n268- *\n269- * `succeeded` is true by construction: the workflow only runs this step when the\n270- * agent step succeeded, so there is no failed turn to report from here.\n271- *\n272- * `loopLimitReached` is NOT known yet, and cannot be. The chain's own limit is\n--\n307-  if (endedBecause === \"loop\") return \"got stuck repeating itself\";\n308-  return endedBecause === \"iterations\" ? \"ran out of iterations\" : \"ran out of time\";\n309-}\n310-\n311-/**\n312- * The sentence that fetches a person, named by how the run actually ended.\n313- *\n314- * It used to say \"task completed\" whatever happened, which no one saw on a stopped\n315- * run because a stopped run rarely got a mention at all -- and the moment it did, it\n316- * was telling the person who had just stopped it that it had finished. \"Review the\n\n[30 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_c5172c2c130f4e6e9caee469"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_34a0bc9b73c8452399adc442",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":75,\"offset\":344,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 344-418 of 687\n\n344\tfunction endingHere(args: {\n345\t  directive?: string;\n346\t  chainContinues?: string;\n347\t  endedBecause?: string;\n348\t  reported?: boolean;\n349\t}): TurnEnding {\n350\t  return endingOf({\n351\t    succeeded: true,\n352\t    endedBecause: args.endedBecause ?? \"\",\n353\t    loopLimitReached: false,\n354\t    chainContinues: isTrue(args.chainContinues),\n355\t    directive: args.directive ?? \"\",\n356\t    reported: args.reported === true,\n357\t  });\n358\t}\n359\t\n360\texport function buildCommentBody(args: {\n361\t  agent: string;\n362\t  notify?: string;\n363\t  directive?: string;\n364\t  chainContinues?: string;\n365\t  endedBecause?: string;\n366\t  /**\n367\t   * Whether the run left a report — its last assistant message had words in it.\n368\t   *\n369\t   * Absent means it did not, which is the direction that speaks up: an unobserved run\n370\t   * is treated as one that said nothing, and the cost of being wrong is one mention\n371\t   * too many rather than a silent run filed as a success.\n372\t   */\n373\t  reported?: boolean;\n374\t  runUrl: string;\n375\t  /** `owner/name`, for linking to the metrics report. Absent when unknown. */\n376\t  repo?: string;\n377\t  output: string;\n378\t  usageLines: string[];\n379\t  isSubIssue?: boolean;\n380\t  issueClosed?: boolean;\n381\t  /** Logins the agent wrote as mentions that were escaped instead. */\n382\t  escapedMentions?: readonly string[];\n383\t  /**\n384\t   * Whether `output` is the agent's last message rather than its report.\n385\t   *\n386\t   * Said in the comment, because presenting a sentence from the middle of the work\n387\t   * as a conclusion is worse than posting nothing: a reader would act on it.\n388\t   */\n389\t  salvaged?: boolean;\n390\t  /**\n391\t   * Whether the run was cut short having said nothing at all, so `output` is this\n392\t   * file's own sentence rather than anything the agent produced.\n393\t   *\n394\t   * The common shape rather than the odd one: a stop lands at the next turn\n395\t   * boundary, so a run in the middle of reading files when it arrives has no text\n396\t   * and nothing to salvage either.\n397\t   */\n398\t  wroteNothing?: boolean;\n399\t  /**\n400\t   * Whether this run pushed a commit, opened a pull request or merged one.\n401\t   *\n402\t   * Written into the comment because that is where the next run can read it.\n403\t   * `domain/work/progress.ts` counts consecutive runs that changed nothing, and it\n404\t   * counts them from the thread rather than from a counter -- so the thread has to\n405\t   * carry the fact.\n406\t   */\n407\t  changed?: boolean;\n408\t  /**\n409\t   * What the tools did to this run, counted from its session by `tool-trouble.ts`.\n410\t   *\n411\t   * Measured over 396 sessions (#940): 30 runs carried a problem a server reported\n412\t   * about itself and 3 said so; 107 carried a refused or errored call and 33 said so.\n413\t   * The prompt asks for all of it by name, so what is left is to stop asking and\n414\t   * count -- and the count belongs in the footer, where every other thing the machine\n415\t   * knows about the run already is, rather than in the agent's text where a reader\n416\t   * would take it for something the agent chose to say.\n417\t   *\n418\t   * Absent when there was none, which is the ordinary run.\n\n[269 more lines. Read again with offset: 419.]",
+      "tool_call_id": "call_34a0bc9b73c8452399adc442"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-848ea5748a4e200e",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 100, \"offset\": 419, \"path\": \"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 419-518 of 687\n\n419\t   */\n420\t  toolTrouble?: string;\n421\t}): string {\n422\t  // Once, and asked twice below. It was derived twice, which is one derivation more\n423\t  // than there are facts.\n424\t  const ending = endingHere(args);\n425\t\n426\t  // This comment is the agent's own report, not a turn comment of the kind\n427\t  // `turn-comment.ts` wraps: it carries `AGENT_TAG` and `CHANGED_TAG` as bookkeeping\n428\t  // (which `withoutBookkeeping` strips on the way back in) and it is deliberately NOT\n429\t  // `llm-context`-tagged, because it is the thing the next run is supposed to read. The\n430\t  // one thing it shares with every other turn-ending comment is the ending, so that is\n431\t  // what it has in common with them and nothing else.\n432\t  const lines = [\n433\t    AGENT_TAG.write(args.agent),\n434\t    CHANGED_TAG.write(args.changed === true ? \"yes\" : \"no\"),\n435\t    // How this run ended, so the thread can be asked later. `\n\n[1489 characters dropped from the middle; 4000 shown]\n\nder what the agent wrote, because that is what it is about, and\n466\t  // above the run footer, which nobody reads for this.\n467\t  const escapedNotice = escapedMentionNotice(args.escapedMentions ?? []);\n468\t  if (escapedNotice !== undefined) lines.push(\"\", escapedNotice, \"\");\n469\t\n470\t  if (\n471\t    shouldMentionOnCompletion({\n472\t      ending,\n473\t      chainContinues: isTrue(args.chainContinues),\n474\t      notify: args.notify,\n475\t      isSubIssue: args.isSubIssue ?? false,\n476\t      issueClosed: args.issueClosed ?? false,\n477\t    })\n478\t  ) {\n479\t    lines.push(mentionLine(ending, args), \"\");\n480\t  }\n481\t\n482\t  // The report, one click from the run that is reporting. It is written after this\n483\t  // comment is posted, so the link is to the branch tip rather than to a commit --\n484\t  // which is what somebody following it wants anyway: the current state, including\n485\t  // this run. A permalink would show the metrics as they were a moment before.\n486\t  //\n487\t  // Omitted rather than guessed when the repository is unknown, because a broken link\n488\t  // in every comment is worse than no link at all.\n489\t  const metrics = args.repo\n490\t    ? ` · [metrics](https://github.com/${args.repo}/blob/atomaton-data/metrics/report.md)`\n491\t    : \"\";\n492\t  lines.push(\"---\", `_run by [${args.agent}](${args.runUrl})${metrics}_`);\n493\t  // Under the run link and above the notice saying how to continue: this is a fact\n494\t  // about the run, the notice is the action, and the action reads last.\n495\t  //\n496\t  // No `⚠️`, in the same voice as the token line and the run link above it. The\n497\t  // marker means one thing in this footer -- the run was cut off and a person has to\n498\t  // continue it -- and this line is not that. Most of what it counts is a guard doing\n499\t  // its job, which `looksRefused` exists to distinguish from a tool breaking;\n500\t  // measured, 107 of 396 runs carried a refused or errored call, so a warning sign\n501\t  // here would appear on a quarter of all comments and the one below it would stop\n502\t  // being read. The line's job is to make the count impossible to lose, not to claim\n503\t  // a fault.\n504\t  if (args.toolTrouble !== undefined) lines.push(`_${args.toolTrouble}_`);\n505\t  if (args.endedBecause === \"stopped\") {\n506\t    // Says the session survived, because that is the whole difference between this\n507\t    // and cancelling the job, and the person who stopped it cannot tell from here\n508\t    // which one they got.\n509\t    lines.push(\n510\t      `⏸️ _Stopped on request. **The session is saved.** Comment \\`/resume\\` to continue ` +\n511\t        `from here, or \\`/${args.agent}\\` with an instruction on the following lines._`,\n512\t    );\n513\t  } else if (cutShort(args.endedBecause)) {\n514\t    lines.push(`⚠️ _The run ${howItWasCutShort(args.endedBecause)}. Comment \\`/${args.agent}\\` to continue._`);\n515\t  }\n516\t\n517\t  return lines.join(\"\\n\");\n518\t}\n\n[169 more lines. Read again with offset: 519.]",
+      "tool_call_id": "chatcmpl-tool-848ea5748a4e200e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b6d96db9de1111bb",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 10, \"max_matches\": 40, \"path\": \"src/domain/work/mention.ts\", \"pattern\": \"shouldMentionOnCompletion|mentionLine|no-report\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "No match for shouldMentionOnCompletion|mentionLine|no-report under src/domain/work/mention.ts.",
+      "tool_call_id": "chatcmpl-tool-b6d96db9de1111bb"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_2a1da6aa8bb54d529c0db832",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"grep -rln \\\"shouldMentionOnCompletion\\\" src/ | head -5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/post_result_comment.ts\\nsrc/domain/work/completion-mention.ts\\nsrc/domain/work/completion-mention.test.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":97}",
+      "tool_call_id": "call_2a1da6aa8bb54d529c0db832"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ecab2064fbd14ad0b3ae3bf0",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\":\"src/domain/work/completion-mention.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/work/completion-mention.ts lines 1-94 of 94\n\n1\t/**\n2\t * completion-mention.ts — decides whether a finished run should pull a person in.\n3\t *\n4\t * The mention on a result comment means one thing: nothing else is going to\n5\t * happen unless you do something. It is the only signal a person gets that work\n6\t * has stopped, so it has to fire whenever work really has stopped — and stay\n7\t * quiet whenever it has not, or it trains people to ignore it.\n8\t *\n9\t * Pure: the caller reads the run's outcome and the issue's state, this decides.\n10\t */\n11\timport type { TurnEnding } from \"./turn.ts\";\n12\t\n13\texport interface CompletionSignals {\n14\t  /**\n15\t   * How this turn ended, and who it named.\n16\t   *\n17\t   * It was the raw directive plus `stopRequested` and `limitReached`, and this\n18\t   * function re-derived \"will the hand-off actually run\" from the three — the\n19\t   * fourth place in the system deriving a turn's ending for itself. It is read\n20\t   * from `domain/work/\n\n[1029 characters dropped from the middle; 4000 shown]\n\nt run — `create_pr` starting the\n46\t *   reviewer, `launch_sub_agent` starting the children.\n47\t * - A closed sub-issue. Closing one is what wakes its parent: the aggregation\n48\t *   gate re-invokes the parent's atomaton once the last sibling lands, and\n49\t *   until then the parent is what is waiting, not a person. The dispatch happens\n50\t *   in a later workflow run, so `chainContinues` — which only sees this run —\n51\t *   cannot know about it.\n52\t *\n53\t * A sub-issue that is still OPEN is deliberately not in that list. Nothing wakes\n54\t * a parent for a sub-issue that has not finished, so a run that ends there has\n55\t * genuinely stopped, and that is exactly the case a person needs to hear about.\n56\t *\n57\t * The hand-off is the one of the three that can be contradicted, and the ending is\n58\t * what already knows: a turn that was stopped, spent, or that failed outright\n59\t * carries no `next` at all, so the plan it wrote silences nothing. The other two\n60\t * are not contradictable — a tool that already dispatched has already dispatched,\n61\t * and a closed sub-issue still wakes its parent, whether or not the run that closed\n62\t * it was stopped afterwards.\n63\t *\n64\t * `chain-over` carries a `next` and silences, which looks like an exception and is\n65\t * not: the chain's own limit posts a comment naming that agent and mentioning the\n66\t * same person. Silencing here is what keeps one event to one notification.\n67\t *\n68\t * ## The one ending that outranks the silencers\n69\t *\n70\t * `no-report` — a run that ended of its own accord having said nothing — is told\n71\t * about whatever else is true, and the only silencer it can actually meet is the\n72\t * closed sub-issue. (It cannot carry a `next`, and a `chainContinues` run is\n73\t * `handed-off` before it ever gets here.)\n74\t *\n75\t * Overriding that one is the point rather than an oversight. The sub-issue rule says\n76\t * the parent is what is waiting, not a person — and that holds because the parent's\n77\t * atomaton is woken to aggregate what its children found. A child that wrote\n78\t * nothing hands it nothing to aggregate, and the one thing the parent cannot do is\n79\t * go and find out what happened: the work is in a saved session, where no agent\n80\t * looks. So the premise of the silence fails exactly here, and the notification is\n81\t * the only thing left that reaches somebody who can read the session.\n82\t *\n83\t * Measured: three of 396 sessions ended this way with the core recording\n84\t * `completed`, after 313, 173 and 110 tool calls. Each was, until now, a success\n85\t * nobody was told about.\n86\t */\n87\texport function shouldMentionOnCompletion(signals: CompletionSignals): boolean {\n88\t  if (!signals.notify) return false;\n89\t  if (signals.ending.ended === \"no-report\") return true;\n90\t  if (signals.ending.next) return false;\n91\t  if (signals.chainContinues) return false;\n92\t  if (signals.isSubIssue && signals.issueClosed) return false;\n93\t  return true;\n94\t}",
+      "tool_call_id": "call_ecab2064fbd14ad0b3ae3bf0"
+    },
+    {
+      "role": "assistant",
+      "content": "はい、#194のセッションで確定しています。そして結論から: **そのケースでコメントを作らないのは仕様として自然ではなく、設計上のバグ**です。理由を述べます。\n\n## 起きていること\n\nLLMの最終レスポンスが「`content: \"\"`、tool_callsなし」で返ってくるケースが実在します。#194のセッション(`atomaton-data` の `sessions/issue-194/atomaton.json`)で、詰まった2回のrunがともに `ended_because: \"completed\"`、最終メッセージが空文字でした。API/モデルが内容のないレスポンスを返しただけで、run側は「正常完了」と記録します。\n\nその結果、`post_result_comment.ts:605-611` の skip が発火します。「出力が空 = セッション終了ツールで終わった」という前提の分岐ですが、空レスポンスもこの条件に合流してしまう。コメントが一件も投稿されず、`atomaton:ended` タグがスレッドに残らないので、ターン状態機械は `asked` のまま → `guard_comment_during_run` が以降の人間コメントを全部削除 → #194と#186で観測されたデッドロックになります。\n\n## 「自然でない」理由\n\n1. **設計としては既に「無言runにも通知する」と決まっている。** `no-report` という終了(`src/domain/work/turn.ts:185`)、専用の WARNING ブロック(`post_result_comment.ts:452-461` の `wroteNothing`)、メンション強制(`src/domain/work/completion-mention.ts:89` — 「closed sub-issue ですら沈黙を無効化する」と明記)、`ended=done` タグの割り当て(`:260`)まで、全部実装済みです。ただ skip の分岐が先に return して、この経路が一つも到達不能なだけ。つまり「自然だと思うか」への答えは、このリポジトリ自身が既に「不自然」と判断して機構まで書いている、ということです。\n\n2. **結果コメントはエージェントの文章ではなくターンの終端マーカー。** `ATOMA:ended` タグは次のrunとガードが「ターンが人に戻った」ことを知る唯一の依据です。skip が正当なのは「別のコメントが既にターンを終端した」場合(セッション終了ツールは自前のコメントを投稿する)だけで、空レスポンスの場合は誰も終端しない。ノイズ削減ではなく、状態機械の不変条件(全runが終端コメントを一つ残す)を破ります。\n\n3. **頻度が無視できない。** メトリクス(`atomaton-data` の `metrics/report.md`)で直近30日の no-report 終了は49セッション中18(36.7%)。レアケースの対処ではありません。\n\n## 直し方の見通し\n\n判別は既にセッションに入っています。最終assistantメッセージが **tool_calls付き** → セッション終了ツールで、ツール自身がコメントを投稿済み → skip は正当。**tool_callsなしで空** → 空レスポンスで、誰も終端していない → `wroteNothing` の通知を投稿する。`post_result_comment.ts` 一箇所(+テスト)の修正です。\n\n一つ付け加えると、#186は `sessions/issue-186/` が `atomaton-data` に存在しない(404)ので、#194と同じ「空レスポンス→skip」ではなく、runがセッション保存前に落ちた別の経路でコメントが欠落した可能性が高いです。結果のデッドロック形は同じですが、一次原因の検証は別途必要です。着手するなら両方見ます。",
+      "atoma_metadata": {
+        "github_comment_id": 6231641059,
+        "agent": "atomaton"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 1,
-      "snapshot_hash": "4b1eaea2bbadd7b8a01d6c98240f1c928914e1dad98cdb2f163684e32ff1be5b",
-      "version": 1
+      "event_count": 3,
+      "snapshot_hash": "234eb6a74aa605b3c2ee8541200c4c31bf9f38bd3e89a6404fe1658e55ff7140",
+      "version": 1,
+      "type": "issue",
+      "resolved_number": "204"
     }
   },
   "atoma_runs": [
@@ -1630,6 +1924,30 @@
         }
       },
       "started": "2026-10-17T06:47:13Z"
+    },
+    {
+      "ended": "2026-10-17T08:17:20Z",
+      "ended_because": "completed",
+      "iterations": 14,
+      "messages": 198,
+      "seconds": 316,
+      "server_calls": {
+        "files": {
+          "grep": 3,
+          "read": 4
+        },
+        "github": {
+          "get_issue": 1,
+          "get_issue_comments": 1
+        },
+        "shell": {
+          "bash": 5
+        },
+        "web": {
+          "fetch": 1
+        }
+      },
+      "started": "2026-10-17T08:12:04Z"
     }
   ]
 }
