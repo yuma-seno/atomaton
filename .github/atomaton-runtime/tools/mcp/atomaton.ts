@@ -18760,7 +18760,7 @@ function handleLaunchSubAgent(args) {
     return false;
   });
   if (unrelated.length) {
-    errors.push(`not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` + "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " + "sub-issue links \u2014 an issue not linked under this one is never counted, so a dispatch onto " + "it would leave this issue waiting forever. `create_issue` links a child under the issue its " + "run is on, so create it from a run on this issue.");
+    errors.push(`not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` + "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " + "sub-issue links \u2014 an issue not linked under this one is never counted, so a dispatch onto " + "it would leave this issue waiting forever. `create_sub_issue` links a child under the issue its " + "run is on, so create it from a run on this issue.");
   }
   for (const { issue, agent } of tasks) {
     try {

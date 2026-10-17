@@ -61,7 +61,7 @@ function writeStreak(file, streak) {
 
 // src/entrypoints/tools/hooks/shell_guard.ts
 var ROUTING_RULES = {
-  gh: "gh CLI is disabled. Use the github tools -- create_pr, create_issue, merge_pr and the rest -- for GitHub operations.",
+  gh: "gh CLI is disabled. Use the github tools -- create_pr, create_sub_issue, merge_pr and the rest -- for GitHub operations.",
   curl: "curl is disabled. Use fetch, which returns the page as text.",
   wget: "wget is disabled. Use fetch.",
   ssh: "ssh is disabled: this run works on the checked-out repository, not on other hosts.",

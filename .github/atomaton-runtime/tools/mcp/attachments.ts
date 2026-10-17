@@ -17945,7 +17945,7 @@ function interpret(mode, status, body, location) {
       return "matches the measured expectation: the endpoint is real and the credential was accepted. " + "A rejected credential would be 401, and a token without write access would be 404 (gh's source says READ and TRIAGE get 404, not 403). " + `Nothing was stored: name was empty${exact}.`;
     }
     if (status === 401) {
-      return "the credential was rejected by the endpoint. gh already refuses a ghs_ token client-side; an endpoint-side rejection closes the direct-POST path too, and the design needs a different credential (a PAT declared in tools.secrets). This is the answer that reopens #12's design.";
+      return "the credential was rejected by the endpoint. gh already refuses a ghs_ token client-side; an endpoint-side " + "rejection closes the direct-POST path too. The design does not reopen on this: the attachment route was " + "narrowed to the orphan branch (publish_draft), which reaches the repository with the credential the run " + "already has, and #12's attachment question is settled on that route. A different credential (a PAT in " + "tools.secrets) would be a new design question, not a reopening of this one.";
     }
     if (status === 403) {
       return "the credential is recognised but forbidden. gh's source says a token without write access gets 404 here, so a 403 points at policy \u2014 an app not authorised, or SSO \u2014 rather than at the repository role.";
@@ -17966,10 +17966,10 @@ function interpret(mode, status, body, location) {
       return "over the size ceiling: the upload was refused and nothing was stored.";
     }
     if (status === 404) {
-      return "the endpoint did not route for this credential: gh's source says a token without write access on the repository gets 404, not 403.";
+      return "the endpoint refuses real uploads from this credential kind: measured, a `ghs_` token with write access " + "gets 404 on every body-bearing POST, whatever the size or MIME type (issues #111 and #164). The gh-source " + "reading of a low role is ruled out by that write access, and the route is real \u2014 the same session's " + "`endpoint` 400 proved the credential was accepted. Deliver the file another way: `publish_draft` onto the " + "orphan branch, which is the route the attachment design settled on. Whether a different token kind would " + "be stored is a trial with that token, not a question this mode can answer.";
     }
     if (status === 401) {
-      return "the credential was rejected by the endpoint \u2014 the direct-POST design needs a different credential, and #12's design reopens.";
+      return "the credential was rejected by the endpoint. The design does not reopen on this: the attachment route is " + "the orphan branch (publish_draft), which does not POST here at all. A credential that would make this " + "mode work is a PAT \u2014 a new credential in tools.secrets, a decision taken on its own if a requirement " + "ever demands it (#164 chose not to).";
     }
     if (status === 403) {
       return "the credential is recognised but forbidden \u2014 policy rather than role, since a low role gets 404 here.";
@@ -17977,22 +17977,22 @@ function interpret(mode, status, body, location) {
     if (status === 422) {
       return "refused as unprocessable \u2014 the endpoint's own message is in the body. This is the shape a validation rule (a format the endpoint rejects) takes.";
     }
-    return "unexpected: the measured expectation is 201 with an asset URL. Record the status and body.";
+    return "unexpected: the measured expectation is 404 with nothing stored \u2014 this credential kind is refused at the body stage. Record the status and body.";
   }
   if (status === 413) {
-    return "the ceiling is enforced server-side: a file over 25MB cannot be attached whole. The design question \u2014 split the artifact, or regenerate a smaller one from the source \u2014 is settled toward pieces at or under the limit.";
+    return "the ceiling is enforced server-side: a body over 25MB is not attached whole. That is a fact about this endpoint alone \u2014 the upload route carries no files any more, so nothing delivered is weighed against it. A published document is bounded by `publish_draft`'s own read ceiling instead.";
   }
   if (status === 201) {
-    return "the over-limit file WAS stored: the documented 25MB ceiling did not fire for this content type. Record the URL \u2014 this contradicts the premise the design rests on, and #12's design reopens.";
+    return "the over-limit file WAS stored: the documented 25MB ceiling did not fire for this content type. Record the URL \u2014 the premise is contradicted, and the finding goes to the attachment design's thread rather than reopening it.";
   }
   if (status === 422 || status === 400) {
     return `refused with ${status}: the ceiling may be reported as a validation message rather than 413. The body is the record; either way the file was not stored whole.`;
   }
   if (status === 404) {
-    return "the shape the ceiling takes here: a body over 25MB is refused with 404 `Not Found` and nothing was stored \u2014 " + "measured, and not the 413 the documented ceiling would suggest. The same session's `endpoint` 400 already " + "proved the route and the credential, so this is not the permission-shaped 404 that `upload` mode describes. " + "Whether the size or the credential's kind at the body stage is the cause cannot be separated without a " + "storing trial at or under the ceiling, which this mode deliberately does not do. Split or regenerate the artifact.";
+    return "the credential kind, not the size: measured, every body-bearing POST from a `ghs_` token is refused with " + "404 `Not Found` \u2014 over the ceiling (this mode) and under it (issues #111 and #164) alike \u2014 so the " + "permission reading and the size reading are both ruled out. The route and the credential were proven by " + "the same session's `endpoint` 400. Nothing was stored. Deliver the file by `publish_draft` onto the " + "orphan branch; the 25MB ceiling is a fact about the upload route, which no longer carries files.";
   }
   if (status === 401) {
-    return "the credential was rejected before the size question was reached \u2014 the direct-POST design needs a different credential, and #12's design reopens.";
+    return "the credential was rejected before the size question was reached. The design does not reopen on this: the " + "attachment route is the orphan branch (publish_draft), which does not POST here at all. A credential that " + "would be accepted here is a PAT \u2014 a new credential in tools.secrets, a decision taken on its own if a " + "requirement ever demands it (#164 chose not to).";
   }
   return "unexpected: the measured expectation is a refusal (413, or 422 carrying the ceiling as a validation message). Record the status and body.";
 }
@@ -18142,7 +18142,7 @@ var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and rep
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "probe",
-    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted \u2014 without saving a file. " + "Mode `routing` omits repository_id \u2014 an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
+    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted \u2014 without saving a file. " + "Mode `routing` omits repository_id \u2014 an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL \u2014 though measured, the Actions token this run carries is refused at the body stage (404, nothing stored), so delivering a file is `publish_draft`'s job and this tool's job is to measure. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
     schema: PROBE_SCHEMA,
     handler: probe
   }),

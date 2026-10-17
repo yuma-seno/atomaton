@@ -83,6 +83,19 @@ what, where a boundary already is. Reach for `files_readonly` yourself when a
 summary cannot carry it: an interface's exact signature, the order of two calls, a
 comment that says why something is the way it is.
 
+The reach of that last one ends where the decision's history begins: a comment
+holds the alternative that was ruled out, in a line or two. When it was decided,
+what it measured, which thread argued it -- that is the issue's, and it is why
+the decision you write goes back to the thread rather than into the code. The
+code keeps the shape and the trap; the thread keeps the story.
+
+Two edges of that boundary are worth naming, because both are easy to get wrong.
+A pointer must be a number or a path -- "the thread that chose it" is a sentence,
+not a link, and the reader cannot follow it. And a measurement nothing else holds,
+where no thread exists to move it to, stays where it is: the number behind a limit
+is not a count of the code, and a table the comment is itself about is the only
+copy.
+
 **Search before reading.** `search_code` finds where something lives; a
 path and a range is often the whole answer. What you need is rarely a file.
 

@@ -44,6 +44,10 @@ function describeMismatch(expected, mismatch) {
   return `${expected.server} ${parts.join("; and ")}. Expected exactly {${expected.tools.join(", ")}}. ` + expected.promise;
 }
 
+// src/shared/tool-output.ts
+var TOOL_OUTPUT_BUDGET = 50000;
+var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
+
 // src/domain/machinery/delegates.ts
 function serverNamesOf(tools) {
   if (!tools || typeof tools !== "object")
