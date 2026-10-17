@@ -2348,14 +2348,183 @@
       "role": "tool",
       "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"main\\n4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":254}",
       "tool_call_id": "call_bae3561ec85d4489bd0f2c46"
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\natomaも自分の所有しているリポジトリなので言ってくれてる改善は入れたい。\nそれとこの場合、atoma側にリトライする機構を入れて、その上で出力が空ならatoma側でエラーにするべきだと思うけど、どう思いますか？",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T12:30:48Z",
+        "event_type": "issue_comment",
+        "id": 6233899985,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_4bb7a395e6a54afaabfee8ad",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"ls src/entrypoints/machinery/report_run_failure.ts && grep -n \\\"report_run_failure\\\\|if: runner.outcome\\\" src/workflows/atomaton-runner.wac.ts | head -8; echo ===; grep -n \\\"failed\\\\|no-report\\\" src/domain/work/turn.ts | head -20\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/report_run_failure.ts\\n57:import { ref as reportRunFailureRef } from \\\"../entrypoints/machinery/report_run_failure.ts\\\";\\n1120: * The text lives in `report_run_failure.ts`, with the other human-facing comments\\n===\\n53: * `no-report` and `finished` are the same split one level further in. `finished` used\\n61:  | \\\"failed\\\"\\n66:   * Named apart from `failed` because it is the one failure a person can act on. A\\n91:  | \\\"no-report\\\"\\n114:   * `stopped`, `loop`, or `failed`.\\n124:   * rather than as having failed, until somebody here decides what it means.\\n168: * `no-report` sits BELOW `handed-off` on purpose, and that placement is most of what\\n179:  if (!signals.succeeded || signals.endedBecause === \\\"failed\\\") return { ended: \\\"failed\\\" };\\n185:  if (!signals.reported) return { ended: \\\"no-report\\\" };\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":327}",
+      "tool_call_id": "call_4bb7a395e6a54afaabfee8ad"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_1fc759aed16942388b251281",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":8,\"path\":\"src/entrypoints/machinery/decide_turn_ending.ts\",\"pattern\":\"no-report|reported\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "60 line(s), match and context, under src/entrypoints/machinery/decide_turn_ending.ts:\n\n31- * toward releasing the guard, never toward holding it stuck.\n32- *\n33- * `--outcome` carries GitHub Actions' own `steps.atoma.outcome` value directly:\n34- * \"success\" | \"failure\" | \"cancelled\" | \"skipped\".\n35- *\n36- * Usage:\n37- *   decide_turn_ending.ts --outcome success\n38- *     [--ended-because runtime] [--loop-limit-reached true]\n39: *     [--chain-continues true] [--directive AGENT_NAME] [--reported true]\n40- */\n41-import { appendFileSync } from \"node:fs\";\n42-import { parseArgs } from \"node:util\";\n43-import { endingOf, nextToDispatch, refusedByChainLimit, shouldReleaseGuard } from \"../../domain/work/turn.ts\";\n44-import { isTrue } from \"./lib/flags.ts\";\n45-import { defineScript } from \"./lib/script-ref.ts\";\n46-\n47-export interface DecideTurnEndingArgs {\n48-  outcome: string;\n49-  \"ended-because\"?: string;\n50-  \"loop-limit-reached\"?: string;\n51-  \"chain-continues\"?: string;\n52-  directive?: string;\n53-  /**\n54-   * Whether the run left a report, as `read_run_ending.ts` read it off the session.\n55-   *\n56:   * Absent means not reported, and that is the safe direction rather than the\n57-   * convenient one: the ending it produces mentions a person, and being told about a\n58:   * run that did report is a smaller harm than a run that reported nothing being\n59-   * filed as a success — which is the state this argument exists to end.\n60-   */\n61:  reported?: string;\n62-}\n63-\n64-export const ref = defineScript<DecideTurnEndingArgs>(import.meta.url);\n65-\n66-function main(): void {\n67-  const { values } = parseArgs({\n68-    args: Bun.argv.slice(2),\n69-    options: {\n70-      outcome: { type: \"string\" },\n71-      \"ended-because\": { type: \"string\" },\n72-      \"loop-limit-reached\": { type: \"string\" },\n73-      \"chain-continues\": { type: \"string\" },\n74-      directive: { type: \"string\" },\n75:      reported: { type: \"string\" },\n76-    },\n77-  });\n78-  if (!values.outcome) {\n79-    console.error(\"decide_turn_ending: --outcome missing/empty -- treating as a failed turn (releases the guard)\");\n80-  }\n81-\n82-  const ending = endingOf({\n83-    succeeded: values.outcome === \"success\",\n84-    endedBecause: values[\"ended-because\"] ?? \"\",\n85-    loopLimitReached: isTrue(values[\"loop-limit-reached\"]),\n86-    chainContinues: isTrue(values[\"chain-continues\"]),\n87-    directive: values.directive ?? \"\",\n88:    reported: isTrue(values.reported),\n89-  });\n90-\n\n[6 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_1fc759aed16942388b251281"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_1a1787d002b144b98e8794d9",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":55,\"offset\":594,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 594-648 of 687\n\n594\t  let salvaged = false;\n595\t  let wroteNothing = false;\n596\t  if (!output.trim() && endedEarly) {\n597\t    const last = lastAgentText(values.session, Number(values[\"messages-before\"]));\n598\t    if (last !== undefined) {\n599\t      output = redact(last);\n600\t      salvaged = true;\n601\t      console.error(\"salvaged the agent's last message from the session (cut short)\");\n602\t    }\n603\t  }\n604\t\n605\t  if (!output.trim()) {\n606\t    // The skip is right for a session-ending tool call: that tool posted its own\n607\t    // comment and a second content-free one is noise.\n608\t    if (!endedEarly) {\n609\t      console.error(\"atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.\");\n610\t      return;\n611\t    }\n612\t    // It is wrong for a run that was cut short, and this is the common shape rather\n613\t    // than the odd one. A stop lands at the next turn boundary, so a run reading\n614\t    // files when it arrives has said nothing at all and there is nothing to salvage\n615\t    // — a run that spent nine iterations in tool calls and produced no assistant\n616\t    // text is the observed case (#831). Skipping there drops the machinery's own\n617\t    // sentence along with the agent's silence: that it stopped, that the session\n618\t    // survived, and how to resume. None of those are the agent's to say, and the\n619\t    // footer below says them.\n620\t    wroteNothing = true;\n621\t    output = values[\"ended-because\"] === \"stopped\"\n622\t      ? \"_This run was stopped before it said anything._\"\n623\t      : `_This run ${howItWasCutShort(values[\"ended-because\"])} before it said anything._`;\n624\t    console.error(\"the run was cut short with nothing to report -- posting the notice rather than nothing.\");\n625\t  }\n626\t\n627\t  // Checked on the way out for the same reason it is redacted on the way out:\n628\t  // this text is whatever the agent decided to write, and a comment is the one\n629\t  // place it reaches people. A `@name` here notifies a real account -- see\n630\t  // `domain/work/mention.ts` for why a name it read somewhere is enough.\n631\t  //\n632\t  // The mention the RUNNER adds is not part of this. It is put in by\n633\t  // `buildCommentBody` below from a login `resolveNotify` produced, and never\n634\t  // passes through here.\n635\t  const checked = escapeUnknownMentions(\n636\t    output,\n637\t    knownParticipants(process.env.GITHUB_REPOSITORY ?? \"\", values.number),\n638\t  );\n639\t  if (checked.escaped.length > 0) {\n640\t    console.error(`escaped ${checked.escaped.length} unconfirmed mention(s): ${checked.escaped.join(\", \")}`);\n641\t  }\n642\t\n643\t  const body = buildCommentBody({\n644\t    agent: values.agent,\n645\t    salvaged,\n646\t    wroteNothing,\n647\t    notify: values.notify,\n648\t    directive: values.directive,\n\n[39 more lines. Read again with offset: 649.]",
+      "tool_call_id": "call_1a1787d002b144b98e8794d9"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_c53080c5b4c746c0a1ae13f6",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"grep -n \\\"endedEarly\\\" src/entrypoints/machinery/post_result_comment.ts | head; echo ===; grep -n \\\"endedEarly =\\\" src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"591:  const endedEarly = cutShort(values[\\\"ended-because\\\"]);\\n596:  if (!output.trim() && endedEarly) {\\n608:    if (!endedEarly) {\\n===\\n591:  const endedEarly = cutShort(values[\\\"ended-because\\\"]);\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":80}",
+      "tool_call_id": "call_c53080c5b4c746c0a1ae13f6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_f58fdeb5e5ad4451b83e3284",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":8,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\",\"pattern\":\"function cutShort\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "17 line(s), match and context, under src/entrypoints/machinery/post_result_comment.ts:\n\n277- *   - it can only turn a `chain-over` into a `handed-off`, and\n278- *   - both carry the same `next`, which is the only thing read here.\n279- *\n280- * So the one signal this cannot see is the one that does not change the answer.\n281- * Deriving the ending here rather than re-deriving the parts is what removes the\n282- * two copies this file used to hold — one for the mention, one for the tag.\n283- */\n284-/** Whether the run ended before it was done, either way round. */\n285:function cutShort(endedBecause: string | undefined): boolean {\n286-  return (\n287-    endedBecause === \"stopped\" ||\n288-    endedBecause === \"runtime\" ||\n289-    endedBecause === \"iterations\" ||\n290-    endedBecause === \"loop\"\n291-  );\n292-}\n293-",
+      "tool_call_id": "call_f58fdeb5e5ad4451b83e3284"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ed325e8c3caf4bdb905bea55",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":2,\"max_matches\":15,\"path\":\"src/workflows/actions/atoma-cli.ts\",\"pattern\":\"install|download|release|npm|bunx|version\"}"
+          }
+        },
+        {
+          "id": "call_40c75c3ce50749f9a8953646",
+          "type": "function",
+          "function": {
+            "name": "create_sub_issue",
+            "arguments": "{\"body\":\"## 背景\\n\\n#204 の調査で確定した機械側の欠陥: core が `completed` を記録し、最終 assistant メッセージが空文字・tool_calls 無しの run で、`src/entrypoints/machinery/post_result_comment.ts:605-611` の skip が発火する。skip の仮定は「空出力 = セッション終端ツールが自前のコメントを投稿済み」だが、空レスポンス完成もこの分岐に合流し、結果コメントも `atomaton:ended` タグも残らない → ガードが以降の人間コメントを永久削除(#194 で実害)。\\n\\n証拠: `atomaton-data` の `sessions/issue-194/atomaton.json` メッセージ 126 と 138(空 assistant、run 39011026414 の \\\"Record run metadata\\\" ステップは skipped)。#186 は `sessions/issue-186/` 自体が atomaton-data に存在せず(404)、セッション欠損→同 skip 経路の疑い。\\n\\nrunner 側(atoma CLI、別リポジトリ)には空応答のリトライ+エラー化が入る見込みだが、**この修正はそれに依存しない防御線**として入れる。機械が「他コンポーネントの不変条件(空出力=ツール呼び出し終端)」を仮定して人のコメントを削除するのは、`decide_turn_ending.ts` が掲げる \\\"toward releasing the guard, never toward holding it stuck\\\" の思想に反する。採用者は古いリリースの runner で走ることもある。\\n\\n## スコープ\\n\\n`post_result_comment.ts` の skip 条件を締める:\\n\\n- **skip してよいのは、セッションが読めて、最終 assistant メッセージが tool_calls を持つ場合(= ツール呼び出し終端の証拠)のみ。**\\n- それ以外の空出力は既存の `wroteNothing` 経路で終端コメントを生成する(completed+空最終メッセージ / セッションファイル欠損 / JSON として読めない)。文言は no-report 向けの変体(例: `_This run ended without saying anything._`)。mention 強制と ended タグ素材は既存機構(`src/domain/work/completion-mention.ts`、`decide_turn_ending` の `--reported` 経由の no-report ending)にそのまま流す。\\n\\n判別に必要な情報はセッションに既にある(`readSession` / 最終メッセージの `tool_calls`)。新形式の導入はしない。\\n\\n## 受け入れ基準\\n\\n1. completed + 空最終メッ���ージ(tool_calls 無し)のセッションで、終端コメント本文が生成される(skip しない)。\\n2. 最終 assistant メッセージが tool_calls を持つ場合は従来通り skip(ツールが自前コメントを投稿済み)。\\n3. セッション欠損・unreadable JSON でも終端コメントが生成される(#186 形状)。\\n4. `bun test` 全绿。skip 判定の単体テストを追加/拡張(既存のテスト配置に従う)。\\n\\n## 検証\\n\\n`bun test`(post_result_comment 関連 + turn/decide_turn_ending の回帰)。\\n\\n## close 条件\\n\\nこの親イシューのブランチへ向けて出された PR がマージされ、マージヘッドで上記 1〜4 が確認できること。判定は engineer 自身がテスト結果で行う。\\n\\n## 依存\\n\\nなし。atoma CLI 側の変更(別リポジトリ)と独立しており、先行して着手できる。\",\"title\":\"post_result_comment: 空出力でも「ツール呼び出し終端」とセッションで証明できる場合しか skip しない\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "15 line(s), match and context, under src/workflows/actions/atoma-cli.ts:\n\n1-/**\n2- * atoma-cli.ts — the steps that put the `atoma` binary on a runner, and the\n3: * version they install by default.\n4- *\n5- * Two workflows need it now. `atomaton-runner` runs agents with it; `atomaton-validate-pr`\n6- * calls `atoma validate` on the agent definitions and tools file a pull request\n7- * would merge, so that a name resolving to nothing is a red check rather than a\n8: * failure on whoever triggers the next run. Both install it the same way, from one\n9: * place, because a second copy of a download-and-chmod is a second thing to fix\n10: * when a release asset is renamed.\n11- */\n12-import { ActionsCheckoutV4 } from \"@github-actions-workflow-ts/actions\";\n--\n14-\n15-/**\n\n[41 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_ed325e8c3caf4bdb905bea55"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":205,\"url\":\"https://github.com/yuma-seno/atomaton/issues/205\",\"parent\":204}",
+      "tool_call_id": "call_40c75c3ce50749f9a8953646"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_306bc4f9f68c404cb7ce62d0",
+          "type": "function",
+          "function": {
+            "name": "create_sub_issue",
+            "arguments": "{\"body\":\"## 背景\\n\\n#204 の調査で、詰まった run の最終 assistant メッセージが「`content: \\\"\\\"`、tool_calls 無し」だったことを確認(#194 セッション、メッセージ 126 と 138、両方とも `ended_because: \\\"completed\\\"`)。これは Chat Completions 仕様上 legal な応答で、既知の経路は:\\n\\n- reasoning/シンキングモデルが `max_output_tokens` やコンテキスト上限を消費し、可視出力ゼロで normal 終了(OpenAI reasoning ガイド: \\\"you could incur costs for input and reasoning tokens without receiving a visible response\\\"、`status: incomplete` + \\\"Ran out of tokens during reasoning\\\")\\n- `finish_reason: \\\"content_filter\\\"`\\n- ルーター(z-ai/glm-5.3-flash 等を経由)の上流失敗が空 completion として透過\\n\\n直近7日のメトリクスで31セッション中12(38.7%)が `completed` なのに無言で、レアケースではない。\\n\\n## スコープ(atoma CLI リポジトリ、yuma-seno/atoma 側の変更)\\n\\n1. **`finish_reason` をセッションに記録する。** 現在セッションは `role/content/tool_calls` のみを保存し、判別材料が失われている。assistant メッセージに `finish_reason`(`length` / `content_filter` / `stop` / `tool_calls`)を保存し、`incomplete` ステータスの場合は `incomplete_details.reason` も。Sessions の型(`domain/work/session.ts` 相当)と保存経路の更新。後方互換: 旧セッション(フィールド無し)は `undefined` として読めること。**移行は不要**(このリポジトリの慣例: `closing-report.ts` の \\\"No migration, and none should be invented\\\" 参照)。\\n\\n2. **空応答のリトライ。** 応答が「テキスト無し・tool_calls 無し・finish_reason が tool_calls でない」場合、同一ターンの再試行を最大 N 回(2 回程度)行う。リトライ条件に `finish_reason === \\\"length\\\"` や `status: incomplete` を含めること(完全な空ではなく部分的な空も拾う)。連続 N 回と���空なら run を**エラーとして終了**させる(成功の `completed` を書かせない。`ended_because: \\\"failed\\\"` 相当になり、機械側は既存の `failed` 経路でガードを解放する)。\\n\\n3. **`(任意)` 空応答をエラー化した際の機械側メッセージ品質。** 失敗理由が `finish_reason` から読めること(#205 の防御線と合わせ、機械のコメントが「何が起きたか」を人に説明できる)。\\n\\n## 受け入れ基準\\n\\n- セッション JSON に `finish_reason` が記録される(新規 run)。\\n- 空応答が1回だけ発生した場合、リトライで回収され、セッションに再試行が記録される。\\n- 連続空応答で run が失敗終了し、結果コメントが投稿される(機械側の既存失敗経路)。\\n- 既存のテストスイートが通る。\\n\\n## close 条件\\n\\natoma CLI リポジトリ上の PR がマージされ、マージヘッドで上記がテストにより確認できること。判定はエンジニア自身が行う。\\n\\n## 依存\\n\\n#205 とは独立。ただし #205 の防御線が入っていても、こちらが正しい根本対応(空応答を「成功」として記録しない)。\",\"title\":\"atoma CLI: finish_reason をセッションに記録し、空応答をリトライ→エラー化する\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":207,\"url\":\"https://github.com/yuma-seno/atomaton/issues/207\",\"parent\":204}",
+      "tool_call_id": "call_306bc4f9f68c404cb7ce62d0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_7d5fdcc74ddd42f684389f39",
+          "type": "function",
+          "function": {
+            "name": "launch_sub_agent",
+            "arguments": "{\"summary\":\"## 判断と分割\\n\\n**ご質問への回答:** 空出力でコメントを作らないのは仕様として不自然 — リポジトリ自身が no-report/WARNING/メンション強制/ended タグの機構まで書いていながら、skip 分岐が先に return して到達不能にしている(#194/#186 の実害)。そして空レスポンスは API 仕様上 legal(reasoning トークンによる予算切れ・content_filter・ルーター上流失敗。実測: 直近7日で31セッション中12 が completed+無言)。\\n\\n**提案への回答:** 同意。atoma CLI 側(あなた所有)の「リトライ → 連続空ならエラー化」が根本対応。ただし、機械側に defense-in-depth も必要: 古い runner で走ることもあるため、空出力=ツール終端の仮定はセッションで証明できる場合に限るべき。\\n\\n**分割した2件:**\\n- **#205**(machine側, atomaton): skip 条件を「セッションで最終メッセージが tool_calls 持つ」場合のみに締め、それ以外は既存 wroteNothing 経路で終端コメント。#186 形状(セッション欠損)も拾う。\\n- **#207**(atoma CLI側): finish_reason をセッションに記録、空応答リトライ(2回)、連続空なら failed 終了。根本対応。\\n\\n**#194/#186 の復旧:** 別途、詰まったコメント(例: #194 の 6230825721)を削除/編集で復旧する必要あり(人的対応)。\\n\\n両方とも atomaton に dispatch します。\",\"tasks\":[{\"agent\": \"atomaton\", \"issue\": 205}, {\"agent\": \"atomaton\", \"issue\": 207}]}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"dispatched\":[\"#205→atomaton\",\"#207→atomaton\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
+      "tool_call_id": "call_7d5fdcc74ddd42f684389f39"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 5,
+      "event_count": 6,
       "resolved_number": "204",
-      "snapshot_hash": "9801883d6136be6d24da1841d17dcf8b0237d676bf6c69e94906e88e2cdd0566",
+      "snapshot_hash": "2505e07b23522624c2dfdfb85f55e9fa9a2d82fc0d89c99a6e7e71985eb64aeb",
       "type": "issue",
       "version": 1
     }
@@ -2449,6 +2618,29 @@
         }
       },
       "started": "2026-10-17T12:18:37Z"
+    },
+    {
+      "ended": "2026-10-17T12:40:12Z",
+      "ended_because": "completed",
+      "iterations": 8,
+      "messages": 267,
+      "seconds": 521,
+      "server_calls": {
+        "atomaton": {
+          "launch_sub_agent": 1
+        },
+        "files": {
+          "grep": 3,
+          "read": 1
+        },
+        "github": {
+          "create_sub_issue": 2
+        },
+        "shell": {
+          "bash": 2
+        }
+      },
+      "started": "2026-10-17T12:31:31Z"
     }
   ]
 }
