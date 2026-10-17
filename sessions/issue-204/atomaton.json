@@ -1877,7 +1877,423 @@
       "role": "assistant",
       "content": "はい、#194のセッションで確定しています。そして結論から: **そのケースでコメントを作らないのは仕様として自然ではなく、設計上のバグ**です。理由を述べます。\n\n## 起きていること\n\nLLMの最終レスポンスが「`content: \"\"`、tool_callsなし」で返ってくるケースが実在します。#194のセッション(`atomaton-data` の `sessions/issue-194/atomaton.json`)で、詰まった2回のrunがともに `ended_because: \"completed\"`、最終メッセージが空文字でした。API/モデルが内容のないレスポンスを返しただけで、run側は「正常完了」と記録します。\n\nその結果、`post_result_comment.ts:605-611` の skip が発火します。「出力が空 = セッション終了ツールで終わった」という前提の分岐ですが、空レスポンスもこの条件に合流してしまう。コメントが一件も投稿されず、`atomaton:ended` タグがスレッドに残らないので、ターン状態機械は `asked` のまま → `guard_comment_during_run` が以降の人間コメントを全部削除 → #194と#186で観測されたデッドロックになります。\n\n## 「自然でない」理由\n\n1. **設計としては既に「無言runにも通知する」と決まっている。** `no-report` という終了(`src/domain/work/turn.ts:185`)、専用の WARNING ブロック(`post_result_comment.ts:452-461` の `wroteNothing`)、メンション強制(`src/domain/work/completion-mention.ts:89` — 「closed sub-issue ですら沈黙を無効化する」と明記)、`ended=done` タグの割り当て(`:260`)まで、全部実装済みです。ただ skip の分岐が先に return して、この経路が一つも到達不能なだけ。つまり「自然だと思うか」への答えは、このリポジトリ自身が既に「不自然」と判断して機構まで書いている、ということです。\n\n2. **結果コメントはエージェントの文章ではなくターンの終端マーカー。** `ATOMA:ended` タグは次のrunとガードが「ターンが人に戻った」ことを知る唯一の依据です。skip が正当なのは「別のコメントが既にターンを終端した」場合(セッション終了ツールは自前のコメントを投稿する)だけで、空レスポンスの場合は誰も終端しない。ノイズ削減ではなく、状態機械の不変条件(全runが終端コメントを一つ残す)を破ります。\n\n3. **頻度が無視できない。** メトリクス(`atomaton-data` の `metrics/report.md`)で直近30日の no-report 終了は49セッション中18(36.7%)。レアケースの対処ではありません。\n\n## 直し方の見通し\n\n判別は既にセッションに入っています。最終assistantメッセージが **tool_calls付き** → セッション終了ツールで、ツール自身がコメントを投稿済み → skip は正当。**tool_callsなしで空** → 空レスポンスで、誰も終端していない → `wroteNothing` の通知を投稿する。`post_result_comment.ts` 一箇所(+テスト)の修正です。\n\n一つ付け加えると、#186は `sessions/issue-186/` が `atomaton-data` に存在しない(404)ので、#194と同じ「空レスポンス→skip」ではなく、runがセッション保存前に落ちた別の経路でコメントが欠落した可能性が高いです。結果のデッドロック形は同じですが、一次原因の検証は別途必要です。着手するなら両方見ます。",
       "atoma_metadata": {
-        "github_comment_id": 6231641059,
+        "agent": "atomaton",
+        "github_comment_id": 6231641059
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nそもそも、そんなことあるの？LLMのAPI仕様として。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T09:25:25Z",
+        "event_type": "issue_comment",
+        "id": 6232265375,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_5a027b2a6e2444ac83733a13",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/sessions/issue-194/atomaton.json\\\");\\nconst j = await r.json();\\nconst ms = j.messages ?? [];\\nfor (const idx of [126, 138]) {\\n  const m = ms[idx];\\n  console.log(\\\"=== message\\\", idx);\\n  console.log(\\\"keys:\\\", Object.keys(m).join(\\\",\\\"));\\n  console.log(JSON.stringify(m).slice(0, 500));\\n}\\n' 2>&1 | tail -12\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"=== message 126\\nkeys: role,content\\n{\\\"role\\\":\\\"assistant\\\",\\\"content\\\":\\\"\\\"}\\n=== message 138\\nkeys: role,content\\n{\\\"role\\\":\\\"assistant\\\",\\\"content\\\":\\\"\\\"}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":303}",
+      "tool_call_id": "call_5a027b2a6e2444ac83733a13"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_7e066658742a4ad3a2ed755a",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"grep -rn \\\"finish_reason\\\\|content_filter\\\\|refusal\\\" src/adapters/ --include=*.ts | grep -v test | head -20; echo ===; grep -rln \\\"chat/completions\\\\|openai\\\" src/adapters/ --include=*.ts | head\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/adapters/mcp/mcp-tool.ts:137:   * refusal an agent can act on and one it can only retry. Measured three times in\\nsrc/adapters/mcp/mcp-tool.ts:138:   * this project: a refusal that says what to do next is followed, and one that only\\nsrc/adapters/github/merge-signals.ts:108: * what each failure costs. An unreadable rule list only makes a refusal less\\nsrc/adapters/github/merge-signals.ts:237:  // the only one whose refusal used to take the whole tool down with it. The reviewer\\nsrc/adapters/github/merge-signals.ts:289:      // and so from reporting one refusal twice.\\nsrc/adapters/github/gh.ts:52:  // the same refusal for the same arguments. The absolute path of the runtime already\\nsrc/adapters/github/branch-placement.ts:87:    // push and the honest answer is the refusal below rather than a string git will\\nsrc/adapters/github/turn-comment.ts:22: * — a notice, a refusal, an acknowledgement — and should not use this; it writes its own\\nsrc/adapters/actions/dispatch-targets.ts:34: * a refusal is fatal is the CALLER's to decide, and one caller decides it is:\\nsrc/adapters/actions/dispatch.ts:163:  // A warning rather than a throw: the refusal stands either way, and the caller has\\nsrc/adapters/actions/dispatch.ts:165:  // line in the log that says so rather than an exception that hides the refusal.\\nsrc/adapters/actions/dispatch.ts:245: * Returns the refusal, or `undefined` when the dispatch may proceed.\\nsrc/adapters/actions/dispatch.ts:344:  // `aggregation.ts`'s `parentAgent` has claimed this refusal for a while; it was not\\nsrc/adapters/actions/dispatch.ts:365:    const refusal = refuseOutstandingRequest(d, markerId);\\nsrc/adapters/actions/dispatch.ts:366:    if (refusal !== undefined) return refusal;\\nsrc/adapters/runner/config.ts:270: * zero and nonsense mean, and it owns the default the refusal message quotes back\\n===\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":97}",
+      "tool_call_id": "call_7e066658742a4ad3a2ed755a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_5e467f49b9bd45f6b8813da2",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"grep -rln \\\"atoma\\\\b\\\" src/adapters/runner/ src/entrypoints/ 2>/dev/null | head; echo ===; grep -rn \\\"OPENAI_BASE_URL\\\\|atoma run\\\" src/workflows/actions/atoma-cli.ts | head -10; echo ===; grep -rn \\\"npm\\\\|bunx\\\\|package\\\" src/workflows/actions/atoma-cli.ts | head -15\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/write_tools_file.ts\\nsrc/entrypoints/machinery/request_stop.ts\\nsrc/entrypoints/machinery/decide_turn_ending.ts\\nsrc/entrypoints/machinery/validate_deliverable.test.ts\\nsrc/entrypoints/machinery/write_credentials_file.test.ts\\nsrc/entrypoints/machinery/validate_deliverable.ts\\nsrc/entrypoints/machinery/restore_agent_session.ts\\nsrc/entrypoints/machinery/watch_for_stop.ts\\nsrc/entrypoints/machinery/write_metrics_report.test.ts\\nsrc/entrypoints/machinery/aggregate_sub_issues.ts\\n===\\n===\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":98}",
+      "tool_call_id": "call_5e467f49b9bd45f6b8813da2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_1112117c6b4840c7ad1403c3",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\":\"src/workflows/actions/atoma-cli.ts\",\"limit\":80}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/workflows/actions/atoma-cli.ts lines 1-80 of 183\n\n1\t/**\n2\t * atoma-cli.ts — the steps that put the `atoma` binary on a runner, and the\n3\t * version they install by default.\n4\t *\n5\t * Two workflows need it now. `atomaton-runner` runs agents with it; `atomaton-validate-pr`\n6\t * calls `atoma validate` on the agent definitions and tools file a pull request\n7\t * would merge, so that a name resolving to nothing is a red check rather than a\n8\t * failure on whoever triggers the next run. Both install it the same way, from one\n9\t * place, because a second copy of a download-and-chmod is a second thing to fix\n10\t * when a release asset is renamed.\n11\t */\n12\timport { ActionsCheckoutV4 } from \"@github-actions-workflow-ts/actions\";\n13\timport { TypedOutputsStep } from \"./base.ts\";\n14\t\n15\t/**\n16\t * The Atoma release a run installs unless the dispatch says otherwise.\n17\t *\n18\t * ## Raising this pin is never a version bump on its own\n19\t *\n20\t * Almost every capability this repositor\n\n[1263 characters dropped from the middle; 4000 shown]\n\nments are\n39\t * worth reading before raising: adding a flag here without raising the pin is a\n40\t * workflow that fails every run.\n41\t *\n42\t * **`tools.servers` in `config.yaml`, which the tools file is generated from.** Three\n43\t * separate couplings: the pin strips the credentials it knows about from a tool\n44\t * server's environment unless that server names them, and expands `${NAME}` in an\n45\t * `env:` value and in an `args:` entry against the run's credentials and environment.\n46\t * An older binary takes those as literal text -- so a `${GH_TOKEN}` reaches a server\n47\t * as those nine characters, overriding what it was inheriting. Raising without the\n48\t * declarations strips a token nothing asks for; shipping the declarations without\n49\t * raising passes a literal.\n50\t *\n51\t * **The `request_timeout_secs` in those declarations.** This one is different: the\n52\t * older binary does not reject the key, it ignores it and caps every call at 60\n53\t * seconds instead. `shell` offers the agent `timeout_seconds` up to 3600 — every\n54\t * value above 60 is a promise the client will not keep — and `search`'s first call\n55\t * loads a reranker measured at 63.9s, so under a binary without this the first search\n56\t * of every run fails. Nothing says so; the declaration is simply not in effect.\n57\t *\n58\t * **The names `tool_allowlist` and `tool_denylist` are written in.** A list lives\n59\t * inside one server's entry, so it is written in the names that server itself uses —\n60\t * `read`, `grep` — and the prefix `atoma` assembles afterwards is not part of what a\n61\t * reader there could know. An older binary compares the list against the prefixed\n62\t * name instead, so `read` matches `files_readonly__read` and every pattern matches\n63\t * nothing. This is the raise that cannot be deferred by a run being quiet: a\n64\t * non-empty `tool_allowlist` that matches nothing refuses EVERY tool on that server,\n65\t * so `files_readonly`, whose whole purpose is reading, refuses all 64 of its calls.\n66\t * The pin and `defaults.yaml` therefore move together, and the older of the two is\n67\t * the one that breaks a run.\n68\t *\n69\t * **`server_calls` on `atoma_runs`.** Which tools each server was asked for, per run.\n70\t * A session cannot answer it: `unprefixed` is what makes a tool arrive under its own\n71\t * bare name, and it is also what strips the server off the call. So the metrics report\n72\t * read the server out of the name — `read_text_file` split on `__` — which stopped\n73\t * working the moment the servers were unprefixed. Under an older binary the field is\n74\t * absent, and the report says it could not check rather than naming every server as\n75\t * unused.\n76\t *\n77\t * **`agent-definitions/*.md`.** The provider names in them are this repository's, and\n78\t * a dialect's name is a row in the core's provider table. A name the installed binary\n79\t * does not have resolves to nothing.\n80\t *\n\n[103 more lines. Read again with offset: 81.]",
+      "tool_call_id": "call_1112117c6b4840c7ad1403c3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_dba82ec743494349aaa93f60",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":80,\"offset\":81,\"path\":\"src/workflows/actions/atoma-cli.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/workflows/actions/atoma-cli.ts lines 81-160 of 183\n\n81\t * **The repository's SECRETS, by name.** Each provider reads its own credential with\n82\t * no fallback: two credentials present for one provider is an error naming both rather\n83\t * than a guess. A repository holding a key under a name the new binary no longer\n84\t * reads gets a failed run, so the secret has to be renamed before or with the raise.\n85\t *\n86\t * **The spelling of `load_skill`'s argument.** It is `skill_name` and there is no\n87\t * other. An older binary accepts the aliases too, so a model calling it `name`\n88\t * succeeds there and the session records `name` -- which is not the spelling\n89\t * `write_metrics_report.ts` reads. Until the pin moves, the skill tally counts calls\n90\t * it cannot attribute.\n91\t *\n92\t * **`max_output_chars`, the per-server cap on a tool result.** It is what covers\n93\t * third-party servers, and it is why `files_guard`'s denylist can be as short as it\n94\t * is: an unbounded s\n\n[956 characters dropped from the middle; 4000 shown]\n\nfused by every provider, so an older binary turns lost work\n110\t * into an issue nothing can run on.\n111\t *\n112\t * **`extra_body.tools` is merged with the runtime tool definitions rather than\n113\t * replacing them.** Every definition here carries extra server tools and uses the\n114\t * adapter that had its own merge, so under an older binary each request sent those and\n115\t * no MCP schema at all -- the model then infers argument shapes from the names in the\n116\t * system prompt.\n117\t *\n118\t * **A retry now waits as long as the provider asks.** Up to a two-minute cap, taken\n119\t * from the provider's own `Retry-After` rather than from this repository's fixed\n120\t * 1s-then-4s backoff, which is what the older binary always waited. The wait is\n121\t * spent out of `--max-runtime-secs` -- the runner floors that at 300 seconds -- so\n122\t * a rate-limited run now pauses and carries on instead of failing five seconds in\n123\t * with \"The upstream provider is temporarily unavailable\".\n124\t *\n125\t * **`ATOMA_LLM_ERROR`, the machine-readable reason an inference failed.** It carries\n126\t * `label=`, `code=` and `type=` beside the prose, in the same `key=value` shape as\n127\t * `ATOMA_TOKEN_USAGE` and `ATOMA_CONFIG_FINDING`. Nothing here reads it yet, and an\n128\t * older binary writes no such line -- so a reader added before the raise would find\n129\t * nothing to read. It is in the log for whoever is looking at a failed run.\n130\t *\n131\t * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`\n132\t * measures the binary, and a repository whose probes and whose runs are on different\n133\t * builds is one where a green probe means less than it looks.\n134\t */\n135\texport const ATOMA_DEFAULT_VERSION = \"v0.4.0\";\n136\t\n137\texport const ATOMA_VERSION_DESC =\n138\t  \"Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.\";\n139\t\n140\t/**\n141\t * Checkout for `atoma_version: source`, which builds the CLI from `main` instead\n142\t * of downloading a release.\n143\t *\n144\t * Only the runner offers that: a workflow installing a fixed version never\n145\t * reaches the `source` branch below, so it needs no checkout.\n146\t */\n147\texport const checkoutAtomaSourceStep = new ActionsCheckoutV4({\n148\t  name: \"Checkout Atoma source (for atoma_version: source)\",\n149\t  if: \"inputs.atoma_version == 'source'\",\n150\t  with: { repository: \"yuma-seno/atoma\", path: \"atoma-src\" },\n151\t});\n152\t\n153\t/**\n154\t * Install the CLI at `version`, which is shell text: an input expression for a\n155\t * workflow that takes one, or a literal tag for a workflow that pins it.\n156\t *\n157\t * The `source` branch is generated into both workflows even though only the runner\n158\t * can select it. A literal version simply never matches it, and one script that\n159\t * both workflows share cannot drift; two scripts differing by one branch can.\n160\t */\n\n[23 more lines. Read again with offset: 161.]",
+      "tool_call_id": "call_dba82ec743494349aaa93f60"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_0826b008fbcb4fbbb2df804b",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"ls .github/atomaton/agent-definitions/ && grep -l \\\"provider\\\\|model\\\" .github/atomaton/agent-definitions/*.md | head -3 && grep -h \\\"provider:\\\\|model:\\\" .github/atomaton/agent-definitions/atomaton.md 2>/dev/null | head -5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"architect.md\\natomaton.md\\nengineer.md\\nreviewer.md\\n.github/atomaton/agent-definitions/architect.md\\n.github/atomaton/agent-definitions/atomaton.md\\n.github/atomaton/agent-definitions/engineer.md\\nprovider: orcarouter\\nmodel: z-ai/glm-5.3-flash\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":96}",
+      "tool_call_id": "call_0826b008fbcb4fbbb2df804b"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_79607f9dd7984785a7e5bca3",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"grep -h \\\"provider:\\\\|model:\\\" .github/atomaton/agent-definitions/*.md; echo ===; bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/metrics/report.md\\\");\\nconst t = await r.text();\\n// find the section about empty responses / no-report if any\\nconst i = t.indexOf(\\\"no-report\\\");\\nconsole.log(t.slice(Math.max(0,i-600), i+400));\\n' 2>&1 | tail -30\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"provider: orcarouter-responses\\nmodel: openai/gpt-6.1-sol\\nprovider: orcarouter\\nmodel: z-ai/glm-5.3-flash\\nprovider: orcarouter-responses\\nmodel: deepseek/deepseek-v4.1-flash\\nprovider: orcarouter-responses\\nmodel: deepseek/deepseek-v4.1-flash\\n===\\n# Agent metrics\\n\\nRead from the sessions stored on this branch. Nothing here is recorded specially: every number is something the agents already wrote down while working.\\n\\nGenerated 2026-10-17.\\n\\nA session appears in a dated window only if it recorded when its runs ended. Sessions from before run recording existed are counted under All time alone, so the dated windows are thinner than the project w\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":164}",
+      "tool_call_id": "call_79607f9dd7984785a7e5bca3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_b18719e187b74bf49775ba57",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/metrics/report.md\\\");\\nconst t = await r.text();\\nfor (const kw of [\\\"silent\\\", \\\"nothing\\\", \\\"empty\\\", \\\"no-report\\\", \\\"ended_because\\\", \\\"completed\\\"]) {\\n  let i = t.indexOf(kw);\\n  if (i >= 0) {\\n    console.log(\\\"=== \\\" + kw + \\\" ===\\\");\\n    console.log(t.slice(Math.max(0,i-300), i+500).slice(0, 700));\\n    console.log();\\n    break;\\n  }\\n}\\n' 2>&1 | tail -25\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"=== nothing ===\\nng, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.\\n\\nWhat is left over is not the same as work delivered. `completed` is the core saying its own loop ended rather than being stopped — it says nothing about whether the run produced a report. **Ran to an end without a report**, in each window below, is that question asked separately.\\n\\n| ended because | runs |\\n| --- | ---: |\\n| `completed` | 93 |\\n| `failed` | 9 |\\n\\n## Last 7 days\\n\\n32 sessions.\\n\\n**Ran to an end without a report:** 12 of 31 sessions whose last run the core recorded as `completed` — 38.7%. These are not runs that gave up: noth\\n\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":104}",
+      "tool_call_id": "call_b18719e187b74bf49775ba57"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_2ad9e45cea55498db05e016a",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/metrics/report.md\\\");\\nconst t = await r.text();\\nconst i = t.indexOf(\\\"Ran to an end without a report:** 12\\\");\\nconsole.log(t.slice(i, i+1200));\\n' 2>&1 | tail -20\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"Ran to an end without a report:** 12 of 31 sessions whose last run the core recorded as `completed` — 38.7%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.\\n\\n**221,351,153 tokens** over 32 runs that reported them, **97.4% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.\\n\\n**96.6% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.\\n\\n| | p50 | p90 | p99 | max | total |\\n| --- | ---: | ---: | ---: | ---: | ---: |\\n| tokens per run | 1,525,516 | 11,776,383 | 73,718,100 | 73,718,100 | 221,351,153 |\\n| messages per session | 182 | 482 | 715 | 715 | 7,761 |\\n\\n| agent | sessions | share |\\n| --- | ---: | ---: |\\n| `at\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":103}",
+      "tool_call_id": "call_2ad9e45cea55498db05e016a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_077c1f36932d4cdca9c682bf",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/sessions/issue-194/atomaton.json\\\");\\nconst j = await r.json();\\nconst ms = j.messages ?? [];\\n// Check the runs BEFORE the empty ones: how many assistant messages with real content vs empty across the session?\\nlet empty = 0, withText = 0, withTools = 0;\\nfor (const m of ms) {\\n  if (m.role !== \\\"assistant\\\") continue;\\n  const hasTools = m.tool_calls !== undefined && m.tool_calls !== null;\\n  const hasText = typeof m.content === \\\"string\\\" && m.content.trim() !== \\\"\\\";\\n  if (hasTools) withTools++;\\n  else if (hasText) withText++;\\n  else empty++;\\n}\\nconsole.log({ empty_no_tools: empty, with_text: withText, with_tool_calls: withTools });\\n// Also: message 125-126 boundary — what did the tool say before the first empty?\\nconsole.log(\\\"125:\\\", ms[125].role, JSON.stringify(String(ms[125].content).slice(0,150)));\\n' 2>&1 | tail -4\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"  with_text: 0,\\n  with_tool_calls: 58,\\n}\\n125: tool \\\"25 line(s), match and context, under .github/atomaton-runtime/scripts/dispatch_agent.ts:\\\\n\\\\n491-  const number = Number((values.number ?? \\\\\\\"\\\\\\\").trim());\\\\n4\\\"\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":109}",
+      "tool_call_id": "call_077c1f36932d4cdca9c682bf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_955706cb5aaa4b269b4bc198",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/sessions/issue-194/atomaton.json\\\");\\nconst j = await r.json();\\nconst ms = j.messages ?? [];\\nlet emptyNoTools = 0, withText = 0, withTools = 0;\\nfor (const m of ms) {\\n  if (m.role !== \\\"assistant\\\") continue;\\n  const hasTools = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;\\n  const hasText = typeof m.content === \\\"string\\\" && m.content.trim() !== \\\"\\\";\\n  if (hasTools) withTools++;\\n  else if (hasText) withText++;\\n  else { emptyNoTools++; }\\n}\\nconsole.log({ emptyNoTools, withText, withTools });\\n// list indexes of empty-no-tools\\nconst idxs = ms.map((m,i)=>m.role===\\\"assistant\\\" && !(Array.isArray(m.tool_calls)&&m.tool_calls.length) && !(typeof m.content===\\\"string\\\"&&m.content.trim()) ? i : -1).filter(i=>i>=0);\\nconsole.log(\\\"empty assistant indexes:\\\", idxs.join(\\\",\\\"));\\n' 2>&1 | tail -3\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"  withTools: 58,\\n}\\nempty assistant indexes: 126,138\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":107}",
+      "tool_call_id": "call_955706cb5aaa4b269b4bc198"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_f5aa09f7c9f642e49ed63b85",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/sessions/issue-194/atomaton.json\\\");\\nconst j = await r.json();\\nconst ms = j.messages ?? [];\\n// the console.log dropped keys. print object\\nconst out = { empty: 0, text: 0, tools: 0 };\\nfor (const m of ms) {\\n  if (m.role !== \\\"assistant\\\") continue;\\n  if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) out.tools++;\\n  else if (typeof m.content === \\\"string\\\" && m.content.trim() !== \\\"\\\") out.text++;\\n  else out.empty++;\\n}\\nconsole.log(JSON.stringify(out));\\n' 2>&1 | tail -2\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"{\\\"empty\\\":2,\\\"text\\\":0,\\\"tools\\\":58}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":109}",
+      "tool_call_id": "call_f5aa09f7c9f642e49ed63b85"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_37f16ead5d984760baf21014",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":50,\"offset\":60,\"path\":\"src/domain/record/closing-report.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/record/closing-report.ts lines 60-86 of 86\n\n60\t *\n61\t * A session accumulates across runs and this takes no run boundary, so what it\n62\t * answers is \"did the LAST run to touch this session say anything\". That is the\n63\t * question in both places.\n64\t *\n65\t * For `read_run_ending.ts` the last run is the one that just finished, unless that\n66\t * run produced no assistant message at all — which means it was cut short before its\n67\t * first turn, and `failed`, `stopped` and `spent` are all decided above `no-report`\n68\t * in `endingOf`, so the answer given here is not the one read. A boundary would be a\n69\t * second argument that changes no decision.\n70\t *\n71\t * For the metrics report it is what can be known at all: an earlier run's silence is\n72\t * buried under everything said since, and no amount of walking backwards recovers\n73\t * which message belonged to which run.\n74\t *\n75\t * `false` for a session that is missing or holds no assistant message. A run that did\n76\t * not write the session it was told to write is not one to record as having reported.\n77\t */\n78\texport function leftClosingReport(session: Session | undefined): boolean {\n79\t  const messages = session?.messages ?? [];\n80\t  for (let i = messages.length - 1; i >= 0; i -= 1) {\n81\t    const message = messages[i];\n82\t    if (message?.role !== \"assistant\") continue;\n83\t    return textOf(message.content).trim() !== \"\";\n84\t  }\n85\t  return false;\n86\t}",
+      "tool_call_id": "call_37f16ead5d984760baf21014"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e4cd0b07ad20426dbffec2e8",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":4,\"max_matches\":20,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\",\"pattern\":\"function lastAgentText\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "9 line(s), match and context, under src/entrypoints/machinery/post_result_comment.ts:\n\n211-    return undefined;\n212-  }\n213-}\n214-\n215:export function lastAgentText(sessionPath: string | undefined, from?: number): string | undefined {\n216-  if (from === undefined || !Number.isFinite(from)) return undefined;\n217-  const messages = readSession(sessionPath)?.messages ?? [];\n218-  for (let i = messages.length - 1; i >= from; i -= 1) {\n219-    const message = messages[i];",
+      "tool_call_id": "call_e4cd0b07ad20426dbffec2e8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e14a0ed7d2aa44e5a263ba8c",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":30,\"offset\":195,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 195-224 of 687\n\n195\t * An absent or unreadable boundary salvages nothing. The failure of showing a person\n196\t * less than they could have had is smaller than the failure of showing them an old\n197\t * conclusion labelled as a new fragment.\n198\t */\n199\t/**\n200\t * The session, or nothing.\n201\t *\n202\t * Every failure here is silent on purpose. The comment is the thing that has to go\n203\t * out; what is read from the session -- the salvaged last message, the count of what\n204\t * the tools did -- is an addition to it and never a precondition for it.\n205\t */\n206\tfunction readSession(path: string | undefined): Session | undefined {\n207\t  if (!path || !existsSync(path)) return undefined;\n208\t  try {\n209\t    return JSON.parse(readFileSync(path, \"utf8\")) as Session;\n210\t  } catch {\n211\t    return undefined;\n212\t  }\n213\t}\n214\t\n215\texport function lastAgentText(sessionPath: string | undefined, from?: number): string | undefined {\n216\t  if (from === undefined || !Number.isFinite(from)) return undefined;\n217\t  const messages = readSession(sessionPath)?.messages ?? [];\n218\t  for (let i = messages.length - 1; i >= from; i -= 1) {\n219\t    const message = messages[i];\n220\t    if (message?.role !== \"assistant\") continue;\n221\t    const content = message.content;\n222\t    if (typeof content === \"string\" && content.trim() !== \"\") return content;\n223\t  }\n224\t  return undefined;\n\n[463 more lines. Read again with offset: 225.]",
+      "tool_call_id": "call_e14a0ed7d2aa44e5a263ba8c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_0bf732076c1c44e299b96b20",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\nconst r = await fetch(\\\"https://raw.githubusercontent.com/yuma-seno/atomaton/atomaton-data/metrics/report.md\\\");\\nconst t = await r.text();\\n// per-agent table\\nconst i = t.indexOf(\\\"| agent | sessions | share |\\\");\\nconsole.log(t.slice(i, i+400));\\nconsole.log(\\\"...\\\");\\n// any mention of model names\\nfor (const kw of [\\\"glm\\\", \\\"flash\\\", \\\"reasoning\\\", \\\"thinking\\\"]) {\\n  const j = t.indexOf(kw);\\n  console.log(kw, \\\"=>\\\", j >= 0 ? \\\"mentioned\\\" : \\\"not in report\\\");\\n}\\n' 2>&1 | tail -20\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"| agent | sessions | share |\\n| --- | ---: | ---: |\\n| `atomaton` | 16 | 50% |\\n| `reviewer` | 10 | 31.3% |\\n| `engineer` | 6 | 18.8% |\\n\\n**Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, s\\n...\\nglm => not in report\\nflash => not in report\\nreasoning => not in report\\nthinking => not in report\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":103}",
+      "tool_call_id": "call_0bf732076c1c44e299b96b20"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_749e269dc2424fd7b80c4711",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun -e '\\n// How many of the silent completions were on which agent? Load a few recent sessions and count.\\n// Simpler: check issue-204 session (this run) + issue-194 done. Instead, sample the archive listing to see scale.\\nconst r = await fetch(\\\"https://api.github.com/repos/yuma-seno/atomaton/contents/sessions?ref=atomaton-data\\\");\\nconst dirs = await r.json();\\nconsole.log(\\\"session dirs:\\\", dirs.length);\\n' 2>&1 | tail -2\",\"timeout_seconds\":60}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"session dirs: 25\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":231}",
+      "tool_call_id": "call_749e269dc2424fd7b80c4711"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_75fdc342eaae4372b8d662b8",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":60,\"offset\":14,\"path\":\"src/domain/record/closing-report.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/record/closing-report.ts lines 14-73 of 86\n\n14\t *\n15\t *   - `read_run_ending.ts` asks it of the run that just finished, so\n16\t *     `domain/work/turn.ts` can answer `no-report` instead of `finished` — the\n17\t *     ending a run gets when it stops of its own accord having said nothing.\n18\t *   - `write_metrics_report.ts` asks it of every stored session, so the report a\n19\t *     person reads to ask how the agents are doing stops calling those runs a\n20\t *     success.\n21\t *\n22\t * The second is why this file exists rather than the function staying where it was\n23\t * written. The comment on such a run now tells a person; the metrics report, which\n24\t * reads the core's `ended_because` and knows nothing of the domain's endings, still\n25\t * said `completed`. The lie had moved, not gone. Two spellings of \"did it report\"\n26\t * would have been the defect; one definition read from two places is one fact in one\n27\t * place. `tool-trouble.ts` is here for the same reason and was moved for it.\n28\t *\n29\t * ## What it does not need\n30\t *\n31\t * No migration, and none should be invented. This is derived from the messages a\n32\t * session already holds, so it answers for every session ever stored — including the\n33\t * hundreds recorded before anybody thought to ask.\n34\t */\n35\timport type { Session, SessionMessage } from \"../work/session.ts\";\n36\t\n37\t/**\n38\t * The words in a message, whichever of the two shapes it is stored in.\n39\t *\n40\t * A message is plain text in nearly every case; the block form appears when a\n41\t * picture travels with it. A picture is not a report, so only the text blocks count.\n42\t */\n43\tfunction textOf(content: SessionMessage[\"content\"]): string {\n44\t  if (typeof content === \"string\") return content;\n45\t  if (!Array.isArray(content)) return \"\";\n46\t  return content.map((block) => (block.type === \"text\" ? block.text : \"\")).join(\"\");\n47\t}\n48\t\n49\t/**\n50\t * Whether the run left a report: did the last thing the model said have words in it?\n51\t *\n52\t * The LAST assistant message, not any of them. An earlier one is a sentence from the\n53\t * middle of the work, and this repository has already measured what that is worth —\n54\t * these agents write prose exactly once, in their final turn (450 assistant turns\n55\t * with 1 carrying text; 204 with 1; 200 with 0). Treating one as a report would call\n56\t * a run reported that a person would call silent, and `post_result_comment.ts`\n57\t * already labels such a sentence as \"not a conclusion\" when it shows one.\n58\t *\n59\t * ## It answers for the session, which is the last run in it\n60\t *\n61\t * A session accumulates across runs and this takes no run boundary, so what it\n62\t * answers is \"did the LAST run to touch this session say anything\". That is the\n63\t * question in both places.\n64\t *\n65\t * For `read_run_ending.ts` the last run is the one that just finished, unless that\n66\t * run produced no assistant message at all — which means it was cut short before its\n67\t * first turn, and `failed`, `stopped` and `spent` are all decided above `no-report`\n68\t * in `endingOf`, so the answer given here is not the one read. A boundary would be a\n69\t * second argument that changes no decision.\n70\t *\n71\t * For the metrics report it is what can be known at all: an earlier run's silence is\n72\t * buried under everything said since, and no amount of walking backwards recovers\n73\t * which message belonged to which run.\n\n[13 more lines. Read again with offset: 74.]",
+      "tool_call_id": "call_75fdc342eaae4372b8d662b8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_37a75d0e214d4515a406cb3c",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"url\":\"https://platform.openai.com/docs/guides/reasoning\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "For the complete documentation index, see [llms.txt](/llms.txt). Markdown versions of documentation pages are available by appending\n`.md` to the page URL.\n\n [ChatGPT](/) [API Dashboard](https://platform.openai.com/login)\n\n [Try ChatGPT](https://chatgpt.com/)\n\n## Search the API docs\n\n Search docs\n\n### Suggested\n\n Primary navigation\n\n Search docs\n\n### Suggested\n\n DocsModels\n\n- [Home](/api/docs)\n\n### Get started\n\n- [Quickstart](/api/docs/quickstart)\n\n- [Using GPT-6](/api/docs/guides/latest-model)\n\n- [Key concepts](/api/docs/concepts)\n\n### Core concepts\n\n- [Responses API](/api/docs/guides/migrate-to-responses)\n\n- [Decisions API](/api/docs/guides/decisions)\n\n- [Conversation state](/api/docs/guides/conversation-state)\n\n- [Background mode](/api/docs/guides/background)\n\n- [Streaming](/api/docs/guides/streaming-responses)\n\n- [WebSocket mode](/api/docs/guides/websocket-mode)\n\n- [Mid-turn steering](/api/docs/guides/steering)\n\n- [Multi-agent](/api/docs/guides/responses-multi-agent)\n\n[46091 characters dropped from the middle; 4000 shown]\n\nnd(), responses.ResponseNewParams{\n Model: \"gpt-6-astra\",\n MaxOutputTokens: openai.Int(300),\n Reasoning: responses.ReasoningParam{\n Effort: responses.ReasoningEffortMedium,\n },\n Input: responses.ResponseNewParamsInputUnion{\n OfString: openai.String(prompt),\n },\n })\n if err != nil {\n panic(err)\n }\n\n if response.Status == responses.ResponseStatusIncomplete {\n fmt.Println(\"Ran out of tokens\")\n if text := response.OutputText(); text != \"\" {\n fmt.Println(\"Partial output:\", text)\n }\n }\n}\n```\n\n```\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32import com.openai.client.OpenAIClient;\nimport com.openai.client.okhttp.OpenAIOkHttpClient;\nimport com.openai.models.Reasoning;\nimport com.openai.models.ReasoningEffort;\nimport com.openai.models.responses.Response;\nimport com.openai.models.responses.ResponseCreateParams;\nimport com.openai.models.responses.ResponseStatus;\n\nResponseCreateParams params =\n ResponseCreateParams.builder()\n .model(\"gpt-6-astra\")\n .input(\n \"Write a bash script that takes a matrix represented as a string with format \"\n + \"'[1,2],[3,4],[5,6]' and prints the transpose in the same format.\")\n .maxOutputTokens(300)\n .reasoning(Reasoning.builder().effort(ReasoningEffort.MEDIUM).build())\n .build();\n\nvar response = client.responses().create(params);\nif (response.status().filter(ResponseStatus.INCOMPLETE::equals).isPresent()\n && response\n .incompleteDetails()\n .flatMap(Response.IncompleteDetails::reason)\n .filter(Response.IncompleteDetails.Reason.MAX_OUTPUT_TOKENS::equals)\n .isPresent()) {\n System.out.println(\"Ran out of tokens\");\n response.output().stream()\n .flatMap(item -> item.message().stream())\n .flatMap(message -> message.content().stream())\n .flatMap(content -> content.outputText().stream())\n .forEach(text -> System.out.println(\"Partial output: \" + text.text()));\n}\n```\n\n```\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48using OpenAI.Responses;\n#pragma warning disable OPENAI001\n\nstring key = Environment.GetEnvironmentVariable(\"OPENAI_API_KEY\")!;\nResponsesClient client = new(key);\n\nCreateResponseOptions options = new()\n{\n Model = \"gpt-6-astra\",\n MaxOutputTokenCount = 300,\n ReasoningOptions = new ResponseReasoningOptions\n {\n ReasoningEffortLevel = ResponseReasoningEffortLevel.Medium,\n },\n};\noptions.InputItems.Add(\n ResponseItem.CreateUserMessageItem(\"Write a bash script that transposes a matrix.\")\n);\n\nResponseResult response = await client.CreateResponseAsync(options);\nif (\n response.Status == ResponseStatus.Incomplete\n && response.IncompleteStatusDetails?.Reason == ResponseIncompleteStatusReason.MaxOutputTokens\n)\n{\n Console.WriteLine(\"The response ended before all output tokens were generated.\");\n string partialOutput = response.GetOutputText();\n Console.WriteLine(\n string.IsNullOrWhiteSpace(partialOutput)\n ? \"Ran out of tokens during reasoning.\n\n[truncated at 50000 characters]",
+      "tool_call_id": "call_37a75d0e214d4515a406cb3c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_58685a35ad414ad0acac1aec",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":6,\"max_matches\":30,\"path\":\"src/entrypoints/machinery/write_metrics_report.ts\",\"pattern\":\"leftClosingReport|no.?report\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "30 line(s), match and context, under src/entrypoints/machinery/write_metrics_report.ts:\n\n39-// \"this call was refused\" is two answers to one question.\n40-import { looksFailed, looksRefused, problemsIn } from \"../../domain/record/tool-trouble.ts\";\n41-// Whether a run left a report, asked of the session. Shared with `read_run_ending.ts`\n42-// for the same reason as the three above: it decides a run's ending there and this\n43-// report's \"ran to an end without a report\" here, and two spellings of one question\n44-// is how the report came to call a silent run a success in the first place.\n45:import { leftClosingReport } from \"../../domain/record/closing-report.ts\";\n46-import type { Session } from \"../../domain/work/session.ts\";\n47-import { sessionEndedAt, within, type RunRecord, type Window } from \"../../domain/record/metrics-windows.ts\";\n48-import { renderReport } from \"../../domain/record/metrics-report.ts\";\n49-import { parseTokenLine } from \"../../domain/record/token-line.ts\";\n50-\n51-export const ref = defineScript(import.meta.url);\n--\n119-export function agentOf(session: { metadata?: { github_context?: { agent?: string } } }): string {\n120-  return session.metadata?.github_context?.agent?.trim() || \"unknown\";\n121-}\n122-\n123-function sessionFrom(path: string, raw: string): SessionRecord | undefined {  // `Session`, the shape `domain/work/session.ts` defines, rather than a narrowed copy\n124-  // spelled here. The copy was fine while nothing else read this document; it stopped\n125:  // being fine when `leftClosingReport` did, because a local shape is not something a\n126-  // shared function can be handed.\n127-  let parsed: Session;\n128-  try {\n129-    parsed = JSON.parse(raw) as Session;\n130-  } catch {\n131-    log(`${path} is not readable as JSON; skipping it`);\n--\n171-  // runs rather than a failure: a session from before it is the normal case.\n172-  const runs = Array.isArray((parsed as { atoma_runs?: unknown }).atoma_runs)\n\n[13 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_58685a35ad414ad0acac1aec"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_088cea95cede4a35b4b096d3",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"url\":\"https://api.docs.glm.ai/en/api/chat-completions\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'fetch' on MCP server 'web' reported an error: Error: Could not reach https://api.docs.glm.ai/en/api/chat-completions: getaddrinfo ENOTFOUND api.docs.glm.ai",
+      "tool_call_id": "call_088cea95cede4a35b4b096d3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_8a2b04bb4e9243f49c77c342",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"url\":\"https://docs.z.ai/guides/llm/glm-4.5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "## Documentation Index\n\nFetch the complete documentation index at: [/llms.txt](/llms.txt)\n\nUse this file to discover all available pages before exploring further.\n\n[Skip to main content](#content-area)\n\n[Overview - Z.AI DEVELOPER DOCUMENT home page](https://z.ai/model-api)\n\n[Guides](/guides/overview/quick-start)[API Reference](/api-reference/introduction)[Coding Plan](/devpack/overview)[Released Notes](/release-notes/new-released)[Terms and Policy](/legal-agreement/privacy-policy)[Help Center](/help/faq)\n\n# GLM-4.5\n\n## [​](#overview)\n\nOverview\n\nGLM-4.5 and GLM-4.5-Air are Z.AI’s models, purpose-built as foundational models for agent-oriented applications. Both leverage a Mixture-of-Experts (MoE) architecture. GLM-4.5 has a total parameter count of 355B with 32B active parameters per forward pass, while GLM-4.5-Air adopts a more streamlined design with 106B total parameters and 12B active parameters.\nBoth models share a similar training pipeline: an initial pretraining ph\n\n[16269 characters dropped from the middle; 4000 shown]\n\n6f)\n .build();\n\n // Send request\n ChatCompletionResponse response = client.chat().createChatCompletion(request);\n\n // Get response\n if (response.isSuccess()) {\n Object reply = response.getData().getChoices().get(0).getMessage();\n System.out.println(\"AI Response: \" + reply);\n } else {\n System.err.println(\"Error: \" + response.getMsg());\n }\n }\n}\n\n```\n\n**Streaming Call**\n\n```\nimport ai.z.openapi.ZaiClient;\nimport ai.z.openapi.service.model.ChatCompletionCreateParams;\nimport ai.z.openapi.service.model.ChatCompletionResponse;\nimport ai.z.openapi.service.model.ChatMessage;\nimport ai.z.openapi.service.model.ChatMessageRole;\nimport ai.z.openapi.service.model.ChatThinking;\nimport ai.z.openapi.service.model.Delta;\nimport java.util.Arrays;\n\npublic class StreamingChat {\n public static void main(String[] args) {\n // Initialize client\n ZaiClient client = ZaiClient.builder().ofZAI()\n .apiKey(\"your-api-key\")\n .build();\n\n // Create streaming chat completion request\n ChatCompletionCreateParams request = ChatCompletionCreateParams.builder()\n .model(\"glm-4.5\")\n .messages(Arrays.asList(\n ChatMessage.builder()\n .role(ChatMessageRole.USER.value())\n .content(\"As a marketing expert, please create an attractive slogan for my product.\")\n .build(),\n ChatMessage.builder()\n .role(ChatMessageRole.ASSISTANT.value())\n .content(\"Sure, to craft a compelling slogan, please tell me more about your product.\")\n .build(),\n ChatMessage.builder()\n .role(ChatMessageRole.USER.value())\n .content(\"Z.AI Open Platform\")\n .build()\n ))\n .thinking(ChatThinking.builder().type(\"enabled\").build())\n .stream(true) // Enable streaming output\n .maxTokens(4096)\n .temperature(0.6f)\n .build();\n\n ChatCompletionResponse response = client.chat().createChatCompletion(request);\n\n if (response.isSuccess()) {\n response.getFlowable().subscribe(\n // Process streaming message data\n data -> {\n if (data.getChoices() != null && !data.getChoices().isEmpty()) {\n Delta delta = data.getChoices().get(0).getDelta();\n System.out.print(delta + \"\\n\");\n }},\n // Process streaming response error\n error -> System.err.println(\"\\nStream error: \" + error.getMessage()),\n // Process streaming response completion event\n () -> System.out.println(\"\\nStreaming response completed\")\n );\n } else {\n System.err.println(\"Error: \" + response.getMsg());\n }\n }\n}\n\n```\n\n**Install SDK**\n\n```\n# Install or upgrade to latest version\npip install --upgrade 'openai>=1.0'\n\n```\n\n**Verify Installation**\n\n```\npython -c \"import openai; print(openai.__version__)\"\n\n```\n\n**Usage Example**\n\n```\nfrom openai import OpenAI\n\nclient = OpenAI(\n api_key=\"your-Z.AI-api-key\",\n base_url=\"https://api.z.ai/api/paas/v4/\"\n)\n\ncompletion = client.chat.completions.create(\n model=\"glm-4.5\",\n messages=[\n {\"role\": \"system\", \"content\": \"You are a smart and creative novelist\"},\n {\"role\": \"user\", \"content\": \"Please write a short fairy tale story as a fairy tale master\"}\n ]\n)\n\nprint(completion.choices[0].message.content)\n\n```\n\nWas this page helpful?",
+      "tool_call_id": "call_8a2b04bb4e9243f49c77c342"
+    },
+    {
+      "role": "assistant",
+      "content": "はい、あります。仕様上**完全に legal な応答**で、しかも公式ドキュメントに明記された挙動が複数あります。\n\n## API仕様として空レスポンスが起きる経路\n\n**1. reasoning トークンが出力予算を使い切る(最も一般的)**\n\nOpenAIのreasoningガイドにはこうあります(今日取得した公式docから):\n\n> \"If the generated tokens reach the context window limit or the `max_output_tokens` value you've set, you'll receive a response with a `status` of `incomplete`... This might occur **before any visible output tokens are produced**, meaning you could incur costs for input and reasoning tokens **without receiving a visible response**.\"\n\n サンプルコードの分岐名はそのまま `\"Ran out of tokens during reasoning\"` です。ハイブリッドシンキングモデル(GLM系は `thinking.type: enabled` がデフォルト)では、推論に予算を全部使うと `content` が空のまま normal に終わります。\n\n**2. content_filter** — `finish_reason: \"content_filter\"` では content が空/nullで返る。これも仕様内。\n\n**3. ルーター/プロバイダのフェイルオーバー** — この環境は `orcarouter` 経由で `z-ai/glm-5.3-flash` 等を使っています。ルーターは上流が途中で死んだとき空の完了を返すことがあり、上流次第では `finish_reason: \"stop\"` に見えることもあります。\n\nスキーマ上、Chat Completions の `content` は `string | null` で、**空文字列は有効な値**です。「成功応答のcontentは非空」という保証はどこにもありません。\n\n## 実測\n\n- #194のセッション: assistantメッセージ60件のうち tool_calls 付き58件、**テキスト付き0件、空content+tool_callsなし2件**(メッセージ126と138)。両方とも末端で、coreは `completed` と記録。\n- メトリクス: 直近7日で31セッション中12(38.7%)が `completed` なのに無言。レアケースではありません。\n- 使っているモデル構成(ハイブリッドシンキング+フラッシュ級+ルーター)は、この挙動の確率を上げる方向に揃っています。\n\n## ただし判定材料が失われている\n\nどのメカニズムだったかは**事後には判別できません**。仕様は `finish_reason`(`length` / `content_filter` / `stop`)で区別できるのに、atomaがセッションに保存するのは `role/content/tool_calls` だけで `finish_reason` が落ちています。ここはatoma本体(yuma-seno/atoma)側の改善ポイントです — 記録しておけば「予算切れなのか、フィルタなのか、上流死なのか」が統計として見えるようになります。\n\n## 設計への含意\n\n空レスポンスの**原因が何であれ、クライアント側の正しい扱いは同じ**です。「モデルが何も言わずターンを終えた = 無言のrun」であり、メカニズムの判別を待たずに機械側が終端コメントを書く。理由は前回述べた通りで、結果コメントはエージェントの文章ではなくターン終端マーカーであり、ガードの不変条件(全runが終端を一つ残す)を守るためです。skip の正当化は「別のコメントが既に終端している」場合だけに限るべきで、その判定は「最終assistantメッセージがtool_callsを持つか」でできます — これもセッションに既にある情報です。\n\nなお、#186は `sessions/issue-186/` が atomaton-data に存在しないため(404を確認済み)、別経路の可能性が残ります。修正に着手する際は仕組みの修正と#186の一次原因確認をセットで行います。",
+      "atoma_metadata": {
+        "github_comment_id": 6232349429,
         "agent": "atomaton"
       }
     }
@@ -1885,11 +2301,11 @@
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 3,
-      "snapshot_hash": "234eb6a74aa605b3c2ee8541200c4c31bf9f38bd3e89a6404fe1658e55ff7140",
-      "version": 1,
+      "event_count": 4,
+      "resolved_number": "204",
+      "snapshot_hash": "32e1fde70446c3dbdcc59fdcb43bfeb9d5059b18f619219c06c6f9b5a98b1316",
       "type": "issue",
-      "resolved_number": "204"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -1948,6 +2364,26 @@
         }
       },
       "started": "2026-10-17T08:12:04Z"
+    },
+    {
+      "ended": "2026-10-17T09:34:43Z",
+      "ended_because": "completed",
+      "iterations": 23,
+      "messages": 244,
+      "seconds": 522,
+      "server_calls": {
+        "files": {
+          "grep": 2,
+          "read": 5
+        },
+        "shell": {
+          "bash": 12
+        },
+        "web": {
+          "fetch": 3
+        }
+      },
+      "started": "2026-10-17T09:26:01Z"
     }
   ]
 }
