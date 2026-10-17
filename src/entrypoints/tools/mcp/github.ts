@@ -270,7 +270,14 @@ function prContextNumber(args: { pull_number?: number }): number {
   return parsed;
 }
 
-const CREATE_ISSUE_SCHEMA = z.object({
+/**
+ * The arguments of BOTH issue-creating tools.
+ *
+ * One schema rather than two, because the two differ in the edge they record -- a
+ * link under this run's issue, or no parent at all -- and not in what the caller
+ * provides. Two copies would be the pair that drifts.
+ */
+const ISSUE_ARGS_SCHEMA = z.object({
   title: z.string().min(1).describe("Concise issue title."),
   body: z.string().optional().describe("Issue body in GitHub-flavored Markdown. Defaults to an empty body."),
   labels: stringArray("Existing repository label names to apply. Defaults to no extra labels.").optional(),
@@ -327,10 +334,10 @@ const COMMIT_AND_PUSH_SCHEMA = z.object({
  * failure, or address it to a name nobody reads and be silent in effect. Neither
  * needs intent: a login is a word, and agents repeat words they have read.
  *
- * `create_pr` has refused this since its parent-issue tag was added; `create_issue`
- * did not, and the asymmetry was load-bearing. `NOTIFY_TAG.read` returns the first
- * match, so the machine's tag wins while there is one -- and when the requester is
- * unknown there is none, which left the agent's as the only tag in the body.
+ * `create_pr` has refused this since its parent-issue tag was added and the
+ * issue-creating tools did not, and the asymmetry was load-bearing. `NOTIFY_TAG.read`
+ * returns the first match, so the machine's tag wins while there is one -- and when the
+ * requester is unknown there is none, which left the agent's as the only tag in the body.
  */
 function notifyTagPrefix(body: string, what: string): string {
   if (NOTIFY_TAG.has(body)) mcpFail(`${what} body already contains a notify tag; refusing to add another`);
@@ -338,10 +345,26 @@ function notifyTagPrefix(body: string, what: string): string {
   return login ? `${NOTIFY_TAG.write(login)}\n` : "";
 }
 
-async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<string> {
+/**
+ * The body of an issue an agent wrote, with the three checks both creating tools apply.
+ *
+ * One function, so `create_sub_issue` and `create_root_issue` cannot come to disagree
+ * about what an agent may write into an issue body: an issue body is read for a command
+ * by `resolve_entry_agent.ts` when the issue is opened, so a command on a line of its
+ * own would start a run nobody asked for; the notify tag decides who is told about the
+ * work, so the run being reported on may not write one; and a mention has to be checked
+ * before GitHub notifies a stranger.
+ *
+ * `instead` names the route the writer meant, and differs between the two: a child is
+ * started with `launch_sub_agent`, and a root issue is not dispatched by an agent at all.
+ */
+function checkedIssueBody(body: string, instead: string): string {
+  refuseCommandLines(body, "issue body", instead);
+  return notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
+}
+
+async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<string> {
   const title = a.title;
-  let body = a.body ?? "";
-  let labels = a.labels ?? [];
   const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
 
   // A pull request run does not create sub-issues. It reviews or fixes one pull
@@ -350,25 +373,36 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   // created here would hang under a node that was never decomposing anything, and
   // the pull request's `atomaton/in-progress` guard would be held by a chain that
   // had moved elsewhere. Decomposition belongs to an issue run.
+  //
+  // A defect found on a pull request run has a route of its own: `create_root_issue`,
+  // which makes no link and holds no guard. Before it existed, a pull request run had
+  // nowhere at all to file one. See #192.
   if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
     mcpFail(
-      "create_issue is for an issue run that is decomposing work into sub-issues. " +
+      "create_sub_issue is for an issue run that is decomposing work into sub-issues. " +
         "This run is on a pull request, which reviews or fixes one pull request rather than " +
-        "decomposing it. Use create_pr to hand this pull request to a reviewer, or " +
-        "request_close_issue to conclude it.",
+        "decomposing it. Use create_root_issue to report a defect that is nobody's child, " +
+        "create_pr to hand this pull request to a reviewer, or request_close_issue to conclude it.",
     );
   }
 
-  // An issue body is read for a command by `resolve_entry_agent.ts` when the issue is
-  // opened, so an agent writing one here would start a run on a child it just created.
-  // The route it meant is `launch_sub_agent`, which is also what the parent's
+  // A sub-issue needs a parent, and the name now says so. This used to create the
+  // issue anyway -- with the sub-issue label and no link -- and add a `note` saying
+  // nothing would aggregate it: an issue that looked like a child, counted as a
+  // sibling, and belonged to no tree. Creating an issue outside the tree is
+  // `create_root_issue`'s job, so the by-product is gone rather than reported.
+  if (!parentNum) {
+    mcpFail(
+      "create_sub_issue links its issue under the issue this run is working on, and this run " +
+        "has no current issue to link it under. Use create_root_issue to file an issue that is " +
+        "nobody's child.",
+    );
+  }
+
+  // The route the writer meant is `launch_sub_agent`, which is also what the parent's
   // aggregation waits on.
-  refuseCommandLines(
-    body,
-    "issue body",
-    "Use `launch_sub_agent` to start an agent on a sub-issue.",
-  );
-  body = notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
+  const body = checkedIssueBody(a.body ?? "", "Use `launch_sub_agent` to start an agent on a sub-issue.");
+  let labels = a.labels ?? [];
   const subIssueLabel = getLabel("sub_issue");
   const ensured = gh(
     "label", "create", subIssueLabel,
@@ -389,7 +423,9 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   const num = Number(stdout.trim().split("/").pop());
   if (!Number.isFinite(num)) mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
 
-  // The link IS the record now, so a failure here is a failure of `create_issue`.
+  // The link IS the record now, and the issue exists by this point and cannot be
+  // un-created, so a failure names it: an agent that is told only
+  // "create_sub_issue failed" would file it again.
   //
   // This used to be best-effort, logged without a severity word, because the
   // `atomaton:parent` tag in the body was what aggregation read and the link was "the
@@ -397,48 +433,107 @@ async function createIssue(a: z.infer<typeof CREATE_ISSUE_SCHEMA>): Promise<stri
   // ever rewrote it, so a person re-parenting a sub-issue in the web UI left two
   // answers in the system. See `adapters/github/parent-issue.ts`.
   //
-  // The issue exists by this point and cannot be un-created, so the failure names it:
-  // an agent that is told only "create_issue failed" would file it again.
-  if (parentNum) {
-    try {
-      const pid = await resolveIssueId(Number(parentNum));
-      const sid = await resolveIssueId(num);
-      ghGraphql(
-        "mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}",
-        { parent: pid, sub: sid },
-      );
-      log(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
-    } catch (e) {
-      mcpFail(
-        `Issue #${num} was created, but could not be linked under #${parentNum} as a sub-issue: ${e}. ` +
-          `Nothing records that edge except the link, so #${num} is currently a root issue and no aggregation ` +
-          `will pick it up. Do not create it again — add it under #${parentNum} in the web UI, or retry the link.`,
-      );
-    }
+  // No branch for "no parent to link under": that is refused above, before the issue is
+  // created. It used to create one anyway -- with the label and no link -- and add a
+  // `note` saying nothing would aggregate it. `create_root_issue` is where an issue
+  // that belongs to no tree is made now, so that outcome is asked for rather than
+  // arrived at.
+  try {
+    const pid = await resolveIssueId(Number(parentNum));
+    const sid = await resolveIssueId(num);
+    ghGraphql(
+      "mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}",
+      { parent: pid, sub: sid },
+    );
+    log(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
+  } catch (e) {
+    mcpFail(
+      `Issue #${num} was created, but could not be linked under #${parentNum} as a sub-issue: ${e}. ` +
+        `Nothing records that edge except the link, so #${num} is currently a root issue and no aggregation ` +
+        `will pick it up. Do not create it again — add it under #${parentNum} in the web UI, or retry the link.`,
+    );
   }
 
-  logOp("create_issue", { number: num, title });
-  // `parent` is returned because asking for a sub-issue does not guarantee getting
-  // one. With no `ISSUE_NUMBER` -- a run that is not working on an issue -- the label
-  // goes on and there is no parent to link it under, producing an issue that looks
-  // like a child and that no aggregation will ever pick up. `{number, url}` reported
-  // that as plain success.
-  //
-  // The other way of ending up here is gone: a failed link is now a failed call, so
-  // reaching this line with `parent` set means the link exists.
-  const parent = parentNum ? Number(parentNum) : null;
+  logOp("create_sub_issue", { number: num, title, parent: Number(parentNum) });
   return JSON.stringify({
     number: num,
     url: stdout.trim(),
-    parent,
-    ...(parent
-      ? {}
-      : {
-          note:
-            "Labelled as a sub-issue, but this run has no current issue, so no parent was recorded. " +
-            "Nothing will aggregate it. Create it from a run that is working on the parent, or treat it " +
-            "as a root issue.",
-        }),
+    parent: Number(parentNum),
+  });
+}
+
+/**
+ * Create an issue that is nobody's child.
+ *
+ * The tree is Issue -> sub-issue -> pull request, and every creating tool above lines
+ * its issue up under the run's own. That leaves no route at all for the one kind of
+ * issue that belongs to no node: a defect in the machinery itself, which is nobody's
+ * child, or a decision somebody has to make before any work exists to decompose. A
+ * pull request run -- which refuses `create_sub_issue` because it is not decomposing
+ * anything -- is where such a report most often originates, and before this tool it had
+ * nowhere to put one.
+ *
+ * What it deliberately does NOT do:
+ *
+ *   - no `atomaton/sub-issue` label, and no `gh label create` to provision it. That
+ *     label is what `countOpenSiblings` counts, so a root issue wearing it would be
+ *     counted as a sibling of a parent it does not have.
+ *   - no `addSubIssue` mutation. The absence of a parent is the point, not a failure.
+ *
+ * Nor is it a by-product of `create_sub_issue` any more. That tool used to make one
+ * when the run had no issue number, label and no link included, and warn in a `note`
+ * that nothing would aggregate it -- an issue that looked like a child and belonged to
+ * no tree. Refusing there and creating here is the same behaviour with the destination
+ * named.
+ */
+async function createRootIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<string> {
+  const title = a.title;
+  const labels = a.labels ?? [];
+
+  // `create_root_issue` is allowed on a pull request run, unlike `create_sub_issue`.
+  // The reasons for that refusal do not apply here: nothing is linked under the pull
+  // request's own node, and holding `atomaton/in-progress` on it is a question about
+  // the chain, not about an issue with no parent. What does apply is that a defect in
+  // a tool is found while reviewing a pull request more often than anywhere else.
+  const body = checkedIssueBody(
+    a.body ?? "",
+    "A root issue is filed for a person to triage rather than dispatched from here, " +
+      "so describe the work in prose.",
+  );
+
+  // Asked for rather than merely not added. A caller passing the label by hand would
+  // otherwise get the one outcome this tool exists to make impossible: an issue that
+  // `countOpenSiblings` counts among a parent's children while GitHub holds no edge
+  // to that parent.
+  const subIssueLabel = getLabel("sub_issue");
+  if (labels.includes(subIssueLabel)) {
+    mcpFail(
+      `create_root_issue creates an issue with no parent, so \`${subIssueLabel}\` -- the label a ` +
+        "parent's aggregation counts its children by -- may not be applied to it. Call " +
+        "create_sub_issue to file a child under this run's issue, or drop the label.",
+    );
+  }
+
+  const cmd = ["issue", "create", "--repo", REPO, "--title", title];
+  if (body) cmd.push("--body", body);
+  for (const l of labels) cmd.push("--label", l);
+
+  const { code, stdout, stderr } = gh(...cmd);
+  if (code) mcpFail(stderr || stdout);
+  const num = Number(stdout.trim().split("/").pop());
+  if (!Number.isFinite(num)) mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
+
+  logOp("create_root_issue", { number: num, title });
+  // `root: true` and `parent: null` both say the same thing, because the reader of a
+  // result JSON should not have to infer "created as a root" from a missing field --
+  // and the one-line note says it in words, since having no parent is what was asked
+  // for rather than a link that failed.
+  return JSON.stringify({
+    number: num,
+    url: stdout.trim(),
+    parent: null,
+    root: true,
+    note: "Created as a root issue: it has no parent, by design rather than because a link failed.",
   });
 }
 
@@ -784,7 +879,7 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   // PR run could open a second PR whose base is the first PR's head -- a pull request
   // under a pull request, which is not a shape the tree has.
   //
-  // `create_issue` and `launch_sub_agent` refuse on a PR run for the same reason; this
+  // `create_sub_issue` and `launch_sub_agent` refuse on a PR run for the same reason; this
   // is the third tool that could add a child, and it was the one left open.
   if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
     mcpFail(
@@ -1484,10 +1579,16 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
 
 const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
-    name: "create_issue",
-    description: "Create a GitHub issue in the current repository and return its number and URL. Use this for durable work items, especially delegated child tasks; the new issue is linked under the current issue as a sub-issue. This mutates GitHub and records the operation in Atomaton's audit log.",
-    schema: CREATE_ISSUE_SCHEMA,
-    handler: createIssue,
+    name: "create_sub_issue",
+    description: "Create a GitHub issue and link it under the issue THIS RUN is working on, as a child of it. Use this for durable work items and for the sub-issues a decomposition is made of; the new issue is always linked under the current issue and always carries the sub-issue label, and the call is refused on a pull request run and on a run with no current issue. To file an issue that is nobody's child -- a defect in the tools, or a decision somebody has to make -- use create_root_issue. This mutates GitHub and records the operation in Atomaton's audit log.",
+    schema: ISSUE_ARGS_SCHEMA,
+    handler: createSubIssue,
+  }),
+  defineMcpTool({
+    name: "create_root_issue",
+    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. Returns {number, url, parent: null, root: true} and mutates GitHub.",
+    schema: ISSUE_ARGS_SCHEMA,
+    handler: createRootIssue,
   }),
   defineMcpTool({ name: "get_issue", description: "Retrieve one issue's title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). It does NOT return the comments themselves — use get_issue_comments for those, which takes a range. Returns a JSON issue object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),

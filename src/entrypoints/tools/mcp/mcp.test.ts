@@ -127,7 +127,7 @@ describe("mcp/github.ts", () => {
       jsonrpc: "2.0", id: 2, method: "tools/list", params: {},
     });
     const names = r.result.tools.map((t: { name: string }) => t.name);
-    for (const tool of ["create_issue", "create_pr", "get_issue", "search_remote_code", "get_pr_diff", "sync_branch"]) {
+    for (const tool of ["create_sub_issue", "create_root_issue", "create_pr", "get_issue", "search_remote_code", "get_pr_diff", "sync_branch"]) {
       expect(names).toContain(tool);
     }
   });
@@ -317,7 +317,7 @@ describe("mcp/github.ts", () => {
         },
         {
           BRANCH: "HEAD",
-          // An ISSUE run, not a pull request run: `create_issue`/`launch_sub_agent`
+          // An ISSUE run, not a pull request run: `create_sub_issue`/`launch_sub_agent`
           // and now `create_pr` itself refuse on a pull request run (a pull request is
           // a leaf and opens nothing below it), so the detached-checkout refusal is
           // reached by the one run type that legitimately opens a pull request. The
@@ -373,7 +373,7 @@ describe("mcp/github.ts", () => {
 
   /**
    * A pull request is a leaf of the tree, so a pull request run does not open another
-   * one. `create_issue` and `launch_sub_agent` already refuse on a PR run; this is the
+   * one. `create_sub_issue` and `launch_sub_agent` already refuse on a PR run; this is the
    * third tool that could add a child, and it was the one left open.
    */
   test("create_pr refuses on a pull request run", async () => {
@@ -502,12 +502,34 @@ describe("mcp/github.ts", () => {
     }
   });
 
-  test("create_issue rejects malformed gh output", async () => {
+  test("create_sub_issue rejects malformed gh output", async () => {
     const r = await sendRequest(
       "github.ts",
       {
         jsonrpc: "2.0", id: 3, method: "tools/call",
-        params: { name: "create_issue", arguments: { title: "Test" } },
+        params: { name: "create_sub_issue", arguments: { title: "Test" } },
+      },
+      {
+        ...fakeGhSeam(),
+        // A run on an issue, because a sub-issue needs a parent to be linked under.
+        ISSUE_NUMBER: "1",
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "not-a-url" }]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("gh issue create: unexpected output");
+  });
+
+  /**
+   * The sibling of the test above, for the tool whose whole purpose is having no
+   * parent. Nothing is linked, so nothing has to be resolved first.
+   */
+  test("create_root_issue rejects malformed gh output", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 3, method: "tools/call",
+        params: { name: "create_root_issue", arguments: { title: "Test" } },
       },
       {
         ...fakeGhSeam(),
@@ -521,9 +543,9 @@ describe("mcp/github.ts", () => {
   /**
    * The tag decides who hears about this work, so an agent that can write it can
    * redirect the report of its own failure or address it to a name nobody reads.
-   * `create_pr` refused this and `create_issue` did not, and the asymmetry mattered
-   * most exactly when the requester was unknown -- with no machine tag to win the
-   * first match, the agent's was the only one in the body.
+   * `create_pr` refused this and the issue-creating tools did not, and the asymmetry
+   * mattered most exactly when the requester was unknown -- with no machine tag to win
+   * the first match, the agent's was the only one in the body.
    */
   /**
    * Agent prose landing where people read gets its mentions checked.
@@ -543,14 +565,20 @@ describe("mcp/github.ts", () => {
         {
           jsonrpc: "2.0", id: 41, method: "tools/call",
           params: {
-            name: "create_issue",
+            name: "create_sub_issue",
             arguments: { title: "A defect", body: "Looks right. @torvalds should see this." },
           },
         },
         {
           ...fakeGhSeam(),
+          ISSUE_NUMBER: "1",
           FAKE_GH_LOG: log,
-          FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/7" }]),
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["issue", "create"], stdout: "https://github.com/o/r/issues/7" },
+            // The link has to succeed for the call to succeed: a sub-issue whose parent
+            // could not be recorded is a failed call, which is the whole of #182.
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { id: "I_x" } } } }) },
+          ]),
         },
       );
       // The argv as issued, rather than the log as text: what matters is the string gh
@@ -573,18 +601,19 @@ describe("mcp/github.ts", () => {
     }
   });
 
-  test("create_issue refuses a body that already names who to notify", async () => {
+  test("create_sub_issue refuses a body that already names who to notify", async () => {
     const r = await sendRequest(
       "github.ts",
       {
         jsonrpc: "2.0", id: 31, method: "tools/call",
         params: {
-          name: "create_issue",
+          name: "create_sub_issue",
           arguments: { title: "Test", body: "<!-- atomaton:notify=someone-else -->" },
         },
       },
       {
         ...fakeGhSeam(),
+        ISSUE_NUMBER: "1",
         FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
       },
     );
@@ -599,18 +628,19 @@ describe("mcp/github.ts", () => {
    * `extract_directive.ts` reads a pull request body the same way. So an agent writing
    * `/engineer` into a body would start a run by accident.
    */
-  test("create_issue refuses a body carrying a command on its own line", async () => {
+  test("create_sub_issue refuses a body carrying a command on its own line", async () => {
     const r = await sendRequest(
       "github.ts",
       {
         jsonrpc: "2.0", id: 32, method: "tools/call",
         params: {
-          name: "create_issue",
+          name: "create_sub_issue",
           arguments: { title: "Test", body: "Do the thing.\n\n/engineer" },
         },
       },
       {
         ...fakeGhSeam(),
+        ISSUE_NUMBER: "1",
         FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
       },
     );
@@ -620,19 +650,23 @@ describe("mcp/github.ts", () => {
   });
 
   // The point of "on a line of its own": prose that mentions a command is not one.
-  test("create_issue allows a command mentioned inside a sentence", async () => {
+  test("create_sub_issue allows a command mentioned inside a sentence", async () => {
     const r = await sendRequest(
       "github.ts",
       {
         jsonrpc: "2.0", id: 33, method: "tools/call",
         params: {
-          name: "create_issue",
+          name: "create_sub_issue",
           arguments: { title: "Test", body: "Comment /engineer to start one." },
         },
       },
       {
         ...fakeGhSeam(),
-        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+        ISSUE_NUMBER: "1",
+        FAKE_GH_RESPONSES: JSON.stringify([
+          { match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" },
+          { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { id: "I_x" } } } }) },
+        ]),
       },
     );
     expect(r.result.isError).toBe(false);
@@ -645,12 +679,12 @@ describe("mcp/github.ts", () => {
    * under a node that was never decomposing anything -- and the pull request's
    * `atomaton/in-progress` guard would be held by a chain that had moved elsewhere.
    */
-  test("create_issue refuses on a pull request run", async () => {
+  test("create_sub_issue refuses on a pull request run", async () => {
     const r = await sendRequest(
       "github.ts",
       {
         jsonrpc: "2.0", id: 34, method: "tools/call",
-        params: { name: "create_issue", arguments: { title: "Child task" } },
+        params: { name: "create_sub_issue", arguments: { title: "Child task" } },
       },
       {
         ...fakeGhSeam(),
@@ -661,9 +695,11 @@ describe("mcp/github.ts", () => {
     );
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0].text).toContain("pull request");
+    // And is pointed at the tool that does work here, rather than left with no route.
+    expect(r.result.content[0].text).toContain("create_root_issue");
   });
 
-  test("create_issue provisions the sub-issue label before creating a child", async () => {
+  test("create_sub_issue provisions the sub-issue label before creating a child", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-create-sub-issue-"));
     const log = join(dir, "gh.log");
     try {
@@ -671,21 +707,195 @@ describe("mcp/github.ts", () => {
         "github.ts",
         {
           jsonrpc: "2.0", id: 4, method: "tools/call",
-          params: { name: "create_issue", arguments: { title: "Child task" } },
+          params: { name: "create_sub_issue", arguments: { title: "Child task" } },
         },
         {
           ...fakeGhSeam(),
+          ISSUE_NUMBER: "3",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["label", "create", "atomaton/sub-issue"] },
             { match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/12" },
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { id: "I_x" } } } }) },
           ]),
         },
       );
-      expect(response.result.isError).toBe(false);
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
       const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
-      expect(calls[0]).toContain("--force");
-      expect(calls[1]).toContain("atomaton/sub-issue");
+      const label = calls.find((argv) => argv[0] === "label" && argv[1] === "create");
+      expect(label, "the sub-issue label has to exist before it can be applied").toBeDefined();
+      expect(label).toContain("--force");
+      const created = calls.find((argv) => argv[0] === "issue" && argv[1] === "create");
+      expect(created, "the child issue itself").toBeDefined();
+      expect(created).toContain("atomaton/sub-issue");
+      // And the link, which is now the only record of the edge (#182).
+      const link = calls.find((argv) => argv.some((a) => a.includes("addSubIssue")));
+      expect(link, "a sub-issue has to be linked under the issue the run is on").toBeDefined();
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  /**
+   * A sub-issue with no parent is not a sub-issue.
+   *
+   * This used to succeed and file a `note` saying nothing would aggregate the issue --
+   * an issue wearing the sub-issue label, counted as a sibling, and belonging to no
+   * tree. Creating something outside the tree is `create_root_issue`'s job now, so the
+   * refusal names it instead of producing the half-made issue.
+   */
+  test("create_sub_issue refuses when this run has no issue to link under", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 36, method: "tools/call",
+        params: { name: "create_sub_issue", arguments: { title: "Orphan" } },
+      },
+      {
+        ...fakeGhSeam(),
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("create_root_issue");
+  });
+
+  /**
+   * The root tool, on both run types.
+   *
+   * It is the one creating tool a pull request run may call, and that is the point of
+   * it: #178/#179/#192 are three runs that found a defect in the tools, read the
+   * prompt telling them to file one, and were refused by the only tool that could --
+   * with nowhere else to put it. Nothing about an issue with no parent reproduces the
+   * reasons `create_sub_issue` refuses on a pull request run.
+   *
+   * `label create` and `addSubIssue` are asserted absent from the argv actually issued,
+   * not merely from the result: the label is what `countOpenSiblings` counts, so a root
+   * issue wearing it corrupts the aggregation of a parent it does not have.
+   */
+  for (const [runType, article] of [["issue", "an"], ["pr", "a"]] as const) {
+    test(`create_root_issue creates an unlabelled, unlinked issue on ${article} ${runType} run`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), `atomaton-create-root-${runType}-`));
+      const log = join(dir, "gh.log");
+      try {
+        const response = await sendRequest(
+          "github.ts",
+          {
+            jsonrpc: "2.0", id: 4, method: "tools/call",
+            params: { name: "create_root_issue", arguments: { title: "A defect in the search server" } },
+          },
+          {
+            ...fakeGhSeam(),
+            ATOMATON_RUN_TYPE: runType,
+            ISSUE_NUMBER: "21",
+            FAKE_GH_LOG: log,
+            FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/13" }]),
+          },
+        );
+        expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+        expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+          number: 13,
+          parent: null,
+          root: true,
+        });
+
+        const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+        expect(calls.some((argv) => argv[0] === "label" && argv[1] === "create"), "a root issue carries no sub-issue label").toBe(false);
+        expect(calls.some((argv) => argv.some((a) => a.includes("addSubIssue"))), "a root issue has no parent to link").toBe(false);
+        expect(calls.some((argv) => argv[0] === "issue" && argv[1] === "create")).toBe(true);
+        expect(calls.flat().join(" ")).not.toContain("atomaton/sub-issue");
+      } finally {
+        removeTemp(dir);
+      }
+    });
+  }
+
+  // The acceptance criterion holds for every input, not just the default one: a caller
+  // who names the sub-issue label on a root issue would otherwise get an issue that
+  // `countOpenSiblings` counts among a parent's children with no edge to that parent.
+  test("create_root_issue refuses the sub-issue label", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 37, method: "tools/call",
+        params: {
+          name: "create_root_issue",
+          arguments: { title: "Orphan", labels: ["atomaton/sub-issue"] },
+        },
+      },
+      {
+        ...fakeGhSeam(),
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("atomaton/sub-issue");
+    expect(r.result.content[0].text).toContain("create_sub_issue");
+  });
+
+  test("create_root_issue refuses a body that already names who to notify", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 31, method: "tools/call",
+        params: {
+          name: "create_root_issue",
+          arguments: { title: "Test", body: "<!-- atomaton:notify=someone-else -->" },
+        },
+      },
+      {
+        ...fakeGhSeam(),
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("already contains a notify tag");
+  });
+
+  test("create_root_issue refuses a body carrying a command on its own line", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 32, method: "tools/call",
+        params: {
+          name: "create_root_issue",
+          arguments: { title: "Test", body: "Do the thing.\n\n/engineer" },
+        },
+      },
+      {
+        ...fakeGhSeam(),
+        FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("/engineer");
+  });
+
+  test("create_root_issue escapes a mention it cannot vouch for", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-root-mentions-"));
+    const log = join(dir, "gh.log");
+    try {
+      await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 41, method: "tools/call",
+          params: {
+            name: "create_root_issue",
+            arguments: { title: "A defect", body: "Looks right. @torvalds should see this." },
+          },
+        },
+        {
+          ...fakeGhSeam(),
+          ISSUE_NUMBER: "21",
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/7" }]),
+        },
+      );
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      const create = calls.find((argv) => argv.includes("--body"));
+      const body = create ? (create[create.indexOf("--body") + 1] ?? "") : "";
+      expect(body).toContain("Looks right. `@torvalds` should see this.");
+      expect(body).toContain("had the notification removed");
     } finally {
       removeTemp(dir);
     }
@@ -1341,7 +1551,7 @@ describe("mcp/atomaton.ts", () => {
   });
 
   /**
-   * A sub-issue is created by `create_issue` and started here, and a person may
+   * A sub-issue is created by `create_sub_issue` and started here, and a person may
    * comment in between. If that comment asks for an agent, this dispatch would be a
    * second run on a node that already has one.
    *

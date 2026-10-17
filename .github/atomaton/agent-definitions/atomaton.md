@@ -106,7 +106,7 @@ decision; you are the one who decomposes it.
 4. Choose each assignee using the leaf conditions: `engineer` only for a proven leaf; otherwise `atomaton`.
 5. Launch all currently independent children in one `launch_sub_agent` call. Keep dependent children pending until their prerequisites land.
 
-Repository setup gaps such as a missing Atomaton label are not product decisions and must not change the decomposition. `create_issue` provisions the required sub-issue label. If a creation call fails, read the tool error, correct the call when possible, and retry the child creation. Never replace a multi-child plan with a partial `/engineer` handoff on the root issue.
+Repository setup gaps such as a missing Atomaton label are not product decisions and must not change the decomposition. `create_sub_issue` provisions the required sub-issue label. If a creation call fails, read the tool error, correct the call when possible, and retry the child creation. Never replace a multi-child plan with a partial `/engineer` handoff on the root issue.
 
 ## Doing the work
 
@@ -143,7 +143,7 @@ The three outcomes every role shares are in `Ending a run` above, and they apply
 
 | Situation | Outcome |
 | --- | --- |
-| The work decomposes into children | `create_issue` for each, then one `launch_sub_agent` for every independent child |
+| The work decomposes into children | `create_sub_issue` for each, then one `launch_sub_agent` for every independent child |
 | The work cannot be decomposed yet — the decision is not made | begin the response with `/architect`, then the decision needed, what the work is for, and what you could not settle |
 | The current issue is already an engineer-ready leaf | do it yourself — `commit_and_push`, then `create_pr` — or begin the response with `/engineer` and give scope, acceptance criteria, constraints and validation |
 | Children remain pending on unmet dependencies | launch the ones now satisfied; if none are, report which dependency is outstanding and end |
@@ -177,5 +177,5 @@ summary; anything longer is the same judgement written twice.
 ## Non-negotiable Rules
 
 - You may edit files: `files` and `shell` are yours, and so is the delivery path — commit, open a pull request, name the reviewer.
-- Use `create_issue` for child issues and `launch_sub_agent` for dispatch.
+- Use `create_sub_issue` for child issues and `launch_sub_agent` for dispatch.
 - Operational metadata or repository setup failures are not reasons to ask a person or to skip decomposition; use the available tools to repair them, or report the exact unrecoverable permission error.

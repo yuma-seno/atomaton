@@ -10,15 +10,16 @@
  * ## Why the tag is gone
  *
  * It answered the same question as GitHub's own sub-issue link, and the two could
- * disagree with nothing to say so. `create_issue` wrote the tag once, at creation,
- * and nothing ever rewrote it; the native link is a person's to change in the web UI
- * at any time. Re-parent a sub-issue there and `parentIssueOf` followed the new
- * parent while `sibling-check.ts` and `work-tree.ts` went on counting under the old
- * one — two answers, both confident.
+ * disagree with nothing to say so. The tool that creates sub-issues wrote the tag once,
+ * at creation -- it was `create_issue` then, `create_sub_issue` now -- and nothing ever
+ * rewrote it; the native link is a person's to change in the web UI at any time.
+ * Re-parent a sub-issue there and `parentIssueOf` followed the new parent while
+ * `sibling-check.ts` and `work-tree.ts` went on counting under the old one — two
+ * answers, both confident.
  *
  * The two were counted against each other before the link was chosen and nothing
  * disagreed; the counts are now on PR #193's thread. So the link is what survives,
- * and `addSubIssue` is no longer best-effort: `create_issue` fails if it cannot
+ * and `addSubIssue` is no longer best-effort: `create_sub_issue` fails if it cannot
  * establish one, because there is now nothing else recording the edge.
  *
  * The pull request half of the edge — `atomaton:parent-issue` — stays, and that

@@ -2,7 +2,7 @@
  * issue-links.ts — reads an issue's relationships out of GitHub.
  *
  * One GraphQL request per issue covers all of it: the parent and children come
- * from GitHub's sub-issues, which `create_issue` establishes through
+ * from GitHub's sub-issues, which `create_sub_issue` establishes through
  * `addSubIssue` and which a person gets for free by using the sub-issue control
  * in the web UI; the pull requests come from two places that have to be unioned,
  * for the reason the comment at that union explains.
