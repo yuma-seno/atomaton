@@ -863,17 +863,492 @@
       "role": "assistant",
       "content": "**イメージはつかめましたし、方向に賛成です。** しかもこの発想は既にリポジトリの中で一度成功しているパターンで、それを広げる形にできることを根拠に伝えます。\n\n## この形を支持する根拠\n\n- 機構側は既に同じ設計をしています。`launch_sub_agent` の報告は `<details>` で折りたたんで投稿され(`src/entrypoints/tools/mcp/atomaton.ts:243`)、その理由がコードコメントに書いてあります — 「2件のコメントが2つの出来事に読め、報告がスレッドを支配した。1件に折りたたむと、スレッドは起動したものを見せ、報告は1クリック先になる」(`src/entrypoints/tools/mcp/atomaton.ts:203-208`)。ご提案はこれを機構コメントからエージェントの報告へ広げるものです\n- **エージェント→エージェントの折りたたみは情報損失ゼロです。** 次 run はコメント本文を raw テキストで読みます(`src/entrypoints/machinery/fetch_events.ts:201-216` が全文を shaping して渡す)。折りたたみは人間の見え方だけを変え、エージェントの読み取りは1文字も減りません。だからエージェント間指示での利用はほぼ無料です\n- #16/#17 で作った報告契約(4部・各部に上限)と衝突しません。折りたたみは「見える量」の契約で、既存は「各部の長さ」の契約なので、重ねられます\n\n## 具体形(こう書きたい)\n\n1. **原則は1行に圧縮できます**: 「コメントを上から読んで開かずに行動できるようにする。読むためではなく検証のために存在するもの — 根拠一覧・再現手順・測定値・引用・却下した代替案 — を `<details>` に入れる。要約行に中身を名指しし、ネストしない。**結論と次の一手は折らない**」\n2. 4部との整合: `How you know` はほぼそのまま折りたたみ対象です。`What you could not establish` は「書く義務」の床だけ残し、長いとき折る\n3. エージェント間指示: 依頼は2行で言い、判断基準・ファイル一覧・制約を折る。`/engineer` への引き継ぎ文の形が自然にこう変わります\n\n## 正直な限界・注意(意見として言っておくべきもの)\n\n- **折りたたみは「見える量」だけを解きます。#210 の本来の不満 — 結論自体が実装語彙 — は解きません。** 前回出した「結論はコードを読まない人の言葉で、アンカーは根拠側へ」という調整とセットで初めて効きます。片方だけだと、折りたたみの中に専門語の塊が移るだけになります\n- 全部折ると「空のコメント」に見えます。結論は折らない、を契約に入れるのはこのためです\n- `<details>` 内の Markdown はインデントで描画が崩れることがあります。崩れてもタグが見えるだけなので致命的ではないですが、ルールは単純に保つのが安全です\n- #13 の方針に倣い、導入後に「折りたたみを除いた見えている文字数」と「アンカー付き主張の存続」を数件の報告で前後比較する程度はしたいです\n\n## スコープ\n\n`src/content/prompt-template.md` の報告セクション数行 + 同僚への指示の説明に1文、契約テスト1本(`tests/contract/agent-prompts.test.ts` は既存の固定句を温存したまま追加)。機構側のコード変更は不要です。\n\nこの形・この線引きで良ければ返信ください。次の run で実装します。",
       "atoma_metadata": {
-        "github_comment_id": 6253749920,
-        "agent": "atomaton"
+        "agent": "atomaton",
+        "github_comment_id": 6253749920
       }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nOKです。実装して。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-18T18:54:30Z",
+        "event_type": "issue_comment",
+        "id": 6253799713,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_09843a812d484bbe9495c125",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":85,\"offset\":228,\"path\":\"src/content/prompt-template.md\"}"
+          }
+        },
+        {
+          "id": "call_7bf20981b50a43c98c01015e",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":40,\"offset\":344,\"path\":\"src/content/prompt-template.md\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/content/prompt-template.md lines 228-312 of 404\n\n228\ta person second.\n229\t\n230\t**The work itself is not one of the parts.** When the issue asked for something\n231\twritten — an explanation, an answer, a review, a measurement — that is the body of\n232\tthis message, written once, above these parts. The parts report on the run that\n233\tproduced it; none of them is where its content goes.\n234\t\n235\tWhat the machinery and GitHub already state is stated above. What is left is what\n236\texists nowhere else — what you concluded, and how you know — in four parts, in\n237\tthis order, every time. A part with nothing in it says so; none is dropped. Three\n238\tof the four have a ceiling, and a ceiling is a limit rather than a target.\n239\t\n240\t**What you concluded.** One or two sentences, first, saying what is true now and\n241\twhat it means for whoever reads it. Not that you followed the steps and not that\n242\tthe work is complete: how the run ended is already recorded above.\n243\tTwo s\n\n[1515 characters dropped from the middle; 4000 shown]\n\nssing.\n266\t\n267\t**What happens next.** Who or what acts now, and on what. If nothing follows, say\n268\tthe work is done and stop. Three sentences at most.\n269\t\n270\tWhen what happens next is a piece of work rather than a step, write it as a\n271\tnumbered list — one bounded action per item, and no item with \"and then\" twice in\n272\tit. The reader is going to do these in order, and a paragraph is where the order\n273\tgets lost. Use the fewest steps that still work: fold a trivial step into the one\n274\tbefore it rather than giving it a number.\n275\t\n276\t**Say what is done, not that you did things.** \"The check passes from a clean tree\"\n277\tis a state the reader can act on; \"I updated the callers\" is a claim about you. And\n278\twhen you report an error, give the cause and the fix: \"the test fails at\n279\t`auth.spec.ts:42`, expected 200 and got 401, because the header is missing\" tells\n280\tthe reader what to do, where \"there seems to be a problem\" tells them only that\n281\tsomething is wrong.\n282\t\n283\t**Do not estimate time; name what it depends on.** Every run here costs minutes\n284\trather than hours, and a guess at the count is worth nothing to the reader who\n285\tdecides what happens next. What they do need is the shape — one file or six, one\n286\tcheck or the whole suite — because that is what tells them whether to continue now\n287\tor come back to it.\n288\t\n289\tSome outcomes end the session inside a tool call, because something else starts\n290\tthe moment it returns. There is no turn after one of those, so the report goes in that\n291\tcall's own text argument, and you write it there before you make the call — `body`\n292\tfor a pull request, `summary` for a close request or a sub-agent launch, `reason`\n293\tfor an environment reload. A report you meant to write afterwards is never written.\n294\t\n295\tA quotation is a copy, not a recollection. Copy what a tool returned out of the\n296\tresult rather than writing it again from memory: the wording is usually the whole\n297\tthing the reader is checking. If you are summarising rather than quoting, say so;\n298\ta summary presented as a quotation is worse than either.\n299\t\n300\tReason privately and do not narrate tool calls. An act you did not see succeed did\n301\tnot happen: an intention is not an outcome and a step you took is not a result, so\n302\treport what came back.\n303\t\n304\t**No opening and no closing.** The first line is the conclusion — not \"I looked\n305\tat\", not \"let me\", not what you are about to do. The last is what happens next.\n306\tEverything between them is a claim, an anchor, or the thing you could not pin down,\n307\tand a sentence that is none of those is a sentence to delete.\n308\t\n309\tPast five items in one list, group them and put the ones that matter first. The\n310\trest do not stop existing — they stop being the shape of the message.\n311\t\n312\tA tangent is one sentence at the end, not an interruption. Finish what was asked,\n\n[92 more lines. Read again with offset: 313.]",
+      "tool_call_id": "call_09843a812d484bbe9495c125"
+    },
+    {
+      "role": "tool",
+      "content": "src/content/prompt-template.md lines 344-383 of 404\n\n344\tthe same question here a different way.\n345\t\n346\t**A decision is needed that is not yours to make.** When it is the goal — what it\n347\tshould do, what matters more, where to stop — ask, as above: say what you would do\n348\twithout the answer and end. When it is the means, do not ask; derive it, or hand it\n349\tto whoever your role names. This is not the exit for a fact you can inspect, a\n350\treversible implementation detail, a convention this repository has already settled,\n351\tor missing repository metadata. A failing tool is not one of them either:\n352\trecovering from it, or reporting it, is yours. Write no handle on the question; the\n353\tcomment this becomes already mentions the person the work belongs to.\n354\t\n355\t**Ask, or hand off. Not both.** That mention is added only when nothing is\n356\tscheduled to run next, so a run that names the next agent silences it, and an\n357\tescalation that also hands off reaches nobody.\n358\t\n359\t**Report to whoever started this run.** A run is started by a person, by another\n360\tagent, or by the machinery, and the one that started it is the one waiting on the\n361\tresult. When another agent started it, that agent is named to you at the start of\n362\tthis run, and the way to reach it is the same slash line below: end with\n363\t`/<that agent>`. A run that finishes with a plain comment and no such line leaves\n364\tthe agent that started it never told the work is done. When a person started it,\n365\tyour report is the comment itself and the machinery mentions them; write no\n366\thandle. When the machinery started it, there is nobody waiting.\n367\t\n368\tTo hand the work to a colleague, write\n369\ta line that holds nothing but a slash and that colleague's name,\n370\ttaken from this list:\n371\t\n372\t{{COLLEAGUES_LIST}}\n373\t\n374\tPut the concrete request on the lines after it. That line dispatches the agent it\n375\tnames, so write it only when you are asking for work to be done; an outcome that\n376\tneeds no further work carries no such line. Only that line is written this way: a\n377\ttool is called rather than written, so a tool name on a line of its own is text\n378\tand nothing runs, and a skill is an argument to `atoma_builtin__load_skill` rather\n379\tthan a tool, so called as one it loads nothing and little about the reply says so.\n380\t\n381\t**After a pull request you opened has merged**, you are started again on the issue,\n382\tand the question you are here to answer is whether what merged satisfies what the\n383\tissue asked for — not whether it merged, which the thread already shows. Read the\n\n[21 more lines. Read again with offset: 384.]",
+      "tool_call_id": "call_7bf20981b50a43c98c01015e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_cb18e68ed48f49ffa06ad129",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":15,\"offset\":308,\"path\":\"src/content/prompt-template.md\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/content/prompt-template.md lines 308-322 of 404\n\n308\t\n309\tPast five items in one list, group them and put the ones that matter first. The\n310\trest do not stop existing — they stop being the shape of the message.\n311\t\n312\tA tangent is one sentence at the end, not an interruption. Finish what was asked,\n313\tthen say the other thing once, and let the reader decide whether to pick it up.\n314\t\n315\t# Ending a run\n316\t\n317\t**You cannot wait.** Nothing resumes this run, so never end by saying you will\n318\tvalidate, wait for a check, or come back to something. Say what you started and\n319\twhat is left.\n320\t\n321\tYour role contract below names an outcome for each situation it covers, and\n322\texactly one of them ends this run. Reaching an outcome means making that call.\n\n[82 more lines. Read again with offset: 323.]",
+      "tool_call_id": "call_cb18e68ed48f49ffa06ad129"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_968e1903d0d94a75afe86d65",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\":\"A tangent is one sentence at the end, not an interruption. Finish what was asked,\\nthen say the other thing once, and let the reader decide whether to pick it up.\\n\\n**Fold what verifies; keep what acts.** Someone reading the thread should be able\\nto act without opening a fold. What exists to be checked rather than read — the\\nevidence list, a reproduction, measurements, quotations, alternatives you ruled\\nout, instructions between agents — goes inside `<details><summary>…</summary>`\\nfold: the summary line names what is inside, the conclusion and the next step are\\nnever folded, and folds do not nest. Folding is how the visible amount drops\\nwithout anything being dropped: the next run reads the full text, so nothing is\\nlost to the model — and a fold whose summary hides the one thing a reader needed\\nis a fold that did the opposite of its job.\\n\\n# Ending a run\",\"old_string\":\"A tangent is one sentence at the end, not an interruption. Finish what was asked,\\nthen say the other thing once, and let the reader decide whether to pick it up.\\n\\n# Ending a run\",\"path\":\"src/content/prompt-template.md\",\"replace_all\":false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/prompt-template.md.",
+      "tool_call_id": "call_968e1903d0d94a75afe86d65"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_3f00035f8f154c3d9822af3e",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\":\"Put the concrete request on the lines after it. Lead with the request itself —\\nwhat to do, in the work's own words — and fold the grounds for it, the files and\\nthe constraints, inside a `<details>` block as above: two lines of ask, the\\ndetail one click away. That line dispatches the agent it\\nnames, so write it only when you are asking for work to be done; an outcome that\\nneeds no further work carries no such line. Only that line is written this way: a\\ntool is called rather than written, so a tool name on a line of its own is text\\nand nothing runs, and a skill is an argument to `atoma_builtin__load_skill` rather\\nthan a tool, so called as one it loads nothing and little about the reply says so.\",\"old_string\":\"Put the concrete request on the lines after it. That line dispatches the agent it\\nnames, so write it only when you are asking for work to be done; an outcome that\\nneeds no further work carries no such line. Only that line is written this way: a\\ntool is called rather than written, so a tool name on a line of its own is text\\nand nothing runs, and a skill is an argument to `atoma_builtin__load_skill` rather\\nthan a tool, so called as one it loads nothing and little about the reply says so.\",\"path\":\"src/content/prompt-template.md\",\"replace_all\":false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/prompt-template.md.",
+      "tool_call_id": "call_3f00035f8f154c3d9822af3e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_624bf5ec0dad4f7ab5fb8b1f",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\":\"**How you know.** Only the claims your conclusion rests on — not every claim the\\nmessage makes. Each of those anchored to something the reader can check without\\nasking you: a path with a line number, text copied out of a tool result, a number\\nwith its unit, a command and what it exited with. Name the files. This is the\\npart folds exist for: when it runs longer than a reader wants open, fold it and\\nlet the anchors live one click away — folded, not thinned.\",\"old_string\":\"**How you know.** Only the claims your conclusion rests on — not every claim the\\nmessage makes. Each of those anchored to something the reader can check without\\nasking you: a path with a line number, text copied out of a tool result, a number\\nwith its unit, a command and what it exited with. Name the files.\",\"path\":\"src/content/prompt-template.md\",\"replace_all\":false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/prompt-template.md.",
+      "tool_call_id": "call_624bf5ec0dad4f7ab5fb8b1f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_71bb5a11d6bd4641b404a95f",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":40,\"offset\":644,\"path\":\"tests/contract/agent-prompts.test.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "tests/contract/agent-prompts.test.ts lines 644-683 of 703\n\n644\t    expect(engineer).toContain(\"A commit says why\");\n645\t    expect(engineer).toContain(\"A comment says why not\");\n646\t  });\n647\t\n648\t  /**\n649\t   * A path with a line is written the way GitHub links it.\n650\t   *\n651\t   * `path/to/file.ts:42` is a link in a comment, and prose about where something is is\n652\t   * not. The report contract already asked for \"a path with a line number\"; what it did\n653\t   * not say is the one spelling the page can follow, which is the difference between an\n654\t   * anchor a reader clicks and one they search for by hand.\n655\t   */\n656\t  test(\"the report writes an anchor in the form the page turns into a link\", () => {\n657\t    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\");\n658\t    expect(prompt).toContain(\"`path/to/file.ts:42`\");\n659\t    expect(prompt, \"and says why that spelling rather than another\").toContain(\n660\t      \"GitHub turns that into a link to\",\n661\t    );\n662\t  });\n663\t\n664\t  /**\n665\t   * A check that needs a real secret is made after the merge, and the prompt has to\n666\t   * say so *before* the run starts.\n667\t   *\n668\t   * #109 was dispatched to answer one question — whether the attachment endpoint\n669\t   * accepts the credential a run holds — and could not answer it where it was asked:\n670\t   * `curl` is refused, and even with it there is no token in the shell to send. The\n671\t   * run found that out one refusal at a time, and then proposed building a tool server\n672\t   * so the check would be possible at all. That is a reasonable reply to an impossible\n673\t   * task and a whole run spent on the wrong one.\n674\t   *\n675\t   * What the prompt owes a run instead is the boundary, stated once, so the plan it\n676\t   * makes at the start is one it can carry out. Three claims have to survive editing:\n677\t   * that the check belongs after the merge, that a tool which would make it possible\n678\t   * earlier is the wrong thing to ask for, and what a run can do here instead.\n679\t   */\n680\t  test(\"the prompt says a check needing a real secret happens after the merge\", () => {\n681\t    // Whitespace collapsed before asserting, because this file is wrapped prose: a\n682\t    // sentence breaks across a line at a column, so an assertion written against the\n683\t    // whole sentence holds only until the paragraph around it is re-flowed -- and then\n\n[20 more lines. Read again with offset: 684.]",
+      "tool_call_id": "call_71bb5a11d6bd4641b404a95f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_d578d620831a4c5fbefc668c",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\":\"  test(\\\"the report writes an anchor in the form the page turns into a link\\\", () => {\\n    const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\");\\n    expect(prompt).toContain(\\\"`path/to/file.ts:42`\\\");\\n    expect(prompt, \\\"and says why that spelling rather than another\\\").toContain(\\n      \\\"GitHub turns that into a link to\\\",\\n    );\\n  });\\n\\n  /**\\n   * Folds lower the visible cost of a comment without throwing anything away.\\n   *\\n   * #210: a report whose conclusion carried the vocabulary of the implementation.\\n   * #16/#17 capped the length of each part; neither touched how much of the\\n   * comment sits open on the page. The machinery already posts the dispatch report\\n   * behind a fold for exactly this reason (`tools/mcp/atomaton.ts`, \\\"the thread\\n   * shows what was launched and the report is one click away\\\") — the prompt now\\n   * asks the same of the agent's own text.\\n   *\\n   * The line is \\\"what verifies folds, what acts stays open\\\": a reader acting on the\\n   * comment should not have to open anything, and the next run reads the full text\\n   * either way, so nothing is lost to the model. Pinned per claim: the criterion,\\n   * what folding does not cost, and the two things that must never fold — a fold\\n   * holding the conclusion is a comment a reader cannot act on without opening.\\n   */\\n  test(\\\"the report folds what verifies and keeps the conclusion and next step open\\\", () => {\\n    const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\").replace(/\\\\s+/g, \\\" \\\");\\n    // The criterion, in the terms a reader acts against.\\n    expect(prompt, \\\"acting must not require opening a fold\\\").toContain(\\n      \\\"act without opening a fold\\\",\\n    );\\n    expect(prompt, \\\"the kinds of content the fold is for\\\").toContain(\\n      \\\"What exists to be checked rather than read\\\",\\n    );\\n    // The cost claim, so nobody later \\\"optimizes\\\" the fold into deletion.\\n    expect(prompt, \\\"the next run reads the full text\\\").toContain(\\n      \\\"nothing is lost to the model\\\",\\n    );\\n    // The two things that never fold.\\n    expect(prompt, \\\"the conclusion stays open\\\").toContain(\\n      \\\"the conclusion and the next step are never folded\\\",\\n    );\\n    // And the fold names what it hides.\\n    expect(prompt, \\\"a summary line that names what is inside\\\").toContain(\\n      \\\"the summary line names what is inside\\\",\\n    );\\n  });\\n\\n  /**\\n   * A handoff to a colleague leads with the ask, not the grounds.\\n   *\\n   * The handoff is the one piece of agent-to-agent prose on a thread a person also\\n   * reads, and it used to be shaped like a report — constraints and files first,\\n   * the actual request buried under them. The request is the part the next agent\\n   * acts on; the grounds are the part it checks when it acts. Same fold rule as\\n   * the report, applied to the other direction of writing.\\n   */\\n  test(\\\"the handoff leads with the request and folds the grounds\\\", () => {\\n    const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\").replace(/\\\\s+/g, \\\" \\\");\\n    expect(prompt, \\\"the ask comes first\\\").toContain(\\\"Lead with the request itself\\\");\\n    expect(prompt, \\\"the grounds fold\\\").toContain(\\n      \\\"fold the grounds for it, the files and the constraints\\\",\\n    );\\n  });\",\"old_string\":\"  test(\\\"the report writes an anchor in the form the page turns into a link\\\", () => {\\n    const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\");\\n    expect(prompt).toContain(\\\"`path/to/file.ts:42`\\\");\\n    expect(prompt, \\\"and says why that spelling rather than another\\\").toContain(\\n      \\\"GitHub turns that into a link to\\\",\\n    );\\n  });\",\"path\":\"tests/contract/agent-prompts.test.ts\",\"replace_all\":false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in tests/contract/agent-prompts.test.ts.",
+      "tool_call_id": "call_d578d620831a4c5fbefc668c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_102fae4711854146bbf2e167",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test tests/contract/agent-prompts.test.ts 2>&1 | tail -20\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) agent prompt contracts > the reviewer's mandatory checks are in its own definition [0.03ms]\\n(pass) agent prompt contracts > says a problem a tool reported about itself is not the agent's failure [0.04ms]\\n(pass) agent prompt contracts > the post-merge trigger and the prompt ask for the same thing [0.16ms]\\n(pass) agent prompt contracts > the close-condition contract names the branch the work lands on, not the default one [0.07ms]\\n(pass) agent prompt contracts > a reported problem turns into a filed issue that outlives the work [0.04ms]\\n(pass) agent prompt contracts > the scratch workspace is named identically wherever an agent reads about it [0.22ms]\\n(pass) agent prompt contracts > the workspace is never named through a variable [0.15ms]\\n(pass) agent prompt contracts > the shared prompt says work is a tree and where a branch merges back to [0.06ms]\\n(pass) agent prompt contracts > the shared prompt splits what to ask from what to derive, and forbids agreement [0.07ms]\\n(pass) agent prompt contracts > architect exists, reads through the delegate, and is handed work by atomaton [0.06ms]\\n(pass) agent prompt contracts > the engineer is told what belongs in code, tests, commits and comments [0.03ms]\\n(pass) agent prompt contracts > the report writes an anchor in the form the page turns into a link [0.04ms]\\n(pass) agent prompt contracts > the report folds what verifies and keeps the conclusion and next step open [0.30ms]\\n(pass) agent prompt contracts > the handoff leads with the request and folds the grounds [0.22ms]\\n(pass) agent prompt contracts > the prompt says a check needing a real secret happens after the merge [0.23ms]\\n\\n 25 pass\\n 0 fail\\n 107 expect() calls\\nRan 25 tests across 1 file. [8.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":597}",
+      "tool_call_id": "call_102fae4711854146bbf2e167"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_7082972df7684482b7805685",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test tests/contract/ 2>&1 | tail -6\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) config.yaml's recognised keys > the shipped config.yaml declares only recognised keys [0.39ms]\\n\\n 358 pass\\n 62 fail\\n 1605 expect() calls\\nRan 420 tests across 36 files. [4.52s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":4610}",
+      "tool_call_id": "call_7082972df7684482b7805685"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_9e5af2521441409480274817",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test tests/contract/ 2>&1 | grep \\\"(fail)\\\" | head -30\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) the places that start a workflow run > no generated workflow starts a run from its own bash [0.14ms]\\n(fail) the provider credential check > runs before the environment is built, and after the CLI it asks [0.13ms]\\n(fail) the provider credential check > asks about presence, never about value [0.13ms]\\n(fail) the provider credential check > carries no `if:`, because the gate it would use is not computed yet [0.06ms]\\n(fail) the provider credential check > names the credentials that exist, and asks about nothing else [0.94ms]\\n(fail) the provider credential check > passes ATOMA_PROVIDER through, promoted only when it is set [0.50ms]\\n(fail) the provider credential check > says nothing when the provider's credential is there [0.46ms]\\n(fail) the provider credential check > stops, names the missing secret, and says nothing was built [0.52ms]\\n(fail) the provider credential check > stops on an undecidable auto-detection without inventing a missing secret [0.54ms]\\n(fail) the provider credential check > warns and continues when the binary does not know the flag [0.47ms]\\n(fail) the provider credential check > warns and continues when there is no binary to ask [0.43ms]\\n(fail) the provider credential check > does not report a broken definition as a missing secret [0.48ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-runner sets the environment up before \\\"Run agent\\\" [0.13ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-check sets the environment up before \\\"Run this check's commands\\\" [0.02ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-deploy sets the environment up before \\\"Run this deployment's commands\\\" [0.02ms]\\n(fail) environment setup reaches every job that runs project commands > setup runs before any secret enters the environment [0.06ms]\\n(fail) environment setup reaches every job that runs project commands > no step before the setup carries a secret's value [0.16ms]\\n(fail) the agent's environment > is exactly the list the reserved names are built from [0.11ms]\\n(fail) workflow sources > every generated workflow names the source in this repository it came from [0.15ms]\\n(fail) generated workflows > the reranker cache is one directory, reachable by both users [0.30ms]\\n(fail) generated workflows > routes recover mode and reports invalid command syntax [0.10ms]\\n(fail) generated workflows > the failure notice does not fire on a run that already posted its report [0.11ms]\\n(fail) generated workflows > the stop watcher runs before the agent and writes where atoma is looking [0.10ms]\\n(fail) generated workflows > checks out the branch a run starts from without creating one [0.09ms]\\n(fail) generated workflows > a pr run is put on the pull request's head branch [0.13ms]\\n(fail) generated workflows > makes tool hooks executable before the agent runs [0.09ms]\\n(fail) generated workflows > every validation run checks the deliverable the pull request would merge [0.09ms]\\n(fail) generated workflows > validation reads the agent a pull request asks for from its thread [0.08ms]\\n(fail) generated workflows > every environment variable a tool server reads is passed to the agent [3.12ms]\\n(fail) generated workflows > world-writable PATH directories are closed after every install, before the agent [0.17ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":3706}",
+      "tool_call_id": "call_9e5af2521441409480274817"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_7f3980156cc544d7b0d668a5",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git stash && bun test tests/contract/ 2>&1 | tail -5; git stash pop\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool blocked by hook '/home/runner/work/_temp/atomaton-machinery/.github/atomaton-runtime/tools/hooks/shell_guard.ts': Command blocked by shell guard: Raw 'git stash' is disabled, and there is no MCP tool for it: this run does not do that. Commit with commit_and_push; read-only inspection (status, diff, log) runs normally. (attempted: git stash && bun test tests/contract/ 2>&1 | tail -5; git stash pop)",
+      "tool_call_id": "call_7f3980156cc544d7b0d668a5"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_3c2c8827c5fd45e4acf220c7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test tests/contract/ 2>&1 | grep -E \\\"^\\\\(fail\\\\)\\\" | grep -vE \\\"provider credential|environment setup|generated workflows|workflow sources|agent's environment|config.yaml|places that start a workflow\\\" | head -40\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) reserved names match the workflows they describe > the agent's step [0.13ms]\\n(fail) reserved names match the workflows they describe > the pull request's check step carries no declared credential at all [0.06ms]\\n(fail) reserved names match the workflows they describe > the credentialed check step [0.05ms]\\n(fail) reserved names match the workflows they describe > the deploy step [0.04ms]\\n(fail) the credentials step and RUN_CREDENTIALS > every credential the run declares is supplied to the step [0.10ms]\\n(fail) the credentials step and RUN_CREDENTIALS > the step supplies nothing that is not a declared credential or a secret slot [0.08ms]\\n(fail) reserved names match the workflows they describe > the agent's step [0.13ms]\\n(fail) reserved names match the workflows they describe > the pull request's check step carries no declared credential at all [0.06ms]\\n(fail) reserved names match the workflows they describe > the credentialed check step [0.05ms]\\n(fail) reserved names match the workflows they describe > the deploy step [0.04ms]\\n(fail) the credentials step and RUN_CREDENTIALS > every credential the run declares is supplied to the step [0.10ms]\\n(fail) the credentials step and RUN_CREDENTIALS > the step supplies nothing that is not a declared credential or a secret slot [0.08ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":3479}",
+      "tool_call_id": "call_3c2c8827c5fd45e4acf220c7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_cc76e596a2e44372bb4df329",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git status --porcelain | head; echo ---; git log --oneline -3\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" M src/content/prompt-template.md\\n M tests/contract/agent-prompts.test.ts\\n---\\n01c068e Merge pull request #221 from yuma-seno/atomaton/issue-204\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":144}",
+      "tool_call_id": "call_cc76e596a2e44372bb4df329"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e492c3d0c10e48f4aa2be303",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test tests/contract/reserved-names.test.ts 2>&1 | grep -A6 \\\"the agent's step\\\" | head -30\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) reserved names match the workflows they describe > the agent's step [0.21ms]\\n26 |  */\\n27 | type WorkflowStep = { name?: string; env?: Record<string, string> };\\n28 | type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };\\n29 | \\n30 | function carrierEnvKeys(workflow: string, job: string, stepName: string): string[] {\\n31 |   const doc = Bun.YAML.parse(readFileSync(`dist/.github/workflows/${workflow}`, \\\"utf8\\\")) as WorkflowDocument;\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":88}",
+      "tool_call_id": "call_e492c3d0c10e48f4aa2be303"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_3e7d489da96c47d39b2a35e2",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test tests/contract/reserved-names.test.ts 2>&1 | grep -B2 -A2 \\\"error:\\\" | head -20\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"31 |   const doc = Bun.YAML.parse(readFileSync(`dist/.github/workflows/${workflow}`, \\\"utf8\\\")) as WorkflowDocument;\\n                                  ^\\nerror: ENOENT: no such file or directory, open 'dist/.github/workflows/atomaton-runner.yml'\\n      at carrierEnvKeys (/home/runner/work/atomaton/atomaton/tests/contract/reserved-names.test.ts:31:30)\\n      at <anonymous> (/home/runner/work/atomaton/atomaton/tests/contract/reserved-names.test.ts:55:63)\\n--\\n31 |   const doc = Bun.YAML.parse(readFileSync(`dist/.github/workflows/${workflow}`, \\\"utf8\\\")) as WorkflowDocument;\\n                                  ^\\nerror: ENOENT: no such file or directory, open 'dist/.github/workflows/atomaton-check.yml'\\n      at carrierEnvKeys (/home/runner/work/atomaton/atomaton/tests/contract/reserved-names.test.ts:31:30)\\n      at <anonymous> (/home/runner/work/atomaton/atomaton/tests/contract/reserved-names.test.ts:65:18)\\n--\\n31 |   const doc = Bun.YAML.parse(readFileSync(`dist/.github/workflows/${workflow}`, \\\"utf8\\\")) as WorkflowDocument;\\n                                  ^\\nerror: ENOENT: no such file or directory, open 'dist/.github/workflows/atomaton-check.yml'\\n      at carrierEnvKeys (/home/runner/work/atomaton/atomaton/tests/contract/reserved-names.test.ts:31:30)\\n      at <anonymous> (/home/runner/work/atomaton/atomaton/tests/contract/reserved-names.test.ts:73:7)\\n--\\n31 |   const doc = Bun.YAML.parse(readFileSync(`dist/.github/workflows/${workflow}`, \\\"utf8\\\")) as WorkflowDocument;\\n                                  ^\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":86}",
+      "tool_call_id": "call_3e7d489da96c47d39b2a35e2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e237c9e5f2d341928fc9c5f7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun run build 2>&1 | tail -3 && bun test tests/contract/ 2>&1 | tail -5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"error: Script not found \\\"build\\\"\\n\\n 358 pass\\n 62 fail\\n 1605 expect() calls\\nRan 420 tests across 36 files. [3.40s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":3489}",
+      "tool_call_id": "call_e237c9e5f2d341928fc9c5f7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ce83970dfc4e434680598f71",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"grep -E '\\\"(build|compile|generate)\\\"' package.json; ls tests/contract/test-builds-first.test.ts && bun test tests/contract/test-builds-first.test.ts 2>&1 | tail -8\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"tests/contract/test-builds-first.test.ts\\n(pass) a script that runs tests reading the build output > bun runs `pre<name>` before `run <name>`, which is what the keys above rely on [14.88ms]\\n(pass) the commands those hooks name > `pretest` builds dist/ from nothing, so `bun run test` can read it [331.31ms]\\n(pass) the commands those hooks name > `pretest:e2e` builds dist/ from nothing, so `bun run test:e2e` can read it [322.35ms]\\n\\n 5 pass\\n 0 fail\\n 16 expect() calls\\nRan 5 tests across 1 file. [702.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":790}",
+      "tool_call_id": "call_ce83970dfc4e434680598f71"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_96a058973ef14241a76d58d1",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun run pretest 2>&1 | tail -3 && bun test tests/contract/ 2>&1 | tail -4\",\"timeout_seconds\":600}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"build-dist: bundled 12 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.7 (101 files)\\n 420 pass\\n 0 fail\\n 2215 expect() calls\\nRan 420 tests across 36 files. [3.25s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":3642}",
+      "tool_call_id": "call_96a058973ef14241a76d58d1"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_9a0a4c08b5274e699cf0578d",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test 2>&1 | tail -4\",\"timeout_seconds\":600}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" 6 skip\\n 0 fail\\n 4985 expect() calls\\nRan 1714 tests across 140 files. [19.00s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":19081}",
+      "tool_call_id": "call_9a0a4c08b5274e699cf0578d"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_027fe9e6831e43abb3c0acc6",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test 2>&1 | grep -E \\\"^ *[0-9]+ (pass|fail|skip)\\\" ; echo ---; bun test tests/contract/agent-prompts.test.ts tests/contract/deployed-config.test.ts 2>&1 | tail -4\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" 1708 pass\\n 6 skip\\n 0 fail\\n---\\n 30 pass\\n 0 fail\\n 113 expect() calls\\nRan 30 tests across 2 files. [11.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":19169}",
+      "tool_call_id": "call_027fe9e6831e43abb3c0acc6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_7a5f9a515881418c8c30422f",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":30,\"offset\":312,\"path\":\"src/content/prompt-template.md\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/content/prompt-template.md lines 312-341 of 419\n\n312\trest do not stop existing — they stop being the shape of the message.\n313\t\n314\tA tangent is one sentence at the end, not an interruption. Finish what was asked,\n315\tthen say the other thing once, and let the reader decide whether to pick it up.\n316\t\n317\t**Fold what verifies; keep what acts.** Someone reading the thread should be able\n318\tto act without opening a fold. What exists to be checked rather than read — the\n319\tevidence list, a reproduction, measurements, quotations, alternatives you ruled\n320\tout, instructions between agents — goes inside `<details><summary>…</summary>`\n321\tfold: the summary line names what is inside, the conclusion and the next step are\n322\tnever folded, and folds do not nest. Folding is how the visible amount drops\n323\twithout anything being dropped: the next run reads the full text, so nothing is\n324\tlost to the model — and a fold whose summary hides the one thing a reader needed\n325\tis a fold that did the opposite of its job.\n326\t\n327\t# Ending a run\n328\t\n329\t**You cannot wait.** Nothing resumes this run, so never end by saying you will\n330\tvalidate, wait for a check, or come back to something. Say what you started and\n331\twhat is left.\n332\t\n333\tYour role contract below names an outcome for each situation it covers, and\n334\texactly one of them ends this run. Reaching an outcome means making that call.\n335\tDescribing one does not: text saying the work looks sound, or that you will open\n336\tsomething next, leaves the repository unchanged and starts nothing.\n337\t\n338\tThree of those outcomes belong to every role. Any run can reach them, and none of\n339\tthem is a failure of yours.\n340\t\n341\t**What was asked is a question.** Answering it is the outcome: there is nothing to\n\n[78 more lines. Read again with offset: 342.]",
+      "tool_call_id": "call_7a5f9a515881418c8c30422f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_9749e005de63454a982615bf",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\":\"Report contract: fold what verifies, keep what acts open\\n\\nComments put everything a reader does not need to act in front of them —\\nevidence lists, reproductions, measurements, the machinery's own dispatch\\nreport was the one place already folded. The prompt now asks the same of the\\nagent's own text: content that exists to be checked goes inside a\\n<details> fold whose summary names what is inside; the conclusion and the\\nnext step never fold; the next run reads the full text either way, so\\nnothing is lost to the model.\\n\\nAgent-to-agent handoffs get the same line in the other direction: lead\\nwith the request, fold the grounds and constraints behind it.\\n\\nTwo contract tests pin the criterion, the cost claim, and the two things\\nthat never fold (tests/contract/agent-prompts.test.ts).\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "call_9749e005de63454a982615bf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_5c2e7d68950f47ba888e32b3",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\":\"## What this does\\n\\nImplements the folding agreement from #210: the report contract gains one principle — **fold what verifies; keep what acts open**.\\n\\n- `src/content/prompt-template.md` (report section): content that exists to be checked rather than read — evidence lists, reproductions, measurements, quotations, ruled-out alternatives, instructions between agents — goes inside `<details><summary>…</summary>`, the summary line names what is inside, folds do not nest, and **the conclusion and the next step are never folded**. Stated cost: the next run reads the full text either way, so nothing is lost to the model — folding drops the *visible* amount, not the content. `How you know` names folding as its own escape valve (folded, not thinned), so the anchor contract from #17 survives intact.\\n- `src/content/prompt-template.md` (handoff section): agent-to-agent requests lead with the ask itself and fold the files and constraints behind it.\\n- `tests/contract/agent-prompts.test.ts`: two tests pin the criterion, the kinds of content, the cost claim, the two never-folds, and the handoff shape — in the whitespace-collapsed style the file already uses for wrapped prose.\\n\\n## What this deliberately does not do\\n\\nFolding alone does not fix #210's original complaint — a conclusion written in implementation vocabulary stays that way inside or outside a fold. The vocabulary part (plain-language conclusions, anchors moved to the evidence) was discussed on the issue as a companion change and is **not** included here: this PR ships only the folding contract the issue owner approved (\\\"OKです。実装して。\\\").\\n\\nMachinery code is unchanged; it already folds its dispatch report (`src/entrypoints/tools/mcp/atomaton.ts:243`), which is the precedent this extends.\\n\\n## Validation\\n\\n- `bun run pretest` builds dist from nothing, then `bun test`: **1708 pass, 6 skip, 0 fail** across 140 files (contract suite 420/420 after build).\\n- New tests: `the report folds what verifies and keeps the conclusion and next step open`, `the handoff leads with the request and folds the grounds` — both pass from a clean tree.\\n\\nCloses #210\",\"reviewer\":\"reviewer\",\"title\":\"報告契約に折りたたみの原則を追加 — 検証のためのものは畳み、行動に必要なものは開いたまま\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'create_pr' on MCP server 'github' reported an error: Error: This pull request body contains \"fix #210\", \"Closes #210\", which GitHub acts on: merging would close whatever issue that names, without going through the path that cleans up labels and tells a parent its child is done. Remove it and try again. To close an issue, call close_issue; to link this work to the issue it belongs to, do nothing -- that link is added for you.",
+      "tool_call_id": "call_5c2e7d68950f47ba888e32b3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_def421380c0748168f986860",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\":\"## What this does\\n\\nImplements the folding agreement from #210: the report contract gains one principle — **fold what verifies; keep what acts open**.\\n\\n- `src/content/prompt-template.md` (report section): content that exists to be checked rather than read — evidence lists, reproductions, measurements, quotations, ruled-out alternatives, instructions between agents — goes inside `<details><summary>…</summary>`, the summary line names what is inside, folds do not nest, and **the conclusion and the next step are never folded**. Stated cost: the next run reads the full text either way, so nothing is lost to the model — folding drops the *visible* amount, not the content. `How you know` names folding as its own escape valve (folded, not thinned), so the anchor contract from #17 survives intact.\\n- `src/content/prompt-template.md` (handoff section): agent-to-agent requests lead with the ask itself and fold the files and constraints behind it.\\n- `tests/contract/agent-prompts.test.ts`: two tests pin the criterion, the kinds of content, the cost claim, the two never-folds, and the handoff shape — in the whitespace-collapsed style the file already uses for wrapped prose.\\n\\n## What this deliberately does not do\\n\\nFolding alone does not fix #210's original complaint — a conclusion written in implementation vocabulary stays that way inside or outside a fold. The vocabulary part (plain-language conclusions, anchors moved to the evidence) was discussed on the issue as a companion change and is **not** included here: this PR ships only the folding contract the issue owner approved (\\\"OKです。実装して。\\\").\\n\\nMachinery code is unchanged; it already folds its dispatch report (`src/entrypoints/tools/mcp/atomaton.ts:243`), which is the precedent this extends.\\n\\n## Validation\\n\\n- `bun run pretest` builds dist from nothing, then `bun test`: **1708 pass, 6 skip, 0 fail** across 140 files (contract suite 420/420 after build).\\n- New tests: `the report folds what verifies and keeps the conclusion and next step open`, `the handoff leads with the request and folds the grounds` — both pass from a clean tree.\\n\\nPart of #210\",\"reviewer\":\"reviewer\",\"title\":\"報告契約に折りたたみの原則を追加 — 検証のためのものは畳み、行動に必要なものは開いたまま\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'create_pr' on MCP server 'github' reported an error: Error: This pull request body contains \"fix #210\", which GitHub acts on: merging would close whatever issue that names, without going through the path that cleans up labels and tells a parent its child is done. Remove it and try again. To close an issue, call close_issue; to link this work to the issue it belongs to, do nothing -- that link is added for you.",
+      "tool_call_id": "call_def421380c0748168f986860"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_22a5b6ef019c450ba62c7dbe",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\":\"## What this does\\n\\nImplements the folding agreement on the issue this run is on: the report contract gains one principle — **fold what verifies; keep what acts open**.\\n\\n- `src/content/prompt-template.md` (report section): content that exists to be checked rather than read — evidence lists, reproductions, measurements, quotations, ruled-out alternatives, instructions between agents — goes inside `<details><summary>…</summary>`, the summary line names what is inside, folds do not nest, and **the conclusion and the next step are never folded**. Stated cost: the next run reads the full text either way, so nothing is lost to the model — folding drops the *visible* amount, not the content. `How you know` names folding as its own escape valve (folded, not thinned), so the anchor contract from #17 survives intact.\\n- `src/content/prompt-template.md` (handoff section): agent-to-agent requests lead with the ask itself and fold the files and constraints behind it.\\n- `tests/contract/agent-prompts.test.ts`: two tests pin the criterion, the kinds of content, the cost claim, the two never-folds, and the handoff shape — in the whitespace-collapsed style the file already uses for wrapped prose.\\n\\n## What this deliberately does not do\\n\\nFolding alone does not fix the original complaint — a conclusion written in implementation vocabulary stays that way inside or outside a fold. The vocabulary part (plain-language conclusions, anchors moved to the evidence) was discussed on the issue as a companion change and is **not** included here: this PR ships only the folding contract the issue owner approved (\\\"OKです。実装して。\\\").\\n\\nMachinery code is unchanged; it already folds its dispatch report (`src/entrypoints/tools/mcp/atomaton.ts:243`), which is the precedent this extends.\\n\\n## Validation\\n\\n- `bun run pretest` builds dist from nothing, then `bun test`: **1708 pass, 6 skip, 0 fail** across 140 files (contract suite 420/420 after build).\\n- New tests: `the report folds what verifies and keeps the conclusion and next step open`, `the handoff leads with the request and folds the grounds` — both pass from a clean tree.\",\"reviewer\":\"reviewer\",\"title\":\"報告契約に折りたたみの原則を追加 — 検証のためのものは畳み、行動に必要なものは開いたまま\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":227,\"url\":\"https://github.com/yuma-seno/atomaton/pull/227\",\"base\":\"\",\"validation_dispatched\":true}",
+      "tool_call_id": "call_22a5b6ef019c450ba62c7dbe"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 3,
+      "event_count": 4,
       "resolved_number": "210",
-      "snapshot_hash": "daf37af9846d608b40f4aaedd5ef718a8230aa046ac6c562ee48bbdc32764195",
+      "snapshot_hash": "d908fff616a4a26189433807a4186665ac86530f2d1138db2f45e66774fae03e",
       "type": "issue",
       "version": 1
     }
@@ -924,6 +1399,27 @@
         }
       },
       "started": "2026-10-18T18:43:23Z"
+    },
+    {
+      "ended": "2026-10-18T18:59:54Z",
+      "ended_because": "completed",
+      "iterations": 25,
+      "messages": 145,
+      "seconds": 278,
+      "server_calls": {
+        "files": {
+          "edit": 4,
+          "read": 5
+        },
+        "github": {
+          "commit_and_push": 1,
+          "create_pr": 3
+        },
+        "shell": {
+          "bash": 13
+        }
+      },
+      "started": "2026-10-18T18:55:16Z"
     }
   ]
 }
