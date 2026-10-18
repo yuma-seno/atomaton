@@ -3598,14 +3598,14 @@
   {
     "path": "sessions/issue-207/atomaton.json",
     "agent": "atomaton",
-    "messages": 202,
+    "messages": 205,
     "calls": 105,
     "failed": 5,
     "refused": 2,
     "skills": [
       "project/conventions"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
       "list": 1,
       "read": 28,
@@ -3668,6 +3668,15 @@
           }
         },
         "started": "2026-10-17T12:40:32Z"
+      },
+      {
+        "ended": "2026-10-18T04:01:20Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 205,
+        "seconds": 162,
+        "server_calls": {},
+        "started": "2026-10-18T03:58:38Z"
       }
     ]
   },
