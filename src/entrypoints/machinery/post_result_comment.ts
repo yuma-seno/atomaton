@@ -178,6 +178,39 @@ function subIssueState(number: string, type?: string): { isSubIssue: boolean; is
  * is better than posting an empty comment.
  */
 /**
+ * Whether the run's last assistant turn made tool calls.
+ *
+ * The one piece of evidence that an empty output file is a session-ending tool
+ * call: atoma's loop stops the moment such a call returns, so the model's last
+ * turn is a tool call with no words and nothing follows it. A run that
+ * `completed` with no calls on that turn is a different shape -- the model
+ * answered silence -- and its silence is its own, to be reported rather than
+ * assumed covered by a tool's comment.
+ *
+ * Read backwards from the END of the session with no boundary: the skip this
+ * decides is about the run's last act, and the messages below this run's
+ * boundary cannot change what the last assistant message holds. A `tool`
+ * message comes after an assistant turn's calls, so stepping over those is what
+ * reaches that turn.
+ *
+ * `false` for a session that is missing, unreadable or empty, and for an
+ * assistant message with no calls or empty ones. That direction is the point of
+ * this function: `false` makes the caller post an ending comment, and the
+ * failure it costs -- a second content-free comment under one a session-ending
+ * tool already posted -- is the smaller one, against deleting a person's
+ * ongoing thread (#194, #186).
+ */
+export function endedWithToolCalls(sessionPath: string | undefined): boolean {
+  const messages = readSession(sessionPath)?.messages ?? [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "assistant") continue;
+    return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+  }
+  return false;
+}
+
+/**
  * The last thing THIS run said, if it said anything.
  *
  * `from` is where this run's own messages begin -- everything below it was written by
@@ -575,19 +608,25 @@ function main(): void {
   // sub-agent(s): ...", "PR #N created..."), so posting a second, essentially
   // content-free "run by [agent](url)" comment here on top of that would
   // just be noise -- skip entirely rather than post an empty wrapper.
-  // Empty output has two meanings, and they need opposite treatment.
   //
-  // A session-ending tool call leaves it empty because atoma's loop stops the moment
-  // that tool returns, before the model gets another turn -- and each of those tools
-  // posts its own comment, so a second content-free one would be noise. That is the
-  // skip below, and it is right.
+  // But an empty file is a shape, not a fact, and it has three meanings. The
+  // session-ending tool call is one. #194 recorded a second: a run the core
+  // filed `completed` whose last assistant message was an empty string with no
+  // calls -- the model answered silence -- and the old skip fired on it,
+  // deleting the machinery's only comment AND the `atomaton:ended` tag that
+  // releases the thread's guard, which is how a guard came to delete a person's
+  // later comments forever. #186 recorded a third: no session file at all, so
+  // nothing can prove anything either way. The skip below therefore asks the
+  // session for its proof -- the last assistant turn carrying tool_calls --
+  // and posts the no-report notice wherever that proof is missing. Cutting a
+  // run off is its own case and keeps its own treatment: a stopped run's last
+  // turn carries tool_calls too, so `--ended-because` decides for those before
+  // the session is asked anything.
   //
-  // Reaching a limit leaves it empty too, and there nothing else speaks.
+  // Reaching a limit leaves the file empty too, and there nothing else speaks.
   // Measured: a run spent 17 minutes and 154k tokens, and the thread received
   // one notice saying the limit was reached. What it had worked out was in the
   // session and nowhere a person would look.
-  // A run that was cut short did not choose to end, so the two empties are told
-  // apart by how the run ended rather than by what it left behind.
   const endedEarly = cutShort(values["ended-because"]);
 
   let output = redacted;
@@ -603,25 +642,61 @@ function main(): void {
   }
 
   if (!output.trim()) {
-    // The skip is right for a session-ending tool call: that tool posted its own
-    // comment and a second content-free one is noise.
-    if (!endedEarly) {
+    // The skip is right only where the session PROVES a session-ending tool call:
+    // the last assistant turn made tool calls, atoma's loop stopped the moment one
+    // returned, and that tool posted its own comment -- a second content-free one
+    // would be noise. Every other empty is a run whose silence is its own: a
+    // `completed` run whose last turn carried no calls (the model answered
+    // silence), a session that is missing or unreadable. Skipping those deletes
+    // the machinery's only comment AND the thread's `atomaton:ended` tag, which
+    // is what releases the thread's guard -- the defect that let a guard delete a
+    // person's later comments forever (#194), and the shape of #186, where no
+    // session exists to prove anything either way.
+    //
+    // The cut-short runs are told apart by `--ended-because`, not by the session:
+    // a stop lands at a turn boundary, so a stopped run's last assistant turn
+    // carries tool_calls too and the session cannot tell "ended via a tool that
+    // spoke" from "stopped mid-work with nothing said". Only the first is a skip;
+    // the second is the shape the #831 notice exists for, and there nothing has
+    // posted the machinery's sentence but this step.
+    //
+    // "toward releasing the guard, never toward holding it stuck" applies here
+    // at the comment level too: the machine must not hold a thread's guard on
+    // the strength of a guess about another component's invariant.
+    if (!endedEarly && endedWithToolCalls(values.session)) {
       console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
       return;
     }
-    // It is wrong for a run that was cut short, and this is the common shape rather
-    // than the odd one. A stop lands at the next turn boundary, so a run reading
-    // files when it arrives has said nothing at all and there is nothing to salvage
-    // — a run that spent nine iterations in tool calls and produced no assistant
-    // text is the observed case (#831). Skipping there drops the machinery's own
-    // sentence along with the agent's silence: that it stopped, that the session
-    // survived, and how to resume. None of those are the agent's to say, and the
-    // footer below says them.
-    wroteNothing = true;
-    output = values["ended-because"] === "stopped"
-      ? "_This run was stopped before it said anything._"
-      : `_This run ${howItWasCutShort(values["ended-because"])} before it said anything._`;
-    console.error("the run was cut short with nothing to report -- posting the notice rather than nothing.");
+    if (endedEarly) {
+      // It is wrong for a run that was cut short, and this is the common shape
+      // rather than the odd one. A stop lands at the next turn boundary, so a run
+      // reading files when it arrives has said nothing at all and there is nothing
+      // to salvage -- a run that spent nine iterations in tool calls and produced
+      // no assistant text is the observed case (#831). Skipping there drops the
+      // machinery's own sentence along with the agent's silence: that it stopped,
+      // that the session survived, and how to resume.
+      wroteNothing = true;
+      output = values["ended-because"] === "stopped"
+        ? "_This run was stopped before it said anything._"
+        : `_This run ${howItWasCutShort(values["ended-because"])} before it said anything._`;
+      console.error("the run was cut short with nothing to report -- posting the notice rather than nothing.");
+    } else {
+      // A run that ended of its own accord without saying anything, and whose
+      // session cannot prove a session-ending tool call did the talking instead:
+      // the shape of #194 (an empty final response `completed`) and #186 (no
+      // session at all). Same treatment, no-report wording: the comment is the
+      // machinery's only sentence on this thread, the `atomaton:ended` tag under
+      // it is what releases the thread's guard, and the mention is what fetches a
+      // person -- see `completion-mention.ts`, which already forces one for a
+      // run the session shows reported nothing.
+      wroteNothing = true;
+      output = "_This run ended without saying anything._";
+      console.error(
+        "atomaton_output.txt is empty and the session shows no session-ending tool call " +
+          "(last assistant turn made no tool calls, or the session is missing/unreadable) " +
+          "-- posting the no-report notice rather than skipping.",
+      );
+    }
   }
 
   // Checked on the way out for the same reason it is redacted on the way out:

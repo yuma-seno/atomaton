@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildCommentBody, lastAgentText } from "./post_result_comment.ts";
+import { buildCommentBody, endedWithToolCalls, lastAgentText } from "./post_result_comment.ts";
 import type { Session } from "../../domain/work/session.ts";
 import { runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
@@ -461,12 +461,172 @@ describe("post_result_comment.ts main", () => {
     }
   });
 
-  test("skips posting entirely when the output file is missing (session ended via a tool call)", () => {
+  /**
+   * The one shape that still skips without a session to read: an empty output
+   * file whose thread carried an unknown number of gh calls -- the participants
+   * read at the top of the script, before any skip decision. These two tests
+   * keep the skip cheap: no session, no proof, but the file's emptiness plus
+   * the `ghCalls.length === 0` shows the script exited before posting anything.
+   *
+   * They used to assert `ghCalls.length === 0` while ALSO passing no
+   * `--session`, which was a legitimate skip only when the script skipped at
+   * all -- after this change an empty output with no session posts rather than
+   * skipping, so these two were rewritten to what they are now checking: the
+   * participants read happens, the comment POST does not...
+   *
+   * Except it now does. These two shapes are the #186 case exactly -- an empty
+   * file and no session -- and this issue's whole point is that they must post.
+   * What a session-ending tool call looks like WITH a session is covered by the
+   * two tests below; what it looks like without one is unknowable, and posting
+   * is the direction this issue chose. So these two are gone, not adjusted: a
+   * test asserting the skip for "missing output file" cannot survive a change
+   * that says a missing output file must not be read as a tool call.
+   */
+  test("posts a no-report notice when the output file is missing", () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
     try {
       const r = runWithFakeGh(
         scriptPath("post_result_comment.ts"),
-        ["--number", "5", "--agent", "atomaton", "--notify", "octocat", "--run-url", "http://example.com/run/1", "--output", join(dir, "atomaton_output.txt")],
+        ["--number", "5", "--type", "issue", "--agent", "atomaton", "--notify", "octocat", "--run-url", "http://example.com/run/1", "--output", join(dir, "atomaton_output.txt")],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(posted, "a missing output file proves nothing about a tool call").toContain("This run ended without saying anything.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("posts a no-report notice when atomaton_output.txt is blank", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "   \n");
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        ["--number", "5", "--type", "issue", "--agent", "atomaton", "--run-url", "http://example.com/run/1", "--output", join(dir, "atomaton_output.txt")],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(posted).toContain("This run ended without saying anything.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The skip needs the session's own proof, not just an empty file.
+   *
+   * #194 was this shape: the core recorded `completed`, the last assistant message
+   * was an empty string with no tool calls, and the skip fired -- deleting the
+   * result comment, the `atomaton:ended` tag under it, and with them the guard
+   * release, so the thread's `atomaton/in-progress` label deleted every person's
+   * later comment. The file being empty proves nothing on its own.
+   *
+   * (Two older tests asserted a skip for "output file missing" and "output file
+   * blank" with no session handed in. Both were this shape -- an empty file and
+   * nothing to prove a tool call with -- and both now post; the tests below
+   * carry their names.)
+   */
+  test("posts a no-report notice for a completed run whose last turn made no tool calls", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    writeFileSync(
+      join(dir, "session.json"),
+      JSON.stringify({
+        messages: [
+          { role: "user", content: "finish the work" },
+          // The measured shape of #194: the model answered silence.
+          { role: "assistant", content: "" },
+        ],
+      }),
+    );
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        // prettier-ignore
+        ["--number", "194", "--type", "issue", "--agent", "engineer", "--notify", "octocat", "--run-url", "http://example.com/run/1",
+         "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt")],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(posted, "an empty completed run still leaves its ending comment").toContain("_run by");
+      expect(posted).toContain("This run ended without saying anything.");
+      expect(posted).toContain("<!-- atomaton:ended=done -->");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * #186's shape: no session file anywhere. Nothing can prove a session-ending
+   * tool call spoke instead, so the run speaks -- the no-report notice.
+   */
+  test("posts a no-report notice when the session is missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        // prettier-ignore
+        ["--number", "186", "--type", "issue", "--agent", "engineer", "--notify", "octocat", "--run-url", "http://example.com/run/1",
+         "--session", join(dir, "not-there.json"), "--output", join(dir, "atomaton_output.txt")],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(posted, "no session to prove the skip still posts").toContain("This run ended without saying anything.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** Unreadable JSON is as good as no session: nothing is proven either way. */
+  test("posts a no-report notice when the session is not readable JSON", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    writeFileSync(join(dir, "session.json"), "not a session at all");
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        // prettier-ignore
+        ["--number", "5", "--type", "issue", "--agent", "engineer", "--run-url", "http://example.com/run/1",
+         "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt")],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(posted).toContain("This run ended without saying anything.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The skip survives, narrowed: where the session DOES show the last assistant
+   * turn making tool calls, the session-ending tool posted its own comment and a
+   * second content-free one would be noise. This is the only shape that skips.
+   */
+  test("still skips when the session proves the last turn made tool calls", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    writeFileSync(
+      join(dir, "session.json"),
+      JSON.stringify({
+        messages: [
+          { role: "user", content: "hand this off" },
+          { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "request_close_issue", arguments: "{}" } }] },
+        ],
+      }),
+    );
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        // prettier-ignore
+        ["--number", "5", "--agent", "atomaton", "--run-url", "http://example.com/run/1",
+         "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt")],
         { cwd: dir, rules: [{ match: ["api", "comments"] }] },
       );
       expect(r.status).toBe(0);
@@ -476,17 +636,96 @@ describe("post_result_comment.ts main", () => {
     }
   });
 
-  test("skips posting entirely when atomaton_output.txt is blank", () => {
+  /**
+   * A tool message AFTER the calls is how a real session ends that way -- the
+   * result of the session-ending call, then the loop's stop. The search walks
+   * back over it to the assistant turn that made the calls; this is the shape
+   * the skip was written for, verified against the session as it is actually
+   * written, not as the test above types it.
+   */
+  test("skips on the real end-of-session shape: calls, then the call's result", () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
-    writeFileSync(join(dir, "atomaton_output.txt"), "   \n");
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    writeFileSync(
+      join(dir, "session.json"),
+      JSON.stringify({
+        messages: [
+          { role: "user", content: "hand this off" },
+          { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "request_close_issue", arguments: "{}" } }] },
+          { role: "tool", tool_call_id: "c1", content: "issue closed" },
+        ],
+      }),
+    );
     try {
       const r = runWithFakeGh(
         scriptPath("post_result_comment.ts"),
-        ["--number", "5", "--agent", "atomaton", "--run-url", "http://example.com/run/1", "--output", join(dir, "atomaton_output.txt")],
+        // prettier-ignore
+        ["--number", "5", "--agent", "atomaton", "--run-url", "http://example.com/run/1",
+         "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt")],
         { cwd: dir, rules: [{ match: ["api", "comments"] }] },
       );
       expect(r.status).toBe(0);
       expect(r.ghCalls.length).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * An assistant turn whose `tool_calls` is an empty array proves nothing: a
+   * call that is not a call is not a session-ending tool call, and the empty
+   * output is then the run's own silence.
+   */
+  test("posts when the last turn's tool_calls is an empty array", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    writeFileSync(
+      join(dir, "session.json"),
+      JSON.stringify({
+        messages: [
+          { role: "assistant", content: "", tool_calls: [] },
+        ],
+      }),
+    );
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        // prettier-ignore
+        ["--number", "5", "--type", "issue", "--agent", "engineer", "--run-url", "http://example.com/run/1",
+         "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt")],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(posted).toContain("This run ended without saying anything.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A session whose messages hold no assistant message at all -- a run cut
+   * before its first turn, or a session written by something else entirely --
+   * cannot prove the skip either. The run's own notice is what posts.
+   */
+  test("posts when the session holds no assistant message", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    writeFileSync(
+      join(dir, "session.json"),
+      JSON.stringify({ messages: [{ role: "user", content: "begin" }] }),
+    );
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        // prettier-ignore
+        ["--number", "5", "--type", "issue", "--agent", "engineer", "--run-url", "http://example.com/run/1",
+         "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt")],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(posted).toContain("This run ended without saying anything.");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -696,32 +935,128 @@ describe("salvaging a run that ended before it reported", () => {
     const path = write("not a session at all");
     expect(lastAgentText(path, 0)).toBeUndefined();
   });
+});
 
-  /**
-   * Presenting a sentence from the middle of the work as a conclusion is worse than
-   * posting nothing, because a reader would act on it.
-   */
-  test("the comment says it is not a report", () => {
-    const body = buildCommentBody({
-      agent: "engineer",
-      runUrl: "http://example.com/run/1",
-      output: "Now checking whether auto_triggers is read anywhere.",
-      salvaged: true,
-      usageLines: [],
+/**
+ * The skip's judge, unit-tested where the script-level tests above can only show
+ * its verdict through a `gh` call count. Every direction of `false` here is a
+ * comment that posts; the one `true` is the only shape that may skip.
+ */
+describe("endedWithToolCalls", () => {
+  const write = (session: unknown): string => {
+    const dir = mkdtempSync(join(tmpdir(), "ended-with-tool-calls-"));
+    const path = join(dir, "session.json");
+    writeFileSync(path, JSON.stringify(session));
+    return path;
+  };
+
+  test("the last assistant turn carrying tool calls is the proof", () => {
+    const path = write({
+      messages: [
+        { role: "user", content: "go" },
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }] },
+      ],
     });
-    expect(body).toContain("ended before it wrote a report");
-    expect(body).toContain("not a conclusion");
-    expect(body.indexOf("ended before it wrote a report")).toBeLessThan(body.indexOf("Now checking"));
+    expect(endedWithToolCalls(path)).toBe(true);
   });
 
-  test("an ordinary report carries no such warning", () => {
+  test("the call's result after the calls does not hide the proof", () => {
+    const path = write({
+      messages: [
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: "c1", content: "ok" },
+      ],
+    });
+    expect(endedWithToolCalls(path)).toBe(true);
+  });
+
+  // The measured shape of #194: the model answered silence, the core wrote
+  // `completed`, and the old skip fired on the empty output file alone.
+  test("an empty final response with no calls is not the proof", () => {
+    const path = write({
+      messages: [
+        { role: "user", content: "go" },
+        { role: "assistant", content: "" },
+      ],
+    });
+    expect(endedWithToolCalls(path)).toBe(false);
+  });
+
+  test("a final response with words and no calls is not the proof", () => {
+    const path = write({
+      messages: [{ role: "assistant", content: "All done." }],
+    });
+    expect(endedWithToolCalls(path)).toBe(false);
+  });
+
+  /** A call that is not a call: the field is there and empty. */
+  test("an empty tool_calls array is not the proof", () => {
+    const path = write({
+      messages: [{ role: "assistant", content: "", tool_calls: [] }],
+    });
+    expect(endedWithToolCalls(path)).toBe(false);
+  });
+
+  test("no assistant message at all is not the proof", () => {
+    const path = write({ messages: [{ role: "user", content: "begin" }] });
+    expect(endedWithToolCalls(path)).toBe(false);
+  });
+
+  test("an empty session is not the proof", () => {
+    const path = write({ messages: [] });
+    expect(endedWithToolCalls(path)).toBe(false);
+  });
+
+  test("a missing, unreadable or unsupplied session is not the proof", () => {
+    expect(endedWithToolCalls(undefined)).toBe(false);
+    expect(endedWithToolCalls("/definitely/not/here.json")).toBe(false);
+    expect(endedWithToolCalls(write("not a session at all"))).toBe(false);
+  });
+
+  /**
+   * Earlier tool calls under a later silent turn do not make the last turn a
+   * tool call. The skip is about the run's LAST act, and an older turn's calls
+   * cannot vouch for what the run did after them.
+   */
+  test("tool calls from an earlier turn are not the proof", () => {
+    const path = write({
+      messages: [
+        { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "bash", arguments: "{}" } }] },
+        { role: "tool", tool_call_id: "c1", content: "ok" },
+        { role: "assistant", content: "" },
+      ],
+    });
+    expect(endedWithToolCalls(path)).toBe(false);
+  });
+});
+
+/**
+ * The no-report notice, for the silence the run itself owns: a `completed` run
+ * whose last assistant message was an empty string with no tool calls (#194),
+ * or whose session is missing or unreadable (#186). The old skip deleted these
+ * runs' comments entirely, and with them the `atomaton:ended` tag that lets a
+ * thread's guard release.
+ */
+describe("the no-report notice for a run whose silence is its own", () => {
+  test("says the run said nothing, without the cut-short machinery around it", () => {
     const body = buildCommentBody({
       agent: "engineer",
+      notify: "octocat",
+      wroteNothing: true,
       runUrl: "http://example.com/run/1",
-      output: "Done.",
+      output: "_This run ended without saying anything._",
       usageLines: [],
     });
-    expect(body).not.toContain("ended before it wrote a report");
+    expect(body).toContain("ended before it said anything at all");
+    expect(body).toContain("saved session");
+    expect(body).toContain("@octocat");
+    // Not tagged as one to resume: the run was not interrupted, it ended
+    // believing itself done. Resuming it would restart an agent with nothing
+    // left to do; what it needs is the person the mention fetches.
+    expect(body).toContain("<!-- atomaton:ended=done -->");
+    expect(body).not.toContain("/resume");
+    // No cut-short warning either: nothing ran out and nothing was stopped.
+    expect(body).not.toContain("⚠️");
   });
 });
 
