@@ -131,11 +131,20 @@ import { TypedOutputsStep } from "./base.ts";
  * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`
  * measures the binary, and a repository whose probes and whose runs are on different
  * builds is one where a green probe means less than it looks.
+ *
+ * **`finish_reason` on a session's assistant messages, and a contentless completion
+ * counted as an empty response.** Written by the core from v0.4.1 (yuma-seno/atoma#7):
+ * every assistant message a run adds now carries the provider's reason for it, and an
+ * empty-text `length` completion re-asks the turn instead of ending it `completed`
+ * in silence. Nothing in this tree reads the field yet -- #205's defence covers the
+ * silent shape on older runners, and the metrics report's `CompletionTally` reads the
+ * silence off the text either way -- so the older binary degrades nothing here. A
+ * reader added before the raise would find no field to read.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.0";
+export const ATOMA_DEFAULT_VERSION = "v0.4.2";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.4.2). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead
