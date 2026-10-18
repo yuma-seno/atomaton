@@ -30,6 +30,15 @@
 # It also refuses a version that is already released, because there is nothing to
 # do: the tag exists, the release exists, and re-declaring it changes nothing.
 #
+# ## What an empty input means
+#
+# An empty `version` is the default, and it means "the next one": the last segment of
+# the declared version is incremented, with no carry (`0.2.9` -> `0.2.10`, and in a
+# prerelease `0.3.0-rc.1` -> `0.3.0-rc.2`). It is a convenience for the common case,
+# not a judgement: a person who wants any other number types it, and the same checks
+# run on whatever results. There is nothing to bump when `package.json` declares no
+# version at all, so the first release names one.
+#
 # ## Why it needs a token that is not `GITHUB_TOKEN`
 #
 # A pull request opened with `GITHUB_TOKEN` starts no workflow run -- GitHub starts
@@ -51,8 +60,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, e.g. 0.2.0 (a leading "v" is accepted)'
-        required: true
+        description: 'Version to release, e.g. 0.2.0 (a leading "v" is accepted). Leave empty to bump the last segment of the declared version.'
+        required: false
+        default: ''
         type: string
 
 # Read-only. Every write in this job goes through the PAT, which keeps the two
@@ -108,18 +118,35 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A leading `v` is how a tag is written and how a person says it out
-          # loud; the declaration is bare. Accept both, store one.
-          NEW="${REQUESTED#v}"
-
-          if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::'$REQUESTED' is not a plain semver version. Expected X.Y.Z, optionally with a -prerelease suffix."
+          # The declared version, read before anything else: it is what an empty
+          # input bumps, and what the downgrade check compares against.
+          CURRENT=$(jq -r '.version // empty' package.json)
+          if [ -z "$CURRENT" ]; then
+            echo "::error::package.json declares no version; there is nothing to compare against, and nothing to bump. Name the version explicitly."
             exit 1
           fi
 
-          CURRENT=$(jq -r '.version // empty' package.json)
-          if [ -z "$CURRENT" ]; then
-            echo "::error::package.json declares no version; there is nothing to compare against."
+          # A leading `v` is how a tag is written and how a person says it out
+          # loud; the declaration is bare. Accept both, store one.
+          #
+          # An empty input is the default, and it means "the next one": increment
+          # the last segment, no carry. The last segment is required to be a
+          # number so that `0.3.0-rc` (a valid prerelease with no number to bump)
+          # fails loudly rather than deriving nonsense -- a person names that one.
+          if [ -z "$REQUESTED" ]; then
+            LAST="${CURRENT##*.}"
+            if ! [[ "$LAST" =~ ^[0-9]+$ ]]; then
+              echo "::error::cannot infer the next version from '${CURRENT}': its last segment is not a number. Name one explicitly."
+              exit 1
+            fi
+            NEW="${CURRENT%.*}.$(( LAST + 1 ))"
+            echo "::notice::no version given; bumping the last segment: ${CURRENT} -> ${NEW}"
+          else
+            NEW="${REQUESTED#v}"
+          fi
+
+          if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'${NEW}' is not a plain semver version. Expected X.Y.Z, optionally with a -prerelease suffix."
             exit 1
           fi
 

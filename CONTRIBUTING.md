@@ -101,6 +101,13 @@ To make that one edit without a checkout, dispatch **Atomaton Release**:
 gh workflow run atomaton-release.yml --ref main -f version=0.2.0
 ```
 
+The `version` input is optional. Leave it empty (the default) to bump the last
+segment of the declared version — `0.2.9` becomes `0.2.10`, and a prerelease
+increments its last segment too, so `0.3.0-rc.1` becomes `0.3.0-rc.2`. Any other
+number is typed, and the same checks run on it. There is nothing to bump on the
+first release, when `package.json` declares no version yet, so that one names a
+version.
+
 Or press **Run workflow** on **Atomaton Release** in the Actions tab. It writes the
 version into `package.json` and opens a pull request; it merges nothing.
 `package.json` is in `merge.governed_paths`, so a person reviews it — a version is a
