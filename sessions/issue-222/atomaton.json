@@ -989,7 +989,155 @@
       "role": "assistant",
       "content": "実装と検証は完了し、ローカルの `atomaton/issue-222` ブランチにコミット済み(`b8d6df0`)ですが、**push がリモートに拒否され、PR を開けないまま実行が終わります**。次の実行で復元できるように、パッチと手順を `/tmp/atomaton-workspace/` に保存しました。\n\n## 何が起きたか\n\n`commit_and_push` がリモートから拒否されました。引用(そのまま):\n\n```\n! [remote rejected] atomaton/issue-222 -> atomaton/issue-222 (refusing to allow a GitHub App to create or update workflow `.github/workflows/atomaton-release.yml` without `workflows` permission)\n```\n\n#156/#152 と同じ「GitHub App トークンは `.github/workflows/**` に書き込めない」拒否ですが、今回は**変更自体がそのワークフローファイルへの変更**です。つまり 回避不能な通常ケース:この push を受け入れられる credential は `workflows` 権限を持つもの、すなわち人の PAT(`SELF_DEPLOY_TOKEN` と同一の権限を持つもの)だけで、エージェントはそれを持てません。ブランチは origin に存在しないため `create_pr` も到達不能です(#156 が記録した capability gap そのものです)。\n\n## 復元手順(次の実行、または人)\n\n1. `/tmp/atomaton-workspace/0001-release-allow-an-empty-version-input-defaulting-to-a.patch`(10,558 B、sha256 `be0f69f8…`、`git format-patch -1` 形式)を、現行 `main` から切ったブランチに `patch -p1` で適用 — 同一ツリー再現をこの実行で検証済み(3 ファイル全部 byte-identical)。\n2. `commit_and_push` + `create_pr`。人が行う場合は、ローカルに `b8d6df0` があるうちに `git cherry-pick` でも同じです。\n3. パッチが失われた場合に備え、変更内容の要点も `/tmp/atomaton-workspace/issue-222-notes.md` に書いてあります。\n\n## 実装した内容(検証済み)\n\n- **`.github/workflows/atomaton-release.yml`** と **`self/workflows/atomaton-release.yml`**(オーバーレイ契約により byte-identical、`self-overlay.test.ts` pass):`version` input を `required: false, default: ''` に。Validate ステップで `CURRENT` を先に読み、`REQUESTED` が空なら「現在バージョンの末尾 +1」を導入(`0.2.9→0.2.10`、キャリーなし)。prerelease は末尾セグメントが増える(`0.3.0-rc.1→0.3.0-rc.2`)。package.json に version が無い場合はエラー(初回リリースはバージョンを名指し)。導出後は既存のダウングレード/リリース済み/タグ済み未リリース判定・PR 作成にそのまま流れるので、下流は無変更。ヘッダーコメントに「## What an empty input means」を追加。\n- **`CONTRIBUTING.md`**: \"Cutting a release\" に空 input の挙動を追記。\n- **検証**:`js-yaml` でパース、bump 算術 5 ケース、`bun run typecheck`、`bun run test` **1703 pass / 0 fail**(135 ファイル、`self-overlay.test.ts` 含む)。\n\n## 何が確立できなかったか\n\n- この変更がマージされた後、GitHub の UI 上で input が正しく「空欄可」と表示されるかは、push ができないため確認できていません(スキーマ上は `required: false + default: ''` で正しい)。\n- `main` がこの間に進んだ場合、パッチがそのまま当たらない可能性があります。その場合は notes の要点から手で再適用してください。\n\n## 次に起こること\n\n次の実行(またはあなた)がパッチを当てて push し、PR を開くのが唯一の残作業です。PR は governing path(`.github/workflows/**`、`package.json` は触らない)なので、マージは人が行うことになります。",
       "atoma_metadata": {
-        "github_comment_id": 6252890187,
+        "agent": "atomaton",
+        "github_comment_id": 6252890187
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nselfフォルダ配下のみに書き込んでくれますか？\n次のセルフデプロイで乗っかるはずです。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-18T17:30:26Z",
+        "event_type": "issue_comment",
+        "id": 6252938257,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_af1b986456f5465c8c8d4946",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\":\"tests/contract/self-overlay.test.ts\"}"
+          }
+        },
+        {
+          "id": "call_190f676e4ce34569a1dda780",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"grep -n \\\"governed_paths\\\" -A 8 .github/atomaton/config.yaml\",\"working_directory\":\"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "tests/contract/self-overlay.test.ts lines 1-204 of 204\n\n1\timport { describe, expect, test } from \"bun:test\";\n2\timport { existsSync, readFileSync, readdirSync, statSync } from \"node:fs\";\n3\timport { join, relative } from \"node:path\";\n4\timport { CONFIG_FILE } from \"../../src/domain/machinery/machinery-layout.ts\";\n5\t\n6\t/**\n7\t * `self/` and `.github/` do not drift apart.\n8\t *\n9\t * ## What this replaced\n10\t *\n11\t * `.github/` used to be the release archive extracted over the previous contents,\n12\t * with three files kept alive by remembering to run `git checkout --` on them\n13\t * afterwards. Two things went wrong with that, and both were silent:\n14\t *\n15\t * - a file the upstream release had **deleted** stayed in the tree. `unzip -o`\n16\t *   overwrites and never removes, so there was no diff to notice it by. The old\n17\t *   `conventions.md` said to \"look for orphans under `.github/atomaton/` yourself\".\n18\t * - the preserve list lived in a person's memory. `config.yaml` was rest\n\n[6738 characters dropped from the middle; 4000 shown]\n\nparseable workflow is not an error. It registers the\n155\t   * file, shows the PATH where the name should be, and registers no triggers. The\n156\t   * only symptom was `gh workflow run` answering\n157\t   * `HTTP 422: Workflow does not have 'workflow_dispatch' trigger` about a file\n158\t   * that plainly has one.\n159\t   *\n160\t   * The generated workflows cannot fail this way -- the synth tool builds them from\n161\t   * TypeScript and would not emit invalid YAML. Only the hand-written ones can, and\n162\t   * they are exactly the ones nothing was checking.\n163\t   */\n164\t  test(\"every hand-written workflow in the overlay is valid YAML with a trigger\", () => {\n165\t    const workflows = filesUnder(join(OVERLAY, \"workflows\")).filter((file) => /\\.ya?ml$/.test(file));\n166\t    expect(workflows.length, \"the overlay should hold at least one hand-written workflow\").toBeGreaterThan(0);\n167\t\n168\t    for (const file of workflows) {\n169\t      const path = join(OVERLAY, \"workflows\", file);\n170\t      let document: unknown;\n171\t      expect(() => {\n172\t        document = Bun.YAML.parse(readFileSync(path, \"utf8\"));\n173\t      }, `${path} is not valid YAML -- GitHub would register it with no triggers and say nothing`).not.toThrow();\n174\t\n175\t      const workflow = document as { name?: string; on?: unknown; true?: unknown; jobs?: Record<string, unknown> };\n176\t      // `on` is the YAML 1.1 boolean, so some parsers hand it back under `true`.\n177\t      // Accepting either keeps this about the workflow rather than the parser.\n178\t      const triggers = workflow.on ?? workflow.true;\n179\t      expect(triggers, `${path} declares no triggers, so nothing can start it`).toBeDefined();\n180\t      expect(typeof workflow.name, `${path} has no name`).toBe(\"string\");\n181\t      expect(Object.keys(workflow.jobs ?? {}).length, `${path} has no jobs`).toBeGreaterThan(0);\n182\t    }\n183\t  });\n184\t\n185\t  /**\n186\t   * The self-deploy workflow is the one thing here that cannot be regenerated, and\n187\t   * the one holding a token. Pinning both facts: it exists in the overlay, and\n188\t   * nothing in the deliverable knows about the secret.\n189\t   */\n190\t  test(\"the self-deploy workflow is this repository's own, and the deliverable never names its token\", () => {\n191\t    expect(existsSync(join(OVERLAY, \"workflows/atomaton-self-deploy.yml\"))).toBe(true);\n192\t    expect(existsSync(join(BUILT, \"workflows/atomaton-self-deploy.yml\")), \"it must not be shipped\").toBe(false);\n193\t\n194\t    // An adopter receiving a reference to this secret would get a workflow that\n195\t    // cannot run, and -- worse -- a name suggesting Atomaton expects a PAT.\n196\t    for (const file of filesUnder(\"src\")) {\n197\t      if (!/\\.(ts|yml|yaml|md|json)$/.test(file)) continue;\n198\t      expect(\n199\t        body(join(\"src\", file)),\n200\t        `src/${file} names SELF_DEPLOY_TOKEN; that secret is this repository's own`,\n201\t      ).not.toContain(\"SELF_DEPLOY_TOKEN\");\n202\t    }\n203\t  });\n204\t});",
+      "tool_call_id": "call_af1b986456f5465c8c8d4946"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"86:  governed_paths:             # changes here are a person's to merge\\n87-    - \\\".github/**\\\"\\n88-    # This repository's own overlay onto .github/. Everything here BECOMES a\\n89-    # governed path at the next self-deploy -- this list included -- so leaving\\n90-    # it out let a change reach .github/** without meeting the rule that guards\\n91-    # it. The deploy pull request is a person's, but it rebuilds the whole tree,\\n92-    # which is the wrong place to first read a one-line change to a gate.\\n93-    - \\\"self/**\\\"\\n94-    # The version declaration. `tag-release.sh` derives the release tag from it,\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":186}",
+      "tool_call_id": "call_190f676e4ce34569a1dda780"
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_08d68a58897c4fd688b02077",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git status --porcelain; cat .git/HEAD; git --no-pager log --oneline -3\",\"working_directory\":\"/home/runner/work/atomaton/atomaton\"}"
+          }
+        },
+        {
+          "id": "call_99c58923d2b945259d1640e7",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\":\".github/atomaton/rulesets/main.json\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"ref: refs/heads/main\\n01c068e Merge pull request #221 from yuma-seno/atomaton/issue-204\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":169}",
+      "tool_call_id": "call_08d68a58897c4fd688b02077"
+    },
+    {
+      "role": "tool",
+      "content": ".github/atomaton/rulesets/main.json lines 1-34 of 34\n\n1\t{\n2\t  \"name\": \"main\",\n3\t  \"target\": \"branch\",\n4\t  \"enforcement\": \"active\",\n5\t  \"conditions\": {\n6\t    \"ref_name\": {\n7\t      \"include\": [\"~DEFAULT_BRANCH\"],\n8\t      \"exclude\": []\n9\t    }\n10\t  },\n11\t  \"bypass_actors\": [],\n12\t  \"rules\": [\n13\t    { \"type\": \"deletion\" },\n14\t    { \"type\": \"non_fast_forward\" },\n15\t    {\n16\t      \"type\": \"pull_request\",\n17\t      \"parameters\": {\n18\t        \"allowed_merge_methods\": [\"merge\"],\n19\t        \"required_approving_review_count\": 0,\n20\t        \"dismiss_stale_reviews_on_push\": false,\n21\t        \"require_code_owner_review\": false,\n22\t        \"require_last_push_approval\": false,\n23\t        \"required_review_thread_resolution\": false\n24\t      }\n25\t    },\n26\t    {\n27\t      \"type\": \"required_status_checks\",\n28\t      \"parameters\": {\n29\t        \"strict_required_status_checks_policy\": false,\n30\t        \"required_status_checks\": [{ \"context\": \"atomaton-check\" }]\n31\t      }\n32\t    }\n33\t  ]\n34\t}",
+      "tool_call_id": "call_99c58923d2b945259d1640e7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_6ba409734e47406cb781e885",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"ls -la /tmp/atomaton-workspace/ && sha256sum /tmp/atomaton-workspace/0001-*.patch\",\"working_directory\":\"/home/runner/work/atomaton/atomaton\"}"
+          }
+        },
+        {
+          "id": "call_5f348c193d9f43428463d548",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\":\"main\"}"
+          }
+        },
+        {
+          "id": "call_3d3bc2ca757940bd942ea37a",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":2,\"path\":\"tests\",\"pattern\":\"self/workflows\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"total 28\\ndrwxrwxr-x+  2 runner runner  4096 Oct 18 17:30 .\\ndrwxrwxrwt  14 root   root    4096 Oct 18 17:39 ..\\n-rw-rw-r--+  1 runner runner 10558 Oct 18 17:30 0001-release-allow-an-empty-version-input-defaulting-to-a.patch\\n-rw-rw-r--+  1 runner runner  3293 Oct 18 17:30 issue-222-notes.md\\nbe0f69f8578b8017d45400d462bbb7cecb9f0b4ad53b0725b70a9392bb3d5eea  /tmp/atomaton-workspace/0001-release-allow-an-empty-version-input-defaulting-to-a.patch\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":97}",
+      "tool_call_id": "call_6ba409734e47406cb781e885"
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"main\",\"exists\":true,\"sha\":\"01c068e167dca8977473adbb858b877808b7174a\",\"protected\":true}",
+      "tool_call_id": "call_5f348c193d9f43428463d548"
+    },
+    {
+      "role": "tool",
+      "content": "No match for self/workflows under tests.",
+      "tool_call_id": "call_3d3bc2ca757940bd942ea37a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_c71198ff0c0e478ba54db305",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":105,\"offset\":60,\"path\":\".github/workflows/atomaton-self-deploy.yml\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": ".github/workflows/atomaton-self-deploy.yml lines 60-164 of 216\n\n60\t# identities apart: if something here can write, it is because a person's token\n61\t# allowed it.\n62\tpermissions:\n63\t  contents: read\n64\t\n65\tjobs:\n66\t  deploy:\n67\t    name: Prepare the deploy pull request\n68\t    runs-on: ubuntu-latest\n69\t    steps:\n70\t      # A bot must not reach this. The agent runner's token carries `actions:\n71\t      # write`, so dispatching this file is within what that token could\n72\t      # theoretically do. An agent has no route to it today -- `gh` and `curl` are\n73\t      # both refused by the shell guard and no MCP tool dispatches a workflow --\n74\t      # but \"no route today\" is a denylist, and this is a token that can rewrite\n75\t      # workflows. So the check is also here, where it is a property of the job\n76\t      # rather than of what an agent happens to be offered.\n77\t      - name: Refuse a non-human trigger\n78\t        env:\n79\t          ACTOR: ${{ github.triggering_actor }}\n80\n\n[761 characters dropped from the middle; 4000 shown]\n\n101\t          # The PAT, so the push later in this job carries an identity allowed to\n102\t          # write workflow files.\n103\t          token: ${{ secrets.SELF_DEPLOY_TOKEN }}\n104\t\n105\t      - name: Resolve the release\n106\t        id: release\n107\t        env:\n108\t          GH_TOKEN: ${{ github.token }}\n109\t          REQUESTED: ${{ inputs.version }}\n110\t        run: |\n111\t          set -euo pipefail\n112\t          if [ \"$REQUESTED\" = \"latest\" ]; then\n113\t            TAG=$(gh release view --json tagName -q .tagName)\n114\t          else\n115\t            TAG=\"$REQUESTED\"\n116\t            # Checked here rather than left to a 404 from the download, so the\n117\t            # error names the tag that does not exist.\n118\t            gh release view \"$TAG\" --json tagName -q .tagName >/dev/null\n119\t          fi\n120\t          echo \"tag=${TAG}\" >> \"$GITHUB_OUTPUT\"\n121\t          echo \"applying ${TAG}\"\n122\t\n123\t      - name: Rebuild .github/ from the release and self/\n124\t        id: apply\n125\t        env:\n126\t          GH_TOKEN: ${{ github.token }}\n127\t          TAG: ${{ steps.release.outputs.tag }}\n128\t        run: |\n129\t          set -euo pipefail\n130\t          gh release download \"$TAG\" --pattern atomaton-delivery.zip --output /tmp/delivery.zip --clobber\n131\t\n132\t          # Deleted, not overwritten. `unzip -o` never removes, so a file the\n133\t          # release dropped would otherwise stay forever with no diff to see it by.\n134\t          # Everything under here is derived from two places, both of which are\n135\t          # about to be reapplied, so there is nothing to preserve.\n136\t          rm -rf .github\n137\t          unzip -q /tmp/delivery.zip -d .\n138\t\n139\t          # `self/` mirrors `.github/`, so this needs no mapping table and no\n140\t          # preserve list: whatever is in there wins, at the same path.\n141\t          cp -r self/. .github/\n142\t\n143\t          if [ -z \"$(git status --porcelain)\" ]; then\n144\t            echo \"changed=false\" >> \"$GITHUB_OUTPUT\"\n145\t            echo \"::notice::.github/ already matches ${TAG} plus self/; nothing to open a pull request for.\"\n146\t          else\n147\t            echo \"changed=true\" >> \"$GITHUB_OUTPUT\"\n148\t            git status --porcelain\n149\t          fi\n150\t\n151\t      - name: Open the pull request\n152\t        if: steps.apply.outputs.changed == 'true'\n153\t        env:\n154\t          # The PAT again, and for the same reason: creating a pull request from a\n155\t          # branch that changes a workflow is refused for `GITHUB_TOKEN`.\n156\t          GH_TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}\n157\t          TAG: ${{ steps.release.outputs.tag }}\n158\t          ACTOR: ${{ github.triggering_actor }}\n159\t        run: |\n160\t          set -euo pipefail\n161\t          BRANCH=\"self-deploy/${TAG}\"\n162\t\n163\t          git config user.name \"atomaton-self-deploy\"\n164\t          git config user.email \"atomaton-self-deploy@users.noreply.github.com\"\n\n[52 more lines. Read again with offset: 165.]",
+      "tool_call_id": "call_c71198ff0c0e478ba54db305"
+    },
+    {
+      "role": "assistant",
+      "content": "結論から: **self/ 配下だけの変更にはできません**。それはリポジトリ自身の契約テストが禁止しているからです。ただし「次のセルフデプロイで乗っかる」という理解は、このファイルについては正しいです。順に説明します。\n\n## なぜ self/ のみでは届き出できないか\n\n`tests/contract/self-overlay.test.ts:104`(\"self/ and .github/ hold the same bytes\")が、**両方向**でオーバーレイの同一性を required check(`atomaton-check`、`.github/atomaton/rulesets/main.json:30`)として強制します。`self/workflows/atomaton-release.yml` だけ直して `.github/` 側を触らないと、このテストが即座に赤になり、PR はマージ不可能です。「次のデプロイで直るから今は放置」という状態を、このリポジトリは意図的に許していません。\n\nなお `self/**` 自体も `merge.governed_paths` に入っています(`.github/atomaton/config.yaml:93`)。なので self/ のみの PR でもマージは人の手のままです — governed パスを迂回する効果はありません。\n\n## 「次のセルフデプロイで乗っかる」は正しい(そして実は不要)\n\n`atomaton-release.yml` と `atomaton-self-deploy.yml` は**リリース zip に入っていない** overlay 専用ファイルです(`.github/atomaton-release.json` の files 一覧にこの2つは無く、8 本の生成ワークフローだけが載っています。self-deploy が ship されないことは `self-overlay.test.ts:192` でも保証)。次の self-deploy は `cp -r self/. .github/`(`atomaton-self-deploy.yml:141`)で self/ を勝たせるので、マージ後の最初の self-deploy で新しい release ワークフローが確かに乗ります。\n\nただし実際には **self-deploy は不要**です。前回実装した PR は `.github/` 側も同一内容で更新する形なので、人がマージした時点で `.github/workflows/atomaton-release.yml` は新しくなります。オーバーレイは copy であって build ではないので、リリースも要りません。\n\n## 変更自体はできていて、残っているのは push だけ\n\n実装・検証済みのコミットは前回作成済みですが、push が「App トークンは `.github/workflows/**` を書けない」(`workflows` 権限なし、identity で拒否)で拒否され、PR を開けませんでした。これは変更をどう分割しても避けられません — `.github/` 側の同時変更が契約上必須なので、diff には必ずワークフローファイルが含まれます。回復用のパッチは検証済みで残してあります:\n\n- `/tmp/atomaton-workspace/0001-release-allow-an-empty-version-input-defaulting-to-a.patch`(10,558 B、sha256 `be0f69f8…2bb3d5eea`)\n- 適用先 `main` はまだ `01c068e` から動いていないので、そのまま `patch -p1` で当たります(当たって 3 ファイル byte-identical になることを前回検証済み)\n\n**あなたにお願いするのはこれだけです**:任意のブランチで `git am` または `patch -p1 < <上のパッチ>` → ご自身の PAT で push → PR をマージ。マージ後、Release ワークフローの `version` は空欄で押せるようになります(空欄=末尾 +1)。先の self-deploy はこの変更の適用には不要で、次回以降のデプロイでも self/ 経由で維持されます。",
+      "atoma_metadata": {
+        "github_comment_id": 6253141206,
         "agent": "atomaton"
       }
     }
@@ -997,9 +1145,9 @@
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 2,
+      "event_count": 3,
       "resolved_number": "222",
-      "snapshot_hash": "d6138af0d06d464b88e9b7e18c877d2c7ef95a236324f6af774ccc60849bcb7c",
+      "snapshot_hash": "5b19eee9be81744eec815cf861be1d46ba7fbc62b7842c5f581ea6a3d961b046",
       "type": "issue",
       "version": 1
     }
@@ -1055,6 +1203,26 @@
         }
       },
       "started": "2026-10-18T17:10:45Z"
+    },
+    {
+      "ended": "2026-10-18T17:50:12Z",
+      "ended_because": "completed",
+      "iterations": 5,
+      "messages": 117,
+      "seconds": 1150,
+      "server_calls": {
+        "files": {
+          "grep": 1,
+          "read": 3
+        },
+        "github": {
+          "get_branch": 1
+        },
+        "shell": {
+          "bash": 3
+        }
+      },
+      "started": "2026-10-18T17:31:02Z"
     }
   ]
 }
