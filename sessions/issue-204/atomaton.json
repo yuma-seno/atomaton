@@ -1591,7 +1591,7 @@
     },
     {
       "role": "user",
-      "content": "#186で同様の現象が発生",
+      "content": "#11, #186で同様の現象が発生",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-10-17T07:04:50Z",
@@ -2517,14 +2517,474 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#205→atomaton\",\"#207→atomaton\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_7d5fdcc74ddd42f684389f39"
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #205). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-18T16:38:47Z",
+        "event_type": "issue_comment",
+        "id": 6252402647,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bf969aa779a16f35",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 205}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-a38decfafca9b2ac",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 207}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":\"2026-10-18T16:38:44Z\",\"createdAt\":\"2026-10-17T12:39:13Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":205,\"state\":\"CLOSED\",\"title\":\"post_result_comment: 空出力でも「ツール呼び出し終端」とセッションで証明できる場合しか skip しない\",\"body\":\"## 背景\\n\\n#204 の調査で確定した機械側の欠陥: core が `completed` を記録し、最終 assistant メッセージが空文字・tool_calls 無しの run で、`src/entrypoints/machinery/post_result_comment.ts:605-611` の skip が発火する。skip の仮定は「空出力 = セッション終端ツールが自前のコメントを投稿済み」だが、空レスポンス完成もこの分岐に合流し、結果コメントも `atomaton:ended` タグも残らない → ガードが以降の人間コメントを永久削除(#194 で実害)。\\n\\n証拠: `atomaton-data` の `sessions/issue-194/atomaton.json` メッセージ 126 と 138(空 assistant、run 39011026414 の \\\"Record run metadata\\\" ステップは skipped)。#186 は `sessions/issue-186/` 自体が atomaton-data に存在せず(404)、セッション欠損→同 skip 経路の疑い。\\n\\nrunner 側(atoma CLI、別リポジトリ)には空応答のリトライ+エラー化が入る見込みだが、**この修正はそれに依存しない防御線**として入れる。機械が「他コンポーネントの不変条件(空出力=ツール呼び出し終端)」を仮定して人のコメントを削除するのは、`decide_turn_ending.ts` が掲げる \\\"toward releasing the guard, never toward holding it stuck\\\" の思想に反する。採用者は古いリリースの runner で走ることもある。\\n\\n## スコープ\\n\\n`post_result_comment.ts` の skip 条件を締める:\\n\\n- **skip してよいのは、セッションが読めて、最終 assistant メッセージが tool_calls を持つ場合(= ツール呼び出し終端の証拠)のみ。**\\n- それ以外の空出力は既存の `wroteNothing` 経路で終端コメントを生成する(completed+空最終メッセージ / セッションファイル欠損 / JSON として読めない)。文言は no-report 向けの変体(例: `_This run ended without saying anything._`)。mention 強制と ended タグ素材は既存機構(`src/domain/work/completion-mention.ts`、`decide_turn_ending` の `--reported` 経由の no-report ending)にそのまま流す。\\n\\n判別に必要な情報はセッションに既にある(`readSession` / 最終メッセージの `tool_calls`)。新形式の導入はしない。\\n\\n## 受け入れ基準\\n\\n1. completed + 空最終メッ���ージ(tool_calls 無し)のセッションで、終端コメント本文が生成される(skip しない)。\\n2. 最終 assistant メッセージが tool_calls を持つ場合は従来通り skip(ツールが自前コメントを投稿済み)。\\n3. セッション欠損・unreadable JSON でも終端コメントが生成される(#186 形状)。\\n4. `bun test` 全绿。skip 判定の単体テストを追加/拡張(既存のテスト配置に従う)。\\n\\n## 検証\\n\\n`bun test`(post_result_comment 関連 + turn/decide_turn_ending の回帰)。\\n\\n## close 条件\\n\\nこの親イシューのブランチへ向けて出された PR がマージされ、マージヘッドで上記 1〜4 が確認できること。判定は engineer 自身がテスト結果で行う。\\n\\n## 依存\\n\\nなし。atoma CLI 側の変更(別リポジトリ)と独立しており、先行して着手できる。\",\"total_comments\":9,\"parent\":{\"number\":204,\"title\":\"runが終わってるのにコメントが追加されない\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":211,\"title\":\"post_result_comment: skip only when the session proves a session-ending tool call (#205)\",\"state\":\"done\"}]}",
+      "tool_call_id": "chatcmpl-tool-bf969aa779a16f35"
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":\"2026-10-18T16:09:19Z\",\"createdAt\":\"2026-10-17T12:39:45Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":207,\"state\":\"CLOSED\",\"title\":\"atoma CLI: finish_reason をセッションに記録し、空応答をリトライ→エラー化する\",\"body\":\"## 背景\\n\\n#204 の調査で、詰まった run の最終 assistant メッセージが「`content: \\\"\\\"`、tool_calls 無し」だったことを確認(#194 セッション、メッセージ 126 と 138、両方とも `ended_because: \\\"completed\\\"`)。これは Chat Completions 仕様上 legal な応答で、既知の経路は:\\n\\n- reasoning/シンキングモデルが `max_output_tokens` やコンテキスト上限を消費し、可視出力ゼロで normal 終了(OpenAI reasoning ガイド: \\\"you could incur costs for input and reasoning tokens without receiving a visible response\\\"、`status: incomplete` + \\\"Ran out of tokens during reasoning\\\")\\n- `finish_reason: \\\"content_filter\\\"`\\n- ルーター(z-ai/glm-5.3-flash 等を経由)の上流失敗が空 completion として透過\\n\\n直近7日のメトリクスで31セッション中12(38.7%)が `completed` なのに無言で、レアケースではない。\\n\\n## スコープ(atoma CLI リポジトリ、yuma-seno/atoma 側の変更)\\n\\n1. **`finish_reason` をセッションに記録する。** 現在セッションは `role/content/tool_calls` のみを保存し、判別材料が失われている。assistant メッセージに `finish_reason`(`length` / `content_filter` / `stop` / `tool_calls`)を保存し、`incomplete` ステータスの場合は `incomplete_details.reason` も。Sessions の型(`domain/work/session.ts` 相当)と保存経路の更新。後方互換: 旧セッション(フィールド無し)は `undefined` として読めること。**移行は不要**(このリポジトリの慣例: `closing-report.ts` の \\\"No migration, and none should be invented\\\" 参照)。\\n\\n2. **空応答のリトライ。** 応答が「テキスト無し・tool_calls 無し・finish_reason が tool_calls でない」場合、同一ターンの再試行を最大 N 回(2 回程度)行う。リトライ条件に `finish_reason === \\\"length\\\"` や `status: incomplete` を含めること(完全な空ではなく部分的な空も拾う)。連続 N 回と���空なら run を**エラーとして終了**させる(成功の `completed` を書かせない。`ended_because: \\\"failed\\\"` 相当になり、機械側は既存の `failed` 経路でガードを解放する)。\\n\\n3. **`(任意)` 空応答をエラー化した際の機械側メッセージ品質。** 失敗理由が `finish_reason` から読めること(#205 の防御線と合わせ、機械のコメントが「何が起きたか」を人に説明できる)。\\n\\n## 受け入れ基準\\n\\n- セッション JSON に `finish_reason` が記録される(新規 run)。\\n- 空応答が1回だけ発生した場合、リトライで回収され、セッションに再試行が記録される。\\n- 連続空応答で run が失敗終了し、結果コメントが投稿される(機械側の既存失敗経路)。\\n- 既存のテストスイートが通る。\\n\\n## close 条件\\n\\natoma CLI リポジトリ上の PR がマージされ、マージヘッドで上記がテストにより確認できること。判定はエンジニア自身が行う。\\n\\n## 依存\\n\\n#205 とは独立。ただし #205 の防御線が入っていても、こちらが正しい根本対応(空応答を「成功」として記録しない)。\",\"total_comments\":9,\"parent\":{\"number\":204,\"title\":\"runが終わってるのにコメントが追加されない\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":213,\"title\":\"Raise the Atoma CLI pin to v0.4.2 (finish_reason on the session, contentless completion re-ask)\",\"state\":\"done\"}]}",
+      "tool_call_id": "chatcmpl-tool-a38decfafca9b2ac"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_30e728a9175c4c63be6d6976",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\":204}"
+          }
+        },
+        {
+          "id": "call_860896b884ab41c2a70faa76",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\":211}"
+          }
+        },
+        {
+          "id": "call_cf5c45bc36e7492c9a63cdac",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\":213}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"closedAt\":null,\"createdAt\":\"2026-10-17T06:46:35Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"}],\"number\":204,\"state\":\"OPEN\",\"title\":\"runが終わってるのにコメントが追加されない\",\"body\":\"/atomaton\\n#194 にて、runが終わってるのにコメントの追加が起きない。それため追加のコメントでエージェントを起動することもできず、イシューが詰む。\\n原因調査からお願い。\",\"total_comments\":15,\"children\":[{\"number\":205,\"title\":\"post_result_comment: 空出力でも「ツール呼び出し終端」とセッションで証明できる場合しか skip しない\",\"state\":\"done\"},{\"number\":207,\"title\":\"atoma CLI: finish_reason をセッションに記録し、空応答をリトライ→エラー化する\",\"state\":\"done\"}],\"pull_requests\":[]}",
+      "tool_call_id": "call_30e728a9175c4c63be6d6976"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"atomaton/issue-204\",\"createdAt\":\"2026-10-18T08:35:24Z\",\"headRefName\":\"atomaton/issue-205\",\"number\":211,\"state\":\"MERGED\",\"title\":\"post_result_comment: skip only when the session proves a session-ending tool call (#205)\",\"body\":\"/reviewer\\n\\nPart of #205\\n## What this fixes\\n\\n`post_result_comment.ts` skipped the result comment whenever `atomaton_output.txt` was empty, on the assumption that the only way the file ends up empty is a session-ending tool call (`create_pr`, `launch_sub_agent`, `request_close_issue`) that already posted its own comment.\\n\\nThat assumption is another component's invariant, and it does not hold. **#194** recorded a run the core filed `completed` whose last assistant message was an empty string with no tool calls — the model answered silence. The skip fired, no result comment and no `atomaton:ended` tag were written, and the thread's `atomaton/in-progress` guard (which the tag's absence fails to release) went on to delete every person's later comment. **#186** recorded the same silence through a missing session file. This is the machine holding a thread stuck on a guess — the exact direction `decide_turn_ending.ts` forbids (\\\"toward releasing the guard, never toward holding it stuck\\\").\\n\\n## The change\\n\\nThe skip now requires the session's own proof: **the last assistant turn carrying `tool_calls`** (`endedWithToolCalls` in `post_result_comment.ts`). That is the one observable signature of a session-ending tool call — atoma's loop stops the moment such a call returns, so the model's last turn is a tool call with no words.\\n\\nEvery other empty output posts the ending comment through the existing `wroteNothing` machinery:\\n\\n- completed run with an empty final message, no tool calls (#194's shape)\\n- session file missing (#186's shape)\\n- session present but not readable JSON\\n\\nWorded with the no-report variant `_This run ended without saying anything._`; the `atomaton:ended` tag and the mention are the existing `buildCommentBody` mechanisms (`completion-mention.ts` already forces a mention for a run the session shows reported nothing). No new session format; the discriminator is `readSession` + the last message's `tool_calls`, which were already in hand.\\n\\nCut-short runs (`stopped`/`runtime`/`iterations`/`loop`) keep their existing treatment unchanged. They are decided by `--ended-because` before the session is consulted, because a stopped run's last assistant turn also carries `tool_calls` and cannot vouch for a tool that spoke — the salvage and the #831 notice keep working exactly as before.\\n\\nIndependent of the planned atoma CLI retry-on-empty-response (separate repository); this is the defensive line for adopters running older runners.\\n\\n## Tests\\n\\n- `endedWithToolCalls` unit suite: the proof (calls on the last turn), the real end-of-session shape (calls then the tool result), and every `false` direction — empty final response, words-only final response, empty `tool_calls` array, no assistant message, empty session, missing/unreadable/unsupplied session, earlier turn's calls under a later silent turn.\\n- Script-level: posts for completed+empty (passes, carries `atomaton:ended=done`, no `/resume`, no ⚠️), posts for missing session, posts for unreadable JSON, still skips on proven tool-call ending (both the typed shape and calls-then-result), and the two former skip tests (missing file / blank file with no session) now assert they post — those were #186's shape exactly.\\n- `buildCommentBody`: the no-report notice renders without the cut-short machinery around it.\\n\\n## Validation\\n\\n- `bun run typecheck` — clean.\\n- `bun test` — 1704 pass, 0 fail, 6 skip (skip-decision tests among them; `read_run_ending`/`decide_turn_ending` regressions green at 80/80).\\n\\nDelivers #205.\"}",
+      "tool_call_id": "call_860896b884ab41c2a70faa76"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"atomaton/issue-204\",\"createdAt\":\"2026-10-18T16:02:36Z\",\"headRefName\":\"atomaton/issue-207\",\"number\":213,\"state\":\"MERGED\",\"title\":\"Raise the Atoma CLI pin to v0.4.2 (finish_reason on the session, contentless completion re-ask)\",\"body\":\"/reviewer\\n\\nPart of #207\\nRaises the pinned Atoma CLI version from `v0.4.0` to `v0.4.2`.\\n\\n## Why\\n\\nThe parent issue's root fix landed upstream:\\n\\n- **yuma-seno/atoma#7** (released in **v0.4.1**) — `finish_reason` is now recorded on every assistant message a session carries (`stop` / `length` / `content_filter` / `tool_calls`, the domain value, stripped before the request goes out), and the empty-completion detector is fed from the `FinishReason::Length` arm: an empty-text `length` completion re-asks the turn (with a note left in the session) instead of ending the run `completed` in silence. Three consecutive contentless completions end the run `failed`, naming the last attempt's finish reason.\\n- **yuma-seno/atoma#10** (released in **v0.4.2**) — the provider-items hand-back fix.\\n\\nThis is the machinery-side half of yuma-seno/atomaton#207: the pin raise is what puts the fixed binary under every run. The issue's remaining machinery-side follow-ups (declaring `finish_reason?` on `SessionMessage`, a reader that explains a silent ending) are deliberately **not** in this PR — a field this tree does not read degrades nothing, and declaring the type before the shape settles on the wire would be a guess. They can follow once a reader is wanted.\\n\\n## What changes, from an adopter's perspective\\n\\n- `atomaton-runner`, `atomaton-check` and `atomaton-validate-pr` default to `atoma v0.4.2` (was `v0.4.0`). An explicit `atoma_version` input overrides the default as before.\\n- A run whose provider keeps returning contentless completions (including reasoning models that spend the whole output budget with nothing visible) now ends `failed` with a result comment, instead of ending `completed` in silence — the machinery's existing `failed` path posts it, and the log line names the finish reason.\\n- Sessions written by new runs carry `finish_reason` on new assistant messages; old sessions read the field as absent (no migration, none needed).\\n\\n## Checklist entry\\n\\nThe doc comment on `ATOMA_DEFAULT_VERSION` is the raise checklist; this raise adds the `finish_reason` / contentless-completion entry: what v0.4.1 added, what an older binary drops, and why nothing in this tree reads the field yet.\\n\\n## Commands run and outcomes\\n\\n- `bun run typecheck` — exit 0\\n- `bun run synth` — exit 0; `dist/.github/workflows/atomaton-runner.yml:43,88` carry `default: v0.4.2`\\n- `bun test ./tests/contract ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks` — **1686 pass / 0 fail**, 135 files\\n- `dist/` is gitignored and not committed, per convention.\\n\\nDelivers the machinery-side half of the parent issue; the atoma-side half is yuma-seno/atoma#7.\"}",
+      "tool_call_id": "call_cf5c45bc36e7492c9a63cdac"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a248cb527a9e20cc",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\": \"atomaton/issue-204\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-9eddd35bf0d3f3a5",
+          "type": "function",
+          "function": {
+            "name": "check_merge_readiness",
+            "arguments": "{\"pull_number\": 211}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"atomaton/issue-204\",\"exists\":true,\"sha\":\"bfe140a35cba68cd3474a8fe7909a79635357fd2\",\"protected\":false}",
+      "tool_call_id": "chatcmpl-tool-a248cb527a9e20cc"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":211,\"ready\":false,\"blockers\":[{\"kind\":\"not-open\",\"detail\":\"pull request state is MERGED, not OPEN\"},{\"kind\":\"mergeability-unknown\",\"detail\":\"GitHub reports mergeStateStatus=UNKNOWN; retry shortly\"}],\"merge_state_status\":\"UNKNOWN\",\"required_checks\":[],\"checks\":[{\"name\":\"aggregate-sub-issues\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"reinvoke-origin-agent\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"notify-parent\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"resolve-parent\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"parse\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"default-branch-checks (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"pull-request-checks (verify)\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"atomaton-tools\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"pull-request-checks (verify)\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"default-branch-checks (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"atomaton-tools\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"completed\",\"conclusion\":\"success\"}],\"ci_dispatched\":false,\"summary\":\"Not mergeable:\\n1. [not-open] pull request state is MERGED, not OPEN\\n2. [mergeability-unknown] GitHub reports mergeStateStatus=UNKNOWN; retry shortly\"}",
+      "tool_call_id": "chatcmpl-tool-9eddd35bf0d3f3a5"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_90c140012aa3477799350a32",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git log --oneline atomaton/issue-204 -12 2>/dev/null | head -14; echo ===; git log --oneline main..atomaton/issue-204 2>/dev/null | wc -l; echo ===; git diff --stat main...atomaton/issue-204 2>/dev/null | tail -5\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"bfe140a Merge pull request #211 from yuma-seno/atomaton/issue-205\\n0a94ec0 Merge pull request #213 from yuma-seno/atomaton/issue-207\\n42249d6 Raise the Atoma CLI pin to v0.4.2\\n276d951 Test the salvaged comment branch the change left uncovered\\n83b59b3 post_result_comment: skip only when the session proves a session-ending tool call\\n4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n===\\n5\\n===\\n .../machinery/post_result_comment.test.ts          | 361 ++++++++++++++++++++-\\n src/entrypoints/machinery/post_result_comment.ts   | 123 +++++--\\n src/workflows/actions/atoma-cli.ts                 |  13 +-\\n 3 files changed, 465 insertions(+), 32 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":149}",
+      "tool_call_id": "call_90c140012aa3477799350a32"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8e40093aa85b754e",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun test 2>&1 | tail -6\", \"timeout_seconds\": 600, \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\n 1640 pass\\n 6 skip\\n 66 fail\\n 4350 expect() calls\\nRan 1712 tests across 140 files. [15.93s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":16011}",
+      "tool_call_id": "chatcmpl-tool-8e40093aa85b754e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ba1e13a00b36c7bf",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun test 2>&1 | grep -E \\\"^\\\\(fail\\\\)\\\" | head -20\", \"timeout_seconds\": 600}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) provider credential check against the real atoma > the binary understands --credentials-present [0.25ms]\\n(fail) provider credential check against the real atoma > stops and names the secret to add when the provider's credential is absent [0.13ms]\\n(fail) provider credential check against the real atoma > continues in silence when the provider's credential is there [0.05ms]\\n(fail) the places that start a workflow run > no generated workflow starts a run from its own bash [0.08ms]\\n(fail) the provider credential check > runs before the environment is built, and after the CLI it asks [0.14ms]\\n(fail) the provider credential check > asks about presence, never about value [0.12ms]\\n(fail) the provider credential check > carries no `if:`, because the gate it would use is not computed yet [0.04ms]\\n(fail) the provider credential check > names the credentials that exist, and asks about nothing else [0.77ms]\\n(fail) the provider credential check > passes ATOMA_PROVIDER through, promoted only when it is set [0.46ms]\\n(fail) the provider credential check > says nothing when the provider's credential is there [0.44ms]\\n(fail) the provider credential check > stops, names the missing secret, and says nothing was built [0.42ms]\\n(fail) the provider credential check > stops on an undecidable auto-detection without inventing a missing secret [0.42ms]\\n(fail) the provider credential check > warns and continues when the binary does not know the flag [0.39ms]\\n(fail) the provider credential check > warns and continues when there is no binary to ask [0.40ms]\\n(fail) the provider credential check > does not report a broken definition as a missing secret [0.42ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-runner sets the environment up before \\\"Run agent\\\" [0.16ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-check sets the environment up before \\\"Run this check's commands\\\" [0.02ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-deploy sets the environment up before \\\"Run this deployment's commands\\\" [0.02ms]\\n(fail) environment setup reaches every job that runs project commands > setup runs before any secret enters the environment [0.05ms]\\n(fail) environment setup reaches every job that runs project commands > no step before the setup carries a secret's value [0.08ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":15477}",
+      "tool_call_id": "chatcmpl-tool-ba1e13a00b36c7bf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8201e8738459e2d4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git stash list | head -3; git status --short | head; echo ===; bun test ./src/entrypoints/machinery 2>&1 | tail -5\", \"timeout_seconds\": 300}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"===\\n\\n 313 pass\\n 0 fail\\n 657 expect() calls\\nRan 313 tests across 40 files. [3.36s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":3535}",
+      "tool_call_id": "chatcmpl-tool-8201e8738459e2d4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-aee3f343d66e0e33",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git log --oneline -2 main; echo ===; bun test 2>&1 | grep -E \\\"^\\\\(fail\\\\)\\\" | grep -oE \\\"[a-z-]+\\\\.test\\\\.ts\\\" | sort | uniq -c | sort -rn | head; echo ===; bun test 2>&1 | grep -B1 \\\"^\\\\(fail\\\\)\\\" | head -4\", \"timeout_seconds\": 600}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n===\\n===\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":31390}",
+      "tool_call_id": "chatcmpl-tool-aee3f343d66e0e33"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8f19da67d7dc4024",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun test 2>&1 | grep -A3 \\\"the places that start a workflow run\\\" | head -20\", \"timeout_seconds\": 600}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) the places that start a workflow run > only lib/gh.ts builds a `gh workflow run` command [3.20ms]\\n86 |         .map((step) => step.run ?? \\\"\\\")\\n87 |         .map((body) => body.split(NEWLINE).filter((line) => !line.trimStart().startsWith(\\\"#\\\")).join(NEWLINE))\\n88 |         .some((body) => /gh\\\\s+workflow\\\\s+run/.test(body));\\n--\\n(fail) the places that start a workflow run > no generated workflow starts a run from its own bash [0.08ms]\\n(pass) the places that start a workflow run > every bridge is named in the header that explains them [0.10ms]\\n\\ntests/contract/own-pipeline.test.ts:\\n(pass) this repository's own deployments > every script a command executes directly is executable in git [3.39ms]\\n--\\n(fail) the places that start a workflow run > no generated workflow starts a run from its own bash [0.08ms]\\n(fail) the provider credential check > runs before the environment is built, and after the CLI it asks [0.13ms]\\n(fail) the provider credential check > asks about presence, never about value [0.10ms]\\n(fail) the provider credential check > carries no `if:`, because the gate it would use is not computed yet [0.04ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":15209}",
+      "tool_call_id": "chatcmpl-tool-8f19da67d7dc4024"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8acb18d69fb4fec2",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git log --all --oneline --format=\\\"%h %s\\\" -20 | head -25; echo ===; git diff main..atomaton/issue-204 --stat | wc -l\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"086f336 atomaton: metrics from 61 sessions\\nbfe140a Merge pull request #211 from yuma-seno/atomaton/issue-205\\n0a94ec0 Merge pull request #213 from yuma-seno/atomaton/issue-207\\n42249d6 Raise the Atoma CLI pin to v0.4.2\\n276d951 Test the salvaged comment branch the change left uncovered\\n83b59b3 post_result_comment: skip only when the session proves a session-ending tool call\\n4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n===\\n4\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":80}",
+      "tool_call_id": "chatcmpl-tool-8acb18d69fb4fec2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-97a4174672c76099",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun test ./tests/contract/own-pipeline.test.ts 2>&1 | tail -8; echo ===; git log --oneline main -- tests/contract/own-pipeline.test.ts | head -3\", \"timeout_seconds\": 300}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) the release scripts and where they think they are > self/atomaton/scripts/tag-release.sh does not count its way to the repository root [0.10ms]\\n(pass) the release scripts and where they think they are > self/atomaton/scripts/publish-release.sh does not count its way to the repository root [0.05ms]\\n(pass) the release scripts and where they think they are > self/atomaton/scripts/check-live-tools.sh does not count its way to the repository root [0.11ms]\\n\\n 5 pass\\n 0 fail\\n 8 expect() calls\\nRan 5 tests across 1 file. [11.00ms]\\n===\\n4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":84}",
+      "tool_call_id": "chatcmpl-tool-97a4174672c76099"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a5984305b9de8c05",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun test 2>&1 | grep -E \\\"^Ran|pass$|fail$\\\" | tail -4; echo ===FULL-COUNT-CHECK===; bun test 2>&1 > /tmp/atomaton-workspace/full-test.log 2>&1; grep -cE \\\"^\\\\(fail\\\\)\\\" /tmp/atomaton-workspace/full-test.log; tail -5 /tmp/atomaton-workspace/full-test.log\", \"timeout_seconds\": 900}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" 1640 pass\\n 66 fail\\nRan 1712 tests across 140 files. [15.63s]\\n===FULL-COUNT-CHECK===\\n132\\n 1640 pass\\n 6 skip\\n 66 fail\\n 4350 expect() calls\\nRan 1712 tests across 140 files. [15.22s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":30949}",
+      "tool_call_id": "chatcmpl-tool-a5984305b9de8c05"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-94de5048ebd84d22",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -E \\\"^\\\\(fail\\\\)\\\" /tmp/atomaton-workspace/full-test.log | sort | uniq | head -40\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) config.yaml's recognised keys > the shipped config.yaml declares only recognised keys [0.24ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-check sets the environment up before \\\"Run this check's commands\\\" [0.02ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-deploy sets the environment up before \\\"Run this deployment's commands\\\" [0.01ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-runner sets the environment up before \\\"Run agent\\\" [0.11ms]\\n(fail) environment setup reaches every job that runs project commands > no step before the setup carries a secret's value [0.07ms]\\n(fail) environment setup reaches every job that runs project commands > setup runs before any secret enters the environment [0.04ms]\\n(fail) generated workflows > a command on a closed issue is refused, except the one that stops a run [0.0\n\n[582 characters dropped from the middle; 4000 shown]\n\nreating one [0.04ms]\\n(fail) generated workflows > every environment variable a tool server reads is passed to the agent [2.57ms]\\n(fail) generated workflows > every job that runs a project's commands takes its runner from configuration [0.08ms]\\n(fail) generated workflows > every op the runner treats as progress is one something actually writes [0.07ms]\\n(fail) generated workflows > every script a workflow runs is under the deployed scripts directory [0.07ms]\\n(fail) generated workflows > every validation run checks the deliverable the pull request would merge [0.05ms]\\n(fail) generated workflows > makes tool hooks executable before the agent runs [0.04ms]\\n(fail) generated workflows > no env: value expects a shell to expand it [0.06ms]\\n(fail) generated workflows > no job-level if: references steps., which a job cannot see [0.06ms]\\n(fail) generated workflows > only the job that runs nothing a project wrote may dispatch a workflow [0.04ms]\\n(fail) generated workflows > operational notices are excluded from the next run's context [0.05ms]\\n(fail) generated workflows > reaches declared credentials by a computed key, never by dumping the secrets context [0.10ms]\\n(fail) generated workflows > resolves the credential declaration from the default branch, not the checkout [0.06ms]\\n(fail) generated workflows > routes recover mode and reports invalid command syntax [0.06ms]\\n(fail) generated workflows > the agent step carries no credentials [0.06ms]\\n(fail) generated workflows > the deploy matrix keeps the order and the stop the loop used to give [0.04ms]\\n(fail) generated workflows > the failure notice does not fire on a run that already posted its report [0.08ms]\\n(fail) generated workflows > the jobs that plan a matrix read the default branch [0.06ms]\\n(fail) generated workflows > the machinery ends up outside the work tree, before anything reads it [0.13ms]\\n(fail) generated workflows > the merge the shipped tool asks for is the merge the shipped ruleset allows [0.06ms]\\n(fail) generated workflows > the reranker cache is one directory, reachable by both users [0.18ms]\\n(fail) generated workflows > the run directory is created before anything writes to it, and shared before the agent runs [0.05ms]\\n(fail) generated workflows > the run's own files are written outside the work tree [0.08ms]\\n(fail) generated workflows > the runner reads its machinery from the default branch, not the checkout [0.09ms]\\n(fail) generated workflows > the shipped ruleset requires exactly the check the shipped workflow produces [0.07ms]\\n(fail) generated workflows > the shipped workflows cover the paths a project's pipeline needs [0.05ms]\\n(fail) generated workflows > the stop watcher runs before the agent and writes where atoma is looking [0.06ms]\\n(fail) generated workflows > the tool servers are read from the machinery, and the workspace only where intended [0.11ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":115}",
+      "tool_call_id": "chatcmpl-tool-94de5048ebd84d22"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a262ccae85aa6ac4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -E \\\"^\\\\(fail\\\\)\\\" /tmp/atomaton-workspace/full-test.log | sed -E 's/ \\\\[[0-9.]+ms\\\\]//' | sort -u | tail -30; echo ===; grep -E \\\"^\\\\(fail\\\\)\\\" /tmp/atomaton-workspace/full-test.log | grep -oE \\\"^[^(]*\\\\(fail\\\\) [a-zA-Z' ]+\\\" | sort | uniq -c | sort -rn | head -10\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) generated workflows > the shipped ruleset requires exactly the check the shipped workflow produces\\n(fail) generated workflows > the shipped workflows cover the paths a project's pipeline needs\\n(fail) generated workflows > the stop watcher runs before the agent and writes where atoma is looking\\n(fail) generated workflows > the tool servers are read from the machinery, and the workspace only where intended\\n(fail) generated workflows > validation reads the agent a pull request asks for from its thread\\n(fail) generated workflows > world-writable PATH directories are closed after every install, before the agent\\n(fail) mcp/delegate.ts > the read-only delegate's sub-run is given files_readonly, both ways the path resolves\\n(fail) provider credential check against the real atoma > continues in silence when the provider's credential is there\\n(fail) provider credential check against the real atoma > stops and names the secret to add when the provider's credential is absent\\n(fail) provider credential check against the real atoma > the binary understands --credentials-present\\n(fail) reserved names match the workflows they describe > the agent's step\\n(fail) reserved names match the workflows they describe > the credentialed check step\\n(fail) reserved names match the workflows they describe > the deploy step\\n(fail) reserved names match the workflows they describe > the pull request's check step carries no declared credential at all\\n(fail) the agent's environment > is exactly the list the reserved names are built from\\n(fail) the credentials step and RUN_CREDENTIALS > every credential the run declares is supplied to the step\\n(fail) the credentials step and RUN_CREDENTIALS > the step supplies nothing that is not a declared credential or a secret slot\\n(fail) the places that start a workflow run > no generated workflow starts a run from its own bash\\n(fail) the provider credential check > asks about presence, never about value\\n(fail) the provider credential check > carries no `if:`, because the gate it would use is not computed yet\\n(fail) the provider credential check > does not report a broken definition as a missing secret\\n(fail) the provider credential check > names the credentials that exist, and asks about nothing else\\n(fail) the provider credential check > passes ATOMA_PROVIDER through, promoted only when it is set\\n(fail) the provider credential check > runs before the environment is built, and after the CLI it asks\\n(fail) the provider credential check > says nothing when the provider's credential is there\\n(fail) the provider credential check > stops on an undecidable auto-detection without inventing a missing secret\\n(fail) the provider credential check > stops, names the missing secret, and says nothing was built\\n(fail) the provider credential check > warns and continues when the binary does not know the flag\\n(fail) the provider credential check > warns and continues when there is no binary to ask\\n(fail) workflow sources > every generated workflow names the source in this repository it came from\\n===\\n     72 (fail) generated workflows \\n     22 (fail) the provider credential check \\n     10 (fail) environment setup reaches every job that runs project commands \\n      8 (fail) reserved names match the workflows they describe \\n      6 (fail) provider credential check against the real atoma \\n      4 (fail) the credentials step and RUN\\n      2 (fail) workflow sources \\n      2 (fail) the places that start a workflow run \\n      2 (fail) the agent's environment \\n      2 (fail) mcp\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":72}",
+      "tool_call_id": "chatcmpl-tool-a262ccae85aa6ac4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_95f6b663ae934d41804ce280",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun run synth 2>&1 | tail -2; echo ===; bun test 2>&1 | tail -6\",\"timeout_seconds\":900}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"build-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.7 (101 files)\\n===\\n\\n 1706 pass\\n 6 skip\\n 0 fail\\n 4978 expect() calls\\nRan 1712 tests across 140 files. [16.28s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":16584}",
+      "tool_call_id": "call_95f6b663ae934d41804ce280"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9c3f56f8c00d76f8",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git status --short | head -5; echo ===; git diff main...atomaton/issue-204 -- src/entrypoints/machinery/post_result_comment.ts | grep -E \\\"^[+-]\\\" | grep -vE \\\"^[+-][+-]\\\" | head -40\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"===\\n+/**\\n+ * Whether the run's last assistant turn made tool calls.\\n+ *\\n+ * The one piece of evidence that an empty output file is a session-ending tool\\n+ * call: atoma's loop stops the moment such a call returns, so the model's last\\n+ * turn is a tool call with no words and nothing follows it. A run that\\n+ * `completed` with no calls on that turn is a different shape -- the model\\n+ * answered silence -- and its silence is its own, to be reported rather than\\n+ * assumed covered by a tool's comment.\\n+ *\\n+ * Read backwards from the END of the session with no boundary: the skip this\\n+ * decides is about the run's last act, and the messages below this run's\\n+ * boundary cannot change what the last assistant message holds. A `tool`\\n+ * message comes after an assistant turn's calls, so stepping over those is what\\n+ * reaches that turn.\\n+ *\\n+ * `false` for a session that is missing, unreadable or empty, and for an\\n+ * assistant message with no calls or empty ones. That direction is the point of\\n+ * this function: `false` makes the caller post an ending comment, and the\\n+ * failure it costs -- a second content-free comment under one a session-ending\\n+ * tool already posted -- is the smaller one, against deleting a person's\\n+ * ongoing thread (#194, #186).\\n+ */\\n+export function endedWithToolCalls(sessionPath: string | undefined): boolean {\\n+  const messages = readSession(sessionPath)?.messages ?? [];\\n+  for (let i = messages.length - 1; i >= 0; i -= 1) {\\n+    const message = messages[i];\\n+    if (message?.role !== \\\"assistant\\\") continue;\\n+    return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;\\n+  }\\n+  return false;\\n+}\\n+\\n-  // Empty output has two meanings, and they need opposite treatment.\\n-  // A session-ending tool call leaves it empty because atoma's loop stops the moment\\n-  // that tool returns, before the model gets another turn -- and each of those tools\\n-  // posts its own comment, so a second content-free one would be noise. That is the\\n-  // skip below, and it is right.\\n+  // But an empty file is a shape, not a fact, and it has three meanings. The\\n+  // session-ending tool call is one. #194 recorded a second: a run the core\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":81}",
+      "tool_call_id": "chatcmpl-tool-9c3f56f8c00d76f8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8fabb68a10d47205",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -n \\\"endedWithToolCalls\\\\|wroteNothing\\\" src/entrypoints/machinery/post_result_comment.ts | head -12; echo ===; sed -n '620,650p' src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"203:export function endedWithToolCalls(sessionPath: string | undefined): boolean {\\n431:  wroteNothing?: boolean;\\n485:  } else if (args.wroteNothing === true) {\\n634:  let wroteNothing = false;\\n666:    if (!endedEarly && endedWithToolCalls(values.session)) {\\n678:      wroteNothing = true;\\n692:      wroteNothing = true;\\n721:    wroteNothing,\\n===\\n  // session for its proof -- the last assistant turn carrying tool_calls --\\n  // and posts the no-report notice wherever that proof is missing. Cutting a\\n  // run off is its own case and keeps its own treatment: a stopped run's last\\n  // turn carries tool_calls too, so `--ended-because` decides for those before\\n  // the session is asked anything.\\n  //\\n  // Reaching a limit leaves the file empty too, and there nothing else speaks.\\n  // Measured: a run spent 17 minutes and 154k tokens, and the thread received\\n  // one notice saying the limit was reached. What it had worked out was in the\\n  // session and nowhere a person would look.\\n  const endedEarly = cutShort(values[\\\"ended-because\\\"]);\\n\\n  let output = redacted;\\n  let salvaged = false;\\n  let wroteNothing = false;\\n  if (!output.trim() && endedEarly) {\\n    const last = lastAgentText(values.session, Number(values[\\\"messages-before\\\"]));\\n    if (last !== undefined) {\\n      output = redact(last);\\n      salvaged = true;\\n      console.error(\\\"salvaged the agent's last message from the session (cut short)\\\");\\n    }\\n  }\\n\\n  if (!output.trim()) {\\n    // The skip is right only where the session PROVES a session-ending tool call:\\n    // the last assistant turn made tool calls, atoma's loop stopped the moment one\\n    // returned, and that tool posted its own comment -- a second content-free one\\n    // would be noise. Every other empty is a run whose silence is its own: a\\n    // `completed` run whose last turn carried no calls (the model answered\\n    // silence), a session that is missing or unreadable. Skipping those deletes\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":73}",
+      "tool_call_id": "chatcmpl-tool-8fabb68a10d47205"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-be937bc8a4675450",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"sed -n '650,700p' src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"    // silence), a session that is missing or unreadable. Skipping those deletes\\n    // the machinery's only comment AND the thread's `atomaton:ended` tag, which\\n    // is what releases the thread's guard -- the defect that let a guard delete a\\n    // person's later comments forever (#194), and the shape of #186, where no\\n    // session exists to prove anything either way.\\n    //\\n    // The cut-short runs are told apart by `--ended-because`, not by the session:\\n    // a stop lands at a turn boundary, so a stopped run's last assistant turn\\n    // carries tool_calls too and the session cannot tell \\\"ended via a tool that\\n    // spoke\\\" from \\\"stopped mid-work with nothing said\\\". Only the first is a skip;\\n    // the second is the shape the #831 notice exists for, and there nothing has\\n    // posted the machinery's sentence but this step.\\n    //\\n    // \\\"toward releasing the guard, never toward holding it stuck\\\" applies here\\n    // at the comment level too: the machine must not hold a thread's guard on\\n    // the strength of a guess about another component's invariant.\\n    if (!endedEarly && endedWithToolCalls(values.session)) {\\n      console.error(\\\"atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.\\\");\\n      return;\\n    }\\n    if (endedEarly) {\\n      // It is wrong for a run that was cut short, and this is the common shape\\n      // rather than the odd one. A stop lands at the next turn boundary, so a run\\n      // reading files when it arrives has said nothing at all and there is nothing\\n      // to salvage -- a run that spent nine iterations in tool calls and produced\\n      // no assistant text is the observed case (#831). Skipping there drops the\\n      // machinery's own sentence along with the agent's silence: that it stopped,\\n      // that the session survived, and how to resume.\\n      wroteNothing = true;\\n      output = values[\\\"ended-because\\\"] === \\\"stopped\\\"\\n        ? \\\"_This run was stopped before it said anything._\\\"\\n        : `_This run ${howItWasCutShort(values[\\\"ended-because\\\"])} before it said anything._`;\\n      console.error(\\\"the run was cut short with nothing to report -- posting the notice rather than nothing.\\\");\\n    } else {\\n      // A run that ended of its own accord without saying anything, and whose\\n      // session cannot prove a session-ending tool call did the talking instead:\\n      // the shape of #194 (an empty final response `completed`) and #186 (no\\n      // session at all). Same treatment, no-report wording: the comment is the\\n      // machinery's only sentence on this thread, the `atomaton:ended` tag under\\n      // it is what releases the thread's guard, and the mention is what fetches a\\n      // person -- see `completion-mention.ts`, which already forces one for a\\n      // run the session shows reported nothing.\\n      wroteNothing = true;\\n      output = \\\"_This run ended without saying anything._\\\";\\n      console.error(\\n        \\\"atomaton_output.txt is empty and the session shows no session-ending tool call \\\" +\\n          \\\"(last assistant turn made no tool calls, or the session is missing/unreadable) \\\" +\\n          \\\"-- posting the no-report notice rather than skipping.\\\",\\n      );\\n    }\\n  }\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":71}",
+      "tool_call_id": "chatcmpl-tool-be937bc8a4675450"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a7798bab2adb752d",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -n \\\"v0.4.2\\\\|ATOMA_DEFAULT_VERSION\\\" src/workflows/actions/atoma-cli.ts | head -6; echo ===; git log --format=\\\"%h %s\\\" atomaton/issue-204 -6 | head -8\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"144:export const ATOMA_DEFAULT_VERSION = \\\"v0.4.2\\\";\\n147:  \\\"Atoma CLI version tag to install (e.g. v0.4.2). Use `source` to build from a checkout of yuma-seno/atoma@main.\\\";\\n===\\nbfe140a Merge pull request #211 from yuma-seno/atomaton/issue-205\\n0a94ec0 Merge pull request #213 from yuma-seno/atomaton/issue-207\\n42249d6 Raise the Atoma CLI pin to v0.4.2\\n276d951 Test the salvaged comment branch the change left uncovered\\n83b59b3 post_result_comment: skip only when the session proves a session-ending tool call\\n4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":75}",
+      "tool_call_id": "chatcmpl-tool-a7798bab2adb752d"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bebe86f4371d2809",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\": \"/reviewer\\n\\nCloses #204\\n## What this delivers\\n\\nBoth children of #204 are merged into this branch and this pull request delivers their accumulated work to the parent.\\n\\n**#211 — machine-side defense (delivers #205).** `post_result_comment.ts` skipped the result comment whenever `atomaton_output.txt` was empty, assuming the only way that file ends up empty is a session-ending tool call that already posted its own comment. #194 proved the assumption false: a run the core filed `completed` whose last assistant message was an empty string with no tool calls — the model answered silence — got no comment and no `atomaton:ended` tag, and the unreleased guard went on to delete every person's later comment. The skip now requires the session's own proof (`endedWithToolCalls`: the last assistant turn carries `tool_calls`); every other empty output posts the ending comment through the existing `wroteNothing` machinery, which releases the guard. Cut-short runs keep their `--ended-because`-driven treatment unchanged.\\n\\n**#213 — root fix upstream (delivers the machinery half of #207).** Raises the pinned Atoma CLI from `v0.4.0` to `v0.4.2`, which carries yuma-seno/atoma#7: `finish_reason` is now recorded on every assistant message, and a contentless completion re-asks the turn instead of ending `completed` in silence — three consecutive contentless completions end the run `failed`, which the machinery's existing failure path reports. The retry→error behavior you asked for is this, upstream.\\n\\n## Validation\\n\\n- `bun run typecheck` — clean (engineer, both children).\\n- `bun test` on this branch's head — **1706 pass / 0 fail / 6 skip** across 140 files (run here after `bun run synth`; the first full run without a fresh `dist/` reported 66 spurious fails in `dist/`-reading contract tests, all resolved by regenerating `dist/`).\\n- Both child PRs reviewed and merged; #205's acceptance criteria 1–4 verified by its engineer and reviewer.\\n\\n## Not in scope\\n\\n- The #207 machinery-side follow-ups declared optional by #213 (declaring `finish_reason?` on `SessionMessage`, a reader that explains a silent ending) — deferred until a reader is wanted.\\n- #186's thread itself: the machinery fix prevents recurrence; unsticking a thread already wedged remains manual (delete the stale comment that the guard is holding the thread on).\", \"title\": \"Result-comment skip no longer trusts an empty file; Atoma CLI pin raised to v0.4.2 (#204)\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'create_pr' on MCP server 'github' reported an error: Error: This pull request body contains \"Closes #204\", which GitHub acts on: merging would close whatever issue that names, without going through the path that cleans up labels and tells a parent its child is done. Remove it and try again. To close an issue, call close_issue; to link this work to the issue it belongs to, do nothing -- that link is added for you.",
+      "tool_call_id": "chatcmpl-tool-bebe86f4371d2809"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-816266fc57d4396a",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\": \"/reviewer\\n\\nPart of #204\\n## What this delivers\\n\\nBoth children of #204 are merged into this branch and this pull request delivers their accumulated work to the parent.\\n\\n**#211 — machine-side defense (delivers #205).** `post_result_comment.ts` skipped the result comment whenever `atomaton_output.txt` was empty, assuming the only way that file ends up empty is a session-ending tool call that already posted its own comment. #194 proved the assumption false: a run the core filed `completed` whose last assistant message was an empty string with no tool calls — the model answered silence — got no comment and no `atomaton:ended` tag, and the unreleased guard went on to delete every person's later comment. The skip now requires the session's own proof (`endedWithToolCalls`: the last assistant turn carries `tool_calls`); every other empty output posts the ending comment through the existing `wroteNothing` machinery, which releases the guard. Cut-short runs keep their `--ended-because`-driven treatment unchanged.\\n\\n**#213 — root fix upstream (delivers the machinery half of #207).** Raises the pinned Atoma CLI from `v0.4.0` to `v0.4.2`, which carries yuma-seno/atoma#7: `finish_reason` is now recorded on every assistant message, and a contentless completion re-asks the turn instead of ending `completed` in silence — three consecutive contentless completions end the run `failed`, which the machinery's existing failure path reports. The retry→error behavior you asked for is this, upstream.\\n\\n## Validation\\n\\n- `bun run typecheck` — clean (engineer, both children).\\n- `bun test` on this branch's head — **1706 pass / 0 fail / 6 skip** across 140 files (run here after `bun run synth`; the first full run without a fresh `dist/` reported 66 spurious fails in `dist/`-reading contract tests, all resolved by regenerating `dist/`).\\n- Both child PRs reviewed and merged; #205's acceptance criteria 1–4 verified by its engineer and reviewer.\\n\\n## Not in scope\\n\\n- The #207 machinery-side follow-ups declared optional by #213 (declaring `finish_reason?` on `SessionMessage`, a reader that explains a silent ending) — deferred until a reader is wanted.\\n- #186's thread itself: the machinery fix prevents recurrence; unsticking a thread already wedged remains manual (delete the stale comment that the guard is holding the thread on).\", \"title\": \"Result-comment skip no longer trusts an empty file; Atoma CLI pin raised to v0.4.2 (#204)\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'create_pr' on MCP server 'github' reported an error: Error: This pull request body has \"/reviewer\" on a line of its own, which Atomaton reads as a command to start an agent. A command is a request from someone entitled to make it, and a body an agent wrote is not one. Pass the agent as the `reviewer` argument instead; the machinery writes the line for you. To mention a command in prose, put it inside a sentence rather than alone on its line.",
+      "tool_call_id": "chatcmpl-tool-816266fc57d4396a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b127768ef3613653",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\": \"Part of #204\\n## What this delivers\\n\\nBoth children of #204 are merged into this branch and this pull request delivers their accumulated work to the parent.\\n\\n**#211 — machine-side defense (delivers #205).** `post_result_comment.ts` skipped the result comment whenever `atomaton_output.txt` was empty, assuming the only way that file ends up empty is a session-ending tool call that already posted its own comment. #194 proved the assumption false: a run the core filed `completed` whose last assistant message was an empty string with no tool calls — the model answered silence — got no comment and no `atomaton:ended` tag, and the unreleased guard went on to delete every person's later comment. The skip now requires the session's own proof (`endedWithToolCalls`: the last assistant turn carries `tool_calls`); every other empty output posts the ending comment through the existing `wroteNothing` machinery, which releases the guard. Cut-short runs keep their `--ended-because`-driven treatment unchanged.\\n\\n**#213 — root fix upstream (delivers the machinery half of #207).** Raises the pinned Atoma CLI from `v0.4.0` to `v0.4.2`, which carries yuma-seno/atoma#7: `finish_reason` is now recorded on every assistant message, and a contentless completion re-asks the turn instead of ending `completed` in silence — three consecutive contentless completions end the run `failed`, which the machinery's existing failure path reports. The retry→error behavior you asked for is this, upstream.\\n\\n## Validation\\n\\n- `bun run typecheck` — clean (engineer, both children).\\n- `bun test` on this branch's head — **1706 pass / 0 fail / 6 skip** across 140 files (run here after `bun run synth`; the first full run without a fresh `dist/` reported 66 spurious fails in `dist/`-reading contract tests, all resolved by regenerating `dist/`).\\n- Both child PRs reviewed and merged; #205's acceptance criteria 1–4 verified by its engineer and reviewer.\\n\\n## Not in scope\\n\\n- The #207 machinery-side follow-ups declared optional by #213 (declaring `finish_reason?` on `SessionMessage`, a reader that explains a silent ending) — deferred until a reader is wanted.\\n- #186's thread itself: the machinery fix prevents recurrence; unsticking a thread already wedged remains manual (delete the stale comment that the guard is holding the thread on).\", \"reviewer\": \"reviewer\", \"title\": \"Result-comment skip no longer trusts an empty file; Atoma CLI pin raised to v0.4.2 (#204)\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":221,\"url\":\"https://github.com/yuma-seno/atomaton/pull/221\",\"base\":\"\",\"validation_dispatched\":true}",
+      "tool_call_id": "chatcmpl-tool-b127768ef3613653"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 6,
+      "event_count": 7,
       "resolved_number": "204",
-      "snapshot_hash": "2505e07b23522624c2dfdfb85f55e9fa9a2d82fc0d89c99a6e7e71985eb64aeb",
+      "snapshot_hash": "e0523906222065ee5f669a7d8c7d118392e0fb8e26fd56964d4a575f4800c162",
       "type": "issue",
       "version": 1
     }
@@ -2641,6 +3101,26 @@
         }
       },
       "started": "2026-10-17T12:31:31Z"
+    },
+    {
+      "ended": "2026-10-18T16:44:50Z",
+      "ended_because": "completed",
+      "iterations": 22,
+      "messages": 316,
+      "seconds": 332,
+      "server_calls": {
+        "github": {
+          "check_merge_readiness": 1,
+          "create_pr": 3,
+          "get_branch": 1,
+          "get_issue": 3,
+          "get_pr": 2
+        },
+        "shell": {
+          "bash": 16
+        }
+      },
+      "started": "2026-10-18T16:39:18Z"
     }
   ]
 }
