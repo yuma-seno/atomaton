@@ -1854,14 +1854,48 @@
       "role": "tool",
       "content": "Issue #207 is concluded: your reason and summary are on the issue. 1 sibling(s) of the parent issue still open. No action needed. Nothing else is yours to do here.",
       "tool_call_id": "chatcmpl-tool-ba95e7f0dd2e15e1"
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the agent on this issue considers its work complete.\n\n**Reason:** 調査完了: #207 の主要スコープ(空応答リトライ2回→連続で failed 終了、エラー文が finish_reason を名指し)は既に稼働中の atoma v0.4.0 に同梱済みで、残りは atoma CLI リポジトリ側(Rust)の変更のみ — このリポジトリからは PR を出せないため、調査結果を親に報告して完了とする。\n\n## 調査結果(#207 のスコープと現状)\n\n#207 のスコープは「atoma CLI リポジトリ、yuma-seno/atoma 側の変更」と明記されており、このリポジトリ(テンプレート側)の変更ではない。yuma-seno/atoma@main の実コードを検証した結果:\n\n**既に shipped(稼働中の v0.4.0 バイナリに含まれる、要確認済み):**\n\n1. **空応答リトライ→エラー化は実装済み。** `src/application/runner/execution.rs` の `inference_loop` に `MAX_EMPTY_COMPLETION_RETRIES: u8 = 2` があり、テキスト無し・tool_calls 無しの contentless completion を2回再リクエストし、3回連続で `bail!(\"LLM returned empty response (finish_reason: {}) 3 times in a row\")` → `ended_because: failed`(非ゼロ exit)。空の `tool_calls` 配列と `stop`+空テキストの両形状をカバー、docs/runtime.md の \"Contentless completions\" セクションにも記載済み。\n2. **機械側の既存 failed 経路でガード解放+結果コメント投稿。** `read_run_ending.ts` が `atoma_runs` の `failed` を読み、ステップが非ゼロで終了すれば `report_run_failure.ts` が \"did not finish — the run failed\" + ログ抜粋(`Run failed: LLM returned empty response (finish_reason: …)` が INTERESTING 正規表現に一致)を投稿。受け入れ基準 3(連続空応答で失敗終了し結果コメントが投稿される)は、`.github/workflows/atomaton-runner.yml:43` のデフォルト `v0.4.0` で既に満たされる。\n3. **エラー文が finish_reason を名指し**(スコープ3、任意)もこの経路では満たされる。\n\n**残るギャップ(すべて yuma-seno/atoma 側の Rust 変更で、このリポジトリからは不可能):**\n\n1. **finish_reason がセッション messages に記録されない。** `Message`(src/domain/session.rs)に finish_reason フィールドが無く、`inference_loop` が `choice.finish_reason` を受け取ったまま捨てている。`RunRecord`/`atoma_runs` にも無い。受け入れ基準1(セッション JSON に finish_reason が記録される)は未達。修正: assistant メッセージに `finish_reason: Option<String>`(`#[serde(default, skip_serializing_if = \"Option::is_none\")]` で後方互換)、Responses API の `incomplete_details.reason` も同様に。\n2. **部分的な空(length)が依然 false success。** `inference_loop` の `FinishReason::Length` アームはテキストが空でも `Completed { reason: Length }` を返す — reasoning モデルが予算を消費したケース(chat-completions の `finish_reason: length`、Responses の `status: incomplete`+`max_output_tokens`、どちらも Length にマップされる)が `completed`+空メッセージとして記録される。#194 と同じ形状。修正: Length+空テキストを Stop アームと同じ `consecutive_empty` リトライ/bail 経路に流す。\n3. **リトライがセッションに記録されない。** 空応答リトライは何も append しない(loop re-ask と StreamInterrupted re-ask は user ノートを append する)。受け入れ基準2の「セッションに再試行が記録される」にはマーカーメッセージが必要。\n\n**このリポジトリ側の後続作業(コアの新リリース後のみ):** `src/workflows/actions/atoma-cli.ts:135` の `ATOMA_DEFAULT_VERSION` 引き上げ(v0.4.0 → 新版)+ チェックリスト項目の追記、`src/domain/work/session.ts` の `SessionMessage` への `finish_reason?` 宣言。先行させると型が存在しないインターフェースを推測するため、リリース後にやること。\n\n**完了判断の根拠:** #207 の「close 条件」は「atoma CLI リポジトリ上の PR がマージされ…」とあり、そのリポジトリはこのリポジトリ(yuma-seno/atomaton)とは別。この run はクロスリポジトリの push/PR 作成ができない(shell guard が git mutation を拒否、GitHub tools は自リポジトリのみ)。atoma 側の変更は yuma-seno 本人が直接行う PR#2〜#6 と同じワークフロー(直接 main ブランチに PR を出してマージ)で行う必要がある。\n\n**このリポジトリの PR:** 出していない(スコープ外のため)。/tmp/atomaton-workspace/issue-207-findings.md に調査メモを残した。",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-17T13:07:41Z",
+        "event_type": "issue_comment",
+        "id": 6234246776,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\natom CLI側にIssueを立てるので、タイトルと説明を考えて。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-18T03:58:00Z",
+        "event_type": "issue_comment",
+        "id": 6245417233,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "content": "#207 の調査で確認済みの事実だけを使って下書きしました。atoma リポジトリ(issue #1、コミット、docs すべて英語)に合わせて**英語で**作成しています。日本語版が必要なら言ってください。\n\n## タイトル案\n\n```\nRecord finish_reason on the session, and count an empty length-completion as an empty response\n```\n\n(defect 形式がお好みなら: `An empty length-completion ends the run completed, and the session cannot say why`)\n\n## 本文ドラフト\n\n````markdown\n## The defect\n\nThe empty-completion retry on `main` (in v0.4.0) already matches what the delivery\nmachinery asked for (yuma-seno/atomaton#207): two re-requests, then\n`LLM returned empty response (finish_reason: …) 3 times in a row` and a `failed`\nending. Two gaps sit beside it:\n\n1. **The session cannot say why a turn ended silent.** `inference_loop` reads\n   `choice.finish_reason` and keeps none of it. `Message` (`src/domain/session.rs`)\n   has no field to record it on, and the run record (`atoma_runs`) carries none\n   either — so a session whose last assistant message is `content: \"\"` with no tool\n   calls cannot distinguish a model that stopped from one that ran out of output\n   budget or was content-filtered. The value already reaches the `--output json`\n   envelope (`report.rs`) and stops there: one channel carries what the other\n   dropped.\n\n2. **An empty `length` completion is recorded as a successful run.** The\n   `FinishReason::Length` arm appends `content.unwrap_or(\"\")` and returns\n   `Completed { reason: Length }`. A reasoning model that spends the output budget\n   on thinking and emits nothing visible therefore ends `completed` with an empty\n   message. The Responses dialect folds into the same hole — `status: incomplete`\n   with `incomplete_details.reason: max_output_tokens` maps to `Length` (pinned by\n   `the_incomplete_reasons_match_the_non_streaming_translation`), and reasoning\n   tokens produce exactly that shape. Measured on the machinery's own sessions: 12\n   of 31 over seven days ended `completed` having said nothing.\n\n## What to build\n\n1. **`finish_reason: Option<String>` on assistant messages**, with\n   `#[serde(default, skip_serializing_if = \"Option::is_none\")]` — old sessions read\n   back as `None`, no migration. Persist the DOMAIN value, not a wire string: both\n   dialects already translate into `FinishReason`, so the adapters are not the\n   work. Whether the Responses incomplete reason (`max_output_tokens`) is spelled\n   into the same string or carried beside it is this issue's to decide.\n\n2. **Feed the empty detector from the Length arm.** The detector's condition is\n   content-based — no text, no tool calls — and that is the right rule: a length\n   completion that CARRIED text is a real partial answer, already appended to the\n   session, and re-asking the turn would duplicate it. What is missing is that an\n   empty-text `Length` reaches the detector at all. Route it through the same\n   `consecutive_empty` path, so the run ends `failed` with the finish_reason of\n   the last attempt named, instead of a silent `completed`.\n\n3. **Record the retry in the session.** The loop re-ask and the `StreamInterrupted`\n   re-ask both append a note saying what happened and to continue rather than\n   repeat; the empty-completion retry appends nothing, so a recovered turn looks\n   like it never stumbled. The same shape fits — a user note before the\n   re-request. Nothing is done with the empty response, so the\n   no-duplicate-side-effects argument is the one those two already make.\n\n## Done when\n\n- A session written after this carries `finish_reason` on new assistant messages;\n  sessions written before it read the field as absent, and nothing rejects them.\n- Three consecutive contentless completions — whatever their finish_reason — end\n  the run `failed`, and the error names the last one's finish_reason.\n- One contentless completion recovered by a retry is visible in the session.\n\n## Not asking for\n\n- A retry keyed on `finish_reason == length` alone: a length completion with text\n  is an answer, not an empty one.\n- A migration of stored sessions.\n- Anything in the delivery machinery (yuma-seno/atomaton): its `failed` path\n  already posts the failure comment and shows the log line this writes.\n````\n\n## ドラフトに入れた判断と根拠\n\n- **リトライ件数は範囲に含めていない**: `MAX_EMPTY_COMPLETION_RETRIES = 2`(3 attempts)が既に #207 の「2 回程度」と一致していることを冒頭で確認済みとして述べ、issue は残った2つのギャップ+記録に絞りました。\n- **リトライ条件の推奨を明記**(「What to build 2」): #207 は「`finish_reason === \"length\"` をリトライ条件に含める」と書いていましたが、実装済みの検出器は content-based(no text, no tool calls)で、こちらの方が正しい — text ありの length は部分的な「答え」であって再送するとセッションに重複が残る、という理由を issue 内に書いたので、異論ならそこにコメントする形で決められます。\n- 引用した実装事実(`Message` のフィールド構成、Length アームの挙動、envelope の `finish_reason`、アダプタのマッピングとテスト名、`docs/runtime.md` の記載)は前回 run で yuma-seno/atoma@main を直接読んで検証済みで、#207 のクローズコメントに証跡付きで書いたものと一致しています。\n\nこのリポジトリ側の対応はありません。この issue の残作業は atoma 側への起票と実装だけです。",
+      "atoma_metadata": {
+        "github_comment_id": 6245442794,
+        "agent": "atomaton"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 1,
-      "snapshot_hash": "6b72963d40ad44b168850842445d017de020fb243a43f3d64ae4ed060e6b7c3b",
-      "version": 1
+      "event_count": 3,
+      "snapshot_hash": "e238ee1cebe6364b4f19bf7d601c101da2ad37cdf80c9a59f88fddd37934b65c",
+      "version": 1,
+      "type": "issue",
+      "resolved_number": "207"
     }
   },
   "atoma_runs": [
@@ -1901,6 +1935,15 @@
         }
       },
       "started": "2026-10-17T12:40:32Z"
+    },
+    {
+      "ended": "2026-10-18T04:01:20Z",
+      "ended_because": "completed",
+      "iterations": 1,
+      "messages": 205,
+      "seconds": 162,
+      "server_calls": {},
+      "started": "2026-10-18T03:58:38Z"
     }
   ]
 }
