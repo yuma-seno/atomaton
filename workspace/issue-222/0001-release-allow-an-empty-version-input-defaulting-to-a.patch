@@ -1,0 +1,212 @@
+From b8d6df08037f16855560d0907a795cf1abdde569 Mon Sep 17 00:00:00 2001
+From: atomaton-atomaton <atomaton-atomaton@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 17:20:31 +0000
+Subject: [PATCH] release: allow an empty version input, defaulting to a
+ last-segment bump
+
+The Atomaton Release workflow required the version to be typed on every
+dispatch. The declared version's last segment incremented is what the
+button usually means, so the input is now optional: leaving it empty
+declares 0.2.3 -> 0.2.4, with no carry -- 0.2.9 -> 0.2.10 -- and a
+prerelease incrementing its own last segment -- 0.3.0-rc.1 ->
+0.3.0-rc.2. Naming anything else (a minor bump, cutting a prerelease)
+is entering the version. The first release names its version, because
+there is nothing declared to increment.
+
+Everything downstream is unchanged: the derived version flows through
+the same downgrade and already-released checks, the same write, and the
+same pull request.
+
+CONTRIBUTING.md documents the empty input. The workflow is an overlay
+file, so self/workflows/atomaton-release.yml carries the identical
+change, as tests/contract/self-overlay.test.ts requires.
+
+Work for issue #222.
+---
+ .github/workflows/atomaton-release.yml | 49 +++++++++++++++++++++-----
+ CONTRIBUTING.md                        |  9 ++++-
+ self/workflows/atomaton-release.yml    | 49 +++++++++++++++++++++-----
+ 3 files changed, 88 insertions(+), 19 deletions(-)
+
+diff --git a/.github/workflows/atomaton-release.yml b/.github/workflows/atomaton-release.yml
+index 7a16c35..5c0ee0a 100644
+--- a/.github/workflows/atomaton-release.yml
++++ b/.github/workflows/atomaton-release.yml
+@@ -45,14 +45,29 @@
+ # request needs a person. Deciding that a set of work is ready to ship is a
+ # judgement no agent is positioned to make, and a version is that judgement written
+ # as a number.
++#
++# ## What an empty input means
++#
++# `version` may be left empty, which is the default: the declared version's last
++# segment is incremented and nothing else, so pressing the button without typing a
++# number ships the next patch. The increment is arithmetic on the last segment,
++# never a carry — `0.2.9` declares `0.2.10`, which is valid semver — and a
++# prerelease increments its own last segment, so `0.3.0-rc.1` declares
++# `0.3.0-rc.2`; cutting the final `0.3.0` is a judgement, made by typing it.
++# Naming what a release ships any other way — a minor bump, a correction — is the
++# same call, made by entering the version. With nothing declared there is nothing
++# to increment, so the first release names its version.
+ name: Atomaton Release
+ 
+ on:
+   workflow_dispatch:
+     inputs:
+       version:
+-        description: 'Version to release, e.g. 0.2.0 (a leading "v" is accepted)'
+-        required: true
++        description: >-
++          Version to release, e.g. 0.2.0 (a leading "v" is accepted). Leave empty
++          to increment the last segment of the declared version, e.g. 0.2.3 -> 0.2.4.
++        required: false
++        default: ''
+         type: string
+ 
+ # Read-only. Every write in this job goes through the PAT, which keeps the two
+@@ -108,16 +123,32 @@ jobs:
+         run: |
+           set -euo pipefail
+ 
+-          # A leading `v` is how a tag is written and how a person says it out
+-          # loud; the declaration is bare. Accept both, store one.
+-          NEW="${REQUESTED#v}"
++          CURRENT=$(jq -r '.version // empty' package.json)
+ 
+-          if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+-            echo "::error::'$REQUESTED' is not a plain semver version. Expected X.Y.Z, optionally with a -prerelease suffix."
+-            exit 1
++          # Empty is the default: increment the declared version's last segment,
++          # nothing else. Arithmetic, never a carry, and the increment applies to
++          # the last segment whatever it is -- so 0.2.9 declares 0.2.10, and a
++          # prerelease bumps its own last segment, 0.3.0-rc.1 -> 0.3.0-rc.2.
++          # Cutting a prerelease to its release, or bumping anything but the last
++          # segment, is a judgement, made by entering the version.
++          if [ -z "$REQUESTED" ]; then
++            if [ -z "$CURRENT" ]; then
++              echo "::error::package.json declares no version and none was given. The first release names its version."
++              exit 1
++            fi
++            NEW="${CURRENT%.*}.$(( ${CURRENT##*.} + 1 ))"
++            echo "::notice::no version given; incrementing the last segment of ${CURRENT}: declaring ${NEW}"
++          else
++            # A leading `v` is how a tag is written and how a person says it out
++            # loud; the declaration is bare. Accept both, store one.
++            NEW="${REQUESTED#v}"
++
++            if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
++              echo "::error::'$REQUESTED' is not a plain semver version. Expected X.Y.Z, optionally with a -prerelease suffix."
++              exit 1
++            fi
+           fi
+ 
+-          CURRENT=$(jq -r '.version // empty' package.json)
+           if [ -z "$CURRENT" ]; then
+             echo "::error::package.json declares no version; there is nothing to compare against."
+             exit 1
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index 195d837..29f1e76 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -101,6 +101,11 @@ To make that one edit without a checkout, dispatch **Atomaton Release**:
+ gh workflow run atomaton-release.yml --ref main -f version=0.2.0
+ ```
+ 
++Leave `version` empty to declare the next patch — the declared version with its
++last segment incremented, `0.2.3 -> 0.2.4` — which is the common case. A prerelease
++increments its own last segment, `0.3.0-rc.1 -> 0.3.0-rc.2`; cutting the release,
++or bumping anything but the last segment, is named by entering the version.
++
+ Or press **Run workflow** on **Atomaton Release** in the Actions tab. It writes the
+ version into `package.json` and opens a pull request; it merges nothing.
+ `package.json` is in `merge.governed_paths`, so a person reviews it — a version is a
+@@ -115,7 +120,9 @@ It refuses two things, and only two:
+ 
+ Everything else is left to the person merging. A version equal to the declared one
+ is not an error: it means a publish did not finish, and the fix is to re-run the
+-deploy rather than open a pull request for no diff.
++deploy rather than open a pull request for no diff. An empty `version` declares the
++next patch and follows the same checks; the first release names its version,
++because there is nothing declared to increment.
+ 
+ The workflow is hand-written and lives in `self/workflows/`, like the self-deploy,
+ and for the same reasons: it is not in the deliverable, no agent triggers it, and it
+diff --git a/self/workflows/atomaton-release.yml b/self/workflows/atomaton-release.yml
+index 7a16c35..5c0ee0a 100644
+--- a/self/workflows/atomaton-release.yml
++++ b/self/workflows/atomaton-release.yml
+@@ -45,14 +45,29 @@
+ # request needs a person. Deciding that a set of work is ready to ship is a
+ # judgement no agent is positioned to make, and a version is that judgement written
+ # as a number.
++#
++# ## What an empty input means
++#
++# `version` may be left empty, which is the default: the declared version's last
++# segment is incremented and nothing else, so pressing the button without typing a
++# number ships the next patch. The increment is arithmetic on the last segment,
++# never a carry — `0.2.9` declares `0.2.10`, which is valid semver — and a
++# prerelease increments its own last segment, so `0.3.0-rc.1` declares
++# `0.3.0-rc.2`; cutting the final `0.3.0` is a judgement, made by typing it.
++# Naming what a release ships any other way — a minor bump, a correction — is the
++# same call, made by entering the version. With nothing declared there is nothing
++# to increment, so the first release names its version.
+ name: Atomaton Release
+ 
+ on:
+   workflow_dispatch:
+     inputs:
+       version:
+-        description: 'Version to release, e.g. 0.2.0 (a leading "v" is accepted)'
+-        required: true
++        description: >-
++          Version to release, e.g. 0.2.0 (a leading "v" is accepted). Leave empty
++          to increment the last segment of the declared version, e.g. 0.2.3 -> 0.2.4.
++        required: false
++        default: ''
+         type: string
+ 
+ # Read-only. Every write in this job goes through the PAT, which keeps the two
+@@ -108,16 +123,32 @@ jobs:
+         run: |
+           set -euo pipefail
+ 
+-          # A leading `v` is how a tag is written and how a person says it out
+-          # loud; the declaration is bare. Accept both, store one.
+-          NEW="${REQUESTED#v}"
++          CURRENT=$(jq -r '.version // empty' package.json)
+ 
+-          if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+-            echo "::error::'$REQUESTED' is not a plain semver version. Expected X.Y.Z, optionally with a -prerelease suffix."
+-            exit 1
++          # Empty is the default: increment the declared version's last segment,
++          # nothing else. Arithmetic, never a carry, and the increment applies to
++          # the last segment whatever it is -- so 0.2.9 declares 0.2.10, and a
++          # prerelease bumps its own last segment, 0.3.0-rc.1 -> 0.3.0-rc.2.
++          # Cutting a prerelease to its release, or bumping anything but the last
++          # segment, is a judgement, made by entering the version.
++          if [ -z "$REQUESTED" ]; then
++            if [ -z "$CURRENT" ]; then
++              echo "::error::package.json declares no version and none was given. The first release names its version."
++              exit 1
++            fi
++            NEW="${CURRENT%.*}.$(( ${CURRENT##*.} + 1 ))"
++            echo "::notice::no version given; incrementing the last segment of ${CURRENT}: declaring ${NEW}"
++          else
++            # A leading `v` is how a tag is written and how a person says it out
++            # loud; the declaration is bare. Accept both, store one.
++            NEW="${REQUESTED#v}"
++
++            if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
++              echo "::error::'$REQUESTED' is not a plain semver version. Expected X.Y.Z, optionally with a -prerelease suffix."
++              exit 1
++            fi
+           fi
+ 
+-          CURRENT=$(jq -r '.version // empty' package.json)
+           if [ -z "$CURRENT" ]; then
+             echo "::error::package.json declares no version; there is nothing to compare against."
+             exit 1
+-- 
+2.55.0
+
