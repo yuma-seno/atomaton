@@ -1341,14 +1341,81 @@
       "role": "tool",
       "content": "{\"number\":227,\"url\":\"https://github.com/yuma-seno/atomaton/pull/227\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_22a5b6ef019c450ba62c7dbe"
+    },
+    {
+      "role": "user",
+      "content": "PR #227: 報告契約に折りたたみの原則を追加 — 検証のためのものは畳み、行動に必要なものは開いたまま\n**Labels:** atomaton/in-progress\n**Linked Issue:** #210\n\n/reviewer\n\nPart of #210\n## What this does\n\nImplements the folding agreement on the issue this run is on: the report contract gains one principle — **fold what verifies; keep what acts open**.\n\n- `src/content/prompt-template.md` (report section): content that exists to be checked rather than read — evidence lists, reproductions, measurements, quotations, ruled-out alternatives, instructions between agents — goes inside `<details><summary>…</summary>`, the summary line names what is inside, folds do not nest, and **the conclusion and the next step are never folded**. Stated cost: the next run reads the full text either way, so nothing is lost to the model — folding drops the *visible* amount, not the content. `How you know` names folding as its own escape valve (folded, not thinned), so the anchor contract from #17 survives intact.\n- `src/content/prompt-template.md` (handoff section): agent-to-agent requests lead with the ask itself and fold the files and constraints behind it.\n- `tests/contract/agent-prompts.test.ts`: two tests pin the criterion, the kinds of content, the cost claim, the two never-folds, and the handoff shape — in the whitespace-collapsed style the file already uses for wrapped prose.\n\n## What this deliberately does not do\n\nFolding alone does not fix the original complaint — a conclusion written in implementation vocabulary stays that way inside or outside a fold. The vocabulary part (plain-language conclusions, anchors moved to the evidence) was discussed on the issue as a companion change and is **not** included here: this PR ships only the folding contract the issue owner approved (\"OKです。実装して。\").\n\nMachinery code is unchanged; it already folds its dispatch report (`src/entrypoints/tools/mcp/atomaton.ts:243`), which is the precedent this extends.\n\n## Validation\n\n- `bun run pretest` builds dist from nothing, then `bun test`: **1708 pass, 6 skip, 0 fail** across 140 files (contract suite 420/420 after build).\n- New tests: `the report folds what verifies and keeps the conclusion and next step open`, `the handoff leads with the request and folds the grounds` — both pass from a clean tree.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-18T18:59:51Z",
+        "event_type": "pr_opened",
+        "id": "pr-227",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-18T19:04:07Z",
+        "event_type": "issue_comment",
+        "id": 6253896685,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/content/prompt-template.md b/src/content/prompt-template.md\nindex fa77ffe..57dda66 100644\n--- a/src/content/prompt-template.md\n+++ b/src/content/prompt-template.md\n@@ -245,7 +245,9 @@ Two sentences is the ceiling, not the opening move of a longer one.\n **How you know.** Only the claims your conclusion rests on — not every claim the\n message makes. Each of those anchored to something the reader can check without\n asking you: a path with a line number, text copied out of a tool result, a number\n-with its unit, a command and what it exited with. Name the files.\n+with its unit, a command and what it exited with. Name the files. This is the\n+part folds exist for: when it runs longer than a reader wants open, fold it and\n+let the anchors live one click away — folded, not thinned.\n \n Write a path and a line as `path/to/file.ts:42`. GitHub turns that into a link to\n the line, so the reader lands on it rather than opening the file and searching for\n@@ -312,6 +314,16 @@ rest do not stop existing — they stop being the shape of the message.\n A tangent is one sentence at the end, not an interruption. Finish what was asked,\n then say the other thing once, and let the reader decide whether to pick it up.\n \n+**Fold what verifies; keep what acts.** Someone reading the thread should be able\n+to act without opening a fold. What exists to be checked rather than read — the\n+evidence list, a reproduction, measurements, quotations, alternatives you ruled\n+out, instructions between agents — goes inside `<details><summary>…</summary>`\n+fold: the summary line names what is inside, the conclusion and the next step are\n+never folded, and folds do not nest. Folding is how the visible amount drops\n+without anything being dropped: the next run reads the full text, so nothing is\n+lost to the model — and a fold whose summary hides the one thing a reader needed\n+is a fold that did the opposite of its job.\n+\n # Ending a run\n \n **You cannot wait.** Nothing resumes this run, so never end by saying you will\n@@ -371,7 +383,10 @@ taken from this list:\n \n {{COLLEAGUES_LIST}}\n \n-Put the concrete request on the lines after it. That line dispatches the agent it\n+Put the concrete request on the lines after it. Lead with the request itself —\n+what to do, in the work's own words — and fold the grounds for it, the files and\n+the constraints, inside a `<details>` block as above: two lines of ask, the\n+detail one click away. That line dispatches the agent it\n names, so write it only when you are asking for work to be done; an outcome that\n needs no further work carries no such line. Only that line is written this way: a\n tool is called rather than written, so a tool name on a line of its own is text\ndiff --git a/tests/contract/agent-prompts.test.ts b/tests/contract/agent-prompts.test.ts\nindex 9cebf3b..72a9e09 100644\n--- a/tests/contract/agent-prompts.test.ts\n+++ b/tests/contract/agent-prompts.test.ts\n@@ -661,6 +661,62 @@ describe(\"agent prompt contracts\", () => {\n     );\n   });\n \n+  /**\n+   * Folds lower the visible cost of a comment without throwing anything away.\n+   *\n+   * #210: a report whose conclusion carried the vocabulary of the implementation.\n+   * #16/#17 capped the length of each part; neither touched how much of the\n+   * comment sits open on the page. The machinery already posts the dispatch report\n+   * behind a fold for exactly this reason (`tools/mcp/atomaton.ts`, \"the thread\n+   * shows what was launched and the report is one click away\") — the prompt now\n+   * asks the same of the agent's own text.\n+   *\n+   * The line is \"what verifies folds, what acts stays open\": a reader acting on the\n+   * comment should not have to open anything, and the next run reads the full text\n+   * either way, so nothing is lost to the model. Pinned per claim: the criterion,\n+   * what folding does not cost, and the two things that must never fold — a fold\n+   * holding the conclusion is a comment a reader cannot act on without opening.\n+   */\n+  test(\"the report folds what verifies and keeps the conclusion and next step open\", () => {\n+    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\").replace(/\\s+/g, \" \");\n+    // The criterion, in the terms a reader acts against.\n+    expect(prompt, \"acting must not require opening a fold\").toContain(\n+      \"act without opening a fold\",\n+    );\n+    expect(prompt, \"the kinds of content the fold is for\").toContain(\n+      \"What exists to be checked rather than read\",\n+    );\n+    // The cost claim, so nobody later \"optimizes\" the fold into deletion.\n+    expect(prompt, \"the next run reads the full text\").toContain(\n+      \"nothing is lost to the model\",\n+    );\n+    // The two things that never fold.\n+    expect(prompt, \"the conclusion stays open\").toContain(\n+      \"the conclusion and the next step are never folded\",\n+    );\n+    // And the fold names what it hides.\n+    expect(prompt, \"a summary line that names what is inside\").toContain(\n+      \"the summary line names what is inside\",\n+    );\n+  });\n+\n+  /**\n+   * A handoff to a colleague leads with the ask, not the grounds.\n+   *\n+   * The handoff is the one piece of agent-to-agent prose on a thread a person also\n+   * reads, and it used to be shaped like a report — constraints and files first,\n+   * the actual request buried under them. The request is the part the next agent\n+   * acts on; the grounds are the part it checks when it acts. Same fold rule as\n+   * the report, applied to the other direction of writing.\n+   */\n+  test(\"the handoff leads with the request and folds the grounds\", () => {\n+    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\").replace(/\\s+/g, \" \");\n+    expect(prompt, \"the ask comes first\").toContain(\"Lead with the request itself\");\n+    expect(prompt, \"the grounds fold\").toContain(\n+      \"fold the grounds for it, the files and the constraints\",\n+    );\n+  });\n+\n   /**\n    * A check that needs a real secret is made after the merge, and the prompt has to\n    * say so *before* the run starts.\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-18T19:04:18Z",
+        "event_type": "pr_diff",
+        "id": "pr-227-diff",
+        "layer": "github-context",
+        "sha": "0bb78713",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "**Merged with no merge-blocking defect: the change is a prompt-and-test edit only, and the one load-bearing claim it makes — that folding costs the next run nothing — is true of the machinery as it now reads comments.**\n\n## How you know\n\n- The rule lands where the PR says: `src/content/prompt-template.md:317` (\"**Fold what verifies; keep what acts.**\"), the escape valve at `src/content/prompt-template.md:248` (\"folded, not thinned\"), and the handoff shape at `src/content/prompt-template.md:386` (\"Lead with the request itself\").\n- \"Nothing is lost to the model\" holds: `src/entrypoints/machinery/fetch_events.ts:217` passes `content: c.body` verbatim, with no stripping of `<details>`, and a `launch_sub_agent` report also travels as the tool-call argument (`src/entrypoints/tools/mcp/atomaton.ts:210`–`215`, folded at `:243`).\n- The new handoff shape cannot swallow the dispatch line: `src/entrypoints/machinery/extract_directive.ts:54`–`65` scans every line of the output for `/agent`, so a `<details>` block after the request is harmless.\n- Generated output is not in play: `src/content/**` is the deliverable and `dist/**` is generated and gitignored, so there was nothing to commit alongside (`project/conventions`).\n- `check_merge_readiness(227)` returned `ready: true`, `blockers: []`, with `atomaton-check` `success` on the branch head; `merge_pr(227)` returned `merged: true`.\n\n## What I could not establish\n\n- I did not run the suite in this session (no shell here), so the PR's \"1708 pass, 6 skip\" rests on the PR body plus the green `atomaton-check` run on the head, not on my own execution.\n- This repository's own live template, `.github/atomaton/prompt-template.md`, does not yet carry the rule — by convention that arrives with a release plus self-deploy, so live agents keep the old report contract until then; nothing in the PR was supposed to change that and I did not verify when a self-deploy will happen.\n\n## What happens next\n\nNothing for the reviewer. `atomaton` is re-invoked on #210, where the remaining question is the half this PR deliberately left out: conclusions written in plain language with anchors moved into the evidence. That half was discussed but never approved by the issue owner, so it should be proposed rather than implemented unasked. One wording tension for a later tightening: \"instructions between agents\" appears in the foldable list at `src/content/prompt-template.md:320` while the same sentence says the next step is never folded and the handoff paragraph says to lead with the ask — \"the grounds for an instruction between agents\" would remove the ambiguity.\n\n\n\n---\n_Tokens: 698359 total (677955 prompt + 20404 completion, 652672 of the prompt cached)_\n---\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/39156820892) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\n_Counted from the session: 1 refused or errored tool call._",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-18T19:04:18Z",
+        "event_type": "pr_comment",
+        "id": 6253898781,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_eb0c80a55acf419eb5f645c5",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"reason\":\"この Issue で承認された折りたたみ契約がマージ済み PR #227 として届いた — 報告は「検証のためのものを畳み、結論と次の一手は開いたまま」、エージェント間の引き継ぎは「依頼を先に、根拠は畳む」。\",\"summary\":\"**PR #227（マージ済み）で、合意した折りたたみ契約が届いています。**\\n\\n## 届いたもの\\n\\n- 報告契約に「**Fold what verifies; keep what acts.**」を追加（`src/content/prompt-template.md:317`）: 検証のために存在するもの（根拠一覧・再現手順・測定値・引用・却下した代替案・エージェント間のやり取り）は `<details><summary>` に畳む。summary 行は中身を名指し、**結論と次の一手は決して畳まない**、ネストしない。\\n- コストの明示（同じ節）: 畳むのは「見える量」だけを減らし、次 run は全文を読むのでモデルへの損失はない。\\n- `How I know` に逃げ道を追加（`src/content/prompt-template.md:248`）: 長いときは畳む — \\\"folded, not thinned\\\"。#17 のアンカー契約は温存。\\n- エージェント→エージェントの引き継ぎ（`src/content/prompt-template.md:386`）: 依頼そのものを先に書き、根拠・ファイル・制約は畳む。\\n- 契約テスト 2 本が基準・コスト主張���不畳み項目・引き継ぎの形を固定（`tests/contract/agent-prompts.test.ts:678` の \\\"the report folds what verifies...\\\" と \\\"the handoff leads with the request...\\\"）。\\n\\n## 検証\\n\\n- `bun run pretest`（dist をゼロからビルド）後に `bun test`: **1708 pass / 6 skip / 0 fail**（140 ファイル）。\\n- reviewer がマージ阻害欠陥なしでマージ済み。「畳んでも次 run に何も失われない」の主張は `src/entrypoints/machinery/fetch_events.ts:217` がコメント全文をそのまま渡すことで機構側と突き合わせ済み（reviewer 報告）。\\n\\n## 意図的に含めなかったもの\\n\\n- **結論の語彙を平易にする調整**（最初のターンで提案した「結論はコードを読まない人の言葉で、アンカーは根拠側へ」）。この Issue では折りたたみ路線が選ばれたため未実施です。折りたたみだけでは「結論自体が実装語彙」は解けないので、必要になったら別 Issue で。\\n\\n## 将来の締め直し候補（reviewer 指摘、非ブロッキング）\\n\\n- 畳み対象リストの「instructions between agents」が引き継ぎ段落の「依頼を先に」と読み違う余地がある。「the grounds for an instruction between agents」への言い換えで解消できます。\\n\\n## 反映タイミング\\n\\nライブの `.github/atomaton/prompt-template.md` への反映はリリース + self-deploy（人のマージ）後です。次の run から新しい報告契約が効きます。\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Issue #210 is concluded: your reason and summary are on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "call_eb0c80a55acf419eb5f645c5"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 4,
+      "event_count": 8,
       "resolved_number": "210",
-      "snapshot_hash": "d908fff616a4a26189433807a4186665ac86530f2d1138db2f45e66774fae03e",
+      "snapshot_hash": "3c21a9b7367a8c9993df0c4d753f4950cc6345d0f016df7e8168a53c25e09381",
       "type": "issue",
       "version": 1
     }
@@ -1420,6 +1487,19 @@
         }
       },
       "started": "2026-10-18T18:55:16Z"
+    },
+    {
+      "ended": "2026-10-18T19:06:06Z",
+      "ended_because": "completed",
+      "iterations": 1,
+      "messages": 151,
+      "seconds": 93,
+      "server_calls": {
+        "atomaton": {
+          "request_close_issue": 1
+        }
+      },
+      "started": "2026-10-18T19:04:33Z"
     }
   ]
 }
