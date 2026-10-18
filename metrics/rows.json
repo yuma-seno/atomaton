@@ -4078,26 +4078,26 @@
   {
     "path": "sessions/issue-208/atomaton.json",
     "agent": "atomaton",
-    "messages": 340,
-    "calls": 168,
-    "failed": 3,
+    "messages": 380,
+    "calls": 188,
+    "failed": 4,
     "refused": 0,
     "skills": [],
-    "reported": false,
+    "reported": true,
     "tools": {
-      "get_issue": 1,
+      "get_issue": 3,
       "search_code": 1,
       "grep": 14,
       "list": 1,
-      "read": 90,
+      "read": 96,
       "glob": 1,
-      "bash": 59,
+      "bash": 71,
       "request_close_issue": 1
     },
     "acts": {
-      "open": 9,
-      "other": 7,
-      "search": 43
+      "open": 11,
+      "other": 12,
+      "search": 48
     },
     "runs": [
       {
@@ -4127,6 +4127,25 @@
           }
         },
         "started": "2026-10-17T12:48:19Z"
+      },
+      {
+        "ended": "2026-10-18T17:54:03Z",
+        "ended_because": "completed",
+        "iterations": 18,
+        "messages": 380,
+        "seconds": 398,
+        "server_calls": {
+          "files": {
+            "read": 6
+          },
+          "github": {
+            "get_issue": 2
+          },
+          "shell": {
+            "bash": 12
+          }
+        },
+        "started": "2026-10-18T17:47:25Z"
       }
     ]
   },
