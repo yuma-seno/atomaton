@@ -1883,19 +1883,690 @@
       "role": "assistant",
       "content": "#207 の調査で確認済みの事実だけを使って下書きしました。atoma リポジトリ(issue #1、コミット、docs すべて英語)に合わせて**英語で**作成しています。日本語版が必要なら言ってください。\n\n## タイトル案\n\n```\nRecord finish_reason on the session, and count an empty length-completion as an empty response\n```\n\n(defect 形式がお好みなら: `An empty length-completion ends the run completed, and the session cannot say why`)\n\n## 本文ドラフト\n\n````markdown\n## The defect\n\nThe empty-completion retry on `main` (in v0.4.0) already matches what the delivery\nmachinery asked for (yuma-seno/atomaton#207): two re-requests, then\n`LLM returned empty response (finish_reason: …) 3 times in a row` and a `failed`\nending. Two gaps sit beside it:\n\n1. **The session cannot say why a turn ended silent.** `inference_loop` reads\n   `choice.finish_reason` and keeps none of it. `Message` (`src/domain/session.rs`)\n   has no field to record it on, and the run record (`atoma_runs`) carries none\n   either — so a session whose last assistant message is `content: \"\"` with no tool\n   calls cannot distinguish a model that stopped from one that ran out of output\n   budget or was content-filtered. The value already reaches the `--output json`\n   envelope (`report.rs`) and stops there: one channel carries what the other\n   dropped.\n\n2. **An empty `length` completion is recorded as a successful run.** The\n   `FinishReason::Length` arm appends `content.unwrap_or(\"\")` and returns\n   `Completed { reason: Length }`. A reasoning model that spends the output budget\n   on thinking and emits nothing visible therefore ends `completed` with an empty\n   message. The Responses dialect folds into the same hole — `status: incomplete`\n   with `incomplete_details.reason: max_output_tokens` maps to `Length` (pinned by\n   `the_incomplete_reasons_match_the_non_streaming_translation`), and reasoning\n   tokens produce exactly that shape. Measured on the machinery's own sessions: 12\n   of 31 over seven days ended `completed` having said nothing.\n\n## What to build\n\n1. **`finish_reason: Option<String>` on assistant messages**, with\n   `#[serde(default, skip_serializing_if = \"Option::is_none\")]` — old sessions read\n   back as `None`, no migration. Persist the DOMAIN value, not a wire string: both\n   dialects already translate into `FinishReason`, so the adapters are not the\n   work. Whether the Responses incomplete reason (`max_output_tokens`) is spelled\n   into the same string or carried beside it is this issue's to decide.\n\n2. **Feed the empty detector from the Length arm.** The detector's condition is\n   content-based — no text, no tool calls — and that is the right rule: a length\n   completion that CARRIED text is a real partial answer, already appended to the\n   session, and re-asking the turn would duplicate it. What is missing is that an\n   empty-text `Length` reaches the detector at all. Route it through the same\n   `consecutive_empty` path, so the run ends `failed` with the finish_reason of\n   the last attempt named, instead of a silent `completed`.\n\n3. **Record the retry in the session.** The loop re-ask and the `StreamInterrupted`\n   re-ask both append a note saying what happened and to continue rather than\n   repeat; the empty-completion retry appends nothing, so a recovered turn looks\n   like it never stumbled. The same shape fits — a user note before the\n   re-request. Nothing is done with the empty response, so the\n   no-duplicate-side-effects argument is the one those two already make.\n\n## Done when\n\n- A session written after this carries `finish_reason` on new assistant messages;\n  sessions written before it read the field as absent, and nothing rejects them.\n- Three consecutive contentless completions — whatever their finish_reason — end\n  the run `failed`, and the error names the last one's finish_reason.\n- One contentless completion recovered by a retry is visible in the session.\n\n## Not asking for\n\n- A retry keyed on `finish_reason == length` alone: a length completion with text\n  is an answer, not an empty one.\n- A migration of stored sessions.\n- Anything in the delivery machinery (yuma-seno/atomaton): its `failed` path\n  already posts the failure comment and shows the log line this writes.\n````\n\n## ドラフトに入れた判断と根拠\n\n- **リトライ件数は範囲に含めていない**: `MAX_EMPTY_COMPLETION_RETRIES = 2`(3 attempts)が既に #207 の「2 回程度」と一致していることを冒頭で確認済みとして述べ、issue は残った2つのギャップ+記録に絞りました。\n- **リトライ条件の推奨を明記**(「What to build 2」): #207 は「`finish_reason === \"length\"` をリトライ条件に含める」と書いていましたが、実装済みの検出器は content-based(no text, no tool calls)で、こちらの方が正しい — text ありの length は部分的な「答え」であって再送するとセッションに重複が残る、という理由を issue 内に書いたので、異論ならそこにコメントする形で決められます。\n- 引用した実装事実(`Message` のフィールド構成、Length アームの挙動、envelope の `finish_reason`、アダプタのマッピングとテスト名、`docs/runtime.md` の記載)は前回 run で yuma-seno/atoma@main を直接読んで検証済みで、#207 のクローズコメントに証跡付きで書いたものと一致しています。\n\nこのリポジトリ側の対応はありません。この issue の残作業は atoma 側への起票と実装だけです。",
       "atoma_metadata": {
-        "github_comment_id": 6245442794,
-        "agent": "atomaton"
+        "agent": "atomaton",
+        "github_comment_id": 6245442794
       }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\natoma側で起票した yuma-seno/atoma#7 が完了となり、v0.4.2がリリースされてる。atomaton側のバージョンを引き上げてほしい。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-18T15:56:22Z",
+        "event_type": "issue_comment",
+        "id": 6251967901,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a1b85fb7d8721225",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atoma/pulls/7\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8fbd52a13ca13fe1",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/tags/v0.4.2\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8fd8db04d56e29cc",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git status | head -5; cat .git/HEAD\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'fetch' on MCP server 'web' reported an error: Error: HTTP 404 Not Found from https://api.github.com/repos/yuma-seno/atoma/pulls/7; nothing was read.",
+      "tool_call_id": "chatcmpl-tool-a1b85fb7d8721225"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/416545539\",\n  \"assets_url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/416545539/assets\",\n  \"upload_url\": \"https://uploads.github.com/repos/yuma-seno/atoma/releases/416545539/assets{?name,label}\",\n  \"html_url\": \"https://github.com/yuma-seno/atoma/releases/tag/v0.4.2\",\n  \"id\": 416545539,\n  \"author\": {\n    \"login\": \"github-actions[bot]\",\n    \"id\": 41898282,\n    \"node_id\": \"MDM6Qm90NDE4OTgyODI=\",\n    \"avatar_url\": \"https://avatars.githubusercontent.com/in/15368?v=4\",\n    \"gravatar_id\": \"\",\n    \"url\": \"https://api.github.com/users/github-actions%5Bbot%5D\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"followers_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/followers\",\n    \"following_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}\",\n    \"gists_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}\",\n    \"starred_u\n\n[6230 characters dropped from the middle; 4000 shown]\n\nhub-actions%5Bbot%5D/received_events\",\n        \"type\": \"Bot\",\n        \"user_view_type\": \"public\",\n        \"site_admin\": false\n      },\n      \"content_type\": \"application/octet-stream\",\n      \"state\": \"uploaded\",\n      \"size\": 8117064,\n      \"digest\": \"sha256:0cbe9e2860a5031ccc5a27492b7e5988e1fa637fb046b6d6c885b7313b63ee6a\",\n      \"download_count\": 0,\n      \"created_at\": \"2026-10-18T15:53:10Z\",\n      \"updated_at\": \"2026-10-18T15:53:11Z\",\n      \"browser_download_url\": \"https://github.com/yuma-seno/atoma/releases/download/v0.4.2/atoma-macos-x86_64\"\n    },\n    {\n      \"url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/assets/653847101\",\n      \"id\": 653847101,\n      \"node_id\": \"RA_kwDOUuDyMM4m-Oo9\",\n      \"name\": \"atoma-windows-x86_64.exe\",\n      \"label\": \"\",\n      \"uploader\": {\n        \"login\": \"github-actions[bot]\",\n        \"id\": 41898282,\n        \"node_id\": \"MDM6Qm90NDE4OTgyODI=\",\n        \"avatar_url\": \"https://avatars.githubusercontent.com/in/15368?v=4\",\n        \"gravatar_id\": \"\",\n        \"url\": \"https://api.github.com/users/github-actions%5Bbot%5D\",\n        \"html_url\": \"https://github.com/apps/github-actions\",\n        \"followers_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/followers\",\n        \"following_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}\",\n        \"gists_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}\",\n        \"starred_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}\",\n        \"subscriptions_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/subscriptions\",\n        \"organizations_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/orgs\",\n        \"repos_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/repos\",\n        \"events_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}\",\n        \"received_events_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/received_events\",\n        \"type\": \"Bot\",\n        \"user_view_type\": \"public\",\n        \"site_admin\": false\n      },\n      \"content_type\": \"application/octet-stream\",\n      \"state\": \"uploaded\",\n      \"size\": 7655936,\n      \"digest\": \"sha256:071e5bafa76ab829c741c46639cc746933d6e2da2c614bc244e0d5ea6e901499\",\n      \"download_count\": 0,\n      \"created_at\": \"2026-10-18T15:53:10Z\",\n      \"updated_at\": \"2026-10-18T15:53:11Z\",\n      \"browser_download_url\": \"https://github.com/yuma-seno/atoma/releases/download/v0.4.2/atoma-windows-x86_64.exe\"\n    }\n  ],\n  \"tarball_url\": \"https://api.github.com/repos/yuma-seno/atoma/tarball/v0.4.2\",\n  \"zipball_url\": \"https://api.github.com/repos/yuma-seno/atoma/zipball/v0.4.2\",\n  \"body\": \"## What's Changed\\n* Keep the provider's items by handing the response message through by @yuma-seno in https://github.com/yuma-seno/atoma/pull/10\\n\\n\\n**Full Changelog**: https://github.com/yuma-seno/atoma/compare/v0.4.1...v0.4.2\",\n  \"mentions_count\": 1\n}\n",
+      "tool_call_id": "chatcmpl-tool-8fbd52a13ca13fe1"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"On branch main\\nYour branch is up to date with 'origin/main'.\\n\\nnothing to commit, working tree clean\\nref: refs/heads/main\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":227}",
+      "tool_call_id": "chatcmpl-tool-8fd8db04d56e29cc"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a99880bfe6fcd53a",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-bf04c52ad5d34424",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/tags/v0.4.1\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7\",\n  \"repository_url\": \"https://api.github.com/repos/yuma-seno/atoma\",\n  \"labels_url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7/labels{/name}\",\n  \"comments_url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7/comments\",\n  \"events_url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7/events\",\n  \"html_url\": \"https://github.com/yuma-seno/atoma/issues/7\",\n  \"id\": 5906138089,\n  \"node_id\": \"I_kwDOUuDyMM8AAAABYAiD6Q\",\n  \"number\": 7,\n  \"title\": \"Record finish_reason on the session, and count an empty length-completion as an empty response\",\n  \"user\": {\n    \"login\": \"yuma-seno\",\n    \"id\": 118330057,\n    \"node_id\": \"U_kgDOBw2SyQ\",\n    \"avatar_url\": \"https://avatars.githubusercontent.com/u/118330057?v=4\",\n    \"gravatar_id\": \"\",\n    \"url\": \"https://api.github.com/users/yuma-seno\",\n    \"html_url\": \"https://github.com/yuma-seno\",\n    \"followers_url\": \"https://api.github.com/users/yuma-seno/fo\n\n[3517 characters dropped from the middle; 4000 shown]\n\ne session, and re-asking the turn would duplicate it. What is missing is that an empty-text `Length` reaches the detector at all. Route it through the same `consecutive_empty` path, so the run ends `failed` with the finish_reason of the last attempt named, instead of a silent `completed`.\\n\\n3. **Record the retry in the session.** The loop re-ask and the `StreamInterrupted` re-ask both append a note saying what happened and to continue rather than repeat; the empty-completion retry appends nothing, so a recovered turn looks like it never stumbled. The same shape fits — a user note before the re-request. Nothing is done with the empty response, so the no-duplicate-side-effects argument is the one those two already make.\\n\\n## Done when\\n\\n- A session written after this carries `finish_reason` on new assistant messages; sessions written before it read the field as absent, and nothing rejects them.\\n- Three consecutive contentless completions — whatever their finish_reason — end the run `failed`, and the error names the last one's finish_reason.\\n- One contentless completion recovered by a retry is visible in the session.\\n\\n## Not asking for\\n\\n- A retry keyed on `finish_reason == length` alone: a length completion with text is an answer, not an empty one.\\n- A migration of stored sessions.\\n- Anything in the delivery machinery (yuma-seno/atomaton): its `failed` path already posts the failure comment and shows the log line this writes.\",\n  \"closed_by\": {\n    \"login\": \"yuma-seno\",\n    \"id\": 118330057,\n    \"node_id\": \"U_kgDOBw2SyQ\",\n    \"avatar_url\": \"https://avatars.githubusercontent.com/u/118330057?v=4\",\n    \"gravatar_id\": \"\",\n    \"url\": \"https://api.github.com/users/yuma-seno\",\n    \"html_url\": \"https://github.com/yuma-seno\",\n    \"followers_url\": \"https://api.github.com/users/yuma-seno/followers\",\n    \"following_url\": \"https://api.github.com/users/yuma-seno/following{/other_user}\",\n    \"gists_url\": \"https://api.github.com/users/yuma-seno/gists{/gist_id}\",\n    \"starred_url\": \"https://api.github.com/users/yuma-seno/starred{/owner}{/repo}\",\n    \"subscriptions_url\": \"https://api.github.com/users/yuma-seno/subscriptions\",\n    \"organizations_url\": \"https://api.github.com/users/yuma-seno/orgs\",\n    \"repos_url\": \"https://api.github.com/users/yuma-seno/repos\",\n    \"events_url\": \"https://api.github.com/users/yuma-seno/events{/privacy}\",\n    \"received_events_url\": \"https://api.github.com/users/yuma-seno/received_events\",\n    \"type\": \"User\",\n    \"user_view_type\": \"public\",\n    \"site_admin\": false\n  },\n  \"reactions\": {\n    \"url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7/reactions\",\n    \"total_count\": 0,\n    \"+1\": 0,\n    \"-1\": 0,\n    \"laugh\": 0,\n    \"hooray\": 0,\n    \"confused\": 0,\n    \"heart\": 0,\n    \"rocket\": 0,\n    \"eyes\": 0\n  },\n  \"timeline_url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7/timeline\",\n  \"performed_via_github_app\": null,\n  \"state_reason\": \"completed\",\n  \"pinned_comment\": null\n}\n",
+      "tool_call_id": "chatcmpl-tool-a99880bfe6fcd53a"
+    },
+    {
+      "role": "tool",
+      "content": "{\n  \"url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/416531228\",\n  \"assets_url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/416531228/assets\",\n  \"upload_url\": \"https://uploads.github.com/repos/yuma-seno/atoma/releases/416531228/assets{?name,label}\",\n  \"html_url\": \"https://github.com/yuma-seno/atoma/releases/tag/v0.4.1\",\n  \"id\": 416531228,\n  \"author\": {\n    \"login\": \"github-actions[bot]\",\n    \"id\": 41898282,\n    \"node_id\": \"MDM6Qm90NDE4OTgyODI=\",\n    \"avatar_url\": \"https://avatars.githubusercontent.com/in/15368?v=4\",\n    \"gravatar_id\": \"\",\n    \"url\": \"https://api.github.com/users/github-actions%5Bbot%5D\",\n    \"html_url\": \"https://github.com/apps/github-actions\",\n    \"followers_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/followers\",\n    \"following_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}\",\n    \"gists_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}\",\n    \"starred_u\n\n[6230 characters dropped from the middle; 4000 shown]\n\nhub-actions%5Bbot%5D/received_events\",\n        \"type\": \"Bot\",\n        \"user_view_type\": \"public\",\n        \"site_admin\": false\n      },\n      \"content_type\": \"application/octet-stream\",\n      \"state\": \"uploaded\",\n      \"size\": 8128688,\n      \"digest\": \"sha256:81585f0af59ebd1e52856d0691fa1fe6fd55b99ab034ac4ae98a444290192dbc\",\n      \"download_count\": 0,\n      \"created_at\": \"2026-10-18T15:34:26Z\",\n      \"updated_at\": \"2026-10-18T15:34:27Z\",\n      \"browser_download_url\": \"https://github.com/yuma-seno/atoma/releases/download/v0.4.1/atoma-macos-x86_64\"\n    },\n    {\n      \"url\": \"https://api.github.com/repos/yuma-seno/atoma/releases/assets/653804723\",\n      \"id\": 653804723,\n      \"node_id\": \"RA_kwDOUuDyMM4m-ESz\",\n      \"name\": \"atoma-windows-x86_64.exe\",\n      \"label\": \"\",\n      \"uploader\": {\n        \"login\": \"github-actions[bot]\",\n        \"id\": 41898282,\n        \"node_id\": \"MDM6Qm90NDE4OTgyODI=\",\n        \"avatar_url\": \"https://avatars.githubusercontent.com/in/15368?v=4\",\n        \"gravatar_id\": \"\",\n        \"url\": \"https://api.github.com/users/github-actions%5Bbot%5D\",\n        \"html_url\": \"https://github.com/apps/github-actions\",\n        \"followers_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/followers\",\n        \"following_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/following{/other_user}\",\n        \"gists_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/gists{/gist_id}\",\n        \"starred_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/starred{/owner}{/repo}\",\n        \"subscriptions_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/subscriptions\",\n        \"organizations_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/orgs\",\n        \"repos_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/repos\",\n        \"events_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/events{/privacy}\",\n        \"received_events_url\": \"https://api.github.com/users/github-actions%5Bbot%5D/received_events\",\n        \"type\": \"Bot\",\n        \"user_view_type\": \"public\",\n        \"site_admin\": false\n      },\n      \"content_type\": \"application/octet-stream\",\n      \"state\": \"uploaded\",\n      \"size\": 7668736,\n      \"digest\": \"sha256:3d104773c39e7fa49f54cc18d3362290d60471fcabcbd0d7bf71376bbb99dcfe\",\n      \"download_count\": 0,\n      \"created_at\": \"2026-10-18T15:34:26Z\",\n      \"updated_at\": \"2026-10-18T15:34:27Z\",\n      \"browser_download_url\": \"https://github.com/yuma-seno/atoma/releases/download/v0.4.1/atoma-windows-x86_64.exe\"\n    }\n  ],\n  \"tarball_url\": \"https://api.github.com/repos/yuma-seno/atoma/tarball/v0.4.1\",\n  \"zipball_url\": \"https://api.github.com/repos/yuma-seno/atoma/zipball/v0.4.1\",\n  \"body\": \"## What's Changed\\n* Record a completion's finish reason, and fail on a contentless one by @yuma-seno in https://github.com/yuma-seno/atoma/pull/8\\n\\n\\n**Full Changelog**: https://github.com/yuma-seno/atoma/compare/v0.4.0...v0.4.1\",\n  \"mentions_count\": 1\n}\n",
+      "tool_call_id": "chatcmpl-tool-bf04c52ad5d34424"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9b7c61d1d04787c8",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"raw\": true, \"url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7/comments\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-b0ed7a0a7dd49d91",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"url\": \"https://github.com/yuma-seno/atoma/pull/8/files\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[\n  {\n    \"url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/comments/6251584526\",\n    \"html_url\": \"https://github.com/yuma-seno/atoma/issues/7#issuecomment-6251584526\",\n    \"issue_url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/7\",\n    \"id\": 6251584526,\n    \"node_id\": \"IC_kwDOUuDyMM8AAAABdJ-cDg\",\n    \"user\": {\n      \"login\": \"yuma-seno\",\n      \"id\": 118330057,\n      \"node_id\": \"U_kgDOBw2SyQ\",\n      \"avatar_url\": \"https://avatars.githubusercontent.com/u/118330057?v=4\",\n      \"gravatar_id\": \"\",\n      \"url\": \"https://api.github.com/users/yuma-seno\",\n      \"html_url\": \"https://github.com/yuma-seno\",\n      \"followers_url\": \"https://api.github.com/users/yuma-seno/followers\",\n      \"following_url\": \"https://api.github.com/users/yuma-seno/following{/other_user}\",\n      \"gists_url\": \"https://api.github.com/users/yuma-seno/gists{/gist_id}\",\n      \"starred_url\": \"https://api.github.com/users/yuma-seno/starred{/owner}{/repo}\",\n      \"subscriptions_url\": \"https:/\n\n[1423 characters dropped from the middle; 4000 shown]\n\nn\\n`chat_completions_body` builds the request from `m.to_llm_value()`, which removes only `atoma_metadata`. A new `finish_reason` field on `Message` would therefore be sent to the provider on the chat-completions path. `to_llm_value` must strip it too. (`anthropic.rs` and `openai_responses.rs` assemble their own bodies, so they are unaffected.)\\n\\n### 3. #205 is complementary, not replaced\\n\\nMaking new runs end `failed` on a contentless completion routes the failure through the machinery's existing `failed` path. #205 is the defence that covers sessions written before this and older runners. Both are wanted; this issue does not fix the stuck guard on its own.\\n\\n### The change\\n\\n**A. Record why a turn ended.** `Message.finish_reason: Option<FinishReason>` — the domain value itself, not a string, so the session carries the same closed vocabulary the runner matches on, and the dialects keep their own names in the adapters. `#[serde(default, skip_serializing_if = \\\"Option::is_none\\\")]`, serialized as `stop` / `length` / `content_filter` / `tool_calls`. No migration. Stripped in `to_llm_value`.\\n\\n**B. Feed the empty detector from the `Length` arm.** A completion with no text and no tool calls is contentless whatever its finish reason; `Stop` and `Length` share one counter and one `failed` ending, which names the last attempt's finish reason. A `Length` completion that *carried* text is a partial answer and keeps ending `Completed { reason: Length }`.\\n\\n**C. Record the retry in the session.** The empty-completion re-ask appends a user note, the shape the stream-interrupted and repetition re-asks already use, so a turn that stumbled and recovered is visible rather than looking like it never happened. (The empty-`Stop` retry currently re-sends an identical payload; it now carries the note too, so `Stop` and `Length` behave the same.)\\n\\n**D. Stamp on every new assistant message.** `stop` / `length`, or the provider's own reason when the turn carried tool calls. A continuation stitched on after a dropped stream has no provider finish reason and stays `None`.\\n\\n### Tests and docs\\n\\n- Integration tests: empty `Length` three times ends `failed` (regression: it currently ends `completed`); empty `Length` recovered by a retry reports `CompletionReason::Length`; the retry note is in the saved session; a saved assistant message carries its `finish_reason`; `to_llm_value()` does not contain it.\\n- `docs/runtime.md`: the empty-response row, the `finish_reason` field, and the `failed` ending.\\n\\nVersion: `0.4.1`.\\n\",\n    \"author_association\": \"OWNER\",\n    \"pin\": null,\n    \"reactions\": {\n      \"url\": \"https://api.github.com/repos/yuma-seno/atoma/issues/comments/6251584526/reactions\",\n      \"total_count\": 0,\n      \"+1\": 0,\n      \"-1\": 0,\n      \"laugh\": 0,\n      \"hooray\": 0,\n      \"confused\": 0,\n      \"heart\": 0,\n      \"rocket\": 0,\n      \"eyes\": 0\n    },\n    \"performed_via_github_app\": null,\n    \"minimized\": null\n  }\n]\n",
+      "tool_call_id": "chatcmpl-tool-9b7c61d1d04787c8"
+    },
+    {
+      "role": "tool",
+      "content": "[Skip to content](#start-of-content)\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n## Navigation Menu\n\n[Sign in](/login?return_to=https%3A%2F%2Fgithub.com%2Fyuma-seno%2Fatoma%2Fpull%2F8%2Ffiles)Appearance settings\n\n[Sign in](/login?return_to=https%3A%2F%2Fgithub.com%2Fyuma-seno%2Fatoma%2Fpull%2F8%2Ffiles)\n\n[Sign up](/signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2F%3Cuser-name%3E%2F%3Crepo-name%3E%2Fpull_requests%2Fshow%2Ffiles&source=header-repo&source_repo=yuma-seno%2Fatoma)Appearance settings\n\n You signed in with another tab or window. Reload to refresh your session.\n You signed out in another tab or window. Reload to refresh your session.\n You switched accounts on another tab or window. Reload to refresh your session.\n\n Dismiss alert\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n## Repository navigation\n\n#\n Record a completion's finish reason, and fail on a\n\n[17377 characters dropped from the middle; 4000 shown]\n\n\n #[serde(rename_all = \"snake_case\")]\n\n pub enum FinishReason {\n\n /// The model finished of its own accord.\n\n Stop,\n\n Expand Down\n\n Expand Up\n\n @@ -308,3 +317,44 @@ pub struct PromptContext<'a> {\n\n pub trait McpFactory: Send + Sync {\n\n async fn build(&self, tool_defs: &[ToolDef]) -> Result<Box<dyn ToolPort + Send>>;\n\n }\n\n #[cfg(test)]\n\n mod tests {\n\n use super::FinishReason;\n\n /// The word a session stores and the word a log prints are one vocabulary.\n\n ///\n\n /// They are written down twice -- serde's `rename_all` derives from the variant\n\n /// names, `as_str` is what a person reads -- and nothing but this test stops a\n\n /// rename from moving one and leaving the other. A session that spelled a reason\n\n /// differently from the log would be exactly the un-checked vocabulary the enum was\n\n /// introduced to end.\n\n #[test]\n\n fn a_session_spelling_and_a_log_spelling_agree() {\n\n for reason in [\n\n FinishReason::Stop,\n\n FinishReason::Length,\n\n FinishReason::ContentFilter,\n\n FinishReason::ToolCalls,\n\n ] {\n\n let on_disk = serde_json::to_value(reason).unwrap();\n\n assert_eq!(\n\n on_disk,\n\n serde_json::json!(reason.as_str()),\n\n \"{reason:?} is stored as {on_disk} but printed as {}\",\n\n reason.as_str()\n\n );\n\n }\n\n }\n\n /// A spelling this program never writes is not one it reads back either.\n\n ///\n\n /// The field is written by `as_str` and nothing else, so a value outside the four is\n\n /// a session this program did not write. Reading it back is then an error rather than\n\n /// a silent `Stop`, the same choice `from_openai` makes at the provider boundary.\n\n #[test]\n\n fn an_unknown_spelling_does_not_load_as_stop() {\n\n let loaded: Result<FinishReason, _> = serde_json::from_value(serde_json::json!(\"banana\"));\n\n assert!(loaded.is_err(), \"an unknown reason loaded as {loaded:?}\");\n\n }\n\n }\n\n Loading\n\n Oops, something went wrong.\n\n### Uh oh!\n\n There was an error while loading. Please reload this page.\n\n Loading\n\n Oops, something went wrong.\n\n### Uh oh!\n\n There was an error while loading. Please reload this page.\n\n Add this suggestion to a batch that can be applied as a single commit.\n This suggestion is invalid because no changes were made to the code.\n Suggestions cannot be applied while the pull request is closed.\n Suggestions cannot be applied while viewing a subset of changes.\n Only one suggestion per line can be applied in a batch.\n Add this suggestion to a batch that can be applied as a single commit.\n Applying suggestions on deleted lines is not supported.\n You must change the existing code in this line in order to create a valid suggestion.\n Outdated suggestions cannot be applied.\n This suggestion has been applied or marked resolved.\n Suggestions cannot be applied from pending reviews.\n Suggestions cannot be applied on multi-line comments.\n Suggestions cannot be applied while the pull request is queued to merge.\n Suggestion cannot be applied right now. Please check back later.\n\n You can’t perform that action at this time.",
+      "tool_call_id": "chatcmpl-tool-b0ed7a0a7dd49d91"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8326e7f52fd4a9a2",
+          "type": "function",
+          "function": {
+            "name": "fetch",
+            "arguments": "{\"url\": \"https://github.com/yuma-seno/atoma/blob/main/src/domain/session.rs\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[Skip to content](#start-of-content)\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n## Navigation Menu\n\n[Sign in](/login?return_to=https%3A%2F%2Fgithub.com%2Fyuma-seno%2Fatoma%2Fblob%2Fmain%2Fsrc%2Fdomain%2Fsession.rs)Appearance settings\n\n[Sign in](/login?return_to=https%3A%2F%2Fgithub.com%2Fyuma-seno%2Fatoma%2Fblob%2Fmain%2Fsrc%2Fdomain%2Fsession.rs)\n\n[Sign up](/signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2F%3Cuser-name%3E%2F%3Crepo-name%3E%2Fblob%2Fshow&source=header-repo&source_repo=yuma-seno%2Fatoma)Appearance settings\n\n You signed in with another tab or window. Reload to refresh your session.\n You signed out in another tab or window. Reload to refresh your session.\n You switched accounts on another tab or window. Reload to refresh your session.\n\n Dismiss alert\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n-\n\n## Repository navigation\n\n## Expand file tree\n\n/\n\n# session.rs\n\nCopy path\n\nMore file actions\n\nMore file actions\n\n## Latest co\n\n[17825 characters dropped from the middle; 4000 shown]\n\nant(Some(\"I'm here.\"), None);\n\n assert_eq!(m.role, \"assistant\");\n\n assert_eq!(m.content, Some(Value::String(\"I'm here.\".into())));\n\n assert!(m.tool_calls.is_none());\n\n }\n\n #[test]\n\n fn test_message_tool() {\n\n let m = Message::tool(\"call-1\", \"result_value\");\n\n assert_eq!(m.role, \"tool\");\n\n assert_eq!(m.tool_call_id.as_deref(), Some(\"call-1\"));\n\n assert_eq!(m.content, Some(Value::String(\"result_value\".into())));\n\n }\n\n #[test]\n\n fn test_to_llm_value_strips_metadata() {\n\n let m: Message = serde_json::from_value(serde_json::json!({\n\n \"role\": \"user\",\n\n \"content\": \"Hi\",\n\n \"atoma_metadata\": { \"github_context\": { \"event_type\": \"issue_comment\" } }\n\n }))\n\n .unwrap();\n\n let val = m.to_llm_value();\n\n let obj = val.as_object().unwrap();\n\n assert!(\n\n !obj.contains_key(\"atoma_metadata\"),\n\n \"atoma_metadata should be stripped\"\n\n );\n\n assert_eq!(obj[\"role\"].as_str(), Some(\"user\"));\n\n }\n\n #[test]\n\n fn test_to_llm_value_preserves_content() {\n\n let m = Message::system(\"sys\");\n\n let val = m.to_llm_value();\n\n assert_eq!(val[\"content\"].as_str(), Some(\"sys\"));\n\n }\n\n /// The reason is a session's own fact and outlives the process that wrote it.\n\n #[test]\n\n fn a_finish_reason_survives_a_round_trip() {\n\n let session = Session {\n\n messages: vec![\n\n Message::user(\"hi\"),\n\n Message::assistant(Some(\"partial\"), None).with_finish_reason(FinishReason::Length),\n\n ],\n\n ..Default::default()\n\n };\n\n let written = serde_json::to_value(&session).unwrap();\n\n assert_eq!(written[\"messages\"][1][\"finish_reason\"], \"length\");\n\n let read: Session = serde_json::from_value(written).unwrap();\n\n assert_eq!(\n\n read.messages[1].finish_reason,\n\n Some(FinishReason::Length),\n\n \"the reason did not survive being written and read back\"\n\n );\n\n }\n\n /// A session the program did not write carries no reason, and that is not an error.\n\n #[test]\n\n fn an_absent_finish_reason_loads_as_none() {\n\n let read: Message =\n\n serde_json::from_value(serde_json::json!({ \"role\": \"assistant\", \"content\": \"hi\" }))\n\n .unwrap();\n\n assert_eq!(read.finish_reason, None);\n\n }\n\n /// The provider never asked for this field, so it must not be sent one.\n\n #[test]\n\n fn a_finish_reason_is_stripped_before_sending() {\n\n let m = Message::assistant(Some(\"partial\"), None)\n\n .with_finish_reason(FinishReason::ContentFilter);\n\n let obj = m.to_llm_value();\n\n let obj = obj.as_object().unwrap();\n\n assert!(\n\n !obj.contains_key(\"finish_reason\"),\n\n \"finish_reason should be stripped, got {obj:?}\"\n\n );\n\n assert_eq!(obj[\"content\"].as_str(), Some(\"partial\"));\n\n }\n\n /// A message no provider finished writes no field at all, so an old session and a\n\n /// new one that never got a reason differ by nothing.\n\n #[test]\n\n fn a_message_without_a_reason_omits_the_field() {\n\n let written = serde_json::to_value(Message::assistant(Some(\"done\"), None)).unwrap();\n\n assert!(\n\n written.as_object().unwrap().get(\"finish_reason\").is_none(),\n\n \"an unreasoned message wrote {written}\"\n\n );\n\n }\n\n}\n\n You can’t perform that action at this time.",
+      "tool_call_id": "chatcmpl-tool-8326e7f52fd4a9a2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-90295879cc69a3fb",
+          "type": "function",
+          "function": {
+            "name": "atoma_builtin__load_skill",
+            "arguments": "{\"skill_name\": \"delivery/pipeline-setup\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "# Skill: delivery/pipeline-setup\n\n# Setting up verification and deployment\n\nRead this when `checks` in `.github/atomaton/config.yaml` is empty, when a pull\nrequest comes back with no required check on it, or when nothing deploys on merge\nand the work in front of you needs one of those. Not a procedure to follow on\nrequest — a description of how this is arranged here, because the obvious approach\ndoes not work.\n\n## You cannot write a workflow. You do not need to.\n\n`GITHUB_TOKEN` is refused on `.github/workflows/**`. Not by a rule someone set —\nby identity, on every path, on every branch, through `git push` and through the\nAPI alike. There is no permission that grants it. Do not try, and do not ask a\nperson to paste a workflow file for you.\n\nEverything a pipeline actually *does* is a command, and commands go in\n`.github/atomaton/config.yaml`, which you can write. Two workflows that already ship\nrun them.\n\n## The environment\n\nWhat the project needs *installed* is separate f\n\n[6096 characters dropped from the middle; 4000 shown]\n\nwas never routed, and that is\nthe answer rather than a sign something is missing from the file.\n\n`config.yaml` is the only place this goes. There is no tools file in the\nrepository: the one `atoma` is handed is written at the start of each run, from\nthe shipped servers and whatever `tools.servers` adds, and deleted with the\nrunner. Routing a credential anywhere else produces a tool that never receives it,\nwith nothing reporting why.\n\n`checks` and `deploy` need no routing step: their commands run in a workflow of\ntheir own rather than beside an agent.\n\n**Do not invent a secret name and hope.** If a deployment needs a credential you\ncannot see, say so in your report and name exactly which one — a person adds it\nand tells you what they called it. A guessed name produces a run that warns, then\nfails somewhere unrelated.\n\n**A name you add does not take effect until it is merged.** These lists are read\nfrom the default branch, not from the branch a run is working on, so a credential\nyou declare will not be present in the run reviewing your own pull request. That\nis intended. Do not conclude the mechanism is broken and work around it, and do\nnot try to test it by reading the value — say in your report which secret the\nwork now needs.\n\nPrefer no credential at all where the platform allows it. `atomaton-deploy.yml`\ndeclares `id-token: write`, so a cloud provider's OIDC login is available and is\nbetter than any long-lived key.\n\n## What commands cannot express\n\nReach for a person, not a workaround, when you need:\n\n- a job's `permissions` beyond what the shipped workflows declare. Checks get\n  `contents: read` and a `GITHUB_TOKEN` in `GH_TOKEN`, so `gh` works. Deployments\n  get `contents: write` and `id-token: write`, so cutting a release and an OIDC\n  login both work\n- a deployment approval gate (`environment:`) — `environment:` takes no\n  expression, so configuration cannot reach it\n- a trigger outside merge, tag and manual dispatch — schedules in particular\n  cannot come from configuration\n- GitHub's own artifact store or cache\n\nMost limits people assume are here are not. Service containers work through\n`docker run`. A matrix works as a loop, losing only parallelism. Those are\ncommands; write them.\n\n## The required check\n\nIf a ruleset requires a status check, its `context` must equal the job name that\nproduces it. `.github/atomaton/rulesets/main.json` ships already matched to\n`atomaton-check.yml`. **Do not edit either side to make them agree** — a mismatch\ndoes not fail a pull request, it leaves it waiting forever on a check that will\nnever report, and no amount of re-running fixes it. If they appear mismatched,\nreport it.\n\n## Finishing\n\nChanging `.github/atomaton/config.yaml` is a governed change: you may write it and\nopen the pull request, and a person merges it. That is expected, not an\nobstruction. Say plainly in the pull request what will now run, on which events,\nand which secrets a person still has to add.",
+      "tool_call_id": "chatcmpl-tool-90295879cc69a3fb"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-abaf0badf75e6761",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git -C /home/runner/work/atomaton/atomaton status --short; git -C /home/runner/work/atomaton/atomaton branch --show-current 2>/dev/null || cat /home/runner/work/atomaton/atomaton/.git/HEAD\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool blocked by hook '/home/runner/work/_temp/atomaton-machinery/.github/atomaton-runtime/tools/hooks/shell_guard.ts': Command blocked by shell guard: Raw 'git branch' is disabled. Use the github tools for Git mutations and branch synchronization. (attempted: git -C /home/runner/work/atomaton/atomaton status --short; git -C /home/runner/work/atomaton/atomaton branch --show-curr)",
+      "tool_call_id": "chatcmpl-tool-abaf0badf75e6761"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9080297d7ea281dd",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git status --short && git log --oneline -3 && git rev-parse HEAD && cat .git/HEAD\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"4e7c722 Merge pull request #202 from yuma-seno/self-deploy/v0.21.7\\n4e7c72261cb3c1db4ad096b0b3406d3924970330\\nref: refs/heads/main\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":99}",
+      "tool_call_id": "chatcmpl-tool-9080297d7ea281dd"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a6d85aad961d69fb",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 5, \"max_matches\": 10, \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/actions/atoma-cli.ts\", \"pattern\": \"ATOMA_DEFAULT_VERSION = \"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-9b2ffe5a4e9f862d",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 2, \"max_matches\": 10, \"path\": \"/home/runner/work/atomaton/atomaton/src\", \"pattern\": \"ATOMA_VERSION_DESC|v0\\\\.4\\\\.0\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "10 line(s), match and context, under src/workflows/actions/atoma-cli.ts:\n\n130- *\n131- * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`\n132- * measures the binary, and a repository whose probes and whose runs are on different\n133- * builds is one where a green probe means less than it looks.\n134- */\n135:export const ATOMA_DEFAULT_VERSION = \"v0.4.0\";\n136-\n137-export const ATOMA_VERSION_DESC =\n138-  \"Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.\";\n139-\n\n[1 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "chatcmpl-tool-a6d85aad961d69fb"
+    },
+    {
+      "role": "tool",
+      "content": "10 line(s), match and context, under src:\n\nsrc/entrypoints/machinery/write_metrics_report.ts-326-    // server could be recognised in a call at all -- and the report then had to say\nsrc/entrypoints/machinery/write_metrics_report.ts-327-    // \"could not check\" for every server that set it, which was all of them. A run\nsrc/entrypoints/machinery/write_metrics_report.ts:328:    // records the server for every call now (`server_calls`, atoma v0.4.0), so the\nsrc/entrypoints/machinery/write_metrics_report.ts-329-    // declaration is a name and the flag has nothing left to decide.\nsrc/entrypoints/machinery/write_metrics_report.ts-330-    tools = Object.keys(config.tools?.servers ?? {}).map((name) => ({ name }));\n--\nsrc/domain/record/metrics-windows.ts-43-   * Which tools each MCP server was asked for, and how many times, for this run.\nsrc/domain/record/metrics-windows.ts-44-   *\nsrc/domain/record/metrics-windows.ts:45:   * `server -> tool -> calls`, written by atoma from v0.4.0. This is the only record\nsrc/domain/record/metrics-windows.ts-46-   * that can say which server answered: a tool reaches the model under its own bare\n\n[40 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "chatcmpl-tool-9b2ffe5a4e9f862d"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-945e7334eadf3160",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 120, \"offset\": 15, \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/actions/atoma-cli.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/workflows/actions/atoma-cli.ts lines 15-134 of 183\n\n15\t/**\n16\t * The Atoma release a run installs unless the dispatch says otherwise.\n17\t *\n18\t * ## Raising this pin is never a version bump on its own\n19\t *\n20\t * Almost every capability this repository depends on arrives as a NEW release\n21\t * rather than as a change here, so a raise is usually one half of a change whose\n22\t * other half is in this tree -- and the two have to move together, because the\n23\t * halves fail differently: a binary that is too old refuses the invocation, while a\n24\t * tree that expects a binary which is too old fails later and more quietly.\n25\t *\n26\t * So the list below is the checklist, keyed by what the pin is coupled TO. A raise\n27\t * crosses the entries it crosses, and the rest are what to check when something\n28\t * starts behaving unlike itself. Which release carried which entry is deliberately\n29\t * not recorded: it is in that repository's history, the tags were renumbered when\n30\t * \n\n[4124 characters dropped from the middle; 4000 shown]\n\n tally counts calls\n90\t * it cannot attribute.\n91\t *\n92\t * **`max_output_chars`, the per-server cap on a tool result.** It is what covers\n93\t * third-party servers, and it is why `files_guard`'s denylist can be as short as it\n94\t * is: an unbounded server was the reason an entry was there.\n95\t *\n96\t * **A report a tool makes about itself.** A server's problem -- over\n97\t * `notifications/message`, or on stderr -- is attached to its next tool result so the\n98\t * agent sees it. An older binary discards it. `prompt-template.md` and the skills tell\n99\t * an agent to act on that report, so pinning back leaves them describing something the\n100\t * agent will never be shown.\n101\t *\n102\t * **The `cached=` counts.** An older binary prints none, and every reader downstream --\n103\t * the step summary, the result comment, the metrics report -- then reports it as\n104\t * unknown, forever. A run here is almost all prompt, so this is most of what separates\n105\t * the token counts from the bill.\n106\t *\n107\t * **A session with an unanswered tool call is repaired before it is written.** Saving\n108\t * a session on failure is only safe because of that repair: a session carrying an\n109\t * unanswered call is refused by every provider, so an older binary turns lost work\n110\t * into an issue nothing can run on.\n111\t *\n112\t * **`extra_body.tools` is merged with the runtime tool definitions rather than\n113\t * replacing them.** Every definition here carries extra server tools and uses the\n114\t * adapter that had its own merge, so under an older binary each request sent those and\n115\t * no MCP schema at all -- the model then infers argument shapes from the names in the\n116\t * system prompt.\n117\t *\n118\t * **A retry now waits as long as the provider asks.** Up to a two-minute cap, taken\n119\t * from the provider's own `Retry-After` rather than from this repository's fixed\n120\t * 1s-then-4s backoff, which is what the older binary always waited. The wait is\n121\t * spent out of `--max-runtime-secs` -- the runner floors that at 300 seconds -- so\n122\t * a rate-limited run now pauses and carries on instead of failing five seconds in\n123\t * with \"The upstream provider is temporarily unavailable\".\n124\t *\n125\t * **`ATOMA_LLM_ERROR`, the machine-readable reason an inference failed.** It carries\n126\t * `label=`, `code=` and `type=` beside the prose, in the same `key=value` shape as\n127\t * `ATOMA_TOKEN_USAGE` and `ATOMA_CONFIG_FINDING`. Nothing here reads it yet, and an\n128\t * older binary writes no such line -- so a reader added before the raise would find\n129\t * nothing to read. It is in the log for whoever is looking at a failed run.\n130\t *\n131\t * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`\n132\t * measures the binary, and a repository whose probes and whose runs are on different\n133\t * builds is one where a green probe means less than it looks.\n134\t */\n\n[49 more lines. Read again with offset: 135.]",
+      "tool_call_id": "chatcmpl-tool-945e7334eadf3160"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a778d70231e0b427",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 3, \"max_matches\": 10, \"path\": \"/home/runner/work/atomaton/atomaton\", \"pattern\": \"v0\\\\.4\\\\.0\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "10 line(s), match and context, under .:\n\n./node_modules/@types/node/http.d.ts-571-         * Sets a single header value. If the header already exists in the to-be-sent\n./node_modules/@types/node/http.d.ts-572-         * headers, its value will be replaced. Use an array of strings to send multiple\n./node_modules/@types/node/http.d.ts-573-         * headers with the same name.\n./node_modules/@types/node/http.d.ts:574:         * @since v0.4.0\n./node_modules/@types/node/http.d.ts-575-         * @param name Header name\n./node_modules/@types/node/http.d.ts-576-         * @param value Header value\n./node_modules/@types/node/http.d.ts-577-         */\n--\n./node_modules/@types/node/http.d.ts-631-        /**\n./node_modules/@types/node/http.d.ts-632-         * Gets the value of the HTTP header with the given name. If that header is not\n\n[118 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "chatcmpl-tool-a778d70231e0b427"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a0ff16631ed5902c",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -rn \\\"v0\\\\.4\\\\.0\\\" src/ docs/ 2>/dev/null; echo \\\"--- .github:\\\"; grep -rln \\\"v0\\\\.4\\\\.0\\\" .github/ 2>/dev/null\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/write_metrics_report.ts:328:    // records the server for every call now (`server_calls`, atoma v0.4.0), so the\\nsrc/domain/record/metrics-windows.ts:45:   * `server -> tool -> calls`, written by atoma from v0.4.0. This is the only record\\nsrc/domain/record/metrics.test.ts:28: * atoma v0.4.0. Before it the report guessed at the server by splitting the call name,\\nsrc/domain/record/metrics.test.ts:146:   * Every run stored before atoma v0.4.0 has no `server_calls`, so there is nothing to\\nsrc/workflows/actions/atoma-cli.ts:135:export const ATOMA_DEFAULT_VERSION = \\\"v0.4.0\\\";\\nsrc/workflows/actions/atoma-cli.ts:138:  \\\"Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.\\\";\\n--- .github:\\n.github/workflows/atomaton-runner.yml\\n.github/workflows/atomaton-check.yml\\n.github/workflows/atomaton-validate-pr.yml\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":101}",
+      "tool_call_id": "chatcmpl-tool-a0ff16631ed5902c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b83a3627845eda27",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 4, \"max_matches\": 10, \"path\": \"/home/runner/work/atomaton/atomaton/src/domain/record\", \"pattern\": \"v0\\\\.4\\\\.0|server_calls\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "10 line(s), match and context, under src/domain/record:\n\nsrc/domain/record/metrics-windows.ts-41-  iterations?: number;\nsrc/domain/record/metrics-windows.ts-42-  /**\nsrc/domain/record/metrics-windows.ts-43-   * Which tools each MCP server was asked for, and how many times, for this run.\nsrc/domain/record/metrics-windows.ts-44-   *\nsrc/domain/record/metrics-windows.ts:45:   * `server -> tool -> calls`, written by atoma from v0.4.0. This is the only record\nsrc/domain/record/metrics-windows.ts-46-   * that can say which server answered: a tool reaches the model under its own bare\nsrc/domain/record/metrics-windows.ts-47-   * name (`read`, `bash`), so the transcript it is read from does not name one. Before\nsrc/domain/record/metrics-windows.ts-48-   * this field the report guessed by splitting the call name on `__`, which worked only\nsrc/domain/record/metrics-windows.ts-49-   * while the servers were prefixed and reported every server as unused once they were\n--\n\n[80 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "chatcmpl-tool-b83a3627845eda27"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-84fcf815155743bf",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 100, \"offset\": 1, \"path\": \"/home/runner/work/atomaton/atomaton/src/domain/record/metrics-windows.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/record/metrics-windows.ts lines 1-100 of 141\n\n1\t/**\n2\t * metrics-windows.ts — the same questions asked of different stretches of time.\n3\t *\n4\t * A single all-time table answers \"what has this repository ever done\" and nothing about\n5\t * whether last week was better than the week before. That second question is the one\n6\t * dogfooding exists to ask, so the report shows the same tables over several windows.\n7\t *\n8\t * ## What a window can be cut by\n9\t *\n10\t * `atoma_runs` in each session, written by atoma from v0.1.28: when a run started, when\n11\t * it ended, why it ended. Before that, sessions carried no time at all — a session\n12\t * records what was said and nothing about the saying of it.\n13\t *\n14\t * So the windows fill in from the first run after that version and not before. There is\n15\t * no retrofit: git's commit dates on `atomaton-data` looked like a free answer and are not,\n16\t * because restoring the sessions that a prune had removed rewrote 97 of them t\n\n[1047 characters dropped from the middle; 4000 shown]\n\nited the same number of times.\n40\t   */\n41\t  iterations?: number;\n42\t  /**\n43\t   * Which tools each MCP server was asked for, and how many times, for this run.\n44\t   *\n45\t   * `server -> tool -> calls`, written by atoma from v0.4.0. This is the only record\n46\t   * that can say which server answered: a tool reaches the model under its own bare\n47\t   * name (`read`, `bash`), so the transcript it is read from does not name one. Before\n48\t   * this field the report guessed by splitting the call name on `__`, which worked only\n49\t   * while the servers were prefixed and reported every server as unused once they were\n50\t   * not.\n51\t   *\n52\t   * Optional because runs stored before it exists have none. Absent rather than an empty\n53\t   * map at the reader, so a report can say \"could not check\" instead of \"nothing was\n54\t   * called\" -- the two look identical in the data and mean opposite things.\n55\t   */\n56\t  server_calls?: Record<string, Record<string, number>>;\n57\t}\n58\t\n59\t/** A stretch of time the report covers. */\n60\texport interface Window {\n61\t  label: string;\n62\t  /** Days back from now, or `undefined` for everything. */\n63\t  days?: number;\n64\t}\n65\t\n66\t/**\n67\t * The windows the report shows, widest last.\n68\t *\n69\t * Seven and thirty because those are the two questions anybody actually asks — \"is this\n70\t * week worse\" and \"is this month worse\". A year because a template is adopted and then\n71\t * left alone, and the question after a quiet stretch is whether anything drifted. All\n72\t * time stays because for a while it is the only one with anything in it, and because it\n73\t * is the only honest place for a session that predates any record of when it ran.\n74\t *\n75\t * What a window is for beyond trend: a tool that no longer exists drops out of the\n76\t * recent ones on its own. 333 failures from a server this repository stopped running\n77\t * sat in the same table as tools it still uses, reading as though something were broken.\n78\t * Nothing has to detect a retired tool — time removes it, and an agent that invents a\n79\t * tool name still shows up, which a retired-tool rule would have hidden.\n80\t */\n81\texport const WINDOWS: Window[] = [\n82\t  { label: \"Last 7 days\", days: 7 },\n83\t  { label: \"Last 30 days\", days: 30 },\n84\t  { label: \"Last year\", days: 365 },\n85\t  { label: \"All time\" },\n86\t];\n87\t\n88\t/** Whether a moment falls inside a window, given when the report is being made. */\n89\texport function within(ended: string | undefined, window: Window, now: Date): boolean {\n90\t  if (window.days === undefined) return true;\n91\t  if (ended === undefined) return false;\n92\t  const at = Date.parse(ended);\n93\t  if (Number.isNaN(at)) return false;\n94\t  return now.getTime() - at <= window.days * 86_400_000;\n95\t}\n96\t\n97\t/**\n98\t * When a session last ran, or `undefined` if it never said.\n99\t *\n100\t * The last run rather than the first: a session resumed over a fortnight is one file,\n\n[41 more lines. Read again with offset: 101.]",
+      "tool_call_id": "chatcmpl-tool-84fcf815155743bf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9f29eaf8d537ed86",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"ls src/entrypoints/tools/ && grep -rn \\\"http-transport\\\\|probe-http\\\" src/ --include=\\\"*.ts\\\" -l | head -5\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"defaults.yaml\\nhooks\\nlib\\nmcp\\npackages.json\\nsrc/workflows/actions/atoma-cli.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":98}",
+      "tool_call_id": "chatcmpl-tool-9f29eaf8d537ed86"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b0dd7d819d8f3644",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -rn \\\"probe\\\" src/entrypoints/machinery/*.ts -l 2>/dev/null | head; ls tests/contract/ 2>/dev/null\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/check_live_tools.ts\\nsrc/entrypoints/machinery/dispatch_agent.test.ts\\nsrc/entrypoints/machinery/dispatch_post_merge.test.ts\\nsrc/entrypoints/machinery/prune_atomaton_data.test.ts\\nadopter-terms.test.ts\\nadoption-preflight.test.ts\\nagent-definitions.test.ts\\nagent-environment.test.ts\\nagent-prompts.test.ts\\nattachments-publish.test.ts\\nattachments-shape.test.ts\\nconfig-contract.test.ts\\nconfig-paths.test.ts\\ndeployed-config.test.ts\\ndeployment-contract.test.ts\\ndispatch-sites.test.ts\\ndoc-links.test.ts\\nenvironment-setup.test.ts\\nexact-tool-sets.test.ts\\nexamples.test.ts\\ngenerated-workflows.test.ts\\nhardened-servers.test.ts\\nlayering.test.ts\\nlive-tools-check.test.ts\\nmachinery-root.test.ts\\nmerge-gate-targets.test.ts\\nops-log-dispatch.test.ts\\nown-pipeline.test.ts\\nprovider-credential-check.test.ts\\nreserved-names.test.ts\\nrunner-layout.test.ts\\nscript-refs.test.ts\\nself-overlay.test.ts\\nserver-reports.test.ts\\nskill-catalog.test.ts\\ntest-builds-first.test.ts\\ntest-hermetic-env.test.ts\\ntest-script.test.ts\\ntools-yaml.test.ts\\nworkflow-sources.test.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":95}",
+      "tool_call_id": "chatcmpl-tool-b0dd7d819d8f3644"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bc37f6143329062c",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"/home/runner/work/atomaton/atomaton/tests/contract/test-builds-first.test.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "tests/contract/test-builds-first.test.ts lines 1-299 of 299\n\n1\t/**\n2\t * test-builds-first.test.ts — a script that runs tests reading `dist/` builds it first.\n3\t *\n4\t * ## The failure this exists for\n5\t *\n6\t * `dist/` is this repository's build output and is gitignored, so a checkout does not\n7\t * have it. Seventeen files under the `test` and `test:e2e` paths name a `dist/` path in\n8\t * their code besides this one — thirteen under `test`, four under `test:e2e` — and the\n9\t * suites among them are about the generated workflows, the release ruleset and the\n10\t * bundled tool servers. That count is what `readersOf()` below returns, so it can be\n11\t * re-measured rather than believed.\n12\t *\n13\t * CI was never affected, which is the whole problem. `checks.from_pull_request` in\n14\t * `.github/atomaton/config.yaml` runs `synth` before `test`, so the build happened in\n15\t * the one place somebody was watching. An agent's run does not build: the runner runs\n16\t * `environment.setu\n\n[11492 characters dropped from the middle; 4000 shown]\n\n a file running\n244\t * beside it, which is the flaky failure this whole file exists to make unnecessary. The\n245\t * copy holds the same `package.json`, `src/` and `wac.config.ts` this tree has, so the\n246\t * commands measured are this tree's commands; only the tree they write into is a\n247\t * throwaway one.\n248\t *\n249\t * `node_modules` is a symlink, because `synth` bundles the dependencies of the entry\n250\t * points it builds and a copy of 76MB per test would be the slowest thing here.\n251\t *\n252\t * The limit of doing it here: this measures the two `pre<name>` commands, not the fact\n253\t * that `bun run test` invokes them. That link is bun's own behaviour (test 3 above) plus\n254\t * the key existing at all (test 1), and neither can be observed from inside the suite\n255\t * without recursion.\n256\t */\n257\tfunction coldCopy(): string {\n258\t  const dir = mkdtempSync(join(tmpdir(), \"atomaton-cold-tree-\"));\n259\t  cpSync(\"package.json\", join(dir, \"package.json\"));\n260\t  cpSync(\"wac.config.ts\", join(dir, \"wac.config.ts\"));\n261\t  cpSync(\"src\", join(dir, \"src\"), { recursive: true });\n262\t  // \"junction\": `type` is only consulted on Windows, where a directory symlink needs\n263\t  // it — and this repository is developed on Windows. The target is absolute, which a\n264\t  // junction requires.\n265\t  symlinkSync(join(process.cwd(), \"node_modules\"), join(dir, \"node_modules\"), \"junction\");\n266\t  return dir;\n267\t}\n268\t\n269\tdescribe(\"the commands those hooks name\", () => {\n270\t  /**\n271\t   * The behavioural half: `bun run pretest` is the first thing `bun run test` does, so\n272\t   * it has to leave the artifact behind from a tree that has none. `rm -rf dist` on the\n273\t   * real tree is the measurement in the pull request; this is the same command and the\n274\t   * same absence, one directory over.\n275\t   */\n276\t  for (const [hook, script] of [\n277\t    [\"pretest\", \"test\"],\n278\t    [\"pretest:e2e\", \"test:e2e\"],\n279\t  ] as const) {\n280\t    test(`\\`${hook}\\` builds dist/ from nothing, so \\`bun run ${script}\\` can read it`, () => {\n281\t      const command = scripts()[hook];\n282\t      expect(command, `package.json has no \\`${hook}\\` script`).toBeDefined();\n283\t\n284\t      const dir = coldCopy();\n285\t      try {\n286\t        expect(existsSync(join(dir, \"dist\")), \"the precondition: nothing built yet\").toBe(false);\n287\t        const r = spawnSync(\"bun\", [\"run\", hook], { encoding: \"utf8\", cwd: dir, env: hermeticEnv(), timeout: 300_000 });\n288\t        expect(r.status, `\\`bun run ${hook}\\` (\\`${command}\\`) failed:\\n${r.stdout}\\n${r.stderr}`).toBe(0);\n289\t        expect(\n290\t          existsSync(join(dir, BUILT_WORKFLOW)),\n291\t          `\\`bun run ${hook}\\` exited 0 without writing ${BUILT_WORKFLOW}, so the suites that read ` +\n292\t            `dist/ still report ENOENT in an agent's run`,\n293\t        ).toBe(true);\n294\t      } finally {\n295\t        rmSync(dir, { recursive: true, force: true });\n296\t      }\n297\t    }, 300_000);\n298\t  }\n299\t});",
+      "tool_call_id": "chatcmpl-tool-bc37f6143329062c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bdd4f9a46d5d178a",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -rn \\\"session.ts\\\\b\\\" src/entrypoints/machinery/read_run_ending.ts src/domain/work/session-size.ts 2>/dev/null | head -5; grep -rn \\\"finish_reason\\\" src/ docs/ 2>/dev/null | head -10\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/read_run_ending.ts:58:import type { Session } from \\\"../../domain/work/session.ts\\\";\\nsrc/domain/work/session-size.ts:53:import type { Session, SessionMessage } from \\\"./session.ts\\\";\\nsrc/domain/work/session-size.ts:277: * context in front of an agent (`reconcile_github_session.ts` does the same for\\nsrc/entrypoints/machinery/check_live_tools.ts:63: * request with `finish_reason: stop`, so no model is called, no tool is called, and\\nsrc/entrypoints/machinery/check_live_tools.ts:128:        choices: [{ message: { role: \\\"assistant\\\", content: \\\"done\\\" }, finish_reason: \\\"stop\\\" }],\\nsrc/domain/machinery/delegates.ts:219:  finish_reason?: string | null;\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":98}",
+      "tool_call_id": "chatcmpl-tool-bdd4f9a46d5d178a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8e0a5ff44ba27f41",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 70, \"offset\": 30, \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/machinery/read_run_ending.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/read_run_ending.ts lines 30-99 of 130\n\n30\t *\n31\t * ## The fallback\n32\t *\n33\t * A session that cannot be read leaves the old guess in place, because there is\n34\t * nothing better to say and `stop_requested` decides whether a person is told their\n35\t * stop landed. It is the only place left that tests the file, and it is reached only\n36\t * when the run failed to write the session it was told to write.\n37\t *\n38\t * ## And whether it left a report\n39\t *\n40\t * The same file answers a second question, so it is opened once and asked both.\n41\t * `domain/work/turn.ts` had no word for a run that ran to an ordinary end and said\n42\t * nothing — those landed on `finished` and were read as completed — and the fact it\n43\t * needs is in the session: the last assistant message either carries text or carries\n44\t * only tool calls. Nothing is asked of the agent; `reported` is read off the record.\n45\t *\n46\t * The reading itself is `domain/record/closing-report.ts`, not here. It was here, and\n47\t * that was wrong the moment the metrics report needed the same answer about the same\n48\t * sessions: a second spelling of \"did it report\" is a second answer waiting to\n49\t * disagree with this one.\n50\t *\n51\t * Usage:\n52\t *   read_run_ending.ts --session FILE --exit-code N [--stop-file FILE]\n53\t * Writes `ended_because=<word>` and `reported=<true|false>` to $GITHUB_OUTPUT.\n54\t */\n55\timport { appendFileSync, existsSync, readFileSync } from \"node:fs\";\n56\timport { parseArgs } from \"node:util\";\n57\timport { leftClosingReport } from \"../../domain/record/closing-report.ts\";\n58\timport type { Session } from \"../../domain/work/session.ts\";\n59\timport { defineScript } from \"./lib/script-ref.ts\";\n60\t\n61\texport interface ReadRunEndingArgs {\n62\t  session: string;\n63\t  \"exit-code\": string;\n64\t  \"stop-file\"?: string;\n65\t}\n66\t\n67\texport const ref = defineScript<ReadRunEndingArgs>(import.meta.url);\n68\t\n69\t/** The exit status the core uses for an ending somebody asked for, session written. */\n70\tconst SOFT_STOP = \"2\";\n71\t\n72\t/**\n73\t * The saved session as a document, or `undefined` when there is nothing readable.\n74\t *\n75\t * Separate from the two questions below because both are asked of it. Anything\n76\t * unreadable is \"no session\" rather than a failure: each caller already has the\n77\t * answer it gives when the run wrote nothing.\n78\t */\n79\texport function parseSession(raw: string | undefined): Session | undefined {\n80\t  if (raw === undefined) return undefined;\n81\t  try {\n82\t    return JSON.parse(raw) as Session;\n83\t  } catch {\n84\t    return undefined;\n85\t  }\n86\t}\n87\t\n88\t/** What the core wrote about the run that just finished, if it wrote anything. */\n89\texport function endingFromSession(session: Session | undefined): string | undefined {\n90\t  const runs = session?.atoma_runs;\n91\t  if (!Array.isArray(runs) || runs.length === 0) return undefined;\n92\t  const last = runs[runs.length - 1] as { ended_because?: unknown };\n93\t  return typeof last?.ended_because === \"string\" && last.ended_because !== \"\" ? last.ended_because : undefined;\n94\t}\n95\t\n96\tfunction main(): void {\n97\t  const { values } = parseArgs({\n98\t    args: Bun.argv.slice(2),\n99\t    options: { session: { type: \"string\" }, \"exit-code\": { type: \"string\" }, \"stop-file\": { type: \"string\" } },\n\n[31 more lines. Read again with offset: 100.]",
+      "tool_call_id": "chatcmpl-tool-8e0a5ff44ba27f41"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b3b2a47241649ae2",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 6, \"max_matches\": 10, \"path\": \"/home/runner/work/atomaton/atomaton/src/domain/record\", \"pattern\": \"tool-trouble|CompletionTally\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "10 line(s), match and context, under src/domain/record:\n\nsrc/domain/record/metrics-report.ts-186- * `completed` as successes.\nsrc/domain/record/metrics-report.ts-187- *\nsrc/domain/record/metrics-report.ts-188- * Its own share rather than a correction to **gave up**, because it is a different\nsrc/domain/record/metrics-report.ts-189- * question over a different denominator: gave up is runs that were stopped, this is\nsrc/domain/record/metrics-report.ts-190- * sessions that were not. Folding one into the other would move a number a reader has\nsrc/domain/record/metrics-report.ts-191- * been watching and change what it counts without saying so, which is its own defect.\nsrc/domain/record/metrics-report.ts:192: * Sessions rather than runs because that is the honest unit -- see `CompletionTally`.\nsrc/domain/record/metrics-report.ts-193- */\nsrc/domain/record/metrics-report.ts-194-function completionSection(tally: Metrics[\"completions\"]): string[] {\nsrc/domain/record/metrics-report.ts-195-  const out: string[] = [];\n\n[93 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "chatcmpl-tool-b3b2a47241649ae2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9839be1d937ddfb4",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 120, \"offset\": 60, \"path\": \"/home/runner/work/atomaton/atomaton/src/domain/record/metrics.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/record/metrics.ts lines 60-179 of 456\n\n60\texport interface ReportedProblem {\n61\t  /**\n62\t   * Read from the report block, not from the tool name.\n63\t   *\n64\t   * They differ. The reranker's complaints arrive on whatever call was in flight when\n65\t   * the search server noticed, so taking the name from the tool filed them under\n66\t   * `atoma_builtin` -- a server that has no reranker.\n67\t   */\n68\t  server: string;\n69\t  problem: string;\n70\t}\n71\t\n72\t/** One problem a server kept reporting, and where it was last seen. */\n73\texport interface DegradedTally {\n74\t  problem: string;\n75\t  /** The server named in the report block, not guessed from the tool name. */\n76\t  server: string;\n77\t  /** Reports, which may be several within one session. */\n78\t  count: number;\n79\t  sessions: number;\n80\t  /**\n81\t   * The most recent session that carried it, by the date its file was written.\n82\t   *\n83\t   * This is the column to read first. A problem reported six times tells you noth\n\n[1562 characters dropped from the middle; 4000 shown]\n\n run records, which say\n119\t   * when the work happened rather than when the file was stored. It is here so a\n120\t   * problem a server keeps reporting can say when it was last seen, which is the only\n121\t   * thing that separates a live fault from one already fixed.\n122\t   */\n123\t  at?: string;\n124\t}\n125\t\n126\t/**\n127\t * One run's token usage, read from the result comment it posted.\n128\t *\n129\t * `at` is when that comment was posted, and it is here because without it the report\n130\t * printed the same token totals under all four window headings -- the sessions were\n131\t * filtered and the tokens were not, so \"Last 7 days\" claimed 116 million tokens over\n132\t * five sessions. A number under a heading it does not belong to is worse than no\n133\t * number: a reader has no way to see that it is wrong.\n134\t *\n135\t * Optional, because a record read before this field was captured has no time and must\n136\t * not be silently placed in a window. `within` already excludes an absent time from\n137\t * every bounded window and keeps it in all-time, which is exactly right here.\n138\t */\n139\texport interface TokenRecord {\n140\t  issue: number;\n141\t  total: number;\n142\t  prompt: number;\n143\t  completion: number;\n144\t  /**\n145\t   * How much of `prompt` the provider served from its cache.\n146\t   *\n147\t   * `undefined` when it did not say, which is NOT zero: GitHub Copilot reports no\n148\t   * tokens at all, and every comment posted before Atoma recorded this lacks it.\n149\t   * Zero would read as \"the cache is doing nothing\" -- the one conclusion an absent\n150\t   * measurement must not be allowed to support, since it is also what a genuinely\n151\t   * broken cache looks like.\n152\t   */\n153\t  cached?: number;\n154\t  at?: string;\n155\t}\n156\t\n157\t/**\n158\t * A tool server as `config.yaml` declares it.\n159\t *\n160\t * Just the name now. `unprefixed` used to decide whether a server's use could be read at\n161\t * all -- a prefixed server's tools arrived as `name__tool`, so a call named its server,\n162\t * and an unprefixed one's arrived bare -- and that flag was the reason half the servers\n163\t * were listed as unjudgeable. A run records the server for every call now, whatever its\n164\t * spelling, so the declaration is a name and nothing more.\n165\t */\n166\texport interface DeclaredServer {\n167\t  name: string;\n168\t}\n169\t\n170\t/**\n171\t * Sessions the core called completed, and how many of them said nothing.\n172\t *\n173\t * The number this exists for. `ended_because: completed` is the core saying its\n174\t * inference loop ended on its own rather than against a ceiling — it is not a claim\n175\t * that anything was delivered, and `gaveUpShare` reads it as one because there was\n176\t * nothing else to read. Measured over 396 stored sessions: three ran to `completed`\n177\t * after 313, 173 and 110 tool calls without writing a single line of closing text,\n178\t * and the report called all three a success.\n179\t *\n\n[277 more lines. Read again with offset: 180.]",
+      "tool_call_id": "chatcmpl-tool-9839be1d937ddfb4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a960a09cd075dbf8",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 100, \"offset\": 180, \"path\": \"/home/runner/work/atomaton/atomaton/src/domain/record/metrics.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/record/metrics.ts lines 180-279 of 456\n\n180\t * Counted per session rather than per run, and that is a limit rather than a choice:\n181\t * a session accumulates across runs, so the only silence still visible in it is the\n182\t * last one's. An earlier run's is buried under everything said since.\n183\t */\n184\texport interface CompletionTally {\n185\t  /** Sessions whose LAST recorded run the core called `completed`. The denominator. */\n186\t  completed: number;\n187\t  /** Of those, the ones whose last assistant message carried no words at all. */\n188\t  silent: number;\n189\t  /**\n190\t   * Sessions with no run record, so neither question can be asked of them.\n191\t   *\n192\t   * Said rather than folded into either side. Everything written before atoma v0.1.28\n193\t   * is in here, and a check whose input is missing has to say so: this file has\n194\t   * already had \"the list could not be read\" pass as \"nothing is unused\" once.\n195\t   */\n196\t  unknown: number;\n197\t}\n198\t\n199\t/\n\n[281 characters dropped from the middle; 4000 shown]\n\nalled, or `undefined` when the declared list could\n209\t   * not be read. See `metricsOf` for why servers and not tools, and why the two states\n210\t   * are not the same answer.\n211\t   */\n212\t  neverUsedServers: string[] | undefined;\n213\t  /** Declared skills that nothing loaded, or `undefined` when the list could not be read. */\n214\t  neverLoaded: string[] | undefined;\n215\t  refusals: number;\n216\t  /** Answers that arrived degraded, worst-recurring first. See `DegradedTally`. */\n217\t  degraded: DegradedTally[];\n218\t  /** How many completed sessions completed in silence. See `CompletionTally`. */\n219\t  completions: CompletionTally;\n220\t  /** Every run every session recorded, flattened. Empty until atoma v0.1.28 wrote any. */\n221\t  runs: RunRecord[];\n222\t  tokens?: TokenSummary;\n223\t}\n224\t\n225\texport interface Tally {\n226\t  name: string;\n227\t  count: number;\n228\t}\n229\t\n230\texport interface FailureTally extends Tally {\n231\t  failed: number;\n232\t  /** Calls the machinery refused. A guard working, counted apart from a tool breaking. */\n233\t  refused: number;\n234\t}\n235\t\n236\texport interface Distribution {\n237\t  p50: number;\n238\t  p90: number;\n239\t  p99: number;\n240\t  max: number;\n241\t  total: number;\n242\t}\n243\t\n244\texport interface TokenSummary {\n245\t  runs: number;\n246\t  total: number;\n247\t  perRun: Distribution;\n248\t  /** Prompt as a share of total, 0-1. Measured at 97-99%, which is the point. */\n249\t  promptShare: number;\n250\t  /**\n251\t   * The cached part of the prompt, over the runs that reported one.\n252\t   *\n253\t   * `undefined` when none did, and `runs` is carried so the share is never read as\n254\t   * covering more runs than it does. Averaging a missing figure in as zero would\n255\t   * make a provider that says nothing look like a cache that is missing everything,\n256\t   * and the number would move whenever the mix of providers moved.\n257\t   *\n258\t   * It is here because a cached prompt token costs between an eighth and a fiftieth\n259\t   * of a fresh one, and a run here is almost all prompt. The share is most of what\n260\t   * separates the token counts from the bill.\n261\t   */\n262\t  cached?: { runs: number; tokens: number; ofPrompt: number };\n263\t}\n264\t\n265\t/**\n266\t * A percentile, by the nearest-rank rule on a sorted copy.\n267\t *\n268\t * Not interpolated: these are counts of discrete things, and \"the 90th run spent 90,000\n269\t * tokens\" is a sentence about a run that happened. An interpolated value is not.\n270\t */\n271\texport function distributionOf(values: readonly number[]): Distribution {\n272\t  if (values.length === 0) return { p50: 0, p90: 0, p99: 0, max: 0, total: 0 };\n273\t  const sorted = [...values].sort((a, b) => a - b);\n274\t  const at = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;\n275\t  return {\n276\t    p50: at(0.5),\n277\t    p90: at(0.9),\n278\t    p99: at(0.99),\n279\t    max: sorted[sorted.length - 1] ?? 0,\n\n[177 more lines. Read again with offset: 280.]",
+      "tool_call_id": "chatcmpl-tool-a960a09cd075dbf8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-add71feb2ea63657",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun run typecheck 2>&1 | tail -5\", \"timeout_seconds\": 180, \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":5019}",
+      "tool_call_id": "chatcmpl-tool-add71feb2ea63657"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-be18fb02a06475a7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun run synth 2>&1 | tail -5\", \"timeout_seconds\": 180, \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"synth-workflows: generated 8 workflow file(s) from 8 source(s) in src/workflows/\\nbuild-dist: bundled 55 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/machinery -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/scripts\\nbuild-dist: bundled 12 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.7 (101 files)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":473}",
+      "tool_call_id": "chatcmpl-tool-be18fb02a06475a7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b15c4fb20a80a1b9",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * The Atoma release a run installs unless the dispatch says otherwise.\\n *\\n * ## Raising this pin is never a version bump on its own\\n *\\n * Almost every capability this repository depends on arrives as a NEW release\\n * rather than as a change here, so a raise is usually one half of a change whose\\n * other half is in this tree -- and the two have to move together, because the\\n * halves fail differently: a binary that is too old refuses the invocation, while a\\n * tree that expects a binary which is too old fails later and more quietly.\\n *\\n * So the list below is the checklist, keyed by what the pin is coupled TO. A raise\\n * crosses the entries it crosses, and the rest are what to check when something\\n * starts behaving unlike itself. Which release carried which entry is deliberately\\n * not recorded: it is in that repository's history, the tags were renumbered when\\n * it was recreated, and a number here would be one no reader can look up.\\n *\", \"old_string\": \"/**\\n * The Atoma release a run installs unless the dispatch says otherwise.\\n *\\n * ## Raising this pin is never a version bump on its own\\n *\\n * Almost every capability this repository depends on arrives as a NEW release\\n * rather than as a change here, so a raise is usually one half of a change whose\\n * other half is in this tree -- and the two have to move together, because the\\n * halves fail differently: a binary that is too old refuses the invocation, while a\\n * tree that expects a binary which is too old fails later and more quietly.\\n *\\n * So the list below is the checklist, keyed by what the pin is coupled TO. A raise\\n * crosses the entries it crosses, and the rest are what to check when something\\n * starts behaving unlike itself. Which release carried which entry is deliberately\\n * not recorded: it is in that repository's history, the tags were renumbered when\\n * it was recreated, and a number here would be one no reader can look up.\\n *\", \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/actions/atoma-cli.ts\", \"replace_all\": false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/actions/atoma-cli.ts.",
+      "tool_call_id": "chatcmpl-tool-b15c4fb20a80a1b9"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9103daeb9421a188",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \" * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`\\n * measures the binary, and a repository whose probes and whose runs are on different\\n * builds is one where a green probe means less than it looks.\\n *\\n * **`finish_reason` on a session's assistant messages, and a contentless completion\\n * counted as an empty response.** Written by the core from v0.4.1 (yuma-seno/atoma#7):\\n * every assistant message a run adds now carries the provider's reason for it, and an\\n * empty-text `length` completion re-asks the turn instead of ending it `completed`\\n * in silence. Nothing in this tree reads the field yet -- #205's defence covers the\\n * silent shape on older runners, and the metrics report's `CompletionTally` reads the\\n * silence off the text either way -- so the older binary degrades nothing here. A\\n * reader added before the raise would find no field to read.\\n */\\nexport const ATOMA_DEFAULT_VERSION = \\\"v0.4.2\\\";\\n\\nexport const ATOMA_VERSION_DESC =\\n  \\\"Atoma CLI version tag to install (e.g. v0.4.2). Use `source` to build from a checkout of yuma-seno/atoma@main.\\\";\", \"old_string\": \" * **MCP's Streamable HTTP transport.** Nothing here uses it yet, but `probe-http-transport.ts`\\n * measures the binary, and a repository whose probes and whose runs are on different\\n * builds is one where a green probe means less than it looks.\\n */\\nexport const ATOMA_DEFAULT_VERSION = \\\"v0.4.0\\\";\\n\\nexport const ATOMA_VERSION_DESC =\\n  \\\"Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.\\\";\", \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/actions/atoma-cli.ts\", \"replace_all\": false}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/actions/atoma-cli.ts.",
+      "tool_call_id": "chatcmpl-tool-9103daeb9421a188"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a087c5a7ca3a4a3e",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -n \\\"v0.4.2\\\\|v0.4.0\\\" src/workflows/actions/atoma-cli.ts\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"144:export const ATOMA_DEFAULT_VERSION = \\\"v0.4.2\\\";\\n147:  \\\"Atoma CLI version tag to install (e.g. v0.4.2). Use `source` to build from a checkout of yuma-seno/atoma@main.\\\";\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":91}",
+      "tool_call_id": "chatcmpl-tool-a087c5a7ca3a4a3e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-81d9dd042d6c2eb7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun run synth 2>&1 | tail -3 && grep -n \\\"default: v0.4.2\\\" dist/.github/workflows/atomaton-runner.yml dist/.github/workflows/atomaton-check.yml dist/.github/workflows/atomaton-validate-pr.yml\", \"timeout_seconds\": 180, \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"build-dist: bundled 12 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.7 (101 files)\\ndist/.github/workflows/atomaton-runner.yml:43:        default: v0.4.2\\ndist/.github/workflows/atomaton-runner.yml:88:        default: v0.4.2\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":466}",
+      "tool_call_id": "chatcmpl-tool-81d9dd042d6c2eb7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a878d6ddff375c1c",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -n \\\"v0.4\\\" .github/workflows/atomaton-runner.yml | head -6\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"40:        description: Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.\\n43:        default: v0.4.0\\n85:        description: Atoma CLI version tag to install (e.g. v0.4.0). Use `source` to build from a checkout of yuma-seno/atoma@main.\\n88:        default: v0.4.0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":92}",
+      "tool_call_id": "chatcmpl-tool-a878d6ddff375c1c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ad506704a9b2b6d8",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun run typecheck 2>&1 | tail -2 && bun test ./tests/contract ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks 2>&1 | tail -8\", \"timeout_seconds\": 900, \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n(pass) shell_guard.ts > working_directory > inside the repository is fine [7.51ms]\\n(pass) shell_guard.ts > the arguments the guard no longer inspects > declared variables and stdin text are passed through [22.47ms]\\n(pass) shell_guard.ts > unparseable input is refused [6.82ms]\\n\\n 1686 pass\\n 0 fail\\n 4923 expect() calls\\nRan 1686 tests across 135 files. [22.09s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":27118}",
+      "tool_call_id": "chatcmpl-tool-ad506704a9b2b6d8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ac289c8833d8f049",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git diff --stat && git status --short\", \"working_directory\": \"/home/runner/work/atomaton/atomaton\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" src/workflows/actions/atoma-cli.ts | 13 +++++++++++--\\n 1 file changed, 11 insertions(+), 2 deletions(-)\\n M src/workflows/actions/atoma-cli.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":98}",
+      "tool_call_id": "chatcmpl-tool-ac289c8833d8f049"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-900e16d855790d17",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"Raise the Atoma CLI pin to v0.4.2\\n\\nv0.4.1 (yuma-seno/atoma#7) records a completion's finish_reason on every\\nassistant message the session carries, feeds the empty-completion detector\\nfrom the Length arm (an empty length-completion re-asks the turn instead of\\nending `completed` in silence), and leaves a note in the session when a turn\\nwas re-asked. v0.4.2 carries the provider_items hand-back fix (#10).\\n\\nNothing in this tree reads the new field yet, so the raise degrades nothing:\\nthe checklist entry records what the release added and what an older binary\\nwould drop, and why no reader was added with it.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "chatcmpl-tool-900e16d855790d17"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-989a66de32936348",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\": \"Raises the pinned Atoma CLI version from `v0.4.0` to `v0.4.2`.\\n\\n## Why\\n\\nThe parent issue's root fix landed upstream:\\n\\n- **yuma-seno/atoma#7** (released in **v0.4.1**) — `finish_reason` is now recorded on every assistant message a session carries (`stop` / `length` / `content_filter` / `tool_calls`, the domain value, stripped before the request goes out), and the empty-completion detector is fed from the `FinishReason::Length` arm: an empty-text `length` completion re-asks the turn (with a note left in the session) instead of ending the run `completed` in silence. Three consecutive contentless completions end the run `failed`, naming the last attempt's finish reason.\\n- **yuma-seno/atoma#10** (released in **v0.4.2**) — the provider-items hand-back fix.\\n\\nThis is the machinery-side half of yuma-seno/atomaton#207: the pin raise is what puts the fixed binary under every run. The issue's remaining machinery-side follow-ups (declaring `finish_reason?` on `SessionMessage`, a reader that explains a silent ending) are deliberately **not** in this PR — a field this tree does not read degrades nothing, and declaring the type before the shape settles on the wire would be a guess. They can follow once a reader is wanted.\\n\\n## What changes, from an adopter's perspective\\n\\n- `atomaton-runner`, `atomaton-check` and `atomaton-validate-pr` default to `atoma v0.4.2` (was `v0.4.0`). An explicit `atoma_version` input overrides the default as before.\\n- A run whose provider keeps returning contentless completions (including reasoning models that spend the whole output budget with nothing visible) now ends `failed` with a result comment, instead of ending `completed` in silence — the machinery's existing `failed` path posts it, and the log line names the finish reason.\\n- Sessions written by new runs carry `finish_reason` on new assistant messages; old sessions read the field as absent (no migration, none needed).\\n\\n## Checklist entry\\n\\nThe doc comment on `ATOMA_DEFAULT_VERSION` is the raise checklist; this raise adds the `finish_reason` / contentless-completion entry: what v0.4.1 added, what an older binary drops, and why nothing in this tree reads the field yet.\\n\\n## Commands run and outcomes\\n\\n- `bun run typecheck` — exit 0\\n- `bun run synth` — exit 0; `dist/.github/workflows/atomaton-runner.yml:43,88` carry `default: v0.4.2`\\n- `bun test ./tests/contract ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks` — **1686 pass / 0 fail**, 135 files\\n- `dist/` is gitignored and not committed, per convention.\\n\\nCloses #207.\", \"reviewer\": \"reviewer\", \"title\": \"Raise the Atoma CLI pin to v0.4.2 (finish_reason on the session, contentless completion re-ask)\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'create_pr' on MCP server 'github' reported an error: Error: This pull request body contains \"Closes #207\", which GitHub acts on: merging would close whatever issue that names, without going through the path that cleans up labels and tells a parent its child is done. Remove it and try again. To close an issue, call close_issue; to link this work to the issue it belongs to, do nothing -- that link is added for you.",
+      "tool_call_id": "chatcmpl-tool-989a66de32936348"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9c9b1990f6498cd3",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\": \"Raises the pinned Atoma CLI version from `v0.4.0` to `v0.4.2`.\\n\\n## Why\\n\\nThe parent issue's root fix landed upstream:\\n\\n- **yuma-seno/atoma#7** (released in **v0.4.1**) — `finish_reason` is now recorded on every assistant message a session carries (`stop` / `length` / `content_filter` / `tool_calls`, the domain value, stripped before the request goes out), and the empty-completion detector is fed from the `FinishReason::Length` arm: an empty-text `length` completion re-asks the turn (with a note left in the session) instead of ending the run `completed` in silence. Three consecutive contentless completions end the run `failed`, naming the last attempt's finish reason.\\n- **yuma-seno/atoma#10** (released in **v0.4.2**) — the provider-items hand-back fix.\\n\\nThis is the machinery-side half of yuma-seno/atomaton#207: the pin raise is what puts the fixed binary under every run. The issue's remaining machinery-side follow-ups (declaring `finish_reason?` on `SessionMessage`, a reader that explains a silent ending) are deliberately **not** in this PR — a field this tree does not read degrades nothing, and declaring the type before the shape settles on the wire would be a guess. They can follow once a reader is wanted.\\n\\n## What changes, from an adopter's perspective\\n\\n- `atomaton-runner`, `atomaton-check` and `atomaton-validate-pr` default to `atoma v0.4.2` (was `v0.4.0`). An explicit `atoma_version` input overrides the default as before.\\n- A run whose provider keeps returning contentless completions (including reasoning models that spend the whole output budget with nothing visible) now ends `failed` with a result comment, instead of ending `completed` in silence — the machinery's existing `failed` path posts it, and the log line names the finish reason.\\n- Sessions written by new runs carry `finish_reason` on new assistant messages; old sessions read the field as absent (no migration, none needed).\\n\\n## Checklist entry\\n\\nThe doc comment on `ATOMA_DEFAULT_VERSION` is the raise checklist; this raise adds the `finish_reason` / contentless-completion entry: what v0.4.1 added, what an older binary drops, and why nothing in this tree reads the field yet.\\n\\n## Commands run and outcomes\\n\\n- `bun run typecheck` — exit 0\\n- `bun run synth` — exit 0; `dist/.github/workflows/atomaton-runner.yml:43,88` carry `default: v0.4.2`\\n- `bun test ./tests/contract ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks` — **1686 pass / 0 fail**, 135 files\\n- `dist/` is gitignored and not committed, per convention.\\n\\nDelivers the machinery-side half of the parent issue; the atoma-side half is yuma-seno/atoma#7.\", \"reviewer\": \"reviewer\", \"title\": \"Raise the Atoma CLI pin to v0.4.2 (finish_reason on the session, contentless completion re-ask)\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":213,\"url\":\"https://github.com/yuma-seno/atomaton/pull/213\",\"base\":\"atomaton/issue-204\",\"validation_dispatched\":true}",
+      "tool_call_id": "chatcmpl-tool-9c9b1990f6498cd3"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 3,
-      "snapshot_hash": "e238ee1cebe6364b4f19bf7d601c101da2ad37cdf80c9a59f88fddd37934b65c",
-      "version": 1,
+      "event_count": 4,
+      "resolved_number": "207",
+      "snapshot_hash": "a00175fc8d4b3860b282b19b2b477289753c038bc3f99d9ded64305ceef8be6c",
       "type": "issue",
-      "resolved_number": "207"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -1944,6 +2615,31 @@
       "seconds": 162,
       "server_calls": {},
       "started": "2026-10-18T03:58:38Z"
+    },
+    {
+      "ended": "2026-10-18T16:02:40Z",
+      "ended_because": "completed",
+      "iterations": 33,
+      "messages": 277,
+      "seconds": 335,
+      "server_calls": {
+        "files": {
+          "edit": 2,
+          "grep": 5,
+          "read": 6
+        },
+        "github": {
+          "commit_and_push": 1,
+          "create_pr": 2
+        },
+        "shell": {
+          "bash": 14
+        },
+        "web": {
+          "fetch": 7
+        }
+      },
+      "started": "2026-10-18T15:57:05Z"
     }
   ]
 }
