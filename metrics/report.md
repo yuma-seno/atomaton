@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 96 | 10.4% | 723 | 9,859 | 18 | 37.8 |
-| Last 30 days | 134 | 9.7% | 924 | 10,246 | 22 | 36.5 |
-| Last year | 134 | 9.7% | 924 | 10,246 | 22 | 36.5 |
-| All time | 134 | 9.7% | 924 | 10,246 | 22 | 36.5 |
+| Last 7 days | 97 | 10.3% | 711 | 9,859 | 18 | 38.0 |
+| Last 30 days | 135 | 9.6% | 905 | 10,246 | 22 | 37.8 |
+| Last year | 135 | 9.6% | 905 | 10,246 | 22 | 37.8 |
+| All time | 135 | 9.6% | 905 | 10,246 | 22 | 37.8 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 121 |
+| `completed` | 122 |
 | `failed` | 11 |
 | `stopped` | 2 |
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,251,353 | 8,138,470 | 73,718,100 | 73,718,100 | 235,413,344 |
-| messages per session | 169 | 396 | 705 | 705 | 9,001 |
+| messages per session | 169 | 396 | 705 | 705 | 9,007 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -70,10 +70,10 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `commit_and_push` | 20 | 4 | 0 | 20% |
 | `list_prs` | 18 | 0 | 0 | 0% |
 | `write` | 18 | 0 | 0 | 0% |
+| `request_close_issue` | 15 | 0 | 0 | 0% |
 | `create_issue` | 14 | 4 | 0 | 28.6% |
 | `delegate_readonly` | 14 | 0 | 0 | 0% |
 | `get_pr_reviews` | 14 | 0 | 0 | 0% |
-| `request_close_issue` | 14 | 0 | 0 | 0% |
 | `search_code` | 14 | 0 | 0 | 0% |
 | `shell__shell_execute` | 14 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 10 | 0 | 0 | 0% |
@@ -130,7 +130,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,508,424 | 11,220,302 | 73,718,100 | 73,718,100 | 355,673,937 |
-| messages per session | 167 | 482 | 715 | 715 | 14,397 |
+| messages per session | 167 | 482 | 715 | 715 | 14,403 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -172,9 +172,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `commit_and_push` | 20 | 4 | 0 | 20% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `list_prs` | 18 | 0 | 0 | 0% |
+| `request_close_issue` | 16 | 0 | 0 | 0% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
-| `request_close_issue` | 15 | 0 | 0 | 0% |
 | `delegate_readonly` | 14 | 0 | 0 | 0% |
 | `get_pr_reviews` | 14 | 0 | 0 | 0% |
 | `search_code` | 14 | 0 | 0 | 0% |
@@ -245,7 +245,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,508,424 | 11,220,302 | 73,718,100 | 73,718,100 | 355,673,937 |
-| messages per session | 167 | 482 | 715 | 715 | 14,397 |
+| messages per session | 167 | 482 | 715 | 715 | 14,403 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -287,9 +287,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `commit_and_push` | 20 | 4 | 0 | 20% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `list_prs` | 18 | 0 | 0 | 0% |
+| `request_close_issue` | 16 | 0 | 0 | 0% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
-| `request_close_issue` | 15 | 0 | 0 | 0% |
 | `delegate_readonly` | 14 | 0 | 0 | 0% |
 | `get_pr_reviews` | 14 | 0 | 0 | 0% |
 | `search_code` | 14 | 0 | 0 | 0% |
@@ -360,7 +360,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,508,424 | 11,220,302 | 73,718,100 | 73,718,100 | 355,673,937 |
-| messages per session | 167 | 482 | 715 | 715 | 14,397 |
+| messages per session | 167 | 482 | 715 | 715 | 14,403 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -402,9 +402,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `commit_and_push` | 20 | 4 | 0 | 20% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `list_prs` | 18 | 0 | 0 | 0% |
+| `request_close_issue` | 16 | 0 | 0 | 0% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
-| `request_close_issue` | 15 | 0 | 0 | 0% |
 | `delegate_readonly` | 14 | 0 | 0 | 0% |
 | `get_pr_reviews` | 14 | 0 | 0 | 0% |
 | `search_code` | 14 | 0 | 0 | 0% |
