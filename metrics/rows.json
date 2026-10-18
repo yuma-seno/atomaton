@@ -4095,7 +4095,7 @@
   {
     "path": "sessions/issue-208/atomaton.json",
     "agent": "atomaton",
-    "messages": 382,
+    "messages": 384,
     "calls": 188,
     "failed": 4,
     "refused": 0,
@@ -4172,6 +4172,15 @@
         "seconds": 115,
         "server_calls": {},
         "started": "2026-10-18T18:03:38Z"
+      },
+      {
+        "ended": "2026-10-18T18:38:51Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 384,
+        "seconds": 70,
+        "server_calls": {},
+        "started": "2026-10-18T18:37:41Z"
       }
     ]
   },
