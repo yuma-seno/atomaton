@@ -4223,6 +4223,48 @@
     ]
   },
   {
+    "path": "sessions/issue-222/atomaton.json",
+    "agent": "atomaton",
+    "messages": 12,
+    "calls": 6,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "get_issue": 1,
+      "glob": 1,
+      "read": 2,
+      "bash": 2
+    },
+    "acts": {
+      "other": 1,
+      "open": 1
+    },
+    "runs": [
+      {
+        "ended": "2026-10-18T17:03:51Z",
+        "ended_because": "completed",
+        "iterations": 4,
+        "messages": 12,
+        "seconds": 146,
+        "server_calls": {
+          "files": {
+            "glob": 1,
+            "read": 2
+          },
+          "github": {
+            "get_issue": 1
+          },
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-10-18T17:01:25Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-23/engineer.json",
     "agent": "engineer",
     "messages": 557,
