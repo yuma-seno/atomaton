@@ -462,25 +462,12 @@ describe("post_result_comment.ts main", () => {
   });
 
   /**
-   * The one shape that still skips without a session to read: an empty output
-   * file whose thread carried an unknown number of gh calls -- the participants
-   * read at the top of the script, before any skip decision. These two tests
-   * keep the skip cheap: no session, no proof, but the file's emptiness plus
-   * the `ghCalls.length === 0` shows the script exited before posting anything.
-   *
-   * They used to assert `ghCalls.length === 0` while ALSO passing no
-   * `--session`, which was a legitimate skip only when the script skipped at
-   * all -- after this change an empty output with no session posts rather than
-   * skipping, so these two were rewritten to what they are now checking: the
-   * participants read happens, the comment POST does not...
-   *
-   * Except it now does. These two shapes are the #186 case exactly -- an empty
-   * file and no session -- and this issue's whole point is that they must post.
-   * What a session-ending tool call looks like WITH a session is covered by the
-   * two tests below; what it looks like without one is unknowable, and posting
-   * is the direction this issue chose. So these two are gone, not adjusted: a
-   * test asserting the skip for "missing output file" cannot survive a change
-   * that says a missing output file must not be read as a tool call.
+   * An empty output file with no session to read proves nothing about how the
+   * run ended, so the run posts the no-report notice instead of skipping. These
+   * two are #186's shape exactly -- an empty file and no session anywhere --
+   * where the old skip fired on the file's emptiness alone. The proven
+   * session-ending tool call, the only shape that still skips, is the pair
+   * further down.
    */
   test("posts a no-report notice when the output file is missing", () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
@@ -934,6 +921,33 @@ describe("salvaging a run that ended before it reported", () => {
     expect(lastAgentText("/definitely/not/here.json", 0)).toBeUndefined();
     const path = write("not a session at all");
     expect(lastAgentText(path, 0)).toBeUndefined();
+  });
+
+  /**
+   * Presenting a sentence from the middle of the work as a conclusion is worse than
+   * posting nothing, because a reader would act on it.
+   */
+  test("the comment says it is not a report", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      runUrl: "http://example.com/run/1",
+      output: "Now checking whether auto_triggers is read anywhere.",
+      salvaged: true,
+      usageLines: [],
+    });
+    expect(body).toContain("ended before it wrote a report");
+    expect(body).toContain("not a conclusion");
+    expect(body.indexOf("ended before it wrote a report")).toBeLessThan(body.indexOf("Now checking"));
+  });
+
+  test("an ordinary report carries no such warning", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      runUrl: "http://example.com/run/1",
+      output: "Done.",
+      usageLines: [],
+    });
+    expect(body).not.toContain("ended before it wrote a report");
   });
 });
 
