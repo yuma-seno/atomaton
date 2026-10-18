@@ -445,7 +445,425 @@
       "role": "assistant",
       "content": "**同様の Issue は見つかりませんでした。**「コメントが読みにくい」系の前例はありますが、どれも「読み手がコードをどの程度把握しているか」という軸は扱っていません。#206 での実装言葉の多さは、エージェントの判断ではなく今の報告契約が生んでいるもので、修正の形は提案できます。\n\n## 調べた結果\n\n- #16(済)・#17(済)は「コメントが長すぎる」を扱い、各部の上限で決着済み。**長さの軸であって、語彙・抽象度の軸ではない**\n- #15(開)は「報告がツール引数に重複する」、#13(開)は「プロンプト変更は計測してから」の方針、#209(開)は同じ #206 が発端だがクローズ判定の話 — どれも本件とは別の論点\n- 6 通りの言い回しで意味検索しましたが、「無い」ことの証明ではなく「見つからなかった」ことまでしか言えません\n\n## 原因と思われるもの(意見)\n\n- 報告の読み手の優先順位が、プロンプトに明文化されています。`src/content/prompt-template.md:227` の \"Write it for that reader first and for a person second\" — この \"that reader\" は直前の行で「**次の run に渡される文脈**」と定義されています。つまり契約上、機械(次の run)が第一の読み手で、人間は第二です。#206 のあの報告は契約どおりに書かれた結果です\n- 「根拠はファイル名:行番号・引用・数値で示す」という契約(`src/content/prompt-template.md:245-257`)は #17 で意図的に残されたもので、#206 ではそれが**結論の文の中まで**入っていました(結論の一文に `commentWouldBeRemoved` が乗っている)\n- 読み手のコード知識に関する指示は、`src/content` 配下のどこにもありません(「読み手/人間/専門用語/平易」で grep して 0 件)。`src/content/agent-definitions/architect.md:119` も \"for whoever builds it and for whoever asked, in that order\" と作り手優先です\n\n## 提案する調整の形\n\nアンカーの契約は壊さず(主張が検証可能であることは #17 で確保した財産です)、役割を分ける形です:\n\n1. **結論は、コードを読まない人が追える言葉で**書く。何が起きた/何が変わるかを、機能の言葉で\n2. ファイル名・関数名・引用は**根拠の部分へ移す**。消さない\n3. 編集先は `prompt-template.md` の報告セクション数行 + 契約テスト。1 リーフの規模です\n\nトレードオフを一つ: 結論からアンカーが離れるので、#13 が測っている「アンカー付き主張」の判定に影響し得ます。だから #13 の方法に倣い、同じ Issue での前後比較を付けるのが安全です。\n\n## 確かめられなかったこと\n\n- free デリゲートが今日は 402 (free_quota_exhausted) で使えず、調査はこの場で行いました。結論への影響はありません\n\n## 次\n\n方向性(結論は平易に・根拠はアンカーで残す)で合っていれば、返信いただければ次の run で編集を実行します。別の形(例： 報告の冒頭に人間向けのやさしい要約を 1 文足すだけ、等)を望むなら、それを一言もらえればそちらに合わせます。返信が無い場合は、上の提案の形で編集案から着手します。",
       "atoma_metadata": {
-        "github_comment_id": 6234962657,
+        "agent": "atomaton",
+        "github_comment_id": 6234962657
+      }
+    },
+    {
+      "role": "user",
+      "content": "なるほど。う〜ん、読み手の認知負荷を下げたいんですよね。\n<details>タグを使った折りたたみを活用したい。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-18T18:40:02Z",
+        "event_type": "issue_comment",
+        "id": 6253652324,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nこのIssueの最初の議題からズレてしまいますが、質問や相談、結果の報告をできる限り完結にまとめて、細かくdetailsタグを利用することで認知負荷を下げるようにプロンプトで指示できないかな？\nエージェントからエージェントに対する指示も同じように、結論や要点を最初にまとめて、細かな判断基準とか説明をタグで囲うようにしたい。\nイメージつく？この形でいいと思う？\nまず意見を聞かせて。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-18T18:42:40Z",
+        "event_type": "issue_comment",
+        "id": 6253679225,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_d030f03996084b3083833eaa",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"glob\":\"*.md\",\"path\":\"src/content\",\"pattern\":\"details|summary|折りたた\"}"
+          }
+        },
+        {
+          "id": "call_9eda77d176234ac284b28bf0",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":3,\"glob\":\"*.ts\",\"max_matches\":20,\"path\":\"src\",\"pattern\":\"<details\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "12 matching line(s) under src/content:\n\nsrc/content/prompt-template.md:46:hands back a summary, and the usual shape is one call:\nsrc/content/prompt-template.md:292:for a pull request, `summary` for a close request or a sub-agent launch, `reason`\nsrc/content/prompt-template.md:298:a summary presented as a quotation is worse than either.\nsrc/content/agent-definitions/architect.md:31:  # a cheap model, and what comes back is one summary. A decision that needs six\nsrc/content/agent-definitions/architect.md:35:  # So this entry is a fallback rather than a habit: reach for it when a summary\nsrc/content/agent-definitions/architect.md:83:summary cannot carry it: an interface's exact signature, the order of two calls, a\nsrc/content/agent-definitions/atomaton.md:168:`request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with `close_issue` or a plain final response.\nsrc/content/agent-definitions/atomaton.md:172:asked for. `summary` adds what that does not already say: what you verified, and\nsrc/content/agent-definitions/atomaton.md:175:summary; anything longer is the same judgement written twice.\nsrc/content/skills/docs/design-doc.md:115:rather than repeated. If an install fails, the script still exits with a summary\nsrc/content/skills/research/web-search.md:30:content. Quoting a search result's one-line summary as fact is how wrong answers\nsrc/content/skills/research/web-search.md:31:get written — the summary is written to attract a click, not to be correct.",
+      "tool_call_id": "call_d030f03996084b3083833eaa"
+    },
+    {
+      "role": "tool",
+      "content": "20 line(s), match and context, under src:\n\nsrc/adapters/github/turn-comment.ts-73-/**\nsrc/adapters/github/turn-comment.ts-74- * The body of a comment that ends a turn, tags and all.\nsrc/adapters/github/turn-comment.ts-75- *\nsrc/adapters/github/turn-comment.ts:76: * Pure. A caller that wants to compose further around it — a `<details>` fold, a footer\nsrc/adapters/github/turn-comment.ts-77- * — uses `turnHeader` instead, so it does not keep a second copy of the tag order.\nsrc/adapters/github/turn-comment.ts-78- */\nsrc/adapters/github/turn-comment.ts-79-export function turnCommentBody(h: TurnCommentHeader & { body: string }): string {\n--\nsrc/entrypoints/tools/mcp/atomaton.ts-84-    .optional()\nsrc/entrypoints/tools/mcp/atomaton.ts-85-    .describe(\nsrc/entrypoints/tools/mcp/atomaton.ts-86-      \"Your report for this run. It is folded into the dispatch comment on the issue you are on, \" +\nsrc/entrypoints/tools/mcp/atomaton.ts:87:        \"behind a `<details>`, so keep it short: what you concluded and what happens next, not the \" +\nsrc/entrypoints/tools/mcp/atomaton.ts-88-        \"full four-part report. This call ends your session when every dispatch succeeds, so there \" +\nsrc/entrypoints/tools/mcp/atomaton.ts-89-        \"is no turn after it to write one in.\",\nsrc/entrypoints/tools/mcp/atomaton.ts-90-    ),\n--\nsrc/entrypoints/tools/mcp/atomaton.ts-204-  // list of what it dispatched, and the report the run concluded. Two comments\nsrc/entrypoints/tools/mcp/atomaton.ts-205-  // for one event read as two events, and the report -- four sections, written\nsrc/entrypoints/tools/mcp/atomaton.ts-206-  // for the next run -- dominated the thread a person scrolls past. Folded into\nsrc/entrypoints/tools/mcp/atomaton.ts:207:  // one comment with the report behind a `<details>`, the thread shows what was\n\n[11 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_9eda77d176234ac284b28bf0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_2b8078292e5741e5b6cfc0aa",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":80,\"offset\":60,\"path\":\"src/adapters/github/turn-comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/adapters/github/turn-comment.ts lines 60-81 of 81\n\n60\t   * a child, which is a different claim from `handoff`'s \"this node's next agent\".\n61\t   */\n62\t  ended: TurnCommentEnding;\n63\t  /** Who reads it: the model's context, or a person. */\n64\t  audience: \"model\" | \"person\";\n65\t}\n66\t\n67\t/** The two header lines, in the order every comment here has them. */\n68\texport function turnHeader(h: TurnCommentHeader): string[] {\n69\t  const context = h.audience === \"model\" ? \"include\" : \"exclude\";\n70\t  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];\n71\t}\n72\t\n73\t/**\n74\t * The body of a comment that ends a turn, tags and all.\n75\t *\n76\t * Pure. A caller that wants to compose further around it — a `<details>` fold, a footer\n77\t * — uses `turnHeader` instead, so it does not keep a second copy of the tag order.\n78\t */\n79\texport function turnCommentBody(h: TurnCommentHeader & { body: string }): string {\n80\t  return [...turnHeader(h), h.body].join(\"\\n\");\n81\t}",
+      "tool_call_id": "call_2b8078292e5741e5b6cfc0aa"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_9570949cfadb4e0aa198ca86",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":4,\"glob\":\"*.ts\",\"max_matches\":30,\"path\":\"src\",\"pattern\":\"summary.*details|details.*summary|fold\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "30 line(s), match and context, under src:\n\nsrc/shared/code-search.ts-121- * cannot be answered by it.\nsrc/shared/code-search.ts-122- *\nsrc/shared/code-search.ts-123- * Measured: 30 English questions scored 98.1% at worst, four Japanese ones 12–19.4%.\nsrc/shared/code-search.ts-124- * Any threshold in 30–60% separates them completely, so 40% sits in the middle of a\nsrc/shared/code-search.ts:125: * band with a fivefold margin on each side rather than on an edge of it.\nsrc/shared/code-search.ts-126- */\nsrc/shared/code-search.ts-127-export const MIN_QUERY_COVERAGE = 0.4;\nsrc/shared/code-search.ts-128-\nsrc/shared/code-search.ts-129-/**\n--\nsrc/adapters/mcp/mcp-tool.ts-79-    )\nsrc/adapters/mcp/mcp-tool.ts-80-    .describe(description);\nsrc/adapters/mcp/mcp-tool.ts-81-}\nsrc/adapters/mcp/mcp-tool.ts-82-\nsrc/adapters/mcp/mcp-tool.ts:83:// `ALIASES`, `declaredKeys` and `acceptAliases` were here: a table folding four\nsrc/adapters/mcp/mcp-tool.ts-84-// synonyms into `number` and one into `branch`, applied before the strict schema\nsrc/adapters/mcp/mcp-tool.ts-85-// could see the call.\nsrc/adapters/mcp/mcp-tool.ts-86-//\nsrc/adapters/mcp/mcp-tool.ts-87-// It was the wrong half of the repair. Only ONE of the five was ever observed --\n--\nsrc/adapters/adapters.test.ts-3- * CLI entry point during the \"system\" refactor (their logic was absorbed into\nsrc/adapters/adapters.test.ts-4- * what is now src/adapters/ and is called directly, via import, by every caller\nsrc/adapters/adapters.test.ts-5- * instead of a subprocess spawn -- see app/aggregation.ts's doc comment).\nsrc/adapters/adapters.test.ts-6- *\nsrc/adapters/adapters.test.ts:7: * At the root of `src/adapters/` rather than inside one of its folders because\nsrc/adapters/adapters.test.ts-8- * it reaches across them: `mcp/`, `github/` and `atoma/`. A test that spans a\nsrc/adapters/adapters.test.ts-9- * boundary belongs above it.\nsrc/adapters/adapters.test.ts-10- *\nsrc/adapters/adapters.test.ts-11- * Since these are plain functions (no `main()`/CLI), each test spawns a\n--\n\n[684 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_9570949cfadb4e0aa198ca86"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_74241345354740818d4c7ddf",
+          "type": "function",
+          "function": {
+            "name": "delegate",
+            "arguments": "{\"context\":\"リポジトリ yuma-seno/atomaton。src/entrypoints/tools/mcp/atomaton.ts の 200 行目付近に `<details>` 折りたたみに関するコメントがある。src/domain/work/ 配下と src/adapters/github/ 配下に、機械が投稿するコメント(dispatch コメント、close コメント、completion コメントなど)を組み立てるコードがあるはず。\",\"task\":\"「機械が投稿するコメントで、報告を <details> 折りたたみで包んでいる箇所」を src/ 全体から grep して列挙してください。どのファイル・どのコメント種別(起動・dispatch・集約・完了など)で details を使っているか、それぞれ ファイルパス:行番号 と一行説明を返してください。details を全く使っていないコメント種別があればそれも教えてください。10分以内。\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "The delegate produced no report: the sub-run ended because of `failed` after 2s and 0 iteration(s) (exit 1). It reported: [611 characters dropped from the start; 2000 shown]\n\n.741310Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::infra::mcp\u001b[0m\u001b[2m:\u001b[0m [MCP:files:stderr] [atomaton-files] this process is now unreadable to its peers\n\u001b[2m2026-10-18T18:45:22.806058Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::infra::mcp\u001b[0m\u001b[2m:\u001b[0m MCP server 'shell' connected: atomaton-shell-mcp v1.0.0 (protocol: 2024-11-05)\n\u001b[2m2026-10-18T18:45:22.808422Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::application::runner\u001b[0m\u001b[2m:\u001b[0m Connected to 2 MCP server(s), discovered 7 tool(s)\n\u001b[2m2026-10-18T18:45:22.808798Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::application::runner\u001b[0m\u001b[2m:\u001b[0m Read prompt from stdin (874 bytes)\n\u001b[2m2026-10-18T18:45:22.808808Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::application::runner::execution\u001b[0m\u001b[2m:\u001b[0m Inference iteration 1 (2 messages in session)\n\u001b[2m2026-10-18T18:45:24.310277Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2matoma::application::runner\u001b[0m\u001b[2m:\u001b[0m Run failed: LLM API error (402 Payment Required): {\"error\":{\"code\":\"free_quota_exhausted\",\"message\":\"your orcarouter/free allowance is used up — top up your balance and call a specific model with wallet billing to keep going https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits (request id: 202610181845241877738948268d9d6hIt33gmk)\",\"metadata\":{\"base_model\":\"\",\"buy_credits_url\":\"https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits\",\"free_model\":\"orcarouter/free\",\"reason\":\"err_free_used\"},\"type\":\"insufficient_quota\"}}\nError: LLM API error (402 Payment Required): {\"error\":{\"code\":\"free_quota_exhausted\",\"message\":\"your orcarouter/free allowance is used up — top up your balance and call a specific model with wallet billing to keep going https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits (request id: 202610181845241877738948268d9d6hIt33gmk)\",\"metadata\":{\"base_model\":\"\",\"buy_credits_url\":\"https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits\",\"free_model\":\"orcarouter/free\",\"reason\":\"err_free_used\"},\"type\":\"insufficient_quota\"}} Nothing was returned to report. The sub-run never reached a model, so the task's size is not the answer; do the work here instead.",
+      "tool_call_id": "call_74241345354740818d4c7ddf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_6472b35df2bc4b549f7c1f65",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"glob\":\"*.ts\",\"max_matches\":40,\"path\":\"src\",\"pattern\":\"details\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "17 matching line(s) under src:\n\nsrc/adapters/github/merge-signals.ts:48:  check_runs?: { name: string; status: string; conclusion: string | null; details_url?: string }[];\nsrc/adapters/github/merge-signals.ts:295:        ...(run.details_url ? { detailsUrl: run.details_url } : {}),\nsrc/adapters/github/turn-comment.ts:76: * Pure. A caller that wants to compose further around it — a `<details>` fold, a footer\nsrc/entrypoints/machinery/validate_pull_request.ts:237:  details: readonly string[] = [],\nsrc/entrypoints/machinery/validate_pull_request.ts:246:    ...(details.length > 0 ? [\"\", ...details.map((detail) => `- ${detail}`)] : []),\nsrc/entrypoints/machinery/reconcile_github_session.test.ts:115:      { role: \"tool\", tool_call_id: \"call-1\", content: \"Issue details\" },\nsrc/entrypoints/tools/mcp/github.ts:1336:  // `details_url` is dropped as a near-duplicate of it.\nsrc/entrypoints/tools/mcp/github.ts:1598:  defineMcpTool({ name: \"get_pr\", description: \"Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.\", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),\nsrc/entrypoints/tools/mcp/atomaton.ts:87:        \"behind a `<details>`, so keep it short: what you concluded and what happens next, not the \" +\nsrc/entrypoints/tools/mcp/atomaton.ts:207:  // one comment with the report behind a `<details>`, the thread shows what was\nsrc/entrypoints/tools/mcp/atomaton.ts:243:      bodyLines.push(\"\", \"<details><summary>Report</summary>\", \"\", summary, \"\", \"</details>\");\nsrc/entrypoints/tools/mcp/mcp.test.ts:942:            details_url: \"https://github.com/owner/repo/actions/runs/1/job/2\",\nsrc/domain/delivery/merge-readiness.ts:32:  detailsUrl?: string;\nsrc/domain/delivery/merge-readiness.ts:265:      const where = run.detailsUrl ? ` (${run.detailsUrl})` : \"\";\nsrc/domain/delivery/merge-readiness.ts:304:          const where = run.detailsUrl ? ` (${run.detailsUrl})` : \"\";\nsrc/domain/delivery/merge-readiness.test.ts:63:          { name: \"check\", status: \"completed\", conclusion: \"failure\", detailsUrl: \"https://example/run/1\" },\nsrc/workflows/atomaton-runner.wac.ts:1354:  echo \"See the workflow run for details: \\${RUN_URL}.\" >> \"$BD\"",
+      "tool_call_id": "call_6472b35df2bc4b549f7c1f65"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_81d8f8233c344b829b33b775",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":70,\"offset\":195,\"path\":\"src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/tools/mcp/atomaton.ts lines 195-264 of 509\n\n195\t      const message = (e as Error).message ?? String(e);\n196\t      log(`dispatchSubAgent failed for #${issue}: ${message}`);\n197\t      errors.push(`#${issue}/${agent}: ${message}`);\n198\t    }\n199\t  }\n200\t\n201\t  // One comment on the PARENT issue, not two.\n202\t  //\n203\t  // The audit line and the report used to be separate comments: the machine's\n204\t  // list of what it dispatched, and the report the run concluded. Two comments\n205\t  // for one event read as two events, and the report -- four sections, written\n206\t  // for the next run -- dominated the thread a person scrolls past. Folded into\n207\t  // one comment with the report behind a `<details>`, the thread shows what was\n208\t  // launched and the report is one click away.\n209\t  //\n210\t  // The report is not lost to the next run by being folded in here. It travels\n211\t  // twice: as this comment, and as the `summary` argument of the `launch_sub_agent`\n2\n\n[242 characters dropped from the middle; 4000 shown]\n\ns context -- costs\n215\t  // the next run nothing.\n216\t  //\n217\t  // Posted even on a partial dispatch: the session stays open there, but a report\n218\t  // the agent has already written is not worth discarding for that.\n219\t  const summary = (args.summary ?? \"\").trim();\n220\t  // The session ends only when every task was dispatched -- see below. Written here\n221\t  // because the `waiting` tag means exactly that: the run is over and a child carries\n222\t  // it. A partial dispatch keeps the session OPEN, so it is not waiting and must not\n223\t  // carry the tag.\n224\t  const complete = errors.length === 0;\n225\t  if (parentIssue && (dispatched.length || summary)) {\n226\t    // The ending goes on through `turnHeader`, and only when the session really ends.\n227\t    // `launch_sub_agent` ends the session on a COMPLETE dispatch and posts no result\n228\t    // comment then, so without `waiting` the node's last event reverts to the `asked`\n229\t    // that started the run — and the aggregation gate reads that as a request nobody\n230\t    // took up, refusing to re-invoke the parent with `parent-busy`. `waiting` says the\n231\t    // request was taken up and the next work is on a child. See `domain/work/thread.ts`.\n232\t    //\n233\t    // A partial dispatch keeps the session OPEN, so it is not waiting and must not carry\n234\t    // the tag, which is why the header is built from `complete` and the tags are not\n235\t    // baked into the body below.\n236\t    const bodyLines = complete\n237\t      ? turnHeader({ ended: \"waiting\", audience: \"person\" })\n238\t      : [LLM_CONTEXT_TAG.write(\"exclude\")];\n239\t    if (dispatched.length) {\n240\t      bodyLines.push(\"Atomaton: Launched sub-agent(s):\", ...dispatched.map((d) => `- ${d}`));\n241\t    }\n242\t    if (summary) {\n243\t      bodyLines.push(\"\", \"<details><summary>Report</summary>\", \"\", summary, \"\", \"</details>\");\n244\t    }\n245\t    gh(\"issue\", \"comment\", parentIssue, \"--body\", bodyLines.join(\"\\n\"));\n246\t  }\n247\t\n248\t  if (errors.length && !dispatched.length) {\n249\t    mcpFail(`All dispatches failed: ${errors.join(\"; \")}`);\n250\t  }\n251\t\n252\t  // The session ends only when every task was dispatched.\n253\t  //\n254\t  // A partial failure used to end it too, mentioning the failures in prose. By\n255\t  // this tool's own contract the atomaton is re-invoked when ALL sub-issues\n256\t  // are closed — and a sub-issue nobody was dispatched onto is never closed, so\n257\t  // the parent waited forever. The atomaton is the one caller that can still\n258\t  // fix a partial dispatch, and it was the one being told to stop.\n259\t  //\n260\t  // `complete` is computed above, beside the `waiting` tag it also decides.\n261\t\n262\t  // Structured, because the prose was wrong in both directions. \"Agents will be\n263\t  // dispatched automatically\" described neither group: the successful ones were\n264\t  // dispatched synchronously, in the loop above, and the failed ones never will\n\n[245 more lines. Read again with offset: 265.]",
+      "tool_call_id": "call_81d8f8233c344b829b33b775"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_3c2c1f0b4c594851b7dea7e3",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":5,\"glob\":\"*.ts\",\"max_matches\":25,\"path\":\"src\",\"pattern\":\"LLM_CONTEXT_TAG\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "25 line(s), match and context, under src:\n\nsrc/adapters/adapters.test.ts-247-    expect(marker).toBe(\"<!-- atomaton:aggregated=9 -->\");\nsrc/adapters/adapters.test.ts-248-    expect(AGGREGATED_TAG.has(`some comment\\n${marker}`)).toBe(true);\nsrc/adapters/adapters.test.ts-249-    expect(AGGREGATED_TAG.has(\"some other comment\")).toBe(false);\nsrc/adapters/adapters.test.ts-250-  });\nsrc/adapters/adapters.test.ts-251-\nsrc/adapters/adapters.test.ts:252:  test(\"LLM_CONTEXT_TAG marks human-visible notifications for exclusion\", async () => {\nsrc/adapters/adapters.test.ts:253:    const { LLM_CONTEXT_TAG } = await import(\"../adapters/github/tags.ts\");\nsrc/adapters/adapters.test.ts:254:    const marker = LLM_CONTEXT_TAG.write(\"exclude\");\nsrc/adapters/adapters.test.ts-255-    expect(marker).toBe(\"<!-- atomaton:llm-context=exclude -->\");\nsrc/adapters/adapters.test.ts:256:    expect(LLM_CONTEXT_TAG.read(`${marker}\\nAtomaton: operation started.`)).toBe(\"exclude\");\nsrc/adapters/adapters.test.ts-257-  });\nsrc/adapters/adapters.test.ts-258-});\nsrc/adapters/adapters.test.ts-259-\nsrc/adapters/adapters.test.ts-260-describe(\"mcp-tool schema helpers\", () => {\nsrc/adapters/adapters.test.ts-261-  test(\"positiveInt accepts a number and its string form, rejecting non-integers\", async () => {\n--\nsrc/adapters/github/tags.test.ts-1-import { describe, expect, test } from \"bun:test\";\nsrc/adapters/github/tags.test.ts:2:import { AGGREGATED_TAG, AGENT_TAG, CHANGED_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, PARENT_ISSUE_TAG, withoutTags } from \"./tags.ts\";\nsrc/adapters/github/tags.test.ts-3-\nsrc/adapters/github/tags.test.ts-4-/**\nsrc/adapters/github/tags.test.ts-5- * These markers carry state between workflow runs through GitHub, so they live in the\nsrc/adapters/github/tags.test.ts-6- * very text that becomes an agent's context — issue bodies, pull request bodies,\nsrc/adapters/github/tags.test.ts-7- * comments. Nothing removed them on the way in, and a real session carried\n--\nsrc/adapters/github/tags.test.ts-45-  /**\n\n[694 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_3c2c1f0b4c594851b7dea7e3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_5a26b8dea1294098a6071df1",
+          "type": "function",
+          "function": {
+            "name": "search_code",
+            "arguments": "{\"limit\":3,\"query\":\"機械が投稿する完了コメントの本文を組み立てる、エージェントの報告を包む枠組み\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "Only 9% of the words in that question appear anywhere in this codebase, so the search cannot match it: the first stage scores near zero and the answer never reaches the second. This is what happens when the question is in a different language from the code and its comments, or is built from names that do not exist. Ask again in the language the code is written in, using the words the code uses — read a file first if you are not sure which that is.",
+      "tool_call_id": "call_5a26b8dea1294098a6071df1"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_1773c66522f048059ce6606a",
+          "type": "function",
+          "function": {
+            "name": "search_code",
+            "arguments": "{\"limit\":5,\"query\":\"where is the machinery completion comment body assembled with tags and mention\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[\n  {\n    \"path\": \"src/adapters/github/tags.test.ts\",\n    \"lines\": \"23-33\",\n    \"excerpt\": \"/**\\n   * The machinery writes its comments through `gh --body` and gets \\\\n, but a body a\\n   * person edited in the browser comes back with \\\\r\\\\n -- and those are the bodies\\n   * `parent`, `notify` and `origin-agent` live in. Matching only \\\\n left a stray\\n   * carriage return and a blank line at the top of exactly the text a person had\\n   * touched.\\n   */\\n  test(\\\"a body a person edited in the browser is left as clean as one we wrote\\\", () => {\\n    const crlf = [PARENT_ISSUE_TAG.write(4), \\\"Body text.\\\"].join(\\\"\\\\r\\\\n\\\");\\n    expect(withoutTags(crlf)).toBe(\\\"Body text.\\\");\\n  });\"\n  },\n  {\n    \"path\": \"src/entrypoints/machinery/post_result_comment.ts\",\n    \"lines\": \"686-696\",\n    \"excerpt\": \"e shape of #194 (an empty final response `completed`) and #186 (no\\n      // session at all). Same treatment, no-report wording: the comment is the\\n      // machinery's only sentence on this thread, the `atomaton:ended` tag under\\n      // it is what releases the thread's guard, and the mention is what fetches a\\n      // person -- see `completion-mention.ts`, which already forces one for a\\n      // run the session shows reported nothing.\\n      wroteNothing = true;\\n      output = \\\"_This run ended without saying anything._\\\";\\n      console.error(\\n        \\\"atomaton_output.txt is empty and the session shows no session-ending tool call \\\" +\\n          \\\"(last assistant turn made no tool calls, or the s\"\n  },\n  {\n    \"path\": \"src/entrypoints/machinery/post_result_comment.test.ts\",\n    \"lines\": \"24-39\",\n    \"excerpt\": \"/**\\n   * The escaped-mention notice belongs with what the agent wrote, and above the\\n   * run footer -- somebody scanning the comment for what happened reads the top,\\n   * and reads the footer only when they want the run.\\n   */\\n  test(\\\"says so when a mention was defused, between the report and the footer\\\", () => {\\n    const body = buildCommentBody({\\n      agent: \\\"engineer\\\",\\n      runUrl: \\\"http://example.com/run/1\\\",\\n      output: \\\"Following `@torvalds`' approach.\\\",\\n      escapedMentions: [\\\"torvalds\\\"],\\n      usageLines: [],\\n    });\\n    expect(body).toContain(\\\"Nobody was notified\\\");\\n    expect(body.indexOf(\\\"Nobody was notified\\\")).toBeGreaterThan(body.indexOf(\\\"Following\\\"));\\n    expect(body.index\"\n  },\n  {\n    \"path\": \"src/content/prompt-template.md\",\n    \"lines\": \"203-209\",\n    \"excerpt\": \"When this run ends, the machinery posts a comment on the issue or pull request it\\nwas about, and your last message is that comment's body. Around it, it writes what\\nit can observe for itself: which agent ran, whether the run pushed a commit,\\nopened a pull request or merged one, how the run ended, what it spent in tokens, a\\nlink to the run, and how many calls failed or were refused. When you end without\\nwriting anything at all it says that too, in a warning, so that a comment with no\\nreport in it is not read as a run that finished and had nothing to say.\"\n  },\n  {\n    \"path\": \"src/entrypoints/tools/mcp/atomaton.ts\",\n    \"lines\": \"233-246\",\n    \"excerpt\": \"EN, so it is not waiting and must not carry\\n    // the tag, which is why the header is built from `complete` and the tags are not\\n    // baked into the body below.\\n    const bodyLines = complete\\n      ? turnHeader({ ended: \\\"waiting\\\", audience: \\\"person\\\" })\\n      : [LLM_CONTEXT_TAG.write(\\\"exclude\\\")];\\n    if (dispatched.length) {\\n      bodyLines.push(\\\"Atomaton: Launched sub-agent(s):\\\", ...dispatched.map((d) => `- ${d}`));\\n    }\\n    if (summary) {\\n      bodyLines.push(\\\"\\\", \\\"<details><summary>Report</summary>\\\", \\\"\\\", summary, \\\"\\\", \\\"</details>\\\");\\n    }\\n    gh(\\\"issue\\\", \\\"comment\\\", parentIssue, \\\"--body\\\", bodyLines.join(\\\"\\\\n\\\"));\\n  }\"\n  }\n]",
+      "tool_call_id": "call_1773c66522f048059ce6606a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ee87057b93d846798beb64e0",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":6,\"glob\":\"*.ts\",\"max_matches\":30,\"path\":\"src/entrypoints/machinery\",\"pattern\":\"buildCommentBody\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "30 line(s), match and context, under src/entrypoints/machinery:\n\nsrc/entrypoints/machinery/post_result_comment.test.ts-1-import { describe, expect, test } from \"bun:test\";\nsrc/entrypoints/machinery/post_result_comment.test.ts-2-import { mkdtempSync, writeFileSync, rmSync } from \"node:fs\";\nsrc/entrypoints/machinery/post_result_comment.test.ts-3-import { tmpdir } from \"node:os\";\nsrc/entrypoints/machinery/post_result_comment.test.ts-4-import { join } from \"node:path\";\nsrc/entrypoints/machinery/post_result_comment.test.ts:5:import { buildCommentBody, endedWithToolCalls, lastAgentText } from \"./post_result_comment.ts\";\nsrc/entrypoints/machinery/post_result_comment.test.ts-6-import type { Session } from \"../../domain/work/session.ts\";\nsrc/entrypoints/machinery/post_result_comment.test.ts-7-import { runWithFakeGh, scriptPath } from \"./testing/harness.ts\";\nsrc/entrypoints/machinery/post_result_comment.test.ts-8-\nsrc/entrypoints/machinery/post_result_comment.test.ts:9:describe(\"post_result_comment.ts buildCommentBody\", () => {\nsrc/entrypoints/machinery/post_result_comment.test.ts-10-  test(\"mentions notify when there is no directive and the chain does not continue\", () => {\nsrc/entrypoints/machinery/post_result_comment.test.ts:11:    const body = buildCommentBody({\nsrc/entrypoints/machinery/post_result_comment.test.ts-12-      agent: \"atomaton\",\nsrc/entrypoints/machinery/post_result_comment.test.ts-13-      notify: \"octocat\",\nsrc/entrypoints/machinery/post_result_comment.test.ts-14-      runUrl: \"http://example.com/run/1\",\nsrc/entrypoints/machinery/post_result_comment.test.ts-15-      output: \"All done.\",\nsrc/entrypoints/machinery/post_result_comment.test.ts-16-      usageLines: [],\nsrc/entrypoints/machinery/post_result_comment.test.ts-17-    });\n--\nsrc/entrypoints/machinery/post_result_comment.test.ts-24-  /**\nsrc/entrypoints/machinery/post_result_comment.test.ts-25-   * The escaped-mention notice belongs with what the agent wrote, and above the\nsrc/entrypoints/machinery/post_result_comment.test.ts-26-   * run footer -- somebody scanning the comment for what happened reads the top,\nsrc/entrypoints/machinery/post_result_comment.test.ts-27-   * and reads the footer only when they want the run.\nsrc/entrypoints/machinery/post_result_comment.test.ts-28-   */\nsrc/entrypoints/machinery/post_result_comment.test.ts-29-  test(\"says so when a mention was defused, between the report and the footer\", () => {\nsrc/entrypoints/machinery/post_result_comment.test.ts:30:    const body = buildCommentBody({\nsrc/entrypoints/machinery/post_result_comment.test.ts-31-      agent: \"engineer\",\nsrc/entrypoints/machinery/post_result_comment.test.ts-32-      runUrl: \"http://example.com/run/1\",\nsrc/entrypoints/machinery/post_result_comment.test.ts-33-      output: \"Following `@torvalds`' approach.\",\nsrc/entrypoints/machinery/post_result_comment.test.ts-34-      escapedMentions: [\"torvalds\"],\nsrc/entrypoints/machinery/post_result_comment.test.ts-35-      usageLines: [],\n\n[387 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_ee87057b93d846798beb64e0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_95e753d7ae844602aeab10c4",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":10,\"glob\":\"post_result_comment.ts\",\"max_matches\":10,\"path\":\"src/entrypoints/machinery\",\"pattern\":\"export function buildCommentBody\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "10 line(s), match and context, under src/entrypoints/machinery:\n\nsrc/entrypoints/machinery/post_result_comment.ts-383-  return endingOf({\nsrc/entrypoints/machinery/post_result_comment.ts-384-    succeeded: true,\nsrc/entrypoints/machinery/post_result_comment.ts-385-    endedBecause: args.endedBecause ?? \"\",\nsrc/entrypoints/machinery/post_result_comment.ts-386-    loopLimitReached: false,\nsrc/entrypoints/machinery/post_result_comment.ts-387-    chainContinues: isTrue(args.chainContinues),\nsrc/entrypoints/machinery/post_result_comment.ts-388-    directive: args.directive ?? \"\",\nsrc/entrypoints/machinery/post_result_comment.ts-389-    reported: args.reported === true,\nsrc/entrypoints/machinery/post_result_comment.ts-390-  });\nsrc/entrypoints/machinery/post_result_comment.ts-391-}\nsrc/entrypoints/machinery/post_result_comment.ts-392-\n\n[11 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_95e753d7ae844602aeab10c4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_2b9f2065e77640b5a9b916ed",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":80,\"offset\":392,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 392-471 of 762\n\n392\t\n393\texport function buildCommentBody(args: {\n394\t  agent: string;\n395\t  notify?: string;\n396\t  directive?: string;\n397\t  chainContinues?: string;\n398\t  endedBecause?: string;\n399\t  /**\n400\t   * Whether the run left a report — its last assistant message had words in it.\n401\t   *\n402\t   * Absent means it did not, which is the direction that speaks up: an unobserved run\n403\t   * is treated as one that said nothing, and the cost of being wrong is one mention\n404\t   * too many rather than a silent run filed as a success.\n405\t   */\n406\t  reported?: boolean;\n407\t  runUrl: string;\n408\t  /** `owner/name`, for linking to the metrics report. Absent when unknown. */\n409\t  repo?: string;\n410\t  output: string;\n411\t  usageLines: string[];\n412\t  isSubIssue?: boolean;\n413\t  issueClosed?: boolean;\n414\t  /** Logins the agent wrote as mentions that were escaped instead. */\n415\t  escapedMentions?: readonly string[];\n416\t  /**\n417\t   * Whether `output` is the agent's last message rather than its report.\n418\t   *\n419\t   * Said in the comment, because presenting a sentence from the middle of the work\n420\t   * as a conclusion is worse than posting nothing: a reader would act on it.\n421\t   */\n422\t  salvaged?: boolean;\n423\t  /**\n424\t   * Whether the run was cut short having said nothing at all, so `output` is this\n425\t   * file's own sentence rather than anything the agent produced.\n426\t   *\n427\t   * The common shape rather than the odd one: a stop lands at the next turn\n428\t   * boundary, so a run in the middle of reading files when it arrives has no text\n429\t   * and nothing to salvage either.\n430\t   */\n431\t  wroteNothing?: boolean;\n432\t  /**\n433\t   * Whether this run pushed a commit, opened a pull request or merged one.\n434\t   *\n435\t   * Written into the comment because that is where the next run can read it.\n436\t   * `domain/work/progress.ts` counts consecutive runs that changed nothing, and it\n437\t   * counts them from the thread rather than from a counter -- so the thread has to\n438\t   * carry the fact.\n439\t   */\n440\t  changed?: boolean;\n441\t  /**\n442\t   * What the tools did to this run, counted from its session by `tool-trouble.ts`.\n443\t   *\n444\t   * Measured over 396 sessions (#940): 30 runs carried a problem a server reported\n445\t   * about itself and 3 said so; 107 carried a refused or errored call and 33 said so.\n446\t   * The prompt asks for all of it by name, so what is left is to stop asking and\n447\t   * count -- and the count belongs in the footer, where every other thing the machine\n448\t   * knows about the run already is, rather than in the agent's text where a reader\n449\t   * would take it for something the agent chose to say.\n450\t   *\n451\t   * Absent when there was none, which is the ordinary run.\n452\t   */\n453\t  toolTrouble?: string;\n454\t}): string {\n455\t  // Once, and asked twice below. It was derived twice, which is one derivation more\n456\t  // than there are facts.\n457\t  const ending = endingHere(args);\n458\t\n459\t  // This comment is the agent's own report, not a turn comment of the kind\n460\t  // `turn-comment.ts` wraps: it carries `AGENT_TAG` and `CHANGED_TAG` as bookkeeping\n461\t  // (which `withoutBookkeeping` strips on the way back in) and it is deliberately NOT\n462\t  // `llm-context`-tagged, because it is the thing the next run is supposed to read. The\n463\t  // one thing it shares with every other turn-ending comment is the ending, so that is\n464\t  // what it has in common with them and nothing else.\n465\t  const lines = [\n466\t    AGENT_TAG.write(args.agent),\n467\t    CHANGED_TAG.write(args.changed === true ? \"yes\" : \"no\"),\n468\t    // How this run ended, so the thread can be asked later. `/resume` over a work tree\n469\t    // needs to know which nodes under the one it was given were interrupted, and the\n470\t    // alternative -- \"has a saved session\" -- is true of every node that ever ran.\n471\t    //\n\n[291 more lines. Read again with offset: 472.]",
+      "tool_call_id": "call_2b9f2065e77640b5a9b916ed"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_248bc5d0a1e44739b5e72761",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":100,\"offset\":471,\"path\":\"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/post_result_comment.ts lines 471-570 of 762\n\n471\t    //\n472\t    // Three wire values rather than the domain's seven, because this tag answers one\n473\t    // question and `/resume` is its only reader. A projection, taken from the ending\n474\t    // rather than re-derived from the signals beside it -- which is what it was, in\n475\t    // this same file, twelve lines from the other copy.\n476\t    ENDED_TAG.write(endedTag(ending)),\n477\t  ];\n478\t  if (args.salvaged === true) {\n479\t    lines.push(\n480\t      \"> [!WARNING]\",\n481\t      \"> This run ended before it wrote a report. Below is the last thing it said,\",\n482\t      \"> from the middle of the work — not a conclusion, and not a summary of what it found.\",\n483\t      \"\",\n484\t    );\n485\t  } else if (args.wroteNothing === true) {\n486\t    // The run said nothing at all, so there is not even a middle to show. Said\n487\t    // outright, because a comment with no report in it otherwise reads as a run that\n488\t \n\n[1068 characters dropped from the middle; 4000 shown]\n\n this\n516\t  // comment is posted, so the link is to the branch tip rather than to a commit --\n517\t  // which is what somebody following it wants anyway: the current state, including\n518\t  // this run. A permalink would show the metrics as they were a moment before.\n519\t  //\n520\t  // Omitted rather than guessed when the repository is unknown, because a broken link\n521\t  // in every comment is worse than no link at all.\n522\t  const metrics = args.repo\n523\t    ? ` · [metrics](https://github.com/${args.repo}/blob/atomaton-data/metrics/report.md)`\n524\t    : \"\";\n525\t  lines.push(\"---\", `_run by [${args.agent}](${args.runUrl})${metrics}_`);\n526\t  // Under the run link and above the notice saying how to continue: this is a fact\n527\t  // about the run, the notice is the action, and the action reads last.\n528\t  //\n529\t  // No `⚠️`, in the same voice as the token line and the run link above it. The\n530\t  // marker means one thing in this footer -- the run was cut off and a person has to\n531\t  // continue it -- and this line is not that. Most of what it counts is a guard doing\n532\t  // its job, which `looksRefused` exists to distinguish from a tool breaking;\n533\t  // measured, 107 of 396 runs carried a refused or errored call, so a warning sign\n534\t  // here would appear on a quarter of all comments and the one below it would stop\n535\t  // being read. The line's job is to make the count impossible to lose, not to claim\n536\t  // a fault.\n537\t  if (args.toolTrouble !== undefined) lines.push(`_${args.toolTrouble}_`);\n538\t  if (args.endedBecause === \"stopped\") {\n539\t    // Says the session survived, because that is the whole difference between this\n540\t    // and cancelling the job, and the person who stopped it cannot tell from here\n541\t    // which one they got.\n542\t    lines.push(\n543\t      `⏸️ _Stopped on request. **The session is saved.** Comment \\`/resume\\` to continue ` +\n544\t        `from here, or \\`/${args.agent}\\` with an instruction on the following lines._`,\n545\t    );\n546\t  } else if (cutShort(args.endedBecause)) {\n547\t    lines.push(`⚠️ _The run ${howItWasCutShort(args.endedBecause)}. Comment \\`/${args.agent}\\` to continue._`);\n548\t  }\n549\t\n550\t  return lines.join(\"\\n\");\n551\t}\n552\t\n553\tfunction main(): void {\n554\t  const { values } = parseArgs({\n555\t    args: Bun.argv.slice(2),\n556\t    options: {\n557\t      number: { type: \"string\" },\n558\t      agent: { type: \"string\" },\n559\t      type: { type: \"string\" },\n560\t      notify: { type: \"string\" },\n561\t      directive: { type: \"string\" },\n562\t      \"chain-continues\": { type: \"string\" },\n563\t      \"ended-because\": { type: \"string\" },\n564\t      reported: { type: \"string\" },\n565\t      \"messages-before\": { type: \"string\" },\n566\t      \"run-url\": { type: \"string\" },\n567\t      changed: { type: \"string\" },\n568\t      session: { type: \"string\" },\n569\t      output: { type: \"string\" },\n570\t      \"logs-file\": { type: \"string\" },\n\n[192 more lines. Read again with offset: 571.]",
+      "tool_call_id": "call_248bc5d0a1e44739b5e72761"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_de79ebd6f4904bfd87d76411",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":4,\"glob\":\"*.ts\",\"max_matches\":15,\"path\":\"src/entrypoints/machinery\",\"pattern\":\"atomaton:notify|NOTIFY_TAG|completion-mention\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "15 line(s), match and context, under src/entrypoints/machinery:\n\nsrc/entrypoints/machinery/resolve_notify.test.ts-17-  });\nsrc/entrypoints/machinery/resolve_notify.test.ts-18-\nsrc/entrypoints/machinery/resolve_notify.test.ts-19-  test(\"a notify tag beats the author\", () => {\nsrc/entrypoints/machinery/resolve_notify.test.ts-20-    const r = run([\nsrc/entrypoints/machinery/resolve_notify.test.ts:21:      { match: [\"api\"], stdout: JSON.stringify({ body: \"<!-- atomaton:notify=requester -->\", login: \"someone-else\", type: \"User\" }) },\nsrc/entrypoints/machinery/resolve_notify.test.ts-22-    ]);\nsrc/entrypoints/machinery/resolve_notify.test.ts-23-    expect(r.stdout.trim()).toBe(\"requester\");\nsrc/entrypoints/machinery/resolve_notify.test.ts-24-  });\nsrc/entrypoints/machinery/resolve_notify.test.ts-25-\n--\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts-32-  });\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts-33-\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts-34-  // An HTML comment is invisible on the rendered issue, so a body carrying one\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts-35-  // above the command looks exactly right and used to start nothing. Atomaton\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:36:  // writes such comments itself — the `atomaton:notify` tag `create_sub_issue`\n\n[42 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_de79ebd6f4904bfd87d76411"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ba90881ac59a4867bb0cfab9",
+          "type": "function",
+          "function": {
+            "name": "search_code",
+            "arguments": "{\"limit\":4,\"query\":\"does fetch_events or thread shaping strip details blocks or summarize comments before handing to the model\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "[\n  {\n    \"path\": \"src/adapters/github/thread.ts\",\n    \"lines\": \"86-102\",\n    \"excerpt\": \"/**\\n * Which of a list of comments survive the guard's shaping, by id.\\n *\\n * For a caller that has already fetched the comments and wants to drop the ones the\\n * guard is removing — `fetch_events.ts`, which builds the model's context from a\\n * comment list it read itself. It does not re-read the thread; it shapes what it has,\\n * with the same rule every other reader uses.\\n *\\n * The comments must be oldest first, which is the order the API returns them in.\\n */\\nexport function keptCommentIds(comments: readonly Comment[]): Set<number> {\\n  const entries = comments.map((comment) => ({\\n    id: comment.id,\\n    body: comment.body ?? \\\"\\\",\\n    isHuman: isHumanComment(comment),\\n  }));\\n  return new Set(s\"\n  },\n  {\n    \"path\": \"src/entrypoints/machinery/fetch_events.ts\",\n    \"lines\": \"201-216\",\n    \"excerpt\": \"const comments = contextList<GhCommentApi>(\\n    `comments on #${issueNum}`,\\n    \\\"api\\\",\\n    `repos/${owner}/${repo}/issues/${issueNum}/comments`,\\n  );\\n  // The guard deletes a person's comment made while an agent is working, and the\\n  // deletion is not instant. The model's context is built from this list, so it has\\n  // to see the thread the guard is producing -- otherwise the agent reads a comment\\n  // the guard told its author would not be acted on. Same rule as every other reader:\\n  // `keptCommentIds` is `shapedThread`'s.\\n  const kept = keptCommentIds(comments);\\n  const commentEvents: GithubEvent[] = comments\\n    .filter((c) => kept.has(c.id))\\n    .map((c) => ({\\n      id: c.id,\\n      eve\"\n  },\n  {\n    \"path\": \"src/entrypoints/machinery/fetch_events.test.ts\",\n    \"lines\": \"8-23\",\n    \"excerpt\": \"describe(\\\"fetch_events.ts\\\", () => {\\n  test(\\\"fetches issue events (body + comments) sorted by created_at\\\", () => {\\n    const dir = mkdtempSync(join(tmpdir(), \\\"atomaton-test-\\\"));\\n    try {\\n      const outFile = join(dir, \\\"events.json\\\");\\n      const outputFile = join(dir, \\\"out\\\");\\n      writeFileSync(outputFile, \\\"\\\");\\n      const r = runWithFakeGh(\\n        scriptPath(\\\"fetch_events.ts\\\"),\\n        [\\\"--type\\\", \\\"issue\\\", \\\"--number\\\", \\\"5\\\", \\\"--out\\\", outFile],\\n        {\\n          env: { GITHUB_REPOSITORY: \\\"owner/repo\\\", GITHUB_OUTPUT: outputFile },\\n          rules: [\\n            { match: [\\\"pr\\\", \\\"list\\\"], stdout: \\\"[]\\\" },\\n            {\\n              // More specific match listed first: \\\"issues/5/comments\\\" is\"\n  },\n  {\n    \"path\": \"src/entrypoints/machinery/guard_comment_during_run.ts\",\n    \"lines\": \"62-72\",\n    \"excerpt\": \"// The comment being judged is excluded: a person's `/engineer` is itself an \\\"asked\\\"\\n  // event, and counting it would block the very command that is starting a run. The\\n  // question is whose turn it was BEFORE this comment.\\n  //\\n  // Comments alone, not the body: a pull request body naming a reviewer is a request\\n  // the validation dispatch is already handling, and deleting a person's comment on\\n  // the strength of it would tell them to wait for a run their comment was not racing.\\n  //\\n  // The rule itself is `shapedThread`'s, shared with the readers that run in the window\\n  // before this deletion lands -- so the guard does not re-derive it, it asks whether\\n  // the comment survived the\"\n  }\n]",
+      "tool_call_id": "call_ba90881ac59a4867bb0cfab9"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ded103a211654bd197e1dfd5",
+          "type": "function",
+          "function": {
+            "name": "delegate",
+            "arguments": "{\"context\":\"リポジトリ yuma-seno/atomaton。#206 の調査で、スレッドの「shaping」(fetch_events / shapedThread)がエージェントに渡すコンテキストを決めている(src/adapters/github/thread.ts, src/entrypoints/machinery/fetch_events.ts)。#16/#17 で報告コメントが長すぎる問題を扱い、4部構成に上限を置く決定がされた。src/content/prompt-template.md が全エージェント共通の土台テンプレートで、報告契約は src/content/prompt-template.md:225-313 にある。\",\"task\":\"次の3点を調べて報告してください。各点、ファイルパス:行番号と一行の根拠付きで。\\n1. エージェントの最終メッセージ(comment として投稿される output)に長さ上限や文字数制限を機械的に掛けている箇所はあるか。src/entrypoints/machinery/post_result_comment.ts と src/domain/ 配下を中心に。無ければ「無い」と明示。\\n2. <details> タグを機械が使っている箇所は src/entrypoints/tools/mcp/atomaton.ts:243 の1箇所か、他にもあるか(コード生成物 .github/atomaton-runtime/ は除く)。\\n3. 契約テスト(prompt の内容を固定するテスト)はどこにあるか。prompt-template.md や agent-definitions の内容を検証するテストファイル名を列挙。10分以内で。\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "The delegate produced no report: the sub-run ended because of `failed` after 1s and 0 iteration(s) (exit 1). It reported: [612 characters dropped from the start; 2000 shown]\n\n017031Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::infra::mcp\u001b[0m\u001b[2m:\u001b[0m [MCP:files:stderr] [atomaton-files] this process is now unreadable to its peers\n\u001b[2m2026-10-18T18:47:14.080594Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::infra::mcp\u001b[0m\u001b[2m:\u001b[0m MCP server 'shell' connected: atomaton-shell-mcp v1.0.0 (protocol: 2024-11-05)\n\u001b[2m2026-10-18T18:47:14.082770Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::application::runner\u001b[0m\u001b[2m:\u001b[0m Connected to 2 MCP server(s), discovered 7 tool(s)\n\u001b[2m2026-10-18T18:47:14.083129Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::application::runner\u001b[0m\u001b[2m:\u001b[0m Read prompt from stdin (1347 bytes)\n\u001b[2m2026-10-18T18:47:14.083145Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2matoma::application::runner::execution\u001b[0m\u001b[2m:\u001b[0m Inference iteration 1 (2 messages in session)\n\u001b[2m2026-10-18T18:47:14.945186Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2matoma::application::runner\u001b[0m\u001b[2m:\u001b[0m Run failed: LLM API error (402 Payment Required): {\"error\":{\"code\":\"free_quota_exhausted\",\"message\":\"your orcarouter/free allowance is used up — top up your balance and call a specific model with wallet billing to keep going https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits (request id: 202610181847148236968398268d9d6dJnNggiV)\",\"metadata\":{\"base_model\":\"\",\"buy_credits_url\":\"https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits\",\"free_model\":\"orcarouter/free\",\"reason\":\"err_free_used\"},\"type\":\"insufficient_quota\"}}\nError: LLM API error (402 Payment Required): {\"error\":{\"code\":\"free_quota_exhausted\",\"message\":\"your orcarouter/free allowance is used up — top up your balance and call a specific model with wallet billing to keep going https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits (request id: 202610181847148236968398268d9d6dJnNggiV)\",\"metadata\":{\"base_model\":\"\",\"buy_credits_url\":\"https://www.orcarouter.ai/console/billing?ref=err_free_used#add-credits\",\"free_model\":\"orcarouter/free\",\"reason\":\"err_free_used\"},\"type\":\"insufficient_quota\"}} Nothing was returned to report. The sub-run never reached a model, so the task's size is not the answer; do the work here instead.",
+      "tool_call_id": "call_ded103a211654bd197e1dfd5"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_f4ab2e88f7cd4d4db8f61369",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":3,\"glob\":\"*.ts\",\"max_matches\":25,\"path\":\"tests\",\"pattern\":\"prompt-template|prompt_template|report contract|報告契約\"}"
+          }
+        },
+        {
+          "id": "call_c8558739f33e4dd982868c04",
+          "type": "function",
+          "function": {
+            "name": "glob",
+            "arguments": "{\"pattern\":\"tests/**/*.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "25 line(s), match and context, under tests:\n\ntests/e2e/run-agent.e2e.test.ts-31-\ntests/e2e/run-agent.e2e.test.ts-32-const GITHUB_MCP_SCRIPT = join(REPO_ROOT, \"dist/.github/atomaton-runtime/tools/mcp/github.ts\");\ntests/e2e/run-agent.e2e.test.ts-33-const SHELL_MCP_SCRIPT = join(REPO_ROOT, \"dist/.github/atomaton-runtime/tools/mcp/shell.ts\");\ntests/e2e/run-agent.e2e.test.ts:34:const PROMPT_TEMPLATE = join(REPO_ROOT, \"dist/.github/atomaton/prompt-template.md\");\ntests/e2e/run-agent.e2e.test.ts-35-const SKILLS_DIR = join(REPO_ROOT, \"dist/.github/atomaton/skills\");\ntests/e2e/run-agent.e2e.test.ts-36-\ntests/e2e/run-agent.e2e.test.ts-37-describe.skipIf(!atomaAvailable)(\"E2E: real atoma binary + real mcp/github.ts\", () => {\n--\ntests/contract/agent-prompts.test.ts-34-   * that is.\ntests/contract/agent-prompts.test.ts-35-   */\ntests/contract/agent-prompts.test.ts-36-  test(\"an agent asked a question has somewhere to arrive\", () => {\ntests/contract/agent-prompts.test.ts:37:    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\");\ntests/contract/agent-prompts.test.ts-38-    expect(prompt, \"the shared exits must offer answering as an outcome\").toContain(\ntests/contract/agent-prompts.test.ts-39-      \"What was asked is a question\",\ntests/contract/agent-prompts.test.ts-40-    );\n--\ntests/contract/agent-prompts.test.ts-83-   * that reads those checks in the definition.\ntests/contract/agent-prompts.test.ts-84-   */\ntests/contract/agent-prompts.test.ts-85-  test(\"loads procedures as skills without requesting visible chain of thought\", () => {\ntests/contract/agent-prompts.test.ts:86:    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\");\ntests/contract/agent-prompts.test.ts-87-    expect(prompt).toContain(\"atoma_builtin__load_skill\");\ntests/contract/agent-prompts.test.ts-88-    expect(prompt).toContain(\"in place of your own approach\");\ntests/contract/agent-prompts.test.ts-89-    expect(prompt).toContain(\"Check the catalog again\");\n--\ntests/contract/agent-prompts.test.ts-113-   * rendered where the directive is explained.\n\n[133 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "call_f4ab2e88f7cd4d4db8f61369"
+    },
+    {
+      "role": "tool",
+      "content": "44 file(s), most recently changed first:\n\ntests/e2e/request-close-issue-aggregation.e2e.test.ts\ntests/e2e/launch-sub-agent.e2e.test.ts\ntests/e2e/request-close-issue.e2e.test.ts\ntests/e2e/run-agent.e2e.test.ts\ntests/e2e/mock-llm-server.ts\ntests/e2e/provider-credential-check.e2e.test.ts\ntests/e2e/run-atoma.ts\ntests/contract/tools-yaml.test.ts\ntests/contract/script-refs.test.ts\ntests/contract/skill-catalog.test.ts\ntests/contract/test-builds-first.test.ts\ntests/contract/workflow-sources.test.ts\ntests/contract/test-script.test.ts\ntests/contract/test-hermetic-env.test.ts\ntests/contract/self-overlay.test.ts\ntests/contract/server-reports.test.ts\ntests/contract/reserved-names.test.ts\ntests/contract/runner-layout.test.ts\ntests/e2e/fake-gh.ts\ntests/contract/merge-gate-targets.test.ts\ntests/contract/own-pipeline.test.ts\ntests/contract/provider-credential-check.test.ts\ntests/contract/layering.test.ts\ntests/contract/machinery-root.test.ts\ntests/contract/ops-log-dispatch.test.ts\ntests/contract/live-tools-check.test.ts\ntests/contract/examples.test.ts\ntests/contract/generated-workflows.test.ts\ntests/contract/hardened-servers.test.ts\ntests/contract/dispatch-sites.test.ts\ntests/contract/doc-links.test.ts\ntests/contract/deployment-contract.test.ts\ntests/contract/agent-prompts.test.ts\ntests/contract/exact-tool-sets.test.ts\ntests/contract/environment-setup.test.ts\ntests/contract/agent-environment.test.ts\ntests/contract/agent-definitions.test.ts\ntests/contract/config-paths.test.ts\ntests/contract/attachments-shape.test.ts\ntests/contract/attachments-publish.test.ts\ntests/contract/config-contract.test.ts\ntests/contract/deployed-config.test.ts\ntests/contract/adoption-preflight.test.ts\ntests/contract/adopter-terms.test.ts",
+      "tool_call_id": "call_c8558739f33e4dd982868c04"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_460208efd5fc4a1888c54929",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\":\"tests/contract/agent-prompts.test.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "tests/contract/agent-prompts.test.ts lines 1-400 of 703\n\n1\timport { describe, expect, test } from \"bun:test\";\n2\timport { readFileSync } from \"node:fs\";\n3\timport { WORKSPACE_PATH } from \"../../src/domain/work/workspace.ts\";\n4\t\n5\tdescribe(\"agent prompt contracts\", () => {\n6\t  test(\"uses decompose-first delegation with an explicit engineer leaf gate\", () => {\n7\t    const atomaton = readFileSync(\"src/content/agent-definitions/atomaton.md\", \"utf8\");\n8\t    expect(atomaton).toContain(\"assign them to `atomaton` by default\");\n9\t    expect(atomaton).toContain(\"only when it satisfies every leaf condition\");\n10\t    expect(atomaton).toContain(\"File count and apparent effort do not determine leaf status\");\n11\t  });\n12\t\n13\t  /**\n14\t   * The outcome that did not exist, and the run that measured its absence.\n15\t   *\n16\t   * The engineer's `Outcome` table was five rows, all of them \"implement and open a\n17\t   * pull request\" or \"refuse\". Asked for an inventory, it spent 200 iterations and\n\n[20718 characters dropped from the middle; 4000 shown]\n\nin(\"operational tool calls is the target\");\n355\t  });\n356\t\n357\t  /**\n358\t   * The sentence this turns on, in both places an agent reads it.\n359\t   *\n360\t   * A tool server can now say it answered worse than it should have, and\n361\t   * the same warning produces two very different runs depending on what the agent\n362\t   * concludes: \"my query was poor\" ends in trying again differently, and \"the\n363\t   * reranker is not running\" ends in an issue. The second was the truth when it happened and\n364\t   * the first is what an agent asked whether something went badly reaches for, because\n365\t   * its own conduct is what it has been told to examine.\n366\t   *\n367\t   * So the attribution is not a nicety of wording -- it is the whole mechanism. Pinned\n368\t   * the way the reviewer's two rules above are pinned: the failure looks like success,\n369\t   * because a run that files an apology instead of a defect still reads as a run that\n370\t   * noticed something.\n371\t   */\n372\t  test(\"says a problem a tool reported about itself is not the agent's failure\", () => {\n373\t    // One file now, where it was two. It was in the template AND in\n374\t    // `engineering/environment`, and the skill was the half carrying the procedure --\n375\t    // so the template asked the agent to load a skill to find out what to do about a\n376\t    // block that had already arrived in a tool result. Of 30 runs that met one, 4\n377\t    // loaded it. The trigger is a result every agent can receive and the response is\n378\t    // three steps long, so both are in the template, beside the tool descriptions the\n379\t    // block is attached to, and the skill keeps only the dependency questions its\n380\t    // description names.\n381\t    const file = \"src/content/prompt-template.md\";\n382\t    const text = readFileSync(file, \"utf8\");\n383\t    expect(text, `${file} must not let a tool's degradation read as the agent's fault`).toContain(\n384\t      \"not a failure of your work\",\n385\t    );\n386\t    // And the procedure has to travel with it, or the attribution is advice with\n387\t    // nowhere to go. The tool is the ROOT one: a defect is nobody's child, and the\n388\t    // sub-issue tool is refused on a pull request run, which is where these are\n389\t    // most often found (#178/#179/#192).\n390\t    expect(text, \"the run that saw it is the only one that can file it\").toContain(\"create_root_issue\");\n391\t  });\n392\t\n393\t  /**\n394\t   * The first thing a re-invoked agent reads, and the paragraph it has to agree with.\n395\t   *\n396\t   * After a merge, `dispatchPostMergeAgent` posts a comment on the issue and then starts\n397\t   * an agent on it. That comment is a user message, ahead of the system prompt in the\n398\t   * only ordering a model has -- and it said \"Please confirm completion and close this\n399\t   * sub-task\", which is an answer, not a question. An agent told to confirm has no\n400\t   * remaining reason to read the issue.\n\n[303 more lines. Read again with offset: 401.]",
+      "tool_call_id": "call_460208efd5fc4a1888c54929"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_26464df385b8439e8f76dc89",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":120,\"offset\":401,\"path\":\"tests/contract/agent-prompts.test.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "tests/contract/agent-prompts.test.ts lines 401-520 of 703\n\n401\t   *\n402\t   * What the re-invocation is for is the opposite: deciding whether what merged\n403\t   * satisfies what the issue asked for, and carrying on when it does not. A merge is\n404\t   * evidence that a change was accepted, not that a requirement was satisfied.\n405\t   *\n406\t   * Pinned as a pair because either half alone is worse than neither. The prompt asking\n407\t   * for a judgement while the trigger asks for a closure is a contradiction the trigger\n408\t   * wins; the trigger asking for a judgement with no contract behind it is a run with no\n409\t   * outcome to reach.\n410\t   */\n411\t  test(\"the post-merge trigger and the prompt ask for the same thing\", () => {\n412\t    const trigger = readFileSync(\"src/adapters/actions/dispatch-targets.ts\", \"utf8\");\n413\t    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\");\n414\t    expect(trigger, \"the trigger comment must not prejudge the answer\").not.\n\n[3158 characters dropped from the middle; 4000 shown]\n\nn has to say so where the next reader looks\").toContain(\n471\t      \"Say so in your report\",\n472\t    );\n473\t  });\n474\t\n475\t  /**\n476\t   * The scratch workspace's path is stated in three places and has to be one path.\n477\t   *\n478\t   * `domain/work/workspace.ts` holds it, the runner mounts it there, the prompt template\n479\t   * tells the agent about it, and `bash`'s description repeats it. Both of\n480\t   * the last two, because a tool's own description was measured to carry more weight\n481\t   * than the same words in the system prompt -- and this sentence has to hold\n482\t   * at the moment the agent is deciding where to put a file, which is when it is\n483\t   * reading the tool.\n484\t   *\n485\t   * A path that drifted in one of them would be an agent writing somewhere real,\n486\t   * being told it persists, and finding it gone -- the exact shape of failure the\n487\t   * workspace exists to remove.\n488\t   */\n489\t  test(\"the scratch workspace is named identically wherever an agent reads about it\", () => {\n490\t    for (const file of [\"src/content/prompt-template.md\", \"src/entrypoints/tools/mcp/shell.ts\"]) {\n491\t      const text = readFileSync(file, \"utf8\");\n492\t      expect(text, `${file} must name the workspace`).toContain(WORKSPACE_PATH);\n493\t      // Both halves. \"This survives\" alone invites leaving working files in the\n494\t      // repository as well; \"nothing else survives\" alone does not say where to\n495\t      // put them.\n496\t      expect(text.toLowerCase(), `${file} must say it survives`).toMatch(/survive/);\n497\t      expect(text, `${file} must say what happens to files left in the repository`).toMatch(/committed/);\n498\t    }\n499\t  });\n500\t\n501\t  /**\n502\t   * And nothing may tell an agent to expand a variable to find it. `ls\n503\t   * $SOMETHING_WORKSPACE` with the variable unset returns nothing, which reads\n504\t   * exactly like an empty directory -- so the failure and the ordinary case become\n505\t   * indistinguishable in the one place a model is looking. The path is written out.\n506\t   *\n507\t   * This watched for one spelling, `ATOMA_WORKSPACE`, which is the name the\n508\t   * variable would have had. Renaming the project left it watching for a string\n509\t   * nobody would write, which is a guard that cannot fail rather than a guard that\n510\t   * passes. The mistake has a shape -- a variable expansion with WORKSPACE in its\n511\t   * name -- and the shape is what is checked now, whatever the project is called.\n512\t   */\n513\t  test(\"the workspace is never named through a variable\", () => {\n514\t    for (const file of [\"src/content/prompt-template.md\", \"src/entrypoints/tools/mcp/shell.ts\"]) {\n515\t      const expansions = readFileSync(file, \"utf8\").match(\n516\t        /\\$\\{?[A-Za-z_]*WORKSPACE[A-Za-z_]*\\}?/g,\n517\t      );\n518\t      expect(\n519\t        expansions ?? [],\n520\t        `${file} names the workspace through a variable. Unset, it expands to nothing and ` +\n\n[183 more lines. Read again with offset: 521.]",
+      "tool_call_id": "call_26464df385b8439e8f76dc89"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_787d6263d0754d4598173863",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":183,\"offset\":521,\"path\":\"tests/contract/agent-prompts.test.ts\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "tests/contract/agent-prompts.test.ts lines 521-703 of 703\n\n521\t          `reads as an empty directory; write the path out`,\n522\t      ).toEqual([]);\n523\t    }\n524\t  });\n525\t\n526\t  /**\n527\t   * The tree, in the shared prompt, because every role acts on a node and means the work\n528\t   * under it.\n529\t   *\n530\t   * This lived in `docs/work/how-it-works/work-is-a-tree-of-issues.md`, which an adopter's\n531\t   * tree does not have: the documentation is this repository's, and the prompt is what\n532\t   * every agent actually reads. So the shape of the work was described in the one place\n533\t   * no agent looks, and each role was left to infer it -- which is how #80's deadlock\n534\t   * (a close condition naming the default branch) could be written in good faith.\n535\t   *\n536\t   * The branch half is pinned because it is the operational consequence: a sub-issue's PR\n537\t   * merges into its parent's branch, so the close condition is checkable there and not on\n538\t   * the default \n\n[6742 characters dropped from the middle; 4000 shown]\n\nh for by hand.\n655\t   */\n656\t  test(\"the report writes an anchor in the form the page turns into a link\", () => {\n657\t    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\");\n658\t    expect(prompt).toContain(\"`path/to/file.ts:42`\");\n659\t    expect(prompt, \"and says why that spelling rather than another\").toContain(\n660\t      \"GitHub turns that into a link to\",\n661\t    );\n662\t  });\n663\t\n664\t  /**\n665\t   * A check that needs a real secret is made after the merge, and the prompt has to\n666\t   * say so *before* the run starts.\n667\t   *\n668\t   * #109 was dispatched to answer one question — whether the attachment endpoint\n669\t   * accepts the credential a run holds — and could not answer it where it was asked:\n670\t   * `curl` is refused, and even with it there is no token in the shell to send. The\n671\t   * run found that out one refusal at a time, and then proposed building a tool server\n672\t   * so the check would be possible at all. That is a reasonable reply to an impossible\n673\t   * task and a whole run spent on the wrong one.\n674\t   *\n675\t   * What the prompt owes a run instead is the boundary, stated once, so the plan it\n676\t   * makes at the start is one it can carry out. Three claims have to survive editing:\n677\t   * that the check belongs after the merge, that a tool which would make it possible\n678\t   * earlier is the wrong thing to ask for, and what a run can do here instead.\n679\t   */\n680\t  test(\"the prompt says a check needing a real secret happens after the merge\", () => {\n681\t    // Whitespace collapsed before asserting, because this file is wrapped prose: a\n682\t    // sentence breaks across a line at a column, so an assertion written against the\n683\t    // whole sentence holds only until the paragraph around it is re-flowed -- and then\n684\t    // it fails over where a line ended rather than over anything it is about. The same\n685\t    // lesson the e2e suite learned about `prompt-template.md`.\n686\t    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\").replace(/\\s+/g, \" \");\n687\t\n688\t    expect(prompt, \"the boundary, in the terms a run plans against\").toContain(\n689\t      \"A check that needs a real secret is made after the merge, not before.\",\n690\t    );\n691\t    expect(prompt, \"and why no rearrangement of the tools closes it\").toContain(\n692\t      \"a tool that would make it askable is the wrong thing to ask for\",\n693\t    );\n694\t    expect(prompt, \"what the pull request's own checks are for instead\").toContain(\n695\t      \"What you can do here is verify the **shape**\",\n696\t    );\n697\t    expect(prompt, \"and that a question the shape cannot settle is a decision\").toContain(\n698\t      \"say so and hand it up, instead of building the machinery\",\n699\t    );\n700\t    // The reason, not just the rule: a run that reads only \"you cannot\" looks for a way.\n701\t    expect(prompt).toContain(\"it would be a credential in the hands of code nobody has read yet\");\n702\t  });\n703\t});",
+      "tool_call_id": "call_787d6263d0754d4598173863"
+    },
+    {
+      "role": "assistant",
+      "content": "**イメージはつかめましたし、方向に賛成です。** しかもこの発想は既にリポジトリの中で一度成功しているパターンで、それを広げる形にできることを根拠に伝えます。\n\n## この形を支持する根拠\n\n- 機構側は既に同じ設計をしています。`launch_sub_agent` の報告は `<details>` で折りたたんで投稿され(`src/entrypoints/tools/mcp/atomaton.ts:243`)、その理由がコードコメントに書いてあります — 「2件のコメントが2つの出来事に読め、報告がスレッドを支配した。1件に折りたたむと、スレッドは起動したものを見せ、報告は1クリック先になる」(`src/entrypoints/tools/mcp/atomaton.ts:203-208`)。ご提案はこれを機構コメントからエージェントの報告へ広げるものです\n- **エージェント→エージェントの折りたたみは情報損失ゼロです。** 次 run はコメント本文を raw テキストで読みます(`src/entrypoints/machinery/fetch_events.ts:201-216` が全文を shaping して渡す)。折りたたみは人間の見え方だけを変え、エージェントの読み取りは1文字も減りません。だからエージェント間指示での利用はほぼ無料です\n- #16/#17 で作った報告契約(4部・各部に上限)と衝突しません。折りたたみは「見える量」の契約で、既存は「各部の長さ」の契約なので、重ねられます\n\n## 具体形(こう書きたい)\n\n1. **原則は1行に圧縮できます**: 「コメントを上から読んで開かずに行動できるようにする。読むためではなく検証のために存在するもの — 根拠一覧・再現手順・測定値・引用・却下した代替案 — を `<details>` に入れる。要約行に中身を名指しし、ネストしない。**結論と次の一手は折らない**」\n2. 4部との整合: `How you know` はほぼそのまま折りたたみ対象です。`What you could not establish` は「書く義務」の床だけ残し、長いとき折る\n3. エージェント間指示: 依頼は2行で言い、判断基準・ファイル一覧・制約を折る。`/engineer` への引き継ぎ文の形が自然にこう変わります\n\n## 正直な限界・注意(意見として言っておくべきもの)\n\n- **折りたたみは「見える量」だけを解きます。#210 の本来の不満 — 結論自体が実装語彙 — は解きません。** 前回出した「結論はコードを読まない人の言葉で、アンカーは根拠側へ」という調整とセットで初めて効きます。片方だけだと、折りたたみの中に専門語の塊が移るだけになります\n- 全部折ると「空のコメント」に見えます。結論は折らない、を契約に入れるのはこのためです\n- `<details>` 内の Markdown はインデントで描画が崩れることがあります。崩れてもタグが見えるだけなので致命的ではないですが、ルールは単純に保つのが安全です\n- #13 の方針に倣い、導入後に「折りたたみを除いた見えている文字数」と「アンカー付き主張の存続」を数件の報告で前後比較する程度はしたいです\n\n## スコープ\n\n`src/content/prompt-template.md` の報告セクション数行 + 同僚への指示の説明に1文、契約テスト1本(`tests/contract/agent-prompts.test.ts` は既存の固定句を温存したまま追加)。機構側のコード変更は不要です。\n\nこの形・この線引きで良ければ返信ください。次の run で実装します。",
+      "atoma_metadata": {
+        "github_comment_id": 6253749920,
         "agent": "atomaton"
       }
     }
@@ -453,11 +871,11 @@
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 1,
-      "snapshot_hash": "30f1bb18c2c615beee68e0f35898525760582d05f944859809a94982cf44f3ed",
-      "version": 1,
+      "event_count": 3,
+      "resolved_number": "210",
+      "snapshot_hash": "daf37af9846d608b40f4aaedd5ef718a8230aa046ac6c562ee48bbdc32764195",
       "type": "issue",
-      "resolved_number": "210"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -485,6 +903,27 @@
         }
       },
       "started": "2026-10-17T14:05:28Z"
+    },
+    {
+      "ended": "2026-10-18T18:49:33Z",
+      "ended_because": "completed",
+      "iterations": 21,
+      "messages": 93,
+      "seconds": 370,
+      "server_calls": {
+        "delegate": {
+          "delegate": 2
+        },
+        "files": {
+          "glob": 1,
+          "grep": 9,
+          "read": 7
+        },
+        "search": {
+          "search_code": 3
+        }
+      },
+      "started": "2026-10-18T18:43:23Z"
     }
   ]
 }
