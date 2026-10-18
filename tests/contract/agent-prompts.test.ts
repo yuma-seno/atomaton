@@ -662,6 +662,62 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * Folds lower the visible cost of a comment without throwing anything away.
+   *
+   * #210: a report whose conclusion carried the vocabulary of the implementation.
+   * #16/#17 capped the length of each part; neither touched how much of the
+   * comment sits open on the page. The machinery already posts the dispatch report
+   * behind a fold for exactly this reason (`tools/mcp/atomaton.ts`, "the thread
+   * shows what was launched and the report is one click away") — the prompt now
+   * asks the same of the agent's own text.
+   *
+   * The line is "what verifies folds, what acts stays open": a reader acting on the
+   * comment should not have to open anything, and the next run reads the full text
+   * either way, so nothing is lost to the model. Pinned per claim: the criterion,
+   * what folding does not cost, and the two things that must never fold — a fold
+   * holding the conclusion is a comment a reader cannot act on without opening.
+   */
+  test("the report folds what verifies and keeps the conclusion and next step open", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8").replace(/\s+/g, " ");
+    // The criterion, in the terms a reader acts against.
+    expect(prompt, "acting must not require opening a fold").toContain(
+      "act without opening a fold",
+    );
+    expect(prompt, "the kinds of content the fold is for").toContain(
+      "What exists to be checked rather than read",
+    );
+    // The cost claim, so nobody later "optimizes" the fold into deletion.
+    expect(prompt, "the next run reads the full text").toContain(
+      "nothing is lost to the model",
+    );
+    // The two things that never fold.
+    expect(prompt, "the conclusion stays open").toContain(
+      "the conclusion and the next step are never folded",
+    );
+    // And the fold names what it hides.
+    expect(prompt, "a summary line that names what is inside").toContain(
+      "the summary line names what is inside",
+    );
+  });
+
+  /**
+   * A handoff to a colleague leads with the ask, not the grounds.
+   *
+   * The handoff is the one piece of agent-to-agent prose on a thread a person also
+   * reads, and it used to be shaped like a report — constraints and files first,
+   * the actual request buried under them. The request is the part the next agent
+   * acts on; the grounds are the part it checks when it acts. Same fold rule as
+   * the report, applied to the other direction of writing.
+   */
+  test("the handoff leads with the request and folds the grounds", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8").replace(/\s+/g, " ");
+    expect(prompt, "the ask comes first").toContain("Lead with the request itself");
+    expect(prompt, "the grounds fold").toContain(
+      "fold the grounds for it, the files and the constraints",
+    );
+  });
+
+  /**
    * A check that needs a real secret is made after the merge, and the prompt has to
    * say so *before* the run starts.
    *
