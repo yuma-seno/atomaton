@@ -5020,5 +5020,62 @@
         "started": "2026-10-19T16:31:10Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-241/reviewer.json",
+    "agent": "reviewer",
+    "messages": 77,
+    "calls": 48,
+    "failed": 1,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "read": 15,
+      "list": 4,
+      "grep": 19,
+      "get_issue": 1,
+      "delegate_readonly": 1,
+      "get_pr": 1,
+      "get_check_runs": 2,
+      "glob": 1,
+      "get_branch": 1,
+      "list_pr_review_comments": 1,
+      "fetch": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-19T17:05:55Z",
+        "ended_because": "completed",
+        "iterations": 26,
+        "messages": 77,
+        "seconds": 176,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1
+          },
+          "files_readonly": {
+            "glob": 1,
+            "grep": 19,
+            "list": 4,
+            "read": 15
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 2,
+            "get_issue": 1,
+            "get_pr": 1,
+            "list_pr_review_comments": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-10-19T17:02:59Z"
+      }
+    ]
   }
 ]
