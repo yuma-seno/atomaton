@@ -402,6 +402,16 @@ function subIssueState(number, type) {
   const found = parentIssueOf(repo, Number(number));
   return { isSubIssue: found.known && found.parent > 0, issueClosed };
 }
+function endedWithToolCalls(sessionPath) {
+  const messages = readSession(sessionPath)?.messages ?? [];
+  for (let i = messages.length - 1;i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.role !== "assistant")
+      continue;
+    return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+  }
+  return false;
+}
 function readSession(path) {
   if (!path || !existsSync(path))
     return;
@@ -550,13 +560,19 @@ function main() {
     }
   }
   if (!output.trim()) {
-    if (!endedEarly) {
+    if (!endedEarly && endedWithToolCalls(values.session)) {
       console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
       return;
     }
-    wroteNothing = true;
-    output = values["ended-because"] === "stopped" ? "_This run was stopped before it said anything._" : `_This run ${howItWasCutShort(values["ended-because"])} before it said anything._`;
-    console.error("the run was cut short with nothing to report -- posting the notice rather than nothing.");
+    if (endedEarly) {
+      wroteNothing = true;
+      output = values["ended-because"] === "stopped" ? "_This run was stopped before it said anything._" : `_This run ${howItWasCutShort(values["ended-because"])} before it said anything._`;
+      console.error("the run was cut short with nothing to report -- posting the notice rather than nothing.");
+    } else {
+      wroteNothing = true;
+      output = "_This run ended without saying anything._";
+      console.error("atomaton_output.txt is empty and the session shows no session-ending tool call " + "(last assistant turn made no tool calls, or the session is missing/unreadable) " + "-- posting the no-report notice rather than skipping.");
+    }
   }
   const checked = escapeUnknownMentions(output, knownParticipants(process.env.GITHUB_REPOSITORY ?? "", values.number));
   if (checked.escaped.length > 0) {
@@ -595,6 +611,7 @@ if (import.meta.main)
   main();
 export {
   buildCommentBody,
+  endedWithToolCalls,
   lastAgentText,
   ref
 };
