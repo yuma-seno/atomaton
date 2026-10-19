@@ -87,7 +87,7 @@ import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-va
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
 import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
-import { latestRequestedAgentOn } from "../../adapters/github/thread.ts";
+import { latestRequestOn } from "../../adapters/github/thread.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -447,28 +447,31 @@ function main(): void {
   // needs no state of its own.
   const priorRetries = countPriorRetries(repo, values.number ?? "");
 
-  // Both names read from the pull request, neither passed in. The reviewer is the
-  // agent the pull request's thread asks for -- the newest `/<agent>` line that
-  // survives the guard's shaping, which is the body's line when nobody has commented
-  // and a person's later comment when somebody has. The engineer is the
-  // `atomaton:origin-agent` tag naming whoever opened it. A dispatch argument would
-  // be gone by the second validation; these survive every one.
+  // Read after the wait, so a directive or command posted while CI ran is seen: the
+  // thread read answers for the moment the verdict is decided, not the moment the
+  // push landed. One read answers both questions the routing asks of the thread --
+  // who it asks for (the default, dispatch markers included), and the newest ask a
+  // push could answer (markers excluded, with who made it and when). See
+  // `latestRequestOn`.
   //
-  // The thread rather than the body alone, because the body is the OLDEST entry in
-  // its own thread: a person commenting `/reviewer` on a pull request whose body says
-  // `/engineer` asked for the reviewer, and reading the body would dispatch the
-  // engineer instead. See `latestRequestedAgentOn`.
+  // The head commit's time rides with them: the push this validation judged produced
+  // that commit, so "newer than the ask" is how the verdict below recognises the
+  // push as an answer. The SHA was read before the wait, and is the commit CI ran
+  // against -- a newer push cancels this validation rather than moving it.
+  const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
+  const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
   const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
-  const reviewerAgent = latestRequestedAgentOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const engineerAgent = ORIGIN_AGENT_TAG.read(prBody) ?? "";
 
   const outcome = decideValidationOutcome({
     conclusion,
-    reviewerAgent,
+    reviewerAgent: threadRequest.newestRequestedAgent,
     engineerAgent,
     askedByPerson: isTrue(values["asked-by-person"]),
     priorRetries,
     deliverableProblems,
+    latestAsk: threadRequest.latestAsk,
+    headCommittedAt,
   });
 
   // One check run per required context, all carrying the same conclusion. The list

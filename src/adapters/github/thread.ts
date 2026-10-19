@@ -34,15 +34,18 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead } from "./gh.ts";
-import { DISPATCH_TAG, ENDED_TAG } from "./tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
+  latestAsk,
   latestRequestedAgent,
   requestOutstanding,
   shapedThread,
   wasLaunched,
   whoseTurn,
+  type AskReaders,
+  type LatestAsk,
   type ShapedThread,
   type ThreadEntry,
   type TurnHolder,
@@ -71,11 +74,32 @@ export const readers: TurnReaders = {
   isDispatchMarker: (body) => DISPATCH_TAG.has(body),
 };
 
+/**
+ * The same readers, plus who the machinery says wrote a comment.
+ *
+ * Every result comment the runner posts opens with `atomaton:agent=<name>` — so the
+ * directive at the end of one has an author to hand the answer back to. A machinery
+ * comment without the tag has no author, and `latestAsk` treats it as one it cannot
+ * route an answer to.
+ */
+const askReaders: AskReaders = {
+  ...readers,
+  authoringAgent: (body) => AGENT_TAG.read(body) ?? "",
+};
+
 /** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
 interface Comment {
   id: number;
   body?: string;
+  /** When the comment was written, as GitHub reports it. Present on every comment the API returns. */
+  created_at?: string;
   user?: { type?: string };
+}
+
+/** A thread entry that also carries when it happened, for asks ordered against events outside the thread. */
+interface DatedEntry extends ThreadEntry {
+  /** When the comment was written, or absent when the read did not have it. */
+  at?: string;
 }
 
 /** Whether a comment was written by a person rather than the machinery. */
@@ -126,11 +150,11 @@ function listComments(repo: string, number: string | number): Comment[] {
  *
  * Throws when the read fails, for the same reason `readThread` does.
  */
-function readComments(repo: string, number: string | number, excludeCommentId?: string | number): ShapedThread {
+function readComments(repo: string, number: string | number, excludeCommentId?: string | number): ShapedThread<DatedEntry> {
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments: ThreadEntry[] = listComments(repo, number)
+  const comments: DatedEntry[] = listComments(repo, number)
     .filter((comment) => String(comment.id) !== excluded)
-    .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+    .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment), at: comment.created_at }));
 
   return shapedThread(comments, readers);
 }
@@ -228,7 +252,7 @@ export function wasLaunchedOn(repo: string, number: string | number): boolean {
 /**
  * Whether a request for an agent is outstanding on a node, read from its comments.
  *
- * The node's BODY is deliberately not read, unlike `latestRequestedAgentOn`. A pull
+ * The node's BODY is deliberately not read, unlike `latestRequestOn`. A pull
  * request body naming a reviewer is the request the validation dispatch exists to
  * fulfil, so counting it would refuse the one dispatch that should happen. What this
  * answers is "has somebody asked, in the thread, and nobody taken it up" — and a body
@@ -288,31 +312,59 @@ export function checkDispatchMarker(
 }
 
 /**
- * The agent a node asks for next, from the newest request in its shaped thread.
+ * The two answers the validation routing asks of one thread.
  *
- * The body is read here, unlike the two above, because a pull request's body IS a
- * request — the `/<agent>` line `create_pr` writes. It is the oldest entry, so a
- * person's later comment wins over it, which is the point: the body is what the node
- * was opened asking for, and a comment is what somebody is asking for now.
- *
- * `isKnownAgent` is the caller's check that a name can actually be dispatched — a
- * definition exists for it. It is a predicate rather than a directory because the
- * filesystem layout is the caller's to know, and a name that fails it is skipped rather
- * than returned, so a typo falls back to the next request instead of dispatching nobody.
+ * The body is read for both, because a pull request's body IS a request — the
+ * `/<agent>` line `create_pr` writes. It is the oldest entry, so a person's later
+ * comment wins over it, which is the point: the body is what the node was opened
+ * asking for, and a comment is what somebody is asking for now. It is the fallback
+ * for `newestRequestedAgent` and never an answerable ask — see `LatestAsk`.
  */
-export function latestRequestedAgentOn(
+export interface ThreadRequest {
+  /**
+   * The agent the thread's newest request names — a dispatch marker included — with
+   * the body's own `/<agent>` line as the fallback. This is the routing default: who
+   * works next when nothing has answered the request yet.
+   */
+  newestRequestedAgent: string;
+  /**
+   * The newest ask a person or an agent made, with who made it and when. Undefined
+   * when the newest ask is the body's own line, a dispatch marker, or machinery the
+   * thread does not identify. This is the ask a push can answer: when the
+   * pull request's head commit postdates it, the push is the answer, and the verdict
+   * hands back to `author` rather than to `newestRequestedAgent`.
+   *
+   * See `domain/work/pr-validation.ts` for the routing, `domain/work/thread.ts`'s
+   * `latestAsk` for why markers and the body are excluded.
+   */
+  latestAsk?: LatestAsk;
+}
+
+/**
+ * Read a node's thread once and answer both request questions the routing asks of it.
+ *
+ * One read, not two, because both answers come from the same listing — the same
+ * argument `checkDispatchMarker` makes, and for the same reason: the API has a rate
+ * limit, and a validation runs on every push to every agent pull request.
+ *
+ * `isKnownAgent` filters the name each answer routes by: a name with no definition is
+ * skipped rather than returned, so a typo falls back to the next request instead of
+ * dispatching nobody. It does not filter the ASK's author — that agent ran, so it has
+ * a definition by construction.
+ */
+export function latestRequestOn(
   repo: string,
   number: string | number,
   isKnownAgent: (name: string) => boolean,
-  excludeCommentId?: string | number,
-): string {
-  const { body, shaped } = readThread(repo, number, excludeCommentId);
-  const known: TurnReaders = {
-    ...readers,
-    requestedAgent: (text) => {
-      const name = readers.requestedAgent(text);
-      return isKnownAgent(name) ? name : "";
-    },
+): ThreadRequest {
+  const { body, shaped } = readThread(repo, number);
+  const knownAgent = (text: string): string => {
+    const name = readers.requestedAgent(text);
+    return isKnownAgent(name) ? name : "";
   };
-  return latestRequestedAgent(body, shaped.comments, known);
+  const known: AskReaders = { ...askReaders, requestedAgent: knownAgent };
+  return {
+    newestRequestedAgent: latestRequestedAgent(body, shaped.comments, known),
+    latestAsk: latestAsk(body, shaped.comments, known),
+  };
 }

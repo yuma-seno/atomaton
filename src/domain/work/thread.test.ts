@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  latestAsk,
   latestRequestedAgent,
   requestOutstanding,
   shapedThread,
   turnEvents,
   whoseTurn,
+  type AskReaders,
   type ThreadEntry,
   type TurnReaders,
 } from "./thread.ts";
@@ -254,5 +256,103 @@ describe("latestRequestedAgent", () => {
   // displace it.
   test("an ordinary comment leaves the body's request standing", () => {
     expect(latestRequestedAgent("/engineer", [human("looks good")], readers)).toBe("engineer");
+  });
+});
+
+/**
+ * The newest ask somebody stands behind, for the question "was this request answered
+ * by a push".
+ *
+ * The readers are stubbed the way the real ones behave: a command is a line anywhere
+ * in a body (a result comment carries its directive at the end), a dispatch marker is
+ * a request, and the machinery names its author with a tag the real adapter reads
+ * from `atomaton:agent`.
+ */
+describe("latestAsk", () => {
+  const askReaders: AskReaders = {
+    ...readers,
+    // The real parser is `parseCommentCommand`, which scans every line and reads the
+    // dispatch marker as a request. The stub keeps that shape.
+    requestedAgent: (body) => {
+      for (const raw of body.split("\n")) {
+        const line = raw.trim();
+        if (line.startsWith("/")) return line.slice(1).split(/\s/)[0]!;
+        if (line.startsWith("DISPATCH ")) return line.slice("DISPATCH ".length).split(/\s/)[0]!;
+      }
+      return "";
+    },
+    authoringAgent: (body) => /BY (\S+)/.exec(body)?.[1] ?? "",
+  };
+
+  /** A comment with a time, as the adapter's read carries it. */
+  const timed = (t: string, entry: ThreadEntry): ThreadEntry & { at: string } => ({ ...entry, at: t });
+
+  // #211's thread, end to end: the reviewer's directive, the machinery's marker
+  // taking it up, the engineer's result. The newest REQUEST is the marker -- and the
+  // marker is the take-up, not the ask, so the ask underneath is what comes back.
+  test("the ask a dispatch marker took up is what it finds, and its author wrote it", () => {
+    const thread = [
+      timed("08:40:00", machine("RESULT handoff BY reviewer\nreview found problems\n/engineer")),
+      timed("08:40:20", machine("DISPATCH engineer")),
+      timed("08:44:00", machine("RESULT done BY engineer\npushed the fix")),
+    ];
+    expect(latestAsk("/reviewer", thread, askReaders)).toEqual({
+      agent: "engineer",
+      author: { kind: "agent", agent: "reviewer" },
+      at: "08:40:00",
+    });
+  });
+
+  test("a person's command is an ask by a person", () => {
+    expect(latestAsk("/reviewer", [timed("09:00:00", human("/engineer"))], askReaders)).toEqual({
+      agent: "engineer",
+      author: { kind: "person" },
+      at: "09:00:00",
+    });
+  });
+
+  // The body's `/<agent>` line is the node's standing request: a push is part of the
+  // work it asked for, not an answer to it. Consuming it would hand the pull request
+  // back to its opener on every push.
+  test("the body's own line is not an ask a push can answer", () => {
+    expect(latestAsk("/reviewer", [], askReaders)).toBeUndefined();
+  });
+
+  test("a thread whose only request is a dispatch marker has no ask", () => {
+    expect(latestAsk("", [timed("08:40:20", machine("DISPATCH engineer"))], askReaders)).toBeUndefined();
+  });
+
+  // The one comment that stops the walk. Routing a newer push's answer to an OLDER
+  // asker would be wrong in a way dispatching nobody is not, so an ask the thread
+  // cannot attribute ends the search rather than being stepped over.
+  test("machinery that asks without naming its author is not routable", () => {
+    const thread = [timed("08:30:00", human("/reviewer")), timed("08:35:00", machine("/engineer"))];
+    expect(latestAsk("", thread, askReaders)).toBeUndefined();
+  });
+
+  // The shaping is the same one every reader uses, so a comment the guard is
+  // removing cannot answer this question either.
+  test("a person's comment the guard is removing cannot become the ask", () => {
+    const thread = [
+      timed("08:40:00", machine("RESULT handoff BY reviewer\n/engineer")),
+      timed("08:41:00", human("/atomaton")),
+    ];
+    expect(latestAsk("", thread, askReaders)).toEqual({
+      agent: "engineer",
+      author: { kind: "agent", agent: "reviewer" },
+      at: "08:40:00",
+    });
+  });
+
+  test("an entry with no time yields an ask with none", () => {
+    expect(latestAsk("", [human("/engineer")], askReaders)).toEqual({
+      agent: "engineer",
+      author: { kind: "person" },
+      at: "",
+    });
+  });
+
+  test("an ordinary comment is not an ask", () => {
+    expect(latestAsk("", [timed("08:00:00", human("looks good"))], askReaders)).toBeUndefined();
   });
 });

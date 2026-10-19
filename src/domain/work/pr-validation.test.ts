@@ -257,3 +257,178 @@ describe("a run a person asked for", () => {
     expect(decide("failure").next?.agent).toBe("engineer");
   });
 });
+
+/**
+ * A request the push answered.
+ *
+ * The rule this pins, from #219: **an ask is consumed when the change answering it
+ * is pushed, and control returns to whoever asked.** The reviewer asks the engineer
+ * to fix something; the engineer pushes the fix; the next green validation must hand
+ * the answer back to the REVIEWER -- not re-run the engineer on a request it already
+ * fulfilled, which is what left #211's pull request green and unattended from 08:45
+ * to 16:24 while the machinery waited for a person.
+ *
+ * `latestAsk` carries the newest ask somebody stands behind (a person's command, an
+ * agent's directive) and when it was made; `headCommittedAt` is when the commit this
+ * validation judged was created. The commit postdating the ask is what makes the
+ * push the answer.
+ */
+describe("a request the push answered", () => {
+  const ASKED = "2026-02-19T08:40:00Z";
+  const PUSHED = "2026-02-19T08:43:02Z";
+
+  // The #211 shape, verbatim: the reviewer's directive asking for a fix, then a push
+  // that fulfilled it, then a green run. What the thread still asks for is the
+  // engineer -- and that is exactly the request the push answered.
+  test("a green run returns to the reviewer whose directive the push answered", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
+      headCommittedAt: PUSHED,
+    });
+    expect(outcome.verdict).toBe("passed");
+    expect(outcome.next?.agent).toBe("reviewer");
+    expect(outcome.summary).toContain("reviewer");
+  });
+
+  // The other half of the rule, stated for a person's request: a person who asked
+  // for the fix is owed the answer themselves, the same rule a red run already
+  // follows through `askedByPerson`. Nobody is dispatched, and the caller's
+  // unattended notice is how they hear about it.
+  test("a green run after an answered person's request dispatches nobody", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      latestAsk: { agent: "engineer", author: { kind: "person" }, at: ASKED },
+      headCommittedAt: PUSHED,
+    });
+    expect(outcome.verdict).toBe("passed");
+    expect(outcome.next).toBeUndefined();
+    expect(outcome.summary).toContain("person");
+  });
+
+  // The body's own `/<agent>` line is the standing request, never an answerable ask:
+  // a push is part of the work it asked for, not an answer to it. Consuming it would
+  // hand the pull request back to its opener instead of the reviewer on every push,
+  // which is the regression this guard exists for.
+  test("a standing request is not consumed by a push, and still routes to the reviewer", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      headCommittedAt: PUSHED,
+    });
+    expect(outcome.next?.agent).toBe("reviewer");
+  });
+
+  // The ask was made ABOUT the commit, not answered by it: the person asked for a
+  // re-run on work that already existed (#235's first validation). The ask stands
+  // and routes as it always did -- and the thread's newest request there names the
+  // engineer, which is what `reviewerAgent` carries here.
+  test("an ask the commit predates is not answered, and routes by the standing request", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      reviewerAgent: "engineer",
+      latestAsk: { agent: "engineer", author: { kind: "person" }, at: "2026-02-19T09:00:00Z" },
+      headCommittedAt: PUSHED,
+    });
+    expect(outcome.next?.agent).toBe("engineer");
+  });
+
+  // Unknown is not old. An unreadable time on either side leaves the standing
+  // request routing, which is the behaviour that predated the question.
+  test("an unreadable commit time or ask time falls back to the standing request", () => {
+    const ask = { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED } as const;
+    expect(
+      decideValidationOutcome({ conclusion: "success", ...agents, latestAsk: ask, headCommittedAt: "" }).next?.agent,
+    ).toBe("reviewer");
+    expect(
+      decideValidationOutcome({
+        conclusion: "success",
+        ...agents,
+        latestAsk: { ...ask, at: "" },
+        headCommittedAt: PUSHED,
+      }).next?.agent,
+    ).toBe("reviewer");
+    expect(
+      decideValidationOutcome({
+        conclusion: "success",
+        ...agents,
+        latestAsk: { ...ask, at: "not-a-date" },
+        headCommittedAt: PUSHED,
+      }).next?.agent,
+    ).toBe("reviewer");
+  });
+
+  // Second precision, so a tie is not an answer.
+  test("a commit as old as the ask is not an answer", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
+      headCommittedAt: ASKED,
+    });
+    expect(outcome.next?.agent).toBe("reviewer");
+  });
+
+  // The bound the issue names: one ask cycles at most once. A SECOND push judged
+  // while the same ask is still the newest returns to the asker AGAIN -- it can
+  // never swing back to the engineer, because consumption is per ask, not per
+  // validation. A new cycle needs a new directive, which is a new ask.
+  test("a second push under the same ask still returns to the asker, never to the engineer", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
+      headCommittedAt: "2026-02-19T16:30:00Z",
+    });
+    expect(outcome.next?.agent).toBe("reviewer");
+  });
+
+  // Each cycle of the review loop routes by ITS own ask: the second directive the
+  // reviewer writes after the first re-review is the newest ask, and the second
+  // push answers that one.
+  test("a second directive answered by a second push routes by the second ask", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: "2026-02-19T09:50:00Z" },
+      headCommittedAt: "2026-02-19T10:10:00Z",
+    });
+    expect(outcome.next?.agent).toBe("reviewer");
+  });
+
+  // A red run is untouched by all of this: the failure routing is the origin
+  // agent's, and an answered ask changes nothing about a check that failed.
+  test("a failed run is unaffected by an answered ask", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "failure",
+      ...agents,
+      latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
+      headCommittedAt: PUSHED,
+    });
+    expect(outcome.verdict).toBe("failed");
+    expect(outcome.next?.agent).toBe("engineer");
+  });
+
+  // The engineer ended without pushing -- the branch #219 asked to decide. Its run
+  // took the request up and gave the node back, which is the ending's own routing;
+  // nothing here re-dispatches anybody on a request a run already worked and
+  // returned. The ask stays consumable: when the engineer's later fix does land,
+  // THIS test's shape -- a green run under an answered ask -- hands it to the
+  // reviewer who asked for it.
+  //
+  // `reviewerAgent: "engineer"` mirrors the production coupling: with the directive
+  // still the newest request, the thread's newest request names the engineer.
+  test("an ask no push answered is not consumed by a run that took it up", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      ...agents,
+      reviewerAgent: "engineer",
+      latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
+      headCommittedAt: "2026-02-19T08:30:00Z",
+    });
+    expect(outcome.next?.agent).toBe("engineer");
+  });
+});

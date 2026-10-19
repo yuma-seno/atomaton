@@ -287,6 +287,97 @@ export function latestRequestedAgent(body: string, comments: readonly ThreadEntr
 }
 
 /**
+ * Who made an ask, as `latestAsk` reports it.
+ *
+ * A person's command and an agent's hand-off directive are the two asks somebody
+ * stands behind: a push that answers either can be handed back to its author. The
+ * machinery makes requests too -- the dispatch marker -- but a marker is the
+ * machinery TAKING UP an ask rather than one it is making, so there is nobody to
+ * return its answer to, and it is no author here.
+ */
+export type AskAuthor = { kind: "person" } | { kind: "agent"; agent: string };
+
+/** The newest ask in a thread that a push could answer, as `latestAsk` returns it. */
+export interface LatestAsk {
+  /** The agent the ask names. */
+  agent: string;
+  /** Who made it -- and who therefore judges the answer to it. */
+  author: AskAuthor;
+  /**
+   * When the ask was written, as the entry carried it. Empty when the entry had no
+   * time, which a caller must treat as unreadable rather than as "very old".
+   */
+  at: string;
+}
+
+/**
+ * How to read the agent a machinery comment was written by.
+ *
+ * Extends `TurnReaders` because the question is adjacent to the turn's without
+ * being one of it: the runner tags its result comment with the agent that produced
+ * it, and that tag's wire format is the caller's (`adapters/github/tags.ts`), not
+ * this module's.
+ */
+export interface AskReaders extends TurnReaders {
+  /** The agent the machinery tagged this comment as written by, or "" when it did not. */
+  authoringAgent: (body: string) => string;
+}
+
+/**
+ * The newest ask a person or an agent made in a thread, with who made it and when.
+ *
+ * ## Why the dispatch markers are not asks
+ *
+ * `latestRequestedAgent` reads them as requests, and rightly so for the turn: a
+ * marker is the node being handed to an agent. But the marker is the machinery
+ * taking up a request, not one it is making -- the ask it took up sits in the
+ * comment before it. This is the question "who asked, so the answer can be handed
+ * back to them", and a marker has no author to hand anything back to. So the walk
+ * skips markers and finds the ask underneath: the reviewer's directive, the
+ * person's command.
+ *
+ * ## Why the body is not an ask either
+ *
+ * The body's `/<agent>` line is the node's standing request: it asks for the work,
+ * and a push is part of that work, not an answer to it. Reading it as consumable
+ * would hand the pull request back to its opener on every push; the standing
+ * request is routed instead by `latestRequestedAgent`, which dispatches the named
+ * agent and is the caller's fallback when this returns undefined. Only an ask
+ * somebody COMPLETED a turn by making -- a person's command, an agent's directive
+ * -- is one a push can answer.
+ *
+ * ## The one comment that stops the walk
+ *
+ * Machinery that asks without saying who it is for -- a directive-carrying comment
+ * with no authoring tag -- returns undefined rather than being walked past. The
+ * asks under it are older, and routing a newer push's answer to an older asker
+ * would be wrong in a way dispatching nobody is not. Undefined is the caller's cue
+ * to route by the standing request, which is the behaviour that predated this fold.
+ *
+ * Entries may carry `at` (the comment's creation time). The ask reports it, so the
+ * caller can tell an ask the push postdates from one it predates; an entry without
+ * one yields an ask with `at: ""`, which the caller must treat as unreadable.
+ */
+export function latestAsk<T extends ThreadEntry & { at?: string }>(
+  body: string,
+  comments: readonly T[],
+  readers: AskReaders,
+): LatestAsk | undefined {
+  const { comments: kept } = shapedThread(comments, readers);
+  for (let index = kept.length - 1; index >= 0; index -= 1) {
+    const entry = kept[index]!;
+    const agent = readers.requestedAgent(entry.body);
+    if (agent === "") continue;
+    if (readers.isDispatchMarker(entry.body)) continue;
+    if (entry.isHuman) return { agent, author: { kind: "person" }, at: entry.at ?? "" };
+    const author = readers.authoringAgent(entry.body);
+    if (author === "") return undefined;
+    return { agent, author: { kind: "agent", agent: author }, at: entry.at ?? "" };
+  }
+  return undefined;
+}
+
+/**
  * Whether an agent was ever dispatched onto this node, from its thread.
  *
  * The `atomaton/launched` label used to answer this, and it was written BEFORE the
