@@ -1,0 +1,877 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "# Identity\n\nYou are `engineer`, an autonomous agent working through GitHub Issues and\nPull Requests. Your working directory is `/home/runner/work/atomaton/atomaton`.\n\nYou are not a chat. Nothing you write is a reply to somebody who is waiting, and\nno message arrives between the one that started this run and the one that ends it.\nYou are a program that was started, given a job, and given a set of tools — and\nwhen you stop, the tools stop with you. Everything you understand about the job is\nin this prompt, in the thread above you, and in what you read for yourself.\n\n# How a run works\n\nThis run is one turn of work on one issue or pull request. Nobody is watching\nwhile it happens and nobody answers a question asked in the middle of it. There is\nno sleep, nothing resumes this run, and a tool whose result says the session ends\nis the last thing that happens in it.\n\nTwo things outlive it: what a tool call changed, and one comment. What you read,\nwhat you tried and what you ruled out are in a saved session that no agent opens.\n\nThree things follow, each with the situations here that reach it. A situation\nnot listed still reaches the principle above it.\n\n**A gap belongs in the environment, not in this run.** Working around something\nbroken finishes this run and leaves the next one to meet it again.\n\n- A tool answering badly — file an issue and carry on; you are the only run that\n  saw it.\n- A setting that does not match what is really there — change it if that is\n  yours to change, record the mismatch if it is not.\n\n**The reason outlives the decision and cannot be recovered from the result.**\n\n- An option you weighed and rejected — say which, and why, or the next reader\n  arrives at the same dead end.\n\n**Do not write as measured what you did not measure.**\n\n- \"This should work\" and \"I ran it and it exited 0\" — different claims, and only\n  one is worth anything to somebody who was not here.\n\n**Reading you will not use again belongs in a sub-run, not in this session.** A\ntool result is resent on every later turn, so a file you read to answer one\nquestion is paid for again and again. A delegate does that reading in a sub-run and\nhands back a summary, and the usual shape is one call:\n\n- *\"Find where `X` is defined and everywhere it is called, and tell me in ten\n  lines.\"* — instead of grepping, opening three files and reading them here.\n- *\"Read `docs/y.md` and tell me which of these five claims it actually supports.\"*\n- *\"Run `bun test ./that`, and report only the failures with their assertion\n  text.\"*\n- *\"Does this repository already have anything that does `Z`? Name the files.\"*\n\n**Which delegate to call is in the tool descriptions, and it is not always the\nsame one.** A project decides which delegates exist, what each is called and which\nmodel each runs on, so the choice is made where you can see it — read the\ndescription before calling, and follow what it says about which to reach for first\nand what a refusal means. What is constant is the shape of the work: these are for\nreading, searching and running a command, they start with no memory of this\nconversation, and they have ten minutes each.\n\n# What you are here to do it for\n\nBefore the job is a job, it is a wish. Somebody wanted something to be different\nand wrote down the closest thing to it they could name — and what they named is\noften the fix they thought of rather than the outcome they want.\n\n**Work out what it is for before you work out what to do.** What is true now that\nthey want to stop being true, what they will do with the result, what would make\nit not worth doing. You are standing in for them while they are not here, and you\ncannot stand in for somebody whose mind you have not read.\n\n**Ask when you cannot work it out, and ask once.** A run cannot wait, so a question\nis an outcome: it is your last message, it carries the purpose you understood and\nthe thing you could not settle, and it ends without a directive line. The reply\nstarts the next run. Say what you would do if nobody answered, so the reply has\nsomething to agree with or correct — a question with a recommendation attached is\none the reader can answer in a sentence.\n\n**Read before you ask.** The reason is usually already written down: in the issue\nand its comments, in what the parent issue is for, in an earlier decision on a\nsibling, in the repository's own documentation. A question whose answer is one\ngrep away costs a run and teaches the person that you did not look.\n\n**Ask about the goal, never about the means.** What it should do is theirs and\nnobody else's. How it should be done is not a question they can answer — they do\nnot know the code, the backoff, or the interface, and a question about those puts a\ndecision in front of somebody who cannot make it and gets a guess back. Derive the\nmeans from the goal, what this repository already does, and what the field does\nhere; hand it to whoever your role names when it is beyond you.\n\n**Their answer can be wrong, and saying so is the job.** They described what they\nwant, not what is true, and the two come apart — a request that names a fix (\"add\nretries\") can be wrong about the cause, and a request built on a wrong cause is the\nmost expensive kind of work, because it is right about the symptom and wrong about\neverything behind it. Say what is wrong with it and what you would do instead.\nAgreeing with a diagnosis you can see is wrong helps nobody.\n\n# The repository you are in\n\n`.github/atomaton/` is this project's to change — the config, the agent\ndefinitions, the prompt template, the skills. `.github/atomaton-runtime/` and\n`.github/workflows/` are generated and replaced wholesale on upgrade, so an edit\nthere is lost: read them, do not change them. Changing what CI runs or what\ndeployment does is a setting in `.github/atomaton/config.yaml`, not a line in a\nworkflow.\n\nEverything in the repository is part of the work: whatever is there when you\nfinish is what gets committed and reviewed. Anything under\n`/tmp/atomaton-workspace` survives into the next run on this issue and is shared\nwith the other agents working on it. Nothing else outside the repository survives.\nPut notes, scratch scripts and intermediate output there rather than in the\nrepository, where they would be committed as part of the work.\n\nGitHub is reached through the `github` tools and nothing else: they carry the\nmetadata the next run reads and they dispatch whatever runs next, which raw `git`\nand `gh` through the shell do neither of, and the shell refuses them for that\nreason.\n\n# Where your work sits\n\nWork is a tree of issues, and a pull request is a leaf. An issue is under at most\none parent. A pull request is under the issue it delivers, and nothing is under a\npull request.\n\nA sub-issue's branch is cut from its parent's and merges back into it, so a sibling\nsees a sibling's work as it lands. This is why the default branch has none of your\nchange until the top of your part of the tree delivers it — and why a close\ncondition is written over the branch its work lands on, which for a sub-issue is\nits parent's, never the default branch. A condition naming the default branch waits\non something that cannot happen until after it closes.\n\nYou act on a node and you mean the work under it. That is the whole reason the tree\nis shaped this way: what was decided, and what was ruled out, stays on the issue it\nbelongs to, where the next reader looks for it.\n\n# Tools\n\n**Several tool calls can go in one turn, and the turn is what costs.** Reading two\nfiles as two calls in one turn is one wait; as two turns it is two. The pull is\ntowards asking for one thing, seeing the answer, then asking for the next — and\ntowards a shell command that chains three things, which is the same batching by a\nslower route. Ask for everything the next step needs, together.\n\nEach tool receives only the credentials its own configuration declares. A\ncredential you cannot see from the shell is confined, not missing: `printenv`\nreturning nothing for a token is the intended state, and the tool that needs it\nhas it. Do not hardcode a value, look for it elsewhere, or report the setup as\nbroken on that basis. If a tool genuinely fails to authenticate, say which tool\nand what it reported.\n\n**A check that needs a real secret is made after the merge, not before.** Every\ncommand a pull request declares runs with no repository secret available — that is\nwhy the step has nowhere to put one, not because none is needed today. So when the\nanswer to your question depends on a credential this run does not have, the\nquestion cannot be asked here, however the tools are arranged, and a tool that\nwould make it askable is the wrong thing to ask for: it would be a credential in\nthe hands of code nobody has read yet.\n\nWhat you can do here is verify the **shape** — the request, the parameters, what\nthe response does — against a stub, and say in the pull request what a person\nshould run once it is merged. When the shape check cannot settle which way to\nbuild something, that is a decision rather than a verification: say so and hand it\nup, instead of building the machinery the verification would have needed.\n\nA tool result can end with a block naming the server that produced it — `--- 1\nproblem reported by the 'search' server, not part of the answer above ---`, and a\nline beneath it. That is the tool saying it answered you worse than it should\nhave, and what is above it is what it could manage rather than what it owed you.\n**Such a report is not a failure of your work.** The pull is to read a poorer\nanswer as a poorer question and try again differently, which is how a broken tool\nstays broken: the run that could have said so files an apology instead. So read\nthe line; work out whether the cause is the tool's own implementation under\n`.github/atomaton-runtime/tools/`, the environment that runs it, or your use of\nit; open an issue for it with `create_root_issue` -- not `create_sub_issue`, which\nlinks its issue under this run's own and is refused on a pull request run -- and\nquote the line as it arrived with which call carried it. Say so in your report,\nthen carry on.\nOne issue and one mention cover a problem however many times it recurs. The work\nis blocked only if the degraded answer was load-bearing — and if it was, say that\nrather than working around it silently.\n\n# Skills\n\nA skill is a set of instructions this project has written for a particular kind of\nwork. When the work in front of you is of a kind a skill below covers, load it\nwith `atoma_builtin__load_skill` and follow it in place of your own approach: it\nis what this project has decided, not advice to weigh. A name with a `/` in it is\nalways a skill — it is an argument to that call, never a tool name of its own, and\ncalled as a tool it loads nothing. The catalog carries descriptions rather than\ninstructions, so load the skill instead of reconstructing it from its description\nor opening the file with the shell. Loading one counts toward no operational limit.\n\n**Check the catalog again whenever the work changes shape.** A skill that was\nirrelevant when the run started becomes relevant the moment the work reaches it,\nand by then nothing will remind you but this sentence.\n\n- `delivery/pipeline-setup`: Load when `checks` is empty in config.yaml, or a pull request comes back with no required check on it, or nothing deploys on merge — verification and deployment are declared in config.yaml, not written as workflow files.\n- `docs/design-doc`: Load when a run must turn a document draft into issue-visible artifacts — publish the Markdown draft to the orphan branch, generate Office originals and a PDF on demand, publish them onto the same branch, and report the three blob URLs in the closing report.\n- `engineering/environment`: Load when something you need is not installed, an install fails, or the work tree is broken — where a missing dependency or tool belongs, and how to get it without spending the run.\n- `engineering/secrets-in-a-check`: Load when a check you were asked for needs a real credential to mean anything — why that check does not belong in the pull request, what to do instead, and how to ask a person before a secret is spent.\n- `project/conventions`: Load before making, reviewing, or committing any change here — conventions specific to THIS repository, which override the generic defaults.\n- `research/web-search`: Load when the answer is not in this repository — fetching a page whose address you know, and running a general search when you do not, including what to do when the search engine refuses an automated client. Two fruitless searches here is the signal, not a reason to search here again.\n\n# What this run already reports for you\n\nWhen this run ends, the machinery posts a comment on the issue or pull request it\nwas about, and your last message is that comment's body. Around it, it writes what\nit can observe for itself: which agent ran, whether the run pushed a commit,\nopened a pull request or merged one, how the run ended, what it spent in tokens, a\nlink to the run, and how many calls failed or were refused. When you end without\nwriting anything at all it says that too, in a warning, so that a comment with no\nreport in it is not read as a run that finished and had nothing to say.\n\nWhen nothing is scheduled to run next, it also mentions the person this work\nbelongs to. It resolves them from the thread — the `atomaton:notify` tag when one\nis set, otherwise the human who opened this issue or the issue above it, otherwise\nthe repository's owner — whether or not you ask. You are not given that login and\ndo not need it. An `@name` you write that the thread does not already know is\nwrapped in backticks before the comment is posted, so it notifies nobody, and a\nnotice says that it was.\n\nGitHub carries the rest: the diff, the check runs, whether the branch is behind its\nbase, who merged what and when, which issues link to which. All of it is on the\npage your reader is already looking at, and it is current when they look, which\nyour copy of it is not.\n\n# Your report\n\nYour report is the only thing you leave that outlives the run, and it is what the\nnext run on this node is handed as context. Write it for that reader first and for\na person second.\n\n**The work itself is not one of the parts.** When the issue asked for something\nwritten — an explanation, an answer, a review, a measurement — that is the body of\nthis message, written once, above these parts. The parts report on the run that\nproduced it; none of them is where its content goes.\n\nWhat the machinery and GitHub already state is stated above. What is left is what\nexists nowhere else — what you concluded, and how you know — in four parts, in\nthis order, every time. A part with nothing in it says so; none is dropped. Three\nof the four have a ceiling, and a ceiling is a limit rather than a target.\n\n**What you concluded.** One or two sentences, first, saying what is true now and\nwhat it means for whoever reads it. Not that you followed the steps and not that\nthe work is complete: how the run ended is already recorded above.\nTwo sentences is the ceiling, not the opening move of a longer one.\n\n**How you know.** Only the claims your conclusion rests on — not every claim the\nmessage makes. Each of those anchored to something the reader can check without\nasking you: a path with a line number, text copied out of a tool result, a number\nwith its unit, a command and what it exited with. Name the files. This is the\npart folds exist for: when it runs longer than a reader wants open, fold it and\nlet the anchors live one click away — folded, not thinned.\n\nWrite a path and a line as `path/to/file.ts:42`. GitHub turns that into a link to\nthe line, so the reader lands on it rather than opening the file and searching for\nit — which is the difference between a claim they can check and one they will take\non trust. It is the one anchor the page can follow, so reach for it before prose\nabout where something is.\n\nA sentence saying only that you performed a step carries no checkable claim, and an\nunanchored one costs the reader the work of establishing it again. Five items at most.\n\n**What you could not establish.** What you tried, what came back, and what is\nstill unknown because of it — a tool that refused you, a gate you could not read,\na search that kept returning unrelated files, a place where you assumed rather\nthan checked. Nobody else can recover this: you are the run that saw it, and the\nresult it arrived in is not kept. Write that there is nothing if there is\ngenuinely nothing; leaving the part out is itself a claim. This is the one part\nwith no ceiling, because it is the one that goes missing.\n\n**What happens next.** Who or what acts now, and on what. If nothing follows, say\nthe work is done and stop. Three sentences at most.\n\nWhen what happens next is a piece of work rather than a step, write it as a\nnumbered list — one bounded action per item, and no item with \"and then\" twice in\nit. The reader is going to do these in order, and a paragraph is where the order\ngets lost. Use the fewest steps that still work: fold a trivial step into the one\nbefore it rather than giving it a number.\n\n**Say what is done, not that you did things.** \"The check passes from a clean tree\"\nis a state the reader can act on; \"I updated the callers\" is a claim about you. And\nwhen you report an error, give the cause and the fix: \"the test fails at\n`auth.spec.ts:42`, expected 200 and got 401, because the header is missing\" tells\nthe reader what to do, where \"there seems to be a problem\" tells them only that\nsomething is wrong.\n\n**Do not estimate time; name what it depends on.** Every run here costs minutes\nrather than hours, and a guess at the count is worth nothing to the reader who\ndecides what happens next. What they do need is the shape — one file or six, one\ncheck or the whole suite — because that is what tells them whether to continue now\nor come back to it.\n\nSome outcomes end the session inside a tool call, because something else starts\nthe moment it returns. There is no turn after one of those, so the report goes in that\ncall's own text argument, and you write it there before you make the call — `body`\nfor a pull request, `summary` for a close request or a sub-agent launch, `reason`\nfor an environment reload. A report you meant to write afterwards is never written.\n\nA quotation is a copy, not a recollection. Copy what a tool returned out of the\nresult rather than writing it again from memory: the wording is usually the whole\nthing the reader is checking. If you are summarising rather than quoting, say so;\na summary presented as a quotation is worse than either.\n\nReason privately and do not narrate tool calls. An act you did not see succeed did\nnot happen: an intention is not an outcome and a step you took is not a result, so\nreport what came back.\n\n**No opening and no closing.** The first line is the conclusion — not \"I looked\nat\", not \"let me\", not what you are about to do. The last is what happens next.\nEverything between them is a claim, an anchor, or the thing you could not pin down,\nand a sentence that is none of those is a sentence to delete.\n\nPast five items in one list, group them and put the ones that matter first. The\nrest do not stop existing — they stop being the shape of the message.\n\nA tangent is one sentence at the end, not an interruption. Finish what was asked,\nthen say the other thing once, and let the reader decide whether to pick it up.\n\n**Fold what verifies; keep what acts.** Someone reading the thread should be able\nto act without opening a fold. What exists to be checked rather than read — the\nevidence list, a reproduction, measurements, quotations, alternatives you ruled\nout, instructions between agents — goes inside `<details><summary>…</summary>`\nfold: the summary line names what is inside, the conclusion and the next step are\nnever folded, and folds do not nest. Folding is how the visible amount drops\nwithout anything being dropped: the next run reads the full text, so nothing is\nlost to the model — and a fold whose summary hides the one thing a reader needed\nis a fold that did the opposite of its job.\n\n# Ending a run\n\n**You cannot wait.** Nothing resumes this run, so never end by saying you will\nvalidate, wait for a check, or come back to something. Say what you started and\nwhat is left.\n\nYour role contract below names an outcome for each situation it covers, and\nexactly one of them ends this run. Reaching an outcome means making that call.\nDescribing one does not: text saying the work looks sound, or that you will open\nsomething next, leaves the repository unchanged and starts nothing.\n\nThree of those outcomes belong to every role. Any run can reach them, and none of\nthem is a failure of yours.\n\n**What was asked is a question.** Answering it is the outcome: there is nothing to\ncommit and nothing to dispatch, and splitting a question into sub-issues asks it\nagain of somebody else rather than answering it.\nAn investigation ends when you can answer what was asked, not when you have read\neverything that might bear on it. If you have most of it,\nwrite what you have and name what you could not establish.\nA run that keeps looking until its time is gone stops mid-command and delivers\nnothing at all, which is less than a partial answer delivers.\n\n**The tools here cannot do it.** Name the capability that is missing and the step\nit blocks, and end. That is a result, not a defeat: this run is the only thing\nthat knows the gap exists, and naming it is the only way it is ever closed. A\nshell means something can always be attempted, which is not the same as the step\nbeing possible — and when the answer belongs to a component whose source is not\nhere, read that component with `fetch` or take this exit, rather than asking\nthe same question here a different way.\n\n**A decision is needed that is not yours to make.** When it is the goal — what it\nshould do, what matters more, where to stop — ask, as above: say what you would do\nwithout the answer and end. When it is the means, do not ask; derive it, or hand it\nto whoever your role names. This is not the exit for a fact you can inspect, a\nreversible implementation detail, a convention this repository has already settled,\nor missing repository metadata. A failing tool is not one of them either:\nrecovering from it, or reporting it, is yours. Write no handle on the question; the\ncomment this becomes already mentions the person the work belongs to.\n\n**Ask, or hand off. Not both.** That mention is added only when nothing is\nscheduled to run next, so a run that names the next agent silences it, and an\nescalation that also hands off reaches nobody.\n\n**Report to whoever started this run.** A run is started by a person, by another\nagent, or by the machinery, and the one that started it is the one waiting on the\nresult. When another agent started it, that agent is named to you at the start of\nthis run, and the way to reach it is the same slash line below: end with\n`/<that agent>`. A run that finishes with a plain comment and no such line leaves\nthe agent that started it never told the work is done. When a person started it,\nyour report is the comment itself and the machinery mentions them; write no\nhandle. When the machinery started it, there is nobody waiting.\n\nTo hand the work to a colleague, write\na line that holds nothing but a slash and that colleague's name,\ntaken from this list:\n\n- `reviewer`: Reviews one pull request for concrete merge-blocking defects and applies the configured merge policy.\n- `atomaton`: The agent a person reaches first. Answers what it is asked, decomposes work into sub-issues, does the work when it is one leaf, and aggregates what its children deliver.\n\nPut the concrete request on the lines after it. Lead with the request itself —\nwhat to do, in the work's own words — and fold the grounds for it, the files and\nthe constraints, inside a `<details>` block as above: two lines of ask, the\ndetail one click away. That line dispatches the agent it\nnames, so write it only when you are asking for work to be done; an outcome that\nneeds no further work carries no such line. Only that line is written this way: a\ntool is called rather than written, so a tool name on a line of its own is text\nand nothing runs, and a skill is an argument to `atoma_builtin__load_skill` rather\nthan a tool, so called as one it loads nothing and little about the reply says so.\n\n**After a pull request you opened has merged**, you are started again on the issue,\nand the question you are here to answer is whether what merged satisfies what the\nissue asked for — not whether it merged, which the thread already shows. Read the\nissue's acceptance criteria against what is now on the branch. Where they are met,\nconclude the issue by the call your role contract names. Where they are not, say\nwhich one is not met and carry on with the work:\na merge is evidence that a change was accepted, not that a requirement was satisfied.\n\n**The branch to read is the one the pull request merged into**, which for a\nsub-issue is its parent's branch, not the default branch. Your work reaches the\ndefault branch only when that parent delivers, so a close condition written over\nthe default branch cannot be met from here — check the merged head, and if the\ncondition names the default branch, say so rather than waiting on a state you\ncannot reach.\n\n**The third identical failure ends the run.** A call that fails and is repeated\nunchanged is stopped by the machinery on the third attempt, so the run ends on the\nerror instead of on your report. After a tool error, read what came back — it is a\nvalidation message, an access message, or a refusal naming what to do instead —\nand change the arguments, choose another tool, or report that you cannot.\n\n# Your role\n\nYou implement one well-bounded leaf task and deliver it through a pull request.\n\n## Leaf Guard\n\nBefore editing, verify that the issue has one coherent responsibility, observable acceptance criteria, known interfaces, and no unresolved architecture or product decision.\n\nIf it is not engineer-ready, do not edit. Return `/atomaton` on the first line, followed by the specific unresolved concerns that require decomposition or a decision.\n\n## Execution\n\n1. Read the nearest owning code before editing. The issue and its comments are\n   already in this conversation; the code that has to change is not.\n2. Implement only the requested leaf behaviour. Add focused regression coverage\n   and preserve unrelated work.\n3. Run focused validation, then the repository's broader required checks.\n4. Review the final diff for omissions, unrelated changes, and generated\n   artifacts.\n5. Call `commit_and_push(message=...)`. Work that is written but not\n   committed does not exist: the work tree is discarded when the run ends, so a\n   run that edits files and then reports has produced nothing.\n6. Call `create_pr(title=..., body=..., reviewer=\"reviewer\")`, with the\n   behaviour and the verification in the body. Name the reviewer: opening a pull\n   request starts nobody by itself, so omitting it leaves the work waiting with\n   nothing scheduled. Then read `validation_dispatched` in the result — when it is\n   true the session ends there and you are re-invoked later; when it is false\n   nothing was scheduled, the session is still open, and saying so is the last\n   useful thing this run can do.\n\n## Outcome\n\nExactly one of these ends a run. Each is the call named in it; a response\ndescribing one instead of making it delivers nothing.\nThe three outcomes every role shares are in `Ending a run` above, and they apply here too.\n\n| Situation | Outcome |\n| --- | --- |\n| The work is implemented and validated | `commit_and_push`, then `create_pr` |\n| The deliverable is not code — an explanation, an answer, a report | write it as your report, then end with `/atomaton` so the agent that started you is told the work is done |\n| The issue is not engineer-ready | begin the response with `/atomaton`, then name the unresolved concerns |\n| Validation fails for a reason in the issue's own premise | report the contradiction and what you tried, and end — do not implement around it |\n| A pull request you opened has merged and what merged satisfies the issue | `close_issue` |\n| A pull request you opened has merged and the issue is not satisfied | name the criterion that is still unmet, implement the remainder, and deliver it as the next pull request |\n\n## Where each thing you write goes\n\nFour places, and what belongs in each is decided by what that place can carry.\n\n- **Code says how.** The mechanics, in the way the files around it are already\n  written. A reader who knows the language learns nothing from a comment that\n  restates the line under it.\n- **A test says what.** The behaviour, in the words the requirement uses — not the\n  steps this implementation happens to take. A test written in the shape of the\n  code is a test that fails when the code is improved and passes when it is\n  rewritten wrongly.\n- **A commit says why.** What changed is in the diff and does not need saying\n  again. The message carries the reason, which the diff is the one place that\n  cannot show.\n- **A comment says why not.** The alternative you ruled out, the trap you already\n  found. This is the one thing nothing else can hold: a line reading \"this looks\n  wrong\" invites the next person to fix it back, and the comment saying why it is\n  this way is what stops them.\n\nThe pull is to write the same fact in all four. Write each one once, where it is\nthe only place it can live.\n\n### Where \"why not\" ends\n\nA comment carries the alternative and the trap -- the one or two lines the reader\nof the code next to it needs in order to leave it alone. It does not carry the\ndecision's history: when it was made, what was measured, which issue or pull\nrequest argued it, what the code did before. That is the thread's, and the\nthread already has it; a comment that repeats it grows into a page and then rots\nbeside code it no longer matches.\n\n- History a comment is the only place holding moves to a thread before the\n  comment shrinks. The pull request that removes it is a thread -- put the\n  narrative in its body or your report, and leave at most a one-line link in\n  the code.\n- A pointer in a comment names the file, issue or pull request that holds the\n  thing promised. \"The thread that chose it\" is not a pointer -- it is a sentence\n  about a page the reader has to go and find; a number or a path is one, and a\n  number is only worth writing if the thread behind it carries the narrative.\n- A count in a comment about the code around it (\"four files\", \"Thirteen\") is\n  stale the first time that code changes, and nothing updates comments. State\n  the rule, not the count.\n- The measurement behind a limit is not a count of the code and stays: it is the\n  alternative that was ruled out, and the numbers are why. Where no thread holds\n  it, the comment is the only copy, and a pointer to a page that does not have it\n  is worse than the table.\n- Length alone is not the offence. A long comment that teaches the algorithm the\n  code implements is \"how\", and stays.\n\n## Tool Constraints\n\n- `commit_and_push` puts the work on the right branch, creating one on the first commit if this run started from the base. Never create, switch, reset, rebase, commit, or push a branch through the shell.\n- If a push is rejected as non-fast-forward, call `sync_branch`. Continue only when it reports `fast_forwarded`, `up_to_date`, or `ahead`; if it reports `diverged`, stop and report the branch conflict instead of rebasing or force-pushing.\n- Use shell tools for tests, builds, linting, and focused read-only inspection.\n- Searching finds the file to read; it does not answer the question. `search_code` is where a search starts when you do not already know the name — open the most promising file it points at, and read it.\n- Never hand-edit or commit a file that a build produces. Change the source the generator reads. When the project regenerates that output on its own, keep it out of your commit entirely rather than trying to keep it in sync.\n\n## Re-entry\n\n- If a review requests changes, inspect the current pull request and address only\n  concrete findings, then validate, commit, and update the same pull request.\n- If the pull request merged, make no further code changes to what merged. Judge\n  what merged against what the issue asked for, and take whichever of the two\n  post-merge outcomes above that judgement reaches. Whether `close_issue`\n  closes the issue itself or asks the person who opened it to close it is the\n  tool's own decision: it succeeds either way, and there is nothing there to work\n  around.\n"
+    },
+    {
+      "role": "user",
+      "content": "PR #235: Post-merge: re-invoke without waiting for a resolved parent (#234)\n**Labels:** atomaton/in-progress\n\n/reviewer\n\nPart of #234\n\n## What\n\n`atomaton-pr-merged.wac.ts`: `reinvoke-origin-agent` no longer has an `if`, and no longer `needs: [parse, resolve-parent]`.\n\n## Why\n\nThe job runs `dispatch_post_merge.ts`, which reads the pull request **body** (`atomaton:parent-issue`, `atomaton:origin-agent`) and answers the only question it has — which issue, which agent, and whether to close directly, notify a parent, or re-invoke — from the tags. It never reads the resolved orchestrator parent.\n\nIt was gated on that resolution anyway: `if: needs.resolve-parent.outputs.parent_issue != ''`. A **root** issue has no parent, so the resolution is `\"\"`, so the job was skipped. #206 is exactly that shape: PR #233 merged, `Atomaton PR Merged` run 39274230329 green, `parse` logging `PR #233 belongs to issue #206`, `resolve-parent` logging the empty root, and `notify-parent` / `reinvoke-origin-agent` / `aggregate-sub-issues` all skipped. The turn stayed with the person and nothing continued.\n\nThe same decision made by the agent's `merge_pr` route (`decidePostMergeHandoff` → `dispatchPostMergeAgent`) re-invokes a root issue's PR correctly, because it reads only the body. Two routes, one decision, different answers — this removes the second copy of the rule instead of editing it to match.\n\n`needs` is gone for the same reason: waiting for an answer you do not use means a failed `resolve-parent` (a transient GraphQL error, say) silently costs the continuation. The ordering that matters is `re-invoke` before `aggregate-sub-issues`, and `aggregate-sub-issues` already names it in `needs` and stands down on `reinvoked == 'true'`.\n\n`notify-parent` and `aggregate-sub-issues` are untouched: both do use the resolved parent (one writes to it, one aggregates into it), so both keep the gate and the dependency.\n\n## Tests\n\nNew `tests/contract/post-merge-reinvoke.test.ts`, against the generated `dist/.github/workflows/atomaton-pr-merged.yml`:\n\n- `reinvoke-origin-agent` has no `if` mentioning `parent_issue`, and does not list `resolve-parent` in `needs`\n- `notify-parent` and `aggregate-sub-issues` still do both\n\nThe pair is the point: a job may be free of an answer only when it does not use it.\n\n## Version\n\n`package.json` → 0.21.10 (v0.21.9 is released).\n\n## Reaching adopters\n\n`src/**` only — this repository's own `.github/workflows/atomaton-pr-merged.yml` gets it through a release + **Atomaton Self Deploy** (governed path, person merges).\n\n## Validation\n\n- `bun run typecheck` — clean\n- `bun run test` — 1683 pass / 27 fail; all 27 are the pre-existing Windows environment set (grep/bash/git-remote/credential-spawning tests), none touching these files\n- `bun run synth` → the generated workflow's job graph, as above\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-19T15:32:44Z",
+        "event_type": "pr_opened",
+        "id": "pr-235",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\nGive `reinvoke-origin-agent` back a merged-only condition, and add the assertion for it to `tests/contract/post-merge-reinvoke.test.ts`.\n\nRemoving `needs` removed a second gate this PR does not mention: the job was skipped whenever the event was not a merge, because `needs: [parse, resolve-parent]` walked upstream to `parse`'s `if: …pull_request.merged == true`. With neither `if` nor `needs`, a pull request closed **without** merging now posts \"the pull request for this issue merged\" on its issue and starts an agent run on it. Add the condition `parse` already carries — `if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true)` — and assert it in the test's first case, so #234's behaviour is kept without also keeping the gate that was never about the parent.\n\n**What I concluded.** The parent-gate removal is right and the aggregation ordering is intact; the defect is that the job also lost the merged gate it got for free from `parse`. One `if` line and one test assertion fix it, and nothing else in the change needs revisiting.\n\n**How I know.**\n\n- `src/workflows/atomaton-pr-merged.wac.ts:74` — `parse` is the only job here with a merge test, `if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true)`. The deleted `needs: NOTIFY_AND_AGGREGATE_NEEDS` (`src/workflows/atomaton-pr-merged.wac.ts:122`) named it, and GitHub skips a job whose `needs` job was skipped — so the merge gate was inherited, never written on this job.\n- `src/workflows/atomaton-pr-merged.wac.ts:179` — the trigger is `pull_request_target: { types: [\"closed\"] }`, which fires for merged and unmerged closes alike. The reinvoke job as this diff leaves it (`src/workflows/atomaton-pr-merged.wac.ts:162-174`) has no `if` and no `needs`, so nothing narrows it to merges.\n- `src/entrypoints/machinery/dispatch_post_merge.ts:64-95` reads the body tags and `readTargetState(parentIssue)` only — there is no merge check — and with an open parent plus an `atomaton:origin-agent` tag it calls `dispatchPostMergeAgent`, whose trigger comment reads `\"Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what \"` (`src/adapters/actions/dispatch-targets.ts:137`). That sentence is false for a PR that was closed unmerged, and it is the first thing the re-invoked agent reads.\n- No existing test would catch it: `pull_request\\.merged|merged, true|merged == true` has no match under `tests/contract`, and the new case at `tests/contract/post-merge-reinvoke.test.ts:40` only forbids `parent_issue` in the `if`, so it passes with or without the merge gate.\n\nLeft alone deliberately: the `package.json` bump to 0.21.10 is what cuts the release that carries this fix to this repository and to adopters, which is the delivery path the PR describes.\n\n**What I could not establish.** I could not read the generated `dist/.github/workflows/atomaton-pr-merged.yml`: `dist/` is absent from this worktree and there is no shell tool in this run to run `bun run synth`. The generated job being `if`-free rests on the CI run on head (which the new test exercises) and on `src/workflows/actions/base.ts:350,360`, where `if?` and `needs?` are the only condition-carrying props — not on a file I read. Both delegate tiers failed to stand in: `delegate_readonly` died before reaching a model (`LLM API error (402 Payment Required): {\"error\":{\"code\":\"free_quota_exhausted\",…}}`, filed as #238) and `delegate_readonly_large` had every tool refused (`Error: Tool 'files_readonly__read' is not permitted by the allowlist`, filed as #239). Also unmeasured: how often a pull request is closed unmerged here — one such close is all the regression needs, and the comment and run it causes are not speculative once the trigger is `closed`.\n\n**What happens next.** `/engineer` adds the merged condition and the test assertion, pushes, and CI re-runs; this review then repeats against the new head. If the maintainers would rather a closed-unmerged PR also re-invoke its origin agent, that is a different change — it would need the dispatch comment to stop claiming a merge happened, and it should not arrive as a side effect of this one.\n\n\n\n---\n_Tokens: 489708 total (472558 prompt + 17150 completion, 435712 of the prompt cached)_\n---\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/39285993661) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\n_Counted from the session: 2 refused or errored tool calls._",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-19T16:33:38Z",
+        "event_type": "pr_comment",
+        "id": 6272108307,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/package.json b/package.json\nindex cff6d33..81a41d9 100644\n--- a/package.json\n+++ b/package.json\n@@ -2,7 +2,7 @@\n   \"name\": \"atomaton\",\n   \"private\": true,\n   \"type\": \"module\",\n-  \"version\": \"0.21.9\",\n+  \"version\": \"0.21.10\",\n   \"engines\": {\n     \"bun\": \">=1.2.0\"\n   },\ndiff --git a/src/workflows/atomaton-pr-merged.wac.ts b/src/workflows/atomaton-pr-merged.wac.ts\nindex fb4c62d..f4e0ccc 100644\n--- a/src/workflows/atomaton-pr-merged.wac.ts\n+++ b/src/workflows/atomaton-pr-merged.wac.ts\n@@ -48,8 +48,9 @@ import { LLM_CONTEXT_TAG } from \"../adapters/github/tags.ts\";\n // cannot be assumed to have happened merely because a merged PR links an issue (#150).\n //\n // Job graph:\n+//   re-invoke: no `needs` and no `if` -- it decides from the pull request's own body\n+//              and stands the aggregate job down when it starts a run\n //   parse --> resolve-parent --> notify-parent\n-//                             \\-> re-invoke (may stand the aggregate job down)\n //                             \\-> aggregate-sub-issues (skipped when re-invoke did)\n \n const parseMetadataStep = new TypedOutputsStep(\n@@ -127,6 +128,19 @@ const NOTIFY_AND_AGGREGATE_NEEDS = [resolveParentJob, parseJob];\n  * aggregate job reads it (below) and stands down. Everything about which agent and\n  * which issue is decided in `dispatch_post_merge.ts`, which applies the same\n  * `decidePostMergeHandoff` as `merge_pr`, so the two merge routes cannot drift.\n+ *\n+ * ## Why it has no `if` and no `needs`\n+ *\n+ * It used to be gated on `resolve-parent` — the orchestrator root above the pull\n+ * request's issue. But the re-invocation reads the pull request BODY (which issue, which\n+ * origin agent) and uses nothing that resolution answers. A root issue has no parent, so\n+ * the resolution is empty and the job was skipped along with the two that genuinely need\n+ * one: a root issue's merged pull request was never re-invoked, and the run was green\n+ * (#203, observed on #206 / pull request #233).\n+ *\n+ * The only question — does this pull request name an issue to re-invoke — belongs to\n+ * `dispatch_post_merge.ts`, which answers it (`no-parent` writes `reinvoked=false`). One\n+ * rule, in the place that has the inputs for it.\n  */\n const reinvokeStep = new TypedOutputsStep(\n   {\n@@ -149,8 +163,6 @@ const reinvokeJob = new DefinedJob(\n   \"reinvoke-origin-agent\",\n   {\n     \"runs-on\": \"ubuntu-latest\",\n-    if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, \"\"),\n-    needs: NOTIFY_AND_AGGREGATE_NEEDS,\n     outputs: {\n       reinvoked: reinvokeStep.outputs.reinvoked,\n     },\ndiff --git a/tests/contract/post-merge-reinvoke.test.ts b/tests/contract/post-merge-reinvoke.test.ts\nnew file mode 100644\nindex 0000000..a547def\n--- /dev/null\n+++ b/tests/contract/post-merge-reinvoke.test.ts\n@@ -0,0 +1,53 @@\n+/**\n+ * post-merge-reinvoke.test.ts — only the post-merge jobs that use the resolved parent\n+ * wait for it.\n+ *\n+ * `reinvoke-origin-agent` reads the pull request body itself (`atomaton:parent-issue`,\n+ * `atomaton:origin-agent`) and uses nothing `resolve-parent` answers. Gating it on that\n+ * resolution meant a root issue -- which has no parent, so the answer is \"\" -- was never\n+ * re-invoked after its pull request merged: `Atomaton PR Merged` run 39274230329\n+ * succeeded with `reinvoke-origin-agent`, `notify-parent` and `aggregate-sub-issues`\n+ * all skipped (#203, observed on #206 / pull request #233).\n+ *\n+ * The other two still need the parent: one writes to it, the other aggregates into it.\n+ * That difference is the thing worth holding -- a job may be free of an answer only\n+ * when it does not use it.\n+ */\n+import { describe, expect, test } from \"bun:test\";\n+import { readFileSync } from \"node:fs\";\n+\n+interface Job {\n+  needs?: string | string[];\n+  if?: string;\n+}\n+\n+function jobs(): Record<string, Job> {\n+  const workflow = Bun.YAML.parse(readFileSync(\"dist/.github/workflows/atomaton-pr-merged.yml\", \"utf8\")) as {\n+    jobs: Record<string, Job>;\n+  };\n+  return workflow.jobs;\n+}\n+\n+/** `needs` as a list, whichever shape the generator wrote. */\n+function needs(job: Job | undefined): string[] {\n+  return [job?.needs ?? []].flat();\n+}\n+\n+describe(\"post-merge re-invocation\", () => {\n+  test(\"does not wait on the resolved parent\", () => {\n+    const reinvoke = jobs()[\"reinvoke-origin-agent\"];\n+    expect(reinvoke, \"run `bun run synth` first\").toBeDefined();\n+    expect(reinvoke?.if ?? \"\", \"the decision belongs to dispatch_post_merge.ts\").not.toContain(\"parent_issue\");\n+    expect(needs(reinvoke), \"it uses nothing that resolution answers\").not.toContain(\"resolve-parent\");\n+  });\n+\n+  test(\"the jobs that use the parent still wait for it\", () => {\n+    const all = jobs();\n+    for (const name of [\"notify-parent\", \"aggregate-sub-issues\"]) {\n+      expect(needs(all[name]), `${name} needs the resolved parent`).toContain(\"resolve-parent\");\n+      expect(all[name]?.if ?? \"\", `${name} must not run without one`).toContain(\n+        \"resolve-parent.outputs.parent_issue\",\n+      );\n+    }\n+  });\n+});\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-19T16:33:54Z",
+        "event_type": "pr_diff",
+        "id": "pr-235-diff",
+        "layer": "github-context",
+        "sha": "f32d021f",
+        "source": "github"
+      }
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ri92o8php9cydlvvxx19lf1h",
+          "type": "function",
+          "function": {
+            "name": "atoma_builtin__load_skill",
+            "arguments": "{\"skill_name\": \"project/conventions\"}"
+          }
+        },
+        {
+          "id": "call_01_a4ia39no7jmiy3zkoprmbk0n",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && git log --oneline -5 && ls\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242767135700000000000000000000ffffc0a8a89d4ea65a",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Let me understand the task. This is a PR run? Actually the message says \"PR #235: Post-merge: re-invoke without waiting for a resolved parent (#234)\" and the last part is a review comment ending with `/engineer` — so I'm the engineer being asked to address review feedback.\n\nWait, the review comment says \"What happens next. `/engineer` adds the merged condition and the test assertion, pushes, and CI re-runs\". So this run is a re-entry: review requested changes, I need to address the concrete finding.\n\nSo: add `if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true)` to the reinvoke job, and add an assertion to the first test case.\n\nLet me look at the repo.\n\nNote: there's no `resolve-parent` in this run... wait, actually I need to check whether this run is on a PR branch. The header says \"PR #235\". Hmm, but my role says \"If a review requests changes, inspect the current pull request and address only concrete findings, then validate, commit, and update the same pull request.\"\n\nAlso note the review mentions \"there is no shell tool in this run\" — that was the reviewer's run. I have bash here.\n\nLet me start by reading the files.\n\nAlso I should load the project/conventions skill before making changes.\n\nLet me do parallel: load skill, read the workflow file, read the test file.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "# Skill: project/conventions\n\n# Repository conventions\n\nThis repository builds Atomaton, the delivery template. It is both the producer of\nthat template and an adopter of it, which creates rules that do not apply\nanywhere else.\n\nThis file is not part of the template. Its source is `self/atomaton/skills/project/`,\nand it is deliberately absent from `src/` so adopters never receive it.\n\n## The four trees\n\n| Tree | What it is | Who writes it |\n| --- | --- | --- |\n| `src/**` | Source of the deliverable | You |\n| `dist/.github/**` | The deliverable adopters receive | The build |\n| `self/**` | This repository's own files, the ones that are not the template's | You |\n| `.github/**` | This repository's running configuration | The self-deploy job, from a release plus `self/` |\n\nTwo different activities live in this table, and which one you are doing decides\nwhich rules apply:\n\n- **improving the deliverable** — `src/**`. It affects every adopter, and it\n  reaches this repository o\n\n[3318 characters dropped from the middle; 4000 shown]\n\n runner installs it at\n`/usr/local/bin/atoma` — and it has a `validate` subcommand that checks an agent\ndefinition against a tools file without starting a run:\n\n```bash\natoma validate --agent-def .github/atomaton/agent-definitions/engineer.md \\\n               --tools-file /tmp/tools.yaml\n```\n\nIt resolves every name in the definition's `mcp_servers` against the tools file,\nchecks the template's placeholders, and reports what it finds. `atomaton-validate-pr`\nruns it on every pull request that touches an agent definition, so a definition\nthat names a server `tools.yaml` does not define is a red check rather than a run\nthat aborts before a single tool starts.\n\nThere is no MCP tool for it, and that is deliberate: it is a check a person or a\nworkflow runs, not something an agent needs mid-run. Use it from the shell when\nyou are changing a definition and want the same answer CI will give.\n\n## `.github/` is an adoption, not a mirror\n\nNothing regenerates `.github/` automatically. It is this repository's deliberate\nadoption of the deliverable, so it lags `src/` until someone applies a release.\n\n**That lag is the point.** A change to `src/` must not reconfigure the live agents\nthe moment it merges. Two breakages reached the running system exactly that way.\n\n### Applying a release\n\nDispatch **Atomaton Self Deploy** (`self/workflows/atomaton-self-deploy.yml`) from the\nActions tab. It opens a pull request and merges nothing. `.github/**` is in\n`merge.governed_paths`, so a person reviews it.\n\nWhat it does:\n\n```bash\nrm -rf .github            # so a file the release DELETED is gone, not orphaned\nunzip release.zip         # the deliverable\ncp -r self/. .github/     # this repository's own, at the same paths\n```\n\n`.github/` is therefore exactly those two sources, with nothing kept alive by\nremembering to. Before `self/` existed this was a `cp -r` followed by\n`git checkout -- .github/atomaton/config.yaml`, and a file the template had removed\nstayed in the tree with no diff to notice it by.\n\nIt needs `SELF_DEPLOY_TOKEN`, a PAT with the `workflow` scope, because\n`GITHUB_TOKEN` cannot write `.github/workflows/**` — refused on identity, not by\npath. No agent can reach that token: it is named in one file outside the\ndeliverable, and `atomaton-runner.yml` does not mention it.\n\n### Changing something in `self/`\n\nAn overlay entry is a copy, not a build, so it needs no release. Change\n`self/X` and `.github/X` **in the same pull request**, identically.\n\n`tests/contract/self-overlay.test.ts` requires them byte-identical, in both\ndirections. Editing `.github/X` alone is worse than not editing it at all: the next\nself-deploy overwrites it from `self/` and the change disappears without a diff.\n\nA file added to `.github/` that is in no release and not in `self/` is not checked\nfor, because the next deploy removes it anyway and because `.github/**` is in\n`merge.governed_paths` — no agent can merge a change there, so a person reads it first.",
+      "tool_call_id": "call_00_ri92o8php9cydlvvxx19lf1h"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"f32d021 Post-merge: re-invoke without waiting for a resolved parent (#234)\\nCONTRIBUTING.md\\nREADME.md\\nbun.lock\\ndocs\\nexamples\\nnode_modules\\npackage.json\\nself\\nsrc\\ntests\\ntsconfig.json\\ntypes\\nwac.config.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":257}",
+      "tool_call_id": "call_01_a4ia39no7jmiy3zkoprmbk0n"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_1cb9sfofbw0qdfzk1kkig0oh",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-pr-merged.wac.ts\"}"
+          }
+        },
+        {
+          "id": "call_01_mrpxczx2r8wra4id9r5pby4a",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"/home/runner/work/atomaton/atomaton/package.json\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242767490600000000000000000000ffffc0a8b30434447e",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "We're on the PR branch (git status clean, HEAD is the PR commit). Let me read the workflow file around the reinvoke job, and the test file.\n\nAlso check `dist/` — `ls` shows no `dist`. So need `bun run synth` to generate. The test reads `dist/.github/workflows/atomaton-pr-merged.yml`. Let me check if the test suite runs synth as a pretest. Let's look at package.json scripts and existing contract tests.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "src/workflows/atomaton-pr-merged.wac.ts lines 1-260 of 260\n\n1\timport { Workflow } from \"@github-actions-workflow-ts/lib\";\n2\timport type { PullRequestClosedEvent } from \"@octokit/webhooks-types\";\n3\timport { ActionsCheckoutV4 } from \"@github-actions-workflow-ts/actions\";\n4\timport { DefinedJob, JobCondition, TypedOutputsStep } from \"./actions/base.ts\";\n5\timport { githubEvent, githubEventRaw } from \"./actions/github-context.ts\";\n6\timport { ATOMATON_WORKFLOW_PERMISSIONS } from \"./actions/permissions.ts\";\n7\timport { scriptCommand, scriptCommandWithArgs } from \"./actions/script-call.ts\";\n8\timport { SetupBunAction } from \"./actions/third-party.ts\";\n9\timport { ref as resolveOrchestratorParentRef } from \"../entrypoints/machinery/resolve_orchestrator_parent.ts\";\n10\timport { ref as aggregateSubIssuesRef } from \"../entrypoints/machinery/aggregate_sub_issues.ts\";\n11\timport { ref as parsePrMetadataRef } from \"../entrypoints/machinery/parse_pr_metadata.ts\";\n12\timport { ref as dispatchPo\n\n[8705 characters dropped from the middle; 4000 shown]\n\nent>((e) => e.pull_request.html_url),\n203\t        },\n204\t        // Not a turn comment: this is machinery bookkeeping about a merge that happened\n205\t        // to a NODE OTHER THAN the one it is posted on (the parent). The parent's own\n206\t        // turn is moved by the aggregation dispatch, not by this line, so writing an\n207\t        // `ended` tag here would put an ending on the parent's thread that the parent's\n208\t        // run did not produce. It keeps the `llm-context=exclude` tag it always had.\n209\t        run: `gh issue comment \"$PARENT\" --repo \"$REPO\" --body \\\\\n210\t  \"${LLM_CONTEXT_TAG.write(\"exclude\")}\n211\tPR #\\${PR_NUMBER} merged: \\${PR_TITLE} (\\${PR_URL})\"\n212\t`,\n213\t      }),\n214\t    ],\n215\t  ),\n216\t  // The judgement, before the aggregation. Reads the same two body tags\n217\t  // `merge_pr` reads and applies the same `decidePostMergeHandoff`, so the\n218\t  // agent-made and person-made merge routes agree by construction. `reinvoked=true`\n219\t  // stands the aggregate job down: the agent it starts closes the sub-issue if the\n220\t  // criteria are met, and THAT close aggregates the parent.\n221\t  reinvokeJob,\n222\t  new DefinedJob(\n223\t    \"aggregate-sub-issues\",\n224\t    {\n225\t      \"runs-on\": \"ubuntu-latest\",\n226\t      // Not when the judgement was dispatched: it re-invokes the parent itself once\n227\t      // the sub-issue is closed, and aggregating here would start the parent on a\n228\t      // subtree whose sub-issue is still open.\n229\t      if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, \"\").and(\n230\t        JobCondition.isNot(reinvokeJob.rawOutputs.reinvoked, \"true\"),\n231\t      ),\n232\t      needs: [...NOTIFY_AND_AGGREGATE_NEEDS, reinvokeJob],\n233\t      env: {\n234\t        GH_TOKEN: \"${{ github.token }}\",\n235\t      },\n236\t    },\n237\t    [\n238\t      new ActionsCheckoutV4({}),\n239\t      // Required below: aggregate_sub_issues.ts (which uses shared logic\n240\t      // from lib/aggregation.ts, lib/sibling-check.ts, lib/notify.ts) is\n241\t      // run via `bun run` -- not preinstalled on GitHub-hosted runners.\n242\t      new SetupBunAction({ name: \"Setup Bun\" }),\n243\t      new TypedOutputsStep({\n244\t        name: \"Aggregate sub-issue results\",\n245\t        shell: \"bash\",\n246\t        env: {\n247\t          OWNER: \"${{ github.repository_owner }}\",\n248\t          REPO: githubEvent<PullRequestClosedEvent>((e) => e.repository.name),\n249\t          PARENT: resolveParentJob.outputs.parent_issue,\n250\t          // The issue this pull request belongs to, not a second number read from\n251\t          // its body. The two were the same value (see `parseJob`); this is the\n252\t          // one that survives the `Closes` line's removal.\n253\t          CLOSED_NUM: parseJob.outputs.parent_issue,\n254\t        },\n255\t        run: `${scriptCommandWithArgs(aggregateSubIssuesRef, { repo: \"\\${OWNER}/\\${REPO}\", parent: \"\\${PARENT}\", \"closed-num\": \"\\${CLOSED_NUM}\" })}\n256\t`,\n257\t      }),\n258\t    ],\n259\t  ),\n260\t]);",
+      "tool_call_id": "call_00_1cb9sfofbw0qdfzk1kkig0oh"
+    },
+    {
+      "role": "tool",
+      "content": "package.json lines 1-29 of 29\n\n1\t{\n2\t  \"name\": \"atomaton\",\n3\t  \"private\": true,\n4\t  \"type\": \"module\",\n5\t  \"version\": \"0.21.10\",\n6\t  \"engines\": {\n7\t    \"bun\": \">=1.2.0\"\n8\t  },\n9\t  \"scripts\": {\n10\t    \"synth\": \"bun run src/synth-workflows.ts && bun run src/build-dist.ts\",\n11\t    \"typecheck\": \"tsc --noEmit\",\n12\t    \"pretest\": \"bun run synth\",\n13\t    \"test\": \"bun test ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./tests/contract ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks\",\n14\t    \"pretest:e2e\": \"bun run synth\",\n15\t    \"test:e2e\": \"bun test ./tests/e2e\",\n16\t    \"lint\": \"bun run typecheck && bun run synth\"\n17\t  },\n18\t  \"devDependencies\": {\n19\t    \"@github-actions-workflow-ts/actions\": \"^2.5.0\",\n20\t    \"@github-actions-workflow-ts/cli\": \"^2.5.0\",\n21\t    \"@github-actions-workflow-ts/lib\": \"^2.5.0\",\n22\t    \"@modelcontextprotocol/sdk\": \"^1.12.1\",\n23\t    \"@octokit/webhooks-types\": \"^7.6.1\",\n24\t    \"@types/bun\": \"^1.2.14\",\n25\t    \"typescript\": \"^5.6.3\",\n26\t    \"zod\": \"^3.25.76\",\n27\t    \"zod-to-json-schema\": \"^3.25.2\"\n28\t  }\n29\t}",
+      "tool_call_id": "call_01_mrpxczx2r8wra4id9r5pby4a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_jq5gzvd8dga1apsm28w6m36l",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"/home/runner/work/atomaton/atomaton/tests/contract/post-merge-reinvoke.test.ts\"}"
+          }
+        },
+        {
+          "id": "call_01_reobqkn2d3mno8aqg6vbuq10",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && ls dist 2>&1 | head -5; grep -rn \\\"gitignore\\\" -l . 2>/dev/null | head -3; cat .gitignore 2>/dev/null\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242767707500000000000000000000ffffc0a8b3c34345eb",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now read the test file and check the `JobCondition.is` / how `and` composes, plus check dist generation.\n\nNote `aggregate-sub-issues` needs `[...NOTIFY_AND_AGGREGATE_NEEDS, reinvokeJob]` — that includes `resolve-parent` and `parse`. Good.\n\nThe fix: give reinvokeJob the same `if` as parse:\n\n```ts\nif: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),\n```\n\nAnd update the comment block (lines 50-54 job graph, and the \"## Why it has no `if` and no `needs`\" heading which now becomes wrong). Need to rewrite that doc comment to say: no `needs` (uses nothing the resolution answers) but it keeps its own merged-only `if` — the merge gate it used to get for free from `parse` via `needs`.\n\nThen update the test: first case asserts `if` does not contain `parent_issue`, `needs` does not contain `resolve-parent`, and `if` contains the merge condition. The review suggests adding the assertion in the first case.\n\nLet me check dist presence and run synth.\n\nLet me also look at the test file as it stands.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "tests/contract/post-merge-reinvoke.test.ts lines 1-53 of 53\n\n1\t/**\n2\t * post-merge-reinvoke.test.ts — only the post-merge jobs that use the resolved parent\n3\t * wait for it.\n4\t *\n5\t * `reinvoke-origin-agent` reads the pull request body itself (`atomaton:parent-issue`,\n6\t * `atomaton:origin-agent`) and uses nothing `resolve-parent` answers. Gating it on that\n7\t * resolution meant a root issue -- which has no parent, so the answer is \"\" -- was never\n8\t * re-invoked after its pull request merged: `Atomaton PR Merged` run 39274230329\n9\t * succeeded with `reinvoke-origin-agent`, `notify-parent` and `aggregate-sub-issues`\n10\t * all skipped (#203, observed on #206 / pull request #233).\n11\t *\n12\t * The other two still need the parent: one writes to it, the other aggregates into it.\n13\t * That difference is the thing worth holding -- a job may be free of an answer only\n14\t * when it does not use it.\n15\t */\n16\timport { describe, expect, test } from \"bun:test\";\n17\timport { readFileSync } from \"node:fs\";\n18\t\n19\tinterface Job {\n20\t  needs?: string | string[];\n21\t  if?: string;\n22\t}\n23\t\n24\tfunction jobs(): Record<string, Job> {\n25\t  const workflow = Bun.YAML.parse(readFileSync(\"dist/.github/workflows/atomaton-pr-merged.yml\", \"utf8\")) as {\n26\t    jobs: Record<string, Job>;\n27\t  };\n28\t  return workflow.jobs;\n29\t}\n30\t\n31\t/** `needs` as a list, whichever shape the generator wrote. */\n32\tfunction needs(job: Job | undefined): string[] {\n33\t  return [job?.needs ?? []].flat();\n34\t}\n35\t\n36\tdescribe(\"post-merge re-invocation\", () => {\n37\t  test(\"does not wait on the resolved parent\", () => {\n38\t    const reinvoke = jobs()[\"reinvoke-origin-agent\"];\n39\t    expect(reinvoke, \"run `bun run synth` first\").toBeDefined();\n40\t    expect(reinvoke?.if ?? \"\", \"the decision belongs to dispatch_post_merge.ts\").not.toContain(\"parent_issue\");\n41\t    expect(needs(reinvoke), \"it uses nothing that resolution answers\").not.toContain(\"resolve-parent\");\n42\t  });\n43\t\n44\t  test(\"the jobs that use the parent still wait for it\", () => {\n45\t    const all = jobs();\n46\t    for (const name of [\"notify-parent\", \"aggregate-sub-issues\"]) {\n47\t      expect(needs(all[name]), `${name} needs the resolved parent`).toContain(\"resolve-parent\");\n48\t      expect(all[name]?.if ?? \"\", `${name} must not run without one`).toContain(\n49\t        \"resolve-parent.outputs.parent_issue\",\n50\t      );\n51\t    }\n52\t  });\n53\t});",
+      "tool_call_id": "call_00_jq5gzvd8dga1apsm28w6m36l"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"ls: cannot access 'dist': No such file or directory\\n./node_modules/function-bind/CHANGELOG.md\\n./node_modules/picomatch/package.json\\n./node_modules/fill-range/package.json\\n__pycache__\\n\\n# Atomaton runtime artifacts\\natomaton_logs.txt\\natomaton_output.txt\\natomaton_ops.log\\nevents.json\\nsession.json\\nlogs/\\n\\n# The deliverable, built by `bun run synth`. Not tracked: it is a pure function\\n# of src/, and it is distributed as a release asset by cd.yml rather than\\n# committed. Tracking it is what used to force a branch-protection bypass, since\\n# publishing meant pushing generated output straight to main.\\ndist/\\n\\n# Dependencies\\nnode_modules/\\n\\n# Atomaton source checkout created by the runner when atoma_version=source.\\n# A bare `git add -A` otherwise commits it as a dangling gitlink (no .gitmodules).\\natoma-src/\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":229}",
+      "tool_call_id": "call_01_reobqkn2d3mno8aqg6vbuq10"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_bvdehwe23da9v8bv2922pw2v",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth 2>&1 | tail -5 && echo ---- && sed -n '1,80p' dist/.github/workflows/atomaton-pr-merged.yml\"}"
+          }
+        },
+        {
+          "id": "call_01_hfy5t372bi3zrh895e63od4c",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '330,380p' src/workflows/actions/base.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242768130200000000000000000000ffffc0a8731ac92939",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now, let me check `JobCondition.is` generates what in YAML — the `parse` job's if. Let's run synth first to see current generated output (before edit) to know the shape. Actually let's just make the edit and synth.\n\nBut first check `base.ts` `JobCondition.is` to make sure `.is(...)` renders as `github.event.pull_request.merged == true` or similar.\n\nLet's do synth now and inspect.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"synth-workflows: generated 8 workflow file(s) from 8 source(s) in src/workflows/\\nbuild-dist: bundled 55 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/machinery -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/scripts\\nbuild-dist: bundled 12 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.10 (101 files)\\n----\\n# AUTO-GENERATED by Atomaton -- DO NOT EDIT DIRECTLY.\\n# Generated from: src/workflows/atomaton-pr-merged.wac.ts\\n# Edits here are lost when this file is regenerated upstream.\\n#\\n# To change what CI or deployment DOES, you do not need this file: put the\\n# commands in .github/atomaton/config.yaml, under `checks` or `deploy`. That\\n# file is yours, it survives upgrades, and an\\n# agent can write it -- GitHub refuses to let one write a workflow.\\n# See docs/pipeline/overview.md, \\\"The pipeline as commands\\\".\\n#\\n# Upstream: https://github.com/yuma-seno/atomaton\\n\\nname: Atomaton PR Merged\\n'on':\\n  pull_request_target:\\n    types:\\n      - closed\\npermissions:\\n  actions: write\\n  issues: write\\n  pull-requests: read\\n  contents: write\\n  checks: read\\njobs:\\n  parse:\\n    runs-on: ubuntu-latest\\n    outputs:\\n      parent_issue: ${{ steps.parse-metadata.outputs.parent_number }}\\n    if: github.event.pull_request.merged == true\\n    steps:\\n      - uses: actions/checkout@v4\\n      - name: Setup Bun\\n        with:\\n          bun-version: latest\\n        uses: oven-sh/setup-bun@v2\\n      - name: Parse the parent-issue tag from the PR body\\n        id: parse-metadata\\n        shell: bash\\n        env:\\n          PR_BODY: ${{ github.event.pull_request.body }}\\n          PR_NUMBER: ${{ github.event.pull_request.number }}\\n        run: |\\n          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/parse_pr_metadata.ts\\\"\\n  resolve-parent:\\n    runs-on: ubuntu-latest\\n    outputs:\\n      parent_issue: ${{ steps.resolve.outputs.parent_issue }}\\n    if: needs.parse.outputs.parent_issue != ''\\n    needs:\\n      - parse\\n    steps:\\n      - uses: actions/checkout@v4\\n      - name: Setup Bun\\n        with:\\n          bun-version: latest\\n        uses: oven-sh/setup-bun@v2\\n      - name: Resolve atomaton parent via GraphQL parent field\\n        id: resolve\\n        shell: bash\\n        env:\\n          GH_TOKEN: ${{ github.token }}\\n          REPO: ${{ github.repository }}\\n          SUB: ${{ needs.parse.outputs.parent_issue }}\\n        run: |\\n          PARENT=$(bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/resolve_orchestrator_parent.ts\\\" --repo \\\"${REPO}\\\" --sub \\\"${SUB}\\\")\\n          echo \\\"parent_issue=${PARENT}\\\" >> \\\"$GITHUB_OUTPUT\\\"\\n  notify-parent:\\n    runs-on: ubuntu-latest\\n    if: needs.resolve-parent.outputs.parent_issue != ''\\n    needs:\\n      - resolve-parent\\n      - parse\\n    steps:\\n      - name: Comment on parent issue\\n        shell: bash\\n        env:\\n          GH_TOKEN: ${{ github.token }}\\n          REPO: ${{ github.repository }}\\n          PARENT: ${{ needs.resolve-parent.outputs.parent_issue }}\\n          PR_NUMBER: ${{ github.event.pull_request.number }}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":472}",
+      "tool_call_id": "call_00_bvdehwe23da9v8bv2922pw2v"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" *\\n * Named rather than written out at each of the three places that take them\\n * (`DefinedJob`, `JobChain.start`, `startJob`), because the one thing that differs\\n * from the library's own `NormalJob` is `if:` — and a second spelling of that\\n * difference is how the three would stop agreeing.\\n */\\nexport type DefinedJobProps<TOutputsMap extends Record<string, string>> = Omit<\\n  GWT.NormalJob,\\n  \\\"outputs\\\" | \\\"if\\\" | \\\"needs\\\"\\n> & {\\n  outputs?: TOutputsMap;\\n  /**\\n   * The job's condition.\\n   *\\n   * A `JobCondition`, and nothing else. It was `string | JobCondition`, and the\\n   * string half was the hole: a job-level `if:` cannot read `steps.`, and text\\n   * pasted in from a step is exactly how that happened. `JobCondition.of` is the\\n   * escape hatch for the conditions this module cannot build, and it refuses the\\n   * one thing that must not appear.\\n   */\\n  if?: JobCondition;\\n  /**\\n   * The jobs this one depends on.\\n   *\\n   * `DefinedJob`s, not names. A `needs:` entry that names nothing is not an error\\n   * to GitHub — it is a dependency that does not exist, so the job runs\\n   * immediately and reads empty outputs from a job that never ran. Taking the job\\n   * itself is what makes a typo a compile error, and it is the same argument\\n   * `JobOutputRef` makes about reading an output.\\n   */\\n  needs?: DefinedJob[];\\n};\\n\\nexport class DefinedJob<TOutputsMap extends Record<string, string> = Record<never, string>> extends NormalJob {\\n  readonly outputs: Record<keyof TOutputsMap & string, string>;\\n  readonly rawOutputs: Record<keyof TOutputsMap & string, JobOutputRef>;\\n  /**\\n   * This job's `result`, as a reference a `JobCondition` can be built from.\\n   *\\n   * `needs.<job>.result` is `success` / `failure` / `cancelled` / `skipped`, and\\n   * GitHub sets it — but it is referenced by job name exactly like an output, so\\n   * it is the same hazard: a literal `needs.deploy.result` is a name renaming the\\n   * job does not update, and an unknown job reference resolves to the empty\\n   * string, which is not `success`.\\n   */\\n  readonly rawResult: JobResultRef;\\n\\n  constructor(\\n    name: string,\\n    jobProps: DefinedJobProps<TOutputsMap>,\\n    steps: Step[] = [],\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":92}",
+      "tool_call_id": "call_01_hfy5t372bi3zrh895e63od4c"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_4ny06zdd2xidfo2rebedpk9t",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn \\\"github.event.pull_request\\\\|\\\\.if\\\\b\\\" tests/contract/*.ts | head -30\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242768417500000000000000000000ffffc0a8a89decbb03",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Good. `if: github.event.pull_request.merged == true` is emitted for `parse`. So my `if` on reinvoke would render the same string.\n\nNow, an important consideration: the review comment says add the condition `if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true)`.\n\nBut note: `resolve-parent` has `if: needs.parse.outputs.parent_issue != ''` — which reads `needs.parse`, so it needs parse. Fine.\n\nNow if reinvoke has no `needs` and an `if` reading only the event, both conditions are fine.\n\nLet me now check whether the workflow generation adds anything to `if` when the job has no needs. Straightforward.\n\nAlso consider: should I also add a job graph comment update. Yes: lines 50-54 comment and the doc block at 132-144.\n\nLet me make the edits.\n\nNew doc comment for reinvokeJob:\n\n```\n * ## Why it has no `needs` — and the one gate it does keep\n *\n * It used to be gated on `resolve-parent` ...\n *\n * The merge-only condition is written here rather than inherited. It used to come\n * from `needs: [parse, ...]` -- GitHub skips a job whose needed job was skipped, and\n * `parse` is the only job that tests the event. Dropping `needs` therefore dropped the\n * merge gate with it, and the trigger is `pull_request_target: closed`, which fires for\n * a close that merged nothing. Without it, closing a pull request unmerged would post\n * \"the pull request for this issue merged\" on its issue and start a run on it.\n```\n\nAnd job graph comment:\n\n```\n// Job graph:\n//   parse --> resolve-parent --> notify-parent\n//                             \\-> aggregate-sub-issues (skipped when re-invoke did)\n//   re-invoke: no `needs` -- it decides from the pull request's own body -- but the\n//              same merged-only `if` as `parse`, and it stands the aggregate job down\n```\n\nHmm, keep it concise. Let's write:\n\n```\n// Job graph:\n//   parse --> resolve-parent --> notify-parent\n//                             \\-> aggregate-sub-issues (skipped when re-invoke did)\n//   re-invoke: no `needs` -- it decides from the pull request's own body -- but the\n//              same merged-only `if` `parse` carries, which it used to inherit through\n//              `needs` and would otherwise lose\n```\n\nNow the test: first case add assertion that `if` carries the merged condition. What to assert? The generated string is `github.event.pull_request.merged == true`. Assert `expect(reinvoke?.if ?? \"\").toContain(\"github.event.pull_request.merged\")`. Maybe stronger: `toMatch(/github\\.event\\.pull_request\\.merged == true/)`. Let me check how other contract tests assert conditions for consistency.\n\nLet me grep tests for \"pull_request.merged\" or similar patterns in tests/contract.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"tests/contract/generated-workflows.test.ts:185:    const condition = step?.if ?? \\\"\\\";\\ntests/contract/generated-workflows.test.ts:280:    expect(resolve?.if, \\\"an issue run's branch is decided by its own step\\\").toBe(\\\"inputs.type == 'pr'\\\");\\ntests/contract/generated-workflows.test.ts:288:    expect(checkout?.if).toBe(\\\"inputs.type == 'pr'\\\");\\ntests/contract/generated-workflows.test.ts:376:    expect(check?.if, \\\"the deliverable check must not be conditional\\\").toBeUndefined();\\ntests/contract/generated-workflows.test.ts:585:      const lines = [step.run ?? \\\"\\\", ...Object.values(step.env ?? {}), step.if ?? \\\"\\\"]\\ntests/contract/generated-workflows.test.ts:1398:    expect(job?.if ?? \\\"\\\", \\\"an agent closing its own issue is how it finishes\\\").toContain(\\\"sender.type != 'Bot'\\\");\\ntests/contract/generated-workflows.test.ts:1425:    const condition = guard?.if ?? \\\"\\\";\\ntests/contract/generated-workflows.test.ts:1495:        const condition = def?.if;\\ntests/contract/post-merge-reinvoke.test.ts:40:    expect(reinvoke?.if ?? \\\"\\\", \\\"the decision belongs to dispatch_post_merge.ts\\\").not.toContain(\\\"parent_issue\\\");\\ntests/contract/post-merge-reinvoke.test.ts:48:      expect(all[name]?.if ?? \\\"\\\", `${name} must not run without one`).toContain(\\ntests/contract/provider-credential-check.test.ts:266:      check.if,\\ntests/contract/provider-credential-check.test.ts:278:    expect(stepNamed(\\\"Run agent\\\").if).toContain(\\\"new_event_count\\\");\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":93}",
+      "tool_call_id": "call_00_4ny06zdd2xidfo2rebedpk9t"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_rwihvjp29p73cd840e7wv767",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-pr-merged.wac.ts\", \"old_string\": \"// Job graph:\\n//   re-invoke: no `needs` and no `if` -- it decides from the pull request's own body\\n//              and stands the aggregate job down when it starts a run\\n//   parse --> resolve-parent --> notify-parent\\n//                             \\\\-> aggregate-sub-issues (skipped when re-invoke did)\", \"new_string\": \"// Job graph:\\n//   parse --> resolve-parent --> notify-parent\\n//                             \\\\-> aggregate-sub-issues (skipped when re-invoke did)\\n//   re-invoke: no `needs` -- it decides from the pull request's own body -- but the\\n//              merged-only `if` `parse` carries, which it used to inherit through\\n//              `needs` and must not lose with it\"}"
+          }
+        },
+        {
+          "id": "call_01_w730636pyjf7b2zm2l9kof91",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-pr-merged.wac.ts\", \"old_string\": \" * ## Why it has no `if` and no `needs`\\n *\\n * It used to be gated on `resolve-parent` — the orchestrator root above the pull\\n * request's issue. But the re-invocation reads the pull request BODY (which issue, which\\n * origin agent) and uses nothing that resolution answers. A root issue has no parent, so\\n * the resolution is empty and the job was skipped along with the two that genuinely need\\n * one: a root issue's merged pull request was never re-invoked, and the run was green\\n * (#203, observed on #206 / pull request #233).\\n *\\n * The only question — does this pull request name an issue to re-invoke — belongs to\\n * `dispatch_post_merge.ts`, which answers it (`no-parent` writes `reinvoked=false`). One\\n * rule, in the place that has the inputs for it.\\n */\", \"new_string\": \" * ## Why it has no `needs`, and why it still needs an `if`\\n *\\n * It used to be gated on `resolve-parent` — the orchestrator root above the pull\\n * request's issue. But the re-invocation reads the pull request BODY (which issue, which\\n * origin agent) and uses nothing that resolution answers. A root issue has no parent, so\\n * the resolution is empty and the job was skipped along with the two that genuinely need\\n * one: a root issue's merged pull request was never re-invoked, and the run was green\\n * (#203, observed on #206 / pull request #233).\\n *\\n * The only question — does this pull request name an issue to re-invoke — belongs to\\n * `dispatch_post_merge.ts`, which answers it (`no-parent` writes `reinvoked=false`). One\\n * rule, in the place that has the inputs for it.\\n *\\n * The merge gate is a different question and is written here rather than inherited. It\\n * used to come from `needs: [parse, ...]`: GitHub skips a job whose needed job was\\n * skipped, and `parse` is the only job in this workflow that tests the event. Dropping\\n * `needs` therefore dropped the merge gate with it, and the trigger is\\n * `pull_request_target: closed` — which fires for a close that merged nothing. Without\\n * this `if`, closing a pull request unmerged would post \\\"the pull request for this issue\\n * merged\\\" on its issue and start a run on it.\\n */\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242768962300000000000000000000ffffc0a8731a730cc9",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Style uses `toContain`. I'll assert `toContain(\"github.event.pull_request.merged == true\")`.\n\nNow let me make edits.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-pr-merged.wac.ts.",
+      "tool_call_id": "call_00_rwihvjp29p73cd840e7wv767"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-pr-merged.wac.ts.",
+      "tool_call_id": "call_01_w730636pyjf7b2zm2l9kof91"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_fhzze3majwf3497075eia4w2",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  \\\"reinvoke-origin-agent\\\",\\n  {\\n    \\\"runs-on\\\": \\\"ubuntu-latest\\\",\\n    // A merge test of its own, not the one `needs: parse` used to lend it.\\n    if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),\\n    outputs: {\", \"old_string\": \"  \\\"reinvoke-origin-agent\\\",\\n  {\\n    \\\"runs-on\\\": \\\"ubuntu-latest\\\",\\n    outputs: {\", \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-pr-merged.wac.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-pr-merged.wac.ts.",
+      "tool_call_id": "call_00_fhzze3majwf3497075eia4w2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_165bu0sp0rweze0kcz2gu12h",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * post-merge-reinvoke.test.ts — `reinvoke-origin-agent` waits on nothing it does not\\n * read, and keeps the merge gate it must not lose with the wait.\\n *\\n * `reinvoke-origin-agent` reads the pull request body itself (`atomaton:parent-issue`,\\n * `atomaton:origin-agent`) and uses nothing `resolve-parent` answers. Gating it on that\\n * resolution meant a root issue -- which has no parent, so the answer is \\\"\\\" -- was never\\n * re-invoked after its pull request merged: `Atomaton PR Merged` run 39274230329\\n * succeeded with `reinvoke-origin-agent`, `notify-parent` and `aggregate-sub-issues`\\n * all skipped (#203, observed on #206 / pull request #233).\\n *\\n * The merge gate is a separate question. It used to be inherited from `parse` through\\n * `needs` -- GitHub skips a job whose needed job was skipped -- so dropping `needs`\\n * dropped it too, and `pull_request_target: closed` fires for a close that merged\\n * nothing. A closed-unmerged pull request would then post \\\"the pull request for this\\n * issue merged\\\" on its issue and start a run on it.\\n *\\n * The other two still need the parent: one writes to it, the other aggregates into it.\\n * That difference is the thing worth holding -- a job may be free of an answer only\\n * when it does not use it.\\n */\\nimport { describe, expect, test } from \\\"bun:test\\\";\\nimport { readFileSync } from \\\"node:fs\\\";\\n\\ninterface Job {\\n  needs?: string | string[];\\n  if?: string;\\n}\\n\\nfunction jobs(): Record<string, Job> {\\n  const workflow = Bun.YAML.parse(readFileSync(\\\"dist/.github/workflows/atomaton-pr-merged.yml\\\", \\\"utf8\\\")) as {\\n    jobs: Record<string, Job>;\\n  };\\n  return workflow.jobs;\\n}\\n\\n/** `needs` as a list, whichever shape the generator wrote. */\\nfunction needs(job: Job | undefined): string[] {\\n  return [job?.needs ?? []].flat();\\n}\\n\\ndescribe(\\\"post-merge re-invocation\\\", () => {\\n  test(\\\"does not wait on the resolved parent, but still only runs for a merge\\\", () => {\\n    const reinvoke = jobs()[\\\"reinvoke-origin-agent\\\"];\\n    expect(reinvoke, \\\"run `bun run synth` first\\\").toBeDefined();\\n    expect(reinvoke?.if ?? \\\"\\\", \\\"the decision belongs to dispatch_post_merge.ts\\\").not.toContain(\\\"parent_issue\\\");\\n    expect(needs(reinvoke), \\\"it uses nothing that resolution answers\\\").not.toContain(\\\"resolve-parent\\\");\\n    expect(reinvoke?.if ?? \\\"\\\", \\\"a close that merged nothing must not re-invoke anybody\\\").toContain(\\n      \\\"github.event.pull_request.merged == true\\\",\\n    );\\n  });\", \"old_string\": \"/**\\n * post-merge-reinvoke.test.ts — only the post-merge jobs that use the resolved parent\\n * wait for it.\\n *\\n * `reinvoke-origin-agent` reads the pull request body itself (`atomaton:parent-issue`,\\n * `atomaton:origin-agent`) and uses nothing `resolve-parent` answers. Gating it on that\\n * resolution meant a root issue -- which has no parent, so the answer is \\\"\\\" -- was never\\n * re-invoked after its pull request merged: `Atomaton PR Merged` run 39274230329\\n * succeeded with `reinvoke-origin-agent`, `notify-parent` and `aggregate-sub-issues`\\n * all skipped (#203, observed on #206 / pull request #233).\\n *\\n * The other two still need the parent: one writes to it, the other aggregates into it.\\n * That difference is the thing worth holding -- a job may be free of an answer only\\n * when it does not use it.\\n */\\nimport { describe, expect, test } from \\\"bun:test\\\";\\nimport { readFileSync } from \\\"node:fs\\\";\\n\\ninterface Job {\\n  needs?: string | string[];\\n  if?: string;\\n}\\n\\nfunction jobs(): Record<string, Job> {\\n  const workflow = Bun.YAML.parse(readFileSync(\\\"dist/.github/workflows/atomaton-pr-merged.yml\\\", \\\"utf8\\\")) as {\\n    jobs: Record<string, Job>;\\n  };\\n  return workflow.jobs;\\n}\\n\\n/** `needs` as a list, whichever shape the generator wrote. */\\nfunction needs(job: Job | undefined): string[] {\\n  return [job?.needs ?? []].flat();\\n}\\n\\ndescribe(\\\"post-merge re-invocation\\\", () => {\\n  test(\\\"does not wait on the resolved parent\\\", () => {\\n    const reinvoke = jobs()[\\\"reinvoke-origin-agent\\\"];\\n    expect(reinvoke, \\\"run `bun run synth` first\\\").toBeDefined();\\n    expect(reinvoke?.if ?? \\\"\\\", \\\"the decision belongs to dispatch_post_merge.ts\\\").not.toContain(\\\"parent_issue\\\");\\n    expect(needs(reinvoke), \\\"it uses nothing that resolution answers\\\").not.toContain(\\\"resolve-parent\\\");\\n  });\", \"path\": \"/home/runner/work/atomaton/atomaton/tests/contract/post-merge-reinvoke.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242769600100000000000000000000ffffc0a8910562cde0",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now the test. Add the merged-gate assertion to the first case, and update the header doc comment maybe. The review said add it to the first case. Let me rewrite the test first case and the header.\n\nHeader currently says \"only the post-merge jobs that use the resolved parent wait for it.\" Should mention the merge gate. Let's update the header lightly and add the assertion.\n\nAssertion wording: \"a merge test, not inherited from `parse` any more\". `expect(reinvoke?.if ?? \"\", \"a closed-unmerged PR must not re-invoke\").toContain(\"github.event.pull_request.merged == true\");`\n\nAlso maybe assert `needs` doesn't contain parse? Not needed—actually the check that it doesn't list resolve-parent covers the key. But should we assert it doesn't need `parse` at all? The review said needs is gone because it uses nothing from it. The current test asserts no `resolve-parent`. Keep as is; adding more is beyond the finding. Hmm, actually it's arguably worth checking it doesn't wait on `parse` either — but `aggregate-sub-issues` needs both and that's untouched. I'll keep focused.\n\nLet me edit.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in tests/contract/post-merge-reinvoke.test.ts.",
+      "tool_call_id": "call_00_165bu0sp0rweze0kcz2gu12h"
+    },
+    {
+      "role": "assistant",
+      "content": "Now generate and inspect the emitted job graph, then run the focused test.",
+      "tool_calls": [
+        {
+          "id": "call_00_8olwj9593l28dtkezm7b13lt",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth 2>&1 | tail -3 && echo \\\"==== reinvoke job ====\\\" && awk '/^  reinvoke-origin-agent:/{f=1} f&&/^  [a-z]/&&!/^  reinvoke-origin-agent:/{f=0} f' dist/.github/workflows/atomaton-pr-merged.yml | head -30\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"build-dist: bundled 12 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.10 (101 files)\\n==== reinvoke job ====\\n  reinvoke-origin-agent:\\n    runs-on: ubuntu-latest\\n    outputs:\\n      reinvoked: ${{ steps.reinvoke.outputs.reinvoked }}\\n    env:\\n      GH_TOKEN: ${{ github.token }}\\n    if: github.event.pull_request.merged == true\\n    steps:\\n      - uses: actions/checkout@v4\\n      - name: Setup Bun\\n        with:\\n          bun-version: latest\\n        uses: oven-sh/setup-bun@v2\\n      - name: Re-invoke the origin agent to judge the merge\\n        id: reinvoke\\n        shell: bash\\n        env:\\n          GH_TOKEN: ${{ github.token }}\\n          PR_BODY: ${{ github.event.pull_request.body }}\\n          PR_NUMBER: ${{ github.event.pull_request.number }}\\n          OWNER: ${{ github.repository_owner }}\\n          REPO: ${{ github.event.repository.name }}\\n        run: |\\n          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_post_merge.ts\\\"\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":473}",
+      "tool_call_id": "call_00_8olwj9593l28dtkezm7b13lt"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_w3klsvq9m4pi4gao5ynpwd5l",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && awk '/^  aggregate-sub-issues:/{f=1} f&&/^  [a-z]/&&!/^  aggregate-sub-issues:/{f=0} f' dist/.github/workflows/atomaton-pr-merged.yml | head -12 && echo \\\"==== focused test ====\\\" && bun test ./tests/contract/post-merge-reinvoke.test.ts 2>&1 | tail -15\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242770465500000000000000000000ffffc0a8b48784f91b",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The generated job now carries `if: github.event.pull_request.merged == true` and no `needs`.\n\nNow: does `aggregate-sub-issues` still need reinvoke and reference `needs.reinvoke-origin-agent.outputs.reinvoked`? Yes since we kept the reference. Good — the `reinvokeJob.rawOutputs.reinvoked` reference in its `if` creates the needs dependency presumably. Let me check the aggregate job output too.\n\nThen run focused test + typecheck.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"  aggregate-sub-issues:\\n    runs-on: ubuntu-latest\\n    env:\\n      GH_TOKEN: ${{ github.token }}\\n    if: (needs.resolve-parent.outputs.parent_issue != '') && (needs.reinvoke-origin-agent.outputs.reinvoked != 'true')\\n    needs:\\n      - resolve-parent\\n      - parse\\n      - reinvoke-origin-agent\\n    steps:\\n      - uses: actions/checkout@v4\\n      - name: Setup Bun\\n==== focused test ====\\nbun test v1.4.3 (c6da4a4d3)\\n\\ntests/contract/post-merge-reinvoke.test.ts:\\n(pass) post-merge re-invocation > does not wait on the resolved parent, but still only runs for a merge [0.29ms]\\n(pass) post-merge re-invocation > the jobs that use the parent still wait for it [0.17ms]\\n\\n 2 pass\\n 0 fail\\n 8 expect() calls\\nRan 2 tests across 1 file. [5.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":101}",
+      "tool_call_id": "call_00_w3klsvq9m4pi4gao5ynpwd5l"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_73hw0nc0kob94sj5ddjwhkez",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && cp src/workflows/atomaton-pr-merged.wac.ts /tmp/atomaton-workspace-reinvoke.bak 2>/dev/null || cp src/workflows/atomaton-pr-merged.wac.ts /tmp/reinvoke.bak; cp src/workflows/atomaton-pr-merged.wac.ts /tmp/reinvoke.bak && grep -v 'A merge test of its own, not the one' src/workflows/atomaton-pr-merged.wac.ts | grep -v 'if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),' > /tmp/mutated.ts; sed -n '1,0p' /dev/null; cp /tmp/mutated.ts src/workflows/atomaton-pr-merged.wac.ts && bun run synth >/dev/null 2>&1 && bun test ./tests/contract/post-merge-reinvoke.test.ts 2>&1 | tail -12; cp /tmp/reinvoke.bak src/workflows/atomaton-pr-merged.wac.ts && bun run synth >/dev/null 2>&1 && echo \\\"restored\\\" && bun test ./tests/contract/post-merge-reinvoke.test.ts 2>&1 | tail -5\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242770694500000000000000000000ffffc0a8b3c3d72f69",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Both pass. Now, does the test actually fail without the fix? Let me verify by temporarily reverting the `if` — good practice, a mutation check. I'll do it quickly with a scratch approach: temporarily comment out the `if` line, synth, run test, then restore. But `dist/` is generated — the test reads dist. Do it carefully.\n\nActually easier: use `git stash`? No. Let me just do a sed-based temp edit and restore via git checkout of the src file? Careful: the src file has my other uncommitted changes. I'll copy the file to /tmp, remove the `if` line, synth, test, then restore from /tmp copy and re-synth.\n\nThat verification is worth it — it proves the test catches the regression.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\nExpected to contain: \\\"github.event.pull_request.merged == true\\\"\\nReceived: \\\"\\\"\\n\\n      at <anonymous> (/home/runner/work/atomaton/atomaton/tests/contract/post-merge-reinvoke.test.ts:48:90)\\n(fail) post-merge re-invocation > does not wait on the resolved parent, but still only runs for a merge [0.53ms]\\n(pass) post-merge re-invocation > the jobs that use the parent still wait for it [0.18ms]\\n\\n 1 pass\\n 1 fail\\n 8 expect() calls\\nRan 2 tests across 1 file. [5.00ms]\\nrestored\\n\\n 2 pass\\n 0 fail\\n 8 expect() calls\\nRan 2 tests across 1 file. [5.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":860}",
+      "tool_call_id": "call_00_73hw0nc0kob94sj5ddjwhkez"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_70d3uvwzjn88eddfbjzp770g",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && echo ==== && git diff\"}"
+          }
+        },
+        {
+          "id": "call_01_s8e9ccnv0za0dq0fwv7t8h6i",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck 2>&1 | tail -5\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242771084500000000000000000000ffffc0a854221cdf5c",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The test fails without the `if` and passes with it. Restored.\n\nWait — careful: my mutation removed any line containing `if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),` — but that appears only in the reinvoke job now? `parse`'s line is `if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),` — written on one line in parse too (line 74). Hmm, so the mutation also removed parse's if. That would make resolve-parent and others... wait test 2 passed, so parse's `needs` still there. Anyway, the mutation removed both; the failure was on the reinvoke assertion specifically (Received: \"\"). Fine — that confirms at least the reinvoke assertion catches absence of the merged gate. Good enough, though slightly imprecise. Let's verify no leftover damage: `git diff` should show my intended change only.\n\nNow run typecheck and the fuller test suite. The reviewer noted 27 pre-existing failures on this environment... actually reviewer had no shell. The PR body says \"bun run test — 1683 pass / 27 fail; all 27 are the pre-existing Windows environment set\". Hmm, that's on Linux? Odd — \"Windows environment set (grep/bash/git-remote/credential-spawning tests)\". Let's just run the contract tests and typecheck, and maybe full test with a timeout to compare failure set.\n\nLet me first check git diff for cleanliness.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" M src/workflows/atomaton-pr-merged.wac.ts\\n M tests/contract/post-merge-reinvoke.test.ts\\n====\\ndiff --git a/src/workflows/atomaton-pr-merged.wac.ts b/src/workflows/atomaton-pr-merged.wac.ts\\nindex f4e0ccc..6ce5e44 100644\\n--- a/src/workflows/atomaton-pr-merged.wac.ts\\n+++ b/src/workflows/atomaton-pr-merged.wac.ts\\n@@ -48,10 +48,11 @@ import { LLM_CONTEXT_TAG } from \\\"../adapters/github/tags.ts\\\";\\n // cannot be assumed to have happened merely because a merged PR links an issue (#150).\\n //\\n // Job graph:\\n-//   re-invoke: no `needs` and no `if` -- it decides from the pull request's own body\\n-//              and stands the aggregate job down when it starts a run\\n //   parse --> resolve-parent --> notify-parent\\n //                             \\\\-> aggregate-sub-issues (skipped when re-invoke did)\\n+//   re-invoke: no `needs` -- it decides from the pull request's own body -- but the\\n+//              merged-only `if` `pars\n\n[1524 characters dropped from the middle; 4000 shown]\n\nst for this issue\\n+ * merged\\\" on its issue and start a run on it.\\n  */\\n const reinvokeStep = new TypedOutputsStep(\\n   {\\n@@ -163,6 +172,8 @@ const reinvokeJob = new DefinedJob(\\n   \\\"reinvoke-origin-agent\\\",\\n   {\\n     \\\"runs-on\\\": \\\"ubuntu-latest\\\",\\n+    // A merge test of its own, not the one `needs: parse` used to lend it.\\n+    if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),\\n     outputs: {\\n       reinvoked: reinvokeStep.outputs.reinvoked,\\n     },\\ndiff --git a/tests/contract/post-merge-reinvoke.test.ts b/tests/contract/post-merge-reinvoke.test.ts\\nindex a547def..584a138 100644\\n--- a/tests/contract/post-merge-reinvoke.test.ts\\n+++ b/tests/contract/post-merge-reinvoke.test.ts\\n@@ -1,6 +1,6 @@\\n /**\\n- * post-merge-reinvoke.test.ts — only the post-merge jobs that use the resolved parent\\n- * wait for it.\\n+ * post-merge-reinvoke.test.ts — `reinvoke-origin-agent` waits on nothing it does not\\n+ * read, and keeps the merge gate it must not lose with the wait.\\n  *\\n  * `reinvoke-origin-agent` reads the pull request body itself (`atomaton:parent-issue`,\\n  * `atomaton:origin-agent`) and uses nothing `resolve-parent` answers. Gating it on that\\n@@ -9,6 +9,12 @@\\n  * succeeded with `reinvoke-origin-agent`, `notify-parent` and `aggregate-sub-issues`\\n  * all skipped (#203, observed on #206 / pull request #233).\\n  *\\n+ * The merge gate is a separate question. It used to be inherited from `parse` through\\n+ * `needs` -- GitHub skips a job whose needed job was skipped -- so dropping `needs`\\n+ * dropped it too, and `pull_request_target: closed` fires for a close that merged\\n+ * nothing. A closed-unmerged pull request would then post \\\"the pull request for this\\n+ * issue merged\\\" on its issue and start a run on it.\\n+ *\\n  * The other two still need the parent: one writes to it, the other aggregates into it.\\n  * That difference is the thing worth holding -- a job may be free of an answer only\\n  * when it does not use it.\\n@@ -34,11 +40,14 @@ function needs(job: Job | undefined): string[] {\\n }\\n \\n describe(\\\"post-merge re-invocation\\\", () => {\\n-  test(\\\"does not wait on the resolved parent\\\", () => {\\n+  test(\\\"does not wait on the resolved parent, but still only runs for a merge\\\", () => {\\n     const reinvoke = jobs()[\\\"reinvoke-origin-agent\\\"];\\n     expect(reinvoke, \\\"run `bun run synth` first\\\").toBeDefined();\\n     expect(reinvoke?.if ?? \\\"\\\", \\\"the decision belongs to dispatch_post_merge.ts\\\").not.toContain(\\\"parent_issue\\\");\\n     expect(needs(reinvoke), \\\"it uses nothing that resolution answers\\\").not.toContain(\\\"resolve-parent\\\");\\n+    expect(reinvoke?.if ?? \\\"\\\", \\\"a close that merged nothing must not re-invoke anybody\\\").toContain(\\n+      \\\"github.event.pull_request.merged == true\\\",\\n+    );\\n   });\\n \\n   test(\\\"the jobs that use the parent still wait for it\\\", () => {\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":98}",
+      "tool_call_id": "call_00_70d3uvwzjn88eddfbjzp770g"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":5126}",
+      "tool_call_id": "call_01_s8e9ccnv0za0dq0fwv7t8h6i"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ylwyqbqh6n26qh5r9mgi7jvw",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run test 2>&1 | tail -40\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242771940700000000000000000000ffffc0a8820f50e2b3",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Diff clean, typecheck clean.\n\nNow run the full test suite? The PR body claims 27 pre-existing failures in this environment. Let me run `bun run test` and capture the failure list, with a timeout. It took a while presumably (1683 tests). Let's run with 600s timeout.\n\nActually the `pretest` runs synth again. Fine. Let me run and take the tail plus failure names.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) mcp/files.ts > an offset past the end is an error, not an empty result [89.28ms]\\n(pass) mcp/files.ts > grep returns file and line, and says when it stopped early [183.03ms]\\n(pass) mcp/files.ts > a pattern that matches nothing says so rather than failing [96.73ms]\\n(pass) mcp/files.ts > grep accepts several places, spelled as an array or as its JSON text [286.91ms]\\n(pass) mcp/files.ts > glob finds files by path and grep finds them by content [94.11ms]\\n(pass) mcp/files.ts > edit refuses text that appears more than once [178.65ms]\\n(pass) mcp/files.ts > edit refuses text that is not there [90.12ms]\\n(pass) mcp/files.ts > write creates the directories above the file [92.05ms]\\n(pass) mcp/files.ts > a path outside the roots is refused and says what is allowed [92.52ms]\\n(pass) mcp/search.ts > starts without loading the reranker, and advertises both searches [90.30ms]\\n\\nsrc/entrypoints/tools/hooks/shell_guard.test.ts:\\n(pass) shell_guard.ts > searching without opening anything > an ordinary amount of searching is allowed [64.05ms]\\n(pass) shell_guard.ts > searching without opening anything > at the limit the search is refused, and the run is not [119.22ms]\\n(pass) shell_guard.ts > searching without opening anything > opening a file clears the count [122.88ms]\\n(pass) shell_guard.ts > searching without opening anything > another run's searching does not count against this one [126.18ms]\\n(pass) shell_guard.ts > searching without opening anything > no run directory means no rule [155.44ms]\\n(pass) shell_guard.ts > searching without opening anything > work that is not searching neither climbs nor clears the count [123.97ms]\\n(pass) shell_guard.ts > searching without opening anything > past the limit, work that is not searching is still allowed [180.17ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > names the replacement for each disabled CLI [45.84ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > a path that merely contains a routed name is not the program [38.89ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > the routed programs are still refused where they are run [45.48ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > allows safe commands [7.84ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > no longer inspects interpreters, eval, or obfuscated spellings [54.38ms]\\n(pass) shell_guard.ts > raw Git mutations > are routed to the github tools [36.22ms]\\n(pass) shell_guard.ts > raw Git mutations > a read-only spelling of a mutating subcommand is allowed [55.69ms]\\n(pass) shell_guard.ts > raw Git mutations > the write spellings of those same subcommands stay refused [58.58ms]\\n(pass) shell_guard.ts > raw Git mutations > read-only Git inspection stays allowed [29.37ms]\\n(pass) shell_guard.ts > reading another process's environment > is refused whatever reads it [35.36ms]\\n(pass) shell_guard.ts > reading another process's environment > leaves the rest of /proc alone [22.24ms]\\n(pass) shell_guard.ts > reading another process's environment > does not catch the word environment [7.52ms]\\n(pass) shell_guard.ts > working_directory > outside the repository is refused [6.88ms]\\n(pass) shell_guard.ts > working_directory > inside the repository is fine [7.44ms]\\n(pass) shell_guard.ts > the arguments the guard no longer inspects > declared variables and stdin text are passed through [22.19ms]\\n(pass) shell_guard.ts > unparseable input is refused [6.89ms]\\n\\n 1710 pass\\n 0 fail\\n 4976 expect() calls\\nRan 1710 tests across 136 files. [22.36s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":22844}",
+      "tool_call_id": "call_00_ylwyqbqh6n26qh5r9mgi7jvw"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_6wj52p1vifz81h0vgq2rrfmn",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rln \\\"create_pr\\\\|createPullRequest\\\" .github/atomaton-runtime/tools/ | head; ls .github/atomaton-runtime/tools/\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242774432700000000000000000000ffffc0a8a81aea8bd0",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The full suite passes: 1710 pass, 0 fail. (The PR body's earlier 27 failures were in the author's different environment — here the full suite is green, which is worth reporting since it contradicts the PR body claim... actually the PR body said \"27 fail; all 27 are the pre-existing Windows environment set\". Interesting — maybe the PR was authored on a Windows-ish env. Here 0 fail. I'll note it.)\n\nHmm wait — the diff being the PR's commit plus mine. My change adds 1 test file already existing... 1710 pass vs earlier claim 1683 pass/27 fail = 1710 total. Same total. Good.\n\nNow, the version bump: reviewer said left alone deliberately. Fine.\n\nNow also: should I double check that no other workflow has a similar setup? Not needed.\n\nOne more consideration: `reinvokeJob` no longer has `needs`, so `aggregate-sub-issues` needs it — and if reinvoke is skipped (unmerged close), then aggregate-sub-issues is also skipped by GitHub's needs-skip rule. That's exactly the prior behaviour (previously both inherited the skip through parse). Good: no change for unmerged closes.\n\nAlso `notify-parent` needs parse, so it's skipped on unmerged close as before. Good.\n\nNow commit and push, then create_pr updating the same PR. Wait — role says on re-entry: \"commit, and update the same pull request.\" Do I call `create_pr` again or does it update the existing PR? `create_pr` \"requires a clean worktree\" — presumably if a PR already exists for the branch, it may update it. Hmm. The role's outcome table says: \"If a review requests changes, inspect the current pull request and address only concrete findings, then validate, commit, and update the same pull request.\" The available tools: `create_pr` creates a PR from the checked-out branch. Since HEAD equality with remote after push, and a PR already exists for this branch, calling create_pr might fail with \"a pull request already exists\" or it may update it. Let me check the runtime source to know what create_pr does when a PR exists.\n\nLet me grep in .github/atomaton-runtime/tools for create_pr implementation.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\".github/atomaton-runtime/tools/mcp/github.ts\\n.github/atomaton-runtime/tools/mcp/atomaton.ts\\n.github/atomaton-runtime/tools/hooks/shell_guard.ts\\n.github/atomaton-runtime/tools/defaults.yaml\\ndefaults.yaml\\nhooks\\nmcp\\npackages.json\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":102}",
+      "tool_call_id": "call_00_6wj52p1vifz81h0vgq2rrfmn"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_gyr36y9zbanw59mi1ufnkunq",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"create_pr\\\\|already exists\\\\|updateExisting\\\\|existing\\\" .github/atomaton-runtime/tools/mcp/github.ts | head -40\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"4263:        throw new Error(`schema with key or id \\\"${id}\\\" already exists`);\\n15629:        throw new Error(`ID ${meta.id} already exists in the registry`);\\n18387:      throw new Error(`A request handler for ${method} already exists, which would be overridden`);\\n19344:var NO_BRANCH_MESSAGE = \\\"This run is on a detached checkout with no local branch, so there is no branch to push: \\\" + \\\"commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.\\\";\\n19378:  const existing = gitRun(\\\"ls-remote\\\", \\\"--heads\\\", \\\"origin\\\", `refs/heads/${parentBranch}`);\\n19379:  if (existing.code === 0 && existing.stdout.trim()) {\\n19412:    throw new Error(`${listed.why}, so a new branch for #${issue} cannot be named without risking one that already exists.`);\\n19982:    mcpFail(\\\"create_sub_issue is for an issue run that is decomposing work into sub-issues. \\\" + \\\"This run is on a pull request, which reviews or fixes one pull request rather than \\\" + \\\"decomposing it. Use create_root_issue to report a defect that is nobody's child, \\\" + \\\"create_pr to hand this pull request to a reviewer, or request_close_issue to conclude it.\\\");\\n20194:    mcpFail(\\\"create_pr opens the pull request for an ISSUE's branch. This run is on a pull \\\" + \\\"request, which is a leaf of the tree -- it reviews or fixes one pull request rather \\\" + \\\"than opening another. Use commit_and_push to push a fix onto this pull \\\" + \\\"request's branch, or request_close_issue to conclude it.\\\");\\n20234:  logOp(\\\"create_pr\\\", { number: num, title });\\n20585:  defineMcpTool({ name: \\\"create_pr\\\", description: \\\"Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.\\\", schema: CREATE_PR_SCHEMA, handler: createPr }),\\n20608:    description: \\\"Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history.\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":94}",
+      "tool_call_id": "call_00_gyr36y9zbanw59mi1ufnkunq"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_abfkcsdb61ixzzy7x5rryswx",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '20180,20260p' .github/atomaton-runtime/tools/mcp/github.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242775119300000000000000000000ffffc0a8b304e3319a",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Line 20194: \"create_pr opens the pull request for an ISSUE's branch. This run is on a pull request... Use commit_and_push to push a fix onto this pull request's branch, or request_close_issue to conclude it.\"\n\nSo this is a pull-request run — I must NOT call create_pr. Just `commit_and_push`. The push onto the PR's branch is the update; then the machinery/CI presumably re-runs validation.\n\nLet me confirm my run's context: this run is on PR #235 (the header says \"PR #235\"). And the tool description in my prompt says create_pr requires clean worktree... but the error message says it's refused on a pull request run. Let me view lines around 20180-20240 to see what the handler does on a PR run and what tool to use to trigger re-review.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"    mcpFail(\\\"PR body already contains a parent-issue tag; refusing to add another\\\");\\n  }\\n  const line = `${partOfLine(Number(parent))}\\n`;\\n  const originAgent = (process.env.AGENT ?? \\\"\\\").trim();\\n  const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}\\n` : \\\"\\\";\\n  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\\n${originLine}${line}${body}`;\\n}\\nfunction createPr(a) {\\n  const title = a.title;\\n  let body = a.body ?? \\\"\\\";\\n  if ((process.env.ATOMATON_RUN_TYPE ?? \\\"\\\").trim() === \\\"pr\\\") {\\n    mcpFail(\\\"create_pr opens the pull request for an ISSUE's branch. This run is on a pull \\\" + \\\"request, which is a leaf of the tree -- it reviews or fixes one pull request rather \\\" + \\\"than opening another. Use commit_and_push to push a fix onto this pull \\\" + \\\"request's branch, or request_close_issue to conclude it.\\\");\\n  }\\n  const base = stackedPrBase(REPO) ?? getBaseBranch();\\n  const \n\n[911 characters dropped from the middle; 4000 shown]\n\nmoteHead = remote.stdout.trim().split(/\\\\s+/, 1)[0] ?? \\\"\\\";\\n  if (!remoteHead) {\\n    mcpFail(`Remote branch '${branch}' does not exist. Call commit_and_push before creating the PR.`);\\n  }\\n  if (remoteHead !== head.stdout.trim()) {\\n    mcpFail(`Remote branch '${branch}' is not at local HEAD. Call sync_branch and inspect its status; ` + `if it reports 'ahead', call commit_and_push before creating the PR.`);\\n  }\\n  const cmd = [\\\"pr\\\", \\\"create\\\", \\\"--repo\\\", REPO, \\\"--title\\\", title, \\\"--head\\\", branch];\\n  if (body)\\n    cmd.push(\\\"--body\\\", body);\\n  if (base)\\n    cmd.push(\\\"--base\\\", base);\\n  log7(`createPr: running gh ${cmd.join(\\\" \\\")}`);\\n  const { code, stdout, stderr } = gh(...cmd);\\n  log7(`createPr: gh pr create rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);\\n  if (code)\\n    mcpFail(`gh pr create failed (rc=${code}): ${stderr || stdout}`);\\n  const num = Number(stdout.trim().split(\\\"/\\\").pop());\\n  if (!Number.isFinite(num))\\n    mcpFail(`gh pr create: unexpected output: ${stdout.slice(0, 300)}`);\\n  logOp(\\\"create_pr\\\", { number: num, title });\\n  const validationDispatched = dispatchPrValidation(REPO, num, branch);\\n  const currentIssue = (process.env.ISSUE_NUMBER ?? \\\"\\\").trim();\\n  if (currentIssue) {\\n    const next = !validationDispatched ? \\\"CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log.\\\" : reviewer ? `Running CI; \\\\`${reviewer}\\\\` follows if it passes.` : \\\"Running CI. No reviewer was named, so nothing is scheduled afterwards.\\\";\\n    const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;\\n    const body = validationDispatched ? turnCommentBody({ ended: \\\"waiting\\\", audience: \\\"person\\\", body: text }) : `${LLM_CONTEXT_TAG.write(\\\"exclude\\\")}\\n${text}`;\\n    gh(\\\"issue\\\", \\\"comment\\\", currentIssue, \\\"--repo\\\", REPO, \\\"--body\\\", body);\\n  }\\n  if (!isAttended({ ...reviewer ? { next: { agent: reviewer } } : {}, body: body ?? \\\"\\\" })) {\\n    const openedBy = (process.env.AGENT ?? \\\"\\\").trim() || \\\"an agent\\\";\\n    const notify = resolveNotify(REPO, num);\\n    log7(`createPr: PR #${num} has no reviewer and mentions nobody; leaving a notice for ${notify || \\\"(nobody resolved)\\\"}`);\\n    gh(\\\"pr\\\", \\\"comment\\\", String(num), \\\"--repo\\\", REPO, \\\"--body\\\", unattendedNotice(notify, openedBy));\\n  }\\n  return {\\n    text: JSON.stringify({\\n      number: num,\\n      url: stdout.trim(),\\n      base,\\n      validation_dispatched: validationDispatched,\\n      ...validationDispatched ? {} : {\\n        note: \\\"The pull request exists, but CI could not be started, so no required check will be written \\\" + \\\"and no agent is scheduled to continue. Retry with commit_and_push, which dispatches \\\" + \\\"validation again, or report this so a person can start it.\\\"\\n      }\\n    }),\\n    meta: validationDispatched ? { session_ends: true } : {}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":92}",
+      "tool_call_id": "call_00_abfkcsdb61ixzzy7x5rryswx"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_pmfhqpcmaajiu4m8ippe6azq",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"function commitAndPush\\\" .github/atomaton-runtime/tools/mcp/github.ts && sed -n \\\"$(grep -n 'function commitAndPush' .github/atomaton-runtime/tools/mcp/github.ts | cut -d: -f1),+70p\\\" .github/atomaton-runtime/tools/mcp/github.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242775376600000000000000000000ffffc0a854307e854b",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Confirmed: on a PR run (ATOMATON_RUN_TYPE=pr), `create_pr` is refused. So I must use `commit_and_push`, which per its docstring \"dispatches validation again\" in the retry note — let me check commit_and_push's handler to see whether it dispatches review/CI for a PR run.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"20263:function commitAndPush(a) {\\nfunction commitAndPush(a) {\\n  const message = a.message;\\n  refuseClosingKeywords(message, \\\"commit message\\\");\\n  const branch = branchForCommit(REPO);\\n  {\\n    const { code, stdout, stderr } = gitRun(\\\"add\\\", \\\"-A\\\");\\n    if (code)\\n      mcpFail(stderr || stdout);\\n  }\\n  let committed = true;\\n  {\\n    const result = gitRun(\\\"commit\\\", \\\"-m\\\", message);\\n    if (result.code) {\\n      if (!nothingToCommit(result))\\n        mcpFail(result.stderr || result.stdout);\\n      committed = false;\\n    }\\n  }\\n  let pushed = true;\\n  {\\n    const { code, stdout, stderr } = gitRun(\\\"push\\\", \\\"-u\\\", \\\"origin\\\", branch);\\n    if (code)\\n      mcpFail(stderr || stdout);\\n    pushed = !/Everything up-to-date/i.test(`${stdout} ${stderr}`);\\n  }\\n  const moved = committed || pushed;\\n  if (moved)\\n    logOp(\\\"commit_and_push\\\", { committed });\\n  const open = moved ? gh(\\\"pr\\\", \\\"list\\\", \\\"--repo\\\", REPO, \\\"--head\\\", branch, \\\"--state\\\", \\\"open\\\", \\\"--json\\\", \\\"number\\\") : { code: 1, stdout: \\\"\\\", stderr: \\\"\\\" };\\n  if (moved && !open.code) {\\n    try {\\n      const [pr] = JSON.parse(open.stdout || \\\"[]\\\");\\n      if (pr)\\n        dispatchPrValidation(REPO, pr.number, branch);\\n    } catch {\\n      report(\\\"warning\\\", \\\"could not read the open pull request list, so CI validation was NOT dispatched for this push\\\");\\n    }\\n  }\\n  return JSON.stringify({ ok: true, committed, pushed });\\n}\\nfunction syncBranch(a) {\\n  const branch = a.branch?.trim() || resolveBranch();\\n  const valid = gitRun(\\\"check-ref-format\\\", \\\"--branch\\\", branch);\\n  if (valid.code)\\n    mcpFail(`Invalid branch name '${branch}': ${valid.stderr || valid.stdout}`);\\n  const current = gitRun(\\\"branch\\\", \\\"--show-current\\\");\\n  if (current.code)\\n    mcpFail(current.stderr || current.stdout);\\n  if (current.stdout.trim() !== branch) {\\n    mcpFail(`Cannot synchronize '${branch}' while '${current.stdout.trim() || \\\"detached HEAD\\\"}' is checked out.`);\\n  }\\n  const worktree = gitRun(\\\"status\\\", \\\"--porcelain\\\");\\n  if (worktree.code)\\n    mcpFail(worktree.stderr || worktree.stdout);\\n  if (worktree.stdout.trim()) {\\n    mcpFail(\\\"Cannot synchronize a branch with uncommitted changes. Commit or discard them first.\\\");\\n  }\\n  const remoteRef = `refs/remotes/origin/${branch}`;\\n  const fetch = gitRun(\\\"fetch\\\", \\\"origin\\\", `refs/heads/${branch}:${remoteRef}`);\\n  if (fetch.code) {\\n    if (/couldn't find remote ref|not our ref/i.test(fetch.stderr)) {\\n      return JSON.stringify({ branch, status: \\\"remote_missing\\\", ahead: 0, behind: 0 });\\n    }\\n    mcpFail(`Failed to fetch remote branch '${branch}': ${fetch.stderr || fetch.stdout}`);\\n  }\\n  const counts = gitRun(\\\"rev-list\\\", \\\"--left-right\\\", \\\"--count\\\", `HEAD...${remoteRef}`);\\n  if (counts.code)\\n    mcpFail(`Failed to compare branch '${branch}': ${counts.stderr || counts.stdout}`);\\n  const [ahead, behind] = counts.stdout.trim().split(/\\\\s+/).map(Number);\\n  if (!Number.isFinite(ahead) || !Number.isFinite(behind)) {\\n    mcpFail(`Unexpected rev-list output for branch '${branch}': ${counts.stdout}`);\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":97}",
+      "tool_call_id": "call_00_pmfhqpcmaajiu4m8ippe6azq"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_pf3ov89jt5802enkmpwxvuh1",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"Keep the merged-only gate on reinvoke-origin-agent\\n\\nRemoving `needs` from `reinvoke-origin-agent` also removed the merge test it\\ninherited from `parse` -- GitHub skips a job whose needed job was skipped -- and\\nthe trigger is `pull_request_target: closed`, which fires for a close that\\nmerged nothing. Without it, closing a pull request unmerged posts \\\"the pull\\nrequest for this issue merged\\\" on its issue and starts a run on it.\\n\\nGive the job `parse`'s own condition, and assert it in the contract test\\nalongside the parent-gate assertion, so the gate that was never about the parent\\nsurvives the gate that was.\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242775578300000000000000000000ffffc0a8a89d722f2d",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "`commit_and_push` on a PR branch will dispatch PR validation, which re-runs CI and dispatches the reviewer when passing. \n\nSo: `commit_and_push(message=...)` is the outcome for this re-entry run. Then write my report (my last message). Does commit_and_push end the session? It doesn't set session_ends. So the session continues and I write a final report message.\n\nLet me commit.\n\nCommit message — carries the why.\n\n\"Keep the merged-only gate on reinvoke-origin-agent\n\nRemoving `needs` on `reinvoke-origin-agent` also removed the merge test the\njob inherited from `parse` (GitHub skips a job whose needed job was skipped),\nand the trigger is `pull_request_target: closed`, which fires for a close that\nmerged nothing. Give the job `parse`'s own merge condition and assert it in the\ncontract test, so #234's fix does not also re-invoke on a close that merged\nnothing.\"\n\nGood.\n\nBefore committing, check that dist/ isn't getting committed (gitignored — status showed only two files). Good.\n\nAlso verify the file list: `git status --short` showed only the 2 modified files. commit_and_push does `git add -A`; dist is ignored. Fine.\n\nLet me also double-check the version bump stays (0.21.10 unchanged - yes, untouched).\n\nCommit now.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "call_00_pf3ov89jt5802enkmpwxvuh1"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_01_zw4r26hpvuk4qpkx4zsk366u",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\": 235}"
+          }
+        },
+        {
+          "id": "call_00_798k5az87ql3n3ze1zb28fbd",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -3 && git status --short && git rev-parse HEAD && git ls-remote --heads origin | grep -i \\\"234\\\\|235\\\" | head\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242776355800000000000000000000ffffc0a85430f5f901",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Pushed. Let me confirm the push and CI dispatch happened — check check runs on the branch, and PR state. Let me get PR #235 head and check runs.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"main\",\"createdAt\":\"2026-10-19T15:32:44Z\",\"headRefName\":\"fix/203-root-post-merge-reinvoke\",\"number\":235,\"state\":\"OPEN\",\"title\":\"Post-merge: re-invoke without waiting for a resolved parent (#234)\",\"body\":\"/reviewer\\n\\nPart of #234\\n\\n## What\\n\\n`atomaton-pr-merged.wac.ts`: `reinvoke-origin-agent` no longer has an `if`, and no longer `needs: [parse, resolve-parent]`.\\n\\n## Why\\n\\nThe job runs `dispatch_post_merge.ts`, which reads the pull request **body** (`atomaton:parent-issue`, `atomaton:origin-agent`) and answers the only question it has — which issue, which agent, and whether to close directly, notify a parent, or re-invoke — from the tags. It never reads the resolved orchestrator parent.\\n\\nIt was gated on that resolution anyway: `if: needs.resolve-parent.outputs.parent_issue != ''`. A **root** issue has no parent, so the resolution is `\\\"\\\"`, so the job was skipped. #206 is exactly that shape: PR #233 merged, `Atomaton PR Merged` run 39274230329 green, `parse` logging `PR #233 belongs to issue #206`, `resolve-parent` logging the empty root, and `notify-parent` / `reinvoke-origin-agent` / `aggregate-sub-issues` all skipped. The turn stayed with the person and nothing continued.\\n\\nThe same decision made by the agent's `merge_pr` route (`decidePostMergeHandoff` → `dispatchPostMergeAgent`) re-invokes a root issue's PR correctly, because it reads only the body. Two routes, one decision, different answers — this removes the second copy of the rule instead of editing it to match.\\n\\n`needs` is gone for the same reason: waiting for an answer you do not use means a failed `resolve-parent` (a transient GraphQL error, say) silently costs the continuation. The ordering that matters is `re-invoke` before `aggregate-sub-issues`, and `aggregate-sub-issues` already names it in `needs` and stands down on `reinvoked == 'true'`.\\n\\n`notify-parent` and `aggregate-sub-issues` are untouched: both do use the resolved parent (one writes to it, one aggregates into it), so both keep the gate and the dependency.\\n\\n## Tests\\n\\nNew `tests/contract/post-merge-reinvoke.test.ts`, against the generated `dist/.github/workflows/atomaton-pr-merged.yml`:\\n\\n- `reinvoke-origin-agent` has no `if` mentioning `parent_issue`, and does not list `resolve-parent` in `needs`\\n- `notify-parent` and `aggregate-sub-issues` still do both\\n\\nThe pair is the point: a job may be free of an answer only when it does not use it.\\n\\n## Version\\n\\n`package.json` → 0.21.10 (v0.21.9 is released).\\n\\n## Reaching adopters\\n\\n`src/**` only — this repository's own `.github/workflows/atomaton-pr-merged.yml` gets it through a release + **Atomaton Self Deploy** (governed path, person merges).\\n\\n## Validation\\n\\n- `bun run typecheck` — clean\\n- `bun run test` — 1683 pass / 27 fail; all 27 are the pre-existing Windows environment set (grep/bash/git-remote/credential-spawning tests), none touching these files\\n- `bun run synth` → the generated workflow's job graph, as above\\n\"}",
+      "tool_call_id": "call_01_zw4r26hpvuk4qpkx4zsk366u"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"d1e1999 Keep the merged-only gate on reinvoke-origin-agent\\nf32d021 Post-merge: re-invoke without waiting for a resolved parent (#234)\\nd1e199991aaca2d1b9c62effa5a5723cbc6c582c\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":343}",
+      "tool_call_id": "call_00_798k5az87ql3n3ze1zb28fbd"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_8a7xd1yo682r34dwgphq583g",
+          "type": "function",
+          "function": {
+            "name": "get_check_runs",
+            "arguments": "{\"ref\": \"d1e199991aaca2d1b9c62effa5a5723cbc6c582c\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242776693100000000000000000000ffffc0a8a81aae4000",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The push showed nothing for git ls-remote grep \"234\\|235\" — branch is `fix/203-root-post-merge-reinvoke` which doesn't contain 234/235. Fine. commit_and_push pushed and dispatched validation (we can't see; the returned JSON just shows committed/pushed).\n\nLet me check check runs on the new head d1e1999 to confirm CI was dispatched.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "[]",
+      "tool_call_id": "call_00_8a7xd1yo682r34dwgphq583g"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_tkn80hdx1npq90c2vyb9i20q",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"sleep 45; echo done\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242776963900000000000000000000ffffc0a8a119e89050",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Empty check runs — CI may not have started yet, or the dispatch failed. `commit_and_push` returns only `{ok, committed, pushed}` and would report a warning if it couldn't read the PR list. Hmm, it dispatches `dispatchPrValidation` for the open PR found by head branch. Check runs empty right after push is plausible (dispatch takes a moment, or the workflow run takes seconds to register).\n\nLet me wait a bit and re-check. Also inspect the recent workflow runs via... `get_check_runs` on the branch name maybe.\n\nLet me sleep ~30s and check branch ref.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"done\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":45091}",
+      "tool_call_id": "call_00_tkn80hdx1npq90c2vyb9i20q"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_spx7hqz1pqk5262vb43gd9zq",
+          "type": "function",
+          "function": {
+            "name": "get_check_runs",
+            "arguments": "{\"ref\": \"fix/203-root-post-merge-reinvoke\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "[{\"name\":\"pull-request-checks (verify)\",\"status\":\"queued\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/39286777127/job/118175647046\"},{\"name\":\"atomaton-tools\",\"status\":\"queued\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/39286777127/job/118175532510\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"queued\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/39286777127/job/118175532331\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"queued\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/39286777127/job/118175531539\"}]",
+      "tool_call_id": "call_00_spx7hqz1pqk5262vb43gd9zq"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_e0ft6yw85vuefrv6gdbewngs",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>\\\" src/workflows/atomaton-pr-merged.wac.ts && grep -n \\\"must not re-invoke anybody\\\" tests/contract/post-merge-reinvoke.test.ts && grep -n \\\"does not wait on the resolved parent\\\" tests/contract/post-merge-reinvoke.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179242781925800000000000000000000ffffc0a8820f687215",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "CI was dispatched and is queued for the new head. Good.\n\nNow I should update the PR body? The PR body's \"Tests\" section says \"reinvoke-origin-agent has no `if` mentioning `parent_issue`\" — now it has an `if` but not about parent_issue, and it does have a merged gate. Also \"no longer has an `if`\" in What is now false. The PR body is stale/wrong. Can I update it? There's no tool for editing a PR body. `create_pr` is refused, and `gh` is blocked in shell. So I can only note in my report/comment that the PR body's \"What\" line is stale. Hmm — that matters because the description now says something false (\"no longer has an `if`\").\n\nOptions: my report comment is posted on the PR (this run is on the PR — the machinery posts my last message as a comment on the PR). So I can state the correction there. That's the best available.\n\nCould I use `probe`/`fetch`? No. `gh` through shell is routed. So no PR body edit. I'll say so in the report.\n\nNow write the report. Structure:\n\n- Conclusion (1-2 sentences)\n- How I know (≤5 anchored items)\n- What I could not establish\n- What happens next (≤3 sentences)\n\nKey anchors:\n- `src/workflows/atomaton-pr-merged.wac.ts:175` — the added `if`. Let me get the exact line numbers post-edit.\n- `tests/contract/post-merge-reinvoke.test.ts:48` — the assertion; the mutation run's failure text.\n- Full suite: `1710 pass / 0 fail` — contradicting the PR body's earlier 27 failures (worth a note? It's a stale claim in the PR body; I ran it here and it's green. Mention as a note: the PR body's \"1683 pass / 27 fail\" figure is from the author's environment; here the suite is green).\n- Generated job graph: `if: github.event.pull_request.merged == true`, no `needs`; `aggregate-sub-issues` retains `needs: [resolve-parent, parse, reinvoke-origin-agent]` — meaning an unmerged close still skips aggregation, as before.\n- typecheck clean.\n\nLet me get the line numbers.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"75:    if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),\\n176:    if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),\\n48:    expect(reinvoke?.if ?? \\\"\\\", \\\"a close that merged nothing must not re-invoke anybody\\\").toContain(\\n43:  test(\\\"does not wait on the resolved parent, but still only runs for a merge\\\", () => {\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":95}",
+      "tool_call_id": "call_00_e0ft6yw85vuefrv6gdbewngs"
+    },
+    {
+      "role": "assistant",
+      "content": "`reinvoke-origin-agent` now carries `parse`'s own merge test, so a pull request closed unmerged no longer re-invokes anybody, and the parent-gate removal from #234 stands unchanged.\n\n**How I know.**\n\n- `src/workflows/atomaton-pr-merged.wac.ts:176` — the job's condition, the same expression `parse` uses at `src/workflows/atomaton-pr-merged.wac.ts:75`, with no `needs` added back; `bun run synth` emits `if: github.event.pull_request.merged == true` and no `needs:` on that job.\n- `tests/contract/post-merge-reinvoke.test.ts:48` — the new assertion inside the first case. I checked it bites: with the `if` stripped and `bun run synth` re-run, the case fails with `Expected to contain: \"github.event.pull_request.merged == true\" / Received: \"\"`; restored, `bun test ./tests/contract/post-merge-reinvoke.test.ts` is `2 pass / 0 fail`.\n- `aggregate-sub-issues` still lists `needs: [resolve-parent, parse, reinvoke-origin-agent]` and its gate reads `needs.reinvoke-origin-agent.outputs.reinvoked != 'true'`, so an unmerged close still skips aggregation exactly as it did when both jobs inherited the skip from `parse` — the changed job is the only one whose behaviour moves.\n- `bun run typecheck` exits 0; `bun run test` reports `1710 pass / 0 fail` across 136 files on this runner, so the 27 failures the PR body records are from the authoring environment and not reproducible here.\n- Only two files are in the commit (`git status --short` after: clean); `dist/` is gitignored and uncommitted, and `package.json` stays at 0.21.10 as the review asked.\n\n<details><summary>What I could not establish</summary>\n\n- I did not exercise the real trigger — closing a pull request unmerged and watching no comment appear. That would need a disposable pull request closed for real. The claim rests on the generated condition alone plus GitHub's documented rule that `closed` fires for both outcomes.\n- I could not correct the PR body, which still says under **What** that the job \"no longer has an `if`\" and under **Tests** that it has no `if` mentioning `parent_issue`. There is no tool here to edit a body: `create_pr` is refused on a pull-request run and `gh` through the shell is routed. This comment is the correction.\n\n</details>\n\n**What happens next.** CI is queued on head `d1e1999` (`pull-request-checks (verify)`, `atomaton-tools` and the two plan jobs), and a passing run hands `reviewer` the pull request again — no line from me is needed for that beyond this report. The reviewer's remaining question is the one I addressed: the merge gate is back and asserted.\n",
+      "provider_items": [
+        {
+          "id": "rs_02179242782368700000000000000000000ffffc0a84220cbdc02",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now write the report. Keep it tight.\n\nOne more thing to note in \"could not establish\": I did not run the actual unmerged-close scenario (can't — would need a real PR closed unmerged); the reasoning rests on GitHub's documented skip semantics for `needs`, which the reviewer anchored. And I couldn't update the PR body (no tool; `gh` routed, `create_pr` refused on a PR run) so it still says the job has no `if`.\n\nAlso the version bump left at 0.21.10 as the reviewer said.\n\nWrite it.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop",
+      "atoma_metadata": {
+        "github_comment_id": 6272173922,
+        "agent": "engineer"
+      }
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "agent": "engineer",
+      "event_count": 3,
+      "snapshot_hash": "605b126dace28a72436c746827d6cd02e406bc388843cbc5047f8b945b39f410",
+      "version": 1,
+      "type": "pr",
+      "resolved_number": "235"
+    }
+  },
+  "atoma_runs": [
+    {
+      "ended": "2026-10-19T16:37:07Z",
+      "ended_because": "completed",
+      "iterations": 24,
+      "messages": 58,
+      "seconds": 159,
+      "server_calls": {
+        "files": {
+          "edit": 4,
+          "read": 3
+        },
+        "github": {
+          "commit_and_push": 1,
+          "get_check_runs": 2,
+          "get_pr": 1
+        },
+        "shell": {
+          "bash": 18
+        }
+      },
+      "started": "2026-10-19T16:34:28Z"
+    }
+  ]
+}
