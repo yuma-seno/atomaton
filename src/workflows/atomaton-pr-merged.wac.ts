@@ -48,8 +48,9 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 // cannot be assumed to have happened merely because a merged PR links an issue (#150).
 //
 // Job graph:
+//   re-invoke: no `needs` and no `if` -- it decides from the pull request's own body
+//              and stands the aggregate job down when it starts a run
 //   parse --> resolve-parent --> notify-parent
-//                             \-> re-invoke (may stand the aggregate job down)
 //                             \-> aggregate-sub-issues (skipped when re-invoke did)
 
 const parseMetadataStep = new TypedOutputsStep(
@@ -127,6 +128,19 @@ const NOTIFY_AND_AGGREGATE_NEEDS = [resolveParentJob, parseJob];
  * aggregate job reads it (below) and stands down. Everything about which agent and
  * which issue is decided in `dispatch_post_merge.ts`, which applies the same
  * `decidePostMergeHandoff` as `merge_pr`, so the two merge routes cannot drift.
+ *
+ * ## Why it has no `if` and no `needs`
+ *
+ * It used to be gated on `resolve-parent` — the orchestrator root above the pull
+ * request's issue. But the re-invocation reads the pull request BODY (which issue, which
+ * origin agent) and uses nothing that resolution answers. A root issue has no parent, so
+ * the resolution is empty and the job was skipped along with the two that genuinely need
+ * one: a root issue's merged pull request was never re-invoked, and the run was green
+ * (#203, observed on #206 / pull request #233).
+ *
+ * The only question — does this pull request name an issue to re-invoke — belongs to
+ * `dispatch_post_merge.ts`, which answers it (`no-parent` writes `reinvoked=false`). One
+ * rule, in the place that has the inputs for it.
  */
 const reinvokeStep = new TypedOutputsStep(
   {
@@ -149,8 +163,6 @@ const reinvokeJob = new DefinedJob(
   "reinvoke-origin-agent",
   {
     "runs-on": "ubuntu-latest",
-    if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, ""),
-    needs: NOTIFY_AND_AGGREGATE_NEEDS,
     outputs: {
       reinvoked: reinvokeStep.outputs.reinvoked,
     },
