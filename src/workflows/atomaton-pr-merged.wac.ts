@@ -1,7 +1,7 @@
 import { Workflow } from "@github-actions-workflow-ts/lib";
 import type { PullRequestClosedEvent } from "@octokit/webhooks-types";
 import { ActionsCheckoutV4 } from "@github-actions-workflow-ts/actions";
-import { DefinedJob, JobCondition, TypedOutputsStep } from "./actions/base.ts";
+import { DefinedJob, JobCondition, SCRIPT_JOB_TIMEOUT_MINUTES, TypedOutputsStep } from "./actions/base.ts";
 import { githubEvent, githubEventRaw } from "./actions/github-context.ts";
 import { ATOMATON_WORKFLOW_PERMISSIONS } from "./actions/permissions.ts";
 import { scriptCommand, scriptCommandWithArgs } from "./actions/script-call.ts";
@@ -72,6 +72,7 @@ const parseJob = new DefinedJob(
   "parse",
   {
     "runs-on": "ubuntu-latest",
+    "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
     if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),
     // One output, where there used to be two.
     //
@@ -108,6 +109,7 @@ const resolveParentJob = new DefinedJob(
   "resolve-parent",
   {
     "runs-on": "ubuntu-latest",
+    "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
     if: JobCondition.isNot(parseJob.rawOutputs.parent_issue, ""),
     needs: [parseJob],
     outputs: {
@@ -172,6 +174,7 @@ const reinvokeJob = new DefinedJob(
   "reinvoke-origin-agent",
   {
     "runs-on": "ubuntu-latest",
+    "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
     // A merge test of its own, not the one `needs: parse` used to lend it.
     if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),
     outputs: {
@@ -197,6 +200,7 @@ export const atomaPrMerged = new Workflow("atomaton-pr-merged", {
     "notify-parent",
     {
       "runs-on": "ubuntu-latest",
+      "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
       if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, ""),
       needs: NOTIFY_AND_AGGREGATE_NEEDS,
     },
@@ -234,6 +238,7 @@ PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
     "aggregate-sub-issues",
     {
       "runs-on": "ubuntu-latest",
+      "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
       // Not when the judgement was dispatched: it re-invokes the parent itself once
       // the sub-issue is closed, and aggregating here would start the parent on a
       // subtree whose sub-issue is still open.

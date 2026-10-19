@@ -360,6 +360,28 @@ export type DefinedJobProps<TOutputsMap extends Record<string, string>> = Omit<
   needs?: DefinedJob[];
 };
 
+/**
+ * The bound a job that is one script long declares.
+ *
+ * A job that names no `timeout-minutes` runs under GitHub's default of six hours.
+ * A step that then hangs — a network call with no timeout, a script waiting on
+ * something that never answers — holds that job, and everything waiting behind it,
+ * for six hours, and the only thing that ends it is the default finally firing.
+ * For jobs that decide what happens next (the post-merge re-invocation, the
+ * aggregation that starts the parent) the cost is the same as the hang: a
+ * continuation that never arrives, with nothing saying so.
+ *
+ * These jobs are `checkout` + bun + one script, and they finish in seconds. This
+ * value is not a budget they are expected to approach; it is the answer to "how
+ * long before we call it dead", and the answer has to be small or it is not an
+ * answer. A job with a real budget — the agent run, a validation that polls CI —
+ * names its own, next to the reason.
+ *
+ * `tests/contract/job-timeouts.test.ts` refuses a generated job that declares
+ * neither this nor `uses:`.
+ */
+export const SCRIPT_JOB_TIMEOUT_MINUTES = 5;
+
 export class DefinedJob<TOutputsMap extends Record<string, string> = Record<never, string>> extends NormalJob {
   readonly outputs: Record<keyof TOutputsMap & string, string>;
   readonly rawOutputs: Record<keyof TOutputsMap & string, JobOutputRef>;
