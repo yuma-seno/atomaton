@@ -103,6 +103,20 @@ export function keptCommentIds(comments: readonly Comment[]): Set<number> {
 }
 
 /**
+ * The raw comment list, oldest first, as the API returns it.
+ *
+ * One read shared by every reader here: the shaped readers fold it, the guard walks it,
+ * and the dispatch freshness probe scans it. Throws when the read fails — every caller
+ * is deciding whether to keep a comment out of a race or whether to start a run, so an
+ * answer nobody could determine must not be the one that lets work through.
+ */
+function listComments(repo: string, number: string | number): Comment[] {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  return JSON.parse(listed.stdout || "[]") as Comment[];
+}
+
+/**
  * A node's shaped comments, read from GitHub.
  *
  * The comments alone, without the body. `runInFlight` needs only these, and it is
@@ -113,11 +127,8 @@ export function keptCommentIds(comments: readonly Comment[]): Set<number> {
  * Throws when the read fails, for the same reason `readThread` does.
  */
 function readComments(repo: string, number: string | number, excludeCommentId?: string | number): ShapedThread {
-  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
-  if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments: ThreadEntry[] = (JSON.parse(listed.stdout || "[]") as Comment[])
+  const comments: ThreadEntry[] = listComments(repo, number)
     .filter((comment) => String(comment.id) !== excluded)
     .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
 
@@ -128,8 +139,8 @@ function readComments(repo: string, number: string | number, excludeCommentId?: 
  * A node's body and its shaped comments, read from GitHub.
  *
  * The one read every question below starts from. `excludeCommentId` drops a comment
- * from the read — the guard excludes the comment it is judging, so the question is
- * whose turn it was BEFORE that comment arrived.
+ * from the read — `requestOutstandingOn` uses it so a dispatch does not count its own
+ * marker's request as the one it would be refusing.
  *
  * Throws when either read fails. Every caller is deciding whether to keep a comment out
  * of a race or whether to start a run, so an answer nobody could determine must not be
@@ -145,18 +156,37 @@ function readThread(repo: string, number: string | number, excludeCommentId?: st
 /**
  * Whether the guard's shaping removes a comment — the question the guard itself asks.
  *
- * The guard deletes a person's comment made while the ball is with an agent, and that
- * rule is `shapedThread`'s. So the guard does not re-derive it: it reads the thread
- * WITHOUT the comment it is judging, shapes what is left, and asks whose turn it was.
- * One rule, one place, and the readers that run in the window before the deletion lands
- * see the same answer.
+ * The rule is `shapedThread`'s, applied to the whole thread in order: a person's comment
+ * is removed when the ball was already with an agent WHEN IT ARRIVED. So the comment is
+ * judged at its own position in that walk, not by removing it and asking whose turn the
+ * rest leaves. Judged by exclusion, a `/agent` command posted seconds AFTER the comment
+ * being judged moved the turn first, and an ordinary comment written on a person's turn
+ * was deleted for racing a run that started after it was written (#206).
+ *
+ * When the comment is in the listing, the answer is whether the shaping keeps it — the
+ * same walk `keptCommentIds` gives the context builder, so the guard and the run's own
+ * context cannot disagree about a comment that is on the page.
+ *
+ * When it is NOT, GitHub's read has not caught up with the write: the comment being
+ * judged is newer than everything the listing shows (read-after-write is not
+ * guaranteed; `MarkerCheck` has the same fact from the dispatch side). Taking "absent"
+ * as "kept" would open the very window this guard exists to close, so the fallback
+ * judges it as the latest arrival — whose turn the whole listed thread leaves.
  *
  * COMMENTS ONLY, never the body. A pull request body naming a reviewer is a request the
  * validation dispatch is already handling, and counting it would delete a person's
  * comment on the strength of a request their comment was not racing.
  */
 export function commentWouldBeRemoved(repo: string, number: string | number, commentId: string | number): boolean {
-  return whoseTurn(readThread(repo, number, commentId).shaped.events) === "agent";
+  const comments = listComments(repo, number);
+  const listed = comments.find((comment) => String(comment.id) === String(commentId));
+  if (listed === undefined) {
+    // Read-after-write lag: the comment being judged is newer than the listing. Judge
+    // it as the latest arrival, which is whose turn the whole listed thread leaves.
+    const entries = comments.map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+    return whoseTurn(shapedThread(entries, readers).events) === "agent";
+  }
+  return !keptCommentIds(comments).has(listed.id);
 }
 
 /**
@@ -246,11 +276,9 @@ export function checkDispatchMarker(
   number: string | number,
   markerId: string | number,
 ): MarkerCheck {
-  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
-  if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const comments = listComments(repo, number);
 
   const marker = String(markerId);
-  const comments = JSON.parse(listed.stdout || "[]") as Comment[];
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
   const entries: ThreadEntry[] = comments
     .filter((comment) => String(comment.id) !== marker)

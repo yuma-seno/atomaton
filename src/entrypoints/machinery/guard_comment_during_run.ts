@@ -59,17 +59,17 @@ function main(): void {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const githubOutput = process.env.GITHUB_OUTPUT;
 
-  // The comment being judged is excluded: a person's `/engineer` is itself an "asked"
-  // event, and counting it would block the very command that is starting a run. The
-  // question is whose turn it was BEFORE this comment.
+  // The rule is `shapedThread`'s, applied to the whole thread in order: a person's
+  // comment is removed when the ball was already with an agent WHEN IT ARRIVED. The
+  // comment is judged at its own position in that walk, not by removing it and asking
+  // whose turn the rest leaves — judged by exclusion, a `/agent` command posted
+  // seconds AFTER the comment being judged moved the turn first, and an ordinary
+  // comment written on a person's turn was deleted for racing a run that started
+  // after it was written (#206). See `commentWouldBeRemoved`.
   //
   // Comments alone, not the body: a pull request body naming a reviewer is a request
   // the validation dispatch is already handling, and deleting a person's comment on
   // the strength of it would tell them to wait for a run their comment was not racing.
-  //
-  // The rule itself is `shapedThread`'s, shared with the readers that run in the window
-  // before this deletion lands -- so the guard does not re-derive it, it asks whether
-  // the comment survived the shaping. See `commentWouldBeRemoved`.
   let removed: boolean;
   try {
     removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
