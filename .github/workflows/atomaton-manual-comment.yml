@@ -24,6 +24,7 @@ permissions:
 jobs:
   parse:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       agent: ${{ steps.dispatch.outputs.agent }}
       session_mode: ${{ steps.command.outputs.session_mode }}
