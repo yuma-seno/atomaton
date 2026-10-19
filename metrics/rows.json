@@ -3895,14 +3895,14 @@
   {
     "path": "sessions/issue-206/atomaton.json",
     "agent": "atomaton",
-    "messages": 250,
-    "calls": 134,
-    "failed": 8,
-    "refused": 2,
+    "messages": 276,
+    "calls": 146,
+    "failed": 9,
+    "refused": 1,
     "skills": [
       "project/conventions"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
       "get_issue": 2,
       "list": 4,
@@ -3910,22 +3910,26 @@
       "grep": 17,
       "get_issue_comments": 2,
       "fetch": 22,
-      "bash": 37,
+      "bash": 39,
       "glob": 4,
       "delegate": 1,
       "atoma_builtin__load_skill": 1,
       "write": 2,
-      "request_close_issue": 1,
+      "request_close_issue": 2,
       "edit": 7,
       "commit_and_push": 1,
-      "create_pr": 1
+      "create_pr": 1,
+      "get_pr": 1,
+      "get_check_runs": 1,
+      "search_remote_code": 6,
+      "list_prs": 1
     },
     "acts": {
       "other": 14,
       "edit": 14,
-      "search": 4,
+      "search": 5,
       "verify": 3,
-      "open": 2
+      "open": 3
     },
     "runs": [
       {
@@ -3983,6 +3987,28 @@
           }
         },
         "started": "2026-10-19T13:51:54Z"
+      },
+      {
+        "ended": "2026-10-19T15:34:39Z",
+        "ended_because": "completed",
+        "iterations": 9,
+        "messages": 276,
+        "seconds": 415,
+        "server_calls": {
+          "atomaton": {
+            "request_close_issue": 1
+          },
+          "github": {
+            "get_check_runs": 1,
+            "get_pr": 1,
+            "list_prs": 1,
+            "search_remote_code": 6
+          },
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-10-19T15:27:44Z"
       }
     ]
   },
