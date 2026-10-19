@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { CONFIG_FILE } from "../../src/domain/machinery/machinery-layout.ts";
+import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
 
 /**
  * `self/` and `.github/` do not drift apart.
@@ -31,6 +33,14 @@ import { CONFIG_FILE } from "../../src/domain/machinery/machinery-layout.ts";
  * so a change to `self/X` belongs in the same pull request as the identical change
  * to `.github/X`. This is what turns "remember to change both" into a failing
  * check, and it is why an agent improving `config.yaml` cannot half-apply it.
+ *
+ * Workflows are the one exception, and the token model is why: GitHub refuses to
+ * let a GitHub App token write `.github/workflows/**` at all, so an agent can
+ * change `self/workflows/**` and cannot change the deployed copy. Requiring both
+ * halves in one pull request would make a workflow change something no agent could
+ * ever finish. `self/` leads, the deployed copy catches up at the next self-deploy,
+ * and the test below holds the direction that matters: the deployed copy may not
+ * be edited on its own.
  *
  * ## Why there is no "every file in `.github/` is accounted for" test
  *
@@ -91,6 +101,61 @@ function body(path: string): string {
   return readFileSync(path, "utf8").replaceAll("\r\n", "\n");
 }
 
+/**
+ * `git`, run in this checkout, returning stdout or `undefined` when it fails.
+ *
+ * stderr is swallowed: a fetch that cannot reach the remote is an answer here, not
+ * something to print. Nothing here stages, commits or writes -- only reads.
+ */
+function git(...args: string[]): string | undefined {
+  const run = spawnSync("git", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    // `hermeticEnv()` because GIT_DIR and GIT_WORK_TREE OVERRIDE `cwd`: a child
+    // started here would run against whatever repository the caller pointed it at
+    // rather than this checkout. `test-hermetic-env.test.ts` requires it of any test
+    // that spawns git, and it is the same helper the machinery's own scripts use.
+    env: hermeticEnv(),
+  });
+  return run.status === 0 ? run.stdout : undefined;
+}
+
+/**
+ * The commit this work branched from, or `undefined` when nothing could say.
+ *
+ * The same shape as `scan_secrets.ts`. A pull request sets `GITHUB_BASE_REF`, and
+ * `atomaton-check.yml` checks out shallow, so unshallow before asking for a merge
+ * base; a repository that is already complete refuses that, which is not a
+ * failure. A dispatch, and a local run, have no `GITHUB_BASE_REF`: there the base
+ * is `origin/main`, read from what the checkout already holds rather than fetched,
+ * so a local run does not reach the network to answer a question about the tree.
+ *
+ * Tolerated rather than required, as it is there: no base is not a finding, and
+ * the caller says so rather than guessing at one.
+ */
+function baseCommit(): string | undefined {
+  const named = (process.env.GITHUB_BASE_REF ?? "").trim();
+
+  if (!named) {
+    for (const ref of ["origin/main", "origin/HEAD"]) {
+      const base = git("merge-base", ref, "HEAD");
+      if (base?.trim()) return base.trim();
+    }
+    return undefined;
+  }
+
+  git("fetch", "--quiet", "--unshallow", "origin");
+  if (git("fetch", "--quiet", "origin", named) === undefined) return undefined;
+  const base = git("merge-base", "FETCH_HEAD", "HEAD");
+  return base?.trim() ? base.trim() : undefined;
+}
+
+/** The bytes of `path` at `commit`, line endings normalised like `body`. */
+function bodyAt(commit: string, path: string): string | undefined {
+  const out = git("show", `${commit}:${path}`);
+  return out === undefined ? undefined : out.replaceAll("\r\n", "\n");
+}
+
 describe("`self/` and `.github/` hold the same overlay", () => {
   test("every file in self/ has a counterpart in .github/", () => {
     const missing = filesUnder(OVERLAY).filter((file) => !existsSync(join(DEPLOYED, file)));
@@ -103,7 +168,13 @@ describe("`self/` and `.github/` hold the same overlay", () => {
 
   test("self/ and .github/ hold the same bytes", () => {
     const differing = filesUnder(OVERLAY).filter(
-      (file) => existsSync(join(DEPLOYED, file)) && body(join(OVERLAY, file)) !== body(join(DEPLOYED, file)),
+      // `workflows/` is held by the next test instead, and in one direction only:
+      // an agent can write the source and not the deployed copy, so they are
+      // allowed to differ there. Every other file is a copy both ways.
+      (file) =>
+        !file.startsWith("workflows/") &&
+        existsSync(join(DEPLOYED, file)) &&
+        body(join(OVERLAY, file)) !== body(join(DEPLOYED, file)),
     );
     expect(
       differing,
@@ -111,6 +182,48 @@ describe("`self/` and `.github/` hold the same overlay", () => {
         `Editing ${DEPLOYED}/ alone is worse than not editing it: the next self-deploy overwrites ` +
         `it from ${OVERLAY}/ and the change disappears with no diff to notice it by`,
     ).toEqual([]);
+  });
+
+  /**
+   * The overlay may lead `.github/workflows/`, and the token model is why: a
+   * GitHub App token cannot write `.github/workflows/**` at all, so an agent can
+   * write `self/workflows/**` and cannot write the deployed copy. The deployed
+   * copy is a copy, and self-deploy copies `self/` over it, so it is allowed to
+   * lag until the next deploy.
+   *
+   * The other direction is not allowed, is not forced by any token, and is what a
+   * person slips into by hand. The next self-deploy overwrites `.github/` from
+   * `self/`, so an edit made there alone is gone with nothing to notice it by.
+   * That is caught against the base the pull request branched from: if the
+   * deployed copy moved, `self/` has to have moved with it, to the same bytes.
+   */
+  test("the overlay may lead .github/workflows, but .github/workflows may not move alone", () => {
+    const base = baseCommit();
+    if (base === undefined) {
+      console.warn(
+        `no base commit could be read (set GITHUB_BASE_REF, or have origin/main), so the workflow ` +
+          `drift check cannot tell which copy moved; skipping rather than guessing`,
+      );
+      return;
+    }
+
+    for (const file of filesUnder(join(OVERLAY, "workflows"))) {
+      const lead = body(join(OVERLAY, "workflows", file));
+      const deployed = body(join(DEPLOYED, "workflows", file));
+      if (!existsSync(join(DEPLOYED, "workflows", file)) || deployed === lead) continue;
+
+      // The deployed copy as the base holds it. Unchanged means `self/` is the one
+      // that moved, which is the allowed direction.
+      const atBase = bodyAt(base, `${DEPLOYED}/workflows/${file}`);
+      if (deployed === atBase) continue;
+
+      expect(
+        deployed,
+        `${DEPLOYED}/workflows/${file} moved on its own. ${OVERLAY}/ is the source and the next ` +
+          `self-deploy reverts ${DEPLOYED}/, so edit ${OVERLAY}/workflows/${file} instead; the ` +
+          `deployed copy catches up when Atomaton Self Deploy runs`,
+      ).toBe(lead);
+    }
   });
 
   /**

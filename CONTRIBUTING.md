@@ -241,8 +241,17 @@ and `.github/X` in the **same pull request**, identically.
 `tests/contract/self-overlay.test.ts` requires them byte-identical, in both
 directions, which is what stops a change from being half-applied.
 
-Editing `.github/X` alone is worse than not editing it: the next self-deploy
-overwrites it from `self/` and the change disappears without a diff.
+**Workflows are the one exception.** GitHub refuses to let a GitHub App token
+write `.github/workflows/**`, so an agent can change `self/workflows/**` and cannot
+change the deployed copy. A workflow change therefore goes in `self/` alone, and
+the deployed copy catches up the next time **Atomaton Self Deploy** runs rather
+than the moment the pull request merges. The direction that matters is still held:
+the test compares against the base the pull request branched from, and fails when
+`.github/workflows/**` moved without `self/` moving with it — the edit that the
+next self-deploy would revert.
+
+Editing any other `.github/X` alone is worse than not editing it: the next
+self-deploy overwrites it from `self/` and the change disappears without a diff.
 
 Nothing checks that every file in `.github/` is accounted for, and nothing needs
 to. The deploy runs `rm -rf .github` first, so a file the release stopped shipping
@@ -397,8 +406,10 @@ a shell any more.
   dispatches that, and CI does not reject a diff that touches `.github/`.
 - What is genuinely yours to edit lives in `self/`, not in `.github/`. Edit both,
   identically, in one pull request — `tests/contract/self-overlay.test.ts` requires
-  it. Editing `.github/` alone is worse than not editing it: the next self-deploy
-  reverts it, silently.
+  it. `self/workflows/**` is the one exception: GitHub refuses to let an agent write
+  `.github/workflows/**`, so it goes in `self/` alone and the next self-deploy
+  applies it. Editing `.github/` alone is worse than not editing it: the next
+  self-deploy reverts it, silently.
 
 ## PR checklist
 

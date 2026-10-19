@@ -157,7 +157,11 @@ here as everywhere.
 `self/workflows/atomaton-self-deploy.yml`. It mirrors `.github/` exactly, so
 nothing goes in it that does not belong in `.github/` — and an overlay file is a
 copy rather than a build, so both halves change in the same pull request.
-`self-overlay.test.ts` holds them to each other in both directions.
+`self-overlay.test.ts` holds them to each other in both directions — except for
+`self/workflows/**`, which leads on its own: GitHub refuses to let a GitHub App
+token write `.github/workflows/**`, so an agent can change the source and not the
+deployed copy, and the next self-deploy applies it. The deployed copy may never be
+edited on its own.
 
 **An upgrade replaces the machinery, and that is the intent.** A project may edit
 anything under `.github/atomaton-runtime/`; the next upgrade puts the shipped
