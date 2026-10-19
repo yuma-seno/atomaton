@@ -24,6 +24,7 @@ permissions:
 jobs:
   parse:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       parent_issue: ${{ steps.parse-metadata.outputs.parent_number }}
     if: github.event.pull_request.merged == true
@@ -43,6 +44,7 @@ jobs:
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/parse_pr_metadata.ts"
   resolve-parent:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       parent_issue: ${{ steps.resolve.outputs.parent_issue }}
     if: needs.parse.outputs.parent_issue != ''
@@ -66,6 +68,7 @@ jobs:
           echo "parent_issue=${PARENT}" >> "$GITHUB_OUTPUT"
   notify-parent:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: needs.resolve-parent.outputs.parent_issue != ''
     needs:
       - resolve-parent
@@ -86,6 +89,7 @@ jobs:
           PR #${PR_NUMBER} merged: ${PR_TITLE} (${PR_URL})"
   reinvoke-origin-agent:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       reinvoked: ${{ steps.reinvoke.outputs.reinvoked }}
     env:
@@ -110,6 +114,7 @@ jobs:
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_post_merge.ts"
   aggregate-sub-issues:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
     if: (needs.resolve-parent.outputs.parent_issue != '') && (needs.reinvoke-origin-agent.outputs.reinvoked != 'true')

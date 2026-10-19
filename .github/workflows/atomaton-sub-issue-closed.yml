@@ -24,6 +24,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       is_sub_issue: ${{ steps.check.outputs.is_sub_issue }}
       parent_number: ${{ steps.check.outputs.parent_number }}
@@ -45,6 +46,7 @@ jobs:
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_sub_issue_closure.ts"
   aggregate:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: needs.check.outputs.is_sub_issue == 'true'
     needs:
       - check
@@ -66,6 +68,7 @@ jobs:
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_if_siblings_done.ts" --repo "${OWNER}/${REPO}" --parent "${PARENT}" --closed-num "${CLOSED_NUM}"
   stop-run:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.event.sender.type != 'Bot'
     steps:
       - uses: actions/checkout@v4
@@ -85,6 +88,7 @@ jobs:
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/stop_on_close.ts" --number "${NUMBER}" --closer "${CLOSER}" --closer-type "${CLOSER_TYPE}"
   prune:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
