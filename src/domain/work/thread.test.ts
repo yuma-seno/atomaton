@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { parseMangledCommand } from "./comment-command.ts";
 import {
   latestAsk,
   latestRequestedAgent,
@@ -309,6 +310,23 @@ describe("latestAsk", () => {
       author: { kind: "person" },
       at: "09:00:00",
     });
+  });
+
+  // The directive the runner extracted and posted back may have been mangled by the
+  // model's markdown. `extract_directive` dispatched it through `lineForms`, so the
+  // ask reader must see the same line: otherwise the ask disappears, `latestAsk`
+  // returns undefined, and the green verdict re-dispatches the agent the push already
+  // answered (#219).
+  test("a directive the model's markdown mangled is still an ask", () => {
+    const real: AskReaders = { ...askReaders, requestedAgent: (body) => parseMangledCommand(body).agent };
+    for (const form of ["- /engineer", "> /engineer", "`/engineer`"]) {
+      const thread = [timed("08:40:00", machine(`RESULT handoff BY reviewer\nreview found problems\n\n${form}`))];
+      expect(latestAsk("/reviewer", thread, real), form).toEqual({
+        agent: "engineer",
+        author: { kind: "agent", agent: "reviewer" },
+        at: "08:40:00",
+      });
+    }
   });
 
   // The body's `/<agent>` line is the node's standing request: a push is part of the

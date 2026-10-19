@@ -279,11 +279,15 @@ describe("a request the push answered", () => {
 
   // The #211 shape, verbatim: the reviewer's directive asking for a fix, then a push
   // that fulfilled it, then a green run. What the thread still asks for is the
-  // engineer -- and that is exactly the request the push answered.
+  // engineer -- and that is exactly the request the push answered. `reviewerAgent` is
+  // set to `engineer` because that is what the standing request names there: on the
+  // pre-change routing this case dispatches the engineer, and only the answered-ask
+  // branch hands it to the reviewer.
   test("a green run returns to the reviewer whose directive the push answered", () => {
     const outcome = decideValidationOutcome({
       conclusion: "success",
       ...agents,
+      reviewerAgent: "engineer",
       latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
       headCommittedAt: PUSHED,
     });
@@ -338,38 +342,55 @@ describe("a request the push answered", () => {
 
   // Unknown is not old. An unreadable time on either side leaves the standing
   // request routing, which is the behaviour that predated the question.
+  //
+  // The ask is a PERSON's, and the standing request names the engineer, so the two
+  // branches are distinguishable: an answered person's request dispatches nobody,
+  // while the standing request dispatches the engineer. With the asker and the
+  // standing request both named "reviewer" this test stayed green even if an
+  // unreadable time were taken for an answer.
   test("an unreadable commit time or ask time falls back to the standing request", () => {
-    const ask = { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED } as const;
-    expect(
-      decideValidationOutcome({ conclusion: "success", ...agents, latestAsk: ask, headCommittedAt: "" }).next?.agent,
-    ).toBe("reviewer");
+    const ask = { agent: "engineer", author: { kind: "person" }, at: ASKED } as const;
     expect(
       decideValidationOutcome({
         conclusion: "success",
         ...agents,
+        reviewerAgent: "engineer",
+        latestAsk: ask,
+        headCommittedAt: "",
+      }).next?.agent,
+    ).toBe("engineer");
+    expect(
+      decideValidationOutcome({
+        conclusion: "success",
+        ...agents,
+        reviewerAgent: "engineer",
         latestAsk: { ...ask, at: "" },
         headCommittedAt: PUSHED,
       }).next?.agent,
-    ).toBe("reviewer");
+    ).toBe("engineer");
     expect(
       decideValidationOutcome({
         conclusion: "success",
         ...agents,
+        reviewerAgent: "engineer",
         latestAsk: { ...ask, at: "not-a-date" },
         headCommittedAt: PUSHED,
       }).next?.agent,
-    ).toBe("reviewer");
+    ).toBe("engineer");
   });
 
-  // Second precision, so a tie is not an answer.
+  // Second precision, so a tie is not an answer. Same distinction as above: a person's
+  // ask taken for an answer would dispatch nobody, and the standing request here
+  // dispatches the engineer.
   test("a commit as old as the ask is not an answer", () => {
     const outcome = decideValidationOutcome({
       conclusion: "success",
       ...agents,
-      latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
+      reviewerAgent: "engineer",
+      latestAsk: { agent: "engineer", author: { kind: "person" }, at: ASKED },
       headCommittedAt: ASKED,
     });
-    expect(outcome.next?.agent).toBe("reviewer");
+    expect(outcome.next?.agent).toBe("engineer");
   });
 
   // The bound the issue names: one ask cycles at most once. A SECOND push judged
@@ -380,6 +401,7 @@ describe("a request the push answered", () => {
     const outcome = decideValidationOutcome({
       conclusion: "success",
       ...agents,
+      reviewerAgent: "engineer",
       latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: ASKED },
       headCommittedAt: "2026-02-19T16:30:00Z",
     });
@@ -393,6 +415,7 @@ describe("a request the push answered", () => {
     const outcome = decideValidationOutcome({
       conclusion: "success",
       ...agents,
+      reviewerAgent: "engineer",
       latestAsk: { agent: "engineer", author: { kind: "agent", agent: "reviewer" }, at: "2026-02-19T09:50:00Z" },
       headCommittedAt: "2026-02-19T10:10:00Z",
     });

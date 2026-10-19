@@ -35,7 +35,7 @@
  */
 import { gh, ghRead } from "./gh.ts";
 import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG } from "./tags.ts";
-import { parseCommentCommand } from "../../domain/work/comment-command.ts";
+import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
   latestAsk,
@@ -81,9 +81,18 @@ export const readers: TurnReaders = {
  * directive at the end of one has an author to hand the answer back to. A machinery
  * comment without the tag has no author, and `latestAsk` treats it as one it cannot
  * route an answer to.
+ *
+ * `requestedAgent` is the tolerant parse here, and only here. The ask is read out of
+ * an AGENT's result comment, which is the model's final text posted verbatim — the
+ * same text `extract_directive` read the handoff from, through `lineForms`. Read
+ * strictly, a directive it dispatched from `- /engineer` would not be an ask, and the
+ * green verdict would re-dispatch the agent the push answered. `readers` stays strict:
+ * a command a person typed is not a model's markdown, and `whoseTurn`,
+ * `requestOutstanding` and the guard all read it as the machinery acts on it.
  */
 const askReaders: AskReaders = {
   ...readers,
+  requestedAgent: (body) => parseMangledCommand(body).agent,
   authoringAgent: (body) => AGENT_TAG.read(body) ?? "",
 };
 
@@ -358,13 +367,21 @@ export function latestRequestOn(
   isKnownAgent: (name: string) => boolean,
 ): ThreadRequest {
   const { body, shaped } = readThread(repo, number);
-  const knownAgent = (text: string): string => {
-    const name = readers.requestedAgent(text);
-    return isKnownAgent(name) ? name : "";
-  };
-  const known: AskReaders = { ...askReaders, requestedAgent: knownAgent };
+  // A name with no definition cannot be dispatched, so each answer routes by the
+  // nearest name that can.
+  const known = (name: string): string => (isKnownAgent(name) ? name : "");
   return {
-    newestRequestedAgent: latestRequestedAgent(body, shaped.comments, known),
-    latestAsk: latestAsk(body, shaped.comments, known),
+    // The standing request keeps the strict read: it is what a dispatch will act on,
+    // and one name for it means the dispatch acts on what was actually asked.
+    newestRequestedAgent: latestRequestedAgent(body, shaped.comments, {
+      ...readers,
+      requestedAgent: (text) => known(readers.requestedAgent(text)),
+    }),
+    // The ask is read the way the HANDOFF was read -- see `askReaders`. A directive
+    // the runner dispatched must be the same directive a push is seen to answer.
+    latestAsk: latestAsk(body, shaped.comments, {
+      ...askReaders,
+      requestedAgent: (text) => known(askReaders.requestedAgent(text)),
+    }),
   };
 }
