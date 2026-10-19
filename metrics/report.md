@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 99 | 10.1% | 650 | 9,859 | 18 | 39.2 |
-| Last 30 days | 137 | 9.5% | 854 | 10,246 | 22 | 38.0 |
-| Last year | 137 | 9.5% | 854 | 10,246 | 22 | 38.0 |
-| All time | 137 | 9.5% | 854 | 10,246 | 22 | 38.0 |
+| Last 7 days | 100 | 10% | 650 | 9,859 | 17 | 39.2 |
+| Last 30 days | 138 | 9.4% | 854 | 10,246 | 22 | 38.0 |
+| Last year | 138 | 9.4% | 854 | 10,246 | 22 | 38.0 |
+| All time | 138 | 9.4% | 854 | 10,246 | 22 | 38.0 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 124 |
+| `completed` | 125 |
 | `failed` | 11 |
 | `stopped` | 2 |
 
@@ -31,14 +31,14 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 **Ran to an end without a report:** 14 of 41 sessions whose last run the core recorded as `completed` — 34.1%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**236,250,996 tokens** over 50 runs that reported them, **97.4% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**236,523,991 tokens** over 51 runs that reported them, **97.4% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **96.1% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,232,143 | 8,138,470 | 73,718,100 | 73,718,100 | 236,250,996 |
-| messages per session | 169 | 396 | 705 | 705 | 9,026 |
+| tokens per run | 1,221,174 | 7,169,420 | 73,718,100 | 73,718,100 | 236,523,991 |
+| messages per session | 169 | 396 | 705 | 705 | 9,031 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -87,8 +87,8 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `probe` | 5 | 0 | 0 | 0% |
 | `github__create_issue` | 4 | 0 | 0 | 0% |
 | `close_issue` | 3 | 0 | 0 | 0% |
+| `create_sub_issue` | 3 | 0 | 0 | 0% |
 | `create_root_issue` | 2 | 0 | 0 | 0% |
-| `create_sub_issue` | 2 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 2 | 0 | 2 | 0% |
 | `github__get_issue` | 2 | 0 | 0 | 0% |
 | `publish_draft` | 2 | 0 | 0 | 0% |
@@ -123,14 +123,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 **Ran to an end without a report:** 20 of 61 sessions whose last run the core recorded as `completed` — 32.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**356,511,589 tokens** over 71 runs that reported them, **97% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**356,784,584 tokens** over 72 runs that reported them, **97% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **96.4% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,452,028 | 11,067,135 | 73,718,100 | 73,718,100 | 356,511,589 |
-| messages per session | 167 | 482 | 715 | 715 | 14,422 |
+| tokens per run | 1,452,028 | 11,067,135 | 73,718,100 | 73,718,100 | 356,784,584 |
+| messages per session | 167 | 482 | 715 | 715 | 14,427 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -196,9 +196,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
 | `close_issue` | 3 | 0 | 0 | 0% |
+| `create_sub_issue` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `create_root_issue` | 2 | 0 | 0 | 0% |
-| `create_sub_issue` | 2 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 2 | 0 | 2 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
@@ -238,14 +238,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 **Ran to an end without a report:** 20 of 61 sessions whose last run the core recorded as `completed` — 32.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**356,511,589 tokens** over 71 runs that reported them, **97% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**356,784,584 tokens** over 72 runs that reported them, **97% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **96.4% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,452,028 | 11,067,135 | 73,718,100 | 73,718,100 | 356,511,589 |
-| messages per session | 167 | 482 | 715 | 715 | 14,422 |
+| tokens per run | 1,452,028 | 11,067,135 | 73,718,100 | 73,718,100 | 356,784,584 |
+| messages per session | 167 | 482 | 715 | 715 | 14,427 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -311,9 +311,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
 | `close_issue` | 3 | 0 | 0 | 0% |
+| `create_sub_issue` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `create_root_issue` | 2 | 0 | 0 | 0% |
-| `create_sub_issue` | 2 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 2 | 0 | 2 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
@@ -353,14 +353,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 **Ran to an end without a report:** 20 of 61 sessions whose last run the core recorded as `completed` — 32.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**356,511,589 tokens** over 71 runs that reported them, **97% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**356,784,584 tokens** over 72 runs that reported them, **97% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **96.4% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,452,028 | 11,067,135 | 73,718,100 | 73,718,100 | 356,511,589 |
-| messages per session | 167 | 482 | 715 | 715 | 14,422 |
+| tokens per run | 1,452,028 | 11,067,135 | 73,718,100 | 73,718,100 | 356,784,584 |
+| messages per session | 167 | 482 | 715 | 715 | 14,427 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -426,9 +426,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
 | `close_issue` | 3 | 0 | 0 | 0% |
+| `create_sub_issue` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `create_root_issue` | 2 | 0 | 0 | 0% |
-| `create_sub_issue` | 2 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 2 | 0 | 2 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
