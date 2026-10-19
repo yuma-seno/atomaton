@@ -49,8 +49,10 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 //
 // Job graph:
 //   parse --> resolve-parent --> notify-parent
-//                             \-> re-invoke (may stand the aggregate job down)
 //                             \-> aggregate-sub-issues (skipped when re-invoke did)
+//   re-invoke: no `needs` -- it decides from the pull request's own body -- but the
+//              merged-only `if` `parse` carries, which it used to inherit through
+//              `needs` and must not lose with it
 
 const parseMetadataStep = new TypedOutputsStep(
   {
@@ -127,6 +129,27 @@ const NOTIFY_AND_AGGREGATE_NEEDS = [resolveParentJob, parseJob];
  * aggregate job reads it (below) and stands down. Everything about which agent and
  * which issue is decided in `dispatch_post_merge.ts`, which applies the same
  * `decidePostMergeHandoff` as `merge_pr`, so the two merge routes cannot drift.
+ *
+ * ## Why it has no `needs`, and why it still needs an `if`
+ *
+ * It used to be gated on `resolve-parent` — the orchestrator root above the pull
+ * request's issue. But the re-invocation reads the pull request BODY (which issue, which
+ * origin agent) and uses nothing that resolution answers. A root issue has no parent, so
+ * the resolution is empty and the job was skipped along with the two that genuinely need
+ * one: a root issue's merged pull request was never re-invoked, and the run was green
+ * (#203, observed on #206 / pull request #233).
+ *
+ * The only question — does this pull request name an issue to re-invoke — belongs to
+ * `dispatch_post_merge.ts`, which answers it (`no-parent` writes `reinvoked=false`). One
+ * rule, in the place that has the inputs for it.
+ *
+ * The merge gate is a different question and is written here rather than inherited. It
+ * used to come from `needs: [parse, ...]`: GitHub skips a job whose needed job was
+ * skipped, and `parse` is the only job in this workflow that tests the event. Dropping
+ * `needs` therefore dropped the merge gate with it, and the trigger is
+ * `pull_request_target: closed` — which fires for a close that merged nothing. Without
+ * this `if`, closing a pull request unmerged would post "the pull request for this issue
+ * merged" on its issue and start a run on it.
  */
 const reinvokeStep = new TypedOutputsStep(
   {
@@ -149,8 +172,8 @@ const reinvokeJob = new DefinedJob(
   "reinvoke-origin-agent",
   {
     "runs-on": "ubuntu-latest",
-    if: JobCondition.isNot(resolveParentJob.rawOutputs.parent_issue, ""),
-    needs: NOTIFY_AND_AGGREGATE_NEEDS,
+    // A merge test of its own, not the one `needs: parse` used to lend it.
+    if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), true),
     outputs: {
       reinvoked: reinvokeStep.outputs.reinvoked,
     },
