@@ -187,22 +187,28 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function readComments(repo, number, excludeCommentId) {
+function keptCommentIds(comments) {
+  const entries = comments.map((comment) => ({
+    id: comment.id,
+    body: comment.body ?? "",
+    isHuman: isHumanComment(comment)
+  }));
+  return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
+}
+function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  const excluded = String(excludeCommentId ?? "").trim();
-  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
-  return shapedThread(comments, readers);
-}
-function readThread(repo, number, excludeCommentId) {
-  const issue = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
-  if (issue.code !== 0)
-    throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
-  return { body: issue.stdout ?? "", shaped: readComments(repo, number, excludeCommentId) };
+  return JSON.parse(listed.stdout || "[]");
 }
 function commentWouldBeRemoved(repo, number, commentId) {
-  return whoseTurn(readThread(repo, number, commentId).shaped.events) === "agent";
+  const comments = listComments(repo, number);
+  const listed = comments.find((comment) => String(comment.id) === String(commentId));
+  if (listed === undefined) {
+    const entries = comments.map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+    return whoseTurn(shapedThread(entries, readers).events) === "agent";
+  }
+  return !keptCommentIds(comments).has(listed.id);
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts

@@ -372,12 +372,15 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function readComments(repo, number, excludeCommentId) {
+function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  return JSON.parse(listed.stdout || "[]");
+}
+function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
   return shapedThread(comments, readers);
 }
 function runInFlight(repo, number) {
