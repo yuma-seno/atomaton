@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 101 | 9.9% | 630 | 9,859 | 17 | 41.3 |
-| Last 30 days | 139 | 9.4% | 785 | 10,246 | 22 | 39.0 |
-| Last year | 139 | 9.4% | 785 | 10,246 | 22 | 39.0 |
-| All time | 139 | 9.4% | 785 | 10,246 | 22 | 39.0 |
+| Last 7 days | 101 | 9.9% | 650 | 9,859 | 18 | 41.3 |
+| Last 30 days | 140 | 9.3% | 854 | 10,246 | 21 | 39.0 |
+| Last year | 140 | 9.3% | 854 | 10,246 | 21 | 39.0 |
+| All time | 140 | 9.3% | 854 | 10,246 | 21 | 39.0 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 126 |
+| `completed` | 127 |
 | `failed` | 11 |
 | `stopped` | 2 |
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,221,174 | 7,169,420 | 73,718,100 | 73,718,100 | 236,969,808 |
-| messages per session | 169 | 396 | 705 | 705 | 9,042 |
+| messages per session | 169 | 396 | 705 | 705 | 9,093 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -50,11 +50,11 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `bash` | 1,633 | 38 | 38 | 2.3% |
-| `read` | 1,159 | 13 | 2 | 1.1% |
-| `grep` | 874 | 13 | 3 | 1.5% |
+| `bash` | 1,643 | 38 | 39 | 2.3% |
+| `read` | 1,165 | 13 | 2 | 1.1% |
+| `grep` | 877 | 13 | 3 | 1.5% |
 | `fetch` | 301 | 35 | 0 | 11.6% |
-| `edit` | 275 | 2 | 0 | 0.7% |
+| `edit` | 282 | 2 | 0 | 0.7% |
 | `get_issue` | 153 | 13 | 0 | 8.5% |
 | `get_issue_comments` | 115 | 0 | 9 | 0% |
 | `list` | 97 | 0 | 0 | 0% |
@@ -64,12 +64,12 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `glob` | 58 | 1 | 1 | 1.7% |
 | `get_check_runs` | 57 | 3 | 0 | 5.3% |
 | `atoma_builtin__load_skill` | 41 | 0 | 0 | 0% |
-| `create_pr` | 29 | 15 | 0 | 51.7% |
+| `create_pr` | 30 | 15 | 0 | 50% |
 | `check_merge_readiness` | 24 | 0 | 0 | 0% |
 | `get_pr_diff` | 22 | 1 | 0 | 4.5% |
-| `commit_and_push` | 20 | 4 | 0 | 20% |
+| `commit_and_push` | 21 | 4 | 0 | 19% |
+| `write` | 19 | 0 | 0 | 0% |
 | `list_prs` | 18 | 0 | 0 | 0% |
-| `write` | 18 | 0 | 0 | 0% |
 | `request_close_issue` | 15 | 0 | 0 | 0% |
 | `create_issue` | 14 | 4 | 0 | 28.6% |
 | `delegate_readonly` | 14 | 0 | 0 | 0% |
@@ -102,11 +102,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 1,113 | 68.2% |
-| `search` | 224 | 13.7% |
-| `edit` | 138 | 8.5% |
-| `verify` | 83 | 5.1% |
-| `open` | 75 | 4.6% |
+| `other` | 1,117 | 68% |
+| `search` | 225 | 13.7% |
+| `edit` | 138 | 8.4% |
+| `verify` | 86 | 5.2% |
+| `open` | 77 | 4.7% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
@@ -130,7 +130,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,420,558 | 11,067,135 | 73,718,100 | 73,718,100 | 357,230,401 |
-| messages per session | 167 | 482 | 715 | 715 | 14,438 |
+| messages per session | 167 | 482 | 715 | 715 | 14,489 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -142,11 +142,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 1,846 | 16 | 4 | 0.9% |
-| `bash` | 1,635 | 38 | 38 | 2.3% |
+| `read` | 1,852 | 16 | 4 | 0.9% |
+| `bash` | 1,645 | 38 | 39 | 2.3% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
-| `grep` | 1,264 | 22 | 7 | 1.7% |
-| `edit` | 394 | 3 | 0 | 0.8% |
+| `grep` | 1,267 | 22 | 7 | 1.7% |
+| `edit` | 401 | 3 | 0 | 0.7% |
 | `fetch` | 301 | 35 | 0 | 11.6% |
 | `list` | 160 | 1 | 0 | 0.6% |
 | `get_issue` | 153 | 13 | 0 | 8.5% |
@@ -160,16 +160,16 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `get_branch` | 62 | 0 | 0 | 0% |
 | `get_check_runs` | 57 | 3 | 0 | 5.3% |
-| `write` | 53 | 0 | 0 | 0% |
+| `write` | 54 | 0 | 0 | 0% |
 | `search__search_issues` | 43 | 0 | 0 | 0% |
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
+| `create_pr` | 30 | 15 | 0 | 50% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
-| `create_pr` | 29 | 15 | 0 | 51.7% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `check_merge_readiness` | 24 | 0 | 0 | 0% |
 | `get_pr_diff` | 22 | 1 | 0 | 4.5% |
-| `commit_and_push` | 20 | 4 | 0 | 20% |
+| `commit_and_push` | 21 | 4 | 0 | 19% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `list_prs` | 18 | 0 | 0 | 0% |
 | `request_close_issue` | 16 | 0 | 0 | 0% |
@@ -217,11 +217,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 1,115 | 68.2% |
-| `search` | 224 | 13.7% |
+| `other` | 1,119 | 68% |
+| `search` | 225 | 13.7% |
 | `edit` | 138 | 8.4% |
-| `verify` | 83 | 5.1% |
-| `open` | 75 | 4.6% |
+| `verify` | 86 | 5.2% |
+| `open` | 77 | 4.7% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
@@ -245,7 +245,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,420,558 | 11,067,135 | 73,718,100 | 73,718,100 | 357,230,401 |
-| messages per session | 167 | 482 | 715 | 715 | 14,438 |
+| messages per session | 167 | 482 | 715 | 715 | 14,489 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -257,11 +257,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 1,846 | 16 | 4 | 0.9% |
-| `bash` | 1,635 | 38 | 38 | 2.3% |
+| `read` | 1,852 | 16 | 4 | 0.9% |
+| `bash` | 1,645 | 38 | 39 | 2.3% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
-| `grep` | 1,264 | 22 | 7 | 1.7% |
-| `edit` | 394 | 3 | 0 | 0.8% |
+| `grep` | 1,267 | 22 | 7 | 1.7% |
+| `edit` | 401 | 3 | 0 | 0.7% |
 | `fetch` | 301 | 35 | 0 | 11.6% |
 | `list` | 160 | 1 | 0 | 0.6% |
 | `get_issue` | 153 | 13 | 0 | 8.5% |
@@ -275,16 +275,16 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `get_branch` | 62 | 0 | 0 | 0% |
 | `get_check_runs` | 57 | 3 | 0 | 5.3% |
-| `write` | 53 | 0 | 0 | 0% |
+| `write` | 54 | 0 | 0 | 0% |
 | `search__search_issues` | 43 | 0 | 0 | 0% |
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
+| `create_pr` | 30 | 15 | 0 | 50% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
-| `create_pr` | 29 | 15 | 0 | 51.7% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `check_merge_readiness` | 24 | 0 | 0 | 0% |
 | `get_pr_diff` | 22 | 1 | 0 | 4.5% |
-| `commit_and_push` | 20 | 4 | 0 | 20% |
+| `commit_and_push` | 21 | 4 | 0 | 19% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `list_prs` | 18 | 0 | 0 | 0% |
 | `request_close_issue` | 16 | 0 | 0 | 0% |
@@ -332,11 +332,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 1,115 | 68.2% |
-| `search` | 224 | 13.7% |
+| `other` | 1,119 | 68% |
+| `search` | 225 | 13.7% |
 | `edit` | 138 | 8.4% |
-| `verify` | 83 | 5.1% |
-| `open` | 75 | 4.6% |
+| `verify` | 86 | 5.2% |
+| `open` | 77 | 4.7% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
@@ -360,7 +360,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,420,558 | 11,067,135 | 73,718,100 | 73,718,100 | 357,230,401 |
-| messages per session | 167 | 482 | 715 | 715 | 14,438 |
+| messages per session | 167 | 482 | 715 | 715 | 14,489 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -372,11 +372,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 1,846 | 16 | 4 | 0.9% |
-| `bash` | 1,635 | 38 | 38 | 2.3% |
+| `read` | 1,852 | 16 | 4 | 0.9% |
+| `bash` | 1,645 | 38 | 39 | 2.3% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
-| `grep` | 1,264 | 22 | 7 | 1.7% |
-| `edit` | 394 | 3 | 0 | 0.8% |
+| `grep` | 1,267 | 22 | 7 | 1.7% |
+| `edit` | 401 | 3 | 0 | 0.7% |
 | `fetch` | 301 | 35 | 0 | 11.6% |
 | `list` | 160 | 1 | 0 | 0.6% |
 | `get_issue` | 153 | 13 | 0 | 8.5% |
@@ -390,16 +390,16 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `get_branch` | 62 | 0 | 0 | 0% |
 | `get_check_runs` | 57 | 3 | 0 | 5.3% |
-| `write` | 53 | 0 | 0 | 0% |
+| `write` | 54 | 0 | 0 | 0% |
 | `search__search_issues` | 43 | 0 | 0 | 0% |
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
+| `create_pr` | 30 | 15 | 0 | 50% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
-| `create_pr` | 29 | 15 | 0 | 51.7% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `check_merge_readiness` | 24 | 0 | 0 | 0% |
 | `get_pr_diff` | 22 | 1 | 0 | 4.5% |
-| `commit_and_push` | 20 | 4 | 0 | 20% |
+| `commit_and_push` | 21 | 4 | 0 | 19% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
 | `list_prs` | 18 | 0 | 0 | 0% |
 | `request_close_issue` | 16 | 0 | 0 | 0% |
@@ -447,11 +447,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 1,115 | 68.2% |
-| `search` | 224 | 13.7% |
+| `other` | 1,119 | 68% |
+| `search` | 225 | 13.7% |
 | `edit` | 138 | 8.4% |
-| `verify` | 83 | 5.1% |
-| `open` | 75 | 4.6% |
+| `verify` | 86 | 5.2% |
+| `open` | 77 | 4.7% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
