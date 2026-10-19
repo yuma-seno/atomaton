@@ -1,7 +1,7 @@
 import { Workflow } from "@github-actions-workflow-ts/lib";
 import type { IssuesClosedEvent } from "@octokit/webhooks-types";
 import { ActionsCheckoutV4 } from "@github-actions-workflow-ts/actions";
-import { DefinedJob, JobCondition, startJob, TypedOutputsStep } from "./actions/base.ts";
+import { DefinedJob, JobCondition, SCRIPT_JOB_TIMEOUT_MINUTES, startJob, TypedOutputsStep } from "./actions/base.ts";
 import { githubEvent, githubEventRaw } from "./actions/github-context.ts";
 import { ATOMATON_WORKFLOW_PERMISSIONS } from "./actions/permissions.ts";
 import { scriptCommand, scriptCommandWithArgs } from "./actions/script-call.ts";
@@ -102,6 +102,7 @@ export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
     "check",
     {
       "runs-on": "ubuntu-latest",
+      "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
       // No trust guard here, and none is needed. This workflow fires on
       // `issues: closed`, and GitHub starts no run for an event its own token
       // raised -- so an agent closing a sub-issue (GITHUB_TOKEN) never reaches
@@ -127,6 +128,7 @@ export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
           "aggregate",
           {
             "runs-on": "ubuntu-latest",
+            "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
             if: JobCondition.is(checkJob.rawOutputs.is_sub_issue, "true"),
             needs: [checkJob],
           },
@@ -155,11 +157,12 @@ export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
         "stop-run",
         {
           "runs-on": "ubuntu-latest",
+          "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
           if: JobCondition.isNot(githubEventRaw<IssuesClosedEvent>((e) => e.sender.type), "Bot"),
         },
         [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), stopOnCloseStep],
       ),
-      new DefinedJob("prune", { "runs-on": "ubuntu-latest" }, [
+      new DefinedJob("prune", { "runs-on": "ubuntu-latest", "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES }, [
         new ActionsCheckoutV4({}),
         new SetupBunAction({ name: "Setup Bun" }),
         pruneStep,

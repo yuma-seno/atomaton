@@ -1,7 +1,7 @@
 import { Workflow, Step } from "@github-actions-workflow-ts/lib";
 import type { IssuesOpenedEvent } from "@octokit/webhooks-types";
 import { ActionsCheckoutV4 } from "@github-actions-workflow-ts/actions";
-import { JobCondition, startJob, TypedOutputsStep } from "./actions/base.ts";
+import { JobCondition, SCRIPT_JOB_TIMEOUT_MINUTES, startJob, TypedOutputsStep } from "./actions/base.ts";
 import { githubEvent, githubEventRaw, isRepositoryMember } from "./actions/github-context.ts";
 import { ATOMATON_WORKFLOW_PERMISSIONS } from "./actions/permissions.ts";
 import { scriptCommand } from "./actions/script-call.ts";
@@ -41,6 +41,7 @@ export const atomaEntry = new Workflow("atomaton-entry", {
     "route",
     {
       "runs-on": "ubuntu-latest",
+      "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
       // Only a repository member's issue starts an agent. An outside contributor
       // may open issues freely; none of them spend model budget or hand an agent
       // instructions from someone without write access.

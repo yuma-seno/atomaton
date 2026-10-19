@@ -1,7 +1,7 @@
 import { Workflow } from "@github-actions-workflow-ts/lib";
 import type { IssueCommentCreatedEvent } from "@octokit/webhooks-types";
 import { ActionsCheckoutV4 } from "@github-actions-workflow-ts/actions";
-import { Condition, JobCondition, startJob, TypedOutputsStep } from "./actions/base.ts";
+import { Condition, JobCondition, SCRIPT_JOB_TIMEOUT_MINUTES, startJob, TypedOutputsStep } from "./actions/base.ts";
 import { githubEvent, githubEventRaw, isRepositoryMember } from "./actions/github-context.ts";
 import { ATOMATON_WORKFLOW_PERMISSIONS } from "./actions/permissions.ts";
 import { scriptCommand, scriptCommandWithArgs } from "./actions/script-call.ts";
@@ -367,6 +367,7 @@ export const atomaManualComment = new Workflow("atomaton-manual-comment", {
     "parse",
     {
       "runs-on": "ubuntu-latest",
+      "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
       // Broader than PARSE_ALLOWED on purpose: this job now also needs to
       // run for ANY human comment (regardless of association) so guardStep
       // can reject it while atomaton/in-progress is active -- actual
