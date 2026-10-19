@@ -355,12 +355,15 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function checkDispatchMarker(repo, number, markerId) {
+function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  return JSON.parse(listed.stdout || "[]");
+}
+function checkDispatchMarker(repo, number, markerId) {
+  const comments = listComments(repo, number);
   const marker = String(markerId);
-  const comments = JSON.parse(listed.stdout || "[]");
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
   const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };

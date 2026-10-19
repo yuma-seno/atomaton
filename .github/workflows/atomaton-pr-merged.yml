@@ -90,10 +90,7 @@ jobs:
       reinvoked: ${{ steps.reinvoke.outputs.reinvoked }}
     env:
       GH_TOKEN: ${{ github.token }}
-    if: needs.resolve-parent.outputs.parent_issue != ''
-    needs:
-      - resolve-parent
-      - parse
+    if: github.event.pull_request.merged == true
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun

@@ -315,23 +315,23 @@ var readers = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
-function readComments(repo, number, excludeCommentId) {
+function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  return JSON.parse(listed.stdout || "[]");
+}
+function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments = JSON.parse(listed.stdout || "[]").filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
   return shapedThread(comments, readers);
 }
 function runInFlight(repo, number) {
   return whoseTurn(readComments(repo, number).events) === "agent";
 }
 function checkDispatchMarker(repo, number, markerId) {
-  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
-  if (listed.code !== 0)
-    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const comments = listComments(repo, number);
   const marker = String(markerId);
-  const comments = JSON.parse(listed.stdout || "[]");
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
   const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
