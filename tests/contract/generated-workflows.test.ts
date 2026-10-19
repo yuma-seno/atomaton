@@ -394,7 +394,7 @@ describe("generated workflows", () => {
    * commenting `/reviewer` on a pull request whose body says `/engineer` asked for the
    * reviewer, and reading the body would dispatch the engineer instead. The body is the
    * oldest entry in its own thread, so reading the thread newest-first lets the person's
-   * later comment win — see `latestRequestedAgentOn`.
+   * later comment win — see `latestRequestOn`.
    *
    * The wiring this pins is that the validation script reads the thread, not the body:
    * a regression to `extractDirective(prBody)` would pass every unit test of the fold

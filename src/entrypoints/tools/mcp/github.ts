@@ -842,7 +842,7 @@ function injectParentIssue(body: string, reviewer: string): string {
   body = notifyTagPrefix(body, "PR") + withCheckedMentions(body);
   // The reviewer, as the same line a person would type. Written before the tags so
   // it is the first visible line of the body, which is where a directive is read
-  // from -- see `latestRequestedAgentOn`. An empty name writes nothing, and the
+  // from -- see `latestRequestOn`. An empty name writes nothing, and the
   // pull request is then left for a person, who is told so below.
   const reviewerLine = reviewer ? `/${reviewer}\n\n` : "";
   if (!parent) return `${reviewerLine}${body}`;

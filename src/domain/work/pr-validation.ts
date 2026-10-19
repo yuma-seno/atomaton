@@ -3,10 +3,12 @@
  * it passed, who works next, and what to say about it.
  *
  * The decision half of the pair whose I/O half is `scripts/validate_pull_request.ts`.
- * Everything here is a pure function of a conclusion string and a count, so the
- * whole truth table is testable without a `gh` in the loop — the same split
+ * Everything here is a pure function of a conclusion string, a count, and the one
+ * thread fact routing needs -- the newest ask and when it was made -- so the whole
+ * truth table is testable without a `gh` in the loop. The same split
  * `domain/delivery/merge-readiness.ts` uses.
  */
+import type { AskAuthor, LatestAsk } from "./thread.ts";
 import type { NextTurn } from "./turn.ts";
 
 /** Conclusions GitHub reports for a completed run that should count as passing. */
@@ -126,6 +128,26 @@ export interface ValidationInput {
    * hand anyone. Here there is one, and its author is the agent that just wrote it.
    */
   deliverableProblems?: readonly string[];
+  /**
+   * The newest ask in the thread that a push could answer -- a person's command or
+   * an agent's hand-off directive -- with who made it and when. Absent when the
+   * newest ask is the pull request body's own `/<agent>` line, a dispatch marker,
+   * or machinery the thread does not identify.
+   *
+   * This is what makes a fix request consumable. The reviewer asks the engineer to
+   * fix something; the engineer's push is the answer; the next green validation
+   * must hand the answer back to the reviewer rather than re-run the engineer on a
+   * request it already fulfilled -- which is what kept #211's pull request green
+   * and unattended, the thread's newest request still naming the engineer the
+   * fix had been asked OF. See `answeredByPush`.
+   */
+  latestAsk?: LatestAsk;
+  /**
+   * When the pull request's head commit was created, or empty when it could not be
+   * read. The push this validation judges produced that commit, so "the commit is
+   * newer than the ask" is how a push is recognised as the answer to one.
+   */
+  headCommittedAt?: string;
 }
 
 /**
@@ -147,6 +169,32 @@ export interface ValidationInput {
  */
 export function contextsPassed(verdict: ValidationVerdict): boolean {
   return verdict === "passed";
+}
+
+/**
+ * Whether the push this validation judged answers the newest ask, and who made it.
+ *
+ * A push answers an ask when the commit it produced is NEWER than the ask: the ask
+ * asked for work, and the commit is work that did not exist when the ask was made.
+ * A commit the ask postdates was already there when the ask was made -- the ask was
+ * made ABOUT it, re-review it or fix it again -- and stands, whoever made it.
+ *
+ * Either timestamp missing or unreadable is "not answered", and so is a tie: the
+ * standing request keeps routing, which is the behaviour that predated this
+ * question. Unknown is not old.
+ *
+ * What the ask NAMES does not gate this, only who made it. The realistic asks are
+ * fix requests -- a reviewer's directive at the engineer, a person's command at the
+ * engineer -- and their author is exactly who the answer belongs to; the body's own
+ * line, the one ask a push must never consume, never reaches here as a
+ * `latestAsk` at all.
+ */
+function answeredByPush(latestAsk: LatestAsk | undefined, headCommittedAt: string | undefined): AskAuthor | undefined {
+  if (!latestAsk?.at || !headCommittedAt) return undefined;
+  const askAt = Date.parse(latestAsk.at);
+  const commitAt = Date.parse(headCommittedAt);
+  if (Number.isNaN(askAt) || Number.isNaN(commitAt)) return undefined;
+  return commitAt > askAt ? latestAsk.author : undefined;
 }
 
 /**
@@ -172,7 +220,7 @@ function handTo(agent: string): { next?: NextTurn } {
  * the pull request and decides.
  */
 export function decideValidationOutcome(input: ValidationInput): ValidationOutcome {
-  const { conclusion, reviewerAgent, engineerAgent, askedByPerson = false, priorRetries = 0 } = input;
+  const { conclusion, reviewerAgent, engineerAgent, askedByPerson = false, priorRetries = 0, headCommittedAt } = input;
 
   // Judged first, and treated exactly as a red CI run: failing checks so the
   // merge is blocked, a comment so the engineer knows what to fix, and the same
@@ -206,6 +254,27 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
   const passed = PASSING.has(normalised);
 
   if (passed) {
+    // A green run after a fix was pushed does not route by the standing request:
+    // the newest ask in the thread is the fix request the push ANSWERED, and
+    // routing by it would re-run the agent the fix was asked of -- the #211
+    // stall, a green pull request nobody returns to. The answer goes to whoever
+    // asked: the reviewer whose directive it was reviews it, and a person's
+    // request is owed to the person, which is the same rule a red run already
+    // follows through `askedByPerson`.
+    const answered = answeredByPush(input.latestAsk, headCommittedAt);
+    if (answered) {
+      if (answered.kind === "agent") {
+        return {
+          verdict: "passed",
+          ...handTo(answered.agent),
+          summary: `CI concluded ${normalised}. The push answered the request ${answered.agent} made, so it is ${answered.agent}'s to judge.`,
+        };
+      }
+      return {
+        verdict: "passed",
+        summary: `CI concluded ${normalised}. The push answered the request a person made, so nobody is dispatched.`,
+      };
+    }
     return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
   }
 

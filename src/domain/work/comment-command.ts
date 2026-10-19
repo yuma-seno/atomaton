@@ -121,6 +121,37 @@ export function lineForms(rawLine: string): string[] {
   return variants;
 }
 
+/**
+ * The first command in text a model wrote, where markdown may have mangled it.
+ *
+ * `parseCommentCommand` is anchored on a line that begins with `/` — what a person
+ * types and what the machinery writes. A model's markdown turns the same directive
+ * into a list bullet (`- /engineer`), a quote marker (`> /engineer`), or wraps it in
+ * backticks, and `extract_directive.ts` accepts every one of those as a real handoff
+ * through `lineForms`. The runner then posts the model's final text back as the
+ * result comment verbatim, so a directive dispatched from `- /engineer` sits in the
+ * thread as a line the strict parser cannot see.
+ *
+ * That gap matters to a reader of the THREAD asking "what was asked here, so a push
+ * can be recognised as the answer": the ask disappears, and the agent the push
+ * already answered is dispatched again. See `latestAsk`.
+ *
+ * Not a looser definition of a command, and not used wherever `parseCommentCommand`
+ * is: a command a person typed is read strictly, because a bullet in a person's
+ * prose was never a request the machinery acted on. Only the ask path needs the
+ * tolerance the handoff path already has.
+ */
+export function parseMangledCommand(body: string): ParsedCommentCommand {
+  if (!body) return NOTHING;
+  for (const rawLine of body.split("\n")) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "") return parsed;
+    }
+  }
+  return NOTHING;
+}
+
 function isCommand(form: string): boolean {
   const parsed = parseCommentCommand(form);
   return parsed.agent !== "" || parsed.control !== "";

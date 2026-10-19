@@ -82,7 +82,7 @@ function log(message: string): void {
  * because the body is the oldest entry in its own thread: a person commenting
  * `/reviewer` on a pull request whose body says `/engineer` asked for the reviewer,
  * and reading the body would dispatch the engineer instead. See
- * `latestRequestedAgentOn`.
+ * `latestRequestOn` in `adapters/github/thread.ts`.
  */
 export function dispatchPrValidation(
   repo: string,

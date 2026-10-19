@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { commandInBodyRefusal, commandLinesIn, lineForms, parseCommentCommand } from "./comment-command.ts";
+import {
+  commandInBodyRefusal,
+  commandLinesIn,
+  lineForms,
+  parseCommentCommand,
+  parseMangledCommand,
+} from "./comment-command.ts";
 
 describe("parseCommentCommand", () => {
   test("accepts a standalone agent command followed by instructions", () => {
@@ -91,6 +97,44 @@ describe("lineForms", () => {
 
   test("a blank line has no forms", () => {
     expect(lineForms("   ")).toEqual([]);
+  });
+});
+
+/**
+ * The reader for an agent's own output, which the runner posts back to the thread
+ * verbatim. It has to yield the directive the runner dispatched from, or the ask a
+ * push answered is invisible and the agent the push already answered is dispatched
+ * again (#219).
+ */
+describe("parseMangledCommand", () => {
+  test("a bare command is read as it is", () => {
+    expect(parseMangledCommand("/engineer").agent).toBe("engineer");
+  });
+
+  test("a bullet, a quote marker and backticks each still yield the directive", () => {
+    expect(parseMangledCommand("- /engineer").agent).toBe("engineer");
+    expect(parseMangledCommand("> /engineer").agent).toBe("engineer");
+    expect(parseMangledCommand("`/engineer`").agent).toBe("engineer");
+    expect(parseMangledCommand("/`engineer`").agent).toBe("engineer");
+  });
+
+  // The shape a result comment actually has: prose, then the directive on its own
+  // line at the end.
+  test("finds the directive at the end of a result comment", () => {
+    const result = "Review found two problems.\n\n<details><summary>how</summary>x</details>\n\n- /engineer\n";
+    expect(parseMangledCommand(result).agent).toBe("engineer");
+  });
+
+  test("a command inside a sentence is still prose", () => {
+    expect(parseMangledCommand("Use `/reviewer` to ask for a review.").agent).toBe("");
+  });
+
+  // The tolerance is the ask reader's, not the definition's: a dispatch and the guard
+  // keep reading a person's line strictly.
+  test("the strict parse of a mangled line still finds nothing", () => {
+    expect(parseCommentCommand("- /engineer").agent).toBe("");
+    expect(parseCommentCommand("> /engineer").agent).toBe("");
+    expect(parseCommentCommand("`/engineer`").agent).toBe("");
   });
 });
 
