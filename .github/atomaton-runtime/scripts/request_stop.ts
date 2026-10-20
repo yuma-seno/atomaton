@@ -296,6 +296,33 @@ function parseCommentCommand(body) {
   }
   return NOTHING;
 }
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function parseMangledCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "")
+        return parsed;
+    }
+  }
+  return NOTHING;
+}
 
 // src/domain/work/actor.ts
 var BOT_TYPE = "Bot";
@@ -345,6 +372,11 @@ var readers = {
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
+var askReaders = {
+  ...readers,
+  requestedAgent: (body) => parseMangledCommand(body).agent,
+  authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
+};
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
@@ -356,7 +388,7 @@ function listComments(repo, number) {
 }
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment), at: comment.created_at }));
   return shapedThread(comments, readers);
 }
 function runInFlight(repo, number) {
