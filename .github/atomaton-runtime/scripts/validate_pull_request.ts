@@ -11,12 +11,21 @@ var CI_RETRY_LIMIT = 3;
 function contextsPassed(verdict) {
   return verdict === "passed";
 }
+function answeredByPush(latestAsk, headCommittedAt) {
+  if (!latestAsk?.at || !headCommittedAt)
+    return;
+  const askAt = Date.parse(latestAsk.at);
+  const commitAt = Date.parse(headCommittedAt);
+  if (Number.isNaN(askAt) || Number.isNaN(commitAt))
+    return;
+  return commitAt > askAt ? latestAsk.author : undefined;
+}
 function handTo(agent) {
   const named = agent.trim();
   return named === "" ? {} : { next: { agent: named } };
 }
 function decideValidationOutcome(input) {
-  const { conclusion, reviewerAgent, engineerAgent, askedByPerson = false, priorRetries = 0 } = input;
+  const { conclusion, reviewerAgent, engineerAgent, askedByPerson = false, priorRetries = 0, headCommittedAt } = input;
   const deliverableProblems = input.deliverableProblems ?? [];
   if (deliverableProblems.length > 0) {
     const count = `${deliverableProblems.length} problem${deliverableProblems.length === 1 ? "" : "s"}`;
@@ -35,6 +44,20 @@ function decideValidationOutcome(input) {
   const normalised = conclusion.trim().toLowerCase();
   const passed = PASSING.has(normalised);
   if (passed) {
+    const answered = answeredByPush(input.latestAsk, headCommittedAt);
+    if (answered) {
+      if (answered.kind === "agent") {
+        return {
+          verdict: "passed",
+          ...handTo(answered.agent),
+          summary: `CI concluded ${normalised}. The push answered the request ${answered.agent} made, so it is ${answered.agent}'s to judge.`
+        };
+      }
+      return {
+        verdict: "passed",
+        summary: `CI concluded ${normalised}. The push answered the request a person made, so nobody is dispatched.`
+      };
+    }
     return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
   }
   if (!normalised) {
@@ -228,6 +251,33 @@ function parseCommentCommand(body) {
   }
   return NOTHING;
 }
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function parseMangledCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "")
+        return parsed;
+    }
+  }
+  return NOTHING;
+}
 
 // src/domain/work/actor.ts
 var BOT_TYPE = "Bot";
@@ -270,6 +320,24 @@ function latestRequestedAgent(body, comments, readers) {
   }
   return readers.requestedAgent(body);
 }
+function latestAsk(body, comments, readers) {
+  const { comments: kept } = shapedThread(comments, readers);
+  for (let index = kept.length - 1;index >= 0; index -= 1) {
+    const entry = kept[index];
+    const agent = readers.requestedAgent(entry.body);
+    if (agent === "")
+      continue;
+    if (readers.isDispatchMarker(entry.body))
+      continue;
+    if (entry.isHuman)
+      return { agent, author: { kind: "person" }, at: entry.at ?? "" };
+    const author = readers.authoringAgent(entry.body);
+    if (author === "")
+      return;
+    return { agent, author: { kind: "agent", agent: author }, at: entry.at ?? "" };
+  }
+  return;
+}
 
 // src/adapters/github/thread.ts
 var readers = {
@@ -286,6 +354,11 @@ var readers = {
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body)
 };
+var askReaders = {
+  ...readers,
+  requestedAgent: (body) => parseMangledCommand(body).agent,
+  authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
+};
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
@@ -297,7 +370,7 @@ function listComments(repo, number) {
 }
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment), at: comment.created_at }));
   return shapedThread(comments, readers);
 }
 function readThread(repo, number, excludeCommentId) {
@@ -306,16 +379,19 @@ function readThread(repo, number, excludeCommentId) {
     throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
   return { body: issue.stdout ?? "", shaped: readComments(repo, number, excludeCommentId) };
 }
-function latestRequestedAgentOn(repo, number, isKnownAgent, excludeCommentId) {
-  const { body, shaped } = readThread(repo, number, excludeCommentId);
-  const known = {
-    ...readers,
-    requestedAgent: (text) => {
-      const name = readers.requestedAgent(text);
-      return isKnownAgent(name) ? name : "";
-    }
+function latestRequestOn(repo, number, isKnownAgent) {
+  const { body, shaped } = readThread(repo, number);
+  const known = (name) => isKnownAgent(name) ? name : "";
+  return {
+    newestRequestedAgent: latestRequestedAgent(body, shaped.comments, {
+      ...readers,
+      requestedAgent: (text) => known(readers.requestedAgent(text))
+    }),
+    latestAsk: latestAsk(body, shaped.comments, {
+      ...askReaders,
+      requestedAgent: (text) => known(askReaders.requestedAgent(text))
+    })
   };
-  return latestRequestedAgent(body, shaped.comments, known);
 }
 
 // src/entrypoints/machinery/extract_directive.ts
@@ -500,16 +576,19 @@ function main() {
   }
   const { conclusion, runUrl } = deliverableProblems.length > 0 ? { conclusion: "", runUrl: "" } : runCiAndWait(repo, workflow, branch, headSha, Number(values["timeout-seconds"] ?? "1800"));
   const priorRetries = countPriorRetries(repo, values.number ?? "");
+  const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
+  const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
   const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
-  const reviewerAgent = latestRequestedAgentOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const engineerAgent = ORIGIN_AGENT_TAG.read(prBody) ?? "";
   const outcome = decideValidationOutcome({
     conclusion,
-    reviewerAgent,
+    reviewerAgent: threadRequest.newestRequestedAgent,
     engineerAgent,
     askedByPerson: isTrue(values["asked-by-person"]),
     priorRetries,
-    deliverableProblems
+    deliverableProblems,
+    latestAsk: threadRequest.latestAsk,
+    headCommittedAt
   });
   const conclusionForContexts = contextsPassed(outcome.verdict) ? "success" : "failure";
   for (const check of requiredContexts.map((name) => ({ name, conclusion: conclusionForContexts }))) {
