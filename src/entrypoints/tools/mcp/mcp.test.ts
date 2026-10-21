@@ -1358,13 +1358,9 @@ describe("mcp/github.ts", () => {
     expect(getIssue.properties.issue_number.type).toBe("integer");
     expect(getIssue.required ?? []).not.toContain("issue_number");
 
-    // Mutations keep it mandatory — no inferring an irreversible target.
-    const closeIssue = byName.get("close_issue").inputSchema;
-    expect(closeIssue.properties.issue_number.type).toBe("integer");
-    expect(closeIssue.required).toContain("issue_number");
-
-    // And a pull request tool names it the way GitHub does, not the way an issue tool
-    // does. One argument each, spelled once — the synonym table is gone.
+    // Mutations keep it mandatory — no inferring an irreversible target. And a
+    // pull request tool names its number the way GitHub does, not the way an
+    // issue tool does.
     const mergePr = byName.get("merge_pr").inputSchema;
     expect(mergePr.properties.pull_number.type).toBe("integer");
     expect(mergePr.required).toContain("pull_number");
@@ -1413,22 +1409,12 @@ describe("mcp/github.ts", () => {
     expect(JSON.parse(r.result.content[0].text)).toMatchObject({ number: 42 });
   });
 
-  test("close_issue still refuses an omitted number", async () => {
-    const r = await sendRequest(
-      "github.ts",
-      {
-        jsonrpc: "2.0", id: 23, method: "tools/call",
-        params: { name: "close_issue", arguments: {} },
-      },
-      { ISSUE_NUMBER: "42" },
-    );
-    expect(r.result.isError).toBe(true);
-    expect(r.result.content[0].text).toContain("Invalid arguments for close_issue");
-  });
-
   /**
-   * The close-request half of #90. `close_issue` on an issue a PERSON opened does not
-   * close it — it asks them to, on the thread — and that comment is the turn ending.
+   * The close-request half of #90, on the one tool that now does this:
+   * `request_close_issue` on an issue a PERSON opened does not close it — it asks
+   * them to, on the thread — and that comment is the turn ending. The reason the
+   * agent gave rides on the request, because a close request that does not say why
+   * asks a person to judge work they cannot see.
    *
    * Without the ending the node's last turn event stays the `asked` that started the run,
    * so the guard reads "the ball is with an agent" and DELETES the person's reply. On
@@ -1437,36 +1423,49 @@ describe("mcp/github.ts", () => {
    * matching the tag text, because a tag nobody reads is exactly how this survived its
    * first fix.
    */
-  test("close_issue asking a person to close ends the turn, so their reply survives", async () => {
+  test("request_close_issue asking a person to close ends the turn, so their reply survives", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-close-request-"));
     const log = join(dir, "gh.log");
     try {
       const r = await sendRequest(
-        "github.ts",
+        "atomaton.ts",
         {
           jsonrpc: "2.0", id: 26, method: "tools/call",
-          params: { name: "close_issue", arguments: { issue_number: 12 } },
+          params: {
+            name: "request_close_issue",
+            arguments: { reason: "the work is delivered", summary: "It landed in #123." },
+          },
         },
         {
           ...fakeGhSeam(),
+          ISSUE_NUMBER: "12",
+          ATOMATON_RUN_DIR: dir,
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             // A person opened it, so the tool asks rather than closes.
             { match: ["issue", "view"], stdout: JSON.stringify({ author: { id: "1", is_bot: false, login: "alice", name: "Alice" } }) },
             // resolveNotify reads the issue's own body and author.
             { match: ["api"], stdout: JSON.stringify({ body: "no tag", login: "alice", type: "User" }) },
-            { match: ["issue", "comment"] },
+            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/12#issuecomment-777" },
           ]),
         },
       );
-      expect(r.result.isError).toBe(false);
-      expect(JSON.parse(r.result.content[0].text)).toMatchObject({ close_requested: 12 });
+      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+      expect(r.result._meta).toEqual({ session_ends: true });
+      expect(JSON.parse(readFileSync(join(dir, "ending-comment.json"), "utf8")))
+        .toEqual({ commentId: "777", node: "12" });
 
       const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
       expect(calls.some((c) => c[0] === "issue" && c[1] === "close")).toBe(false);
       const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
       const body = comment?.join(" ") ?? "";
       expect(body).toContain("please close it yourself");
+      // The reason and summary ride on the request: they are what the person reads
+      // to decide whether the work is done.
+      expect(body).toContain("**Reason:** the work is delivered");
+      expect(body).toContain("It landed in #123.");
+      // The ask comes before the report, because it is the sentence the reader acts on.
+      expect(body.indexOf("please close it yourself")).toBeLessThan(body.indexOf("**Reason:**"));
       expect(readers.ending(body)).toBe("returned");
       expect(whoseTurn(turnEvents(["/engineer", body], readers))).toBe("person");
     } finally {

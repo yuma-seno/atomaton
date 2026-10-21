@@ -4,21 +4,19 @@
  *
  * ## The defect
  *
- * Two tools conclude an issue, and both asked GitHub who opened it before doing
- * anything. A person's issue is not closed by an agent — that part was never in
- * question. What they did with the answer was:
- *
- * - `request_close_issue` posted its comment and returned a normal
- *   result explaining that it had NOT closed the issue.
- * - `close_issue` returned a tool ERROR — "Refusing to close issue #N:
- *   opened by a human, not a bot" — and posted nothing at all.
+ * Two code paths conclude an issue — `request_close_issue`, and the internal
+ * close `merge_pr` runs on a parent issue — and both ask GitHub who opened it
+ * before doing anything. A person's issue is not closed by an agent — that part
+ * was never in question. What the github server's close used to do with the
+ * answer was return a tool ERROR — "Refusing to close issue #N: opened by a
+ * human, not a bot" — and post nothing at all.
  *
  * Measured across the runs held at the time: 30 refusals, 22 of them the last
  * act of the run. The agent, handed a refusal at the moment it had decided it
  * was finished, wrote the refusal into its report — so the person reading the
- * thread got a paragraph of tool mechanics they had not asked about, and in the
- * `close_issue` half got no request to close anything either, because an
- * error posts no comment. #933 is one of those reports.
+ * thread got a paragraph of tool mechanics they had not asked about, and in that
+ * half got no request to close anything either, because an error posts no
+ * comment. #933 is one of those reports.
  *
  * ## The rule
  *
@@ -29,7 +27,7 @@
  * person to close it. Nothing errors, and nothing in the agent's result invites
  * it to explain a decision it did not make.
  *
- * This module is the one place that line is written, so the two tools cannot
+ * This module is the one place that line is written, so the two paths cannot
  * word it differently or forget it. Pure: the caller resolves who to mention and
  * what the agent had to say.
  */

@@ -34,14 +34,15 @@ how much came back.
 
 Two of the shipped servers are the same program as another one with tools
 withheld: `files_readonly` is `files` without the three that write, and
-`atomaton_env` is `atomaton` with everything but `reload_environment` withheld.
+`atomaton_env` is `atomaton` without `launch_sub_agent`.
 
-The second case is why the pattern exists. `reload_environment` is for whoever is
-doing the work — the engineer, which is the agent that finds a dependency
-missing. The other tools on that server are the atomaton's:
-`request_close_issue` calls itself "the ONLY correct way for the atomaton to
-finish an issue", and an engineer that could call it could end an issue without a
-review. So the server cannot simply be handed over.
+The second case is why the pattern exists. `reload_environment` is for whoever
+is doing the work — the engineer, which is the agent that finds a dependency
+missing — and `request_close_issue` is how that same agent concludes its own
+issue once its pull request has merged. `launch_sub_agent` is the atomaton's:
+dispatching sub-issues is decomposition, and an engineer that could dispatch
+could grow the work it was given without anyone deciding that. So the server
+cannot simply be handed over.
 
 An allowlist is how this project solves that, rather than a second
 implementation. The cost is a second process of the same script and a longer tool

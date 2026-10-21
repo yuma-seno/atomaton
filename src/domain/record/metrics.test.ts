@@ -617,7 +617,7 @@ describe("degraded answers", () => {
       [
         session("a", [
           withProblem("get_pr", "github", "x", { failed: true }),
-          withProblem("close_issue", "github", "y", { refused: true }),
+          withProblem("get_issue", "github", "y", { refused: true }),
         ]),
       ],
       [],

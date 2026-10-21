@@ -164,7 +164,7 @@ export function needsAttention(result: DispatchGateResult): boolean {
  * is a return type asking to be a union.
  */
 export function describeGateResult(result: DispatchGateResult, closedNum: number, parent?: number): string {
-  // `parent` is optional because one caller does not know it: `close_issue`
+  // `parent` is optional because the in-run callers do not know it: a close
   // reaches the gate through the sub-issue's own link. Named as "the parent"
   // there rather than printed as `#0`, which would be a number that identifies
   // a different thing.

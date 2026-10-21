@@ -101,7 +101,7 @@ describe("closingKeywordRefusal", () => {
     const refusal = closingKeywordRefusal(["Closes #1"], "pull request body")!;
     expect(refusal).toContain('"Closes #1"');
     expect(refusal).toContain("pull request body");
-    expect(refusal).toContain("close_issue");
+    expect(refusal).toContain("request_close_issue");
     expect(refusal).toContain("added for you");
   });
 });
