@@ -33,6 +33,7 @@ import { closingKeywordRefusal, closingReferences, partOfLine } from "../../../d
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
+import { postTurnComment } from "../../../adapters/github/ending-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
 import { capText, fitItems, TOOL_OUTPUT_BUDGET } from "../../../shared/tool-output.ts";
@@ -845,7 +846,7 @@ function injectParentIssue(body: string, reviewer: string): string {
   // from -- see `latestRequestOn`. An empty name writes nothing, and the
   // pull request is then left for a person, who is told so below.
   const reviewerLine = reviewer ? `/${reviewer}\n\n` : "";
-  if (!parent) return `${reviewerLine}${body}`;
+  if (!parent) return `${reviewerLine}${body}${openedByLine()}`;
   if (PARENT_ISSUE_TAG.has(body)) {
     mcpFail("PR body already contains a parent-issue tag; refusing to add another");
   }
@@ -866,7 +867,35 @@ function injectParentIssue(body: string, reviewer: string): string {
   const line = `${partOfLine(Number(parent))}\n`;
   const originAgent = (process.env.AGENT ?? "").trim();
   const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}\n` : "";
-  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${line}${body}`;
+  return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}\n${originLine}${line}${body}${openedByLine()}`;
+}
+
+/**
+ * Who opened this pull request, said in the body where a reader can see it.
+ *
+ * The hidden `atomaton:origin-agent` tag above carries the same fact for the
+ * machinery, but a tag is invisible in every place a person reads the thread, and
+ * the PR body is where "who did this work" is looked for (#215). This line is
+ * there for everyone else — and it is the routing input when a review sends the
+ * pull request back: the agent `Opened by` names is the one that fixes the
+ * findings, which is exactly the agent that opened it.
+ *
+ * Written at the END of the body, below the work: it is metadata about the pull
+ * request, the work is above it, and a directive is read from the body's first
+ * visible line — a `/engineer` a caller meant to write would otherwise sit next to
+ * something that looks like a second answer.
+ *
+ * Written for a root-issue pull request as well as a stacked one: who opened the
+ * pull request is a fact about the pull request, not about the branch it aims at.
+ * Empty when a person or the machinery started this run, which is the ordinary
+ * case for a pull request nobody will route back to.
+ */
+function openedByLine(): string {
+  const agent = (process.env.AGENT ?? "").trim();
+  if (!agent) return "";
+  const runUrl = (process.env.ATOMATON_RUN_URL ?? "").trim();
+  const who = runUrl ? `[\`${agent}\`](${runUrl})` : `\`${agent}\``;
+  return `\n---\n_Opened by ${who}_\n`;
 }
 
 function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
@@ -981,7 +1010,12 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     const body = validationDispatched
       ? turnCommentBody({ ended: "waiting", audience: "person", body: text })
       : `${LLM_CONTEXT_TAG.write("exclude")}\n${text}`;
-    gh("issue", "comment", currentIssue, "--repo", REPO, "--body", body);
+    // Posted and recorded through the one helper (`ending-comment.ts`), so the
+    // result footer lands on THIS comment — the one that ended the run's turn —
+    // instead of on a second, content-free one beside it. `validationDispatched`
+    // is also whether the session ends here: a failed dispatch keeps it open,
+    // and a run that continues must not leave a record behind.
+    postTurnComment({ number: currentIssue, repo: REPO, body, sessionEnds: validationDispatched });
   }
 
   // Nobody coming, said out loud on the pull request itself.

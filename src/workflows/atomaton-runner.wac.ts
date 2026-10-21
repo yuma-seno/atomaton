@@ -840,6 +840,15 @@ AGENT_ENV=(
   ATOMATON_RELOAD_COUNT="$ATOMATON_RELOAD_COUNT"
   ATOMATON_DISPATCHED_BY="$ATOMATON_DISPATCHED_BY"
   ATOMATON_OPS_LOG="$ATOMATON_OPS_LOG"
+  # This run's own directory, and the URL for the run itself. The tools use the
+  # first to record which comment ended the run's turn (ending-comment.ts, so
+  # the result footer can be appended onto it later), and the second to link the
+  # artifacts they leave back to the run that made them (create_pr's
+  # "Opened by" line). The directory is per-run; the machinery step is given the
+  # file's path as an argument rather than the variable, because it is not an
+  # agent process.
+  ATOMATON_RUN_DIR="${RUN_DIR}"
+  ATOMATON_RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
   # Caches, because $HOME is read-only to this user. CARGO_HOME is not a cache
   # directory -- redirecting it also hides ~/.cargo/config.toml -- but cargo has no
   # separate cache variable, and a project needing that config can commit
@@ -1059,6 +1068,11 @@ const postResultCommentStep = new TypedOutputsStep(
       session: `${RUN_DIR}/session.json`,
       output: `${RUN_DIR}/atomaton_output.txt`,
       "logs-file": `${RUN_DIR}/atomaton_logs.txt`,
+      // Where a session-ending tool recorded the comment this run ended on, when
+      // one did. Read only when the output is empty and the session proves the
+      // tool call -- the skip branch, which the footer is then appended onto
+      // instead of being dropped. See `ending-comment.ts`.
+      "ending-comment": `${RUN_DIR}/ending-comment.json`,
     })}\n`,
   },
   ["comment_id"] as const,

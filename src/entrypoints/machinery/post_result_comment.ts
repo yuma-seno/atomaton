@@ -11,7 +11,8 @@
  *   post_result_comment.ts --number N --agent NAME [--notify LOGIN]
  *     [--directive NAME] [--chain-continues true|false]
  *     [--ended-because completed|runtime|iterations|stopped] --run-url URL
- * Writes `comment_id=<id>` to $GITHUB_OUTPUT.
+ *     [--ending-comment PATH]
+ * Writes `comment_id=<id>` to $GITHUB_OUTPUT when a comment is posted.
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -26,6 +27,7 @@ import { renderTokenLine } from "../../domain/record/token-line.ts";
 import { toolTroubleLine } from "../../domain/record/tool-trouble.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../domain/work/mention.ts";
 import { knownParticipants } from "../../adapters/github/participants.ts";
+import { readEndingComment } from "../../adapters/github/ending-comment.ts";
 import type { Session } from "../../domain/work/session.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -74,6 +76,14 @@ export interface PostResultCommentArgs {
    */
   output: string;
   "logs-file": string;
+  /**
+   * Where a session-ending tool recorded the comment this run ended on, when one
+   * did (`ending-comment.ts`). Read only when the output is empty and the session
+   * proves the tool call — the skip branch, which the footer is then appended onto
+   * instead of being dropped. Absent means no record was handed in, and the skip
+   * is the skip it always was.
+   */
+  "ending-comment"?: string;
 }
 
 export const ref = defineScript<PostResultCommentArgs>(import.meta.url);
@@ -108,12 +118,12 @@ export const ref = defineScript<PostResultCommentArgs>(import.meta.url);
  * than a derivation. Add money here only when it arrives from the provider as
  * money.
  */
-function tokenUsageLines(logsFile: string): string[] {
-  if (!existsSync(logsFile)) return [];
+function tokenUsageLine(logsFile: string): string | undefined {
+  if (!existsSync(logsFile)) return undefined;
   const usageLine = readFileSync(logsFile, "utf8")
     .split("\n")
     .find((l) => l.includes("ATOMA_TOKEN_USAGE:"));
-  if (!usageLine) return [];
+  if (!usageLine) return undefined;
 
   const prompt = /prompt=(\d+)/.exec(usageLine)?.[1];
   const completion = /completion=(\d+)/.exec(usageLine)?.[1];
@@ -124,7 +134,7 @@ function tokenUsageLines(logsFile: string): string[] {
   // The digits-only pattern is what makes `unknown` fall through to absent.
   const cached = /cached=(\d+)/.exec(usageLine)?.[1];
 
-  return ["", "---", renderTokenLine({ total, prompt, completion, cached })];
+  return renderTokenLine({ total, prompt, completion, cached });
 }
 
 /**
@@ -408,7 +418,8 @@ export function buildCommentBody(args: {
   /** `owner/name`, for linking to the metrics report. Absent when unknown. */
   repo?: string;
   output: string;
-  usageLines: string[];
+  /** The token line, as the run's log gave it up. Absent when the log carried no usage. */
+  tokenLine?: string;
   isSubIssue?: boolean;
   issueClosed?: boolean;
   /** Logins the agent wrote as mentions that were escaped instead. */
@@ -493,7 +504,7 @@ export function buildCommentBody(args: {
       "",
     );
   }
-  lines.push(args.output, "", ...args.usageLines);
+  lines.push(args.output, "");
 
   // Directly under what the agent wrote, because that is what it is about, and
   // above the run footer, which nobody reads for this.
@@ -512,17 +523,59 @@ export function buildCommentBody(args: {
     lines.push(mentionLine(ending, args), "");
   }
 
-  // The report, one click from the run that is reporting. It is written after this
-  // comment is posted, so the link is to the branch tip rather than to a commit --
-  // which is what somebody following it wants anyway: the current state, including
-  // this run. A permalink would show the metrics as they were a moment before.
-  //
-  // Omitted rather than guessed when the repository is unknown, because a broken link
-  // in every comment is worse than no link at all.
+  // One footer, one function — the same one `appendFooter` puts on the comment a
+  // session-ending tool posted. Everything below it is the machinery's: tokens,
+  // run link, metrics, tool trouble, and the cut-short notices.
+  lines.push(buildFooter({
+    agent: args.agent,
+    runUrl: args.runUrl,
+    repo: args.repo,
+    tokenLine: args.tokenLine,
+    toolTrouble: args.toolTrouble,
+    endedBecause: args.endedBecause,
+  }));
+
+  return lines.join("\n");
+}
+
+/**
+ * The footer, as one block — the only place its pieces are assembled.
+ *
+ * Two kinds of comment carry it. The result comment this file posts when the
+ * model returned prose, and — through `appendFooter` — the comment a
+ * session-ending tool posted instead, which used to end the run with no footer
+ * and whose tokens the metrics report (`token-line.ts`) then never counted. The
+ * footer is about ONE run, so it goes on the ONE comment that ended that run's
+ * turn, whichever of the two that was.
+ *
+ * The report link is to the branch tip rather than to a commit, because the
+ * report is written after this comment is posted — which is what somebody
+ * following it wants anyway: the current state, including this run. A permalink
+ * would show the metrics as they were a moment before.
+ *
+ * Omitted rather than guessed when the repository is unknown, because a broken
+ * link in every comment is worse than no link at all.
+ */
+export function buildFooter(args: {
+  agent: string;
+  runUrl: string;
+  repo?: string;
+  /** The token line, as the run's log gave it up. Absent when the log carried no usage. */
+  tokenLine?: string;
+  /**
+   * What the tools did to this run, counted from its session by `tool-trouble.ts`.
+   * Absent when there was none, which is the ordinary run.
+   */
+  toolTrouble?: string;
+  /** How the run ended, for the cut-short notices. Empty in the appended footer. */
+  endedBecause?: string;
+}): string {
+  const lines: string[] = ["---"];
+  if (args.tokenLine !== undefined) lines.push(args.tokenLine);
   const metrics = args.repo
     ? ` · [metrics](https://github.com/${args.repo}/blob/atomaton-data/metrics/report.md)`
     : "";
-  lines.push("---", `_run by [${args.agent}](${args.runUrl})${metrics}_`);
+  lines.push(`_run by [${args.agent}](${args.runUrl})${metrics}_`);
   // Under the run link and above the notice saying how to continue: this is a fact
   // about the run, the notice is the action, and the action reads last.
   //
@@ -550,6 +603,63 @@ export function buildCommentBody(args: {
   return lines.join("\n");
 }
 
+/**
+ * Append the footer onto the comment a session-ending tool posted, in place.
+ *
+ * A tool that ends the session (`create_pr`, `launch_sub_agent`,
+ * `request_close_issue`, `reload_environment`) posts its own turn-ending comment
+ * and records it (`ending-comment.ts`, in the run's own directory). This reads it
+ * back and PATCHes the footer onto it, so the run's tokens reach the metrics
+ * report — which counts token lines off comment bodies — and a person reading the
+ * thread sees the same run facts they would under any result comment.
+ *
+ * Reading the body back rather than recording it at post time: the file carries an
+ * id, which is the only fact still true hours later. A body read fresh is the
+ * body that is really there, whatever touched the comment in between.
+ */
+function appendFooter(args: {
+  repo: string;
+  commentId: string;
+  agent: string;
+  runUrl: string;
+  tokenLine?: string;
+  toolTrouble?: string;
+}): void {
+  const current = gh(
+    "api",
+    `repos/${args.repo}/issues/comments/${args.commentId}`,
+    "--jq",
+    ".body",
+  );
+  if (current.code !== 0 || !current.stdout.trim()) {
+    console.error(
+      `could not read the ending comment ${args.commentId}: ` +
+        `${current.stderr || current.stdout || "(empty body)"} -- the footer is not appended`,
+    );
+    return;
+  }
+  const body = `${current.stdout.trim()}\n\n${buildFooter({
+    agent: args.agent,
+    runUrl: args.runUrl,
+    repo: args.repo,
+    tokenLine: args.tokenLine,
+    toolTrouble: args.toolTrouble,
+  })}`;
+  const updated = gh(
+    "api",
+    `repos/${args.repo}/issues/comments/${args.commentId}`,
+    "--method",
+    "PATCH",
+    "-f",
+    `body=${body}`,
+  );
+  if (updated.code !== 0) {
+    console.error(`could not append the footer: ${updated.stderr || updated.stdout}`);
+    return;
+  }
+  console.error(`footer appended to the ending comment ${args.commentId}`);
+}
+
 function main(): void {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
@@ -568,6 +678,7 @@ function main(): void {
       session: { type: "string" },
       output: { type: "string" },
       "logs-file": { type: "string" },
+      "ending-comment": { type: "string" },
     },
   });
 
@@ -663,8 +774,30 @@ function main(): void {
     // "toward releasing the guard, never toward holding it stuck" applies here
     // at the comment level too: the machine must not hold a thread's guard on
     // the strength of a guess about another component's invariant.
+    //
+    // And the tool that did the talking records its comment (`ending-comment.ts`,
+    // in the run's own directory). Where that record exists, the footer goes onto
+    // THAT comment -- the one that ended the run's turn -- instead of the run
+    // ending with none of it: tokens, run link, metrics and tool trouble, all of
+    // which the metrics report reads back off comment bodies, so a run whose
+    // footer never went out also never counted toward them. No record: the skip
+    // is the skip it always was, which is also what an older deployment sees --
+    // the tools there recorded nothing.
     if (!endedEarly && endedWithToolCalls(values.session)) {
-      console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
+      const ending = readEndingComment(values["ending-comment"]);
+      if (!ending) {
+        console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
+        return;
+      }
+      console.error(`appending the result footer onto the tool's ending comment ${ending.commentId} (on ${ending.node})`);
+      appendFooter({
+        repo: process.env.GITHUB_REPOSITORY ?? "",
+        commentId: ending.commentId,
+        agent: values.agent,
+        runUrl: values["run-url"],
+        tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
+        toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
+      });
       return;
     }
     if (endedEarly) {
@@ -735,7 +868,7 @@ function main(): void {
     // across runs, and a count taken from the top would put an earlier run's trouble
     // under this one's comment.
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
-    usageLines: tokenUsageLines(values["logs-file"] ?? ""),
+    tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
     ...subIssueState(values.number, values.type),
   });
 

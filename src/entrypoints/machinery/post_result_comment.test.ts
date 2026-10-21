@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildCommentBody, endedWithToolCalls, lastAgentText } from "./post_result_comment.ts";
+import { buildCommentBody, buildFooter, endedWithToolCalls, lastAgentText } from "./post_result_comment.ts";
 import type { Session } from "../../domain/work/session.ts";
 import { runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
@@ -13,7 +13,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       notify: "octocat",
       runUrl: "http://example.com/run/1",
       output: "All done.",
-      usageLines: [],
     });
     expect(body).toContain("<!-- atomaton:agent=atomaton -->");
     expect(body).toContain("All done.");
@@ -32,7 +31,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       runUrl: "http://example.com/run/1",
       output: "Following `@torvalds`' approach.",
       escapedMentions: ["torvalds"],
-      usageLines: [],
     });
     expect(body).toContain("Nobody was notified");
     expect(body.indexOf("Nobody was notified")).toBeGreaterThan(body.indexOf("Following"));
@@ -44,7 +42,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       agent: "engineer",
       runUrl: "http://example.com/run/1",
       output: "All done.",
-      usageLines: [],
     });
     expect(body).not.toContain("Nobody was notified");
   });
@@ -62,7 +59,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       endedBecause: "stopped",
       runUrl: "http://example.com/run/1",
       output: "Handing off.",
-      usageLines: [],
     });
     expect(body).toContain("@octocat");
     expect(body).toContain("Stopped on request");
@@ -76,7 +72,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       endedBecause: "runtime",
       runUrl: "http://example.com/run/1",
       output: "Handing off.",
-      usageLines: [],
     });
     expect(body).toContain("@octocat");
   });
@@ -96,7 +91,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       endedBecause: "stopped",
       runUrl: "http://example.com/run/1",
       output: "_This run was stopped before it said anything._",
-      usageLines: [],
     });
     expect(body).toContain("ended before it said anything at all");
     expect(body).toContain("saved session");
@@ -120,7 +114,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       endedBecause: "stopped",
       runUrl: "http://example.com/run/1",
       output: "_This run was stopped before it said anything._",
-      usageLines: [],
     });
     expect(body).toContain("@octocat");
     expect(body).toContain("was stopped before it finished");
@@ -134,7 +127,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       endedBecause: "runtime",
       runUrl: "http://example.com/run/1",
       output: "Got partway.",
-      usageLines: [],
     });
     expect(body).toContain("ran out of time before it finished");
     expect(body).not.toContain("task completed");
@@ -148,7 +140,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       reported: true,
       runUrl: "http://example.com/run/1",
       output: "All done.",
-      usageLines: [],
     });
     expect(body).toContain("task completed");
   });
@@ -166,7 +157,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       reported: false,
       runUrl: "http://example.com/run/1",
       output: "",
-      usageLines: [],
     });
     expect(body).toContain("@octocat");
     expect(body).toContain("ended without writing a report");
@@ -186,7 +176,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       reported: false,
       runUrl: "http://example.com/run/1",
       output: "",
-      usageLines: [],
     });
     expect(body).toContain("<!-- atomaton:ended=done -->");
   });
@@ -198,7 +187,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       directive: "engineer",
       runUrl: "http://example.com/run/1",
       output: "Handing off.",
-      usageLines: [],
     });
     expect(body).not.toContain("@octocat");
   });
@@ -210,7 +198,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       chainContinues: "true",
       runUrl: "http://example.com/run/1",
       output: "Dispatched.",
-      usageLines: [],
     });
     expect(body).not.toContain("@octocat");
   });
@@ -227,7 +214,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       issueClosed: true,
       runUrl: "http://example.com/run/1",
       output: "Merged in PR #173. Closing this sub-task.",
-      usageLines: [],
     });
     expect(body).not.toContain("@octocat");
   });
@@ -246,7 +232,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       issueClosed: true,
       runUrl: "http://example.com/run/1",
       output: "",
-      usageLines: [],
     });
     expect(body).toContain("@octocat");
   });
@@ -260,7 +245,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       issueClosed: false,
       runUrl: "http://example.com/run/1",
       output: "I could not finish this.",
-      usageLines: [],
     });
     expect(body).toContain("@octocat");
   });
@@ -271,7 +255,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       endedBecause: "runtime",
       runUrl: "http://example.com/run/1",
       output: "Still working.",
-      usageLines: [],
     });
     expect(body).toContain("The run ran out of time");
     expect(body).toContain("`/engineer`");
@@ -285,7 +268,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       endedBecause: "stopped",
       runUrl: "http://example.com/run/1",
       output: "Halfway through.",
-      usageLines: [],
     });
     expect(body).toContain("Stopped on request");
     expect(body).toContain("session is saved");
@@ -308,7 +290,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       notify: "alice",
       runUrl: "http://example.com/run/1",
       output: "Halfway through.",
-      usageLines: [],
     });
     expect(outOfTime).toContain("ran out of time");
     // The sentence this replaces. `--max-iterations` is never passed, so a run that
@@ -324,7 +305,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       notify: "alice",
       runUrl: "http://example.com/run/1",
       output: "Halfway through.",
-      usageLines: [],
     });
     expect(body).toContain("ran out of iterations");
   });
@@ -341,7 +321,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       notify: "alice",
       runUrl: "http://example.com/run/1",
       output: "Halfway through.",
-      usageLines: [],
     });
     expect(body).toContain("got stuck repeating itself");
     expect(body).not.toContain("ran out of time");
@@ -370,7 +349,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       runUrl: "http://example.com/run/1",
       output: "LGTM.",
       toolTrouble: "Counted from the session: 1 problem a server reported about itself (`search`).",
-      usageLines: [],
     });
     expect(body).toContain("\n_Counted from the session: 1 problem a server reported about itself (`search`)._");
     expect(body.indexOf("Counted from the session")).toBeGreaterThan(body.indexOf("_run by"));
@@ -389,7 +367,6 @@ describe("post_result_comment.ts buildCommentBody", () => {
       agent: "engineer",
       runUrl: "http://example.com/run/1",
       output: "LGTM.",
-      usageLines: [],
     });
     expect(body).not.toContain("Counted from the session");
   });
@@ -653,6 +630,54 @@ describe("post_result_comment.ts main", () => {
       );
       expect(r.status).toBe(0);
       expect(r.ghCalls.length).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The skip, where the tool that did the talking recorded its comment: the
+   * footer is appended onto THAT comment -- the one that ended the run's turn --
+   * instead of a second, content-free one posted beside it. No second POST, and
+   * the tokens reach the metrics report, which counts token lines off comment
+   * bodies and never saw them from these runs before.
+   */
+  test("appends the footer onto the tool's recorded ending comment", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "");
+      writeFileSync(join(dir, "session.json"), JSON.stringify({
+        messages: [
+          { role: "user", content: "open the pr" },
+          { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "create_pr", arguments: "{}" } }] },
+          { role: "tool", tool_call_id: "c1", content: "created" },
+        ],
+      }));
+      writeFileSync(join(dir, "ending-comment.json"), JSON.stringify({ commentId: "42", node: "5" }));
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        [
+          "--number", "5", "--type", "issue", "--agent", "atomaton", "--run-url", "http://example.com/run/1",
+          "--session", join(dir, "session.json"),
+          "--output", join(dir, "atomaton_output.txt"),
+          "--ending-comment", join(dir, "ending-comment.json"),
+        ],
+        {
+          cwd: dir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [{ match: ["issues/comments/42"], stdout: "<!-- atomaton:ended=waiting -->\nAtomaton: PR #123 created. Running CI." }],
+        },
+      );
+      expect(r.status).toBe(0);
+      // The PATCH happened, and no second comment was posted beside it.
+      expect(r.ghCalls.some((c) => c.includes("PATCH"))).toBe(true);
+      expect(r.ghCalls.some((c) => c.includes("POST"))).toBe(false);
+      const patched = (r.ghCalls.find((c) => c.includes("PATCH")) ?? []).join(" ");
+      // The appended footer is the same one any result comment carries.
+      expect(patched).toContain(
+        "_run by [atomaton](http://example.com/run/1) · [metrics](https://github.com/owner/repo/blob/atomaton-data/metrics/report.md)_",
+      );
+      expect(patched).toContain("Atomaton: PR #123 created");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -933,7 +958,6 @@ describe("salvaging a run that ended before it reported", () => {
       runUrl: "http://example.com/run/1",
       output: "Now checking whether auto_triggers is read anywhere.",
       salvaged: true,
-      usageLines: [],
     });
     expect(body).toContain("ended before it wrote a report");
     expect(body).toContain("not a conclusion");
@@ -945,7 +969,6 @@ describe("salvaging a run that ended before it reported", () => {
       agent: "engineer",
       runUrl: "http://example.com/run/1",
       output: "Done.",
-      usageLines: [],
     });
     expect(body).not.toContain("ended before it wrote a report");
   });
@@ -1059,7 +1082,6 @@ describe("the no-report notice for a run whose silence is its own", () => {
       wroteNothing: true,
       runUrl: "http://example.com/run/1",
       output: "_This run ended without saying anything._",
-      usageLines: [],
     });
     expect(body).toContain("ended before it said anything at all");
     expect(body).toContain("saved session");
@@ -1083,7 +1105,6 @@ describe("the metrics link in the footer", () => {
     agent: "engineer",
     runUrl: "https://example.com/run",
     output: "done",
-    usageLines: [] as string[],
   };
 
   test("it points at the report on atomaton-data", () => {
@@ -1097,5 +1118,48 @@ describe("the metrics link in the footer", () => {
     const body = buildCommentBody(base);
     expect(body).toContain("_run by [engineer](https://example.com/run)_");
     expect(body).not.toContain("metrics");
+  });
+
+  /**
+   * The footer is one block below the mention, not two blocks with it between
+   * them. It used to sit with the run link only, with the token line above the
+   * mention — which made the footer two pieces to assemble and left the comment a
+   * session-ending tool posted nothing to copy. One block is what the appended
+   * footer (`appendFooter`) and this one are made of, from one function.
+   */
+  test("one block, below the mention, carrying the token line with it", () => {
+    const body = buildCommentBody({
+      ...base,
+      tokenLine: "_Tokens: 100 total (90 prompt + 10 completion)_",
+    });
+    expect(body.indexOf("@octocat")).toBeLessThan(body.indexOf("---"));
+    expect(body.indexOf("_Tokens:")).toBeGreaterThan(body.indexOf("---"));
+    expect(body.indexOf("_Tokens:")).toBeLessThan(body.indexOf("_run by"));
+  });
+});
+
+describe("buildFooter", () => {
+  test("assembles every piece the run knows, in one block", () => {
+    const footer = buildFooter({
+      agent: "engineer",
+      runUrl: "https://example.com/run",
+      repo: "acme/widgets",
+      tokenLine: "_Tokens: 100 total (90 prompt + 10 completion)_",
+      toolTrouble: "Counted from the session: 1 refused or errored tool call.",
+    });
+    expect(footer).toContain("_Tokens: 100 total (90 prompt + 10 completion)_");
+    expect(footer).toContain(
+      "_run by [engineer](https://example.com/run) · [metrics](https://github.com/acme/widgets/blob/atomaton-data/metrics/report.md)_",
+    );
+    expect(footer).toContain("_Counted from the session: 1 refused or errored tool call._");
+  });
+
+  test("an absent piece is an absent line, not a guess at it", () => {
+    const footer = buildFooter({ agent: "engineer", runUrl: "https://example.com/run" });
+    expect(footer).toContain("---");
+    expect(footer).toContain("_run by [engineer](https://example.com/run)_");
+    expect(footer).not.toContain("metrics");
+    expect(footer).not.toContain("Tokens");
+    expect(footer).not.toContain("Counted from the session");
   });
 });
