@@ -38,8 +38,8 @@ below it is the role prompt, placed inside
 
 **Which servers it gets.** `mcp_servers` is the whole of its reach — an agent
 receives the servers it names and no others. An agent that must not change the
-tree names `files_readonly` rather than `files`; one that must not close its own
-issue names `atomaton_env` rather than `atomaton`. [What an agent can
+tree names `files_readonly` rather than `files`; one that must not dispatch
+another agent names `atomaton_env` rather than `atomaton`. [What an agent can
 reach](../../tools/overview.md) is the set to choose from.
 
 **Who it may hand work to.** `knows_about` is the colleague list the prompt
