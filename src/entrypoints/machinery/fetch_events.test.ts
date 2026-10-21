@@ -56,6 +56,139 @@ describe("fetch_events.ts", () => {
     }
   });
 
+  // A sub-issue's run context is built from its own issue's events alone, so the
+  // parent has to be ON the body event for the child to see it at all — the same
+  // reason a PR body event carries `**Linked Issue:** #N`. The parent comes from
+  // GitHub's native sub-issue link (`parentIssueOf`), so the fake answers the
+  // GraphQL query, distinguished by `{parent{number}}`, which no other query in
+  // this script contains.
+  test("a sub-issue's body event names its parent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
+    try {
+      const outFile = join(dir, "events.json");
+      const outputFile = join(dir, "out");
+      writeFileSync(outputFile, "");
+      const r = runWithFakeGh(
+        scriptPath("fetch_events.ts"),
+        ["--type", "issue", "--number", "5", "--out", outFile],
+        {
+          env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: outputFile },
+          rules: [
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["issues/5/comments"], stdout: "[]" },
+            {
+              match: ["graphql", "parent{number}"],
+              stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 3 } } } } }),
+            },
+            {
+              match: ["issues/5"],
+              stdout: JSON.stringify({
+                number: 5,
+                title: "Fix the bug",
+                body: "Please fix it.",
+                labels: [{ name: "bug" }],
+                user: { login: "alice" },
+                created_at: "2026-01-01T00:00:00Z",
+              }),
+            },
+          ],
+        },
+      );
+
+      expect(r.status).toBe(0);
+      const events = JSON.parse(readFileSync(outFile, "utf8")) as { event_type: string; content: string }[];
+      // Same block the PR body event arranges its metadata into: title, labels,
+      // the line that says where the node sits, then the body.
+      expect(events[0]?.content).toContain("Issue #5: Fix the bug\n**Labels:** bug\n**Sub-issue of:** #3\n\nPlease fix it.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a root issue carries no parent line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
+    try {
+      const outFile = join(dir, "events.json");
+      const outputFile = join(dir, "out");
+      writeFileSync(outputFile, "");
+      const r = runWithFakeGh(
+        scriptPath("fetch_events.ts"),
+        ["--type", "issue", "--number", "5", "--out", outFile],
+        {
+          env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: outputFile },
+          rules: [
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["issues/5/comments"], stdout: "[]" },
+            // `parent: null` is GitHub's answer for a root: an answer, not a failure.
+            { match: ["graphql", "parent{number}"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+            {
+              match: ["issues/5"],
+              stdout: JSON.stringify({
+                number: 5,
+                title: "Fix the bug",
+                body: "Please fix it.",
+                labels: [],
+                user: { login: "alice" },
+                created_at: "2026-01-01T00:00:00Z",
+              }),
+            },
+          ],
+        },
+      );
+
+      expect(r.status).toBe(0);
+      const events = JSON.parse(readFileSync(outFile, "utf8")) as { content: string }[];
+      expect(events[0]?.content).not.toContain("Sub-issue of");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The half that keeps the line honest: a parent that could not be read is not a
+  // parent that does not exist, and the line must not be added as if it were. The
+  // read is enrichment, so the run still succeeds — and it says why, via
+  // `parentIssueOf`'s own log, rather than quietly shipping a context with the
+  // tree missing.
+  test("a parent that could not be read adds no line and does not fail the run", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
+    try {
+      const outFile = join(dir, "events.json");
+      const outputFile = join(dir, "out");
+      writeFileSync(outputFile, "");
+      const r = runWithFakeGh(
+        scriptPath("fetch_events.ts"),
+        ["--type", "issue", "--number", "5", "--out", outFile],
+        {
+          env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: outputFile },
+          rules: [
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["issues/5/comments"], stdout: "[]" },
+            { match: ["graphql", "parent{number}"], code: 1, stdout: "boom" },
+            {
+              match: ["issues/5"],
+              stdout: JSON.stringify({
+                number: 5,
+                title: "Fix the bug",
+                body: "Please fix it.",
+                labels: [],
+                user: { login: "alice" },
+                created_at: "2026-01-01T00:00:00Z",
+              }),
+            },
+          ],
+        },
+      );
+
+      expect(r.status).toBe(0);
+      const events = JSON.parse(readFileSync(outFile, "utf8")) as { content: string }[];
+      expect(events[0]?.content).not.toContain("Sub-issue of");
+      expect(r.stderr).toContain("[atomaton-parent] WARN");
+      expect(r.stderr).toContain("could not read the parent of #5");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // Reproduces the 2026-08-17 outage: `pulls/{n}/reviews` returned 404 for every
   // pull request in the repository while every other endpoint answered normally.
   // `ghPaginated` throws on any non-zero exit, so that one endpoint took down

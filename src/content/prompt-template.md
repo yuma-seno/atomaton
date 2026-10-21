@@ -81,7 +81,10 @@ one the reader can answer in a sentence.
 **Read before you ask.** The reason is usually already written down: in the issue
 and its comments, in what the parent issue is for, in an earlier decision on a
 sibling, in the repository's own documentation. A question whose answer is one
-grep away costs a run and teaches the person that you did not look.
+grep away costs a run and teaches the person that you did not look. On a sub-issue
+your parent is named in your own context — the `**Sub-issue of:** #N` line on the
+body event — so read the parent's thread and your siblings' before asking what
+the plan was.
 
 **Ask about the goal, never about the means.** What it should do is theirs and
 nobody else's. How it should be done is not a question they can answer — they do
