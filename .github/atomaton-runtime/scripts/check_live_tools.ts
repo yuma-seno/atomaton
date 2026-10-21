@@ -123,6 +123,40 @@ function resolveRoster(rosterPath, read, exists) {
   }
   return { defs, problems };
 }
+var FILES_PROGRAM_TOOLS = ["read", "grep", "glob", "edit", "write", "list"];
+var SHELL_PROGRAM_TOOLS = ["bash"];
+var EXACT_DELEGATE_TOOL_SETS = [
+  {
+    delegate: "delegate",
+    tools: ["read", "grep", "glob", "edit", "write", "list", "bash"],
+    servers: [
+      { server: "files", provides: FILES_PROGRAM_TOOLS },
+      { server: "shell", provides: SHELL_PROGRAM_TOOLS }
+    ],
+    promise: "The writing sub-run holds the whole file surface and a shell \u2014 the description its caller " + "chooses it by promises reading, searching and changing files and one command to answer a " + "question, and its caller commits whatever the sub-run changes."
+  },
+  {
+    delegate: "delegate_large",
+    tools: ["read", "grep", "glob", "edit", "write", "list", "bash"],
+    servers: [
+      { server: "files", provides: FILES_PROGRAM_TOOLS },
+      { server: "shell", provides: SHELL_PROGRAM_TOOLS }
+    ],
+    promise: "The paid writing sub-run holds the same surface as the free one: the tier is a property of " + "the model, not of the tools, and a task the free tier could not finish is not a smaller task."
+  },
+  {
+    delegate: "delegate_readonly",
+    tools: ["read", "grep", "glob", "list"],
+    servers: [{ server: "files_readonly", provides: FILES_PROGRAM_TOOLS }],
+    promise: "The read-only sub-run holds the four reading tools and nothing that writes. The allowlist " + "is the whole of what makes the delegate safe to hand to an agent that must not change the " + "tree, and it narrows only a server whose tools arrive under their bare names \u2014 the " + 'description promises its caller "its own `grep`, `glob` and `read`".'
+  },
+  {
+    delegate: "delegate_readonly_large",
+    tools: ["read", "grep", "glob", "list"],
+    servers: [{ server: "files_readonly", provides: FILES_PROGRAM_TOOLS }],
+    promise: "The paid read-only sub-run holds the same four reading tools as the free one, for the same " + "reason: nothing in this tier may write, whoever is paying for the reading."
+  }
+];
 
 // src/domain/machinery/machinery-layout.ts
 var USER_ROOT = ".github/atomaton";

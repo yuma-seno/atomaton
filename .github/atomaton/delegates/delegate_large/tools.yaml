@@ -24,7 +24,14 @@
 # sub-run. Nothing else reads it, and no agent names these servers.
 watch: {}
 servers:
+  # Every server here is `unprefixed`, for the same reason as every entry in
+  # `tools/defaults.yaml`: a tool is called by its own name — `read`, `bash` — which
+  # is what this server's own tool description promises its caller, and what a bare
+  # `tool_allowlist` pattern requires. Patterns are matched against the name the
+  # sub-run calls the tool by, so without this a tool arrives as `files__read` and
+  # a bare pattern matches nothing at all.
   files:
+    unprefixed: true
     command: bun
     args:
       - run
@@ -32,6 +39,7 @@ servers:
     env: {}
     hooks: {}
   shell:
+    unprefixed: true
     command: bun
     args:
       - run
