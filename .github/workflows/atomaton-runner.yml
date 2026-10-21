@@ -709,6 +709,7 @@ jobs:
         if: steps.context.outputs.new_event_count != '0'
       - name: Run agent
         id: atoma
+        continue-on-error: true
         env:
           GITHUB_RUN_ID: ${{ github.run_id }}
           ISSUE_NUMBER: ${{ steps.fetch.outputs.resolved_number }}
@@ -742,7 +743,13 @@ jobs:
           #
           # `--hook-base` is the machinery's `tools/` directory, because that is where the
           # hook scripts are. The output goes to the run directory and is thrown away with it.
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/write_tools_file.ts" --config "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/config.yaml" --defaults "${ATOMATON_MACHINERY_ROOT}/.github/atomaton-runtime/tools/defaults.yaml" --out "${RUNNER_TEMP}/atomaton-run/tools.yaml" --hook-base "${ATOMATON_MACHINERY_ROOT}/.github/atomaton-runtime/tools"
+          #
+          # Guarded, not bare: the guard names the failure — the machinery could not produce
+          # the tools file, atoma never started — instead of leaving the step's exit code to
+          # say it, and it stops the step here, before the failure branch below can write the
+          # boundary flag. A failure here is the MACHINERY's, and "Report failure" reads that
+          # from `atoma_failed` staying unset.
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/write_tools_file.ts" --config "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/config.yaml" --defaults "${ATOMATON_MACHINERY_ROOT}/.github/atomaton-runtime/tools/defaults.yaml" --out "${RUNNER_TEMP}/atomaton-run/tools.yaml" --hook-base "${ATOMATON_MACHINERY_ROOT}/.github/atomaton-runtime/tools" || { echo "::error::could not write the tools file from the machinery config; atoma never started"; exit 1; }
           TOOLS_ARG="--tools-file ${RUNNER_TEMP}/atomaton-run/tools.yaml"
 
           # Settings, not credentials. These two are repository VARIABLES -- which provider
@@ -834,6 +841,20 @@ jobs:
           fi
           echo "agent time budget: $BUDGET seconds"
 
+          # Preflighting `sudo`, because the real invocation cannot separate a sudo refusal
+          # from atoma's own exit: `|| EXIT_CODE=$?` below catches both, and a failure once
+          # atoma has run is attributed to atoma. `sudo -n -u "$TOOL_USER" true` is everything
+          # the invocation needs from sudo — the user, the passwordless grant — at no cost, so
+          # a refusal is caught here, while it is still nameable and while the boundary flag is
+          # still unwritten: "Report failure" reads that as the machinery's. The residue is a
+          # sudo that passes the preflight and fails the real invocation, which arrives as
+          # atoma's exit code and is attributed to atoma; nothing in this script can
+          # distinguish the two, and the log will say.
+          if ! sudo -n -u "atomaton-tools" true 2>/dev/null; then
+            echo "::error::cannot run the tool servers as atomaton-tools: sudo refused; atoma never started"
+            exit 1
+          fi
+
           EXIT_CODE=0
           sudo -n -u "atomaton-tools" env "${AGENT_ENV[@]}" \
             atoma run \
@@ -866,11 +887,22 @@ jobs:
           # read_run_ending.ts.
           #
           # A non-zero status that is not the soft stop is still a failure and still ends the
-          # step, so nothing below it runs and no ending is published: the turn failed, and
-          # decide_turn_ending.ts reads that from the step's own outcome.
+          # step, so none of the run's own outputs are written: the turn failed, and
+          # decide_turn_ending.ts reads that from the step's outcome. "Report failure" turns
+          # that failure into the ending it owes the thread, and the colour it leaves behind is
+          # decided by the flag the failure branch below publishes.
           if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
             bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/read_run_ending.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --exit-code "${EXIT_CODE}" --stop-file "${RUNNER_TEMP}/atomaton-run/stop-requested"
           elif [ "$EXIT_CODE" != "0" ]; then
+            # atoma's own failure — neither success nor the soft stop — published for
+            # "Report failure", which leaves the run green only for this case. Everything
+            # the machinery does around atoma — the tools file, the sudo preflight above,
+            # and the reads that turn a 0/2 exit into an ending, which this bash runs with
+            # `-e` — leaves the flag unwritten, and unwritten is red: the machinery's.
+            # The residue is a machinery failure that arrives as atoma's exit code (a sudo
+            # that passed the preflight and failed inside the real invocation), which
+            # nothing here can tell from atoma's own; the log will say.
+            echo "atoma_failed=true" >> "$GITHUB_OUTPUT"
             exit $EXIT_CODE
           fi
 
@@ -984,13 +1016,14 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          ATOMA_FAILED: ${{ steps.atoma.outputs.atoma_failed }}
           NUMBER: ${{ inputs.number }}
           AGENT: ${{ inputs.agent }}
           NOTIFY: ${{ steps.notify.outputs.notify }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/report_run_failure.ts" --number "${NUMBER}" --agent "${AGENT}" --notify "${NOTIFY}" --run-url "${RUN_URL}" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt"
-        if: always() && job.status != 'success' && steps.post-result.outputs.comment_id == ''
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/report_run_failure.ts" --number "${NUMBER}" --agent "${AGENT}" --notify "${NOTIFY}" --run-url "${RUN_URL}" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --atoma-failed "${ATOMA_FAILED}"
+        if: always() && steps.atoma.outcome == 'failure' && steps.post-result.outputs.comment_id == ''
       - name: Check for uncommitted changes
         id: dirty
         shell: bash

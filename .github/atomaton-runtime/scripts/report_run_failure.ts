@@ -141,7 +141,7 @@ function failureNotice(agent, notify, runUrl, excerpt) {
   const mention = mentionPrefix(notify);
   const lines = [
     ...turnHeader({ ended: "done", audience: "person" }),
-    `${mention}Atomaton: \`${agent}\` did not finish \u2014 the run failed.`,
+    `${mention}Atomaton: \`${agent}\` did not finish.`,
     "",
     "**The session was saved.** What this run worked out is still there.",
     "",
@@ -165,11 +165,13 @@ function main() {
       agent: { type: "string" },
       notify: { type: "string" },
       "run-url": { type: "string" },
-      "logs-file": { type: "string" }
+      "logs-file": { type: "string" },
+      "atoma-failed": { type: "string" }
     }
   });
   if (!values.number) {
     console.error("::error::Cannot post failure comment: issue/PR number unknown.");
+    process.exitCode = 1;
     return;
   }
   let excerpt = "";
@@ -183,8 +185,14 @@ function main() {
   }
   const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt);
   const { code, stdout, stderr } = gh("issue", "comment", String(values.number), "--body", body);
-  if (code !== 0)
+  const atomaFailed = (values["atoma-failed"] ?? "").trim() === "true";
+  if (code !== 0) {
     console.error(`Failed to post the failure comment: ${stderr || stdout}`);
+    process.exitCode = 1;
+  } else if (!atomaFailed) {
+    console.error("The machinery failed, not the agent; the notice healed the thread, but the run stays red.");
+    process.exitCode = 1;
+  }
 }
 if (import.meta.main)
   main();
