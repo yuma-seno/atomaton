@@ -150,6 +150,12 @@ export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent:
       number: subIssueNum,
       notify,
       repo,
+      // This dispatch is the merging run's own conclusion. The run sits on the pull
+      // request and the run it wakes sits on this issue, so the node comparison alone
+      // would log `dispatch-elsewhere` — and the merged pull request's result comment
+      // would then claim no agent will run next while one has just been started. See
+      // `RunnerDispatch.continuesChain`.
+      continuesChain: true,
       log,
     }) === "dispatched"
   );

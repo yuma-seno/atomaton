@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 // The servers are spawned with the ambient environment, and inside an Atomaton run that
 // includes the run's own `TYPE` and `NUMBER`. See `hermeticEnv`.
-import { hermeticEnv } from "../../../entrypoints/machinery/testing/harness.ts";
+import { hermeticEnv, makeConfigDir } from "../../../entrypoints/machinery/testing/harness.ts";
 
 const SCRIPTS_DIR = join(process.cwd(), "src/entrypoints/tools/mcp");
 import { FAKE_GH_IMPL } from "../../../entrypoints/machinery/testing/fake-gh-env.ts";
@@ -1240,6 +1240,112 @@ describe("mcp/github.ts", () => {
         removeTemp(dir);
       }
     });
+
+    /**
+     * The full route the reviewer takes on every agent merge: the gate passes, the
+     * merge lands, the body's parent tag resolves, and `dispatchPostMergeAgent`
+     * wakes the delivered issue's agent. That dispatch is this run's own conclusion
+     * — it must reach the ops log as `"op":"dispatch"`, which is what
+     * `chain_continues` greps, or the merged pull request's result comment claims
+     * "No agent will be automatically executed next" while a run has just been
+     * started. Before the node env was renamed the node comparison stumbled into
+     * this by accident (#259); the flag makes it explicit, and this test is the
+     * route's only coverage.
+     */
+    test("merge_pr's post-merge restart is recorded as the chain continuing", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-chain-"));
+      const opsLog = join(dir, "ops.log");
+      const ghLog = join(dir, "gh.log");
+      const configDir = makeConfigDir({ merge: { policy: "auto" } });
+      try {
+        const r = await sendRequest(
+          "github.ts",
+          {
+            jsonrpc: "2.0", id: 47, method: "tools/call",
+            params: { name: "merge_pr", arguments: {} },
+          },
+          {
+            ...fakeGhSeam(),
+            GITHUB_REPOSITORY: "owner/repo",
+            TYPE: "pr",
+            NUMBER: "802",
+            ATOMATON_OPS_LOG: opsLog,
+            ATOMATON_MACHINERY_ROOT: configDir,
+            FAKE_GH_LOG: ghLog,
+            FAKE_GH_RESPONSES: JSON.stringify([
+              // The merge gate. The base branch is an issue branch, so the merge's
+              // own CD dispatch is skipped (a sub-issue's merge never deploys).
+              {
+                match: ["pr", "view", "802", "isDraft,author"],
+                stdout: JSON.stringify({
+                  isDraft: false,
+                  author: { is_bot: true, login: "engineer" },
+                  state: "OPEN",
+                  headRefOid: "abc123",
+                  headRefName: "atomaton/issue-300",
+                  baseRefName: "atomaton/issue-300",
+                  title: "Deliver #300",
+                  labels: [],
+                }),
+              },
+              { match: ["pr", "view", "802", "mergeStateStatus"], stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }) },
+              {
+                match: ["commits/abc123/check-runs"],
+                stdout: JSON.stringify({ check_runs: [{ name: "validate", status: "completed", conclusion: "success" }] }),
+              },
+              { match: ["rules/branches/atomaton/issue-300"], stdout: "[]" },
+              { match: ["pulls/802/files"], stdout: "" },
+              // The merge, the branch deletion, and the body read for the handoff.
+              { match: ["pr", "merge", "802"], stdout: "" },
+              { match: ["git/refs/heads/atomaton/issue-300"], stdout: "" },
+              {
+                match: ["pr", "view", "802", "body"],
+                stdout: JSON.stringify({
+                  body: "<!-- atomaton:parent-issue=300 -->\n<!-- atomaton:origin-agent=engineer -->",
+                }),
+              },
+              // The parent issue: open (so the re-invocation is chosen), and read
+              // again by the notify walk and by the dispatch's own target check.
+              // The marker POST is listed first because every needle of the plain
+              // `issues/300` rule is a substring of its path too.
+              { match: ["issues/300/comments", "POST"], stdout: "999" },
+              { match: ["issues/300/comments", "--paginate"], stdout: JSON.stringify([
+                {
+                  id: 999,
+                  body: "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:dispatch=engineer -->\nAtomaton: `engineer` starting on this issue.",
+                },
+              ]) },
+              { match: ["api", "repos/owner/repo/issues/300"], stdout: JSON.stringify({ state: "open", body: "" }) },
+              { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issueOrPullRequest: { __typename: "Issue", parent: null } } } }) },
+              { match: ["issue", "comment", "300"], stdout: "https://github.com/owner/repo/issues/300#comment-1" },
+              { match: ["workflow", "run", "atomaton-runner.yml"], stdout: "" },
+            ]),
+          },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        const parsed = JSON.parse(r.result.content[0].text) as {
+          merged: boolean;
+          parent_outcome: string;
+          reinvoked_agent?: string;
+        };
+        expect(parsed).toMatchObject({ merged: true, parent_outcome: "reinvoked", reinvoked_agent: "engineer" });
+
+        // The dispatch went to the parent issue, not to the pull request.
+        const calls = readFileSync(ghLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]);
+        const run = calls.find((c) => c.includes("workflow") && c.includes("run"));
+        expect(run?.some((a) => a.includes("number=300")), JSON.stringify(run)).toBe(true);
+
+        // And the ops log carries it as the chain continuing — the exact literal
+        // `chain_continues` greps for, and none of the elsewhere kind.
+        const ops = readFileSync(opsLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
+        const dispatches = ops.filter((entry) => String(entry.op).startsWith("dispatch"));
+        expect(dispatches.length, JSON.stringify(ops)).toBe(1);
+        expect(dispatches[0]).toMatchObject({ op: "dispatch", target: "issue", agent: "engineer", number: 300 });
+      } finally {
+        removeTemp(dir);
+        rmSync(configDir, { recursive: true, force: true });
+      }
+    }, 30_000);
 
     /**
      * GitHub allows ten code searches a minute, and a 429 names its own wait. Thirty

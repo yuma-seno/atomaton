@@ -51,12 +51,18 @@ export function logOp(op: string, payload: Record<string, unknown> = {}): void {
  *
  * So the op NAME carries which kind it was, and a reader greps for the one it means:
  *
- *   `"op":"dispatch"`            this node's turn moves on — the run is on THIS node
+ *   `"op":"dispatch"`            this dispatch carries the run's own turn on — the
+ *                                run is on the target node, or the dispatch is the
+ *                                run's own conclusion waking another node (a merged
+ *                                pull request re-invoking the issue it delivers)
  *   `"op":"dispatch-elsewhere"`  work started UNDER this node — the node is waiting
  *
  * `elsewhere` is passed in rather than derived here because only the caller knows
- * which node it is dispatching onto; `dispatchRunner` decides it by comparing the
- * target number with the run's own. The two names are exact-proof against each other:
+ * which node it is dispatching onto. `dispatchRunner` derives it by comparing the
+ * target number with the run's own, and a caller whose dispatch is the run's own
+ * conclusion landing elsewhere passes `continuesChain` instead — the one case the
+ * comparison cannot see, and the reason the flag exists (see `RunnerDispatch`). The
+ * two names are exact-proof against each other:
  * `grep '"op":"dispatch"'` does not match `"op":"dispatch-elsewhere"`, because the
  * character after `dispatch` must be a closing quote.
  */

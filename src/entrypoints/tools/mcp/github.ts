@@ -709,7 +709,10 @@ function closeIssue(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>): boolean {
  * either answer "not yet" pointlessly or, worse, re-invoke a parent on the
  * strength of an issue that is still open.
  */
-async function closeIssueAndDispatch(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>): Promise<string> {
+async function closeIssueAndDispatch(
+  a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>,
+  options: { continuesChain?: boolean } = {},
+): Promise<string> {
   const closed = closeIssue(a);
   const num = a[ISSUE_NUMBER_ARG];
 
@@ -733,7 +736,7 @@ async function closeIssueAndDispatch(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>)
   // issue is the last thing in a position to notice.
   let aggregation: DispatchGateResult;
   try {
-    aggregation = await dispatchOrchestratorIfSubIssueReady(REPO, num);
+    aggregation = await dispatchOrchestratorIfSubIssueReady(REPO, num, options);
   } catch (e) {
     const why = (e as Error).message ?? String(e);
     log(`closeIssueAndDispatch: aggregation check failed for #${num}: ${why}`);
@@ -1577,7 +1580,14 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
     // ignores the answer therefore reports a parent as closed while it is open --
     // which is the failure this change exists to remove, and discarding the return
     // value here would have moved it rather than fixed it.
-    const outcome = JSON.parse(await closeIssueAndDispatch({ [ISSUE_NUMBER_ARG]: parentIssue })) as {
+    //
+    // `continuesChain`, because this fallback is the same conclusion as the
+    // re-invocation it replaces: the merge closed this run's own issue, and the
+    // aggregation dispatch that may follow is that conclusion continuing -- not work
+    // started under the pull request. See `RunnerDispatch.continuesChain`.
+    const outcome = JSON.parse(
+      await closeIssueAndDispatch({ [ISSUE_NUMBER_ARG]: parentIssue }, { continuesChain: true }),
+    ) as {
       close_requested?: number;
     };
     if (outcome.close_requested !== undefined) {
