@@ -5869,7 +5869,7 @@
   {
     "path": "sessions/issue-259/reviewer.json",
     "agent": "reviewer",
-    "messages": 138,
+    "messages": 140,
     "calls": 84,
     "failed": 2,
     "refused": 0,
@@ -5911,6 +5911,15 @@
           }
         },
         "started": "2026-10-21T17:41:47Z"
+      },
+      {
+        "ended": "2026-10-21T18:13:06Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 140,
+        "seconds": 11,
+        "server_calls": {},
+        "started": "2026-10-21T18:12:55Z"
       }
     ]
   },
