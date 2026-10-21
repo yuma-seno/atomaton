@@ -19,6 +19,25 @@
  * Which of those is right is a judgement about the work, and it belongs to the
  * person rather than to the machinery.
  *
+ * ## The exit code is the gate
+ *
+ * The step this runs in is the run's verdict on its own failure, and the colour is
+ * decided by two facts: whether the ending got written, and whose the failure was.
+ * An agent failure whose notice posted has said everything there is to say — the
+ * comment became the turn ending, and a red run beside it would only repeat that
+ * news in Notifications — so that exits 0. A machinery failure is red even once its
+ * notice has healed the thread — red is the machinery's signal, and the thread is
+ * healed beside it, not instead of it — and a notice that could not be written ends
+ * the run red because red is then the only signal left. So this exits 0 only for the
+ * first case, and non-zero for the other two. No extra gate step is needed: the
+ * step's own failure IS the run's failure.
+ *
+ * Whose the failure was arrives as `--atoma-failed`, the output "Run agent" writes
+ * when atoma's own exit is a failure and nothing else writes. Absent reads as NOT
+ * atoma's — the machinery's, wherever it struck — so the notice still posts while
+ * the run stays red, and a future rename that loses the output turns every failure
+ * red again, which is the conservative direction.
+ *
  * ## Why the excerpt is last
  *
  * It is usually about the infrastructure — "MCP server closed connection",
@@ -33,7 +52,7 @@
  *
  * Usage:
  *   report_run_failure.ts --number N --agent NAME [--notify LOGIN]
- *     --run-url URL [--logs-file FILE]
+ *     --run-url URL [--logs-file FILE] [--atoma-failed true]
  */
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -49,6 +68,13 @@ export interface ReportRunFailureArgs {
   notify?: string;
   "run-url": string;
   "logs-file"?: string;
+  /**
+   * Whether atoma itself failed — the output "Run agent" writes when its exit is
+   * neither success nor the soft stop. Absent or anything but "true" reads as the
+   * machinery's, wherever it struck, which is the conservative direction: the
+   * notice still posts, and the run stays red. See "The exit code is the gate".
+   */
+  "atoma-failed"?: string;
 }
 
 export const ref = defineScript<ReportRunFailureArgs>(import.meta.url);
@@ -101,7 +127,10 @@ export function failureNotice(
     // `domain/work/thread.ts` keeps. `turnHeader` writes the two tags this DOES carry
     // and nothing else, which is why the note fits here rather than in the wrapper.
     ...turnHeader({ ended: "done", audience: "person" }),
-    `${mention}Atomaton: \`${agent}\` did not finish — the run failed.`,
+    // No "the run failed": the run's colour is decided by whether THIS comment
+    // posted. A notice that landed leaves the run green, and "the run failed"
+    // underneath it would contradict the run the reader can see.
+    `${mention}Atomaton: \`${agent}\` did not finish.`,
     "",
     "**The session was saved.** What this run worked out is still there.",
     "",
@@ -126,13 +155,17 @@ function main(): void {
       notify: { type: "string" },
       "run-url": { type: "string" },
       "logs-file": { type: "string" },
+      "atoma-failed": { type: "string" },
     },
   });
 
   if (!values.number) {
-    // Not an error: a run can fail before the number is known, and there is
-    // nowhere to post. Said in the workflow log, where somebody is already looking.
+    // Not an error a comment could answer: a run can fail before the number is
+    // known, and there is nowhere to post. Said in the workflow log, where
+    // somebody is already looking -- and the non-zero exit is what turns the run
+    // red, because there is no comment to convert the failure into.
     console.error("::error::Cannot post failure comment: issue/PR number unknown.");
+    process.exitCode = 1;
     return;
   }
 
@@ -148,7 +181,19 @@ function main(): void {
 
   const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt);
   const { code, stdout, stderr } = gh("issue", "comment", String(values.number), "--body", body);
-  if (code !== 0) console.error(`Failed to post the failure comment: ${stderr || stdout}`);
+  // Green only for an agent failure whose notice landed -- see "The exit code is
+  // the gate" above. The other two cases both exit non-zero: the post failed (red
+  // is the only signal left), or the failure is the machinery's -- wherever it
+  // struck -- and the notice, though posted, healed the thread beside a red run
+  // rather than instead of one.
+  const atomaFailed = (values["atoma-failed"] ?? "").trim() === "true";
+  if (code !== 0) {
+    console.error(`Failed to post the failure comment: ${stderr || stdout}`);
+    process.exitCode = 1;
+  } else if (!atomaFailed) {
+    console.error("The machinery failed, not the agent; the notice healed the thread, but the run stays red.");
+    process.exitCode = 1;
+  }
 }
 
 if (import.meta.main) main();

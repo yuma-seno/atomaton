@@ -166,14 +166,20 @@ describe("generated workflows", () => {
    * The failure notice stands down once the run has already reported.
    *
    * Both comments describe the same run, and the second one contradicts the first: a
-   * person reading "the work is on the issue" and then "the run failed" has no way to
+   * person reading "the work is on the issue" and then a failure notice has no way to
    * tell which is true. The trigger is therefore the run's own `comment_id`, which
    * `post-result` writes only on the path that posts — so the condition is exactly "this
    * run has no ending on the thread", which is also when the notice is the thing that
    * must write one.
    *
-   * Held on the generated YAML because that is where the condition lives, and because a
-   * `always()` that loses a term still runs — it just runs when it should not.
+   * The failure half is the agent's own outcome, not the job's: "Run agent" runs with
+   * `continue-on-error`, so a reported failure no longer fails the job, and `job.status`
+   * would never say what the notice is for. It is also what keeps machinery failures
+   * red — a checkout or a session save that dies never reaches this condition, and the
+   * red run stays the only signal those leave.
+   *
+   * Held on the generated YAML because that is where the condition lives, and because
+   * an `always()` that loses a term still runs — it just runs when it should not.
    */
   test("the failure notice does not fire on a run that already posted its report", () => {
     type WorkflowStep = { name?: string; if?: string };
@@ -184,11 +190,98 @@ describe("generated workflows", () => {
     expect(step, "the failure notice step").toBeDefined();
     const condition = step?.if ?? "";
     expect(condition, "it has to run when a prior step failed").toContain("always()");
-    expect(condition, "and only when this run failed").toContain("job.status != 'success'");
+    expect(condition, "and only when the agent itself failed — machinery failures keep their own red").toContain(
+      "steps.atoma.outcome == 'failure'",
+    );
     expect(
       condition,
       "and not when a result comment was already posted, or the two comments disagree",
     ).toContain("steps.post-result.outputs.comment_id == ''");
+  });
+
+  /**
+   * A failure the run managed to report must not also turn the run red.
+   *
+   * `continue-on-error` leaves the failure in `steps.atoma.outcome` — every condition
+   * below reads it unchanged — while the step's `conclusion` goes success, so the job
+   * reaches "Report failure" and that step's own exit code decides the colour: notice
+   * posted, run green; notice refused, run red. Without this, a failure that was
+   * already written onto the thread as a comment also filed a red run — the same news
+   * twice, in Notifications, where it drowns the runs whose red is their only signal.
+   *
+   * Held on the generated YAML because that is where the flag lives.
+   */
+  test("an agent failure the run reported does not have to turn the run red", () => {
+    type WorkflowStep = { name?: string; "continue-on-error"?: boolean };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const step = workflow.jobs?.run?.steps?.find((candidate) => candidate.name === "Run agent");
+    expect(step, "the agent step").toBeDefined();
+    expect(
+      step?.["continue-on-error"],
+      "the failure must reach the steps that report it, not stop them",
+    ).toBe(true);
+  });
+
+  /**
+   * The boundary between the agent's own failure and the machinery's has to exist,
+   * or every failure inside "Run agent" arrives as the agent's and takes the
+   * agent's colour — including the machinery's, which the rule says is red.
+   *
+   * The flag is `atoma_failed`, and three facts held together, because any one
+   * missing reintroduces the hole:
+   *
+   *   1. it is written only AFTER the agent has run, and only in the failure
+   *      branch — neither success nor the soft stop — so a failure before atoma
+   *      (the tools file, the sudo preflight) and one after it (the reads that
+   *      turn a 0/2 exit into an ending) both leave it unset.
+   *   2. the fallible machinery before atoma stops the step at its own site: the
+   *      bash runs with `-e`, so nothing falls through — the guard's job is to
+   *      NAME the failure and to exit before the flag can be written.
+   *   3. "Report failure" receives the flag, so its exit code can tell the two
+   *      apart.
+   *
+   * Held on the generated YAML: the ordering, the guard and the wiring all live in
+   * the step's own run text, and a test on the source would pass while the
+   * generation dropped any of them.
+   */
+  test("the agent's own failure is distinguished from the machinery's", () => {
+    type WorkflowStep = { name?: string; run?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const agent = steps.find((candidate) => candidate.name === "Run agent");
+    const report = steps.find((candidate) => candidate.name === "Report failure");
+    expect(agent, "the agent step").toBeDefined();
+    expect(report, "the failure notice step").toBeDefined();
+
+    const run = agent?.run ?? "";
+    const flagAt = run.indexOf('atoma_failed=true');
+    const invokeAt = run.indexOf("--agent-def");
+    const branchAt = run.indexOf('[ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]');
+    const readsAt = run.indexOf('read_run_ending.ts" --session');
+    const exitAt = run.indexOf("exit $EXIT_CODE");
+    expect(flagAt, "the failure flag is written as a step output").toBeGreaterThan(-1);
+    expect(invokeAt, "the agent invocation").toBeGreaterThan(-1);
+    expect(branchAt, "the success/soft-stop branch test").toBeGreaterThan(-1);
+    expect(flagAt, "the flag is written after atoma has run, so a failure before it leaves it unset").toBeGreaterThan(invokeAt);
+    expect(flagAt, "the flag is written only after the 0/2 branch has been tested").toBeGreaterThan(branchAt);
+    expect(readsAt, "the ending reads sit inside the 0/2 branch").toBeGreaterThan(branchAt);
+    expect(readsAt, "and ahead of the flag, so their failure leaves it unset").toBeLessThan(flagAt);
+    expect(exitAt, "the failure branch exits with atoma's own code").toBeGreaterThan(flagAt);
+    expect(run, "sudo is preflighted, so its refusal is caught while it is still nameable").toContain("sudo -n -u");
+    expect(
+      /write_tools_file\.ts[^\n]*\|\|/.test(run),
+      "the tools-file failure is named at its own site — `-e` stops the step; the guard gives it the name",
+    ).toBe(true);
+    expect(run, "no earlier boundary flag survives the rename").not.toContain("atoma_reached");
+
+    expect(report?.env?.ATOMA_FAILED, "the distinction reaches the reporter").toBe(
+      "${{ steps.atoma.outputs.atoma_failed }}",
+    );
+    expect(report?.run, "the reporter passes it to the script that decides the colour").toContain("--atoma-failed");
   });
 
   /**

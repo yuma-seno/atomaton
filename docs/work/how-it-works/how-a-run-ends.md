@@ -1,0 +1,64 @@
+# How a run ends, and what a failure leaves behind
+
+A run that gets to report ends with exactly one turn-ending comment on the issue or
+pull request it worked on. That comment is how the thread learns the turn is over —
+the guard reads the thread, not the Actions tab.
+
+## The two ways the comment is written
+
+**The agent's own last message.** A run that finishes by saying something has that
+message posted as the turn-ending comment, footer attached.
+
+**A session-ending tool.** `create_pr`, `launch_sub_agent`, `request_close_issue`
+and `reload_environment` end the session while doing their work, and the comment
+such a call left on the thread is the ending: the footer is appended onto it, so
+the run still has exactly one.
+
+The footer is the record of a run that reported — the run's link, its token count,
+its metrics link — and it goes on those two comments and no others. The failure
+notice below is a turn-ending comment without one: it links the run's log itself,
+and a run that failed mid-turn has no token tally worth recording.
+
+## A failure that gets reported is also an ending
+
+When the agent itself fails, the failure is converted into the comment it owed the
+thread. The failure notice IS the turn-ending comment: it says the session was
+saved, names the two ways forward — continue with `/agent`, or start clean with
+`/agent recover` — and links the run's log. The node is back with a person, so the
+next comment on the thread resumes normally.
+
+The colour follows what the comment says, because the thing that reports is a step
+inside the run:
+
+- **The agent's own failure, reported — green.** The notice is the run's report;
+  a red run beside it would only repeat that news in Notifications, where it
+  drowns the runs whose red is their only signal.
+- **The machinery's failure — red, ending or not.** A machinery failure inside the
+  run itself (the tools file it could not write, a `sudo` it was refused, an
+  ending it could not read) still posts the notice, so the thread is healed — but
+  the run goes red, because red is the machinery's signal and the thread is healed
+  beside it, not instead of it.
+- **A failure that could not be reported — red, and no ending.** The machinery
+  died before the reporter could run (the checkout, the tool installs, the session
+  save), or `gh` refused the comment. Red is then the only signal the run leaves,
+  and the workflow log says what the thread does not.
+
+## When a run leaves no ending at all
+
+A run that died before it could report — the third case above — leaves the
+thread's last turn event saying the ball is still with an agent. The guard reads
+that the same way it reads a live run —
+[what keeps two runs off one issue](what-keeps-two-runs-off-one-issue.md) — so it
+keeps removing what a person writes next, and it suppresses the dispatch as well:
+no run arrives to heal the thread. Comments that keep vanishing with no run behind
+them are this shape.
+
+The restore is the same for every kind of death: **re-run the failed run**.
+"Re-run failed jobs" from the run's page, or by hand:
+
+```bash
+gh workflow run atomaton-runner.yml -f number=N -f agent=X -f type=issue
+```
+
+The job runs again from the saved session and writes the ending it owed — and once
+the ending is on the thread, comments go through again.

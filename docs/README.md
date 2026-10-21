@@ -93,6 +93,7 @@ If you know the key and not the artifact,
 [GitHub raises no event for its own token](work/how-it-works/github-raises-no-event-for-its-own-token.md) ·
 [The branch a run commits to](work/how-it-works/the-branch-a-run-commits-to.md) ·
 [What keeps two runs off one issue](work/how-it-works/what-keeps-two-runs-off-one-issue.md) ·
+[How a run ends, and what a failure leaves behind](work/how-it-works/how-a-run-ends.md) ·
 [The labels Atomaton applies](work/how-it-works/the-labels-atomaton-applies.md) ·
 [Work is a tree of issues](work/how-it-works/work-is-a-tree-of-issues.md) ·
 [Two comments, and why they are not the same one twice](work/how-it-works/the-two-comments-a-stop-leaves.md) ·

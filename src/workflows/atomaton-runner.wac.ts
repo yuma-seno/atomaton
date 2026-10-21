@@ -723,6 +723,18 @@ const runAgentStep = new TypedOutputsStep(
     name: "Run agent",
     id: "atoma",
     if: `${buildContextStep.rawOutputs.new_event_count} != '0'`,
+    // Not "ignore the failure". The failure stays in `steps.atoma.outcome` --
+    // `conclusion` is what turns success -- and every condition below reads the
+    // outcome exactly as before. What this buys is that the failure reaches the
+    // step that reports it: "Report failure" converts the failure into the
+    // turn-ending comment it owes the thread, and the colour is decided there —
+    // an agent failure whose notice posted is green, the machinery's is red even
+    // beside its notice. The boundary flag in the run below is how the two are
+    // told apart. Without this, a failure that was
+    // already reported as a comment also turned the run red -- the same news
+    // twice, in Notifications, where it drowns the runs whose red is their only
+    // signal.
+    "continue-on-error": true,
     // No credentials here, and that is the point of the step above.
     //
     // This step's bash lives for the whole of `atoma run`, so anything in its
@@ -783,12 +795,18 @@ export GITHUB_RUN_ID ISSUE_NUMBER ISSUE_NOTIFY ATOMATON_RUN_TYPE ATOMATON_OPS_LO
 #
 # \`--hook-base\` is the machinery's \`tools/\` directory, because that is where the
 # hook scripts are. The output goes to the run directory and is thrown away with it.
+#
+# Guarded, not bare: the guard names the failure — the machinery could not produce
+# the tools file, atoma never started — instead of leaving the step's exit code to
+# say it, and it stops the step here, before the failure branch below can write the
+# boundary flag. A failure here is the MACHINERY's, and "Report failure" reads that
+# from \`atoma_failed\` staying unset.
 ${scriptCommandWithArgs(writeToolsFileRef, {
   config: `${MACHINERY}/${CONFIG_FILE_PATH}`,
   defaults: `${MACHINERY}/${TOOL_DEFAULTS_PATH}`,
   out: `${RUN_DIR}/tools.yaml`,
   "hook-base": `${MACHINERY}/${TOOLS_DIR_PATH}`,
-})}
+})} || { echo "::error::could not write the tools file from the machinery config; atoma never started"; exit 1; }
 TOOLS_ARG="--tools-file ${RUN_DIR}/tools.yaml"
 
 # Settings, not credentials. These two are repository VARIABLES -- which provider
@@ -880,6 +898,20 @@ if [ "$BUDGET" -lt ${MIN_AGENT_BUDGET_SECS} ]; then
 fi
 echo "agent time budget: $BUDGET seconds"
 
+# Preflighting \`sudo\`, because the real invocation cannot separate a sudo refusal
+# from atoma's own exit: \`|| EXIT_CODE=$?\` below catches both, and a failure once
+# atoma has run is attributed to atoma. \`sudo -n -u "$TOOL_USER" true\` is everything
+# the invocation needs from sudo — the user, the passwordless grant — at no cost, so
+# a refusal is caught here, while it is still nameable and while the boundary flag is
+# still unwritten: "Report failure" reads that as the machinery's. The residue is a
+# sudo that passes the preflight and fails the real invocation, which arrives as
+# atoma's exit code and is attributed to atoma; nothing in this script can
+# distinguish the two, and the log will say.
+if ! sudo -n -u "${TOOL_USER}" true 2>/dev/null; then
+  echo "::error::cannot run the tool servers as ${TOOL_USER}: sudo refused; atoma never started"
+  exit 1
+fi
+
 EXIT_CODE=0
 sudo -n -u "${TOOL_USER}" env "\${AGENT_ENV[@]}" \\
   atoma run \\
@@ -912,8 +944,10 @@ fi
 # read_run_ending.ts.
 #
 # A non-zero status that is not the soft stop is still a failure and still ends the
-# step, so nothing below it runs and no ending is published: the turn failed, and
-# decide_turn_ending.ts reads that from the step's own outcome.
+# step, so none of the run's own outputs are written: the turn failed, and
+# decide_turn_ending.ts reads that from the step's outcome. "Report failure" turns
+# that failure into the ending it owes the thread, and the colour it leaves behind is
+# decided by the flag the failure branch below publishes.
 if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
   ${scriptCommandWithArgs(readRunEndingRef, {
     // The same two paths the agent step just handed atoma, from the same constants,
@@ -923,6 +957,15 @@ if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
     "stop-file": STOP_FILE,
   })}
 elif [ "$EXIT_CODE" != "0" ]; then
+  # atoma's own failure — neither success nor the soft stop — published for
+  # "Report failure", which leaves the run green only for this case. Everything
+  # the machinery does around atoma — the tools file, the sudo preflight above,
+  # and the reads that turn a 0/2 exit into an ending, which this bash runs with
+  # \`-e\` — leaves the flag unwritten, and unwritten is red: the machinery's.
+  # The residue is a machinery failure that arrives as atoma's exit code (a sudo
+  # that passed the preflight and failed inside the real invocation), which
+  # nothing here can tell from atoma's own; the log will say.
+  echo "atoma_failed=true" >> "$GITHUB_OUTPUT"
   exit $EXIT_CODE
 fi
 
@@ -984,7 +1027,11 @@ echo "changed=\${CHANGED}" >> "$GITHUB_OUTPUT"
   // `reported` rides along with `ended_because`: both are read out of the saved
   // session by read_run_ending.ts, from one open of one file, because they are two
   // facts about the same run and a second read is a second answer waiting to disagree.
-  ["result", "directive", "ended_because", "reported", "chain_continues", "changed"] as const,
+  // `atoma_failed` rides alone: it is written only when atoma's own exit is a
+  // failure — neither success nor the soft stop — and by nothing else, so its
+  // absence is the machinery's, wherever it struck. See the comments in the run
+  // above, and "Report failure" which reads it.
+  ["result", "directive", "ended_because", "reported", "chain_continues", "changed", "atoma_failed"] as const,
 );
 
 const tokenUsageStep = new TypedOutputsStep({
@@ -1129,18 +1176,39 @@ const saveSessionStep = new TypedOutputsStep({
 });
 
 /**
- * What a failed run leaves on the issue.
+ * What a failed run leaves on the issue — and when the run itself stays green.
  *
  * The text lives in `report_run_failure.ts`, with the other human-facing comments
  * this repository writes, because it is markdown with slash commands in it and
  * markdown assembled by `echo` inside a template literal inside YAML inside bash is
  * markdown nobody can test.
  *
- * `always()` is required here, not just the `job.status != 'success'` condition
- * alone: without an explicit always()/failure()/success() call anywhere in a step's
- * `if:`, GitHub Actions implicitly ANDs the whole condition with `success()` -- which
- * is exactly false once a prior step has genuinely failed, so without `always()` the
- * step whose entire purpose is to report THAT failure would never run.
+ * ## The colour follows the comment
+ *
+ * An agent failure that wrote its turn-ending comment has said everything there is to
+ * say — the notice IS the run's ending, it hands the node back to a person, and the
+ * next comment on the thread resumes normally. A red run beside it would only repeat
+ * that news in Notifications, drowning the runs whose red is their only signal. "Run
+ * agent" therefore runs with `continue-on-error`, the failure stays in
+ * `steps.atoma.outcome`, and this step is the run's verdict on its own failure: the
+ * script exits 0 when the notice was posted AND the failure was the agent's own —
+ * the run ends green — and non-zero when it was not, which leaves the red standing
+ * for whatever the thread alone cannot say.
+ *
+ * The agent's own vs the machinery's is `atoma_failed`, the output "Run agent"
+ * writes when atoma's own exit is neither success nor the soft stop, and nothing
+ * else writes: set means the failure is atoma's own; unset means the machinery's —
+ * a tools file it could not write, a sudo it was refused, an ending it could not
+ * read — and the notice still heals the thread while the run stays red, because red
+ * is the machinery's signal and the thread is only healed beside it, not instead of
+ * it. Absent reads as unset: a future rename that loses the output turns every
+ * failure red again, which is the conservative direction.
+ *
+ * `always()` is required here, not just the `steps.atoma.outcome == 'failure'`
+ * condition alone: without an explicit always()/failure()/success() call anywhere in a
+ * step's `if:`, GitHub Actions implicitly ANDs the whole condition with `success()` --
+ * which is exactly false once a prior step has genuinely failed, so without `always()`
+ * the step whose entire purpose is to report THAT failure would never run.
  *
  * ## Why it stands down once the run has reported
  *
@@ -1148,20 +1216,35 @@ const saveSessionStep = new TypedOutputsStep({
  * is recoverable and how to resume it. A run that already posted its result comment
  * has said everything this would say, and the failure afterwards is in the machinery
  * rather than in the work: saving the session, writing metrics. Firing here too would
- * put "the run failed" underneath a report that reads as finished, and a person who
+ * put a failure notice underneath a report that reads as finished, and a person who
  * has been told both has no way to tell which is true.
  *
- * So the trigger is `job.status != 'success'` AND no result comment was posted --
+ * So the trigger is the AGENT failed AND no result comment was posted --
  * `postResultCommentStep`'s own `comment_id` output, which is written only on the
  * path that posts. That is also the condition for "this run has no ending on the
  * thread", so the notice is the one that writes it exactly when one is missing.
+ *
+ * ## What red still means
+ *
+ * A failure the thread alone cannot carry. A step that dies before the agent --
+ * checkout, the tool installs -- skips "Run agent" entirely, so its `outcome` is
+ * `skipped` and no ending is owed; the machinery inside "Run agent" fails — the
+ * tools file, the sudo preflight, an ending it could not read — `atoma_failed`
+ * stays unset, and the notice is posted but the run goes red; a machinery step
+ * that dies after the agent reported fails the job itself; and a notice that
+ * `gh` refuses exits this step non-zero. In each, the red run is the signal, and
+ * re-running it resumes from the saved session and writes the ending it owed.
  */
 const reportFailureStep = new TypedOutputsStep({
   name: "Report failure",
-  if: `always() && job.status != 'success' && ${postResultCommentStep.rawOutputs.comment_id} == ''`,
+  if: `always() && ${runAgentStep.rawOutcome} == 'failure' && ${postResultCommentStep.rawOutputs.comment_id} == ''`,
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",
+    // Whose the failure was, read off "Run agent" itself: empty means the failure
+    // is the machinery's, and the run stays red even once the notice has healed
+    // the thread. See "The colour follows the comment" above.
+    ATOMA_FAILED: runAgentStep.outputs.atoma_failed,
     NUMBER: "${{ inputs.number }}",
     AGENT: "${{ inputs.agent }}",
     NOTIFY: notifyStep.outputs.notify,
@@ -1173,6 +1256,7 @@ const reportFailureStep = new TypedOutputsStep({
     notify: "\${NOTIFY}",
     "run-url": "\${RUN_URL}",
     "logs-file": `${RUN_DIR}/atomaton_logs.txt`,
+    "atoma-failed": "\${ATOMA_FAILED}",
   })}\n`,
 });
 
