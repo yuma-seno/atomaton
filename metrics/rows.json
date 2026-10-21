@@ -5670,7 +5670,7 @@
   {
     "path": "sessions/issue-256/reviewer.json",
     "agent": "reviewer",
-    "messages": 63,
+    "messages": 64,
     "calls": 39,
     "failed": 0,
     "refused": 0,
@@ -5730,6 +5730,15 @@
           }
         },
         "started": "2026-10-21T15:37:49Z"
+      },
+      {
+        "ended": "2026-10-21T15:39:21Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 64,
+        "seconds": 12,
+        "server_calls": {},
+        "started": "2026-10-21T15:39:09Z"
       }
     ]
   },
