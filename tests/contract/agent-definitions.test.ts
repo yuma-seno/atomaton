@@ -248,3 +248,27 @@ describe("the delegate's definitions are not in the agent namespace", () => {
     }
   });
 });
+
+/**
+ * The reviewer's handoff rule, fixed in the definition that executes it.
+ *
+ * The findings a review produces used to go back to one hard-coded agent — a
+ * return that dispatched the engineer even when the pull request was opened by
+ * another agent, and dispatched one at all when a person opened it. `create_pr`
+ * now names who opened the pull request in the body's `Opened by` line, and the
+ * definition routes on it. This holds the two together: a definition that drifts
+ * back to naming an agent it was not given, or loses the line it routes from,
+ * sends work to a place the thread never asked for.
+ */
+describe("the reviewer's handoff rule", () => {
+  const reviewer = readFileSync(join(AGENT_DIR, "reviewer.md"), "utf8");
+
+  test("names no fixed agent in its routing instructions", () => {
+    expect(reviewer, "who a review returns to is whoever `Opened by` names, not a constant").not.toContain("`/engineer`");
+  });
+
+  test("routes on the `Opened by` line the pull request body carries", () => {
+    expect(reviewer).toContain("Opened by");
+    expect(reviewer).toContain("no directive line");
+  });
+});

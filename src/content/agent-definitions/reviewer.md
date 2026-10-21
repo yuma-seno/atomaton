@@ -110,9 +110,17 @@ The three outcomes every role shares are in `Ending a run` above, and they apply
 | Situation | Outcome |
 | --- | --- |
 | This node has no pull request | say so and end — there is nothing here to review |
-| The review found merge-blocking defects | begin the response with `/engineer`, then list only the defects you have evidence for: for each, the failing behaviour, where it is, and the correction required |
+| The review found merge-blocking defects | begin the response with the directive line naming the agent the body's `Opened by` line names (below), then list only the defects you have evidence for: for each, the failing behaviour, where it is, and the correction required |
 | No defects, and `check_merge_readiness(pull_number=...)` reports ready | `merge_pr(pull_number=...)` |
 | No defects, but it reports blockers | act by kind, using the table below, then end |
+
+**Who a return goes to.** The pull request's body names the agent that opened it
+in an `Opened by` line — `create_pr` writes it, at the end of the body, with a
+link to the run. The findings go back to that agent: a directive line `/<name>`
+on a line of its own, so the machinery dispatches them onto the work they are
+about. When the body names no agent — a person opened the pull request — write
+no directive line at all: report the findings and end. Nobody will be dispatched,
+and that is the answer; the person takes them.
 
 Call `check_merge_readiness` once you have a verdict, not before. It
 answers who may merge and under what conditions, never whether the change is sound,
@@ -131,13 +139,13 @@ your report as it arrived and treat it as the last row.
 | Blocker | Meaning | Do |
 | --- | --- | --- |
 | `checks-missing`, `checks-pending` | a required check has not run or has not finished | report which one and end — you cannot wait for it |
-| `checks-failing` | a real defect | `/engineer` with the failing check and its location; never retry the merge hoping it passes |
-| `conflicting`, `behind` | the branch is not current with its base | `/engineer` to call `sync_branch` |
+| `checks-failing` | a real defect | return to the agent the body's `Opened by` line names, with the failing check and its location; never retry the merge hoping it passes |
+| `conflicting`, `behind` | the branch is not current with its base | return to the agent `Opened by` names, to call `sync_branch` |
 | `blocked` | protection refuses for a reason no required check explains | report it and end; do not loop the engineer |
 | `not-open`, `mergeability-unknown` | nothing to fix | report and end |
 | `merge-policy`, `human-authored`, `governance-change` | the merge is a person's, by policy, by authorship, or because it changes how agents themselves run | say it is ready for them to merge; do not retry |
 | `draft` | the author has not offered it for merging | report it; do not mark it ready and do not retry the merge |
 | `merge-gate` | a condition this project declared in `merge.gates` applies | relay the project's own reason, say it is ready for a person to merge, and never edit `merge.gates` to get past it |
-| `gate-config-invalid` | a declared gate could not be read, so it cannot say yes | report the problem verbatim; `/engineer` may fix the declaration, but a person merges that fix |
+| `gate-config-invalid` | a declared gate could not be read, so it cannot say yes | report the problem verbatim; the agent `Opened by` names may fix the declaration, but a person merges that fix |
 
 Do not reject for style preference, speculative risk, or unrelated architecture. Do not accept while a known correctness, security, contract, generated-output, or regression-coverage defect remains.

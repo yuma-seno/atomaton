@@ -24,6 +24,7 @@ import { dispatchSubAgent } from "../lib/dispatch_sub_agent.ts";
 import { parentIssueOf } from "../../../adapters/github/parent-issue.ts";
 import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
+import { postTurnComment, recordEndingComment } from "../../../adapters/github/ending-comment.ts";
 import { concludeIssue, type ConcludeIssueResult } from "../lib/conclude_issue.ts";
 import { describeGateResult, needsAttention } from "../../../app/aggregation.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -242,7 +243,10 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     if (summary) {
       bodyLines.push("", "<details><summary>Report</summary>", "", summary, "", "</details>");
     }
-    gh("issue", "comment", parentIssue, "--body", bodyLines.join("\n"));
+    // Posted and recorded through the one helper. `complete` is also whether the
+    // session ends here: a partial dispatch keeps it open, and a run that goes on
+    // must not leave a comment behind for the machinery to append the footer onto.
+    postTurnComment({ number: parentIssue, body: bodyLines.join("\n"), sessionEnds: complete });
   }
 
   if (errors.length && !dispatched.length) {
@@ -312,6 +316,9 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
   const concluded = `Issue #${issueNumber} is concluded: your reason and summary are on the issue.`;
 
   if (result.outcome !== "closed") {
+    // The close request is the comment this run ends on: the session ends here
+    // whatever the person decides, so the machinery's footer goes onto it.
+    recordEndingComment(result.commentId, String(issueNumber));
     return { text: `${concluded} Nothing else is yours to do here.`, meta: { session_ends: true } };
   }
 
@@ -321,6 +328,11 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
   // nothing will retry.
   const aggregation = result.aggregation;
   const stalled = aggregation !== undefined && needsAttention(aggregation);
+  // The one answer, used twice: whether this call ends the session. Recorded from
+  // here rather than inside `concludeIssue`, because a stalled gate keeps the
+  // session open — the run goes on, and a comment recorded as its ending would put
+  // the footer on a comment that is not the ending.
+  const ends = !stalled;
 
   return {
     text: [
@@ -353,7 +365,7 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
     // control-flow change rather than a wording one, and the failing path is now the
     // one thing #143 removed: the marker write cannot report `undetermined` on a
     // transient failure without also failing its own take-back.
-    meta: stalled ? {} : { session_ends: true },
+    meta: ends ? { session_ends: true } : {},
   };
 }
 
@@ -406,18 +418,21 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
   // comment with no ending would leave the node's last event as the `asked` this run is
   // fulfilling, which is indistinguishable from a request nobody took up. See
   // `turn-comment.ts` for why the ending is a required argument.
-  gh(
-    "issue", "comment", number,
-    "--body",
-    turnCommentBody({
+  // Posted through the one helper, and recorded only once the dispatch has
+  // actually succeeded: whether this call ends the session is known after
+  // `dispatchRunner` answers, not before — a comment recorded as this run's
+  // ending while the reload then failed to dispatch would put the result footer
+  // on a comment claiming a restart that never happened.
+  const endingCommentId = postTurnComment({
+    number,
+    body: turnCommentBody({
       ended: "handoff",
       audience: "person",
       body:
         `Atomaton: rebuilding the environment and restarting \`${agent}\` ` +
         `(reload ${next} of ${limit}). Reason: ${args.reason}`,
     }),
-  );
-
+  });
   const outcome = dispatchRunner({
     context: `${agent} was to be restarted on #${number} after an environment rebuild`,
     agent,
@@ -449,6 +464,7 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
     );
   }
 
+  recordEndingComment(endingCommentId, number);
   return { text: reloadAccepted(next, limit), meta: { session_ends: true } };
 }
 

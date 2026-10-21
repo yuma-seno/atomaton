@@ -175,6 +175,13 @@ export const AGENT_ENV_NAMES: readonly string[] = [
   // Shadowing this is a way to remove that limit.
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
+  // This run's own directory, and the URL of the run itself: the tools record
+  // which comment ended the run's turn in the first, and link their artifacts
+  // back to the run with the second. A declared secret shadowing the first would
+  // point the ending-comment record somewhere else, and the run's footer would be
+  // silently dropped.
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
   // The agent that started this run, so the run knows who to report back to. A
   // declared secret shadowing it would let a tool server rewrite who the run
   // believes is waiting on it.

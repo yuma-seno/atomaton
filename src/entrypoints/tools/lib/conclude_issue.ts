@@ -7,6 +7,7 @@ import {
 } from "../../../app/aggregation.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
+import { commentIdFromUrl } from "../../../adapters/github/ending-comment.ts";
 import { turnCommentBody } from "../../../adapters/github/turn-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 
@@ -20,6 +21,17 @@ export interface ConcludeIssueResult {
    * `domain/work/close-request.ts` for why the second is not a refusal.
    */
   outcome: "closed" | "close-requested";
+  /**
+   * The comment this conclusion went out as, when GitHub gave one back.
+   *
+   * Carried out rather than recorded here, because whether the session ends on
+   * this call is the caller's answer — a `stalled` aggregation keeps it open
+   * (`mcp/atomaton.ts`), and a comment recorded as the run's ending while the run
+   * went on would put the result footer on a comment that is not the ending.
+   * The caller records it through `recordEndingComment` on exactly the paths
+   * where its own meta carries `session_ends`.
+   */
+  commentId?: string;
   /**
    * What the parent's aggregation gate did afterwards, when this closed a
    * sub-issue.
@@ -101,14 +113,12 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
     // half is #90's; this is the same defect here, in code written to fix #90. See
     // `turn-comment.ts`.
     const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
-    mustSucceed(
-      gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request })),
-      `comment on issue #${issue}`,
-    );
+    const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request }));
+    mustSucceed(posted, `comment on issue #${issue}`);
     // stderr, where the tool's own decisions belong. Putting it in the result is
     // what put it in the agent's report.
     console.error(`close requested: issue=#${issue} (opened by a person, left open for them)`);
-    return { outcome: "close-requested" };
+    return { outcome: "close-requested", commentId: commentIdFromUrl(posted.stdout) };
   }
 
   // The conclusion itself. `audience: "model"` because this is what the parent agent
@@ -120,13 +130,11 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   // session ends on this call. It closes the issue just below, so the thread has an
   // answer either way — but a close is not an event to `domain/work/thread.ts`, and the
   // turn's ending has to be written down rather than inferred from one.
-  mustSucceed(
-    gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body })),
-    `comment on issue #${issue}`,
-  );
+  const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body }));
+  mustSucceed(posted, `comment on issue #${issue}`);
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
   console.error(describeGateResult(aggregation, issue));
-  return { outcome: "closed", aggregation };
+  return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 // The servers are spawned with the ambient environment, and inside an Atomaton run that
@@ -228,6 +228,163 @@ describe("mcp/github.ts", () => {
         .map((line) => JSON.parse(line) as string[])
         .find((argv) => argv.includes("pr") && argv.includes("create"));
       expect(created, "the parent's branch is the base, and nothing else is").toContain("atomaton/issue-12");
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * Who opened the pull request, said in the body where a reader can see it. The
+   * hidden `atomaton:origin-agent` tag was the only copy, and a tag is invisible
+   * in every place a person reads the thread — and it is the routing input when a
+   * review sends the pull request back: the agent `Opened by` names is the one
+   * that fixes the findings.
+   */
+  test("create_pr writes the agent that opened it into the pull request body", async () => {
+    const { root, seed, work } = makeRemoteBranchFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-opened-by-"));
+    const log = join(dir, "gh.log");
+    try {
+      git(seed, "branch", "atomaton/issue-12");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      git(work, "fetch", "origin");
+
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 21, method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR" } },
+        },
+        {
+          BRANCH: "atomaton/issue-1",
+          ATOMATON_RUN_TYPE: "issue",
+          ISSUE_NUMBER: "1",
+          AGENT: "engineer",
+          ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/42",
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
+            { match: ["workflow", "run"], stdout: "" },
+            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
+            { match: ["issue", "comment"], stdout: "" },
+            { match: ["pr", "comment"], stdout: "" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      const created = readFileSync(log, "utf8").trim().split("\n")
+        .map((line) => JSON.parse(line) as string[])
+        .find((argv) => argv.includes("pr") && argv.includes("create"));
+      const body = created?.[created.indexOf("--body") + 1] ?? "";
+      expect(body).toContain("_Opened by [`engineer`](https://github.com/owner/repo/actions/runs/42)_");
+      // The hidden tag stays; the visible line is beside it, not instead of it.
+      expect(body).toContain("<!-- atomaton:origin-agent=engineer -->");
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * The comment this run ends on is recorded, so the machinery's footer goes onto
+   * it instead of onto a second, content-free comment beside it — and the run's
+   * tokens reach the metrics report, which counts token lines off comment bodies
+   * and never saw them from these runs before. Recorded only when the session
+   * actually ends here: a failed validation dispatch keeps it open, and the record
+   * must not outlive the run it is about.
+   */
+  test("create_pr records the comment it ends the run on, and only when the session ends", async () => {
+    const { root, seed, work } = makeRemoteBranchFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-ending-comment-"));
+    const log = join(dir, "gh.log");
+    try {
+      git(seed, "branch", "atomaton/issue-12");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      git(work, "fetch", "origin");
+
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 22, method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR" } },
+        },
+        {
+          BRANCH: "atomaton/issue-1",
+          ATOMATON_RUN_TYPE: "issue",
+          ISSUE_NUMBER: "1",
+          AGENT: "engineer",
+          ATOMATON_RUN_DIR: dir,
+          ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/42",
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
+            { match: ["workflow", "run"], stdout: "" },
+            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
+            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/1#issuecomment-777" },
+            { match: ["pr", "comment"], stdout: "" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      const recorded = JSON.parse(readFileSync(join(dir, "ending-comment.json"), "utf8"));
+      expect(recorded).toEqual({ commentId: "777", node: "1" });
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * A failed validation dispatch keeps the session open — the model gets another
+   * turn and may still write prose of its own. Nothing is recorded, so the footer
+   * cannot land on the confirmation comment while the run goes on.
+   */
+  test("create_pr records nothing when validation did not dispatch", async () => {
+    const { root, seed, work } = makeRemoteBranchFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-ending-comment-"));
+    try {
+      git(seed, "branch", "atomaton/issue-12");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      git(work, "fetch", "origin");
+
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 23, method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR" } },
+        },
+        {
+          BRANCH: "atomaton/issue-1",
+          ATOMATON_RUN_TYPE: "issue",
+          ISSUE_NUMBER: "1",
+          AGENT: "engineer",
+          ATOMATON_RUN_DIR: dir,
+          ...fakeGhSeam(),
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
+            { match: ["workflow", "run"], code: 1 },
+            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
+            { match: ["issue", "comment"], stdout: "" },
+            { match: ["pr", "comment"], stdout: "" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(response.result.content[0].text).validation_dispatched).toBe(false);
+      const recorded = existsSync(join(dir, "ending-comment.json"));
+      expect(recorded, "a run that continues leaves no record behind").toBe(false);
     } finally {
       removeTemp(root);
       removeTemp(dir);
