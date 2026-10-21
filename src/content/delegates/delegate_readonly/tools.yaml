@@ -14,7 +14,13 @@
 # below, which is the whole of what makes it read-only.
 watch: {}
 servers:
+  # `unprefixed` is what lets the allowlist below do its job, and it is not optional
+  # here the way it looks: the patterns are bare names, and they are matched against
+  # the name the sub-run's model calls the tool by. Without this setting that name is
+  # `files_readonly__read`, no pattern matches, and every call arrives as a refusal —
+  # the server that was withholding three tools withholds all six instead.
   files_readonly:
+    unprefixed: true
     command: bun
     args:
       - run
