@@ -357,9 +357,10 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
     //
     // Keeping it open gives the model one more turn, and that is the whole of what it
     // does. The turn used to be justified as "you are the last thing able to act on
-    // that: report it on the parent issue" -- and there is no such tool. `close_issue`
-    // acts on the issue the run is already on; nothing in this server comments on an
-    // arbitrary one. The instruction asked for something the tool set cannot do, and
+    // that: report it on the parent issue" -- and there is no such tool.
+    // `request_close_issue` acts on the issue the run is already on; nothing in this
+    // server comments on an arbitrary one. The instruction asked for something the
+    // tool set cannot do, and
     // the run that closed #109 did the only thing left to it: posted a second comment
     // on its own thread saying the parent was out of reach (#143).
     //
@@ -489,8 +490,7 @@ const { tools: TOOLS, dispatch } = buildMcpTools([
     name: "request_close_issue",
     description:
       "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " +
-      "correct way for the atomaton to finish an issue -- do NOT call " +
-      "close_issue yourself, and do NOT just stop responding without calling " +
+      "correct way to finish an issue -- do NOT just stop responding without calling " +
       "this. Your reason and summary are posted to the issue, and phase-gating/" +
       "aggregation is triggered for its parent when this is a sub-issue. Whether the " +
       "close happens now or the issue's author is asked to make it is this tool's " +

@@ -16,7 +16,7 @@ already starts with.
 | `search` | Ranked search over your repository's issues and code. | the run's GitHub token |
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. | the run's GitHub token |
 | `attachments` | Probes GitHub's user-asset upload endpoint, the one `gh --attach` posts to, and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. | the run's GitHub token |
-| `atomaton_env` | Rebuilding the run's environment, and nothing else. | the run's GitHub token |
+| `atomaton_env` | Rebuilding the run's environment, and concluding the run's own issue. | the run's GitHub token |
 | `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers `delegate` and `delegate_free` as tools. | the run's provider key |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. Offers `delegate_readonly` and `delegate_readonly_free`. | the run's provider key |
 

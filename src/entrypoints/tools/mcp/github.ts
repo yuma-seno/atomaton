@@ -143,8 +143,10 @@ const PR_NUMBER_ARG_SCHEMA = z.object({
  *
  * Deliberately not used for mutations. Inferring the target of an irreversible,
  * outward-facing action from an environment variable turns a malformed call into
- * a wrong merge instead of an error message, so `close_issue` and `merge_pr`
- * require the number.
+ * a wrong merge instead of an error message, so `merge_pr` — now the only
+ * mutation tool on this surface — requires the number. The internal close below
+ * takes this schema as its parameter type and is reached from code, not from the
+ * model.
  *
  * It was also not meant for PR reads, and `check_merge_readiness` used it
  * anyway. The comment here explained precisely the failure that caused: a
@@ -225,18 +227,17 @@ function issueContextNumber(args: { issue_number?: number }): number {
  * request. Naming the number costs nothing and keeps the decision with the agent:
  * it still has to pass it.
  */
-function omittedNumberGuidance(what: "pull request" | "issue"): (args: Record<string, unknown>) => string | undefined {
-  const arg = what === "pull request" ? PR_NUMBER_ARG : ISSUE_NUMBER_ARG;
+function omittedNumberGuidance(): (args: Record<string, unknown>) => string | undefined {
   return (args) => {
-    if (arg in args) return undefined;
-    if (process.env.ATOMATON_RUN_TYPE !== (what === "pull request" ? "pr" : "issue")) return undefined;
+    if (PR_NUMBER_ARG in args) return undefined;
+    if (process.env.ATOMATON_RUN_TYPE !== "pr") return undefined;
     const raw = (process.env.ISSUE_NUMBER ?? "").trim();
     if (!/^[0-9]+$/.test(raw)) return undefined;
     return (
-      `\`${arg}\` is required and was omitted. This tool changes GitHub, so unlike the ` +
+      `\`${PR_NUMBER_ARG}\` is required and was omitted. This tool changes GitHub, so unlike the ` +
       "read-only tools it will not infer its target -- a guessed number here is a wrong " +
-      `merge or a wrong close, not an error message. This run is working on ${what} ` +
-      `#${raw}; if that is the one you mean, call this again with {"${arg}": ${raw}}.`
+      `merge or a wrong close, not an error message. This run is working on pull request ` +
+      `#${raw}; if that is the one you mean, call this again with {"${PR_NUMBER_ARG}": ${raw}}.`
     );
   };
 }
@@ -661,18 +662,20 @@ function getIssueComments(a: z.infer<typeof ISSUE_COMMENTS_SCHEMA>): string {
 /**
  * Close the issue, or ask the person who opened it to.
  *
- * This used to answer a person-opened issue with a tool ERROR -- "Refusing to
- * close issue #N: opened by a human, not a bot" -- and post nothing. Two things
- * were wrong with that, and `domain/work/close-request.ts` holds the measurement:
- * the error arrived at the moment the agent had decided it was finished, so it
- * went into the report as a paragraph about tools; and because an error posts no
- * comment, nobody was ever asked to close anything. The issue just stayed open
- * with a merged pull request against it.
+ * The github server's close used to answer a person-opened issue with a tool
+ * ERROR -- "Refusing to close issue #N: opened by a human, not a bot" -- and
+ * post nothing. Two things were wrong with that, and
+ * `domain/work/close-request.ts` holds the measurement: the error arrived at the
+ * moment the agent had decided it was finished, so it went into the report as a
+ * paragraph about tools; and because an error posts no comment, nobody was ever
+ * asked to close anything. The issue just stayed open with a merged pull request
+ * against it.
  *
- * `request_close_issue` had already settled the shape for the same
- * question and this tool disagreed with it. It is the canonical one: the tool
- * decides, it does not fail, and it leaves the request where a person will read
- * it.
+ * `request_close_issue` settled the shape for the same question, and this
+ * internal path follows it: the close decides, it does not fail, and it leaves
+ * the request where a person will read it. Its only caller is `merge_pr`,
+ * through `closeParentAndReport` -- an agent concludes its own issue with
+ * `request_close_issue`, which this tool surface no longer duplicates.
  *
  * Returns whether the close actually happened, because the caller's aggregation
  * gate counts siblings and an issue that is still open is not one of them.
@@ -1606,7 +1609,7 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
       closed_issue: null,
       parent_issue: parentIssue,
       parent_outcome: "close-failed",
-      note: `The pull request merged, but issue #${parentIssue} could not be closed: ${why}. It is still open and nothing will retry. Close it with close_issue, or report it.`,
+      note: `The pull request merged, but issue #${parentIssue} could not be closed: ${why}. It is still open and nothing will retry. Close it with request_close_issue, or report it.`,
     });
   }
 }
@@ -1627,7 +1630,6 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "get_issue", description: "Retrieve one issue's title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). It does NOT return the comments themselves — use get_issue_comments for those, which takes a range. Returns a JSON issue object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),
   defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
-  defineMcpTool({ name: "close_issue", description: "Conclude an issue whose work is complete, and trigger Atomaton parent-task aggregation when applicable. Whether the issue is closed now or the person who opened it is asked on the thread to close it is this tool's decision and not yours; it does not fail on either. Returns JSON and mutates GitHub.", schema: ISSUE_NUMBER_ARG_SCHEMA, guidance: omittedNumberGuidance("issue"), handler: closeIssueAndDispatch }),
   defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
@@ -1660,7 +1662,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
     name: "merge_pr",
     description: "Merge a pull request, then continue Atomaton's issue handoff. Refuses and returns merged:false with a `blockers` list whenever the PR is not mergeable. The list is open-ended, so read it rather than assuming a fixed set: it covers failing, pending and absent required checks, conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. A refusal is a decision or a real defect, never a condition to retry around — read `blockers`, and use check_merge_readiness for detail. On success this may merge the PR, close its linked issue, and dispatch follow-up work.",
     schema: PR_NUMBER_ARG_SCHEMA,
-    guidance: omittedNumberGuidance("pull request"),
+    guidance: omittedNumberGuidance(),
     handler: mergePr,
   }),
 ]);

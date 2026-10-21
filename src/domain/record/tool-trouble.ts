@@ -49,12 +49,13 @@ export function looksRefused(content: string): boolean {
     /blocked by hook|shell_guard:|Tool blocked/.test(content) ||
     /is blocked by denylist pattern/.test(content) ||
     /is not permitted by the allowlist/.test(content) ||
-    // `close_issue` declining a human's issue. A guard of ours, matched on wording we
+    // A close of a person's issue declined outright, in wording this project wrote
+    // for the tool that used to emit it. A guard of ours, matched on wording we
     // wrote ourselves, so unlike a general "looks like a refusal" rule it cannot
     // swallow a call the agent simply got wrong. Fourteen of these were counted as
     // failures, which read as a broken tool when it was the tool doing its job.
     //
-    // Nothing emits this any more: the tool now posts a comment asking the issue's
+    // Nothing emits this any more: that close now posts a comment asking the issue's
     // author to close it and reports success, because a refusal handed to an agent at
     // the end of its run came back out in the report. The pattern stays for the
     // sessions already recorded, which the metrics report still reads.

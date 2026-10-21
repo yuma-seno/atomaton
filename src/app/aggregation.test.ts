@@ -424,9 +424,9 @@ describe("describeGateResult", () => {
   });
 
   /**
-   * `which` is what a reader locates the problem by. `close_issue` cannot know the
-   * parent's number -- it reaches the gate through the sub-issue's own link -- so it
-   * passes none, and printing `#undefined` or `#0` would name a different issue.
+   * `which` is what a reader locates the problem by. A close that reaches the gate
+   * through the sub-issue's own link cannot know the parent's number, so it passes
+   * none, and printing `#undefined` or `#0` would name a different issue.
    */
   test("a caller that does not know the parent names it in words", () => {
     expect(describeGateResult({ kind: "dispatched" }, 10)).toContain("the parent issue");
