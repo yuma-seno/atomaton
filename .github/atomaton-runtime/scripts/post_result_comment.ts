@@ -2,7 +2,7 @@
 // @bun
 
 // src/entrypoints/machinery/post_result_comment.ts
-import { appendFileSync, existsSync, readFileSync } from "fs";
+import { appendFileSync, existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { parseArgs } from "util";
 
 // src/adapters/github/gh.ts
@@ -348,6 +348,21 @@ function knownParticipants(repo, number) {
   return [...logins];
 }
 
+// src/adapters/github/ending-comment.ts
+import { existsSync, readFileSync, writeFileSync } from "fs";
+function readEndingComment(path) {
+  if (!path || !existsSync(path))
+    return;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof parsed.commentId !== "string" || !parsed.commentId)
+      return;
+    return { commentId: parsed.commentId, node: parsed.node ?? "" };
+  } catch {
+    return;
+  }
+}
+
 // src/entrypoints/machinery/lib/flags.ts
 function isTrue(value) {
   return value === "true";
@@ -380,18 +395,18 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/post_result_comment.ts
 var ref = defineScript(import.meta.url);
-function tokenUsageLines(logsFile) {
-  if (!existsSync(logsFile))
-    return [];
-  const usageLine = readFileSync(logsFile, "utf8").split(`
+function tokenUsageLine(logsFile) {
+  if (!existsSync2(logsFile))
+    return;
+  const usageLine = readFileSync2(logsFile, "utf8").split(`
 `).find((l) => l.includes("ATOMA_TOKEN_USAGE:"));
   if (!usageLine)
-    return [];
+    return;
   const prompt = /prompt=(\d+)/.exec(usageLine)?.[1];
   const completion = /completion=(\d+)/.exec(usageLine)?.[1];
   const total = /total=(\d+)/.exec(usageLine)?.[1];
   const cached = /cached=(\d+)/.exec(usageLine)?.[1];
-  return ["", "---", renderTokenLine({ total, prompt, completion, cached })];
+  return renderTokenLine({ total, prompt, completion, cached });
 }
 function subIssueState(number, type) {
   if (type !== "issue")
@@ -413,10 +428,10 @@ function endedWithToolCalls(sessionPath) {
   return false;
 }
 function readSession(path) {
-  if (!path || !existsSync(path))
+  if (!path || !existsSync2(path))
     return;
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync2(path, "utf8"));
   } catch {
     return;
   }
@@ -492,7 +507,7 @@ function buildCommentBody(args) {
   } else if (args.wroteNothing === true) {
     lines.push("> [!WARNING]", "> This run ended before it said anything at all, so there is no report below \u2014", "> not even a partial one. What it had done is in its saved session.", "");
   }
-  lines.push(args.output, "", ...args.usageLines);
+  lines.push(args.output, "");
   const escapedNotice = escapedMentionNotice(args.escapedMentions ?? []);
   if (escapedNotice !== undefined)
     lines.push("", escapedNotice, "");
@@ -505,8 +520,23 @@ function buildCommentBody(args) {
   })) {
     lines.push(mentionLine(ending, args), "");
   }
+  lines.push(buildFooter({
+    agent: args.agent,
+    runUrl: args.runUrl,
+    repo: args.repo,
+    tokenLine: args.tokenLine,
+    toolTrouble: args.toolTrouble,
+    endedBecause: args.endedBecause
+  }));
+  return lines.join(`
+`);
+}
+function buildFooter(args) {
+  const lines = ["---"];
+  if (args.tokenLine !== undefined)
+    lines.push(args.tokenLine);
   const metrics = args.repo ? ` \xB7 [metrics](https://github.com/${args.repo}/blob/atomaton-data/metrics/report.md)` : "";
-  lines.push("---", `_run by [${args.agent}](${args.runUrl})${metrics}_`);
+  lines.push(`_run by [${args.agent}](${args.runUrl})${metrics}_`);
   if (args.toolTrouble !== undefined)
     lines.push(`_${args.toolTrouble}_`);
   if (args.endedBecause === "stopped") {
@@ -516,6 +546,28 @@ function buildCommentBody(args) {
   }
   return lines.join(`
 `);
+}
+function appendFooter(args) {
+  const current = gh("api", `repos/${args.repo}/issues/comments/${args.commentId}`, "--jq", ".body");
+  if (current.code !== 0 || !current.stdout.trim()) {
+    console.error(`could not read the ending comment ${args.commentId}: ` + `${current.stderr || current.stdout || "(empty body)"} -- the footer is not appended`);
+    return;
+  }
+  const body = `${current.stdout.trim()}
+
+${buildFooter({
+    agent: args.agent,
+    runUrl: args.runUrl,
+    repo: args.repo,
+    tokenLine: args.tokenLine,
+    toolTrouble: args.toolTrouble
+  })}`;
+  const updated = gh("api", `repos/${args.repo}/issues/comments/${args.commentId}`, "--method", "PATCH", "-f", `body=${body}`);
+  if (updated.code !== 0) {
+    console.error(`could not append the footer: ${updated.stderr || updated.stdout}`);
+    return;
+  }
+  console.error(`footer appended to the ending comment ${args.commentId}`);
 }
 function main() {
   const { values } = parseArgs({
@@ -534,7 +586,8 @@ function main() {
       changed: { type: "string" },
       session: { type: "string" },
       output: { type: "string" },
-      "logs-file": { type: "string" }
+      "logs-file": { type: "string" },
+      "ending-comment": { type: "string" }
     }
   });
   if (!values.number || !values.agent || !values["run-url"]) {
@@ -546,7 +599,7 @@ function main() {
     console.error("post_result_comment.ts: --output is required (the agent's stdout file)");
     process.exit(2);
   }
-  const redacted = redact(existsSync(outputFile) ? readFileSync(outputFile, "utf8") : "");
+  const redacted = redact(existsSync2(outputFile) ? readFileSync2(outputFile, "utf8") : "");
   const endedEarly = cutShort(values["ended-because"]);
   let output = redacted;
   let salvaged = false;
@@ -561,7 +614,20 @@ function main() {
   }
   if (!output.trim()) {
     if (!endedEarly && endedWithToolCalls(values.session)) {
-      console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
+      const ending = readEndingComment(values["ending-comment"]);
+      if (!ending) {
+        console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
+        return;
+      }
+      console.error(`appending the result footer onto the tool's ending comment ${ending.commentId} (on ${ending.node})`);
+      appendFooter({
+        repo: process.env.GITHUB_REPOSITORY ?? "",
+        commentId: ending.commentId,
+        agent: values.agent,
+        runUrl: values["run-url"],
+        tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
+        toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"]))
+      });
       return;
     }
     if (endedEarly) {
@@ -593,7 +659,7 @@ function main() {
     escapedMentions: checked.escaped,
     changed: isTrue(values.changed),
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
-    usageLines: tokenUsageLines(values["logs-file"] ?? ""),
+    tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
     ...subIssueState(values.number, values.type)
   });
   const { code, stdout, stderr } = gh("api", `repos/${process.env.GITHUB_REPOSITORY}/issues/${values.number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
@@ -611,6 +677,7 @@ if (import.meta.main)
   main();
 export {
   buildCommentBody,
+  buildFooter,
   endedWithToolCalls,
   lastAgentText,
   ref
