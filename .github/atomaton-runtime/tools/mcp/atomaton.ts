@@ -18962,7 +18962,7 @@ var { tools: TOOLS, dispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "request_close_issue",
-    description: "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " + "correct way for the atomaton to finish an issue -- do NOT call " + "close_issue yourself, and do NOT just stop responding without calling " + "this. Your reason and summary are posted to the issue, and phase-gating/" + "aggregation is triggered for its parent when this is a sub-issue. Whether the " + "close happens now or the issue's author is asked to make it is this tool's " + "decision and not yours -- it is the same call either way, and your session " + "ends when it returns.",
+    description: "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " + "correct way to finish an issue -- do NOT just stop responding without calling " + "this. Your reason and summary are posted to the issue, and phase-gating/" + "aggregation is triggered for its parent when this is a sub-issue. Whether the " + "close happens now or the issue's author is asked to make it is this tool's " + "decision and not yours -- it is the same call either way, and your session " + "ends when it returns.",
     schema: REQUEST_CLOSE_ISSUE_SCHEMA,
     handler: handleRequestCloseIssue
   }),
