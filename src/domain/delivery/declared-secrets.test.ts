@@ -43,7 +43,7 @@ describe("resolveDeclaredSecrets", () => {
   // The whole point of the reserved list: this would have replaced the run's own
   // token with an adopter-supplied value instead of adding a credential.
   test("rejects a name the destination already uses for itself", () => {
-    for (const reserved of ["GH_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ISSUE_NUMBER"]) {
+    for (const reserved of ["GH_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NUMBER"]) {
       const { names, problems } = resolveDeclaredSecrets([reserved], TOOL_SECRETS);
       expect(names, reserved).toEqual([]);
       expect(problems[0], reserved).toContain(reserved);

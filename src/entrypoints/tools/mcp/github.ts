@@ -40,6 +40,7 @@ import { capText, fitItems, TOOL_OUTPUT_BUDGET } from "../../../shared/tool-outp
 import { decidePostMergeHandoff } from "../../../domain/work/handoff.ts";
 import { isAttended, unattendedNotice } from "../../../domain/work/unattended-pull-request.ts";
 import { branchForCommit, resolveBranch, stackedPrBase } from "../../../adapters/github/branch-placement.ts";
+import { isIssueRun, isPrRun, nodeNumber, refusePrRun } from "../../../adapters/runner/run-node.ts";
 import { dispatchCd, dispatchCi, dispatchPostMergeAgent, dispatchPrValidation } from "../../../adapters/actions/dispatch-targets.ts";
 import { issueLinks } from "../../../adapters/github/issue-links.ts";
 import type { LinkedChild, LinkedIssue } from "../../../domain/work/issue-links.ts";
@@ -122,55 +123,52 @@ const ISSUE_NUMBER_ARG = "issue_number";
 const PR_NUMBER_ARG = "pull_number";
 
 /**
- * Schema for a MUTATION on an issue, whose number is never inferred.
+ * Schema for a close of an issue, whose number is never inferred.
  *
  * Required, and deliberately not defaulted from the run: inferring the target of an
  * irreversible, outward-facing action turns a malformed call into a wrong close
- * instead of an error message.
+ * instead of an error message. `merge_pr` used to share that rule with a required
+ * `pull_number` of its own; it now takes no number at all — the pull request it
+ * merges is the node the run sits on — so this schema's remaining callers are the
+ * internal close helpers, reached from code rather than from the model.
  */
 const ISSUE_NUMBER_ARG_SCHEMA = z.object({
   [ISSUE_NUMBER_ARG]: positiveInt("Positive GitHub issue number, without a leading '#'."),
 });
 
-/** Schema for a MUTATION on a pull request. Required, for the same reason. */
-const PR_NUMBER_ARG_SCHEMA = z.object({
-  [PR_NUMBER_ARG]: positiveInt("Positive GitHub pull request number, without a leading '#'."),
-});
-
 /**
- * Schema for read-only ISSUE lookups whose `number` defaults to the issue this
- * run is already operating on.
+ * Schema for read-only ISSUE lookups whose `number` defaults to the node this run
+ * sits on.
  *
  * Deliberately not used for mutations. Inferring the target of an irreversible,
- * outward-facing action from an environment variable turns a malformed call into
- * a wrong merge instead of an error message, so `merge_pr` — now the only
- * mutation tool on this surface — requires the number. The internal close below
- * takes this schema as its parameter type and is reached from code, not from the
- * model.
+ * outward-facing action from an environment variable turns a malformed call into a
+ * wrong merge instead of an error message; the internal close below takes its
+ * required schema and is reached from code, not from the model.
  *
- * It was also not meant for PR reads, and `check_merge_readiness` used it
- * anyway. The comment here explained precisely the failure that caused: a
- * defaulted PR read during an issue run shells out `gh pr view <issue-number>`
- * and returns "Could not resolve to a PullRequest" — an iteration burnt on the
- * one tool whose job is explaining refusals. `PR_CONTEXT_NUMBER_ARG_SCHEMA`
- * below is the PR-shaped version, and it defaults only when the run really is a
- * pull request run.
+ * The default is the run's NODE (`adapters/runner/run-node.ts`), which on a pull
+ * request run is the pull request itself: issues and pull requests share one
+ * number space, so the number resolves either way, and the result says which one
+ * came back with `kind`. A defaulted PR read during an issue run is refused
+ * instead — see `PR_CONTEXT_NUMBER_ARG_SCHEMA` below for the failure that refusal
+ * exists for.
  */
 const ISSUE_CONTEXT_NUMBER_ARG_SCHEMA = z.object({
   [ISSUE_NUMBER_ARG]: positiveInt(
     "Positive GitHub issue number, without a leading '#'. " +
-      "Omit to use the issue this run is already operating on.",
+      "Omit to use the node this run is already on (an issue's number, or the pull request's on a pull request run).",
   ).optional(),
 });
 
 /**
  * Schema for a read-only PULL REQUEST lookup that may default to this run's own.
  *
- * The old comment above claimed "the run env does not say whether that was an
- * issue or a PR". It does: `ATOMATON_RUN_TYPE` is set by the runner and is exactly
- * `"issue"` or `"pr"`, and `branch-placement.ts` — imported by this file —
- * already guards on it. So the default is available to a PR read, provided it
- * checks first.
+ * The default is available only when the run really is a pull request run —
+ * `isPrRun()` from `adapters/runner/run-node.ts`, which reads the `TYPE` the
+ * runner sets. Issues and pull requests share one number space, so an issue
+ * run's number is a perfectly valid-looking pull request number belonging to a
+ * different thing entirely — and the resulting `gh pr view <issue-number>` fails
+ * with a GitHub error about resolving a PullRequest, which reads as a broken
+ * tool rather than a missing argument.
  */
 const PR_CONTEXT_NUMBER_ARG_SCHEMA = z.object({
   [PR_NUMBER_ARG]: positiveInt(
@@ -193,83 +191,55 @@ const ISSUE_COMMENTS_SCHEMA = z.object({
 });
 
 /**
- * Resolve an issue read's target, falling back to the run's issue number.
+ * Resolve an issue read's target, falling back to the node this run sits on.
  *
  * Models omit it entirely when they are already reasoning about a single issue,
- * which used to surface as a required-argument error and burn an iteration.
- * `ISSUE_NUMBER` is the number the runner resolved for this run (see
- * `atomaton-runner.wac.ts`), and is already relied on elsewhere in this file.
+ * which used to surface as a required-argument error and burn an iteration. On an
+ * issue run the node is the issue; on a pull request run it is the pull request,
+ * whose number answers the issue-shaped read because the number space is shared —
+ * and the result's `kind` says which one came back. The conflation this replaces
+ * is #248: the run's environment used to hold the SESSION's issue under
+ * `ISSUE_NUMBER`, which on a pull request run was the parent issue, not the node.
  */
 function issueContextNumber(args: { issue_number?: number }): number {
   if (args[ISSUE_NUMBER_ARG] !== undefined) return args[ISSUE_NUMBER_ARG];
-  const raw = (process.env.ISSUE_NUMBER ?? "").trim();
-  const parsed = Number(raw);
-  if (!raw || !Number.isInteger(parsed) || parsed <= 0) {
+  const node = nodeNumber();
+  if (node === undefined) {
     mcpFail(
-      `\`${ISSUE_NUMBER_ARG}\` was omitted and this run has no current issue number. ` +
+      `\`${ISSUE_NUMBER_ARG}\` was omitted and this run has no node number in its environment. ` +
         `Pass \`${ISSUE_NUMBER_ARG}\` explicitly.`,
     );
   }
-  return parsed;
+  return node;
 }
 
 /**
- * The message a mutation gives when its number was left out.
- *
- * Reads above may default their target from the run; mutations may not, and the
- * comment on `ISSUE_CONTEXT_NUMBER_ARG_SCHEMA` says why: inferring the target of an
- * irreversible outward-facing action turns a malformed call into a wrong merge.
- * That rule stays. What changes is the refusal it produces.
- *
- * Measured on the tool this was written for, since removed: 28 calls with
- * `{event, body}` and no number, each answered "number: Expected number, received
- * undefined" -- true, and no help at all to a caller looking at exactly one pull
- * request. Naming the number costs nothing and keeps the decision with the agent:
- * it still has to pass it.
- */
-function omittedNumberGuidance(): (args: Record<string, unknown>) => string | undefined {
-  return (args) => {
-    if (PR_NUMBER_ARG in args) return undefined;
-    if (process.env.ATOMATON_RUN_TYPE !== "pr") return undefined;
-    const raw = (process.env.ISSUE_NUMBER ?? "").trim();
-    if (!/^[0-9]+$/.test(raw)) return undefined;
-    return (
-      `\`${PR_NUMBER_ARG}\` is required and was omitted. This tool changes GitHub, so unlike the ` +
-      "read-only tools it will not infer its target -- a guessed number here is a wrong " +
-      `merge or a wrong close, not an error message. This run is working on pull request ` +
-      `#${raw}; if that is the one you mean, call this again with {"${PR_NUMBER_ARG}": ${raw}}.`
-    );
-  };
-}
-
-/**
- * Resolve a pull request read's target, falling back to this run's number only
- * when the run is a pull request run.
+ * Resolve a pull request read's target, falling back to this run's own pull request
+ * only when the run is a pull request run.
  *
  * The type check is the whole point. Issues and pull requests share one number
- * space, so `ISSUE_NUMBER` on an issue run is a perfectly valid-looking pull
- * request number that belongs to a different thing entirely — and the resulting
+ * space, so a number that is an issue's here is a perfectly valid-looking pull
+ * request number belonging to a different thing entirely — and the resulting
  * `gh pr view <issue-number>` fails with a GitHub error about resolving a
  * PullRequest, which reads as a broken tool rather than a missing argument.
  */
 function prContextNumber(args: { pull_number?: number }): number {
   if (args[PR_NUMBER_ARG] !== undefined) return args[PR_NUMBER_ARG];
-  if (process.env.ATOMATON_RUN_TYPE !== "pr") {
+  if (!isPrRun()) {
     mcpFail(
-      `\`${PR_NUMBER_ARG}\` was omitted, and this run is working on an issue rather than a ` +
-        "pull request. Pass the pull request's number explicitly — an issue's number is not a " +
-        "pull request's.",
+      `\`${PR_NUMBER_ARG}\` was omitted, and this run is on ` +
+        (isIssueRun() ? `issue #${nodeNumber()}` : "neither an issue nor a pull request") +
+        ". Pass the pull request's number explicitly — an issue's number is not a pull request's.",
     );
   }
-  const raw = (process.env.ISSUE_NUMBER ?? "").trim();
-  const parsed = Number(raw);
-  if (!raw || !Number.isInteger(parsed) || parsed <= 0) {
+  const node = nodeNumber();
+  if (node === undefined) {
     mcpFail(
-      `\`${PR_NUMBER_ARG}\` was omitted and this run has no current pull request number. ` +
+      `\`${PR_NUMBER_ARG}\` was omitted and this run has no node number in its environment. ` +
         `Pass \`${PR_NUMBER_ARG}\` explicitly.`,
     );
   }
-  return parsed;
+  return node;
 }
 
 /**
@@ -343,7 +313,7 @@ const COMMIT_AND_PUSH_SCHEMA = z.object({
  */
 function notifyTagPrefix(body: string, what: string): string {
   if (NOTIFY_TAG.has(body)) mcpFail(`${what} body already contains a notify tag; refusing to add another`);
-  const login = (process.env.ISSUE_NOTIFY ?? "").trim();
+  const login = (process.env.NOTIFY ?? "").trim();
   return login ? `${NOTIFY_TAG.write(login)}\n` : "";
 }
 
@@ -367,11 +337,9 @@ function checkedIssueBody(body: string, instead: string): string {
 
 async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<string> {
   const title = a.title;
-  const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
 
   // A pull request run does not create sub-issues. It reviews or fixes one pull
-  // request, and `ISSUE_NUMBER` on such a run is the pull request's own number (or
-  // the parent issue `fetch_events.ts` resolved for context) -- so a sub-issue
+  // request, and the node it sits on is that pull request -- so a sub-issue
   // created here would hang under a node that was never decomposing anything, and
   // the pull request's `atomaton/in-progress` guard would be held by a chain that
   // had moved elsewhere. Decomposition belongs to an issue run.
@@ -379,12 +347,11 @@ async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<str
   // A defect found on a pull request run has a route of its own: `create_root_issue`,
   // which makes no link and holds no guard. Before it existed, a pull request run had
   // nowhere at all to file one. See #192.
-  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
-    mcpFail(
-      "create_sub_issue is for an issue run that is decomposing work into sub-issues. " +
-        "This run is on a pull request, which reviews or fixes one pull request rather than " +
-        "decomposing it. Use create_root_issue to report a defect that is nobody's child, " +
-        "create_pr to hand this pull request to a reviewer, or request_close_issue to conclude it.",
+  if (isPrRun()) {
+    refusePrRun(
+      "create_sub_issue",
+      "Use create_root_issue to report a defect that is nobody's child, " +
+        "create_pr to hand this pull request to a reviewer, or merge_pr to merge it once its review passes.",
     );
   }
 
@@ -393,10 +360,11 @@ async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<str
   // nothing would aggregate it: an issue that looked like a child, counted as a
   // sibling, and belonged to no tree. Creating an issue outside the tree is
   // `create_root_issue`'s job, so the by-product is gone rather than reported.
-  if (!parentNum) {
+  const parentNum = nodeNumber();
+  if (parentNum === undefined) {
     mcpFail(
-      "create_sub_issue links its issue under the issue this run is working on, and this run " +
-        "has no current issue to link it under. Use create_root_issue to file an issue that is " +
+      "create_sub_issue links its issue under the node this run sits on, and this run " +
+        "has no node number in its environment. Use create_root_issue to file an issue that is " +
         "nobody's child.",
     );
   }
@@ -441,7 +409,7 @@ async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<str
   // that belongs to no tree is made now, so that outcome is asked for rather than
   // arrived at.
   try {
-    const pid = await resolveIssueId(Number(parentNum));
+    const pid = await resolveIssueId(parentNum);
     const sid = await resolveIssueId(num);
     ghGraphql(
       "mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}",
@@ -456,11 +424,11 @@ async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<str
     );
   }
 
-  logOp("create_sub_issue", { number: num, title, parent: Number(parentNum) });
+  logOp("create_sub_issue", { number: num, title, parent: parentNum });
   return JSON.stringify({
     number: num,
     url: stdout.trim(),
-    parent: Number(parentNum),
+    parent: parentNum,
   });
 }
 
@@ -570,6 +538,11 @@ function getIssue(a: z.infer<typeof ISSUE_CONTEXT_NUMBER_ARG_SCHEMA>): string {
   const { comments, body, ...rest } = issue ?? {};
   const links = issueLinks(REPO, number);
   return JSON.stringify({
+    // `issue` or `pull_request`: issues and pull requests share one number space,
+    // so a read pointed at the other kind resolves and the caller has to be told
+    // which it got. Absent only when the links could not be read — `links_unavailable`
+    // below then says so.
+    ...(links.kind ? { kind: links.kind } : {}),
     ...rest,
     // An issue body is text a person wrote and has no bound. Most are short; the
     // ones that are not tend to be the ones with a log or a table pasted in, and
@@ -636,6 +609,9 @@ function getIssueComments(a: z.infer<typeof ISSUE_COMMENTS_SCHEMA>): string {
   return JSON.stringify({
     issue: {
       number,
+      // See `get_issue`: what the number resolved to, since a pull request's
+      // number answers this read too.
+      ...(links.kind ? { kind: links.kind } : {}),
       title: issue?.title,
       state: issue?.state,
       total_comments: all.length,
@@ -781,8 +757,9 @@ async function closeIssueAndDispatch(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>)
  * issue or pull request body notifies a real account, and a name an agent read in
  * a commit log is a name it can repeat. See `domain/work/mention.ts`.
  *
- * The thread it checks against is the issue this run is working on. For a new
- * issue that is the parent's thread rather than its own, which does not exist yet
+ * The thread it checks against is the node this run sits on. On an issue run that
+ * is the issue's own thread; on a pull request run the pull request's. For a new
+ * issue the thread is the parent's rather than its own, which does not exist yet
  * -- and is the right set anyway: the people already talking about this work.
  *
  * The notice goes in the body rather than being logged, because the body is where
@@ -822,7 +799,7 @@ function refuseCommandLines(text: string, what: string, instead: string): void {
 function withCheckedMentions(body: string): string {
   const checked = escapeUnknownMentions(
     body,
-    knownParticipants(REPO, (process.env.ISSUE_NUMBER ?? "").trim()),
+    knownParticipants(REPO, nodeNumber() === undefined ? "" : String(nodeNumber())),
   );
   if (checked.escaped.length === 0) return body;
   log(`escaped ${checked.escaped.length} unconfirmed mention(s): ${checked.escaped.join(", ")}`);
@@ -831,7 +808,11 @@ function withCheckedMentions(body: string): string {
 }
 
 function injectParentIssue(body: string, reviewer: string): string {
-  const parent = (process.env.ISSUE_NUMBER ?? "").trim();
+  // The node this run sits on. `create_pr` refuses a pull request run before this
+  // is reached, so on the only path here the node is the issue the pull request
+  // delivers — and the tag below is what `merge_pr`, `issue-links.ts` and
+  // `parse_pr_metadata.ts` all read as the same fact.
+  const parent = nodeNumber() === undefined ? "" : String(nodeNumber());
   refuseClosingKeywords(body, "pull request body");
   // The reviewer is a tool argument, and the machinery writes the `/<agent>` line
   // itself below. An agent writing one into the body is asking for a run in the one
@@ -913,12 +894,11 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   //
   // `create_sub_issue` and `launch_sub_agent` refuse on a PR run for the same reason; this
   // is the third tool that could add a child, and it was the one left open.
-  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
-    mcpFail(
-      "create_pr opens the pull request for an ISSUE's branch. This run is on a pull " +
-        "request, which is a leaf of the tree -- it reviews or fixes one pull request rather " +
-        "than opening another. Use commit_and_push to push a fix onto this pull " +
-        "request's branch, or request_close_issue to conclude it.",
+  if (isPrRun()) {
+    refusePrRun(
+      "create_pr",
+      "Use commit_and_push to push a fix onto this pull request's branch, " +
+        "or merge_pr to merge it once its review passes.",
     );
   }
 
@@ -990,8 +970,8 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   // meta.session_ends below) no further agent text will be posted on the
   // CURRENT issue about this -- record it here explicitly, the same way
   // dispatchSubAgent always confirms its own dispatch with a comment.
-  const currentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
-  if (currentIssue) {
+  const node = nodeNumber();
+  if (node !== undefined) {
     const next = !validationDispatched
       ? "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log."
       : reviewer
@@ -1018,7 +998,7 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     // instead of on a second, content-free one beside it. `validationDispatched`
     // is also whether the session ends here: a failed dispatch keeps it open,
     // and a run that continues must not leave a record behind.
-    postTurnComment({ number: currentIssue, repo: REPO, body, sessionEnds: validationDispatched });
+    postTurnComment({ number: String(node), repo: REPO, body, sessionEnds: validationDispatched });
   }
 
   // Nobody coming, said out loud on the pull request itself.
@@ -1483,8 +1463,25 @@ function deleteMergedBranch(branch: string): void {
   log(`mergePr: deleted merged branch ${branch}`);
 }
 
-async function mergePr(a: z.infer<typeof PR_NUMBER_ARG_SCHEMA>): Promise<string> {
-  const num = a[PR_NUMBER_ARG];
+async function mergePr(): Promise<string> {
+  // The pull request this run sits on, and nothing else. There is no number
+  // argument to name a different one: a merge is irreversible, and the node the
+  // run is on is the one thing this run was started for. On an issue run there is
+  // no pull request to name — the pull request that delivers this work is merged
+  // by the run sitting on it, its reviewer once the checks pass, or the engineer
+  // the review sends back.
+  if (!isPrRun()) {
+    mcpFail(
+      "`merge_pr` merges the pull request this run is on and takes no number: the run's own node is the only " +
+        "pull request it will merge. This run is on " +
+        (isIssueRun() ? `issue #${nodeNumber()}` : "neither an issue nor a pull request") +
+        ". A pull request is merged by the run sitting on it — its reviewer once the checks pass, or the engineer the review sends back.",
+    );
+  }
+  const num = nodeNumber();
+  if (num === undefined) {
+    mcpFail("merge_pr could not read this run's own pull request number (the environment's NUMBER is unset or not a positive integer).");
+  }
 
   // The gate, applied on the path every agent merge takes. The verdict itself is
   // the repository's own branch protection, re-read here rather than restated —
@@ -1627,9 +1624,9 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
     schema: ISSUE_ARGS_SCHEMA,
     handler: createRootIssue,
   }),
-  defineMcpTool({ name: "get_issue", description: "Retrieve one issue's title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). It does NOT return the comments themselves — use get_issue_comments for those, which takes a range. Returns a JSON issue object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
+  defineMcpTool({ name: "get_issue", description: "Retrieve one issue's — or, when the number names one, pull request's — title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). The result carries `kind` (`issue` or `pull_request`) because the two share one number space, so a read pointed at the other kind still resolves. It does NOT return the comments themselves — use get_issue_comments for those, which takes a range. Returns a JSON object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),
-  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
+  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, `kind` (`issue` or `pull_request`), parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
   defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
@@ -1660,9 +1657,8 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "merge_pr",
-    description: "Merge a pull request, then continue Atomaton's issue handoff. Refuses and returns merged:false with a `blockers` list whenever the PR is not mergeable. The list is open-ended, so read it rather than assuming a fixed set: it covers failing, pending and absent required checks, conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. A refusal is a decision or a real defect, never a condition to retry around — read `blockers`, and use check_merge_readiness for detail. On success this may merge the PR, close its linked issue, and dispatch follow-up work.",
-    schema: PR_NUMBER_ARG_SCHEMA,
-    guidance: omittedNumberGuidance(),
+    description: "Merge the pull request this run is on — it takes no arguments, and the run's own node is the only pull request it will merge; the call is refused when this run is on an issue. Then continues Atomaton's issue handoff. Refuses and returns merged:false with a `blockers` list whenever the PR is not mergeable. The list is open-ended, so read it rather than assuming a fixed set: it covers failing, pending and absent required checks, conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. A refusal is a decision or a real defect, never a condition to retry around — read `blockers`, and use check_merge_readiness for detail. On success this may merge the PR, close its linked issue, and dispatch follow-up work.",
+    schema: z.object({}),
     handler: mergePr,
   }),
 ]);

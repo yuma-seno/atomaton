@@ -111,7 +111,7 @@ The three outcomes every role shares are in `Ending a run` above, and they apply
 | --- | --- |
 | This node has no pull request | say so and end — there is nothing here to review |
 | The review found merge-blocking defects | begin the response with the directive line naming the agent the body's `Opened by` line names (below), then list only the defects you have evidence for: for each, the failing behaviour, where it is, and the correction required |
-| No defects, and `check_merge_readiness(pull_number=...)` reports ready | `merge_pr(pull_number=...)` |
+| No defects, and `check_merge_readiness(pull_number=...)` reports ready | `merge_pr` |
 | No defects, but it reports blockers | act by kind, using the table below, then end |
 
 **Who a return goes to.** The pull request's body names the agent that opened it

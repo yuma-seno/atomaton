@@ -4,8 +4,8 @@
  *
  * ## The failure this exists for
  *
- * The runner sets `ATOMATON_MACHINERY_ROOT`, `ATOMATON_RUN_TYPE`, `ISSUE_NUMBER`,
- * `ATOMATON_OPS_LOG` and `ISSUE_NOTIFY` in the environment the agent works in, and a
+ * The runner sets `ATOMATON_MACHINERY_ROOT`, `TYPE`, `NUMBER`, `NOTIFY`,
+ * `ATOMATON_OPS_LOG` in the environment the agent works in, and a
  * test that spawns a child with `...process.env` hands them straight to it. The child
  * is then not reading the fixture the test wrote: `loadConfig()` resolves its path
  * through `machineryPath(CONFIG_FILE)`, so `ATOMATON_MACHINERY_ROOT` sends it to the

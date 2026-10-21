@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 // The servers are spawned with the ambient environment, and inside an Atomaton run that
-// includes the run's own `ATOMATON_RUN_TYPE` and `ISSUE_NUMBER`. See `hermeticEnv`.
+// includes the run's own `TYPE` and `NUMBER`. See `hermeticEnv`.
 import { hermeticEnv } from "../../../entrypoints/machinery/testing/harness.ts";
 
 const SCRIPTS_DIR = join(process.cwd(), "src/entrypoints/tools/mcp");
@@ -203,8 +203,8 @@ describe("mcp/github.ts", () => {
         },
         {
           BRANCH: "atomaton/issue-1",
-          ATOMATON_RUN_TYPE: "issue",
-          ISSUE_NUMBER: "1",
+          TYPE: "issue",
+          NUMBER: "1",
           ...fakeGhSeam(),
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
@@ -258,8 +258,8 @@ describe("mcp/github.ts", () => {
         },
         {
           BRANCH: "atomaton/issue-1",
-          ATOMATON_RUN_TYPE: "issue",
-          ISSUE_NUMBER: "1",
+          TYPE: "issue",
+          NUMBER: "1",
           AGENT: "engineer",
           ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/42",
           ...fakeGhSeam(),
@@ -315,8 +315,8 @@ describe("mcp/github.ts", () => {
         },
         {
           BRANCH: "atomaton/issue-1",
-          ATOMATON_RUN_TYPE: "issue",
-          ISSUE_NUMBER: "1",
+          TYPE: "issue",
+          NUMBER: "1",
           AGENT: "engineer",
           ATOMATON_RUN_DIR: dir,
           ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/42",
@@ -364,8 +364,8 @@ describe("mcp/github.ts", () => {
         },
         {
           BRANCH: "atomaton/issue-1",
-          ATOMATON_RUN_TYPE: "issue",
-          ISSUE_NUMBER: "1",
+          TYPE: "issue",
+          NUMBER: "1",
           AGENT: "engineer",
           ATOMATON_RUN_DIR: dir,
           ...fakeGhSeam(),
@@ -442,7 +442,7 @@ describe("mcp/github.ts", () => {
           params: { name: "commit_and_push", arguments: { message: "fix the findings" } },
         },
         // What the runner sets on a `pr` run: the branch env is the literal HEAD.
-        { BRANCH: "HEAD", ATOMATON_RUN_TYPE: "pr", ISSUE_NUMBER: "802" },
+        { BRANCH: "HEAD", TYPE: "pr", NUMBER: "802" },
         work,
       );
 
@@ -480,8 +480,8 @@ describe("mcp/github.ts", () => {
           // reached by the one run type that legitimately opens a pull request. The
           // detached case a pull request run hits is covered by
           // `commit_and_push`, which a pull request run may still call.
-          ATOMATON_RUN_TYPE: "issue",
-          ISSUE_NUMBER: "802",
+          TYPE: "issue",
+          NUMBER: "802",
           ...fakeGhSeam(),
           FAKE_GH_RESPONSES: JSON.stringify([
             // `stackedPrBase` asks GitHub whether #802 is a sub-issue before
@@ -540,7 +540,7 @@ describe("mcp/github.ts", () => {
         jsonrpc: "2.0", id: 35, method: "tools/call",
         params: { name: "create_pr", arguments: { title: "Test PR" } },
       },
-      { ...fakeGhSeam(), ATOMATON_RUN_TYPE: "pr", ISSUE_NUMBER: "21", FAKE_GH_RESPONSES: "[]" },
+      { ...fakeGhSeam(), TYPE: "pr", NUMBER: "21", FAKE_GH_RESPONSES: "[]" },
     );
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0].text).toContain("pull request");
@@ -570,8 +570,8 @@ describe("mcp/github.ts", () => {
       writeFileSync(join(work, "work.txt"), "the work\n");
 
       const env = {
-        ATOMATON_RUN_TYPE: "issue",
-        ISSUE_NUMBER: "1",
+        TYPE: "issue",
+        NUMBER: "1",
         BRANCH: "",
         ...fakeGhSeam(),
         FAKE_GH_LOG: log,
@@ -669,7 +669,7 @@ describe("mcp/github.ts", () => {
       {
         ...fakeGhSeam(),
         // A run on an issue, because a sub-issue needs a parent to be linked under.
-        ISSUE_NUMBER: "1",
+        NUMBER: "1",
         FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "not-a-url" }]),
       },
     );
@@ -728,7 +728,7 @@ describe("mcp/github.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "1",
+          NUMBER: "1",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["issue", "create"], stdout: "https://github.com/o/r/issues/7" },
@@ -770,7 +770,7 @@ describe("mcp/github.ts", () => {
       },
       {
         ...fakeGhSeam(),
-        ISSUE_NUMBER: "1",
+        NUMBER: "1",
         FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
       },
     );
@@ -797,7 +797,7 @@ describe("mcp/github.ts", () => {
       },
       {
         ...fakeGhSeam(),
-        ISSUE_NUMBER: "1",
+        NUMBER: "1",
         FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
       },
     );
@@ -819,7 +819,7 @@ describe("mcp/github.ts", () => {
       },
       {
         ...fakeGhSeam(),
-        ISSUE_NUMBER: "1",
+        NUMBER: "1",
         FAKE_GH_RESPONSES: JSON.stringify([
           { match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" },
           { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { id: "I_x" } } } }) },
@@ -831,10 +831,10 @@ describe("mcp/github.ts", () => {
 
   /**
    * A pull request run reviews or fixes one pull request; it does not decompose work.
-   * `ISSUE_NUMBER` on such a run is the pull request's own number (or the parent issue
-   * `fetch_events.ts` resolved for context), so a sub-issue created here would hang
-   * under a node that was never decomposing anything -- and the pull request's
-   * `atomaton/in-progress` guard would be held by a chain that had moved elsewhere.
+   * `NUMBER` on such a run is the pull request's own number, so a sub-issue created
+   * here would hang under a node that was never decomposing anything -- and the pull
+   * request's `atomaton/in-progress` guard would be held by a chain that had moved
+   * elsewhere.
    */
   test("create_sub_issue refuses on a pull request run", async () => {
     const r = await sendRequest(
@@ -845,8 +845,8 @@ describe("mcp/github.ts", () => {
       },
       {
         ...fakeGhSeam(),
-        ATOMATON_RUN_TYPE: "pr",
-        ISSUE_NUMBER: "21",
+        TYPE: "pr",
+        NUMBER: "21",
         FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/1" }]),
       },
     );
@@ -868,7 +868,7 @@ describe("mcp/github.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "3",
+          NUMBER: "3",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["label", "create", "atomaton/sub-issue"] },
@@ -943,8 +943,8 @@ describe("mcp/github.ts", () => {
           },
           {
             ...fakeGhSeam(),
-            ATOMATON_RUN_TYPE: runType,
-            ISSUE_NUMBER: "21",
+            TYPE: runType,
+            NUMBER: "21",
             FAKE_GH_LOG: log,
             FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/13" }]),
           },
@@ -1043,7 +1043,7 @@ describe("mcp/github.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "21",
+          NUMBER: "21",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/7" }]),
         },
@@ -1179,16 +1179,13 @@ describe("mcp/github.ts", () => {
     });
 
     /**
-     * Measured on `submit_pr_review`, since removed: 28 calls with `{event, body}`
-     * and no number. The guidance it prompted is still on every mutation that needs
-     * one, and this holds it on one of those.
-     *
-     * The number stays required -- this writes to GitHub, and the rule that mutations
-     * do not infer their target is deliberate and stays. What is tested here is the
-     * refusal: it has to name the number to pass, because a refusal that says what to
-     * do next is followed and one that only restates the schema is not.
+     * `merge_pr` takes no number: the pull request it merges is the node the run
+     * sits on. On an issue run there is nothing to name and nothing to guess — the
+     * refusal names the run's own node and the route a merge actually takes,
+     * because a refusal that says what to do next is followed and one that only
+     * restates a rule is not.
      */
-    test("a mutation that needs a number says which number", async () => {
+    test("merge_pr on an issue run is refused, with the node named", async () => {
       const r = await sendRequest(
         "github.ts",
         {
@@ -1198,12 +1195,50 @@ describe("mcp/github.ts", () => {
         {
           ...fakeGhSeam(),
           FAKE_GH_RESPONSES: "[]",
-          ATOMATON_RUN_TYPE: "pr",
-          ISSUE_NUMBER: "305",
+          TYPE: "issue",
+          NUMBER: "305",
         },
       );
       expect(r.result.isError).toBe(true);
       expect(r.result.content[0].text).toContain("305");
+      expect(r.result.content[0].text).toContain("reviewer");
+    });
+
+    /**
+     * The other half of "no number": the run's own node is what it asks about.
+     * No merge fixtures — the gate's first read fails and the call errors — but
+     * the log shows WHICH pull request was asked about first, and it is the node
+     * the environment named. Under the old env that number was the parent issue
+     * the session is keyed to, which is exactly the #248 conflation.
+     */
+    test("merge_pr on a pull request run asks about the run's own pull request", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-node-"));
+      const log = join(dir, "gh.log");
+      try {
+        await sendRequest(
+          "github.ts",
+          {
+            jsonrpc: "2.0", id: 46, method: "tools/call",
+            params: { name: "merge_pr", arguments: {} },
+          },
+          {
+            ...fakeGhSeam(),
+            FAKE_GH_LOG: log,
+            FAKE_GH_RESPONSES: "[]",
+            TYPE: "pr",
+            NUMBER: "802",
+          },
+        );
+        const calls = readFileSync(log, "utf8")
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as string[]);
+        expect(calls.length, "the merge gate read something before it failed").toBeGreaterThan(0);
+        expect(calls[0]!.some((a) => a.includes("802")), JSON.stringify(calls[0])).toBe(true);
+      } finally {
+        removeTemp(dir);
+      }
     });
 
     /**
@@ -1358,12 +1393,11 @@ describe("mcp/github.ts", () => {
     expect(getIssue.properties.issue_number.type).toBe("integer");
     expect(getIssue.required ?? []).not.toContain("issue_number");
 
-    // Mutations keep it mandatory — no inferring an irreversible target. And a
-    // pull request tool names its number the way GitHub does, not the way an
-    // issue tool does.
+    // `merge_pr` takes no number at all: what it merges is the node the run sits
+    // on, so the schema is the empty object and there is no target to infer.
     const mergePr = byName.get("merge_pr").inputSchema;
-    expect(mergePr.properties.pull_number.type).toBe("integer");
-    expect(mergePr.required).toContain("pull_number");
+    expect(mergePr.properties ?? {}).toEqual({});
+    expect(mergePr.required ?? []).toEqual([]);
 
     // `labels` stays an array in the contract even though a bare string parses.
     const listIssues = byName.get("list_issues").inputSchema;
@@ -1398,7 +1432,7 @@ describe("mcp/github.ts", () => {
         params: { name: "get_issue", arguments: {} },
       },
       {
-        ISSUE_NUMBER: "42",
+        NUMBER: "42",
         ...fakeGhSeam(),
         FAKE_GH_RESPONSES: JSON.stringify([
           { match: ["issue", "view", "42"], stdout: JSON.stringify({ number: 42, title: "From context" }) },
@@ -1407,6 +1441,72 @@ describe("mcp/github.ts", () => {
     );
     expect(r.result.isError).toBe(false);
     expect(JSON.parse(r.result.content[0].text)).toMatchObject({ number: 42 });
+  });
+
+  /**
+   * On a pull request run the node IS the pull request: issues and pull requests
+   * share one number space, so the same omitted argument resolves — and the result
+   * says which kind came back, because the number alone cannot. #248 is the other
+   * direction this closes: the default used to be the parent issue the session is
+   * keyed to, silently.
+   */
+  test("get_issue with no arguments on a pull request run returns that pull request, and says so", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 23, method: "tools/call",
+        params: { name: "get_issue", arguments: {} },
+      },
+      {
+        TYPE: "pr",
+        NUMBER: "802",
+        ...fakeGhSeam(),
+        FAKE_GH_RESPONSES: JSON.stringify([
+          { match: ["issue", "view", "802"], stdout: JSON.stringify({ number: 802, title: "The PR" }) },
+          {
+            match: ["graphql"],
+            stdout: JSON.stringify({
+              data: {
+                repository: {
+                  issueOrPullRequest: {
+                    __typename: "PullRequest",
+                    closingIssuesReferences: { nodes: [{ number: 300, title: "The issue", state: "OPEN" }] },
+                  },
+                },
+              },
+            }),
+          },
+        ]),
+      },
+    );
+    expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+    const parsed = JSON.parse(r.result.content[0].text);
+    expect(parsed).toMatchObject({ number: 802, kind: "pull_request" });
+    expect(parsed.parent).toMatchObject({ number: 300 });
+  });
+
+  /**
+   * The converse: an issue run's number is a valid-looking pull request number
+   * belonging to a different thing entirely, so a PR read defaulting to it is
+   * refused rather than resolved — the failure the PR-shaped schema exists for,
+   * held here on the read that reaches it.
+   */
+  test("get_pr with no arguments on an issue run is refused, not defaulted", async () => {
+    const r = await sendRequest(
+      "github.ts",
+      {
+        jsonrpc: "2.0", id: 24, method: "tools/call",
+        params: { name: "get_pr", arguments: {} },
+      },
+      {
+        ...fakeGhSeam(),
+        TYPE: "issue",
+        NUMBER: "42",
+        FAKE_GH_RESPONSES: "[]",
+      },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("issue #42");
   });
 
   /**
@@ -1438,7 +1538,7 @@ describe("mcp/github.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "12",
+          NUMBER: "12",
           ATOMATON_RUN_DIR: dir,
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
@@ -1571,11 +1671,10 @@ describe("mcp/atomaton.ts", () => {
 
   /**
    * A pull request run reviews or fixes one pull request; it does not decompose work.
-   * `ISSUE_NUMBER` on such a run is the pull request's own number (or the parent issue
-   * `fetch_events.ts` resolved for context), so a dispatch from here would start
-   * sub-agents under a node that was never decomposing anything -- and the pull
-   * request's `atomaton/in-progress` guard would be held by a chain that had moved
-   * elsewhere. This is the shape #21 walked into.
+   * `NUMBER` on such a run is the pull request's own number, so a dispatch from here
+   * would start sub-agents under a node that was never decomposing anything -- and the
+   * pull request's `atomaton/in-progress` guard would be held by a chain that had
+   * moved elsewhere. This is the shape #21 walked into.
    */
   test("launch_sub_agent refuses on a pull request run", async () => {
     const r = await sendRequest(
@@ -1584,10 +1683,32 @@ describe("mcp/atomaton.ts", () => {
         jsonrpc: "2.0", id: 6, method: "tools/call",
         params: { name: "launch_sub_agent", arguments: { tasks: [{ issue: 7, agent: "engineer" }] } },
       },
-      { ...fakeGhSeam(), ATOMATON_RUN_TYPE: "pr", ISSUE_NUMBER: "21" },
+      { ...fakeGhSeam(), TYPE: "pr", NUMBER: "21" },
     );
     expect(r.result.isError).toBe(true);
     expect(r.result.content[0].text).toContain("pull request");
+  });
+
+  /**
+   * A pull request run has no issue to conclude. Its outcomes are the review it
+   * posts, a fix pushed with commit_and_push, and merge_pr — and the issue it
+   * delivers is concluded by a run on that issue, which merge_pr's post-merge
+   * dispatch starts. Checked before the arguments, because the refusal is about
+   * the node the run sits on, not about what the caller passed.
+   */
+  test("request_close_issue refuses on a pull request run", async () => {
+    const r = await sendRequest(
+      "atomaton.ts",
+      {
+        jsonrpc: "2.0", id: 7, method: "tools/call",
+        params: { name: "request_close_issue", arguments: { reason: "done" } },
+      },
+      { ...fakeGhSeam(), TYPE: "pr", NUMBER: "21" },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("pull request");
+    // And names the route the pull request run has instead.
+    expect(r.result.content[0].text).toContain("merge_pr");
   });
 
   /**
@@ -1609,7 +1730,7 @@ describe("mcp/atomaton.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "3",
+          NUMBER: "3",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             // #7's parent is nothing — a root issue, not a child of #3.
@@ -1639,7 +1760,7 @@ describe("mcp/atomaton.ts", () => {
       },
       {
         ...fakeGhSeam(),
-        ISSUE_NUMBER: "3",
+        NUMBER: "3",
         FAKE_GH_RESPONSES: JSON.stringify([
           { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 99 } } } } }) },
         ]),
@@ -1663,7 +1784,7 @@ describe("mcp/atomaton.ts", () => {
       },
       {
         ...fakeGhSeam(),
-        ISSUE_NUMBER: "3",
+        NUMBER: "3",
         // No rule for it, so the fake exits 1 and the read does not answer.
         FAKE_GH_RESPONSES: JSON.stringify([]),
       },
@@ -1685,7 +1806,7 @@ describe("mcp/atomaton.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "3",
+          NUMBER: "3",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 3 } } } } }) },
@@ -1813,7 +1934,7 @@ describe("mcp/atomaton.ts", () => {
           // The parent this run is on. `launch_sub_agent` posts its dispatch comment
           // THERE, not on the child, so an unset number skips the very comment this test
           // is about.
-          ISSUE_NUMBER: "3",
+          NUMBER: "3",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 3 } } } } }) },
@@ -1861,7 +1982,7 @@ describe("mcp/atomaton.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "5",
+          NUMBER: "5",
           ATOMATON_RUN_DIR: dir,
           FAKE_GH_RESPONSES: JSON.stringify([
             // Bot-authored: this tool closes the issue itself rather than asking a person.
@@ -1902,7 +2023,7 @@ describe("mcp/atomaton.ts", () => {
         },
         {
           ...fakeGhSeam(),
-          ISSUE_NUMBER: "5",
+          NUMBER: "5",
           ATOMATON_RUN_DIR: dir,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["issue", "view"], stdout: JSON.stringify({ author: { is_bot: true, login: "atomaton[bot]" } }) },

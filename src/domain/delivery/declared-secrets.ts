@@ -166,9 +166,14 @@ export const AGENT_ENV_NAMES: readonly string[] = [
   MACHINERY_ROOT_VAR,
   "GITHUB_REPOSITORY",
   "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
+  // The node the run sits on: its number, its kind, and the requester on that node
+  // to notify. These were `ISSUE_NUMBER` / `ISSUE_NOTIFY` / `ATOMATON_RUN_TYPE`,
+  // and the issue name was the defect (#259): on a pull request run the value under
+  // the issue name was the parent issue the session resolves to, not the node the
+  // run acts on. See `adapters/runner/run-node.ts`.
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
   // How many times this work has already rebuilt its environment. A declared
   // secret shadowing it would set the tally the reload tool reads -- and a smaller
   // number buys extra reloads, each of which resets the run's own time budget.

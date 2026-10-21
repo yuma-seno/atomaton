@@ -71,7 +71,7 @@ export interface SessionGithubContext {
   event_count?: number;
   agent?: string;
   type?: string;
-  resolved_number?: string | number;
+  session_number?: string | number;
   auto_dispatch_count?: number;
 }
 
