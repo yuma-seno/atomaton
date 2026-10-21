@@ -186,7 +186,7 @@ servers:
     hooks:
       {}
   atomaton_env:
-    description: "Rebuilding the run's environment, and nothing else."
+    description: "Rebuilding the run's environment, and concluding the run's own issue."
     unprefixed: true
     command: bun
     args:
@@ -195,12 +195,13 @@ servers:
     env:
       GH_TOKEN: "${GH_TOKEN}"
     hooks:
-      # The same program as `atomaton`, with two tools withheld -- so an engineer can
-      # rebuild its environment and cannot close its own issue or dispatch an agent.
-      # `launch_sub_agent` and `request_close_issue` are what the core's own
-      # `duplicate_tool` check would otherwise see this server claim a second time.
+      # The same program as `atomaton`, with one tool withheld -- so an engineer can
+      # rebuild its environment and conclude its own issue, and cannot dispatch an
+      # agent. `launch_sub_agent` is what the core's own `duplicate_tool` check would
+      # otherwise see this server claim a second time.
       tool_allowlist:
         - reload_environment
+        - request_close_issue
   # The one server that starts another `atoma`. It holds the provider keys because
   # a tool server receives a credential only through its `env:` block, and it hands
   # them to the sub-run through `--credentials-file` rather than the environment --

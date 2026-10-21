@@ -27,9 +27,9 @@ mcp_servers:
   # the endpoint measurement. `upload` stores a file with no documented deletion, so
   # the read-only agents do not name this server.
   - attachments
-  # `reload_environment` only -- the same server the atomaton has, with its
-  # other two tools withheld, so an engineer cannot close the issue it is working
-  # on. Atomaton ships both entries; neither is in config.yaml.
+  # `reload_environment` and `request_close_issue` -- the same server the atomaton
+  # has, with `launch_sub_agent` withheld, so an engineer cannot dispatch an agent.
+  # Atomaton ships both entries; neither is in config.yaml.
   - atomaton_env
   # The writing delegate, for the investigation that would otherwise fill this
   # session: where a symbol is defined, what calls it, what a change would touch.
@@ -80,7 +80,7 @@ The three outcomes every role shares are in `Ending a run` above, and they apply
 | The deliverable is not code — an explanation, an answer, a report | write it as your report, then end with `/atomaton` so the agent that started you is told the work is done |
 | The issue is not engineer-ready | begin the response with `/atomaton`, then name the unresolved concerns |
 | Validation fails for a reason in the issue's own premise | report the contradiction and what you tried, and end — do not implement around it |
-| A pull request you opened has merged and what merged satisfies the issue | `close_issue` |
+| A pull request you opened has merged and what merged satisfies the issue | `request_close_issue` |
 | A pull request you opened has merged and the issue is not satisfied | name the criterion that is still unmet, implement the remainder, and deliver it as the next pull request |
 
 ## Where each thing you write goes
@@ -146,7 +146,7 @@ beside code it no longer matches.
   concrete findings, then validate, commit, and update the same pull request.
 - If the pull request merged, make no further code changes to what merged. Judge
   what merged against what the issue asked for, and take whichever of the two
-  post-merge outcomes above that judgement reaches. Whether `close_issue`
+  post-merge outcomes above that judgement reaches. Whether `request_close_issue`
   closes the issue itself or asks the person who opened it to close it is the
   tool's own decision: it succeeds either way, and there is nothing there to work
   around.
