@@ -6898,6 +6898,8 @@ var AGENT_ENV_NAMES = [
   "ATOMATON_RUN_TYPE",
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
   "ATOMATON_DISPATCHED_BY",
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
@@ -8235,6 +8237,44 @@ function turnHeader(h) {
 function turnCommentBody(h) {
   return [...turnHeader(h), h.body].join(`
 `);
+}
+
+// src/adapters/github/ending-comment.ts
+import { existsSync, readFileSync as readFileSync2, writeFileSync } from "fs";
+function endingCommentPath() {
+  const dir = (process.env.ATOMATON_RUN_DIR ?? "").trim();
+  return dir ? `${dir}/ending-comment.json` : undefined;
+}
+function commentIdFromUrl(stdout) {
+  const match = /#issuecomment-(\d+)\s*$/.exec(stdout.trim());
+  return match?.[1];
+}
+function recordEndingComment(commentId, node) {
+  if (!commentId)
+    return;
+  const path = endingCommentPath();
+  if (!path)
+    return;
+  try {
+    writeFileSync(path, JSON.stringify({ commentId, node }));
+  } catch (e) {
+    console.error(`could not record the ending comment: ${e.message}`);
+  }
+}
+function postTurnComment(args) {
+  const cmd = ["issue", "comment", args.number];
+  if (args.repo)
+    cmd.push("--repo", args.repo);
+  cmd.push("--body", args.body);
+  const { code, stdout, stderr } = gh(...cmd);
+  if (code !== 0) {
+    console.error(`could not comment on issue ${args.number}: ${stderr || stdout}`);
+    return;
+  }
+  const commentId = commentIdFromUrl(stdout);
+  if (args.sessionEnds)
+    recordEndingComment(commentId, args.number);
+  return commentId;
 }
 
 // node_modules/zod/v3/helpers/util.js
@@ -20193,7 +20233,7 @@ function injectParentIssue(body, reviewer) {
 
 ` : "";
   if (!parent)
-    return `${reviewerLine}${body}`;
+    return `${reviewerLine}${body}${openedByLine()}`;
   if (PARENT_ISSUE_TAG.has(body)) {
     mcpFail("PR body already contains a parent-issue tag; refusing to add another");
   }
@@ -20203,7 +20243,18 @@ function injectParentIssue(body, reviewer) {
   const originLine = originAgent ? `${ORIGIN_AGENT_TAG.write(originAgent)}
 ` : "";
   return `${reviewerLine}${PARENT_ISSUE_TAG.write(Number(parent))}
-${originLine}${line}${body}`;
+${originLine}${line}${body}${openedByLine()}`;
+}
+function openedByLine() {
+  const agent = (process.env.AGENT ?? "").trim();
+  if (!agent)
+    return "";
+  const runUrl = (process.env.ATOMATON_RUN_URL ?? "").trim();
+  const who = runUrl ? `[\`${agent}\`](${runUrl})` : `\`${agent}\``;
+  return `
+---
+_Opened by ${who}_
+`;
 }
 function createPr(a) {
   const title = a.title;
@@ -20257,7 +20308,7 @@ function createPr(a) {
     const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;
     const body = validationDispatched ? turnCommentBody({ ended: "waiting", audience: "person", body: text }) : `${LLM_CONTEXT_TAG.write("exclude")}
 ${text}`;
-    gh("issue", "comment", currentIssue, "--repo", REPO, "--body", body);
+    postTurnComment({ number: currentIssue, repo: REPO, body, sessionEnds: validationDispatched });
   }
   if (!isAttended({ ...reviewer ? { next: { agent: reviewer } } : {}, body: body ?? "" })) {
     const openedBy = (process.env.AGENT ?? "").trim() || "an agent";

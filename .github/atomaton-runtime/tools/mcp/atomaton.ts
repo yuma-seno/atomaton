@@ -6727,6 +6727,8 @@ var AGENT_ENV_NAMES = [
   "ATOMATON_RUN_TYPE",
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
   "ATOMATON_DISPATCHED_BY",
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
@@ -7311,6 +7313,44 @@ function turnCommentBody(h) {
 `);
 }
 
+// src/adapters/github/ending-comment.ts
+import { existsSync, readFileSync as readFileSync2, writeFileSync } from "fs";
+function endingCommentPath() {
+  const dir = (process.env.ATOMATON_RUN_DIR ?? "").trim();
+  return dir ? `${dir}/ending-comment.json` : undefined;
+}
+function commentIdFromUrl(stdout) {
+  const match = /#issuecomment-(\d+)\s*$/.exec(stdout.trim());
+  return match?.[1];
+}
+function recordEndingComment(commentId, node) {
+  if (!commentId)
+    return;
+  const path = endingCommentPath();
+  if (!path)
+    return;
+  try {
+    writeFileSync(path, JSON.stringify({ commentId, node }));
+  } catch (e) {
+    console.error(`could not record the ending comment: ${e.message}`);
+  }
+}
+function postTurnComment(args) {
+  const cmd = ["issue", "comment", args.number];
+  if (args.repo)
+    cmd.push("--repo", args.repo);
+  cmd.push("--body", args.body);
+  const { code, stdout, stderr } = gh(...cmd);
+  if (code !== 0) {
+    console.error(`could not comment on issue ${args.number}: ${stderr || stdout}`);
+    return;
+  }
+  const commentId = commentIdFromUrl(stdout);
+  if (args.sessionEnds)
+    recordEndingComment(commentId, args.number);
+  return commentId;
+}
+
 // src/adapters/github/notify.ts
 function log2(message) {
   console.error(`[atomaton-notify] ${message}`);
@@ -7646,16 +7686,18 @@ ${summary}`;
   }
   if (!isBot) {
     const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
-    mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request })), `comment on issue #${issue}`);
+    const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request }));
+    mustSucceed(posted, `comment on issue #${issue}`);
     console.error(`close requested: issue=#${issue} (opened by a person, left open for them)`);
-    return { outcome: "close-requested" };
+    return { outcome: "close-requested", commentId: commentIdFromUrl(posted.stdout) };
   }
-  mustSucceed(gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body })), `comment on issue #${issue}`);
+  const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body }));
+  mustSucceed(posted, `comment on issue #${issue}`);
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
   console.error(describeGateResult(aggregation, issue));
-  return { outcome: "closed", aggregation };
+  return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };
 }
 
 // node_modules/zod/v3/helpers/util.js
@@ -18814,8 +18856,8 @@ function handleLaunchSubAgent(args) {
     if (summary) {
       bodyLines.push("", "<details><summary>Report</summary>", "", summary, "", "</details>");
     }
-    gh("issue", "comment", parentIssue, "--body", bodyLines.join(`
-`));
+    postTurnComment({ number: parentIssue, body: bodyLines.join(`
+`), sessionEnds: complete });
   }
   if (errors.length && !dispatched.length) {
     mcpFail(`All dispatches failed: ${errors.join("; ")}`);
@@ -18850,17 +18892,21 @@ async function handleRequestCloseIssue(args) {
   }
   const concluded = `Issue #${issueNumber} is concluded: your reason and summary are on the issue.`;
   if (result.outcome !== "closed") {
+    recordEndingComment(result.commentId, String(issueNumber));
     return { text: `${concluded} Nothing else is yours to do here.`, meta: { session_ends: true } };
   }
   const aggregation = result.aggregation;
   const stalled = aggregation !== undefined && needsAttention(aggregation);
+  const ends = !stalled;
+  if (ends)
+    recordEndingComment(result.commentId, String(issueNumber));
   return {
     text: [
       concluded,
       aggregation ? describeGateResult(aggregation, issueNumber) : "",
       stalled ? "The parent was not re-invoked, and that is not yours to fix from here: the " + "parent's thread is not yours to comment on, and this issue's own report is " + "already posted. The reason is in the run log. End your turn without repeating it." : "Nothing else is yours to do here."
     ].filter(Boolean).join(" "),
-    meta: stalled ? {} : { session_ends: true }
+    meta: ends ? { session_ends: true } : {}
   };
 }
 var RELOAD_ENVIRONMENT_SCHEMA = objectType({
@@ -18880,11 +18926,14 @@ function handleReloadEnvironment(args) {
     mcpFail(refusal);
   }
   const next = soFar + 1;
-  gh("issue", "comment", number, "--body", turnCommentBody({
-    ended: "handoff",
-    audience: "person",
-    body: `Atomaton: rebuilding the environment and restarting \`${agent}\` ` + `(reload ${next} of ${limit}). Reason: ${args.reason}`
-  }));
+  const endingCommentId = postTurnComment({
+    number,
+    body: turnCommentBody({
+      ended: "handoff",
+      audience: "person",
+      body: `Atomaton: rebuilding the environment and restarting \`${agent}\` ` + `(reload ${next} of ${limit}). Reason: ${args.reason}`
+    })
+  });
   const outcome = dispatchRunner({
     context: `${agent} was to be restarted on #${number} after an environment rebuild`,
     agent,
@@ -18901,6 +18950,7 @@ function handleReloadEnvironment(args) {
   if (outcome !== "dispatched") {
     mcpFail("Could not dispatch the new run; the environment was not rebuilt. See the workflow log. " + "Report what you found rather than retrying.");
   }
+  recordEndingComment(endingCommentId, number);
   return { text: reloadAccepted(next, limit), meta: { session_ends: true } };
 }
 var { tools: TOOLS, dispatch } = buildMcpTools([
