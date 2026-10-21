@@ -166,14 +166,20 @@ describe("generated workflows", () => {
    * The failure notice stands down once the run has already reported.
    *
    * Both comments describe the same run, and the second one contradicts the first: a
-   * person reading "the work is on the issue" and then "the run failed" has no way to
+   * person reading "the work is on the issue" and then a failure notice has no way to
    * tell which is true. The trigger is therefore the run's own `comment_id`, which
    * `post-result` writes only on the path that posts — so the condition is exactly "this
    * run has no ending on the thread", which is also when the notice is the thing that
    * must write one.
    *
-   * Held on the generated YAML because that is where the condition lives, and because a
-   * `always()` that loses a term still runs — it just runs when it should not.
+   * The failure half is the agent's own outcome, not the job's: "Run agent" runs with
+   * `continue-on-error`, so a reported failure no longer fails the job, and `job.status`
+   * would never say what the notice is for. It is also what keeps machinery failures
+   * red — a checkout or a session save that dies never reaches this condition, and the
+   * red run stays the only signal those leave.
+   *
+   * Held on the generated YAML because that is where the condition lives, and because
+   * an `always()` that loses a term still runs — it just runs when it should not.
    */
   test("the failure notice does not fire on a run that already posted its report", () => {
     type WorkflowStep = { name?: string; if?: string };
@@ -184,11 +190,38 @@ describe("generated workflows", () => {
     expect(step, "the failure notice step").toBeDefined();
     const condition = step?.if ?? "";
     expect(condition, "it has to run when a prior step failed").toContain("always()");
-    expect(condition, "and only when this run failed").toContain("job.status != 'success'");
+    expect(condition, "and only when the agent itself failed — machinery failures keep their own red").toContain(
+      "steps.atoma.outcome == 'failure'",
+    );
     expect(
       condition,
       "and not when a result comment was already posted, or the two comments disagree",
     ).toContain("steps.post-result.outputs.comment_id == ''");
+  });
+
+  /**
+   * A failure the run managed to report must not also turn the run red.
+   *
+   * `continue-on-error` leaves the failure in `steps.atoma.outcome` — every condition
+   * below reads it unchanged — while the step's `conclusion` goes success, so the job
+   * reaches "Report failure" and that step's own exit code decides the colour: notice
+   * posted, run green; notice refused, run red. Without this, a failure that was
+   * already written onto the thread as a comment also filed a red run — the same news
+   * twice, in Notifications, where it drowns the runs whose red is their only signal.
+   *
+   * Held on the generated YAML because that is where the flag lives.
+   */
+  test("an agent failure the run reported does not have to turn the run red", () => {
+    type WorkflowStep = { name?: string; "continue-on-error"?: boolean };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const step = workflow.jobs?.run?.steps?.find((candidate) => candidate.name === "Run agent");
+    expect(step, "the agent step").toBeDefined();
+    expect(
+      step?.["continue-on-error"],
+      "the failure must reach the steps that report it, not stop them",
+    ).toBe(true);
   });
 
   /**

@@ -10,6 +10,10 @@ The label comes off when the work hands back to a person. Which endings count as
 handing back is a rule of the machinery rather than a condition written into a
 workflow, so every path out of a run releases the guard the same way.
 
+The hand-back is written on the thread: every run, a failed one included, ends by
+posting one turn-ending comment —
+[how a run ends, and what a failure leaves behind](how-a-run-ends.md).
+
 **A comment made while a run is going is deleted.** It would otherwise reach the
 agent mid-turn as though it had been part of the conversation all along, so the
 machinery removes it and tells whoever wrote it to say it again once the run ends.

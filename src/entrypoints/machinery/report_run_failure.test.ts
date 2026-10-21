@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { failureNotice, logExcerpt } from "./report_run_failure.ts";
 import { ENDED_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 describe("report_run_failure.ts", () => {
   /**
@@ -59,6 +60,18 @@ describe("report_run_failure.ts", () => {
   });
 
   /**
+   * #236: the run's colour is decided by whether THIS comment posted. A notice that
+   * landed leaves the run green, so a body that still said "the run failed" would
+   * contradict the run the reader can see — and a person told both has no way to
+   * tell which is true.
+   */
+  test("does not say the run failed", () => {
+    const body = failureNotice("engineer", "octocat", "u", "");
+    expect(body).not.toContain("the run failed");
+    expect(body).toContain("did not finish");
+  });
+
+  /**
    * Below the part that always matters, because it usually is not: "MCP server
    * closed connection" is not something a person can act on.
    */
@@ -95,5 +108,44 @@ describe("the excerpt", () => {
 
   test("a log with nothing interesting yields nothing", () => {
     expect(logExcerpt("all fine\nstill fine")).toBe("");
+  });
+});
+
+/**
+ * The step's exit code is the gate: a notice that posted leaves the run green, one
+ * that could not be written leaves it red — see "The exit code is the gate" in
+ * `report_run_failure.ts`. These run the script the way the workflow runs it, with
+ * the fake `gh`, so the exit code is measured rather than read off the source.
+ */
+describe("report_run_failure.ts as the workflow's gate", () => {
+  const args = ["--number", "9", "--agent", "engineer", "--run-url", "http://example.com/run/1"];
+
+  test("a posted notice exits 0", () => {
+    const r = runWithFakeGh(scriptPath("report_run_failure.ts"), args, {
+      env: { GITHUB_REPOSITORY: "owner/repo" },
+      rules: [{ match: ["issue", "comment"] }],
+    });
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.some((call) => call.includes("issue") && call.includes("comment"))).toBe(true);
+  });
+
+  test("a gh that refuses the comment exits non-zero — red is then the only signal", () => {
+    const r = runWithFakeGh(scriptPath("report_run_failure.ts"), args, {
+      env: { GITHUB_REPOSITORY: "owner/repo" },
+      rules: [{ match: ["issue", "comment"], code: 1, stdout: "gh: refused" }],
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("Failed to post the failure comment");
+  });
+
+  test("no number to post to exits non-zero, having called nothing", () => {
+    const r = runWithFakeGh(
+      scriptPath("report_run_failure.ts"),
+      ["--agent", "engineer", "--run-url", "http://example.com/run/1"],
+      { env: { GITHUB_REPOSITORY: "owner/repo" } },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.ghCalls).toHaveLength(0);
+    expect(r.stderr).toContain("Cannot post failure comment");
   });
 });

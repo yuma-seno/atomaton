@@ -723,6 +723,16 @@ const runAgentStep = new TypedOutputsStep(
     name: "Run agent",
     id: "atoma",
     if: `${buildContextStep.rawOutputs.new_event_count} != '0'`,
+    // Not "ignore the failure". The failure stays in `steps.atoma.outcome` --
+    // `conclusion` is what turns success -- and every condition below reads the
+    // outcome exactly as before. What this buys is that the failure reaches the
+    // step that reports it: "Report failure" converts the failure into the
+    // turn-ending comment it owes the thread, and the run goes green when that
+    // comment got written, red when it did not. Without this, a failure that was
+    // already reported as a comment also turned the run red -- the same news
+    // twice, in Notifications, where it drowns the runs whose red is their only
+    // signal.
+    "continue-on-error": true,
     // No credentials here, and that is the point of the step above.
     //
     // This step's bash lives for the whole of `atoma run`, so anything in its
@@ -912,8 +922,10 @@ fi
 # read_run_ending.ts.
 #
 # A non-zero status that is not the soft stop is still a failure and still ends the
-# step, so nothing below it runs and no ending is published: the turn failed, and
-# decide_turn_ending.ts reads that from the step's own outcome.
+# step, so none of the outputs below are written: the turn failed, and
+# decide_turn_ending.ts reads that from the step's own outcome. "Report failure"
+# turns that failure into the ending it owes the thread, and its own exit code
+# decides whether the run also stays red.
 if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
   ${scriptCommandWithArgs(readRunEndingRef, {
     // The same two paths the agent step just handed atoma, from the same constants,
@@ -1129,18 +1141,29 @@ const saveSessionStep = new TypedOutputsStep({
 });
 
 /**
- * What a failed run leaves on the issue.
+ * What a failed run leaves on the issue — and when the run itself stays green.
  *
  * The text lives in `report_run_failure.ts`, with the other human-facing comments
  * this repository writes, because it is markdown with slash commands in it and
  * markdown assembled by `echo` inside a template literal inside YAML inside bash is
  * markdown nobody can test.
  *
- * `always()` is required here, not just the `job.status != 'success'` condition
- * alone: without an explicit always()/failure()/success() call anywhere in a step's
- * `if:`, GitHub Actions implicitly ANDs the whole condition with `success()` -- which
- * is exactly false once a prior step has genuinely failed, so without `always()` the
- * step whose entire purpose is to report THAT failure would never run.
+ * ## The colour follows the comment
+ *
+ * An agent failure that wrote its turn-ending comment has said everything there is to
+ * say — the notice IS the run's ending, it hands the node back to a person, and the
+ * next comment on the thread resumes normally. A red run beside it would only repeat
+ * that news in Notifications, drowning the runs whose red is their only signal. "Run
+ * agent" therefore runs with `continue-on-error`, the failure stays in
+ * `steps.atoma.outcome`, and this step is the run's verdict on its own failure: the
+ * script exits 0 when the notice was posted — the run ends green — and non-zero when
+ * it was not, which leaves the red standing for the ending that never landed.
+ *
+ * `always()` is required here, not just the `steps.atoma.outcome == 'failure'`
+ * condition alone: without an explicit always()/failure()/success() call anywhere in a
+ * step's `if:`, GitHub Actions implicitly ANDs the whole condition with `success()` --
+ * which is exactly false once a prior step has genuinely failed, so without `always()`
+ * the step whose entire purpose is to report THAT failure would never run.
  *
  * ## Why it stands down once the run has reported
  *
@@ -1148,17 +1171,26 @@ const saveSessionStep = new TypedOutputsStep({
  * is recoverable and how to resume it. A run that already posted its result comment
  * has said everything this would say, and the failure afterwards is in the machinery
  * rather than in the work: saving the session, writing metrics. Firing here too would
- * put "the run failed" underneath a report that reads as finished, and a person who
+ * put a failure notice underneath a report that reads as finished, and a person who
  * has been told both has no way to tell which is true.
  *
- * So the trigger is `job.status != 'success'` AND no result comment was posted --
+ * So the trigger is the AGENT failed AND no result comment was posted --
  * `postResultCommentStep`'s own `comment_id` output, which is written only on the
  * path that posts. That is also the condition for "this run has no ending on the
  * thread", so the notice is the one that writes it exactly when one is missing.
+ *
+ * ## What red still means
+ *
+ * A failure that could not be reported. A step that dies before the agent -- checkout,
+ * the tool installs -- skips "Run agent" entirely, so its `outcome` is `skipped` and
+ * no ending is owed; a machinery step that dies after the agent reported fails the
+ * job itself; and a notice that `gh` refuses exits this step non-zero. In each, the
+ * red run is the only signal, and re-running it resumes from the saved session and
+ * writes the ending it owed.
  */
 const reportFailureStep = new TypedOutputsStep({
   name: "Report failure",
-  if: `always() && job.status != 'success' && ${postResultCommentStep.rawOutputs.comment_id} == ''`,
+  if: `always() && ${runAgentStep.rawOutcome} == 'failure' && ${postResultCommentStep.rawOutputs.comment_id} == ''`,
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",

@@ -19,6 +19,16 @@
  * Which of those is right is a judgement about the work, and it belongs to the
  * person rather than to the machinery.
  *
+ * ## The exit code is the gate
+ *
+ * The step this runs in is the run's verdict on its own failure, and the colour is
+ * decided by whether the ending got written: a notice that posted ends the run green
+ * — the failure became the comment it owed the thread, and a red run beside it would
+ * only repeat that news in Notifications — and a notice that could not be written
+ * ends the run red, because red is then the only signal left. So this exits 0 when
+ * the comment landed and non-zero when it did not. No extra gate step is needed:
+ * the step's own failure IS the run's failure.
+ *
  * ## Why the excerpt is last
  *
  * It is usually about the infrastructure — "MCP server closed connection",
@@ -101,7 +111,10 @@ export function failureNotice(
     // `domain/work/thread.ts` keeps. `turnHeader` writes the two tags this DOES carry
     // and nothing else, which is why the note fits here rather than in the wrapper.
     ...turnHeader({ ended: "done", audience: "person" }),
-    `${mention}Atomaton: \`${agent}\` did not finish — the run failed.`,
+    // No "the run failed": the run's colour is decided by whether THIS comment
+    // posted. A notice that landed leaves the run green, and "the run failed"
+    // underneath it would contradict the run the reader can see.
+    `${mention}Atomaton: \`${agent}\` did not finish.`,
     "",
     "**The session was saved.** What this run worked out is still there.",
     "",
@@ -130,9 +143,12 @@ function main(): void {
   });
 
   if (!values.number) {
-    // Not an error: a run can fail before the number is known, and there is
-    // nowhere to post. Said in the workflow log, where somebody is already looking.
+    // Not an error a comment could answer: a run can fail before the number is
+    // known, and there is nowhere to post. Said in the workflow log, where
+    // somebody is already looking -- and the non-zero exit is what turns the run
+    // red, because there is no comment to convert the failure into.
     console.error("::error::Cannot post failure comment: issue/PR number unknown.");
+    process.exitCode = 1;
     return;
   }
 
@@ -148,7 +164,13 @@ function main(): void {
 
   const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt);
   const { code, stdout, stderr } = gh("issue", "comment", String(values.number), "--body", body);
-  if (code !== 0) console.error(`Failed to post the failure comment: ${stderr || stdout}`);
+  // Green when the ending got written, red when it did not -- see "The exit code
+  // is the gate" above. This step is the run's verdict on its own failure, and
+  // the only thing that decides an agent failure's colour.
+  if (code !== 0) {
+    console.error(`Failed to post the failure comment: ${stderr || stdout}`);
+    process.exitCode = 1;
+  }
 }
 
 if (import.meta.main) main();
