@@ -333,6 +333,10 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
   // session open — the run goes on, and a comment recorded as its ending would put
   // the footer on a comment that is not the ending.
   const ends = !stalled;
+  // Recorded on exactly the paths whose meta carries `session_ends` below: the
+  // comment `concludeIssue` posted is this run's ending one only when the session
+  // ends here, and the footer plus the metrics token line go on it only then.
+  if (ends) recordEndingComment(result.commentId, String(issueNumber));
 
   return {
     text: [

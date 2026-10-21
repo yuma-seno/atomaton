@@ -1840,6 +1840,89 @@ describe("mcp/atomaton.ts", () => {
       removeTemp(dir);
     }
   });
+
+  /**
+   * Closing the issue is the atomaton's ordinary way to end a run, and the comment
+   * `concludeIssue` posts is the one that ended its turn — so it is the comment the
+   * machinery's footer goes onto, and the one whose token line the metrics report
+   * counts. Whether the session ends here is this call's answer (`ends`), which is
+   * why the record is written from the same place that decides `session_ends`.
+   */
+  test("request_close_issue records the comment it ends the run on", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-ending-comment-"));
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 40, method: "tools/call",
+          params: {
+            name: "request_close_issue",
+            arguments: { reason: "the work is delivered", summary: "It landed in #123." },
+          },
+        },
+        {
+          ...fakeGhSeam(),
+          ISSUE_NUMBER: "5",
+          ATOMATON_RUN_DIR: dir,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // Bot-authored: this tool closes the issue itself rather than asking a person.
+            { match: ["issue", "view"], stdout: JSON.stringify({ author: { is_bot: true, login: "atomaton[bot]" } }) },
+            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/5#issuecomment-4242" },
+            { match: ["issue", "close"], stdout: "" },
+            // A root issue has no parent to aggregate, so nothing stalls and the session ends.
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+          ]),
+        },
+      );
+      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+      expect(r.result._meta).toEqual({ session_ends: true });
+      expect(JSON.parse(readFileSync(join(dir, "ending-comment.json"), "utf8")))
+        .toEqual({ commentId: "4242", node: "5" });
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  /**
+   * The converse, and the half the record's contract depends on: a parent that could
+   * not be read leaves the gate `undetermined`, the session open, and the model with
+   * another turn. That comment is then not the run's ending, so nothing is recorded
+   * and the footer cannot land on it while the run goes on.
+   */
+  test("request_close_issue records nothing when the aggregation gate stalls", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-ending-comment-"));
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 41, method: "tools/call",
+          params: {
+            name: "request_close_issue",
+            arguments: { reason: "the work is delivered", summary: "It landed in #123." },
+          },
+        },
+        {
+          ...fakeGhSeam(),
+          ISSUE_NUMBER: "5",
+          ATOMATON_RUN_DIR: dir,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["issue", "view"], stdout: JSON.stringify({ author: { is_bot: true, login: "atomaton[bot]" } }) },
+            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/5#issuecomment-4242" },
+            { match: ["issue", "close"], stdout: "" },
+            // No rule for the parent read, so the fake exits 1 and the gate cannot answer.
+          ]),
+        },
+      );
+      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+      expect(r.result._meta?.session_ends, "a stalled gate keeps the session open").toBeUndefined();
+      expect(
+        existsSync(join(dir, "ending-comment.json")),
+        "a comment recorded as the ending while the run continues would take the footer off the real one",
+      ).toBe(false);
+    } finally {
+      removeTemp(dir);
+    }
+  });
 });
 
 /**
