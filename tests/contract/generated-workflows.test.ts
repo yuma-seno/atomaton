@@ -225,6 +225,55 @@ describe("generated workflows", () => {
   });
 
   /**
+   * The machinery/agent boundary has to exist, or every failure inside "Run agent"
+   * arrives as the agent's and takes the agent's colour — including the machinery's
+   * own, which the rule says is red.
+   *
+   * Three facts held together, because any one missing reintroduces the hole:
+   *
+   *   1. `atoma_reached` is written BEFORE the agent is invoked, so a wrapper
+   *      failure leaves it unset.
+   *   2. the wrapper's own fallible steps fail the step there — this bash has no
+   *      `set -e`, so an unguarded tools-file write would fall through and start
+   *      atoma against a partial file, dressing a machinery failure up as the
+   *      agent's.
+   *   3. "Report failure" receives the flag, so its exit code can tell the two
+   *      apart.
+   *
+   * Held on the generated YAML: the ordering, the guard and the wiring all live in
+   * the step's own run text, and a test on the source would pass while the
+   * generation dropped any of them.
+   */
+  test("the machinery/agent boundary is published and read", () => {
+    type WorkflowStep = { name?: string; run?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const agent = steps.find((candidate) => candidate.name === "Run agent");
+    const report = steps.find((candidate) => candidate.name === "Report failure");
+    expect(agent, "the agent step").toBeDefined();
+    expect(report, "the failure notice step").toBeDefined();
+
+    const run = agent?.run ?? "";
+    const flagAt = run.indexOf('atoma_reached=true');
+    const invokeAt = run.indexOf("--agent-def");
+    expect(flagAt, "the boundary flag is written as a step output").toBeGreaterThan(-1);
+    expect(invokeAt, "the agent invocation").toBeGreaterThan(-1);
+    expect(flagAt, "the flag must be written before the agent starts, so a wrapper failure leaves it unset").toBeLessThan(invokeAt);
+    expect(run, "sudo is preflighted, so its refusal is caught while it is still nameable").toContain("sudo -n -u");
+    expect(
+      /write_tools_file\.ts[^\n]*\|\|/.test(run),
+      "the tools-file write is guarded — without set -e an unguarded failure starts atoma against a partial file",
+    ).toBe(true);
+
+    expect(report?.env?.ATOMA_REACHED, "the boundary reaches the reporter").toBe(
+      "${{ steps.atoma.outputs.atoma_reached }}",
+    );
+    expect(report?.run, "the reporter passes it to the script that decides the colour").toContain("--atoma-reached");
+  });
+
+  /**
    * A stop has to cross a boundary nothing else does.
    *
    * The person deciding is outside the job; atoma is inside it and busy. Three things
