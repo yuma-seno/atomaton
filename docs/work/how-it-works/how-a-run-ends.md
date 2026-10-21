@@ -34,9 +34,10 @@ inside the run:
   a red run beside it would only repeat that news in Notifications, where it
   drowns the runs whose red is their only signal.
 - **The machinery's failure — red, ending or not.** A machinery failure inside the
-  run itself (the tools file it could not write, a `sudo` it was refused) still
-  posts the notice, so the thread is healed — but the run goes red, because red is
-  the machinery's signal and the thread is healed beside it, not instead of it.
+  run itself (the tools file it could not write, a `sudo` it was refused, an
+  ending it could not read) still posts the notice, so the thread is healed — but
+  the run goes red, because red is the machinery's signal and the thread is healed
+  beside it, not instead of it.
 - **A failure that could not be reported — red, and no ending.** The machinery
   died before the reporter could run (the checkout, the tool installs, the session
   save), or `gh` refused the comment. Red is then the only signal the run leaves,

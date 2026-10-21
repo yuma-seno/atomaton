@@ -225,18 +225,20 @@ describe("generated workflows", () => {
   });
 
   /**
-   * The machinery/agent boundary has to exist, or every failure inside "Run agent"
-   * arrives as the agent's and takes the agent's colour — including the machinery's
-   * own, which the rule says is red.
+   * The boundary between the agent's own failure and the machinery's has to exist,
+   * or every failure inside "Run agent" arrives as the agent's and takes the
+   * agent's colour — including the machinery's, which the rule says is red.
    *
-   * Three facts held together, because any one missing reintroduces the hole:
+   * The flag is `atoma_failed`, and three facts held together, because any one
+   * missing reintroduces the hole:
    *
-   *   1. `atoma_reached` is written BEFORE the agent is invoked, so a wrapper
-   *      failure leaves it unset.
-   *   2. the wrapper's own fallible steps fail the step there — this bash has no
-   *      `set -e`, so an unguarded tools-file write would fall through and start
-   *      atoma against a partial file, dressing a machinery failure up as the
-   *      agent's.
+   *   1. it is written only AFTER the agent has run, and only in the failure
+   *      branch — neither success nor the soft stop — so a failure before atoma
+   *      (the tools file, the sudo preflight) and one after it (the reads that
+   *      turn a 0/2 exit into an ending) both leave it unset.
+   *   2. the fallible machinery before atoma stops the step at its own site: the
+   *      bash runs with `-e`, so nothing falls through — the guard's job is to
+   *      NAME the failure and to exit before the flag can be written.
    *   3. "Report failure" receives the flag, so its exit code can tell the two
    *      apart.
    *
@@ -244,7 +246,7 @@ describe("generated workflows", () => {
    * the step's own run text, and a test on the source would pass while the
    * generation dropped any of them.
    */
-  test("the machinery/agent boundary is published and read", () => {
+  test("the agent's own failure is distinguished from the machinery's", () => {
     type WorkflowStep = { name?: string; run?: string; env?: Record<string, string> };
     type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
 
@@ -256,21 +258,30 @@ describe("generated workflows", () => {
     expect(report, "the failure notice step").toBeDefined();
 
     const run = agent?.run ?? "";
-    const flagAt = run.indexOf('atoma_reached=true');
+    const flagAt = run.indexOf('atoma_failed=true');
     const invokeAt = run.indexOf("--agent-def");
-    expect(flagAt, "the boundary flag is written as a step output").toBeGreaterThan(-1);
+    const branchAt = run.indexOf('[ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]');
+    const readsAt = run.indexOf('read_run_ending.ts" --session');
+    const exitAt = run.indexOf("exit $EXIT_CODE");
+    expect(flagAt, "the failure flag is written as a step output").toBeGreaterThan(-1);
     expect(invokeAt, "the agent invocation").toBeGreaterThan(-1);
-    expect(flagAt, "the flag must be written before the agent starts, so a wrapper failure leaves it unset").toBeLessThan(invokeAt);
+    expect(branchAt, "the success/soft-stop branch test").toBeGreaterThan(-1);
+    expect(flagAt, "the flag is written after atoma has run, so a failure before it leaves it unset").toBeGreaterThan(invokeAt);
+    expect(flagAt, "the flag is written only after the 0/2 branch has been tested").toBeGreaterThan(branchAt);
+    expect(readsAt, "the ending reads sit inside the 0/2 branch").toBeGreaterThan(branchAt);
+    expect(readsAt, "and ahead of the flag, so their failure leaves it unset").toBeLessThan(flagAt);
+    expect(exitAt, "the failure branch exits with atoma's own code").toBeGreaterThan(flagAt);
     expect(run, "sudo is preflighted, so its refusal is caught while it is still nameable").toContain("sudo -n -u");
     expect(
       /write_tools_file\.ts[^\n]*\|\|/.test(run),
-      "the tools-file write is guarded — without set -e an unguarded failure starts atoma against a partial file",
+      "the tools-file failure is named at its own site — `-e` stops the step; the guard gives it the name",
     ).toBe(true);
+    expect(run, "no earlier boundary flag survives the rename").not.toContain("atoma_reached");
 
-    expect(report?.env?.ATOMA_REACHED, "the boundary reaches the reporter").toBe(
-      "${{ steps.atoma.outputs.atoma_reached }}",
+    expect(report?.env?.ATOMA_FAILED, "the distinction reaches the reporter").toBe(
+      "${{ steps.atoma.outputs.atoma_failed }}",
     );
-    expect(report?.run, "the reporter passes it to the script that decides the colour").toContain("--atoma-reached");
+    expect(report?.run, "the reporter passes it to the script that decides the colour").toContain("--atoma-failed");
   });
 
   /**

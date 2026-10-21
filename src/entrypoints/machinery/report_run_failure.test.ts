@@ -120,7 +120,7 @@ describe("report_run_failure.ts as the workflow's gate", () => {
   const args = ["--number", "9", "--agent", "engineer", "--run-url", "http://example.com/run/1"];
 
   test("an agent failure whose notice posted exits 0", () => {
-    const r = runWithFakeGh(scriptPath("report_run_failure.ts"), [...args, "--atoma-reached", "true"], {
+    const r = runWithFakeGh(scriptPath("report_run_failure.ts"), [...args, "--atoma-failed", "true"], {
       env: { GITHUB_REPOSITORY: "owner/repo" },
       rules: [{ match: ["issue", "comment"] }],
     });
@@ -129,20 +129,20 @@ describe("report_run_failure.ts as the workflow's gate", () => {
   });
 
   test("a machinery failure exits non-zero even though its notice healed the thread", () => {
-    // `atoma-reached` absent is how the workflow says the machinery failed before
-    // the agent started — the flag is written at that boundary and nothing else
-    // writes it. The notice still posts; the run goes red beside it.
+    // `atoma-failed` absent is how the workflow says the failure is the machinery's
+    // — the flag is written only when atoma's own exit is a failure, and nothing
+    // else writes it. The notice still posts; the run goes red beside it.
     const r = runWithFakeGh(scriptPath("report_run_failure.ts"), args, {
       env: { GITHUB_REPOSITORY: "owner/repo" },
       rules: [{ match: ["issue", "comment"] }],
     });
     expect(r.status).not.toBe(0);
     expect(r.ghCalls.some((call) => call.includes("issue") && call.includes("comment"))).toBe(true);
-    expect(r.stderr).toContain("The machinery failed before the agent started");
+    expect(r.stderr).toContain("The machinery failed");
   });
 
   test("a gh that refuses the comment exits non-zero — red is then the only signal", () => {
-    const r = runWithFakeGh(scriptPath("report_run_failure.ts"), [...args, "--atoma-reached", "true"], {
+    const r = runWithFakeGh(scriptPath("report_run_failure.ts"), [...args, "--atoma-failed", "true"], {
       env: { GITHUB_REPOSITORY: "owner/repo" },
       rules: [{ match: ["issue", "comment"], code: 1, stdout: "gh: refused" }],
     });
@@ -153,7 +153,7 @@ describe("report_run_failure.ts as the workflow's gate", () => {
   test("no number to post to exits non-zero, having called nothing", () => {
     const r = runWithFakeGh(
       scriptPath("report_run_failure.ts"),
-      ["--agent", "engineer", "--run-url", "http://example.com/run/1", "--atoma-reached", "true"],
+      ["--agent", "engineer", "--run-url", "http://example.com/run/1", "--atoma-failed", "true"],
       { env: { GITHUB_REPOSITORY: "owner/repo" } },
     );
     expect(r.status).not.toBe(0);

@@ -727,8 +727,10 @@ const runAgentStep = new TypedOutputsStep(
     // `conclusion` is what turns success -- and every condition below reads the
     // outcome exactly as before. What this buys is that the failure reaches the
     // step that reports it: "Report failure" converts the failure into the
-    // turn-ending comment it owes the thread, and the run goes green when that
-    // comment got written, red when it did not. Without this, a failure that was
+    // turn-ending comment it owes the thread, and the colour is decided there —
+    // an agent failure whose notice posted is green, the machinery's is red even
+    // beside its notice. The boundary flag in the run below is how the two are
+    // told apart. Without this, a failure that was
     // already reported as a comment also turned the run red -- the same news
     // twice, in Notifications, where it drowns the runs whose red is their only
     // signal.
@@ -794,11 +796,11 @@ export GITHUB_RUN_ID ISSUE_NUMBER ISSUE_NOTIFY ATOMATON_RUN_TYPE ATOMATON_OPS_LO
 # \`--hook-base\` is the machinery's \`tools/\` directory, because that is where the
 # hook scripts are. The output goes to the run directory and is thrown away with it.
 #
-# Guarded, not bare: this bash has no \`set -e\`, so an unguarded failure here would
-# fall through and start atoma against a missing or partial tools file — the failure
-# surfacing later as, and dressed up as, atoma's own. A failure here is the
-# MACHINERY's, and "Report failure" reads that from \`atoma_reached\` staying unset,
-# which is why this exits before that line is written.
+# Guarded, not bare: the guard names the failure — the machinery could not produce
+# the tools file, atoma never started — instead of leaving the step's exit code to
+# say it, and it stops the step here, before the failure branch below can write the
+# boundary flag. A failure here is the MACHINERY's, and "Report failure" reads that
+# from \`atoma_failed\` staying unset.
 ${scriptCommandWithArgs(writeToolsFileRef, {
   config: `${MACHINERY}/${CONFIG_FILE_PATH}`,
   defaults: `${MACHINERY}/${TOOL_DEFAULTS_PATH}`,
@@ -896,29 +898,19 @@ if [ "$BUDGET" -lt ${MIN_AGENT_BUDGET_SECS} ]; then
 fi
 echo "agent time budget: $BUDGET seconds"
 
-# The machinery/agent boundary, published for "Report failure".
-#
-# \`continue-on-error\` makes the step's own wrapper failures and atoma's failures
-# indistinguishable in \`steps.atoma.outcome\` — both arrive as \`failure\` — and they
-# must not take the same colour: an agent failure that posted its notice is green,
-# a machinery failure is red, whatever the thread got. So the step publishes
-# \`atoma_reached\`, written at the one moment the machinery has finished and the
-# agent is about to take over. "Report failure" reads it: set — the failure is
-# atoma's own, notice posted, run green; unset — the machinery failed first, the
-# notice still heals the thread, but the step exits non-zero and the run stays red.
-#
-# Preflighting \`sudo\` first, because the real invocation cannot separate a sudo
-# refusal from atoma's own exit: \`|| EXIT_CODE=$?\` catches both, and once the flag
-# is written a failure is attributed to atoma. \`sudo -n -u "$TOOL_USER" true\` is
-# everything the invocation needs from sudo — the user, the passwordless grant —
-# at no cost, so a refusal is caught while it is still nameable. The residue is a
-# sudo that passes the preflight and fails the real invocation, which nothing here
-# can distinguish and which the log will say.
+# Preflighting \`sudo\`, because the real invocation cannot separate a sudo refusal
+# from atoma's own exit: \`|| EXIT_CODE=$?\` below catches both, and a failure once
+# atoma has run is attributed to atoma. \`sudo -n -u "$TOOL_USER" true\` is everything
+# the invocation needs from sudo — the user, the passwordless grant — at no cost, so
+# a refusal is caught here, while it is still nameable and while the boundary flag is
+# still unwritten: "Report failure" reads that as the machinery's. The residue is a
+# sudo that passes the preflight and fails the real invocation, which arrives as
+# atoma's exit code and is attributed to atoma; nothing in this script can
+# distinguish the two, and the log will say.
 if ! sudo -n -u "${TOOL_USER}" true 2>/dev/null; then
   echo "::error::cannot run the tool servers as ${TOOL_USER}: sudo refused; atoma never started"
   exit 1
 fi
-echo "atoma_reached=true" >> "$GITHUB_OUTPUT"
 
 EXIT_CODE=0
 sudo -n -u "${TOOL_USER}" env "\${AGENT_ENV[@]}" \\
@@ -952,10 +944,10 @@ fi
 # read_run_ending.ts.
 #
 # A non-zero status that is not the soft stop is still a failure and still ends the
-# step, so none of the outputs below are written: the turn failed, and
-# decide_turn_ending.ts reads that from the step's own outcome. "Report failure"
-# turns that failure into the ending it owes the thread, and its own exit code
-# decides whether the run also stays red.
+# step, so none of the run's own outputs are written: the turn failed, and
+# decide_turn_ending.ts reads that from the step's outcome. "Report failure" turns
+# that failure into the ending it owes the thread, and the colour it leaves behind is
+# decided by the flag the failure branch below publishes.
 if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
   ${scriptCommandWithArgs(readRunEndingRef, {
     // The same two paths the agent step just handed atoma, from the same constants,
@@ -965,6 +957,15 @@ if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
     "stop-file": STOP_FILE,
   })}
 elif [ "$EXIT_CODE" != "0" ]; then
+  # atoma's own failure — neither success nor the soft stop — published for
+  # "Report failure", which leaves the run green only for this case. Everything
+  # the machinery does around atoma — the tools file, the sudo preflight above,
+  # and the reads that turn a 0/2 exit into an ending, which this bash runs with
+  # \`-e\` — leaves the flag unwritten, and unwritten is red: the machinery's.
+  # The residue is a machinery failure that arrives as atoma's exit code (a sudo
+  # that passed the preflight and failed inside the real invocation), which
+  # nothing here can tell from atoma's own; the log will say.
+  echo "atoma_failed=true" >> "$GITHUB_OUTPUT"
   exit $EXIT_CODE
 fi
 
@@ -1026,10 +1027,11 @@ echo "changed=\${CHANGED}" >> "$GITHUB_OUTPUT"
   // `reported` rides along with `ended_because`: both are read out of the saved
   // session by read_run_ending.ts, from one open of one file, because they are two
   // facts about the same run and a second read is a second answer waiting to disagree.
-  // `atoma_reached` rides alone: it is written before the agent starts and by
-  // nothing else, so its absence is the machinery failing first — see the boundary
-  // comment in the run above, and "Report failure" which reads it.
-  ["result", "directive", "ended_because", "reported", "chain_continues", "changed", "atoma_reached"] as const,
+  // `atoma_failed` rides alone: it is written only when atoma's own exit is a
+  // failure — neither success nor the soft stop — and by nothing else, so its
+  // absence is the machinery's, wherever it struck. See the comments in the run
+  // above, and "Report failure" which reads it.
+  ["result", "directive", "ended_because", "reported", "chain_continues", "changed", "atoma_failed"] as const,
 );
 
 const tokenUsageStep = new TypedOutputsStep({
@@ -1193,14 +1195,14 @@ const saveSessionStep = new TypedOutputsStep({
  * the run ends green — and non-zero when it was not, which leaves the red standing
  * for whatever the thread alone cannot say.
  *
- * The agent's own vs the machinery's is `atoma_reached`, the output "Run agent"
- * writes at the machinery/agent boundary and nothing else writes: set means the
- * machinery finished and the failure is the agent's; unset means the machinery
- * failed first — a tools file it could not write, a sudo it was refused — and the
- * notice still heals the thread while the run stays red, because red is the
- * machinery's signal and the thread is only healed beside it, not instead of it.
- * Absent reads as unset: a future rename that loses the output turns every failure
- * red again, which is the conservative direction.
+ * The agent's own vs the machinery's is `atoma_failed`, the output "Run agent"
+ * writes when atoma's own exit is neither success nor the soft stop, and nothing
+ * else writes: set means the failure is atoma's own; unset means the machinery's —
+ * a tools file it could not write, a sudo it was refused, an ending it could not
+ * read — and the notice still heals the thread while the run stays red, because red
+ * is the machinery's signal and the thread is only healed beside it, not instead of
+ * it. Absent reads as unset: a future rename that loses the output turns every
+ * failure red again, which is the conservative direction.
  *
  * `always()` is required here, not just the `steps.atoma.outcome == 'failure'`
  * condition alone: without an explicit always()/failure()/success() call anywhere in a
@@ -1226,12 +1228,12 @@ const saveSessionStep = new TypedOutputsStep({
  *
  * A failure the thread alone cannot carry. A step that dies before the agent --
  * checkout, the tool installs -- skips "Run agent" entirely, so its `outcome` is
- * `skipped` and no ending is owed; the machinery inside "Run agent" fails before
- * atoma starts, `atoma_reached` stays unset, and the notice is posted but the run
- * goes red; a machinery step that dies after the agent reported fails the job
- * itself; and a notice that `gh` refuses exits this step non-zero. In each, the
- * red run is the signal, and re-running it resumes from the saved session and
- * writes the ending it owed.
+ * `skipped` and no ending is owed; the machinery inside "Run agent" fails — the
+ * tools file, the sudo preflight, an ending it could not read — `atoma_failed`
+ * stays unset, and the notice is posted but the run goes red; a machinery step
+ * that dies after the agent reported fails the job itself; and a notice that
+ * `gh` refuses exits this step non-zero. In each, the red run is the signal, and
+ * re-running it resumes from the saved session and writes the ending it owed.
  */
 const reportFailureStep = new TypedOutputsStep({
   name: "Report failure",
@@ -1239,10 +1241,10 @@ const reportFailureStep = new TypedOutputsStep({
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",
-    // The machinery/agent boundary, read off "Run agent" itself: empty means the
-    // machinery failed before atoma started, and the run stays red even once the
-    // notice has healed the thread. See "The colour follows the comment" above.
-    ATOMA_REACHED: runAgentStep.outputs.atoma_reached,
+    // Whose the failure was, read off "Run agent" itself: empty means the failure
+    // is the machinery's, and the run stays red even once the notice has healed
+    // the thread. See "The colour follows the comment" above.
+    ATOMA_FAILED: runAgentStep.outputs.atoma_failed,
     NUMBER: "${{ inputs.number }}",
     AGENT: "${{ inputs.agent }}",
     NOTIFY: notifyStep.outputs.notify,
@@ -1254,7 +1256,7 @@ const reportFailureStep = new TypedOutputsStep({
     notify: "\${NOTIFY}",
     "run-url": "\${RUN_URL}",
     "logs-file": `${RUN_DIR}/atomaton_logs.txt`,
-    "atoma-reached": "\${ATOMA_REACHED}",
+    "atoma-failed": "\${ATOMA_FAILED}",
   })}\n`,
 });
 

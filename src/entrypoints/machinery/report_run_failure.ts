@@ -32,10 +32,11 @@
  * first case, and non-zero for the other two. No extra gate step is needed: the
  * step's own failure IS the run's failure.
  *
- * Whose the failure was arrives as `--atoma-reached`, the output "Run agent" writes
- * at the machinery/agent boundary and nothing else writes. Absent reads as NOT
- * reached — a future rename that loses the output turns every failure red again,
- * which is the conservative direction.
+ * Whose the failure was arrives as `--atoma-failed`, the output "Run agent" writes
+ * when atoma's own exit is a failure and nothing else writes. Absent reads as NOT
+ * atoma's — the machinery's, wherever it struck — so the notice still posts while
+ * the run stays red, and a future rename that loses the output turns every failure
+ * red again, which is the conservative direction.
  *
  * ## Why the excerpt is last
  *
@@ -51,7 +52,7 @@
  *
  * Usage:
  *   report_run_failure.ts --number N --agent NAME [--notify LOGIN]
- *     --run-url URL [--logs-file FILE] [--atoma-reached true]
+ *     --run-url URL [--logs-file FILE] [--atoma-failed true]
  */
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -68,12 +69,12 @@ export interface ReportRunFailureArgs {
   "run-url": string;
   "logs-file"?: string;
   /**
-   * Whether the machinery reached `atoma run` — the output "Run agent" writes at
-   * the machinery/agent boundary. Absent or anything but "true" reads as NOT
-   * reached, which is the conservative direction: the machinery failed first, the
+   * Whether atoma itself failed — the output "Run agent" writes when its exit is
+   * neither success nor the soft stop. Absent or anything but "true" reads as the
+   * machinery's, wherever it struck, which is the conservative direction: the
    * notice still posts, and the run stays red. See "The exit code is the gate".
    */
-  "atoma-reached"?: string;
+  "atoma-failed"?: string;
 }
 
 export const ref = defineScript<ReportRunFailureArgs>(import.meta.url);
@@ -154,7 +155,7 @@ function main(): void {
       notify: { type: "string" },
       "run-url": { type: "string" },
       "logs-file": { type: "string" },
-      "atoma-reached": { type: "string" },
+      "atoma-failed": { type: "string" },
     },
   });
 
@@ -182,16 +183,15 @@ function main(): void {
   const { code, stdout, stderr } = gh("issue", "comment", String(values.number), "--body", body);
   // Green only for an agent failure whose notice landed -- see "The exit code is
   // the gate" above. The other two cases both exit non-zero: the post failed (red
-  // is the only signal left), or the machinery failed first and the notice, though
-  // posted, healed the thread beside a red run rather than instead of one.
-  const atomaRan = (values["atoma-reached"] ?? "").trim() === "true";
+  // is the only signal left), or the failure is the machinery's -- wherever it
+  // struck -- and the notice, though posted, healed the thread beside a red run
+  // rather than instead of one.
+  const atomaFailed = (values["atoma-failed"] ?? "").trim() === "true";
   if (code !== 0) {
     console.error(`Failed to post the failure comment: ${stderr || stdout}`);
     process.exitCode = 1;
-  } else if (!atomaRan) {
-    console.error(
-      "The machinery failed before the agent started; the notice healed the thread, but the run stays red.",
-    );
+  } else if (!atomaFailed) {
+    console.error("The machinery failed, not the agent; the notice healed the thread, but the run stays red.");
     process.exitCode = 1;
   }
 }
