@@ -296,6 +296,16 @@ Atomaton command error: \${ERROR}"
  * own pull request fixes it, and a person who asked for a run is owed the answer
  * themselves. See `ValidationInput.askedByPerson`.
  *
+ * There is deliberately no "CI is waiting" comment in this workflow, though the wait
+ * is minutes long. It used to be one, posted the moment the command was handed over
+ * -- and it said "`<agent>` will start once CI finishes" before validation had
+ * decided anything: validation reuses a CI run that already finished, so its most
+ * common case promised a wait that did not exist, and when checks fail the agent the
+ * result dispatches is the engineer, not the one the command named (#271). The
+ * comment now lives where the wait is known -- `validate_pull_request.ts`'s
+ * `notifyCiWaiting`, posted only when CI actually runs and only for a person's
+ * command.
+ *
  * The branch is read here rather than passed in, because the comment carries only
  * the number and the validation needs the head branch to run CI against.
  */
@@ -321,38 +331,6 @@ ${scriptCommandWithArgs(dispatchPrValidationRef, {
   branch: "\${BRANCH}",
   "asked-by-person": "true",
 })}
-`,
-});
-
-/**
- * The comment that says a run is waiting on CI.
- *
- * Posted immediately, because the wait is minutes long and a person who typed a
- * command and saw nothing happen has no way to tell a queued run from a broken
- * workflow. It is the same reason the runner posts a start marker: the label says
- * something is happening, and this says what.
- *
- * Tagged out of the model's context. It is addressed to the person who typed the
- * command, and the agent that eventually runs is told the same thing by its own
- * dispatch.
- *
- * Not a turn comment: the person's `/agent` on the pull request IS the `asked`, and the
- * turn is still the agent's while validation runs. An ending here would hand the node
- * back to a person while the run they asked for was on its way.
- */
-const prWaitingStep = new TypedOutputsStep({
-  name: "Say the run is waiting for CI",
-  if:
-    `${dispatchStep.rawOutputs.agent} != '' && ${targetStep.rawOutputs.type} == 'pr' && ` +
-    `${guardStep.rawOutputs.blocked} != 'true' && ${closedGuardStep.rawOutputs.blocked} != 'true'`,
-  shell: "bash",
-  env: {
-    GH_TOKEN: "${{ github.token }}",
-    NUMBER: targetStep.outputs.number,
-    AGENT: dispatchStep.outputs.agent,
-  },
-  run: `gh issue comment "$NUMBER" --body "${LLM_CONTEXT_TAG.write("exclude")}
-Atomaton: \\\`\${AGENT}\\\` will start once CI finishes on this pull request."
 `,
 });
 
@@ -400,7 +378,6 @@ export const atomaManualComment = new Workflow("atomaton-manual-comment", {
       resumeSubtreeStep,
       dispatchStep,
       commandErrorStep,
-      prWaitingStep,
       prValidationStep,
     ],
   )

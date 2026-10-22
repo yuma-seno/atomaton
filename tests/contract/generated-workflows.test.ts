@@ -101,6 +101,33 @@ describe("generated workflows", () => {
   });
 
   /**
+   * The "CI is running" comment does not belong to the workflow that hands a command
+   * to validation.
+   *
+   * `prWaitingStep` used to post "`<agent>` will start once CI finishes" the moment a
+   * person's command on a pull request was handed over -- before validation had
+   * decided anything. Two things were wrong with it (#271): validation reuses a CI
+   * run that already finished, so the most common case promised a wait that did not
+   * exist; and when checks fail, the agent the result dispatches is the engineer who
+   * opened the pull request, not the one the command named. The comment now lives in
+   * `validate_pull_request.ts` (`notifyCiWaiting`), posted only when CI actually
+   * runs and only for a person's command -- the only place that knows either fact.
+   */
+  test("the manual-comment workflow does not promise what validation will decide", () => {
+    type WorkflowDocument = { jobs?: Record<string, { steps?: { name?: string; run?: string }[] }> };
+    const source = readFileSync("dist/.github/workflows/atomaton-manual-comment.yml", "utf8");
+    const workflow = Bun.YAML.parse(source) as WorkflowDocument;
+    const steps = workflow.jobs?.parse?.steps ?? [];
+    expect(steps.some((step) => step.name === "Say the run is waiting for CI"), "the waiting step is gone").toBe(
+      false,
+    );
+    expect(
+      source.includes("will start once CI finishes"),
+      "no step may promise the agent the result may not name",
+    ).toBe(false);
+  });
+
+  /**
    * The same rule, on the other side of the line, and stated the way it actually is.
    *
    * The test above reads the generated workflow and can only see a notice posted by
