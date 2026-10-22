@@ -257,6 +257,10 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
+function isQuotation(body) {
+  return QUOTES_TAG.has(body);
+}
 
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
@@ -303,8 +307,8 @@ function main() {
   const { comments, read } = readComments(repo, number);
   if (!read)
     console.error(`WARN could not read comments on ${repo}#${number}; treating the chain as fresh`);
-  const handoffs = handoffsSincePerson(comments, (body) => AGENT_TAG.has(body));
-  const stalled = runsWithoutChange(comments, (body) => AGENT_TAG.has(body) && CHANGED_TAG.read(body) === "no");
+  const handoffs = handoffsSincePerson(comments, (body) => !isQuotation(body) && AGENT_TAG.has(body));
+  const stalled = runsWithoutChange(comments, (body) => !isQuotation(body) && AGENT_TAG.has(body) && CHANGED_TAG.read(body) === "no");
   const decision = stopReason({
     handoffs,
     handoffLimit: limit,
