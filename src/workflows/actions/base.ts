@@ -456,7 +456,7 @@ export class DefinedJob<TOutputsMap extends Record<string, string> = Record<neve
  *
  * Only fits a genuinely LINEAR producer -> consumer chain, where each link
  * depends on exactly the one immediately before it. A real multi-hop DAG
- * (e.g. atomaton-pr-merged.wac.ts, where two downstream jobs each need both
+ * (e.g. atomaton-pr-closed.wac.ts, where two downstream jobs each need both
  * their immediate predecessor AND its predecessor) still needs actual named
  * handles -- that's an honest reflection of a real graph, not something a
  * linear chain can flatten away.

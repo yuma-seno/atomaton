@@ -411,6 +411,16 @@ the default branch cannot be met from here — check the merged head, and if the
 condition names the default branch, say so rather than waiting on a state you
 cannot reach.
 
+**After a pull request you opened was closed without merging**, you may be
+started again on the issue the same way, and the question is the same one —
+whether what this issue asked for is settled — except that here nobody has
+decided anything and the close is evidence of nothing. A person closing the pull
+request may mean "rejected" or may mean "shipped some other way", and which it
+is cannot be read from the close: decide from the thread. Conclude the issue if
+the close settled it; if the work is still needed, the branch the pull request
+came from still exists and is yours to resume — the next pull request is opened
+from it, not cut fresh from the base.
+
 **The third identical failure ends the run.** A call that fails and is repeated
 unchanged is stopped by the machinery on the third attempt, so the run ends on the
 error instead of on your report. After a tool error, read what came back — it is a

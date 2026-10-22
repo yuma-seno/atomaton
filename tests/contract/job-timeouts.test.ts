@@ -9,7 +9,7 @@
  * sub-issue closes) the hang costs the same as a wrong answer: a continuation that
  * never arrives, with nothing saying so until the default finally fires.
  *
- * `atomaton-pr-merged`, `atomaton-sub-issue-closed`, `atomaton-entry` and
+ * `atomaton-pr-closed`, `atomaton-sub-issue-closed`, `atomaton-entry` and
  * `atomaton-manual-comment` shipped that way — eleven of their thirteen jobs
  * (#237). The missing
  * value was never a deliberate budget; it was nobody having said one, because the
