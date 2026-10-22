@@ -7889,6 +7889,19 @@
     ]
   },
   {
+    "path": "sessions/issue-287/atomaton.json",
+    "agent": "atomaton",
+    "messages": 2,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
+  },
+  {
     "path": "sessions/issue-3/atomaton.json",
     "agent": "atomaton",
     "messages": 100,
