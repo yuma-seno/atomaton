@@ -14,6 +14,8 @@
  * in-process (resolveNotify/dispatchOrchestratorIfSubIssueReady/etc.);
  * always `console.error()` (`log()` below) for logging.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { gh, ghGraphql, gitRun, nothingToCommit } from "../../../adapters/github/gh.ts";
 import { getBaseBranch, getLabel } from "../../../adapters/runner/config.ts";
 import { resolveNotify } from "../../../adapters/github/notify.ts";
@@ -1065,67 +1067,91 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
 }
 
 
-function commitAndPush(a: z.infer<typeof COMMIT_AND_PUSH_SCHEMA>): string {
-  const message = a.message;
-  // Before anything is written. A commit message is the other place GitHub acts on a
-  // closing keyword, and the harder of the two to notice afterwards: it is not in the
-  // pull request's diff, and nobody opens the commit list to check.
-  refuseClosingKeywords(message, "commit message");
-  // Before the commit, so a failure to name a branch does not leave a commit
-  // stranded on the base branch.
-  const branch = branchForCommit(REPO);
-  {
-    const { code, stdout, stderr } = gitRun("add", "-A");
-    if (code) mcpFail(stderr || stdout);
+/**
+ * The first line of git's own record of the merge in progress, or "".
+ *
+ * Read rather than recomposed. `git merge -m` writes the message into `MERGE_MSG`, so
+ * a merge `merge_base_into_branch` started leaves `Merge base branch 'main' (abc1234)
+ * into 'atomaton/issue-3'` there, and git's own default leaves what it decided. The
+ * base a conflicted merge came from was fixed when that merge started, and asking the
+ * configuration again later can answer a different branch.
+ */
+function mergeMessage(): string {
+  const dir = gitRun("rev-parse", "--git-dir");
+  if (dir.code) return "";
+  try {
+    const text = readFileSync(join(dir.stdout.trim(), "MERGE_MSG"), "utf8");
+    return text.split("\n").map((line) => line.trim()).find((line) => line && !line.startsWith("#")) ?? "";
+  } catch {
+    return "";
   }
-  // "nothing to commit" is not a failure to commit; it is having nothing to commit.
-  // It happened 23 times, and failing here skipped the push below -- so an agent that
-  // had committed through the shell and called this to publish the work got an error
-  // and a branch that never reached origin. The push is the part that still had
-  // something to do, so fall through to it and report honestly that nothing was
-  // committed. `git push` on an already-published branch exits 0 saying so.
-  let committed = true;
-  {
-    const result = gitRun("commit", "-m", message);
-    if (result.code) {
-      if (!nothingToCommit(result)) mcpFail(result.stderr || result.stdout);
-      committed = false;
+}
+
+/**
+ * The merge an unfinished `merge_base_into_branch` left behind, if there is one.
+ *
+ * `MERGE_HEAD` is git's own record that the next commit has two parents, and the
+ * unmerged entries in the index are the paths the merge could not decide. Both have to
+ * be read BEFORE `git add -A`, which is what stages a conflicted path and so tells git
+ * the conflict is resolved.
+ *
+ * Which of those paths are still unresolved is asked of the FILE, not of the index, and
+ * that is not a shortcut: an agent that resolved a conflict by editing it has no way to
+ * stage the result -- raw `git add` is a mutation the shell guard refuses -- so the
+ * index would call every conflict unresolved until `commit_and_push` had already
+ * committed it. The content can answer: git's markers are `<<<<<<< label` and
+ * `>>>>>>> label` at the start of a line, and they are gone exactly when the conflict
+ * has been decided. A resolved path needs to be bracketed by git's end of it; a path
+ * written down as a literal, in a comment or a test, does not.
+ */
+function unfinishedMerge(): { head: string; unresolved: string[]; description: string } | undefined {
+  const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
+  if (head.code !== 0) return undefined;
+  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+  const paths =
+    unmerged.code === 0 ? unmerged.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : [];
+  const unresolved = paths.filter((path) => {
+    try {
+      return /^(?:<{7} |>{7} )/m.test(readFileSync(path, "utf8"));
+    } catch {
+      // Gone from the worktree, which is a resolution: `add -A` stages the deletion.
+      return false;
     }
-  }
-  let pushed = true;
-  {
-    const { code, stdout, stderr } = gitRun("push", "-u", "origin", branch);
-    if (code) mcpFail(stderr || stdout);
-    pushed = !/Everything up-to-date/i.test(`${stdout} ${stderr}`);
-  }
+  });
+  return { head: head.stdout.trim(), unresolved, description: mergeMessage() };
+}
 
-  // Only when something moved.
-  //
-  // The runner reads this log to decide whether a run changed anything, and stops a
-  // chain that has stopped moving. Letting the commit through when the tree was clean
-  // was right -- there was a commit waiting to be pushed -- but a call that commits
-  // nothing AND pushes nothing must not register as progress, or the fix to one
-  // failure would have quietly disarmed a guard against another.
-  const moved = committed || pushed;
-  if (moved) logOp("commit_and_push", { committed });
+/**
+ * Push the checked-out branch, and make GitHub run the required check on its new head.
+ *
+ * One copy for both callers that publish: `commit_and_push`, and
+ * `merge_base_into_branch`'s merge commit. A second copy would be a second place for
+ * the validation dispatch below to be forgotten — and forgetting it is invisible: the
+ * pull request keeps the check its previous head commit had, so the ruleset reads the
+ * required context as missing and the merge stays refused.
+ *
+ * A push to a branch that already has a pull request has to be validated the same way
+ * the first push was. Nothing else will do it: GitHub raises no event for a push made
+ * with GITHUB_TOKEN, so neither CI nor any routing workflow hears about this commit.
+ *
+ * Skipped when there is no pull request yet, which is the ordinary first push:
+ * `create_pr` dispatches validation itself once the pull request exists, and
+ * validating a branch with nothing to merge into would only burn a CI run.
+ *
+ * Repeated pushes within one run each dispatch, and the validation workflow's own
+ * concurrency group collapses them, keeping the last.
+ *
+ * Returns whether the remote moved, so a caller can report honestly that it pushed
+ * nothing.
+ */
+function pushBranch(branch: string): boolean {
+  const { code, stdout, stderr } = gitRun("push", "-u", "origin", branch);
+  if (code) mcpFail(stderr || stdout);
+  const pushed = !/Everything up-to-date/i.test(`${stdout} ${stderr}`);
+  if (!pushed) return false;
 
-  // A push to a branch that already has a pull request has to be validated the
-  // same way the first push was. Nothing else will do it: GitHub raises no event
-  // for a push made with GITHUB_TOKEN, so neither CI nor any routing workflow
-  // hears about this commit, and the pull request would keep whatever check the
-  // previous head commit had -- on a commit that is no longer the head, so the
-  // ruleset sees the required context as missing and the merge stays refused.
-  //
-  // Skipped when there is no pull request yet, which is the ordinary first push:
-  // `create_pr` dispatches validation itself once the pull request exists, and
-  // validating a branch with nothing to merge into would only burn a CI run.
-  //
-  // Repeated pushes within one run each dispatch, and the validation workflow's
-  // own concurrency group collapses them, keeping the last.
-  const open = moved
-    ? gh("pr", "list", "--repo", REPO, "--head", branch, "--state", "open", "--json", "number")
-    : { code: 1, stdout: "", stderr: "" };
-  if (moved && !open.code) {
+  const open = gh("pr", "list", "--repo", REPO, "--head", branch, "--state", "open", "--json", "number");
+  if (!open.code) {
     try {
       const [pr] = JSON.parse(open.stdout || "[]") as { number: number }[];
       // No reviewer argument. This dispatch exists to refresh the required check on
@@ -1149,12 +1175,69 @@ function commitAndPush(a: z.infer<typeof COMMIT_AND_PUSH_SCHEMA>): string {
       );
     }
   }
+  return true;
+}
+
+function commitAndPush(a: z.infer<typeof COMMIT_AND_PUSH_SCHEMA>): string {
+  const message = a.message;
+  // Before anything is written. A commit message is the other place GitHub acts on a
+  // closing keyword, and the harder of the two to notice afterwards: it is not in the
+  // pull request's diff, and nobody opens the commit list to check.
+  refuseClosingKeywords(message, "commit message");
+  // Before the commit, so a failure to name a branch does not leave a commit
+  // stranded on the base branch.
+  const branch = branchForCommit(REPO);
+  // Before `git add -A` below, which would stage the conflict markers and so tell git
+  // every conflict is resolved. `merge_base_into_branch` stops on a conflict and
+  // leaves the work in the worktree; this is the only way that merge is ever
+  // concluded, so refusing here is what keeps a marker file out of the branch.
+  const merge = unfinishedMerge();
+  if (merge && merge.unresolved.length > 0) {
+    mcpFail(
+      `The merge in progress still has unresolved conflicts: ${merge.unresolved.join(", ")}. ` +
+        "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge.",
+    );
+  }
+  {
+    const { code, stdout, stderr } = gitRun("add", "-A");
+    if (code) mcpFail(stderr || stdout);
+  }
+  // "nothing to commit" is not a failure to commit; it is having nothing to commit.
+  // It happened 23 times, and failing here skipped the push below -- so an agent that
+  // had committed through the shell and called this to publish the work got an error
+  // and a branch that never reached origin. The push is the part that still had
+  // something to do, so fall through to it and report honestly that nothing was
+  // committed. `git push` on an already-published branch exits 0 saying so.
+  //
+  // The message a merge is concluded with carries what was brought in -- the base
+  // branch, in git's own words from `MERGE_MSG`. The agent decides the rest of the
+  // commit message; what it cannot be expected to know is which merge it is closing,
+  // because the call that stopped for conflicts is not this one.
+  const commitMessage = merge ? `${message}\n\n${merge.description || `Merge ${merge.head}`}` : message;
+  let committed = true;
+  {
+    const result = gitRun("commit", "-m", commitMessage);
+    if (result.code) {
+      if (!nothingToCommit(result)) mcpFail(result.stderr || result.stdout);
+      committed = false;
+    }
+  }
+  const pushed = pushBranch(branch);
+
+  // Only when something moved.
+  //
+  // The runner reads this log to decide whether a run changed anything, and stops a
+  // chain that has stopped moving. Letting the commit through when the tree was clean
+  // was right -- there was a commit waiting to be pushed -- but a call that commits
+  // nothing AND pushes nothing must not register as progress, or the fix to one
+  // failure would have quietly disarmed a guard against another.
+  if (committed || pushed) logOp("commit_and_push", { committed });
 
   // `committed: false, pushed: false` is the honest report of a call that found nothing
   // to do. It used to be an error, which stopped the run; it is a fact the agent can
   // read and act on, and saying it plainly is better than either failing or implying
   // work was published.
-  return JSON.stringify({ ok: true, committed, pushed });
+  return JSON.stringify({ ok: true, committed, pushed, ...(merge ? { merge_head: merge.head } : {}) });
 }
 
 function syncBranch(a: z.infer<typeof SYNC_BRANCH_SCHEMA>): string {
@@ -1199,6 +1282,149 @@ function syncBranch(a: z.infer<typeof SYNC_BRANCH_SCHEMA>): string {
   const status = ahead! > 0 && behind! > 0 ? "diverged" : ahead! > 0 ? "ahead" : "up_to_date";
   logOp("sync_branch", { branch, status, ahead, behind });
   return JSON.stringify({ branch, status, ahead, behind });
+}
+
+/**
+ * The branch this run's work is based on: the one a merge brings in.
+ *
+ * The same rule `create_pr` states, applied to the node this run is actually on. An
+ * issue run resolves it from the tree — a sub-issue's base is its parent's branch, and
+ * anything else targets the configured base branch — because that is where its own
+ * pull request will aim. A pull request run has no issue to ask about: its `NUMBER` is
+ * the pull request, and the base that pull request aims at is the one base this branch
+ * must take in. Reading it from the pull request rather than re-deriving it is what
+ * makes a stacked pull request bring in its parent's branch and not the release branch
+ * underneath it.
+ *
+ * `getBaseBranch()` answers "" for "the repository's default branch", which `gh pr
+ * create` resolves on its own and a merge has to name: there is nothing to fetch from
+ * an empty name.
+ */
+function baseBranchForMerge(): string {
+  const number = nodeNumber();
+  if (isPrRun() && number !== undefined) {
+    const pr = ghJsonOrThrow<{ baseRefName?: string }>(
+      "pr", "view", String(number), "--repo", REPO, "--json", "baseRefName",
+    );
+    const fromPullRequest = (pr?.baseRefName ?? "").trim();
+    if (fromPullRequest) return fromPullRequest;
+  }
+
+  const fromTree = stackedPrBase(REPO) ?? getBaseBranch();
+  if (fromTree) return fromTree;
+
+  const repository = ghJsonOrThrow<{ defaultBranchRef?: { name?: string } }>(
+    "repo", "view", REPO, "--json", "defaultBranchRef",
+  );
+  const defaultBranch = (repository?.defaultBranchRef?.name ?? "").trim();
+  if (!defaultBranch) {
+    mcpFail(
+      `Cannot tell which branch this work is based on: no base branch is configured, and the repository's ` +
+        `default branch could not be read from GitHub.`,
+    );
+  }
+  return defaultBranch;
+}
+
+/**
+ * Bring this branch's base into it, as a merge commit, and push.
+ *
+ * The route `git merge` never had. #264: a pull request whose base had moved ahead
+ * could be brought up to date by no tool at all — `sync_branch` fast-forwards THIS
+ * branch from its OWN remote branch, which is the other question, and the shell guard
+ * refused a raw merge by saying to use the github tools. The run that hit it built the
+ * merge out of `commit-tree` and `update-ref`, and that merge reached no ops log, so
+ * the only record of it was the transcript.
+ *
+ * One node, one branch, one direction. The base comes INTO the checked-out branch;
+ * nothing is pushed anywhere else, no child's or sibling's branch is touched, and
+ * nothing cascades. A merge up the tree is what closing an issue and merging the pull
+ * request into the parent branch already do.
+ *
+ * A conflict commits nothing and leaves the markers in the worktree, because which side
+ * wins is a judgement about the code. A `package.json` version is the case that shows
+ * why no rule belongs here: both sides are plausible, and a machine choosing one
+ * silently rolls a release back.
+ */
+function mergeBaseIntoBranch(): string {
+  try {
+    return mergeBaseIntoBranchOrThrow();
+  } catch (error) {
+    // Every result, including this one: a merge that failed half-way is the entry
+    // someone reading the log most needs, and it is the one an early return loses.
+    logOp("merge_base_into_branch", { status: "failed", reason: (error as Error).message });
+    throw error;
+  }
+}
+
+function mergeBaseIntoBranchOrThrow(): string {
+  const branch = resolveBranch();
+  if (unfinishedMerge()) {
+    mcpFail(
+      "A merge is already in progress on this branch. Resolve its conflicts and call commit_and_push to close " +
+        "it before bringing another base in.",
+    );
+  }
+  const worktree = gitRun("status", "--porcelain");
+  if (worktree.code) mcpFail(worktree.stderr || worktree.stdout);
+  if (worktree.stdout.trim()) {
+    mcpFail("Cannot merge the base branch into a branch with uncommitted changes. Call commit_and_push first.");
+  }
+
+  const base = baseBranchForMerge();
+  if (base === branch) {
+    mcpFail(`'${base}' is both the branch this run is on and its base, so there is nothing to bring in.`);
+  }
+  const remoteRef = `refs/remotes/origin/${base}`;
+  const fetch = gitRun("fetch", "origin", `refs/heads/${base}:${remoteRef}`);
+  if (fetch.code) mcpFail(`Cannot fetch base branch '${base}': ${fetch.stderr || fetch.stdout}`);
+  const resolved = gitRun("rev-parse", remoteRef);
+  if (resolved.code) mcpFail(`Cannot resolve base branch '${base}': ${resolved.stderr || resolved.stdout}`);
+  const baseSha = resolved.stdout.trim();
+
+  const ancestor = gitRun("merge-base", "--is-ancestor", remoteRef, "HEAD");
+  if (ancestor.code === 0) {
+    logOp("merge_base_into_branch", { branch, base, status: "up_to_date", base_sha: baseSha });
+    return JSON.stringify({ status: "up_to_date", branch, base, base_sha: baseSha });
+  }
+  if (ancestor.code !== 1) {
+    mcpFail(`Cannot compare '${branch}' with '${base}': ${ancestor.stderr || ancestor.stdout}`);
+  }
+
+  // `--no-ff` so the result is always a merge commit: it records that the base was
+  // taken in, and it is one shape for every case rather than a fast-forward whose
+  // history says nothing about why it moved.
+  const merge = gitRun(
+    "merge", "--no-ff",
+    "-m", `Merge base branch '${base}' (${baseSha.slice(0, 12)}) into '${branch}'`,
+    remoteRef,
+  );
+  // Asked of the index rather than read from the merge's exit code: that code is 1 for
+  // a conflict and for several failures that are not one.
+  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+  const files = unmerged.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (files.length > 0) {
+    // Not committed, and deliberately not `merge --abort`: the markers are the work.
+    logOp("merge_base_into_branch", { branch, base, status: "conflicts", base_sha: baseSha, files });
+    return JSON.stringify({
+      status: "conflicts",
+      branch,
+      base,
+      base_sha: baseSha,
+      files,
+      note:
+        "Nothing was committed. The conflicts are in the worktree with their markers; resolve them, then call " +
+        "commit_and_push to close the merge.",
+    });
+  }
+  if (merge.code) mcpFail(`Merging '${base}' into '${branch}' failed: ${merge.stderr || merge.stdout}`);
+
+  const head = gitRun("rev-parse", "HEAD");
+  if (head.code) mcpFail(`Cannot resolve HEAD after the merge: ${head.stderr || head.stdout}`);
+  const commit = head.stdout.trim();
+  pushBranch(branch);
+  logOp("merge_base_into_branch", { branch, base, status: "merged", base_sha: baseSha, commit });
+  return JSON.stringify({ status: "merged", branch, base, base_sha: baseSha, commit });
 }
 
 /**
@@ -1647,9 +1873,16 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "get_branch", description: "Retrieve GitHub's branch metadata for an exact branch name, or report that no such branch exists. Use this to inspect remote branch identity and protection information, not local worktree state. A branch that is not there is an answer, not an error: it returns `{branch, exists: false}`, so this is the tool for checking before you create one. When the branch does exist it returns `branch`, `exists`, `sha` and `protected` -- the head commit's SHA, not the commit itself; use get_pr_diff or bash git log for commit content. Does not mutate GitHub.", schema: GET_BRANCH_SCHEMA, handler: getBranch }),
   defineMcpTool({
     name: "sync_branch",
-    description: "Synchronize the checked-out branch with its remote counterpart and report ahead/behind status. Use this after a non-fast-forward push failure or before retrying branch publication; it fast-forwards only when safe. It never rebases or force-pushes, and reports diverged branches for explicit resolution.",
+    description: "Synchronize the checked-out branch with its remote counterpart and report ahead/behind status. Use this after a non-fast-forward push failure or before retrying branch publication; it fast-forwards only when safe. It never rebases or force-pushes, and reports diverged branches for explicit resolution. It does NOT bring the base branch in — a branch behind its base is merge_base_into_branch's job.",
     schema: SYNC_BRANCH_SCHEMA,
     handler: syncBranch,
+  }),
+  defineMcpTool({
+    name: "merge_base_into_branch",
+    description:
+      "Bring this run's base branch into the checked-out branch, as a merge commit, and push it. The base is resolved the way create_pr resolves it: a sub-issue's is its parent's branch, anything else the configured base branch, and a pull request run's is the base the pull request aims at. It takes no arguments and touches no branch but this one: no cascade, no writes to a child's or sibling's branch, no rebase, no force-push. Returns {status: 'up_to_date'} when the base is already an ancestor, {status: 'merged', base, base_sha, commit} after a clean merge, or {status: 'conflicts', base, base_sha, files} — in which case nothing is committed and the conflict markers are left in the worktree: resolve them and call commit_and_push to close the merge. Every outcome is recorded in the ops log.",
+    schema: z.object({}),
+    handler: mergeBaseIntoBranch,
   }),
   defineMcpTool({ name: "get_check_runs", description: "Retrieve GitHub Actions and other check runs for a commit, branch, or tag. Use this to verify CI status after pushing or before merge decisions. Returns one object per check with `name`, `status`, `conclusion` and `html_url` -- follow the URL for a failing check's log, which is not included. Does not wait for incomplete checks.", schema: GET_CHECK_RUNS_SCHEMA, handler: getCheckRuns }),
   defineMcpTool({
@@ -1663,7 +1896,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_pr_review_comments", description: "Retrieve line-level review comments for one pull request. Use this to find file- and line-specific feedback; use get_pr_reviews for overall review decisions. Returns { total, omitted, comments } where each comment has `author`, `path`, `line`, `in_reply_to` and `body`; the surrounding code is not included, read it with the `read` tool or get_pr_diff, and a non-zero `omitted` means the rest did not fit. Does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: listPrReviewComments }),
   defineMcpTool({
     name: "commit_and_push",
-    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history.",
+    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush,
   }),

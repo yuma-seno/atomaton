@@ -16,6 +16,23 @@
   done. Deployment is not dispatched for a merge into a parent branch: that work
   is still in progress, and only the final pull request into the base branch
   carries it to release.
+- A node's base is exactly one branch: its parent's, or the base branch for a root
+  issue. When that branch moves ahead, the node brings it into its own branch with
+  `merge_base_into_branch`. The direction is always a pull — nothing writes to a
+  child's or a sibling's branch and nothing cascades, so two siblings catching up
+  with the same parent never touch each other's work, and there is no shared state
+  to keep consistent. A pull request run brings in the base its own pull request
+  aims at, which is the same branch. It is also the route a stacked child takes to
+  its parent's newer commits — the one it did not have before this.
+- The base arrives as a merge commit, never as a rebase: the branch's own commits
+  keep their hashes, and the merge records where it came from. A conflict stops it
+  — the markers stay in the worktree and nothing is committed — and the run
+  resolves them and calls `commit_and_push` to close the merge. Which side wins is
+  the agent's decision; a version in `package.json` is the case that shows why no
+  rule belongs there, since a machine choosing one could roll a release back
+  quietly.
+- `sync_branch` is the other question and does not answer this one: it
+  fast-forwards a branch to its own remote branch, and brings no base in.
 
 Which branch the first of these is cut from is
 [`base_branch`](../reference.md#base_branch), and the tree these branches follow is

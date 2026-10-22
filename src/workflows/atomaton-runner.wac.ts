@@ -1016,12 +1016,20 @@ echo "chain_continues=\${CHAIN_CONTINUES}" >> "$GITHUB_OUTPUT"
 # reason: domain/work/progress.ts stops a chain that is not getting anywhere, and the
 # most direct signal of that is a run that pushed nothing.
 #
-# Three ops count as progress. A commit is the obvious one; opening a pull request
-# and merging one both move the work along without necessarily pushing during THIS
-# run, and reading either as "changed nothing" would stop a chain at the moment it
-# was working.
+# A commit is the obvious one; opening a pull request and merging one both move the
+# work along without necessarily pushing during THIS run, and reading either as
+# "changed nothing" would stop a chain at the moment it was working.
+#
+# \`merge_base_into_branch\` is the fourth, and it is only progress in its \`merged\`
+# outcome. That is the route #264 added: a reviewer sees \`behind\` or \`conflicting\`,
+# the engineer brings the base in, the merge is clean and pushed, and no
+# commit_and_push follows because there is nothing left to commit -- so without this
+# the whole point of the route is recorded as a run that changed nothing, and two of
+# those stop the chain and call a person. Its other outcomes pushed nothing and must
+# keep counting as nothing: \`up_to_date\` found there was nothing to do, \`conflicts\`
+# is waiting on the agent, and \`failed\` is a failure.
 CHANGED=false
-if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -qE '"op":"(commit_and_push|create_pr|merge_pr)"' "${RUN_DIR}/atomaton_ops.log"; then
+if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -qE '"op":"(commit_and_push|create_pr|merge_pr)"|"op":"merge_base_into_branch".*"status":"merged"' "${RUN_DIR}/atomaton_ops.log"; then
   CHANGED=true
 fi
 echo "changed=\${CHANGED}" >> "$GITHUB_OUTPUT"

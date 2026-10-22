@@ -114,6 +114,90 @@ function advanceRemote(seed: string): string {
   return git(seed, "rev-parse", "HEAD");
 }
 
+/**
+ * A repository with a base branch and a work branch cut from it, which is the shape
+ * `merge_base_into_branch` exists for: `main` moves, and `atomaton/issue-1` has to take
+ * it in.
+ */
+function makeMergeBaseFixture(): { root: string; seed: string; work: string } {
+  const root = mkdtempSync(join(tmpdir(), "atomaton-merge-base-"));
+  const remote = join(root, "remote.git");
+  const seed = join(root, "seed");
+  const work = join(root, "work");
+  git(root, "init", "--bare", "--initial-branch=main", remote);
+  git(root, "init", "--initial-branch=main", seed);
+  git(seed, "config", "user.name", "Atomaton Test");
+  git(seed, "config", "user.email", "atomaton@example.com");
+  writeFileSync(join(seed, "shared.txt"), "one\n");
+  writeFileSync(join(seed, "README.md"), "readme\n");
+  git(seed, "add", ".");
+  git(seed, "commit", "-m", "initial");
+  git(seed, "remote", "add", "origin", remote);
+  git(seed, "push", "-u", "origin", "main");
+  git(root, "clone", remote, work);
+  git(work, "config", "user.name", "Atomaton Test");
+  git(work, "config", "user.email", "atomaton@example.com");
+  git(work, "checkout", "-b", "atomaton/issue-1");
+  writeFileSync(join(work, "work.txt"), "the work\n");
+  git(work, "add", "work.txt");
+  git(work, "commit", "-m", "the work");
+  git(work, "push", "-u", "origin", "atomaton/issue-1");
+  return { root, seed, work };
+}
+
+/** A commit on `main` in the seed clone, pushed. Returns its sha. */
+function commitOnMain(seed: string, file: string, content: string): string {
+  git(seed, "checkout", "main");
+  writeFileSync(join(seed, file), content);
+  git(seed, "add", file);
+  git(seed, "commit", "-m", `base change to ${file}`);
+  git(seed, "push", "origin", "main");
+  return git(seed, "rev-parse", "HEAD");
+}
+
+/** A commit on the work branch in the work clone, pushed. Returns its sha. */
+function commitOnWork(work: string, file: string, content: string): string {
+  writeFileSync(join(work, file), content);
+  git(work, "add", file);
+  git(work, "commit", "-m", `work change to ${file}`);
+  git(work, "push", "origin", "atomaton/issue-1");
+  return git(work, "rev-parse", "HEAD");
+}
+
+/**
+ * The environment a merge needs on an issue run with no `config.yaml` beside it.
+ *
+ * `parentIssueOf` is asked whether #1 is a sub-issue (it is not, so the base is the
+ * configured base branch, which is empty) and the default branch then has to be named,
+ * because `merge_base_into_branch` has to have something to fetch from.
+ */
+function mergeBaseEnv(dir: string, extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    TYPE: "issue",
+    NUMBER: "1",
+    BRANCH: "atomaton/issue-1",
+    ATOMATON_OPS_LOG: join(dir, "ops.log"),
+    FAKE_GH_LOG: join(dir, "gh.log"),
+    ...fakeGhSeam(),
+    FAKE_GH_RESPONSES: JSON.stringify([
+      { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+      { match: ["repo", "view"], stdout: JSON.stringify({ defaultBranchRef: { name: "main" } }) },
+      { match: ["pr", "list"], stdout: "[]" },
+    ]),
+    ...extra,
+  };
+}
+
+/** Every `logOp` entry this run wrote, in order. */
+function opsLog(dir: string): Record<string, unknown>[] {
+  const path = join(dir, "ops.log");
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
 describe("mcp/github.ts", () => {
   test("initialize returns server info", async () => {
     const r = await sendRequest("github.ts", {
@@ -127,7 +211,7 @@ describe("mcp/github.ts", () => {
       jsonrpc: "2.0", id: 2, method: "tools/list", params: {},
     });
     const names = r.result.tools.map((t: { name: string }) => t.name);
-    for (const tool of ["create_sub_issue", "create_root_issue", "create_pr", "get_issue", "search_remote_code", "get_pr_diff", "sync_branch"]) {
+    for (const tool of ["create_sub_issue", "create_root_issue", "create_pr", "get_issue", "search_remote_code", "get_pr_diff", "sync_branch", "merge_base_into_branch"]) {
       expect(names).toContain(tool);
     }
   });
@@ -658,6 +742,197 @@ describe("mcp/github.ts", () => {
       removeTemp(root);
     }
   });
+
+  /**
+   * #264: a pull request whose base had moved ahead could be brought up to date by no
+   * tool at all. `sync_branch` answers the other question -- this branch against its own
+   * remote branch -- and the shell guard refused a raw merge by naming a tool set with
+   * no merge in it, so the run that hit it built the merge out of `commit-tree` and
+   * `update-ref`, where no ops log could see it.
+   */
+  test("merge_base_into_branch merges the base in and pushes the merge commit", async () => {
+    const { root, seed, work } = makeMergeBaseFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-base-env-"));
+    try {
+      const baseSha = commitOnMain(seed, "README.md", "readme, updated\n");
+      const before = git(work, "rev-parse", "HEAD");
+
+      const response = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 20, method: "tools/call", params: { name: "merge_base_into_branch", arguments: {} } },
+        mergeBaseEnv(dir),
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      const result = JSON.parse(response.result.content[0].text) as {
+        status: string; base: string; base_sha: string; commit: string;
+      };
+      expect(result).toMatchObject({ status: "merged", base: "main", base_sha: baseSha });
+
+      // A merge commit: the branch's own work is the first parent, the base the second.
+      const parents = git(work, "rev-list", "--parents", "-n", "1", "HEAD").split(/\s+/);
+      expect(parents.length).toBe(3);
+      expect(git(work, "rev-parse", "HEAD^1")).toBe(before);
+      expect(git(work, "rev-parse", "HEAD^2")).toBe(baseSha);
+      expect(git(work, "rev-parse", "HEAD")).toBe(result.commit);
+      // Pushed, because a merge nobody can see is not a pull request that can merge.
+      expect(git(work, "rev-parse", "origin/atomaton/issue-1")).toBe(result.commit);
+
+      expect(opsLog(dir).find((entry) => entry.op === "merge_base_into_branch")).toMatchObject({
+        status: "merged",
+        base: "main",
+        base_sha: baseSha,
+      });
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  test("merge_base_into_branch reports a base that is already an ancestor", async () => {
+    const { root, work } = makeMergeBaseFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-base-env-"));
+    try {
+      const before = git(work, "rev-parse", "HEAD");
+
+      const response = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "merge_base_into_branch", arguments: {} } },
+        mergeBaseEnv(dir),
+        work,
+      );
+      const result = JSON.parse(response.result.content[0].text) as { status: string };
+      expect(result.status).toBe("up_to_date");
+      expect(git(work, "rev-parse", "HEAD")).toBe(before);
+      expect(opsLog(dir).find((entry) => entry.op === "merge_base_into_branch")).toMatchObject({
+        status: "up_to_date",
+      });
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * A pull request run has no issue to resolve the tree from: its `NUMBER` is the pull
+   * request, and the base that pull request aims at is the branch it has to take in.
+   * Reading it from the pull request is what keeps a stacked pull request bringing in
+   * its parent's branch rather than the release branch underneath it.
+   */
+  test("a pull request run brings in the base its own pull request aims at", async () => {
+    const { root, seed, work } = makeMergeBaseFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-base-env-"));
+    try {
+      git(seed, "checkout", "-b", "atomaton/issue-12");
+      writeFileSync(join(seed, "README.md"), "the parent moved on\n");
+      git(seed, "add", "README.md");
+      git(seed, "commit", "-m", "parent update");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      const parentSha = git(seed, "rev-parse", "HEAD");
+
+      const response = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 25, method: "tools/call", params: { name: "merge_base_into_branch", arguments: {} } },
+        {
+          TYPE: "pr",
+          NUMBER: "7",
+          BRANCH: "atomaton/issue-1",
+          ATOMATON_OPS_LOG: join(dir, "ops.log"),
+          FAKE_GH_LOG: join(dir, "gh.log"),
+          ...fakeGhSeam(),
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["pr", "view"], stdout: JSON.stringify({ baseRefName: "atomaton/issue-12" }) },
+            { match: ["pr", "list"], stdout: "[]" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({
+        status: "merged",
+        base: "atomaton/issue-12",
+        base_sha: parentSha,
+      });
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * A conflict is the agent's to decide, not the tool's. Nothing is committed, the
+   * markers are left where the agent will read them, and `commit_and_push` is what
+   * closes the merge -- refusing while a conflicted path is still unresolved, because
+   * `git add -A` would otherwise mark the markers resolved and commit them.
+   */
+  test("a conflict is left in the worktree, committed by nobody but the agent", async () => {
+    const { root, seed, work } = makeMergeBaseFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-base-env-"));
+    try {
+      const branchHead = commitOnWork(work, "shared.txt", "from the branch\n");
+      const baseSha = commitOnMain(seed, "shared.txt", "from the base\n");
+
+      const conflicted = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 22, method: "tools/call", params: { name: "merge_base_into_branch", arguments: {} } },
+        mergeBaseEnv(dir),
+        work,
+      );
+      expect(conflicted.result.isError, conflicted.result.content?.[0]?.text).toBeFalsy();
+      const result = JSON.parse(conflicted.result.content[0].text) as { status: string; files: string[]; base_sha: string };
+      expect(result).toMatchObject({ status: "conflicts", base_sha: baseSha });
+      expect(result.files).toContain("shared.txt");
+      // Nothing was committed, and the markers are in the file for the agent to read.
+      expect(git(work, "rev-parse", "HEAD")).toBe(branchHead);
+      expect(readFileSync(join(work, "shared.txt"), "utf8")).toContain("<<<<<<<");
+      expect(git(work, "rev-parse", "-q", "--verify", "MERGE_HEAD")).toBe(baseSha);
+      expect(opsLog(dir).find((entry) => entry.op === "merge_base_into_branch")).toMatchObject({
+        status: "conflicts",
+        base: "main",
+      });
+
+      const refused = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 23, method: "tools/call",
+          params: { name: "commit_and_push", arguments: { message: "resolve the conflict" } },
+        },
+        mergeBaseEnv(dir),
+        work,
+      );
+      expect(refused.result.isError).toBe(true);
+      expect(refused.result.content[0].text).toContain("shared.txt");
+      expect(git(work, "rev-parse", "HEAD")).toBe(branchHead);
+
+      writeFileSync(join(work, "shared.txt"), "from the branch, and the base\n");
+      const closed = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 24, method: "tools/call",
+          params: { name: "commit_and_push", arguments: { message: "resolve the conflict" } },
+        },
+        mergeBaseEnv(dir),
+        work,
+      );
+      expect(closed.result.isError, closed.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(closed.result.content[0].text)).toMatchObject({ ok: true, committed: true, merge_head: baseSha });
+
+      // Closed as a merge commit, not as a plain commit that happens to have the base's
+      // tree: both parents are there, and the message says what was taken in.
+      const parents = git(work, "rev-list", "--parents", "-n", "1", "HEAD").split(/\s+/);
+      expect(parents.length).toBe(3);
+      expect(git(work, "rev-parse", "HEAD^2")).toBe(baseSha);
+      const message = git(work, "log", "-1", "--format=%B");
+      expect(message).toContain("resolve the conflict");
+      expect(message).toContain("Merge base branch 'main'");
+      expect(message).toContain(baseSha.slice(0, 12));
+      // ...and it reached origin, so the pull request's head is current.
+      expect(git(work, "rev-parse", "origin/atomaton/issue-1")).toBe(git(work, "rev-parse", "HEAD"));
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
 
   test("create_sub_issue rejects malformed gh output", async () => {
     const r = await sendRequest(

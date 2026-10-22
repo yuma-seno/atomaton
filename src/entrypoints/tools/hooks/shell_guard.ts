@@ -175,6 +175,22 @@ const ROUTED_GIT_COMMANDS = new Set([
 ]);
 
 /**
+ * What stands in for a routed subcommand, when "the github tools" is not the answer.
+ *
+ * A routed refusal that names the wrong tool is worse than one that names none: #264 is
+ * an agent that read "Use the github tools for Git mutations" after `git merge
+ * origin/main`, looked through the tool set for the one that takes a base into a
+ * branch, found none that does, and built the merge out of `commit-tree` and
+ * `update-ref` -- which worked, and reached no ops log at all.
+ *
+ * `merge` now has that tool. `sync_branch` does not answer it, and never did: it
+ * fast-forwards this branch from its OWN remote branch.
+ */
+const ROUTED_GIT_ADVICE: Record<string, string> = {
+  merge: " To bring the base branch into this branch, call merge_base_into_branch.",
+};
+
+/**
  * Subcommands in the set below that also have a purely read-only form.
  *
  * `git branch` is in the mutating set because `git branch -d` deletes one, and that
@@ -308,7 +324,8 @@ function checkInvocation(invocation: ShellInvocation): GuardVerdict {
     return {
       allow: false,
       reason: routed
-        ? `Raw 'git ${gitCommand}' is disabled. Use the github tools for Git mutations and branch synchronization.`
+        ? `Raw 'git ${gitCommand}' is disabled. Use the github tools for Git mutations and branch synchronization.` +
+          (ROUTED_GIT_ADVICE[gitCommand] ?? "")
         : `Raw 'git ${gitCommand}' is disabled, and there is no MCP tool for it: this run does not do that. `
           + `Commit with commit_and_push; read-only inspection (status, diff, log) runs normally.`,
     };

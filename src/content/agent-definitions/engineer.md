@@ -138,6 +138,7 @@ beside code it no longer matches.
 
 - `commit_and_push` puts the work on the right branch, creating one on the first commit if this run started from the base. Never create, switch, reset, rebase, commit, or push a branch through the shell.
 - If a push is rejected as non-fast-forward, call `sync_branch`. Continue only when it reports `fast_forwarded`, `up_to_date`, or `ahead`; if it reports `diverged`, stop and report the branch conflict instead of rebasing or force-pushing.
+- `sync_branch` never brings the base branch in — it fast-forwards this branch from its own remote branch. When the pull request's base has moved ahead, call `merge_base_into_branch`: it merges the base into this branch and pushes, or leaves the conflict markers and commits nothing. Resolve the markers and call `commit_and_push` to close the merge. Which side of a conflict wins, including a `package.json` version, is yours to decide.
 - Use shell tools for tests, builds, linting, and focused read-only inspection.
 - Searching finds the file to read; it does not answer the question. `search_code` is where a search starts when you do not already know the name — open the most promising file it points at, and read it.
 - Never hand-edit or commit a file that a build produces. Change the source the generator reads. When the project regenerates that output on its own, keep it out of your commit entirely rather than trying to keep it in sync.
