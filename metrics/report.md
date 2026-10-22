@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 121 | 8.3% | 383 | 9,859 | 15 | 29.9 |
-| Last 30 days | 186 | 7.5% | 542 | 10,246 | 21 | 30.6 |
-| Last year | 186 | 7.5% | 542 | 10,246 | 21 | 30.6 |
-| All time | 186 | 7.5% | 542 | 10,246 | 21 | 30.6 |
+| Last 7 days | 122 | 8.2% | 383 | 9,859 | 15 | 29.8 |
+| Last 30 days | 187 | 7.5% | 529 | 10,246 | 21 | 30.6 |
+| Last year | 187 | 7.5% | 529 | 10,246 | 21 | 30.6 |
+| All time | 187 | 7.5% | 529 | 10,246 | 21 | 30.6 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,64 +21,64 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 172 |
+| `completed` | 173 |
 | `failed` | 11 |
 | `stopped` | 3 |
 
 ## Last 7 days
 
-50 sessions.
+51 sessions.
 
-**Ran to an end without a report:** 11 of 49 sessions whose last run the core recorded as `completed` — 22.4%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 11 of 50 sessions whose last run the core recorded as `completed` — 22%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**138,824,652 tokens** over 66 runs that reported them, **97.7% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**140,633,229 tokens** over 67 runs that reported them, **97.7% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **94.2% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 906,491 | 5,619,407 | 39,097,860 | 39,097,860 | 138,824,652 |
-| messages per session | 144 | 384 | 571 | 571 | 8,730 |
+| tokens per run | 906,491 | 5,619,407 | 39,097,860 | 39,097,860 | 140,633,229 |
+| messages per session | 135 | 327 | 571 | 571 | 8,809 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `atomaton` | 26 | 52% |
-| `reviewer` | 18 | 36% |
-| `engineer` | 6 | 12% |
+| `atomaton` | 26 | 51% |
+| `reviewer` | 19 | 37.3% |
+| `engineer` | 6 | 11.8% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 1,292 | 10 | 0 | 0.8% |
+| `read` | 1,306 | 10 | 0 | 0.8% |
 | `bash` | 1,156 | 18 | 19 | 1.6% |
-| `grep` | 899 | 14 | 0 | 1.6% |
+| `grep` | 923 | 14 | 0 | 1.5% |
 | `edit` | 517 | 7 | 0 | 1.4% |
 | `fetch` | 210 | 32 | 0 | 15.2% |
 | `get_issue` | 132 | 13 | 4 | 9.8% |
-| `list` | 79 | 0 | 0 | 0% |
+| `list` | 81 | 0 | 0 | 0% |
 | `get_issue_comments` | 78 | 0 | 2 | 0% |
-| `glob` | 65 | 1 | 0 | 1.5% |
+| `glob` | 66 | 1 | 0 | 1.5% |
 | `search_issues` | 63 | 0 | 0 | 0% |
-| `get_pr` | 59 | 5 | 0 | 8.5% |
-| `get_check_runs` | 55 | 1 | 0 | 1.8% |
-| `atoma_builtin__load_skill` | 42 | 0 | 0 | 0% |
+| `get_pr` | 60 | 5 | 0 | 8.3% |
+| `get_check_runs` | 56 | 1 | 0 | 1.8% |
+| `atoma_builtin__load_skill` | 43 | 0 | 0 | 0% |
 | `get_branch` | 42 | 0 | 0 | 0% |
 | `create_pr` | 35 | 17 | 0 | 48.6% |
 | `commit_and_push` | 29 | 3 | 0 | 10.3% |
-| `check_merge_readiness` | 23 | 0 | 0 | 0% |
-| `get_pr_diff` | 22 | 2 | 0 | 9.1% |
+| `check_merge_readiness` | 24 | 0 | 0 | 0% |
+| `get_pr_diff` | 23 | 2 | 0 | 8.7% |
 | `request_close_issue` | 21 | 0 | 0 | 0% |
 | `write` | 16 | 0 | 0 | 0% |
 | `search_code` | 14 | 0 | 0 | 0% |
 | `shell__shell_execute` | 14 | 0 | 0 | 0% |
+| `delegate_readonly` | 13 | 0 | 0 | 0% |
 | `search_remote_code` | 13 | 4 | 0 | 30.8% |
-| `delegate_readonly` | 12 | 0 | 0 | 0% |
 | `delegate` | 10 | 0 | 0 | 0% |
+| `create_root_issue` | 9 | 1 | 0 | 11.1% |
 | `get_pr_reviews` | 9 | 0 | 0 | 0% |
 | `list_prs` | 9 | 0 | 0 | 0% |
 | `web__fetch` | 9 | 0 | 0 | 0% |
-| `create_root_issue` | 7 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 7 | 0 | 0 | 0% |
 | `launch_sub_agent` | 6 | 2 | 0 | 33.3% |
 | `merge_pr` | 6 | 0 | 0 | 0% |
@@ -88,7 +88,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `sync_branch` | 4 | 2 | 0 | 50% |
 | `close_issue` | 3 | 0 | 0 | 0% |
 | `create_sub_issue` | 3 | 0 | 0 | 0% |
-| `delegate_readonly_large` | 2 | 0 | 1 | 0% |
+| `delegate_readonly_large` | 3 | 0 | 1 | 0% |
 | `github__get_issue` | 2 | 0 | 0 | 0% |
 | `atomaton__launch_sub_agent` | 1 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 1 | 0 | 0 | 0% |
@@ -107,67 +107,67 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 40 | 95.2% |
-| `delivery/pipeline-setup` | 1 | 2.4% |
-| `research/web-search` | 1 | 2.4% |
+| `project/conventions` | 41 | 95.3% |
+| `delivery/pipeline-setup` | 1 | 2.3% |
+| `research/web-search` | 1 | 2.3% |
 
 ## Last 30 days
 
-86 sessions.
+87 sessions.
 
-**Ran to an end without a report:** 22 of 84 sessions whose last run the core recorded as `completed` — 26.2%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 22 of 85 sessions whose last run the core recorded as `completed` — 25.9%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**408,228,057 tokens** over 101 runs that reported them, **97.2% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**410,036,634 tokens** over 102 runs that reported them, **97.2% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **96% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,408,541 | 7,169,420 | 39,097,860 | 73,718,100 | 408,228,057 |
-| messages per session | 157 | 450 | 715 | 715 | 17,643 |
+| tokens per run | 1,413,053 | 7,169,420 | 39,097,860 | 73,718,100 | 410,036,634 |
+| messages per session | 152 | 450 | 715 | 715 | 17,722 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `atomaton` | 41 | 47.7% |
-| `reviewer` | 28 | 32.6% |
-| `engineer` | 17 | 19.8% |
+| `atomaton` | 41 | 47.1% |
+| `reviewer` | 29 | 33.3% |
+| `engineer` | 17 | 19.5% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 2,341 | 17 | 4 | 0.7% |
+| `read` | 2,355 | 17 | 4 | 0.7% |
 | `bash` | 2,005 | 42 | 44 | 2.1% |
-| `grep` | 1,591 | 26 | 7 | 1.6% |
+| `grep` | 1,615 | 26 | 7 | 1.6% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
 | `edit` | 729 | 8 | 0 | 1.1% |
 | `fetch` | 312 | 35 | 0 | 11.2% |
-| `list` | 184 | 1 | 0 | 0.5% |
+| `list` | 186 | 1 | 0 | 0.5% |
 | `get_issue` | 171 | 13 | 4 | 7.6% |
 | `web__fetch` | 148 | 10 | 0 | 6.8% |
 | `get_issue_comments` | 131 | 0 | 10 | 0% |
-| `glob` | 110 | 1 | 1 | 0.9% |
-| `get_pr` | 93 | 9 | 0 | 9.7% |
-| `atoma_builtin__load_skill` | 88 | 0 | 0 | 0% |
+| `glob` | 111 | 1 | 1 | 0.9% |
+| `get_pr` | 94 | 9 | 0 | 9.6% |
+| `atoma_builtin__load_skill` | 89 | 0 | 0 | 0% |
 | `search_issues` | 87 | 0 | 2 | 0% |
-| `get_check_runs` | 84 | 3 | 0 | 3.6% |
+| `get_check_runs` | 85 | 3 | 0 | 3.5% |
 | `get_branch` | 81 | 0 | 0 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `write` | 66 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `create_pr` | 44 | 20 | 0 | 45.5% |
 | `search__search_issues` | 43 | 0 | 0 | 0% |
+| `check_merge_readiness` | 38 | 0 | 0 | 0% |
 | `commit_and_push` | 38 | 5 | 0 | 13.2% |
-| `check_merge_readiness` | 37 | 0 | 0 | 0% |
+| `get_pr_diff` | 35 | 3 | 0 | 8.6% |
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
-| `get_pr_diff` | 34 | 3 | 0 | 8.8% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `request_close_issue` | 25 | 0 | 0 | 0% |
 | `list_prs` | 22 | 0 | 0 | 0% |
+| `delegate_readonly` | 19 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
-| `delegate_readonly` | 18 | 0 | 0 | 0% |
 | `search_code` | 18 | 0 | 0 | 0% |
 | `get_pr_reviews` | 17 | 0 | 0 | 0% |
 | `search_remote_code` | 16 | 5 | 0 | 31.3% |
@@ -180,18 +180,18 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
 | `merge_pr` | 10 | 0 | 0 | 0% |
+| `create_root_issue` | 9 | 1 | 0 | 11.1% |
 | `list_issues` | 9 | 0 | 0 | 0% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
 | `probe` | 8 | 0 | 0 | 0% |
 | `sync_branch` | 8 | 3 | 0 | 37.5% |
-| `create_root_issue` | 7 | 0 | 0 | 0% |
 | `launch_sub_agent` | 7 | 2 | 0 | 28.6% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `close_issue` | 5 | 0 | 0 | 0% |
+| `delegate_readonly_large` | 5 | 0 | 3 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
-| `delegate_readonly_large` | 4 | 0 | 3 | 0% |
 | `create_sub_issue` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
@@ -219,70 +219,70 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 71 | 80.7% |
-| `delivery/pipeline-setup` | 6 | 6.8% |
-| `engineering/environment` | 6 | 6.8% |
-| `engineering/secrets-in-a-check` | 2 | 2.3% |
-| `research/web-search` | 2 | 2.3% |
+| `project/conventions` | 72 | 80.9% |
+| `delivery/pipeline-setup` | 6 | 6.7% |
+| `engineering/environment` | 6 | 6.7% |
+| `engineering/secrets-in-a-check` | 2 | 2.2% |
+| `research/web-search` | 2 | 2.2% |
 | `docs/design-doc` | 1 | 1.1% |
 
 ## Last year
 
-86 sessions.
+87 sessions.
 
-**Ran to an end without a report:** 22 of 84 sessions whose last run the core recorded as `completed` — 26.2%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 22 of 85 sessions whose last run the core recorded as `completed` — 25.9%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**408,228,057 tokens** over 101 runs that reported them, **97.2% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**410,036,634 tokens** over 102 runs that reported them, **97.2% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **96% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,408,541 | 7,169,420 | 39,097,860 | 73,718,100 | 408,228,057 |
-| messages per session | 157 | 450 | 715 | 715 | 17,643 |
+| tokens per run | 1,413,053 | 7,169,420 | 39,097,860 | 73,718,100 | 410,036,634 |
+| messages per session | 152 | 450 | 715 | 715 | 17,722 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `atomaton` | 41 | 47.7% |
-| `reviewer` | 28 | 32.6% |
-| `engineer` | 17 | 19.8% |
+| `atomaton` | 41 | 47.1% |
+| `reviewer` | 29 | 33.3% |
+| `engineer` | 17 | 19.5% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 2,341 | 17 | 4 | 0.7% |
+| `read` | 2,355 | 17 | 4 | 0.7% |
 | `bash` | 2,005 | 42 | 44 | 2.1% |
-| `grep` | 1,591 | 26 | 7 | 1.6% |
+| `grep` | 1,615 | 26 | 7 | 1.6% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
 | `edit` | 729 | 8 | 0 | 1.1% |
 | `fetch` | 312 | 35 | 0 | 11.2% |
-| `list` | 184 | 1 | 0 | 0.5% |
+| `list` | 186 | 1 | 0 | 0.5% |
 | `get_issue` | 171 | 13 | 4 | 7.6% |
 | `web__fetch` | 148 | 10 | 0 | 6.8% |
 | `get_issue_comments` | 131 | 0 | 10 | 0% |
-| `glob` | 110 | 1 | 1 | 0.9% |
-| `get_pr` | 93 | 9 | 0 | 9.7% |
-| `atoma_builtin__load_skill` | 88 | 0 | 0 | 0% |
+| `glob` | 111 | 1 | 1 | 0.9% |
+| `get_pr` | 94 | 9 | 0 | 9.6% |
+| `atoma_builtin__load_skill` | 89 | 0 | 0 | 0% |
 | `search_issues` | 87 | 0 | 2 | 0% |
-| `get_check_runs` | 84 | 3 | 0 | 3.6% |
+| `get_check_runs` | 85 | 3 | 0 | 3.5% |
 | `get_branch` | 81 | 0 | 0 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `write` | 66 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `create_pr` | 44 | 20 | 0 | 45.5% |
 | `search__search_issues` | 43 | 0 | 0 | 0% |
+| `check_merge_readiness` | 38 | 0 | 0 | 0% |
 | `commit_and_push` | 38 | 5 | 0 | 13.2% |
-| `check_merge_readiness` | 37 | 0 | 0 | 0% |
+| `get_pr_diff` | 35 | 3 | 0 | 8.6% |
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
-| `get_pr_diff` | 34 | 3 | 0 | 8.8% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `request_close_issue` | 25 | 0 | 0 | 0% |
 | `list_prs` | 22 | 0 | 0 | 0% |
+| `delegate_readonly` | 19 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
-| `delegate_readonly` | 18 | 0 | 0 | 0% |
 | `search_code` | 18 | 0 | 0 | 0% |
 | `get_pr_reviews` | 17 | 0 | 0 | 0% |
 | `search_remote_code` | 16 | 5 | 0 | 31.3% |
@@ -295,18 +295,18 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
 | `merge_pr` | 10 | 0 | 0 | 0% |
+| `create_root_issue` | 9 | 1 | 0 | 11.1% |
 | `list_issues` | 9 | 0 | 0 | 0% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
 | `probe` | 8 | 0 | 0 | 0% |
 | `sync_branch` | 8 | 3 | 0 | 37.5% |
-| `create_root_issue` | 7 | 0 | 0 | 0% |
 | `launch_sub_agent` | 7 | 2 | 0 | 28.6% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `close_issue` | 5 | 0 | 0 | 0% |
+| `delegate_readonly_large` | 5 | 0 | 3 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
-| `delegate_readonly_large` | 4 | 0 | 3 | 0% |
 | `create_sub_issue` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
@@ -334,70 +334,70 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 71 | 80.7% |
-| `delivery/pipeline-setup` | 6 | 6.8% |
-| `engineering/environment` | 6 | 6.8% |
-| `engineering/secrets-in-a-check` | 2 | 2.3% |
-| `research/web-search` | 2 | 2.3% |
+| `project/conventions` | 72 | 80.9% |
+| `delivery/pipeline-setup` | 6 | 6.7% |
+| `engineering/environment` | 6 | 6.7% |
+| `engineering/secrets-in-a-check` | 2 | 2.2% |
+| `research/web-search` | 2 | 2.2% |
 | `docs/design-doc` | 1 | 1.1% |
 
 ## All time
 
-86 sessions.
+87 sessions.
 
-**Ran to an end without a report:** 22 of 84 sessions whose last run the core recorded as `completed` — 26.2%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 22 of 85 sessions whose last run the core recorded as `completed` — 25.9%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**408,228,057 tokens** over 101 runs that reported them, **97.2% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**410,036,634 tokens** over 102 runs that reported them, **97.2% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **96% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,408,541 | 7,169,420 | 39,097,860 | 73,718,100 | 408,228,057 |
-| messages per session | 157 | 450 | 715 | 715 | 17,643 |
+| tokens per run | 1,413,053 | 7,169,420 | 39,097,860 | 73,718,100 | 410,036,634 |
+| messages per session | 152 | 450 | 715 | 715 | 17,722 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `atomaton` | 41 | 47.7% |
-| `reviewer` | 28 | 32.6% |
-| `engineer` | 17 | 19.8% |
+| `atomaton` | 41 | 47.1% |
+| `reviewer` | 29 | 33.3% |
+| `engineer` | 17 | 19.5% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 2,341 | 17 | 4 | 0.7% |
+| `read` | 2,355 | 17 | 4 | 0.7% |
 | `bash` | 2,005 | 42 | 44 | 2.1% |
-| `grep` | 1,591 | 26 | 7 | 1.6% |
+| `grep` | 1,615 | 26 | 7 | 1.6% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
 | `edit` | 729 | 8 | 0 | 1.1% |
 | `fetch` | 312 | 35 | 0 | 11.2% |
-| `list` | 184 | 1 | 0 | 0.5% |
+| `list` | 186 | 1 | 0 | 0.5% |
 | `get_issue` | 171 | 13 | 4 | 7.6% |
 | `web__fetch` | 148 | 10 | 0 | 6.8% |
 | `get_issue_comments` | 131 | 0 | 10 | 0% |
-| `glob` | 110 | 1 | 1 | 0.9% |
-| `get_pr` | 93 | 9 | 0 | 9.7% |
-| `atoma_builtin__load_skill` | 88 | 0 | 0 | 0% |
+| `glob` | 111 | 1 | 1 | 0.9% |
+| `get_pr` | 94 | 9 | 0 | 9.6% |
+| `atoma_builtin__load_skill` | 89 | 0 | 0 | 0% |
 | `search_issues` | 87 | 0 | 2 | 0% |
-| `get_check_runs` | 84 | 3 | 0 | 3.6% |
+| `get_check_runs` | 85 | 3 | 0 | 3.5% |
 | `get_branch` | 81 | 0 | 0 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `write` | 66 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `create_pr` | 44 | 20 | 0 | 45.5% |
 | `search__search_issues` | 43 | 0 | 0 | 0% |
+| `check_merge_readiness` | 38 | 0 | 0 | 0% |
 | `commit_and_push` | 38 | 5 | 0 | 13.2% |
-| `check_merge_readiness` | 37 | 0 | 0 | 0% |
+| `get_pr_diff` | 35 | 3 | 0 | 8.6% |
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
-| `get_pr_diff` | 34 | 3 | 0 | 8.8% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `request_close_issue` | 25 | 0 | 0 | 0% |
 | `list_prs` | 22 | 0 | 0 | 0% |
+| `delegate_readonly` | 19 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
-| `delegate_readonly` | 18 | 0 | 0 | 0% |
 | `search_code` | 18 | 0 | 0 | 0% |
 | `get_pr_reviews` | 17 | 0 | 0 | 0% |
 | `search_remote_code` | 16 | 5 | 0 | 31.3% |
@@ -410,18 +410,18 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
 | `merge_pr` | 10 | 0 | 0 | 0% |
+| `create_root_issue` | 9 | 1 | 0 | 11.1% |
 | `list_issues` | 9 | 0 | 0 | 0% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
 | `probe` | 8 | 0 | 0 | 0% |
 | `sync_branch` | 8 | 3 | 0 | 37.5% |
-| `create_root_issue` | 7 | 0 | 0 | 0% |
 | `launch_sub_agent` | 7 | 2 | 0 | 28.6% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `close_issue` | 5 | 0 | 0 | 0% |
+| `delegate_readonly_large` | 5 | 0 | 3 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
-| `delegate_readonly_large` | 4 | 0 | 3 | 0% |
 | `create_sub_issue` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
@@ -449,11 +449,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 71 | 80.7% |
-| `delivery/pipeline-setup` | 6 | 6.8% |
-| `engineering/environment` | 6 | 6.8% |
-| `engineering/secrets-in-a-check` | 2 | 2.3% |
-| `research/web-search` | 2 | 2.3% |
+| `project/conventions` | 72 | 80.9% |
+| `delivery/pipeline-setup` | 6 | 6.7% |
+| `engineering/environment` | 6 | 6.7% |
+| `engineering/secrets-in-a-check` | 2 | 2.2% |
+| `research/web-search` | 2 | 2.2% |
 | `docs/design-doc` | 1 | 1.1% |
 
 ## Degraded answers
