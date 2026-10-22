@@ -333,16 +333,34 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
   return { events, parentIssue };
 }
 
+/**
+ * The pull requests whose body carries `atomaton:parent-issue=N` for THIS issue.
+ *
+ * The search only enumerates candidates. GitHub tokenizes a query, so the bare
+ * term matched every PR that merely mentions the number: PR #269's body says
+ * "Version 0.21.21 — 0.21.20 is held by #263's PR", that `#263` was enough, and
+ * #269's body, diff and comments joined #266's run — whose reviewer then reviewed
+ * #269 instead of #266 (#270). Two guards, because they fail differently: the
+ * quoted phrase is the candidate cut (measured on this repository — the quoted
+ * form returned only the tagged PR where the bare term returned both), and the
+ * `read` below decides on each candidate's CURRENT body whether it is linked at
+ * all, so a stale index or a tag a person has since removed costs a candidate,
+ * never a wrong PR. The same search is confirmed the same way in `readChildren`
+ * (`adapters/github/work-tree.ts`) — `tags.ts`'s contract for `search`:
+ * enumeration by search, confirmation by the tag on the body.
+ */
 function linkedPrNumbers(owner: string, repo: string, issueNumber: number): number[] {
-  const prs = ghJson<{ number: number }[]>(
+  const prs = ghJson<{ number: number; body: string | null }[]>(
     "pr", "list", "--repo", `${owner}/${repo}`, "--state", "all",
-    "--search", `${PARENT_ISSUE_TAG.search(issueNumber)} in:body`,
-    "--limit", "1000", "--json", "number",
+    "--search", `"${PARENT_ISSUE_TAG.search(issueNumber)}" in:body`,
+    "--limit", "1000", "--json", "number,body",
   ) ?? [];
   if (prs.length === 1000) {
     console.error(`::warning::Linked PR search for Issue #${issueNumber} reached GitHub's 1000-result search limit.`);
   }
-  return prs.map((pr) => pr.number);
+  return prs
+    .filter((pr) => PARENT_ISSUE_TAG.read(pr.body ?? "") === issueNumber)
+    .map((pr) => pr.number);
 }
 
 function tryLinkedPrNumbers(owner: string, repo: string, issueNumber: number): number[] {
