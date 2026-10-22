@@ -7060,6 +7060,16 @@ function eventOf(entry, readers) {
     return "asked";
   return;
 }
+function newestEventBody(entries, readers) {
+  for (let i = entries.length - 1;i >= 0; i--) {
+    const entry = entries[i];
+    if (entry === undefined)
+      break;
+    if (eventOf(entry, readers) !== undefined)
+      return entry.body;
+  }
+  return;
+}
 function whoseTurn(events) {
   const last = events[events.length - 1];
   return last === "asked" || last === "handed-off" ? "agent" : "person";
@@ -7122,7 +7132,13 @@ function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
     throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  return JSON.parse(listed.stdout || "[]");
+  const pages = splitConcatenatedJson(listed.stdout);
+  const flat = [];
+  for (const page of pages) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
 }
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
@@ -7138,6 +7154,18 @@ function checkDispatchMarker(repo, number, markerId) {
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
   const entries = comments.filter((comment) => String(comment.id) !== marker).map(entryOf);
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
+}
+function readLastTurnEvent(repo, number, probeId) {
+  const comments = listComments(repo, number);
+  const entries = comments.map(entryOf);
+  const shaped = shapedThread(entries, readers);
+  const last = shaped.events[shaped.events.length - 1];
+  const probe = probeId === undefined ? undefined : String(probeId);
+  return {
+    probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
+    last,
+    lastAgent: last === "returned" ? AGENT_TAG.read(newestEventBody(entries, readers) ?? "") : undefined
+  };
 }
 
 // src/domain/work/closed-target.ts
@@ -7277,6 +7305,45 @@ function refuseOutstandingRequest(d, markerId) {
   log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
   return "refused-outstanding";
 }
+function refuseResolvedWait(d) {
+  const log = d.log ?? ((message) => console.error(message));
+  const repoPath = d.repo ?? "{owner}/{repo}";
+  const delays = [1000, 2000, 4000];
+  let read;
+  for (let attempt = 0;attempt <= delays.length; attempt++) {
+    try {
+      read = readLastTurnEvent(repoPath, d.number, d.freshnessProbeId);
+    } catch (e) {
+      log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+      return "superseded";
+    }
+    if (d.freshnessProbeId === undefined || read.probeVisible)
+      break;
+    const delay = delays[attempt];
+    if (delay === undefined)
+      break;
+    log(`${d.context}: the comment this dispatch answers on #${d.number} is not visible yet; ` + `waiting ${delay}ms and reading again`);
+    Bun.sleepSync(delay);
+  }
+  if (read === undefined || d.freshnessProbeId !== undefined && !read.probeVisible) {
+    log(`${d.context}: whether #${d.number} still waits for ${d.agent} could not be established ` + "(the thread would not confirm it had caught up), so nothing was started");
+    return "superseded";
+  }
+  const last = read.last;
+  if (last === undefined || last === "waiting" || last === "handed-off")
+    return;
+  if (last === "returned") {
+    const own = read.lastAgent === undefined || read.lastAgent === d.agent;
+    if (!own)
+      return;
+    if (d.verdictPassed === false)
+      return;
+    log(`${d.context}: the wait on #${d.number} had already resolved (the thread's newest word on the work is ` + `${read.lastAgent ?? d.agent}'s own verdict${d.verdictPassed === true ? ", and the caller's confirms it" : ""}), ` + `so ${d.agent} was not started`);
+    return "superseded";
+  }
+  log(`${d.context}: the wait on #${d.number} had already resolved (the thread's last turn event is \`${last}\`), ` + `so ${d.agent} was not started`);
+  return "superseded";
+}
 function dispatchRunner(d) {
   if (!d.agent.trim()) {
     const log = d.log ?? ((message) => console.error(message));
@@ -7286,7 +7353,11 @@ function dispatchRunner(d) {
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
-  if (!d.answersRequest) {
+  if (d.answersRequest) {
+    const refusal = refuseResolvedWait(d);
+    if (refusal !== undefined)
+      return refusal;
+  } else {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined)
@@ -19029,6 +19100,7 @@ function handleReloadEnvironment(args) {
     notify: (process.env.NOTIFY ?? "").trim(),
     reloadCount: next,
     answersRequest: true,
+    freshnessProbeId: endingCommentId,
     log: log3
   });
   if (outcome === "refused-closed") {
