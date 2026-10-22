@@ -1,0 +1,185 @@
+import { describe, expect, test } from "bun:test";
+import { runWithFakeGh, scriptPath, makeConfigDir, removeTemp } from "./testing/harness.ts";
+
+/**
+ * The run watch's reconciliation, asked of the script the workflow actually runs,
+ * with the fake `gh` answering. The pure judgement lives in
+ * `domain/work/run-report.test.ts`; what is pinned here is the FLOW — that the
+ * gates come before the reads, that a notice carries the turn tags, and that the
+ * label follows the rule the thread states.
+ */
+
+const REPO = "o/r";
+const START = "2026-10-22T10:00:00Z";
+const AGENT = "engineer";
+const NUMBER = 7;
+const RUN_URL = "https://github.com/o/r/actions/runs/123";
+
+/** The arguments the workflow passes, as the step builds them. */
+function argv(overrides: Record<string, string> = {}): string[] {
+  return [
+    "--display-title", overrides["display-title"] ?? `${AGENT} on #${NUMBER}`,
+    "--run-started-at", overrides["run-started-at"] ?? START,
+    "--run-url", overrides["run-url"] ?? RUN_URL,
+    ...(overrides.conclusion === undefined ? [] : ["--conclusion", overrides.conclusion]),
+  ];
+}
+
+/** A comment as the Issues API returns it. */
+function apiComment(body: string, createdAt: string): Record<string, string> {
+  return { body, created_at: createdAt };
+}
+
+const BEFORE = "2026-10-20T09:00:00Z";
+const AFTER = "2026-10-23T09:00:00Z";
+
+function configDir(): string {
+  // The label's name read from a config this test wrote, not from whichever
+  // checkout the suite happens to run in.
+  return makeConfigDir({ chain: { labels: { in_progress: "atomaton/in-progress" } } });
+}
+
+const LABELS_ON = JSON.stringify(["atomaton/in-progress", "other"]);
+const LABELS_OFF = JSON.stringify(["other"]);
+
+type FakeGhRules = NonNullable<Parameters<typeof runWithFakeGh>[2]>["rules"];
+
+function rulesFor(opts: { comments?: Record<string, string>[]; commentsStdout?: string; labels?: string; postCode?: number } = {}): FakeGhRules {
+  return [
+    // Order matters: the comments path CONTAINS the issue path, so the more
+    // specific rule is listed first.
+    {
+      match: ["api", `repos/${REPO}/issues/${NUMBER}/comments`],
+      stdout: opts.commentsStdout ?? JSON.stringify(opts.comments ?? []),
+    },
+    { match: [`repos/${REPO}/issues/${NUMBER}`, "--jq"], stdout: opts.labels ?? LABELS_ON },
+    { match: ["issue", "comment"], ...(opts.postCode === undefined ? {} : { code: opts.postCode }) },
+    { match: ["issue", "edit"] },
+  ];
+}
+
+function run(args: string[], rules: ReturnType<typeof rulesFor>): ReturnType<typeof runWithFakeGh> {
+  const dir = configDir();
+  try {
+    return runWithFakeGh(scriptPath("reconcile_run_ending.ts"), args, { rules, env: { GITHUB_REPOSITORY: REPO }, cwd: dir });
+  } finally {
+    removeTemp(dir);
+  }
+}
+
+function postedNotice(result: ReturnType<typeof runWithFakeGh>): string | undefined {
+  const call = result.ghCalls.find((argv) => argv.includes("comment"));
+  const at = call?.indexOf("--body");
+  return at !== undefined && at >= 0 ? call?.[at + 1] : undefined;
+}
+
+describe("reconcile_run_ending.ts", () => {
+  test("a run that posted its ending leaves the thread alone", () => {
+    const comments = [apiComment("<!-- atomaton:ended=done -->\nDone.", AFTER)];
+    const r = run(argv(), rulesFor({ comments }));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
+  });
+
+  test("a run that left no ending gets the notice, and the label the run left comes off", () => {
+    // The thread as a jammed node has it: an earlier turn's ending (`done`, before
+    // this run started), this run's dispatch, and nothing since — the label is the
+    // dead run's leftover, and the ending predates the run, so it cannot excuse it.
+    const comments = [apiComment("<!-- atomaton:ended=done -->\nDone.", BEFORE), apiComment("just a remark", "2026-10-21T09:00:00Z")];
+    const r = run(argv(), rulesFor({ comments }));
+    expect(r.status).toBe(0);
+
+    const body = postedNotice(r);
+    expect(body).toContain("atomaton:ended=done");
+    expect(body).toContain("atomaton:llm-context=exclude");
+    expect(body).toContain(AGENT);
+    expect(body).toContain(RUN_URL);
+    // The two ways forward, and none of the claim the deaths this covers cannot
+    // back: the report step that would know is the one that never ran.
+    expect(body).toContain("`/engineer` and put what to do next on the following lines");
+    expect(body).toContain("`/engineer recover`");
+    expect(body).not.toMatch(/session was saved/i);
+
+    expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(true);
+  });
+
+  test("a waiting ending still releases the label; a hand-off keeps it", () => {
+    const waiting = [apiComment("<!-- atomaton:ended=waiting -->", BEFORE)];
+    const rWaiting = run(argv(), rulesFor({ comments: waiting }));
+    expect(rWaiting.status).toBe(0);
+    expect(rWaiting.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(true);
+
+    const handoff = [apiComment("<!-- atomaton:ended=handoff -->", BEFORE)];
+    const rHandoff = run(argv(), rulesFor({ comments: handoff }));
+    expect(rHandoff.status).toBe(0);
+    expect(rHandoff.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
+  });
+
+  test("the label is left alone when the issue carries none", () => {
+    const r = run(argv(), rulesFor({ comments: [apiComment("remark", BEFORE)], labels: LABELS_OFF }));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
+  });
+
+  test("a thread past one page still names its ending", () => {
+    // What `gh api --paginate` writes past one page: one array per page, back to
+    // back, and the ending only on the second.
+    const stdout = JSON.stringify([apiComment("early remark", BEFORE)]) + JSON.stringify([
+      apiComment("later remark", "2026-10-24T09:00:00Z"),
+      apiComment("<!-- atomaton:ended=done -->\nDone.", AFTER),
+    ]);
+    const r = run(argv(), rulesFor({ commentsStdout: stdout }));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
+  });
+
+  test("a title that names no node does nothing at all, not even the read", () => {
+    for (const title of ["Atomaton Runner", "deploy: apply v0.21.22", ""]) {
+      const r = run(argv({ "display-title": title }), rulesFor());
+      expect(r.status, title).toBe(0);
+      expect(r.ghCalls, title).toEqual([]);
+    }
+  });
+
+  test("a skipped run is not a run to reconcile", () => {
+    const r = run(argv({ conclusion: "skipped" }), rulesFor());
+    expect(r.status).toBe(0);
+    expect(r.ghCalls).toEqual([]);
+  });
+
+  test("an ending whose only evidence is a quotation does not excuse the run", () => {
+    const quotation = apiComment(
+      [
+        "<!-- atomaton:llm-context=exclude -->",
+        "<!-- atomaton:quotes=123 -->",
+        "<details><summary>Your comment, as you wrote it</summary>",
+        "",
+        "```",
+        "<!-- atomaton:ended=done -->",
+        "```",
+        "</details>",
+      ].join("\n"),
+      AFTER,
+    );
+    const r = run(argv(), rulesFor({ comments: [quotation] }));
+    expect(r.status).toBe(0);
+    expect(postedNotice(r)).toBeDefined();
+  });
+
+  test("a thread that cannot be read fails the watch instead of answering no", () => {
+    const rules: FakeGhRules = [
+      { match: ["api", `repos/${REPO}/issues/${NUMBER}/comments`], code: 1 },
+      { match: ["issue", "comment"] },
+      { match: ["issue", "edit"] },
+    ];
+    const r = run(argv(), rules);
+    expect(r.status).toBe(1);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
+  });
+
+  test("a comment GitHub refuses fails the watch: the red run is the signal", () => {
+    const r = run(argv(), rulesFor({ comments: [apiComment("remark", BEFORE)], postCode: 1 }));
+    expect(r.status).toBe(1);
+    expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
+  });
+});

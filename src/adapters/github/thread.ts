@@ -34,7 +34,7 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead } from "./gh.ts";
-import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, QUOTES_TAG } from "./tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, QUOTES_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
@@ -51,6 +51,7 @@ import {
   type TurnHolder,
   type TurnReaders,
 } from "../../domain/work/thread.ts";
+import type { EndingWalkReaders } from "../../domain/work/run-report.ts";
 
 /**
  * The readers, from the modules that own each format.
@@ -95,6 +96,20 @@ const askReaders: AskReaders = {
   requestedAgent: (body) => parseMangledCommand(body).agent,
   authoringAgent: (body) => AGENT_TAG.read(body) ?? "",
 };
+
+/**
+ * The walk readers for counting endings over a whole thread — the turn's ending
+ * reader, and the quotation skip beside it.
+ *
+ * The skip is load-bearing on its own: the guard's notice preserving a removed
+ * comment carries that comment's text verbatim, so an `atomaton:ended` tag inside
+ * it is the DELETED author's words, and a walk that read it would take the
+ * quotation for the thread's own ending. `lastEnding` (work-tree.ts) applies the
+ * same skip by hand; this is the shared form, so a walk written tomorrow reaches
+ * for one definition instead of a third copy. See `run-report.ts`, which folds on
+ * exactly these two readers.
+ */
+export const endingWalkReaders: EndingWalkReaders = { ending: readers.ending, quoted: isQuotation };
 
 /** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
 interface Comment {

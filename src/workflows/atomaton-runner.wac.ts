@@ -2086,6 +2086,14 @@ echo "tool servers will run as ${TOOL_USER} (no sudo), caches in ${TOOL_CACHE}"
 
 export const atomaRunner = new Workflow("atomaton-runner", {
   name: "Atomaton Runner",
+  // The run's own name, carrying the node it works on. A `workflow_run` event
+  // carries no inputs, so the display title is the only place an OUTSIDE reader —
+  // the run watch (atomaton-run-watch), triggered by this workflow's completion —
+  // can learn which agent was asked and on which node. Without this every run's
+  // title is the workflow's name, and a watch that cannot read the node stays
+  // silent on all of them. It also makes the Actions list readable: one line per
+  // run, naming the agent and the issue, instead of twenty identical names.
+  "run-name": "${{ inputs.agent }} on #${{ inputs.number }}",
   // Cast: the generated `WorkflowDispatchInput.default` type is an upstream
   // json-schema-to-typescript quirk (typed as a generic object, not the
   // string/boolean/number the real schema allows) -- see

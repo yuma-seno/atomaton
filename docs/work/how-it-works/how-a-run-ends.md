@@ -53,6 +53,22 @@ keeps removing what a person writes next, and it suppresses the dispatch as well
 no run arrives to heal the thread. Comments that keep vanishing with no run behind
 them are this shape.
 
+**The run watch is the outside check for exactly this.** After a runner run
+completes, `Atomaton Run Watch` reads the node's thread and asks whether an ending
+comment was written at or after that run started. A run that reported has one —
+the two above are steps of the run itself, which finished before the watch could
+ever look — so the watch stays silent. A run that never got to write one gets a
+notice: the turn-ending header that puts the node back with a person, the fact
+that nothing was decided, the run's link, and the two ways forward. The watch
+also removes the `atomaton/in-progress` label the dead run left, by the same
+turn rule the runner itself applies. It cannot double-post: the runner's
+completion fires only after its own steps are done, so a report that landed at
+all landed first.
+
+The watch reads which node a run worked on out of the run's title, which the
+runner writes as `run-name: "agent on #N"`. Runs from before that existed have
+titles the watch does not recognise, and are left alone.
+
 The restore is the same for every kind of death: **re-run the failed run**.
 "Re-run failed jobs" from the run's page, or by hand:
 
@@ -61,4 +77,9 @@ gh workflow run atomaton-runner.yml -f number=N -f agent=X -f type=issue
 ```
 
 The job runs again from the saved session and writes the ending it owed — and once
-the ending is on the thread, comments go through again.
+the ending is on the thread, comments go through again. The watch is what makes
+the thread survivable in the meantime; only the re-run makes the work continue.
+Three deaths it cannot cover, because nothing outside GitHub can: GitHub itself
+down (nobody can write anything), a run queued forever (its completion never
+fires), and a deleted node (nowhere to post). There the red run is the only
+signal, and re-running it is the recovery.
