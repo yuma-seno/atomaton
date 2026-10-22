@@ -49,6 +49,26 @@ function ghJson(...args) {
   }
   return stdout ? JSON.parse(stdout) : null;
 }
+function graphqlArgs(query, variables) {
+  const args = ["api", "graphql", "-f", `query=${query}`];
+  for (const [key, value] of Object.entries(variables)) {
+    args.push("-F", `${key}=${value}`);
+  }
+  return args;
+}
+function graphqlResult({ code, stdout, stderr }) {
+  if (code !== 0) {
+    throw new Error(`GraphQL query failed: ${stderr || stdout.slice(0, 200)}`);
+  }
+  const result = JSON.parse(stdout);
+  if (result.errors) {
+    throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
+  }
+  return result.data;
+}
+function ghGraphqlRead(query, variables = {}) {
+  return graphqlResult(ghRead(...graphqlArgs(query, variables)));
+}
 function splitConcatenatedJson(text) {
   const results = [];
   let depth = 0;
@@ -97,6 +117,27 @@ function ghPaginated(...args) {
       flat.push(...page);
   }
   return flat;
+}
+
+// src/adapters/github/parent-issue.ts
+function log(message) {
+  console.error(`[atomaton-parent] ${message}`);
+}
+function parentIssueOf(repo, issue) {
+  const [owner, name] = repo.split("/", 2);
+  if (!owner || !name) {
+    const why = `'${repo}' is not an owner/name repository, so #${issue}'s parent could not be asked for`;
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+  try {
+    const data = ghGraphqlRead("query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){issue(number:$num){parent{number}}}}", { owner, repo: name, num: issue });
+    return { known: true, parent: data.repository.issue.parent?.number ?? 0 };
+  } catch (error) {
+    const why = `could not read the parent of #${issue}: ${error.message}`;
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
 }
 
 // src/domain/work/agent-name.ts
@@ -341,13 +382,16 @@ function requiredJson(what, ...args) {
 }
 function fetchIssueEvents(owner, repo, issueNum, openedType, commentType, idPrefix) {
   const issue = requiredJson(`issue #${issueNum}`, "api", `repos/${owner}/${repo}/issues/${issueNum}`);
+  const found = parentIssueOf(`${owner}/${repo}`, issueNum);
+  const parentLine = found.known && found.parent > 0 ? `**Sub-issue of:** #${found.parent}
+` : "";
   const labelsLine = issue.labels.length > 0 ? `**Labels:** ${issue.labels.map((l) => l.name).join(", ")}
 ` : "";
   const openedEvent = {
     id: `${idPrefix}-${issue.number}`,
     event_type: openedType,
     content: `Issue #${issue.number}: ${issue.title}
-${labelsLine}
+${labelsLine}${parentLine}
 ${issue.body ?? ""}`,
     author: issue.user.login,
     author_type: issue.user.type,
@@ -466,7 +510,7 @@ function fetchEvents(type, number, maxDiffChars) {
       appendPrEvents(events, owner, repo, prNumber, maxDiffChars);
     }
     events.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    return { events, resolvedType: "issue", resolvedNumber: number };
+    return { events, sessionType: "issue", sessionNumber: number };
   }
   const prResult = fetchPrEvents(owner, repo, number, maxDiffChars);
   let events = [...prResult.events];
@@ -483,14 +527,14 @@ function fetchEvents(type, number, maxDiffChars) {
     } catch {
       console.error(`::warning::Linked Issue #${prResult.parentIssue} not found or inaccessible \u2014 using PR-local context.`);
       events.sort((a, b) => a.created_at.localeCompare(b.created_at));
-      return { events, resolvedType: "pr", resolvedNumber: number };
+      return { events, sessionType: "pr", sessionNumber: number };
     }
   }
   events.sort((a, b) => a.created_at.localeCompare(b.created_at));
   return {
     events,
-    resolvedType: prResult.parentIssue ? "issue" : "pr",
-    resolvedNumber: prResult.parentIssue ?? number
+    sessionType: prResult.parentIssue ? "issue" : "pr",
+    sessionNumber: prResult.parentIssue ?? number
   };
 }
 function main() {
@@ -508,7 +552,7 @@ function main() {
     process.exit(2);
   }
   const maxDiffChars = Number(values["max-diff-chars"] ?? 30000);
-  const { events, resolvedType, resolvedNumber } = fetchEvents(values.type, Number(values.number), maxDiffChars);
+  const { events, sessionType, sessionNumber } = fetchEvents(values.type, Number(values.number), maxDiffChars);
   const withoutBookkeeping = events.map((event) => ({
     ...event,
     llm_context: LLM_CONTEXT_TAG.read(event.content),
@@ -518,8 +562,8 @@ function main() {
   writeFileSync(values.out, JSON.stringify(withoutBookkeeping, null, 2));
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput)
-    appendFileSync(githubOutput, `resolved_type=${resolvedType}
-resolved_number=${resolvedNumber}
+    appendFileSync(githubOutput, `session_type=${sessionType}
+session_number=${sessionNumber}
 `);
   console.error(`Fetched ${events.length} events \u2192 ${values.out}`);
 }

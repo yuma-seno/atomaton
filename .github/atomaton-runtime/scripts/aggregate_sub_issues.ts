@@ -131,9 +131,9 @@ var AGENT_ENV_NAMES = [
   MACHINERY_ROOT_VAR,
   "GITHUB_REPOSITORY",
   "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
   "ATOMATON_RUN_DIR",
@@ -330,6 +330,7 @@ function issueLinks(repo, number) {
   if (issue.__typename === "PullRequest") {
     const closes = issue.closingIssuesReferences?.nodes ?? [];
     return {
+      kind: "pull_request",
       parent: closes[0] ? normalise(closes[0]) : undefined,
       children: [],
       pullRequests: []
@@ -338,6 +339,7 @@ function issueLinks(repo, number) {
   const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
   const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number).map(asPr);
   return {
+    kind: "issue",
     parent: issue.parent ? normalise(issue.parent) : undefined,
     children: (issue.subIssues?.nodes ?? []).map(asChild),
     pullRequests: dedupeByNumber(declared, referenced)
@@ -524,6 +526,12 @@ function logOp(op, payload = {}) {
 function logDispatch(target, agent, extra = {}) {
   const { elsewhere, ...rest } = extra;
   logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
+}
+
+// src/adapters/runner/run-node.ts
+function nodeNumber() {
+  const parsed = Number((process.env.NUMBER ?? "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 // src/adapters/github/target-state.ts
@@ -723,8 +731,8 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  const here = (process.env.ISSUE_NUMBER ?? "").trim();
-  const elsewhere = here !== "" && String(d.number) !== here;
+  const here = nodeNumber();
+  const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }
@@ -925,7 +933,8 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
     type: "issue",
     number: opts.parent,
     notify: resolveNotify(opts.repo, opts.parent),
-    repo: opts.repo
+    repo: opts.repo,
+    continuesChain: opts.continuesChain
   });
   const takeBackMarker = (why) => {
     const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);

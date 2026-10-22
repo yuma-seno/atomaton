@@ -17658,6 +17658,12 @@ async function serveMcpServer(options) {
   await server.connect(new StdioServerTransport);
 }
 
+// src/adapters/runner/run-node.ts
+function nodeNumber() {
+  const parsed = Number((process.env.NUMBER ?? "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 // src/shared/bm25.ts
 var CHUNK_LIMIT = 700;
 var MIN_CHUNK = 40;
@@ -17924,9 +17930,9 @@ var AGENT_ENV_NAMES = [
   MACHINERY_ROOT_VAR,
   "GITHUB_REPOSITORY",
   "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
   "ATOMATON_RUN_DIR",
@@ -18316,8 +18322,7 @@ function log2(message) {
 }
 hardenCredentialHolder(log2);
 function currentIssue() {
-  const parsed = Number((process.env.ISSUE_NUMBER ?? "").trim());
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  return nodeNumber();
 }
 function loadIndex() {
   const stored = restoreFromBranch(INDEX_BRANCH, INDEX_PATH);

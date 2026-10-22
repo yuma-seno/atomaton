@@ -6722,9 +6722,9 @@ var AGENT_ENV_NAMES = [
   MACHINERY_ROOT_VAR,
   "GITHUB_REPOSITORY",
   "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
   "ATOMATON_RUN_DIR",
@@ -6813,6 +6813,22 @@ function logOp(op, payload = {}) {
 function logDispatch(target, agent, extra = {}) {
   const { elsewhere, ...rest } = extra;
   logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
+}
+
+// src/adapters/runner/run-node.ts
+function nodeType() {
+  const raw = (process.env.TYPE ?? "").trim().toLowerCase();
+  return raw === "issue" || raw === "pr" ? raw : undefined;
+}
+function isPrRun() {
+  return nodeType() === "pr";
+}
+function nodeNumber() {
+  const parsed = Number((process.env.NUMBER ?? "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+function refusePrRun(tool, instead) {
+  throw new Error(`${tool} is for an issue run, and this run is on a pull request \u2014 a leaf of the work tree, ` + "which reviews or fixes one pull request and adds nothing below it. " + instead);
 }
 
 // src/adapters/github/outcome.ts
@@ -7227,8 +7243,8 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  const here = (process.env.ISSUE_NUMBER ?? "").trim();
-  const elsewhere = here !== "" && String(d.number) !== here;
+  const here = nodeNumber();
+  const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }
@@ -7468,6 +7484,7 @@ function issueLinks(repo, number) {
   if (issue.__typename === "PullRequest") {
     const closes = issue.closingIssuesReferences?.nodes ?? [];
     return {
+      kind: "pull_request",
       parent: closes[0] ? normalise(closes[0]) : undefined,
       children: [],
       pullRequests: []
@@ -7476,6 +7493,7 @@ function issueLinks(repo, number) {
   const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
   const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number).map(asPr);
   return {
+    kind: "issue",
     parent: issue.parent ? normalise(issue.parent) : undefined,
     children: (issue.subIssues?.nodes ?? []).map(asChild),
     pullRequests: dedupeByNumber(declared, referenced)
@@ -7604,7 +7622,8 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
     type: "issue",
     number: opts.parent,
     notify: resolveNotify(opts.repo, opts.parent),
-    repo: opts.repo
+    repo: opts.repo,
+    continuesChain: opts.continuesChain
   });
   const takeBackMarker = (why) => {
     const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);
@@ -7637,7 +7656,7 @@ function withNotice(opts, result) {
   } catch {}
   return result;
 }
-async function dispatchOrchestratorIfSubIssueReady(repo, subIssueNum) {
+async function dispatchOrchestratorIfSubIssueReady(repo, subIssueNum, options = {}) {
   const found = parentIssueOf(repo, subIssueNum);
   if (!found.known) {
     const why = `could not read the parent of #${subIssueNum}: ${found.why}`;
@@ -7648,7 +7667,7 @@ async function dispatchOrchestratorIfSubIssueReady(repo, subIssueNum) {
     console.error(`issue #${subIssueNum} is not a sub-issue of anything, nothing to do`);
     return { kind: "not-tracked" };
   }
-  return dispatchOrchestratorIfReady({ repo, parent: found.parent, closedNum: subIssueNum, retry: true });
+  return dispatchOrchestratorIfReady({ repo, parent: found.parent, closedNum: subIssueNum, retry: true, continuesChain: options.continuesChain });
 }
 
 // src/domain/work/close-request.ts
@@ -18812,15 +18831,15 @@ function mcpFail(message) {
 function handleLaunchSubAgent(args) {
   const validTasks = args.tasks;
   log3(`Dispatching ${validTasks.length} sub-issue(s): ${JSON.stringify(validTasks)}`);
-  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
-    mcpFail("launch_sub_agent is for an issue run that is decomposing work into sub-issues. " + "This run is on a pull request, which reviews or fixes one pull request rather than " + "decomposing it. Use create_pr to hand this pull request to a reviewer, or " + "request_close_issue to conclude it.");
+  if (isPrRun()) {
+    refusePrRun("launch_sub_agent", "Use create_pr to hand this pull request to a reviewer, or merge_pr to merge it once its review passes.");
   }
-  const parentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
-  const notify = process.env.ISSUE_NOTIFY ?? "";
+  const parentIssue = nodeNumber();
+  const notify = (process.env.NOTIFY ?? "").trim();
   const dispatched = [];
   const errors = [];
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const parentNum = parentIssue === "" ? 0 : Number(parentIssue);
+  const parentNum = parentIssue ?? 0;
   const unrelated = [];
   const tasks = parentNum === 0 ? validTasks : validTasks.filter(({ issue }) => {
     const found = parentIssueOf(repo, issue);
@@ -18834,7 +18853,7 @@ function handleLaunchSubAgent(args) {
     return false;
   });
   if (unrelated.length) {
-    errors.push(`not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` + "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " + "sub-issue links \u2014 an issue not linked under this one is never counted, so a dispatch onto " + "it would leave this issue waiting forever. `create_sub_issue` links a child under the issue its " + "run is on, so create it from a run on this issue.");
+    errors.push(`not a child of #${parentIssue ?? "(unknown)"}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` + "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " + "sub-issue links \u2014 an issue not linked under this one is never counted, so a dispatch onto " + "it would leave this issue waiting forever. `create_sub_issue` links a child under the issue its " + "run is on, so create it from a run on this issue.");
   }
   for (const { issue, agent } of tasks) {
     try {
@@ -18856,7 +18875,7 @@ function handleLaunchSubAgent(args) {
     if (summary) {
       bodyLines.push("", "<details><summary>Report</summary>", "", summary, "", "</details>");
     }
-    postTurnComment({ number: parentIssue, body: bodyLines.join(`
+    postTurnComment({ number: String(parentIssue), body: bodyLines.join(`
 `), sessionEnds: complete });
   }
   if (errors.length && !dispatched.length) {
@@ -18873,14 +18892,17 @@ function handleLaunchSubAgent(args) {
   };
 }
 async function handleRequestCloseIssue(args) {
+  if (isPrRun()) {
+    refusePrRun("request_close_issue", "A pull request has no issue to conclude: its outcomes are the review it posts, a fix pushed with " + "commit_and_push, and merge_pr \u2014 and the issue it delivers is concluded by a run on that issue, " + "which merge_pr's post-merge dispatch starts.");
+  }
   const reason = args.reason.trim();
   const summary = (args.summary ?? "").trim();
   if (!reason)
     mcpFail("reason must be a non-empty string");
-  const issueNumberRaw = (process.env.ISSUE_NUMBER ?? "").trim();
-  if (!issueNumberRaw)
-    mcpFail("ISSUE_NUMBER is not set in the environment");
-  const issueNumber = Number(issueNumberRaw);
+  const issueNumber = nodeNumber();
+  if (issueNumber === undefined) {
+    mcpFail("request_close_issue could not read this run's own issue number (the environment's NUMBER is unset or not a positive integer)");
+  }
   log3(`Concluding issue #${issueNumber}: reason=${JSON.stringify(reason)}`);
   let result;
   try {
@@ -18913,10 +18935,10 @@ var RELOAD_ENVIRONMENT_SCHEMA = objectType({
   reason: stringType().min(1).describe("What you need the environment to have that it does not, in one sentence. Recorded on the issue so a " + "person reading it later can see why the run restarted.")
 });
 function handleReloadEnvironment(args) {
-  const number = (process.env.ISSUE_NUMBER ?? "").trim();
+  const number = nodeNumber();
   const agent = (process.env.AGENT ?? "").trim();
   if (!number || !agent) {
-    mcpFail("Cannot reload: this run does not know its own issue number or agent name.");
+    mcpFail("Cannot reload: this run does not know its own node number or agent name.");
   }
   const limit = resolveReloadLimit(getReloadLimit());
   const soFar = reloadsSoFar(process.env.ATOMATON_RELOAD_COUNT);
@@ -18927,7 +18949,7 @@ function handleReloadEnvironment(args) {
   }
   const next = soFar + 1;
   const endingCommentId = postTurnComment({
-    number,
+    number: String(number),
     body: turnCommentBody({
       ended: "handoff",
       audience: "person",
@@ -18937,9 +18959,9 @@ function handleReloadEnvironment(args) {
   const outcome = dispatchRunner({
     context: `${agent} was to be restarted on #${number} after an environment rebuild`,
     agent,
-    type: (process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr" ? "pr" : "issue",
+    type: nodeType() ?? "issue",
     number,
-    notify: (process.env.ISSUE_NOTIFY ?? "").trim(),
+    notify: (process.env.NOTIFY ?? "").trim(),
     reloadCount: next,
     answersRequest: true,
     log: log3
@@ -18950,19 +18972,19 @@ function handleReloadEnvironment(args) {
   if (outcome !== "dispatched") {
     mcpFail("Could not dispatch the new run; the environment was not rebuilt. See the workflow log. " + "Report what you found rather than retrying.");
   }
-  recordEndingComment(endingCommentId, number);
+  recordEndingComment(endingCommentId, String(number));
   return { text: reloadAccepted(next, limit), meta: { session_ends: true } };
 }
 var { tools: TOOLS, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "launch_sub_agent",
-    description: "Dispatch Atomaton agents onto sub-issues and immediately end the atomaton session. " + "Call this ONCE after creating all sub-issues via GitHub MCP. " + "Each sub-issue can be assigned a different agent. " + "Put your report in `summary`: the atomaton session ends immediately after this call " + "returns, so there is no turn afterwards in which to write one. " + "The atomaton will be automatically re-invoked when ALL sub-issues are closed.",
+    description: "Dispatch Atomaton agents onto sub-issues and immediately end the atomaton session. " + "Call this ONCE after creating all sub-issues via GitHub MCP. " + "Each sub-issue can be assigned a different agent. " + "Each sub-issue's body is the hand-off: write there how the work divides among its siblings, " + "any interface they share, and what has already been decided \u2014 the child starts from its own " + "issue's thread, not from this one's. " + "Put your report in `summary`: the atomaton session ends immediately after this call " + "returns, so there is no turn afterwards in which to write one. " + "The atomaton will be automatically re-invoked when ALL sub-issues are closed.",
     schema: LAUNCH_SUB_AGENT_SCHEMA,
     handler: handleLaunchSubAgent
   }),
   defineMcpTool({
     name: "request_close_issue",
-    description: "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " + "correct way to finish an issue -- do NOT just stop responding without calling " + "this. Your reason and summary are posted to the issue, and phase-gating/" + "aggregation is triggered for its parent when this is a sub-issue. Whether the " + "close happens now or the issue's author is asked to make it is this tool's " + "decision and not yours -- it is the same call either way, and your session " + "ends when it returns.",
+    description: "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " + "correct way to finish an issue -- do NOT just stop responding without calling " + "this. Your reason and summary are posted to the issue, and phase-gating/" + "aggregation is triggered for its parent when this is a sub-issue. Whether the " + "close happens now or the issue's author is asked to make it is this tool's " + "decision and not yours -- it is the same call either way, and your session " + "ends when it returns. The call is refused on a pull request run: a pull " + "request has no issue to conclude, and its outcome is merge_pr and the " + "post-merge dispatch, not this tool.",
     schema: REQUEST_CLOSE_ISSUE_SCHEMA,
     handler: handleRequestCloseIssue
   }),

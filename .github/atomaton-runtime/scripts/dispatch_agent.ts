@@ -80,6 +80,12 @@ function logDispatch(target, agent, extra = {}) {
   logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
 }
 
+// src/adapters/runner/run-node.ts
+function nodeNumber() {
+  const parsed = Number((process.env.NUMBER ?? "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 // src/adapters/github/outcome.ts
 function issueOutcome(reason) {
   const said = (reason ?? "").toLowerCase();
@@ -471,8 +477,8 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  const here = (process.env.ISSUE_NUMBER ?? "").trim();
-  const elsewhere = here !== "" && String(d.number) !== here;
+  const here = nodeNumber();
+  const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }

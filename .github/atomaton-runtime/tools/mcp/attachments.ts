@@ -6601,7 +6601,7 @@ var require_dist = __commonJS(function(exports, module) {
 });
 
 // src/entrypoints/tools/mcp/attachments.ts
-import { readFileSync, mkdtempSync, rmSync, statSync as statSync2 } from "fs";
+import { readFileSync as readFileSync2, mkdtempSync, rmSync, statSync as statSync2 } from "fs";
 import { tmpdir } from "os";
 import { basename, isAbsolute, join, resolve, sep } from "path";
 
@@ -17649,6 +17649,131 @@ async function serveMcpServer(options) {
   await server.connect(new StdioServerTransport);
 }
 
+// src/adapters/runner/config.ts
+import { readFileSync } from "fs";
+
+// src/domain/delivery/merge-readiness.ts
+var CI_WOULD_BE_WASTED = new Set([
+  "not-open",
+  "draft",
+  "conflicting",
+  "behind",
+  "mergeability-unknown",
+  "checks-pending",
+  "checks-failing"
+]);
+var PASSING = new Set(["success", "neutral", "skipped"]);
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${USER_ROOT}/delegates`;
+var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
+
+// src/domain/delivery/declared-secrets.ts
+var RUN_CREDENTIALS = [
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "ORCAROUTER_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "ATOMA_COPILOT_TOKEN",
+  "GH_TOKEN"
+];
+var AGENT_ENV_NAMES = [
+  "HOME",
+  "PATH",
+  "AGENT",
+  MACHINERY_ROOT_VAR,
+  "GITHUB_REPOSITORY",
+  "BRANCH",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
+  "ATOMATON_RELOAD_COUNT",
+  "ATOMATON_OPS_LOG",
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
+  "ATOMATON_DISPATCHED_BY",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "BUN_INSTALL_CACHE_DIR",
+  "npm_config_cache",
+  "PIP_CACHE_DIR",
+  "CARGO_HOME",
+  "OPENAI_BASE_URL",
+  "ATOMA_PROVIDER"
+];
+var RUN_STEP_NAMES = [
+  "GITHUB_RUN_ID",
+  "OPENROUTER_BASE_URL",
+  "ORCAROUTER_BASE_URL",
+  "ANTHROPIC_BASE_URL",
+  "COPILOT_BASE_URL",
+  "ATOMA_PROVIDER_IN",
+  "OPENAI_BASE_URL_IN"
+];
+var TOOL_SECRETS = {
+  field: "tools.secrets",
+  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
+};
+var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
+
+// src/domain/delivery/check-jobs.ts
+var CHECKS_FROM_PULL_REQUEST = {
+  where: "checks.from_pull_request",
+  secrets: {
+    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
+  }
+};
+var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
+
+// src/adapters/runner/machinery.ts
+function machineryRoot() {
+  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
+}
+function machineryPath(relative) {
+  const root = machineryRoot();
+  return root ? `${root}/${relative}` : relative;
+}
+
+// src/adapters/runner/config.ts
+function configPath() {
+  return machineryPath(CONFIG_FILE);
+}
+var cached2;
+function loadConfig() {
+  if (!cached2) {
+    cached2 = Bun.YAML.parse(readFileSync(configPath(), "utf8"));
+  }
+  return cached2;
+}
+var DEFAULT_DOCS_BRANCH = "business-docs";
+function getDocsBranch() {
+  let branch;
+  try {
+    const settings = loadConfig().tools?.servers?.attachments?.settings;
+    branch = settings?.branch;
+  } catch (error) {
+    if (error.code !== "ENOENT")
+      throw error;
+  }
+  return branch?.trim().replace(/^refs\/heads\//, "") || DEFAULT_DOCS_BRANCH;
+}
+
 // src/adapters/github/gh.ts
 function run(cmd) {
   const proc = Bun.spawnSync({
@@ -17768,7 +17893,6 @@ var UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 var MAX_READ_BYTES = 128 * 1024 * 1024;
 var REQUEST_ABORT_MS = 120000;
 var BODY_EXCERPT_CHARS = 2000;
-var DEFAULT_DOCS_BRANCH = "business-docs";
 var DRAFT_FILE_MODE = "100644";
 function commitIdentity() {
   const agent = (process.env.AGENT ?? "").trim() || "engineer";
@@ -17781,8 +17905,7 @@ var DRAFT_FILE_SCHEMA = objectType({
 });
 var PUBLISH_DRAFT_SCHEMA = objectType({
   files: arrayType(DRAFT_FILE_SCHEMA).min(1).describe("The drafts to publish, each as a local `path` and the `target` it takes on the branch."),
-  message: stringType().min(1).describe("Commit message for this publication."),
-  branch: stringType().optional().describe(`Branch to publish onto. Default \`${DEFAULT_DOCS_BRANCH}\`.`)
+  message: stringType().min(1).describe("Commit message for this publication.")
 });
 function blobUrlFor(repo, branch, target) {
   const path = target.split("/").map((segment) => encodeURIComponent(segment)).join("/");
@@ -17920,7 +18043,7 @@ function readFileFor(mode, path) {
   if (size > MAX_READ_BYTES) {
     throw new Error(`${path} is ${size} bytes, past the ${MAX_READ_BYTES}-byte ceiling this tool reads into memory.`);
   }
-  const bytes = new Uint8Array(readFileSync(path));
+  const bytes = new Uint8Array(readFileSync2(path));
   return { bytes, size };
 }
 function interpret(mode, status, body, location) {
@@ -18053,8 +18176,7 @@ function commitAt(treeish) {
 }
 async function publishDraft(a) {
   const repo = resolveRepo();
-  const requested = (a.branch ?? "").trim().replace(/^refs\/heads\//, "");
-  const branch = requested || DEFAULT_DOCS_BRANCH;
+  const branch = getDocsBranch();
   const format = gitRun("check-ref-format", "--branch", branch);
   if (format.code !== 0) {
     throw new Error(`'${branch}' is not a branch name git accepts: ${format.stderr || format.stdout}`);
@@ -18065,11 +18187,11 @@ async function publishDraft(a) {
   }
   const defaultBranch = defaultBranchFrom(symref.stdout);
   if (defaultBranch && branch === defaultBranch) {
-    throw new Error(`'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` + `review, which is the one thing an orphan branch exists to avoid \u2014 and nothing here opens a pull request. ` + `Name another branch, or omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`);
+    throw new Error(`'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` + `review, which is the one thing an orphan branch exists to avoid \u2014 and nothing here opens a pull request. ` + `Set \`tools.servers.attachments.settings.branch\` in this repository's config.yaml to an orphan branch, not the default branch.`);
   }
   const current = gitRun("branch", "--show-current").stdout.trim();
   if (current && current === branch) {
-    throw new Error(`'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` + `this run is delivering. Omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`);
+    throw new Error(`'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` + `this run is delivering. Set \`tools.servers.attachments.settings.branch\` in this repository's config.yaml to the orphan branch the documents belong on.`);
   }
   const drafts = resolveDraftFiles(a.files);
   const tmp = mkdtempSync(join(tmpdir(), "atomaton-publish-"));
@@ -18138,7 +18260,7 @@ async function publishDraft(a) {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
-var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " + "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " + "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " + "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " + "refused \u2014 an orphan branch is safe because it is not the reviewed one.";
+var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " + "The branch is this repository's own setting \u2014 `tools.servers.attachments.settings.branch` in config.yaml, " + "default `business-docs` \u2014 and is deliberately not an argument: naming a branch from the outside is what let a " + "publish land on somebody's work branch. " + "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " + "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " + "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " + "refused \u2014 an orphan branch is safe because it is not the reviewed one.";
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "probe",
@@ -18159,7 +18281,6 @@ async function main() {
 if (import.meta.main)
   main();
 export {
-  DEFAULT_DOCS_BRANCH,
   PUBLISH_DRAFT_SCHEMA,
   REQUEST_ABORT_MS,
   UPLOAD_LIMIT_BYTES,

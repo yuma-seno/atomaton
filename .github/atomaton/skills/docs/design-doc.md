@@ -51,8 +51,11 @@ publish_draft({
 
 - `path` is where the file is in this run's world (a checkout-relative path, or
   an absolute one under `/tmp`); `target` is where it goes on the branch.
-- `branch` defaults to `business-docs`. Omit it unless the request names
-  another branch.
+- There is no `branch` argument. The branch is this repository's own setting —
+  `tools.servers.attachments.settings.branch` in `.github/atomaton/config.yaml`,
+  defaulting to `business-docs` — so a publish cannot be aimed at a branch the
+  tool's guards do not see. If the request names a different branch, that is a
+  settings change, not a tool argument: say so and stop.
 - The branch is created as an **orphan** the first time (a root commit with no
   parent in the default branch's history) and fast-forwarded after, so one
   branch accumulates the documents' history and a document's diff stays
