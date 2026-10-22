@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Session } from "../../domain/work/session.ts";
+import { PARENT_ISSUE_TAG } from "../../adapters/github/tags.ts";
 import { parseGithubOutput, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 describe("fetch_events.ts", () => {
@@ -311,6 +312,113 @@ describe("fetch_events.ts", () => {
     }
   });
 
+  // #270: GitHub tokenizes a search, so the bare tag term matched PR #269 — its
+  // body says "Version 0.21.21 — 0.21.20 is held by #263's PR" — and #269's whole
+  // context joined #266's run, whose reviewer then reviewed #269. The search names
+  // candidates; the tag on each candidate's body decides. The fake does not model
+  // GitHub's tokenizer and answers the search with both PRs, so this passes only
+  // when the candidate without the tag is confirmed away BEFORE its events are
+  // fetched: under the old code PR 12's body, diff and comment entered the
+  // context, and the `pulls/12` call was made.
+  test("a candidate that only mentions the issue number is not a linked PR", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-fetch-mention-"));
+    const eventsFile = join(dir, "events.json");
+    const outputFile = join(dir, "output.txt");
+    writeFileSync(outputFile, "");
+    try {
+      const r = runWithFakeGh(
+        scriptPath("fetch_events.ts"),
+        ["--type", "issue", "--number", "5", "--out", eventsFile],
+        {
+          env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: outputFile },
+          rules: [
+            // The search: PR 10 carries the tag, PR 12 only mentions "#5" in
+            // prose — the shape of #269's body that started this.
+            {
+              match: ["pr", "list"],
+              stdout: JSON.stringify([
+                { number: 10, body: "<!-- atomaton:parent-issue=5 -->" },
+                { number: 12, body: "Version 0.21.21 — 0.21.20 is held by #5's PR, which merges first." },
+              ]),
+            },
+            // PR 12 has a full answer waiting, so the old code's `pulls/12`
+            // call would have succeeded and its events would have entered the
+            // context. The fix must never make the call. Diff and reviews
+            // first: both also match the plain `pulls/12` rule below, and the
+            // first rule in array order wins.
+            { match: ["pulls/12", "application/vnd.github.v3.diff"], stdout: "diff --git a/wrong b/wrong\n+wrong change" },
+            { match: ["pulls/12/reviews"], stdout: JSON.stringify([{ id: 1201, body: "reviewing the wrong PR", state: "APPROVED", user: { login: "bob" }, submitted_at: "2026-01-04T00:00:00Z" }]) },
+            { match: ["pulls/12/comments"], stdout: JSON.stringify([{ id: 1200, path: "wrong", line: 1, original_line: 1, body: "inline on the wrong PR", user: { login: "carol" }, created_at: "2026-01-04T00:00:00Z" }]) },
+            { match: ["issues/12/comments"], stdout: "[]" },
+            {
+              match: ["pulls/12"],
+              stdout: JSON.stringify({
+                number: 12,
+                title: "Return closed PRs as rejections",
+                body: "Version 0.21.21 — 0.21.20 is held by #5's PR, which merges first.",
+                user: { login: "engineer" },
+                created_at: "2026-01-04T00:00:00Z",
+                updated_at: "2026-01-04T01:00:00Z",
+                labels: [],
+                head: { sha: "ffffffff" },
+              }),
+            },
+            // PR 10 is the real linked PR, and it must still arrive whole.
+            { match: ["pulls/10", "application/vnd.github.v3.diff"], stdout: "diff --git a/a b/a\n+the fix" },
+            { match: ["pulls/10/reviews"], stdout: JSON.stringify([{ id: 1001, body: "looks good", state: "APPROVED", user: { login: "bob" }, submitted_at: "2026-01-03T00:00:00Z" }]) },
+            { match: ["pulls/10/comments"], stdout: "[]" },
+            { match: ["issues/10/comments"], stdout: "[]" },
+            {
+              match: ["pulls/10"],
+              stdout: JSON.stringify({
+                number: 10,
+                title: "Implement fix",
+                body: "<!-- atomaton:parent-issue=5 -->\nCloses #5",
+                user: { login: "engineer" },
+                created_at: "2026-01-02T00:00:00Z",
+                updated_at: "2026-01-02T06:00:00Z",
+                labels: [],
+                head: { sha: "1234567890" },
+              }),
+            },
+            { match: ["issues/5/comments"], stdout: "[]" },
+            { match: ["graphql", "parent{number}"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+            {
+              match: ["issues/5"],
+              stdout: JSON.stringify({
+                number: 5,
+                title: "Fix the bug",
+                body: "Please fix it.",
+                labels: [],
+                user: { login: "alice" },
+                created_at: "2026-01-01T00:00:00Z",
+              }),
+            },
+          ],
+        },
+      );
+
+      expect(r.status).toBe(0);
+      // The candidate cut is the quoted phrase, the decision in #270: the bare
+      // term also matches a PR that merely mentions the number.
+      const listCall = r.ghCalls.find((argv) => argv.includes("--search"));
+      const searchArg = listCall ? listCall[listCall.indexOf("--search") + 1] ?? "" : "";
+      expect(searchArg).toBe(`"${PARENT_ISSUE_TAG.search(5)}" in:body`);
+      // PR 10 was fetched, so the pipeline ran end to end...
+      expect(r.ghCalls.some((argv) => argv.some((a) => a.includes("pulls/10")))).toBe(true);
+      // ...and PR 12 was never fetched at all, let alone taken into the context.
+      expect(r.ghCalls.some((argv) => argv.some((a) => a.includes("pulls/12")))).toBe(false);
+      const events = JSON.parse(readFileSync(eventsFile, "utf8")) as { content: string }[];
+      const context = events.map((e) => e.content).join("\n");
+      expect(context).toContain("Implement fix");
+      expect(context).not.toContain("held by #5's PR");
+      expect(context).not.toContain("wrong change");
+      expect(parseGithubOutput(readFileSync(outputFile, "utf8"))).toMatchObject({ session_type: "issue", session_number: "5" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // Two whole runs of the script, each making a dozen or so `gh` calls, and every one
   // of those spawns the fake as its own process. Bun`s default 5s is not enough for
   // that on a cold Windows spawn -- and until the fake was actually reachable this
@@ -324,7 +432,15 @@ describe("fetch_events.ts", () => {
     writeFileSync(issueOutput, "");
     writeFileSync(prOutput, "");
     const rules = [
-      { match: ["pr", "list"], stdout: JSON.stringify([{ number: 10 }, { number: 11 }]) },
+      // The search response carries the body: `linkedPrNumbers` confirms each
+      // candidate's tag from it before that PR's events are fetched at all.
+      {
+        match: ["pr", "list"],
+        stdout: JSON.stringify([
+          { number: 10, body: "<!-- atomaton:parent-issue=5 -->" },
+          { number: 11, body: "<!-- atomaton:parent-issue=5 -->" },
+        ]),
+      },
       { match: ["pulls/10", "application/vnd.github.v3.diff"], stdout: "diff --git a/a b/a\n+change" },
       { match: ["pulls/10/comments"], stdout: JSON.stringify([{ id: 1002, path: "a", line: 1, original_line: 1, body: "inline", user: { login: "carol" }, created_at: "2026-01-04T00:00:00Z" }]) },
       { match: ["pulls/10/reviews"], stdout: JSON.stringify([{ id: 1001, body: "looks good", state: "APPROVED", user: { login: "bob" }, submitted_at: "2026-01-03T00:00:00Z" }]) },
