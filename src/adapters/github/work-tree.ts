@@ -37,7 +37,7 @@
  * closes every node — and a partial tree silently treated as whole is a close that
  * leaves work running with nobody told.
  */
-import { gh, ghRead } from "./gh.ts";
+import { gh, ghRead, splitConcatenatedJson } from "./gh.ts";
 import { issueLinks } from "./issue-links.ts";
 import { runInFlight } from "./thread.ts";
 import { issueOutcome, pullRequestOutcome, saysOpen } from "./outcome.ts";
@@ -288,17 +288,24 @@ export function readWorkTree(repo: string, root: number): { nodes: WorkNode[]; p
  * that comment verbatim, and an `atomaton:ended` tag inside it is the DELETED author's
  * words -- a subtree resume reading it would treat the quoted ending as the node's own.
  * See `isQuotation`.
+ *
+ * With `--paginate`, `gh` evaluates `--jq` once per page and writes each page's
+ * result to the same stream -- past one page, back-to-back arrays that
+ * `JSON.parse` refuses as a whole. The pages are split, not parsed as one
+ * document: a thread past 100 comments must still name its ending, and a
+ * `JSON.parse` throw here would return `undefined`, which `/resume` reads as
+ * "nothing was interrupted" -- a stopped node silently skipped. The read stays
+ * `ghRead` (the retrying one, as before) and the pages are split with the
+ * splitter `ghPaginated` wraps.
  */
 export function lastEnding(repo: string, number: number): string | undefined {
   const { code, stdout } = ghRead(
     "api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]",
   );
   if (code !== 0) return undefined;
-  let bodies: string[];
-  try {
-    bodies = JSON.parse(stdout || "[]") as string[];
-  } catch {
-    return undefined;
+  const bodies: string[] = [];
+  for (const page of splitConcatenatedJson(stdout || "[]")) {
+    if (Array.isArray(page)) bodies.push(...(page as string[]));
   }
   for (let i = bodies.length - 1; i >= 0; i -= 1) {
     const body = bodies[i] ?? "";

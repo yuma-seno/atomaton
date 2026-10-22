@@ -41,7 +41,7 @@
  * modules that read a thread, and the tag format stays in `tags.ts` where it is
  * defined.
  */
-import { gh } from "./gh.ts";
+import { ghPaginated } from "./gh.ts";
 import { AGENT_TAG, isQuotation } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 
@@ -107,12 +107,13 @@ export function mostRecentAgent(bodies: readonly string[]): string {
  * transient API error into work that never resumes.
  */
 export function mostRecentAgentOn(repo: string, number: number): string {
-  const { code, stdout } = gh(
-    "api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]",
-  );
-  if (code !== 0) return "";
+  // `ghPaginated`, not a `JSON.parse` of the whole stdout: with `--paginate`, `gh`
+  // evaluates `--jq` once per page and writes each page's result to the same
+  // stream, so past one page the output is back-to-back arrays and a whole-output
+  // parse throws -- which would return "" here, and `/resume` reads "" as "nobody
+  // to start", silently skipping the node.
   try {
-    return mostRecentAgent(JSON.parse(stdout || "[]") as string[]);
+    return mostRecentAgent(ghPaginated<string>("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
   } catch {
     return "";
   }

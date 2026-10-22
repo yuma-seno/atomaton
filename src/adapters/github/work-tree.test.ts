@@ -14,6 +14,11 @@ const SRC = join(import.meta.dir, "work-tree.ts");
 
 /** How the last run on #9 ended, through the real adapter with the fake `gh` answering. */
 function lastEnding(bodies: string[]): string | undefined {
+  return lastEndingStdout(JSON.stringify(bodies));
+}
+
+/** The same, from raw stdout — the shape `gh` itself writes past one page. */
+function lastEndingStdout(stdout: string): string | undefined {
   const script = `
     const { lastEnding } = await import(${JSON.stringify(SRC)});
     const ended = lastEnding("o/r", 9);
@@ -27,7 +32,7 @@ function lastEnding(bodies: string[]): string | undefined {
       ...process.env,
       ATOMATON_FAKE_GH: FAKE_GH_IMPL,
       FAKE_GH_RESPONSES: JSON.stringify([
-        { match: ["repos/o/r/issues/9/comments"], stdout: JSON.stringify(bodies) },
+        { match: ["repos/o/r/issues/9/comments"], stdout },
       ]),
       // Nothing here may reach the real CLI; see `fake-gh-env.ts`.
       GH_TOKEN: "fake-gh-must-be-used",
@@ -69,5 +74,26 @@ describe("lastEnding", () => {
       "</details>",
     ].join("\n");
     expect(lastEnding(["<!-- atomaton:ended=stopped -->", notice])).toBe("stopped");
+  });
+
+  // With `--paginate`, `gh` evaluates `--jq` once per page and writes each page's
+  // result to the same stream: past one page the output is TWO back-to-back arrays,
+  // not one document, and a whole-output `JSON.parse` throws. The old read parsed
+  // the stdout as one document, so a thread past 100 comments returned `undefined`
+  // -- which `/resume` reads as "nothing was interrupted here", silently skipping a
+  // stopped node. The page boundary at 100 is what produces the shape, so this is
+  // the only test whose fake emits it.
+  test("a thread past one page still names its ending", () => {
+    const firstPage = JSON.stringify(["just a remark", "<!-- atomaton:ended=stopped -->"]);
+    const secondPage = JSON.stringify(["<!-- atomaton:ended=waiting -->"]);
+    expect(lastEndingStdout(firstPage + secondPage)).toBe("waiting");
+  });
+
+  test("a response with no JSON in it finds no ending", () => {
+    // Not an error, and not the tag: the old line-split read answered the same
+    // way for a body that carried no tag. Garbage is not a state a caller should
+    // guess at, and `undefined` -- "nothing says" -- is the answer that starts no
+    // work it was not asked for.
+    expect(lastEndingStdout("not json at all")).toBeUndefined();
   });
 });
