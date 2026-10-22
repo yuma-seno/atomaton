@@ -115,6 +115,14 @@ describe("dispatchRunner's ops-log classification", () => {
  * the ball — and validation then dispatched the same reviewer onto the same head
  * again, posting no marker and so leaving the thread silent about who started it.
  *
+ * A `returned` verdict is two facts wearing one event, and the gate tells them apart:
+ * the reviewer's own verdict on the head (#282, refused) against the engineer's fix
+ * report with no directive of its own — the ordinary fix cycle, whose green
+ * validation routes the push to the reviewer whose directive it answered (#211), and
+ * whose red validation sends the engineer back to fix CI. The verdict comment names
+ * its author (`atomaton:agent`); whether that verdict still stands is not in the
+ * thread at all, so validation passes it (`verdictPassed`).
+ *
  * Run through a subprocess like the classification tests above.
  */
 
@@ -126,7 +134,13 @@ function threadRule(target: number, comments: unknown[]): FakeGhRule {
   return { match: ["api", `repos/owner/repo/issues/${target}/comments`], stdout: JSON.stringify(comments) };
 }
 
-function runAnswers(opts: { target: number; thread: FakeGhRule[]; probeId?: number }): { outcome: string; stderr: string; ghCalls: string[][] } {
+function runAnswers(opts: {
+  target: number;
+  thread: FakeGhRule[];
+  probeId?: number;
+  agent?: string;
+  verdictPassed?: boolean;
+}): { outcome: string; stderr: string; ghCalls: string[][] } {
   const dir = mkdtempSync(join(tmpdir(), "atomaton-dispatch-"));
   const opsLog = join(dir, "ops.log");
   const shim = join(dir, "shim.ts");
@@ -135,12 +149,13 @@ function runAnswers(opts: { target: number; thread: FakeGhRule[]; probeId?: numb
     `import { dispatchRunner } from "${importable(join(LIB_DIR, "dispatch.ts"))}";
 const outcome = dispatchRunner({
   context: "dispatch.test.ts",
-  agent: "reviewer",
+  agent: ${JSON.stringify(opts.agent ?? "reviewer")},
   type: "pr",
   number: ${opts.target},
   repo: "owner/repo",
   answersRequest: true,
   ${opts.probeId !== undefined ? `freshnessProbeId: ${opts.probeId},` : ""}
+  ${opts.verdictPassed !== undefined ? `verdictPassed: ${opts.verdictPassed},` : ""}
 });
 console.log(outcome);
 `,
@@ -169,20 +184,80 @@ describe("the answers-request check (#283)", () => {
     expect(ghCalls.some((call) => call.includes("POST"))).toBe(false);
   });
 
-  test("a ball already returned to a person is refused — the #282 repro", () => {
+  test("a reviewer's own verdict on the work is refused — the #282 repro", () => {
     // The incident's thread, in order: the hand-off's marker (reviewer asked for),
-    // then the reviewer's own result comment giving the ball back.
+    // then the reviewer's own result comment giving the ball back. The dispatch
+    // would re-deliver exactly the judgement the thread already holds, and the
+    // caller's green verdict confirms it rather than refuting it.
     const comments = [
       { id: 1, body: "<!-- atomaton:dispatch=reviewer -->", user: { type: "Bot" } },
       { id: 2, body: "<!-- atomaton:agent=reviewer -->\n<!-- atomaton:ended=done -->\nNo defects found.", user: { type: "Bot" } },
     ];
-    const { outcome, stderr, ghCalls } = runAnswers({ target: 300, thread: [threadRule(300, comments)] });
+    const { outcome, stderr, ghCalls } = runAnswers({
+      target: 300,
+      thread: [threadRule(300, comments)],
+      verdictPassed: true,
+    });
     expect(outcome).toBe("superseded");
     expect(ghCalls.some((call) => call[0] === "workflow")).toBe(false);
     // Quiet by design: nothing posted, nothing to take back. One log line is the
     // account, and it says what resolved.
     expect(ghCalls.some((call) => call.includes("POST") || call.includes("DELETE"))).toBe(false);
     expect(stderr).toContain("had already resolved");
+  });
+
+  test("a green validation after a fix push dispatches the reviewer — the fix cycle (#211)", () => {
+    // The ordinary shape the first cut of this gate broke: the reviewer's directive
+    // sent the engineer to fix, the engineer pushed and ended with no directive of
+    // its own (`ended=done`), and the green validation routes that push to the
+    // reviewer whose directive it answered. The engineer's return is not the
+    // reviewer's verdict, and the reviewer has not spoken on this work at all.
+    const comments = [
+      { id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } },
+      { id: 2, body: "<!-- atomaton:agent=engineer -->\n<!-- atomaton:ended=done -->\nFixed, pushed, no agent runs next.", user: { type: "Bot" } },
+    ];
+    const { outcome, ghCalls } = runAnswers({
+      target: 300,
+      thread: [threadRule(300, comments)],
+      verdictPassed: true,
+    });
+    expect(outcome).toBe("dispatched");
+    expect(ghCalls.some((call) => call[0] === "workflow")).toBe(true);
+  });
+
+  test("a red validation after a fix push sends the engineer back — the retry", () => {
+    // The same thread with CI red: the engineer's "done" was wrong about its own
+    // push, and the retry the verdict calls for is the one dispatch that can happen.
+    const comments = [
+      { id: 1, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } },
+      { id: 2, body: "<!-- atomaton:agent=engineer -->\n<!-- atomaton:ended=done -->\nFixed, pushed, no agent runs next.", user: { type: "Bot" } },
+    ];
+    const { outcome, ghCalls } = runAnswers({
+      target: 300,
+      agent: "engineer",
+      thread: [threadRule(300, comments)],
+      verdictPassed: false,
+    });
+    expect(outcome).toBe("dispatched");
+    expect(ghCalls.some((call) => call[0] === "workflow")).toBe(true);
+  });
+
+  test("a `returned` verdict the caller says nothing about is treated as standing", () => {
+    // The conservative side of the fact validation supplies: an unrefuted verdict of
+    // the dispatched agent's own stands, and #282's refusal survives a caller that
+    // forgot `verdictPassed`.
+    const comments = [
+      { id: 1, body: "<!-- atomaton:agent=reviewer -->\n<!-- atomaton:ended=done -->\nNo defects found.", user: { type: "Bot" } },
+    ];
+    expect(runAnswers({ target: 300, thread: [threadRule(300, comments)] }).outcome).toBe("superseded");
+
+    // A verdict comment that names no agent is treated the same way: unattributable
+    // is not provably somebody else's, and the dispatch would still re-deliver a
+    // judgement already on the thread.
+    const anonymous = [{ id: 2, body: "<!-- atomaton:ended=done -->\nDone.", user: { type: "Bot" } }];
+    expect(runAnswers({ target: 300, thread: [threadRule(300, anonymous)], verdictPassed: true }).outcome).toBe(
+      "superseded",
+    );
   });
 
   test("an untaken request (`asked`) is refused — a run is already coming", () => {
@@ -219,6 +294,33 @@ describe("the answers-request check (#283)", () => {
     // is not a comment and is deliberately not read as an event, so there is no
     // evidence the wait resolved and the dispatch is the one that should happen.
     const { outcome, ghCalls } = runAnswers({ target: 300, thread: [threadRule(300, [])] });
+    expect(outcome).toBe("dispatched");
+    expect(ghCalls.some((call) => call[0] === "workflow")).toBe(true);
+  });
+
+  test("a thread longer than one page is read whole, not refused as unreadable", () => {
+    // `--paginate` writes one JSON array per page back to back, which is not one
+    // JSON document: parsed whole, page two made the read throw and the gate stand
+    // down on a thread it could have judged. The fix cycle, arriving past the page
+    // boundary, must still be dispatched.
+    const page1 = [
+      { id: 1, body: "<!-- atomaton:ended=waiting -->", user: { type: "Bot" } },
+      { id: 2, body: "chatter", user: { type: "User" } },
+      { id: 3, body: "<!-- atomaton:dispatch=engineer -->", user: { type: "Bot" } },
+    ];
+    const page2 = [
+      { id: 4, body: "<!-- atomaton:agent=engineer -->\n<!-- atomaton:ended=done -->\nFixed, pushed.", user: { type: "Bot" } },
+    ];
+    const { outcome, ghCalls } = runAnswers({
+      target: 300,
+      thread: [
+        {
+          match: ["api", "repos/owner/repo/issues/300/comments"],
+          stdout: JSON.stringify(page1) + JSON.stringify(page2),
+        },
+      ],
+      verdictPassed: true,
+    });
     expect(outcome).toBe("dispatched");
     expect(ghCalls.some((call) => call[0] === "workflow")).toBe(true);
   });

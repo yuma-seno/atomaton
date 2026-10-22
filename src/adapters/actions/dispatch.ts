@@ -133,6 +133,26 @@ export interface RunnerDispatch {
    */
   freshnessProbeId?: number | string;
   /**
+   * Whether the verdict this dispatch rides on judged the work `passed` — for
+   * validation, `contextsPassed` of the verdict it wrote the checks from; for every
+   * other caller, unsupplied.
+   *
+   * The answers-request check reads it in one place only: the thread's last event is a
+   * `returned` verdict of the agent being dispatched. That verdict is then the
+   * thread's newest word on the work, and what the caller judged decides whether it
+   * still stands — a green run confirms it, and dispatching the same agent again would
+   * re-deliver a judgement the thread already holds (#282); a red one refutes it, and
+   * the engineer's "done" was wrong about its own push, so the retry must go. The
+   * thread cannot carry this: a verdict comment does not name the commit it judged.
+   * Unsupplied, the standing verdict is treated as unrefuted — the conservative
+   * reading, and the one that keeps #282's refusal for a caller that forgot the fact.
+   *
+   * A `returned` from another agent never reaches this field: the fix push that
+   * answers a reviewer's directive ends `returned` with the engineer's name on it, and
+   * the reviewer it routes to has not spoken on that work at all.
+   */
+  verdictPassed?: boolean;
+  /**
    * This dispatch is the run's own conclusion continuing the chain — on another node.
    *
    * The default classification compares the target with the node the run sits on:
@@ -417,8 +437,6 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
  *     owed. It goes.
  *   - `handed-off` — the caller just wrote its own handoff and is dispatching the
  *     agent it named (the reload). It goes.
- *   - `returned` — the ball is with a person. Whoever the dispatch was for has been
- *     served; starting the same work again is the double review #283 reports.
  *   - `asked` — a request stands untaken, so a run is queued or in flight on this
  *     node already. A second dispatch would be a second run on one node — the same
  *     answer the outstanding-request check gives a dispatch that posts a marker.
@@ -426,6 +444,26 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
  *     There is no evidence the wait resolved, and the request this fulfils is the
  *     body's own line, which `requestOutstandingOn` does not read for exactly this
  *     reason. It goes.
+ *   - `returned` — the ball came back, and WHOSE verdict it was decides, because a
+ *     return is two different facts wearing one event:
+ *
+ *       - Another agent's verdict — the ordinary fix cycle. The reviewer asked for a
+ *         fix, the engineer pushed one and ended with no directive of its own
+ *         (`ended=done`), and the green validation routes that push to the reviewer
+ *         whose directive it answered. The agent being dispatched has not spoken on
+ *         this work; refusing here would strand the pull request green with no
+ *         verdict, and strand the red retry the same way. It goes.
+ *       - The dispatched agent's own verdict. The thread's newest word on the work is
+ *         then exactly the judgement this dispatch would commission again — #282's
+ *         reviewer, whose "no defects" was already on the thread when the validation
+ *         it was racing came to dispatch the same reviewer onto the same head. What
+ *         the caller judged decides whether that word still stands: a passed verdict
+ *         confirms it, and the dispatch is refused; a failed one refutes it — CI
+ *         called the engineer's "done" wrong — and the retry must go, so
+ *         `verdictPassed: false` lets it. Unsupplied reads as unrefuted: the
+ *         conservative side, and #282's answer survives a caller that forgot the
+ *         fact. A verdict whose comment names no agent is treated as the dispatched
+ *         agent's own, for the same reason.
  *
  * A refused dispatch posts nothing: the person already holds the judgement, and a
  * notice restating it is the confusion #283 reports rather than a cure. One log line
@@ -483,6 +521,21 @@ function refuseResolvedWait(d: RunnerDispatch): "superseded" | undefined {
 
   const last = read.last;
   if (last === undefined || last === "waiting" || last === "handed-off") return undefined;
+  if (last === "returned") {
+    // A `returned` verdict is two facts wearing one event. Another agent's return is
+    // the fix cycle this dispatch exists to answer; the dispatched agent's own return
+    // is a judgement already in the thread, which only a verdict that refutes it can
+    // send this dispatch after.
+    const own = read.lastAgent === undefined || read.lastAgent === d.agent;
+    if (!own) return undefined;
+    if (d.verdictPassed === false) return undefined;
+    log(
+      `${d.context}: the wait on #${d.number} had already resolved (the thread's newest word on the work is ` +
+        `${read.lastAgent ?? d.agent}'s own verdict${d.verdictPassed === true ? ", and the caller's confirms it" : ""}), ` +
+        `so ${d.agent} was not started`,
+    );
+    return "superseded";
+  }
   log(
     `${d.context}: the wait on #${d.number} had already resolved (the thread's last turn event is \`${last}\`), ` +
       `so ${d.agent} was not started`,

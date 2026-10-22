@@ -54,15 +54,29 @@ export interface DispatchAgentArgs {
   /**
    * Whether this dispatch takes up a request already in the thread.
    *
-   * Validation sets it: the run it starts fulfils the command a person typed, so the
-   * thread's last turn-changing event is that command — this dispatch's own request.
-   * Without it the outstanding-request check would read the request as somebody
-   * else's and refuse the one dispatch that should happen.
+   * Validation sets it: the run it starts fulfils the request the pull request
+   * carries, so the thread's last turn-changing event is that request — this
+   * dispatch's own. Without it the outstanding-request check would read the request
+   * as somebody else's and refuse the one dispatch that should happen. The claim is
+   * verified in `dispatchRunner` (#283): the dispatch goes out only while the thread
+   * still waits for it.
    *
    * A hand-off does not set it: the agent that named the next one is not answering a
    * request, it is making one.
    */
   "answers-request"?: string;
+  /**
+   * Whether the verdict this dispatch rides on judged the work `passed` — for
+   * validation, of the verdict its check runs were written from.
+   *
+   * Read only by the answers-request check, and only when the thread's last event is
+   * a `returned` verdict of the agent being dispatched: a passed verdict confirms
+   * that verdict (so the dispatch would re-deliver a judgement the thread already
+   * holds, and is refused), a failed one refutes it (the engineer's "done" was wrong
+   * about its own push, and the retry must go). Validation always passes it, in both
+   * directions; left off, the standing verdict is treated as unrefuted.
+   */
+  "verdict-passed"?: string;
   /**
    * What was about to happen, in the caller's words.
    *
@@ -85,6 +99,7 @@ function main(): void {
       notify: { type: "string" },
       repo: { type: "string" },
       "answers-request": { type: "string" },
+      "verdict-passed": { type: "string" },
       context: { type: "string" },
     },
   });
@@ -123,6 +138,7 @@ function main(): void {
     notify: values.notify ?? "",
     repo: (values.repo ?? "").trim() || undefined,
     answersRequest: isTrue(values["answers-request"]),
+    verdictPassed: values["verdict-passed"] === undefined ? undefined : isTrue(values["verdict-passed"]),
   });
 
   if (outcome === "failed") {

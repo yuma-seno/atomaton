@@ -196,6 +196,29 @@ export function turnEvents(bodies: readonly string[], readers: TurnReaders): Tur
 }
 
 /**
+ * The body of the newest comment that is a turn event, or nothing.
+ *
+ * `shapedThread`'s events say what happened and in what order, but not whose each one
+ * was — the fold reduces a comment to its event and the source is dropped. Callers
+ * that must attribute an event walk the surviving comments with this and read the tag
+ * they need off the body it names: the newest event's source is the newest comment
+ * that folds to one, so one backward walk finds it. An answers-request dispatch reads
+ * it to attribute a `returned` verdict to the agent that wrote it (#283) — the one
+ * question about a thread the events alone cannot answer.
+ */
+export function newestEventBody(
+  entries: readonly (Pick<ThreadEntry, "body" | "quoted">)[],
+  readers: TurnReaders,
+): string | undefined {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry === undefined) break;
+    if (eventOf(entry, readers) !== undefined) return entry.body;
+  }
+  return undefined;
+}
+
+/**
  * Whose turn it is, from the events in the order they happened.
  *
  * The last event decides. An empty thread is a person's: nothing has been asked for,

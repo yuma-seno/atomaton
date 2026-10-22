@@ -33,13 +33,14 @@
  * script's `ref`, and the machinery scripts are bundled one per file — so the shared
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
-import { gh, ghRead, ghPaginated } from "./gh.ts";
+import { gh, ghRead, ghPaginated, splitConcatenatedJson } from "./gh.ts";
 import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, QUOTES_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
   latestAsk,
   latestRequestedAgent,
+  newestEventBody,
   requestOutstanding,
   shapedThread,
   wasLaunched,
@@ -221,7 +222,18 @@ export function keptCommentIds(comments: readonly Comment[]): Set<number> {
 function listComments(repo: string, number: string | number): Comment[] {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  return JSON.parse(listed.stdout || "[]") as Comment[];
+  // `--paginate` writes one JSON array per page back to back, so from the second page
+  // on the stream is not one JSON document and `JSON.parse` throws on it — a node with
+  // more than one page of comments read as an unreadable thread, and every reader here
+  // answers an unreadable thread by standing down. Split the pages and flatten, the
+  // way `ghPaginated` does; this read keeps `ghRead` rather than `ghPaginated` because
+  // it is the retrying kind (see `splitConcatenatedJson` for the split of labour).
+  const pages = splitConcatenatedJson(listed.stdout);
+  const flat: Comment[] = [];
+  for (const page of pages) {
+    if (Array.isArray(page)) flat.push(...(page as Comment[]));
+  }
+  return flat;
 }
 
 /**
@@ -406,6 +418,14 @@ export interface LastTurnRead {
   probeVisible: boolean | undefined;
   /** The newest turn event in the shaped thread, or `undefined` when it carries none. */
   last: TurnEvent | undefined;
+  /**
+   * The agent the newest event belongs to, when it is a `returned` verdict whose
+   * comment names its author (`AGENT_TAG`) — the fact that separates the dispatch that
+   * would re-deliver a verdict already in the thread from the one that answers a fix
+   * another agent just pushed (#283). `undefined` for every other event, and for a
+   * verdict whose comment names nobody.
+   */
+  lastAgent: string | undefined;
 }
 
 /**
@@ -427,11 +447,17 @@ export function readLastTurnEvent(
   probeId?: string | number,
 ): LastTurnRead {
   const comments = listComments(repo, number);
+  const entries = comments.map(entryOf);
+  const shaped = shapedThread(entries, readers);
+  const last = shaped.events[shaped.events.length - 1];
   const probe = probeId === undefined ? undefined : String(probeId);
-  const events = shapedThread(comments.map(entryOf), readers).events;
   return {
     probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
-    last: events[events.length - 1],
+    last,
+    // Only a `returned` verdict is attributed: `asked` is refused without asking who
+    // made it, and the other events name no agent to attribute.
+    lastAgent:
+      last === "returned" ? AGENT_TAG.read(newestEventBody(entries, readers) ?? "") : undefined,
   };
 }
 

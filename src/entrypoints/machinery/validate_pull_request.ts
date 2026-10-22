@@ -591,6 +591,14 @@ function main(): void {
 
   write(`next_agent=${outcome.next?.agent ?? ""}`);
   write(`conclusion=${conclusion}`);
+  // Whether the verdict this run judged the work `passed`, passed to the dispatch as
+  // `--verdict-passed`. The answers-request check reads it when the thread's last
+  // event is the dispatched agent's own `returned` verdict: green confirms it (#282 —
+  // the same reviewer, the same head, again), red refutes it (the engineer's "done"
+  // was wrong about its own push, and the retry must go). The thread cannot carry
+  // this — a verdict comment does not name the commit it judged — so the caller that
+  // judged it supplies it.
+  write(`verdict_passed=${contextsPassed(outcome.verdict)}`);
   write(`summary=${outcome.summary}`);
 }
 
