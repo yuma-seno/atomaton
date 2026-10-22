@@ -392,13 +392,13 @@ function eventOf(entry, readers) {
     return "asked";
   return;
 }
-function newestEventBody(entries, readers) {
+function newestEventEntry(entries, readers) {
   for (let i = entries.length - 1;i >= 0; i--) {
     const entry = entries[i];
     if (entry === undefined)
       break;
     if (eventOf(entry, readers) !== undefined)
-      return entry.body;
+      return entry;
   }
   return;
 }
@@ -482,10 +482,12 @@ function readLastTurnEvent(repo, number, probeId) {
   const shaped = shapedThread(entries, readers);
   const last = shaped.events[shaped.events.length - 1];
   const probe = probeId === undefined ? undefined : String(probeId);
+  const source = newestEventEntry(shaped.comments, readers);
   return {
     probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
     last,
-    lastAgent: last === "returned" ? AGENT_TAG.read(newestEventBody(entries, readers) ?? "") : undefined
+    lastAgent: last === "returned" ? AGENT_TAG.read(source?.body ?? "") : undefined,
+    lastIsMachinery: source !== undefined && !source.isHuman
   };
 }
 
@@ -653,6 +655,12 @@ function refuseResolvedWait(d) {
   const last = read.last;
   if (last === undefined || last === "waiting" || last === "handed-off")
     return;
+  if (last === "asked") {
+    if (!read.lastIsMachinery)
+      return;
+    log(`${d.context}: #${d.number} already has the machinery's dispatch marker on it, ` + `so ${d.agent} was not started`);
+    return "superseded";
+  }
   if (last === "returned") {
     const own = read.lastAgent === undefined || read.lastAgent === d.agent;
     if (!own)
