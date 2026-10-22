@@ -270,7 +270,9 @@ const CREATE_PR_SCHEMA = z.object({
     .describe(
       "Which agent should review this once CI passes, for example 'reviewer'. Nothing reviews a pull request " +
         "unless you ask: opening one no longer starts anyone by itself. Omit it only when a review is genuinely " +
-        "not wanted -- a person is then told the pull request is waiting, by name, so it does not sit unnoticed.",
+        "not wanted -- a person is then told the pull request is waiting, by name, so it does not sit unnoticed. " +
+        "That a person will merge it is not a reason to omit it: the review is what tells them whether it may " +
+        "be merged at all.",
     ),
 });
 

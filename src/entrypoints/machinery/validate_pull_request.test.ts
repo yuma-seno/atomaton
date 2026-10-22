@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { FAKE_GH_IMPL } from "./testing/fake-gh-env.ts";
+import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { parseGithubOutput, removeTemp, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 import { countPriorRetries, findExistingCiRun, pickDispatchedRun } from "./validate_pull_request.ts";
 
 type Run = Parameters<typeof pickDispatchedRun>[0][number];
@@ -180,4 +184,155 @@ describe("countPriorRetries", () => {
     expect(retries([notice])).toBe(0);
     expect(retries([notice, "<!-- atomaton:ci-retry=2 -->\nCI failed."])).toBe(1);
   });
+});
+
+/**
+ * The "CI is running" comment, as the whole script posts it with a fake `gh`
+ * answering.
+ *
+ * Neither half of the behaviour is reachable from the pure functions: the reuse
+ * decision and the post live in `runCiAndWait`'s poll loop, so these run the script
+ * the way the validate workflow does. `--timeout-seconds 1` bounds the wait -- the
+ * poll interval is 10s, so one loop iteration is one test's worth, and the timeout
+ * path reports "no conclusion" rather than hanging.
+ *
+ * The runs-list answer is read more than once -- the reuse check, then a poll -- and
+ * `attempt` is what makes those different answers: first read, then poll. It is
+ * counted per rule in the fake, so the fixtures here are per-test and exact.
+ */
+describe("notifyCiWaiting, through the whole script", () => {
+  const RUN_ID = 4242;
+  const HEAD = "abc123def4567890abcdef1234567890abcdef12";
+
+  /** One run as the Actions API lists it. */
+  function ciActionRun(status: string, conclusion: string | null): Record<string, unknown> {
+    return {
+      id: RUN_ID,
+      status,
+      conclusion,
+      head_sha: HEAD,
+      path: ".github/workflows/ci.yml",
+      // Far past any test's clock: `pickDispatchedRun` filters `created_at >= since`,
+      // and `since` is the script's own start time.
+      created_at: "2099-01-01T00:00:00Z",
+      event: "workflow_dispatch",
+    };
+  }
+
+  interface Validation {
+    status: number | null;
+    /** Every comment posted, as the `--body` each `gh issue comment` carried. */
+    comments: string[];
+    out: Record<string, string>;
+  }
+
+  /**
+   * Run the whole script once.
+   *
+   * `existingRun` is what the reuse check (the first runs-list read) sees: a run to
+   * reuse or wait for, or nothing when CI must be dispatched. The second read (the
+   * first poll) always sees the run still going, and the third completed -- never
+   * reached here, because the 1s timeout ends the wait after one poll.
+   */
+  function runValidation(existingRun: Record<string, unknown> | undefined, askedByPerson: boolean): Validation {
+    const runsRule = { match: ["actions/runs?event=workflow_dispatch"] };
+    const runs = (list: Record<string, unknown>[]) => JSON.stringify({ total_count: list.length, workflow_runs: list });
+    const rules = [
+      // First-match-wins in the fake, so the more specific rules come first: the
+      // comments URL contains `issues/7` as a substring, and the runs URL contains
+      // both `workflow` and `run`.
+      { ...runsRule, stdout: runs(existingRun ? [existingRun] : []), attempt: 1 },
+      { ...runsRule, stdout: runs([ciActionRun("in_progress", null)]), attempt: 2 },
+      { ...runsRule, stdout: runs([ciActionRun("completed", "success")]), attempt: 3 },
+      { match: ["repos/o/r/issues/7/comments"], stdout: "[]" },
+      { match: ["repos/o/r/issues/7"], stdout: "just a body" },
+      { match: ["repos/o/r/pulls/7"], stdout: JSON.stringify({ head: { sha: HEAD }, base: { ref: "main" } }) },
+      { match: ["repos/o/r/rules/branches/main"], stdout: "[]" },
+      { match: ["repos/o/r/commits/"], stdout: "2099-01-01T00:00:00Z" },
+      // The dispatch itself. `--ref` is what keeps this rule off the runs-list call,
+      // whose URL carries `workflow_dispatch` -- the words the obvious
+      // `["workflow", "run"]` rule would also match.
+      { match: ["--ref", "ci.yml"], stdout: "" },
+    ];
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-validate-"));
+    try {
+      const report = join(dir, "deliverable-report");
+      writeFileSync(report, "");
+      const defDir = join(dir, "agent-definitions");
+      mkdirSync(defDir);
+      const outputFile = join(dir, "out");
+      writeFileSync(outputFile, "");
+      const result = runWithFakeGh(
+        scriptPath("validate_pull_request.ts"),
+        [
+          "--repo", "o/r",
+          "--number", "7",
+          "--branch", "atomaton/issue-7",
+          "--workflow", "ci.yml",
+          "--def-dir", defDir,
+          "--deliverable-report", report,
+          "--asked-by-person", askedByPerson ? "true" : "false",
+          "--timeout-seconds", "1",
+        ],
+        { rules, env: { GITHUB_OUTPUT: outputFile } },
+      );
+      if (result.status !== 0) throw new Error(`script failed: ${result.stderr}`);
+      const comments = result.ghCalls
+        .filter((call) => call[0] === "issue" && call[1] === "comment")
+        .map((call) => call[call.indexOf("--body") + 1] ?? "");
+      return { status: result.status, comments, out: parseGithubOutput(readFileSync(outputFile, "utf8")) };
+    } finally {
+      removeTemp(dir);
+    }
+  }
+
+  const waiting = (bodies: string[]): string | undefined =>
+    bodies.find((body) => body.includes("CI is running on this pull request"));
+
+  // The whole point of moving the comment off the workflow side: the most common
+  // case for a person's `/agent` on a pull request was a CI run that had already
+  // finished, and the old comment promised a wait that did not exist. A reused run
+  // says nothing -- the person's command is the record, and the verdict is seconds
+  // old.
+  test("a reused run posts nothing", () => {
+    const v = runValidation(ciActionRun("completed", "success"), true);
+    expect(v.comments).toEqual([]);
+    expect(v.out.conclusion).toBe("success");
+  });
+
+  // Each of the three slow tests below waits out one 10s poll interval inside the
+  // script -- the sleep is hardcoded, so the bound here is 3x it plus startup.
+  const WAIT = 30_000;
+
+  test("a run dispatched by this validation is announced, with its run URL", () => {
+    const v = runValidation(undefined, true);
+    const notice = waiting(v.comments);
+    expect(notice, "the waiting comment is posted").toBeDefined();
+    expect(notice).toContain(LLM_CONTEXT_TAG.write("exclude"));
+    expect(notice).toContain(`https://github.com/o/r/actions/runs/${RUN_ID}`);
+    expect(notice).toContain("Its result decides who works next");
+    // The sentence is the fact, not a promise: what the result dispatches is
+    // decided by the result.
+    expect(notice).not.toContain("reviewer");
+    expect(notice).not.toContain("engineer");
+  }, WAIT);
+
+  test("a run already going for this commit is announced, with its run URL", () => {
+    const v = runValidation(ciActionRun("in_progress", null), true);
+    const notice = waiting(v.comments);
+    expect(notice, "the waiting comment is posted").toBeDefined();
+    expect(notice).toContain(`https://github.com/o/r/actions/runs/${RUN_ID}`);
+  }, WAIT);
+
+  // An agent's push starts the same validation and must not get the comment: the
+  // tool that started the validation already told the agent, and a comment per push
+  // would be noise on the thread the agent is working in.
+  test("the same run asked for by an agent posts no waiting comment", () => {
+    const v = runValidation(undefined, false);
+    expect(waiting(v.comments)).toBeUndefined();
+    // What is suppressed is the waiting comment only -- the no-conclusion verdict
+    // still reports.
+    expect(v.comments.length).toBe(1);
+    expect(v.comments[0]).toContain("CI never reported a conclusion");
+  }, WAIT);
 });
