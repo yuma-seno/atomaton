@@ -31,6 +31,7 @@ import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z, type McpT
 import { hardenCredentialHolder } from "../lib/harden.ts";
 import { dispatchRunner } from "../../../adapters/actions/dispatch.ts";
 import { getReloadLimit } from "../../../adapters/runner/config.ts";
+import { isPrRun, nodeNumber, nodeType, refusePrRun } from "../../../adapters/runner/run-node.ts";
 import {
   reloadAccepted,
   reloadRefusal,
@@ -112,28 +113,26 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   log(`Dispatching ${validTasks.length} sub-issue(s): ${JSON.stringify(validTasks)}`);
 
   // A pull request run does not decompose work. It reviews or fixes one pull
-  // request, and the node it is on is that pull request -- so there is no parent
-  // issue for a sub-issue to hang under, and `ISSUE_NUMBER` here is the pull
-  // request's own number (or, worse, the parent issue `fetch_events.ts` resolved
-  // for context). Dispatching from it created sub-issues under a node that was
-  // never decomposing anything, and left the pull request's `atomaton/in-progress`
-  // guard held by a chain that had moved to a different node entirely.
+  // request, and the node it sits on is that pull request -- so there is no parent
+  // issue for a sub-issue to hang under. Dispatching from it created sub-issues
+  // under a node that was never decomposing anything, and left the pull request's
+  // `atomaton/in-progress` guard held by a chain that had moved to a different
+  // node entirely.
   //
-  // The route a pull request run has is `create_pr` (to hand to a reviewer) or
-  // `request_close_issue` (to conclude). Decomposition belongs to an issue run.
-  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
-    mcpFail(
-      "launch_sub_agent is for an issue run that is decomposing work into sub-issues. " +
-        "This run is on a pull request, which reviews or fixes one pull request rather than " +
-        "decomposing it. Use create_pr to hand this pull request to a reviewer, or " +
-        "request_close_issue to conclude it.",
+  // Decomposition belongs to an issue run; the refusal names the routes a pull
+  // request run has.
+  if (isPrRun()) {
+    refusePrRun(
+      "launch_sub_agent",
+      "Use create_pr to hand this pull request to a reviewer, or merge_pr to merge it once its review passes.",
     );
   }
 
   // The atomaton's OWN current issue (the parent, from the sub-issues'
-  // point of view).
-  const parentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
-  const notify = process.env.ISSUE_NOTIFY ?? "";
+  // point of view). This run is an issue run — the refusal above turns a pull
+  // request run away first — so the node is the issue the sub-issues hang under.
+  const parentIssue = nodeNumber();
+  const notify = (process.env.NOTIFY ?? "").trim();
 
   const dispatched: string[] = [];
   const errors: string[] = [];
@@ -151,16 +150,16 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   // belong to.
   //
   // Checked here rather than in `dispatchSubAgent`, because it needs to know WHICH
-  // node this run is on — and that is this tool's own `ISSUE_NUMBER`, not something
-  // `dispatchSubAgent` can see. It reads the parent rather than a label: GitHub's
-  // sub-issue link is the edge the aggregation counts, so it is the edge this has to
-  // agree with (`adapters/github/parent-issue.ts`).
+  // node this run is on — and that is this run's own node number (`run-node.ts`),
+  // not something `dispatchSubAgent` can see. It reads the parent rather than a
+  // label: GitHub's sub-issue link is the edge the aggregation counts, so it is
+  // the edge this has to agree with (`adapters/github/parent-issue.ts`).
   //
-  // Skipped entirely when this run does not know its own number: an empty parent is
+  // Skipped entirely when this run does not know its own number: an absent node is
   // not a parent of zero, and refusing every dispatch on a run whose environment is
   // broken would replace a wrong dispatch with no dispatch at all.
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const parentNum = parentIssue === "" ? 0 : Number(parentIssue);
+  const parentNum = parentIssue ?? 0;
   const unrelated: string[] = [];
   const tasks = parentNum === 0 ? validTasks : validTasks.filter(({ issue }) => {
     const found = parentIssueOf(repo, issue);
@@ -180,7 +179,7 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     // and the shape of the mistake is what tells it what to do: create the link, or
     // stop treating the number as its own.
     errors.push(
-      `not a child of #${parentIssue}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` +
+      `not a child of #${parentIssue ?? "(unknown)"}, so nothing was dispatched onto: ${unrelated.join(", ")}. ` +
         "A sub-agent runs on a sub-issue, and the aggregation that wakes this issue counts GitHub's " +
         "sub-issue links — an issue not linked under this one is never counted, so a dispatch onto " +
         "it would leave this issue waiting forever. `create_sub_issue` links a child under the issue its " +
@@ -246,7 +245,7 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     // Posted and recorded through the one helper. `complete` is also whether the
     // session ends here: a partial dispatch keeps it open, and a run that goes on
     // must not leave a comment behind for the machinery to append the footer onto.
-    postTurnComment({ number: parentIssue, body: bodyLines.join("\n"), sessionEnds: complete });
+    postTurnComment({ number: String(parentIssue!), body: bodyLines.join("\n"), sessionEnds: complete });
   }
 
   if (errors.length && !dispatched.length) {
@@ -284,14 +283,27 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
 }
 
 async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_SCHEMA>): Promise<McpToolResult> {
+  // A pull request run has no issue to conclude, and this is the first thing the
+  // call checks — before its arguments, because the refusal is about the node the
+  // run sits on, not about what the caller passed.
+  if (isPrRun()) {
+    refusePrRun(
+      "request_close_issue",
+      "A pull request has no issue to conclude: its outcomes are the review it posts, a fix pushed with " +
+        "commit_and_push, and merge_pr — and the issue it delivers is concluded by a run on that issue, " +
+        "which merge_pr's post-merge dispatch starts.",
+    );
+  }
+
   const reason = args.reason.trim();
   const summary = (args.summary ?? "").trim();
 
   if (!reason) mcpFail("reason must be a non-empty string");
 
-  const issueNumberRaw = (process.env.ISSUE_NUMBER ?? "").trim();
-  if (!issueNumberRaw) mcpFail("ISSUE_NUMBER is not set in the environment");
-  const issueNumber = Number(issueNumberRaw);
+  const issueNumber = nodeNumber();
+  if (issueNumber === undefined) {
+    mcpFail("request_close_issue could not read this run's own issue number (the environment's NUMBER is unset or not a positive integer)");
+  }
 
   log(`Concluding issue #${issueNumber}: reason=${JSON.stringify(reason)}`);
 
@@ -395,10 +407,10 @@ const RELOAD_ENVIRONMENT_SCHEMA = z.object({
  * useful thing left to do. A run that died here would take the reason with it.
  */
 function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>): McpToolResult {
-  const number = (process.env.ISSUE_NUMBER ?? "").trim();
+  const number = nodeNumber();
   const agent = (process.env.AGENT ?? "").trim();
   if (!number || !agent) {
-    mcpFail("Cannot reload: this run does not know its own issue number or agent name.");
+    mcpFail("Cannot reload: this run does not know its own node number or agent name.");
   }
 
   const limit = resolveReloadLimit(getReloadLimit());
@@ -429,7 +441,7 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
   // ending while the reload then failed to dispatch would put the result footer
   // on a comment claiming a restart that never happened.
   const endingCommentId = postTurnComment({
-    number,
+    number: String(number),
     body: turnCommentBody({
       ended: "handoff",
       audience: "person",
@@ -441,9 +453,9 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
   const outcome = dispatchRunner({
     context: `${agent} was to be restarted on #${number} after an environment rebuild`,
     agent,
-    type: (process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr" ? "pr" : "issue",
+    type: nodeType() ?? "issue",
     number,
-    notify: (process.env.ISSUE_NOTIFY ?? "").trim(),
+    notify: (process.env.NOTIFY ?? "").trim(),
     reloadCount: next,
     // The same turn, continued: the agent running right now is restarting itself, so
     // the thread's last event is the command that started this very run. Without this
@@ -469,7 +481,7 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
     );
   }
 
-  recordEndingComment(endingCommentId, number);
+  recordEndingComment(endingCommentId, String(number));
   return { text: reloadAccepted(next, limit), meta: { session_ends: true } };
 }
 
@@ -495,7 +507,9 @@ const { tools: TOOLS, dispatch } = buildMcpTools([
       "aggregation is triggered for its parent when this is a sub-issue. Whether the " +
       "close happens now or the issue's author is asked to make it is this tool's " +
       "decision and not yours -- it is the same call either way, and your session " +
-      "ends when it returns.",
+      "ends when it returns. The call is refused on a pull request run: a pull " +
+      "request has no issue to conclude, and its outcome is merge_pr and the " +
+      "post-merge dispatch, not this tool.",
     schema: REQUEST_CLOSE_ISSUE_SCHEMA,
     handler: handleRequestCloseIssue,
   }),

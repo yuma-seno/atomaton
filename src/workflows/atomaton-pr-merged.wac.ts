@@ -78,7 +78,7 @@ const parseJob = new DefinedJob(
     //
     // `sub_issue` was read from the body's `Closes #N` line and `parent_issue` from
     // its tag — and the two were the same number every time, because `create_pr`
-    // wrote both from one `ISSUE_NUMBER`. Every use below was `sub_issue` fed to
+    // wrote both from the run's one issue number. Every use below was `sub_issue` fed to
     // something that then asked GitHub for ITS parent, which the tag answers on its
     // own. The line is gone (#171) and the duplicate with it.
     outputs: {

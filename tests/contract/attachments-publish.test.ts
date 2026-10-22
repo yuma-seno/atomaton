@@ -1,16 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
+import { hermeticEnv, makeConfigDir } from "../../src/entrypoints/machinery/testing/harness.ts";
 import {
-  DEFAULT_DOCS_BRANCH,
   blobUrlFor,
   defaultBranchFrom,
   indexInfoFor,
   resolveDraftFiles,
 } from "../../src/entrypoints/tools/mcp/attachments.ts";
+import { DEFAULT_DOCS_BRANCH } from "../../src/adapters/runner/config.ts";
 
 /**
  * `publish_draft`, held to what it puts on a branch.
@@ -139,14 +139,34 @@ function sendRequest(
   });
 }
 
-async function callPublish(cwd: string, args: Record<string, unknown>): Promise<any> {
+async function callPublish(cwd: string, args: Record<string, unknown>, env: Record<string, string> = {}): Promise<any> {
   return sendRequest(
     "attachments.ts",
     { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "publish_draft", arguments: args } },
-    {},
+    env,
     cwd,
   );
 }
+
+/**
+ * A config directory whose `tools.servers.attachments.settings.branch` names
+ * `branch`, pointed at by `ATOMATON_MACHINERY_ROOT`. That setting is the only
+ * way a publish's branch is chosen now — there is no branch argument — so a test
+ * that wants a branch other than the default speaks through the config the tool
+ * reads, the same way a run does.
+ */
+function docsBranchConfig(branch: string): Record<string, string> {
+  const dir = makeConfigDir({ tools: { servers: { attachments: { settings: { branch } } } } });
+  configs.push(dir);
+  return { ATOMATON_MACHINERY_ROOT: dir };
+}
+
+/** Every config directory a test made, removed in `afterAll` below. */
+const configs: string[] = [];
+
+afterAll(() => {
+  for (const dir of configs) rmSync(dir, { recursive: true, force: true });
+});
 
 /** The result's payload, or the refusal the tool raised. */
 function payloadOf(response: any): any {
@@ -169,7 +189,7 @@ describe("the tool the agents are handed", () => {
   }, 30_000);
 
   /** The interface #111's skill is written against, pin names and all. */
-  test("publish_draft advertises files, message and an optional branch", async () => {
+  test("publish_draft advertises files and message — and no branch argument", async () => {
     const response = await sendRequest("attachments.ts", {
       jsonrpc: "2.0",
       id: 1,
@@ -180,7 +200,9 @@ describe("the tool the agents are handed", () => {
       (candidate) => candidate.name === "publish_draft",
     );
     expect(tool, "no publish_draft tool").toBeDefined();
-    expect(Object.keys(tool!.inputSchema.properties).sort()).toEqual(["branch", "files", "message"]);
+    // No `branch`: the branch is the repository's own config setting, and an
+    // argument naming one is what let a publish land on somebody's work branch.
+    expect(Object.keys(tool!.inputSchema.properties).sort()).toEqual(["files", "message"]);
     expect(tool!.inputSchema.required).toContain("files");
     expect(tool!.inputSchema.required).toContain("message");
     const item = tool!.inputSchema.properties.files.items;
@@ -393,44 +415,58 @@ describe("publishing onto a real remote", () => {
 
   test("publishing onto the remote's default branch is refused, and nothing is pushed", async () => {
     const { root, remote, work } = makeGitFixture();
+    // The branch is what the config says it is, and the config here says `main` —
+    // a settings mistake, which is exactly the case the guard exists to catch.
+    const configEnv = docsBranchConfig("main");
     try {
       const draft = join(root, "overview.md");
       writeFileSync(draft, "# Overview\n");
       const mainBefore = git(root, "--git-dir", remote, "rev-parse", "main");
 
-      const response = await callPublish(work, {
-        files: [{ path: draft, target: "designs/12/overview.md" }],
-        message: "publish onto main",
-        branch: "main",
-      });
+      const response = await callPublish(
+        work,
+        {
+          files: [{ path: draft, target: "designs/12/overview.md" }],
+          message: "publish onto main",
+        },
+        configEnv,
+      );
       expect(response.result.isError).toBe(true);
       expect(response.result.content[0].text).toContain("default branch");
+      expect(response.result.content[0].text).toContain("config.yaml");
       expect(git(root, "--git-dir", remote, "rev-parse", "main")).toBe(mainBefore);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
 
-  test("a branch a caller names is the one used, and its name is checked by git", async () => {
+  test("the configured branch is the one used, and its name is checked by git", async () => {
     const { root, remote, work } = makeGitFixture();
+    const configEnv = docsBranchConfig("research-notes");
     try {
       const draft = join(root, "overview.md");
       writeFileSync(draft, "# Overview\n");
       const published = payloadOf(
-        await callPublish(work, {
-          files: [{ path: draft, target: "designs/12/overview.md" }],
-          message: "publish elsewhere",
-          branch: "research-notes",
-        }),
+        await callPublish(
+          work,
+          {
+            files: [{ path: draft, target: "designs/12/overview.md" }],
+            message: "publish elsewhere",
+          },
+          configEnv,
+        ),
       );
       expect(published.branch).toBe("research-notes");
       expect(git(root, "--git-dir", remote, "rev-parse", "research-notes")).toBe(published.commit_sha);
 
-      const bad = await callPublish(work, {
-        files: [{ path: draft, target: "designs/12/overview.md" }],
-        message: "publish",
-        branch: "not a branch name",
-      });
+      const bad = await callPublish(
+        work,
+        {
+          files: [{ path: draft, target: "designs/12/overview.md" }],
+          message: "publish",
+        },
+        docsBranchConfig("not a branch name"),
+      );
       expect(bad.result.isError).toBe(true);
       expect(bad.result.content[0].text).toContain("not a branch name git accepts");
     } finally {
@@ -440,17 +476,23 @@ describe("publishing onto a real remote", () => {
 
   test("publishing onto the branch this run is checked out on is refused too", async () => {
     const { root, work } = makeGitFixture();
+    const configEnv = docsBranchConfig("atomaton/issue-152");
     try {
       const draft = join(root, "overview.md");
       writeFileSync(draft, "# Overview\n");
       // A branch other than the remote's default, so the refusal tested here is the
       // one about the run's own work — which is the case the orphan branch exists for.
+      // The branch comes from the config now; there is no argument to name it with,
+      // which is the point: the only branch a publish can reach is the configured one.
       git(work, "checkout", "--quiet", "-b", "atomaton/issue-152");
-      const response = await callPublish(work, {
-        files: [{ path: draft, target: "designs/12/overview.md" }],
-        message: "publish onto the work branch",
-        branch: "atomaton/issue-152",
-      });
+      const response = await callPublish(
+        work,
+        {
+          files: [{ path: draft, target: "designs/12/overview.md" }],
+          message: "publish onto the work branch",
+        },
+        configEnv,
+      );
       expect(response.result.isError).toBe(true);
       expect(response.result.content[0].text).toContain("checked out");
     } finally {
@@ -458,17 +500,21 @@ describe("publishing onto a real remote", () => {
     }
   }, 60_000);
 
-  test("a branch named with its full ref is published to the branch, not refs/heads/refs/heads", async () => {
+  test("a branch configured with its full ref is published to the branch, not refs/heads/refs/heads", async () => {
     const { root, remote, work } = makeGitFixture();
+    const configEnv = docsBranchConfig("refs/heads/business-docs");
     try {
       const draft = join(root, "overview.md");
       writeFileSync(draft, "# Overview\n");
       const published = payloadOf(
-        await callPublish(work, {
-          files: [{ path: draft, target: "designs/12/overview.md" }],
-          message: "publish by full ref",
-          branch: "refs/heads/business-docs",
-        }),
+        await callPublish(
+          work,
+          {
+            files: [{ path: draft, target: "designs/12/overview.md" }],
+            message: "publish by full ref",
+          },
+          configEnv,
+        ),
       );
       expect(published.branch).toBe("business-docs");
       expect(git(root, "--git-dir", remote, "rev-parse", "refs/heads/business-docs")).toBe(published.commit_sha);

@@ -52,6 +52,7 @@ import { readFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z } from "../../../adapters/mcp/mcp-tool.ts";
+import { getDocsBranch } from "../../../adapters/runner/config.ts";
 import { gh, gitRun, gitRunWith } from "../../../adapters/github/gh.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 
@@ -99,9 +100,6 @@ export const REQUEST_ABORT_MS = 120_000;
 /** How much of a response body reaches the result. The status decides the design; the body records why. */
 const BODY_EXCERPT_CHARS = 2_000;
 
-/** The branch `publish_draft` writes to when the caller does not name one. */
-export const DEFAULT_DOCS_BRANCH = "business-docs";
-
 /** The blob mode every published draft gets: an ordinary, non-executable file. */
 const DRAFT_FILE_MODE = "100644";
 
@@ -145,10 +143,6 @@ export const PUBLISH_DRAFT_SCHEMA = z.object({
     .min(1)
     .describe("The drafts to publish, each as a local `path` and the `target` it takes on the branch."),
   message: z.string().min(1).describe("Commit message for this publication."),
-  branch: z
-    .string()
-    .optional()
-    .describe(`Branch to publish onto. Default \`${DEFAULT_DOCS_BRANCH}\`.`),
 });
 
 /**
@@ -704,12 +698,12 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
   // finds its own remote. `GITHUB_REPOSITORY` is what the runner sets; the fallback
   // reads the checkout's remote for a hand-run server.
   const repo = resolveRepo();
-  // `refs/heads/x` and `x` are the same branch, and the refspec below adds the prefix
-  // itself — so the longer spelling would push `refs/heads/refs/heads/x`, a branch
-  // nobody would look at again. Normalised rather than refused, because it is the
-  // spelling somebody reading `ls-remote` output has in front of them.
-  const requested = (a.branch ?? "").trim().replace(/^refs\/heads\//, "");
-  const branch = requested || DEFAULT_DOCS_BRANCH;
+  // The branch is the repository's own setting (`getDocsBranch`), not an argument:
+  // naming a branch from the outside is what let a publish land on somebody's work
+  // branch (#254). The tool's guards below hold it away from the default branch and
+  // from the branch this run is delivering, so a settings mistake surfaces as a
+  // refusal rather than as a document in a tree people review.
+  const branch = getDocsBranch();
 
   // git's own rule, asked rather than restated: it refuses `HEAD`, a name with a space,
   // a trailing `.lock` and the rest, and its message says which.
@@ -727,7 +721,7 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
     throw new Error(
       `'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` +
         `review, which is the one thing an orphan branch exists to avoid — and nothing here opens a pull request. ` +
-        `Name another branch, or omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`,
+        `Set \`tools.servers.attachments.settings.branch\` in this repository's config.yaml to an orphan branch, not the default branch.`,
     );
   }
 
@@ -739,7 +733,7 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
   if (current && current === branch) {
     throw new Error(
       `'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` +
-        `this run is delivering. Omit \`branch\` for '${DEFAULT_DOCS_BRANCH}'.`,
+        `this run is delivering. Set \`tools.servers.attachments.settings.branch\` in this repository's config.yaml to the orphan branch the documents belong on.`,
     );
   }
 
@@ -844,6 +838,9 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
 
 const PUBLISH_DRAFT_DESCRIPTION =
   "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " +
+  "The branch is this repository's own setting — `tools.servers.attachments.settings.branch` in config.yaml, " +
+  "default `business-docs` — and is deliberately not an argument: naming a branch from the outside is what let a " +
+  "publish land on somebody's work branch. " +
   "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " +
   "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " +
   "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " +

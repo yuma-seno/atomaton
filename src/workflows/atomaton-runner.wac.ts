@@ -506,7 +506,7 @@ const fetchEventsStep = new TypedOutputsStep(
       out: `${RUN_DIR}/events.json`,
     })}\n`,
   },
-  ["resolved_type", "resolved_number"] as const,
+  ["session_type", "session_number"] as const,
 );
 
 const restoreSessionStep = new TypedOutputsStep({
@@ -514,8 +514,8 @@ const restoreSessionStep = new TypedOutputsStep({
   id: "restore-session",
   shell: "bash",
   run: `${scriptCommandWithArgs(restoreAgentSessionRef, {
-    type: fetchEventsStep.outputs.resolved_type,
-    number: fetchEventsStep.outputs.resolved_number,
+    type: fetchEventsStep.outputs.session_type,
+    number: fetchEventsStep.outputs.session_number,
     agent: "${{ inputs.agent }}",
     out: `${RUN_DIR}/session.json`,
     "session-mode": "${{ inputs.session_mode }}",
@@ -748,17 +748,20 @@ const runAgentStep = new TypedOutputsStep(
     // repository reads it. It was a token in an environment for no consumer.
     env: {
       GITHUB_RUN_ID: "${{ github.run_id }}",
-      ISSUE_NUMBER: fetchEventsStep.outputs.resolved_number,
-      // Whether ISSUE_NUMBER is an issue or a pull request. `commit_and_push`
-      // creates a branch on an issue run and never on a pull request run, where
-      // the checkout is already the branch under review.
-      ATOMATON_RUN_TYPE: "${{ inputs.type }}",
+      // The node this run sits on. `NUMBER` is its number — the issue's on an issue
+      // run, the pull request's on a PR run — and `TYPE` is its kind. This is
+      // deliberately not `fetch`'s session resolution below: a PR run's conversation
+      // is its parent issue's, and its tools act on the pull request. See
+      // `adapters/runner/run-node.ts` for the two axes, and #259/#248 for the one
+      // name that used to carry both.
+      NUMBER: "${{ inputs.number }}",
+      TYPE: "${{ inputs.type }}",
       // The tally this run arrived with. `reload_environment` reads it to
       // decide whether it may rebuild again -- and a contract test requires every
       // `process.env` a tool server reads to appear in AGENT_ENV, because a missing
       // one reads as zero and silently buys extra reloads.
       ATOMATON_RELOAD_COUNT: "${{ inputs.reload_count }}",
-      ISSUE_NOTIFY: notifyStep.outputs.notify,
+      NOTIFY: notifyStep.outputs.notify,
       // The agent that started this run, or empty when a person or the machinery
       // did. Read by the prompt layer so the run knows who to report back to.
       ATOMATON_DISPATCHED_BY: "${{ inputs.dispatched_by }}",
@@ -783,7 +786,7 @@ export AGENT
 # Exported because the invocation below passes each one explicitly to \`env\`, and a
 # step's \`env:\` block is present in the shell's environment already -- this makes
 # the dependency visible rather than implicit.
-export GITHUB_RUN_ID ISSUE_NUMBER ISSUE_NOTIFY ATOMATON_RUN_TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY
+export GITHUB_RUN_ID NUMBER NOTIFY TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY
 
 # The tools file is written now, from the config, rather than shipped. See
 # \`scripts/write_tools_file.ts\` for what shipping a generated file cost.
@@ -852,9 +855,9 @@ AGENT_ENV=(
   ${MACHINERY_ROOT_VAR}="$${MACHINERY_ROOT_VAR}"
   GITHUB_REPOSITORY="$GITHUB_REPOSITORY"
   BRANCH="\${BRANCH:-}"
-  ISSUE_NUMBER="$ISSUE_NUMBER"
-  ISSUE_NOTIFY="$ISSUE_NOTIFY"
-  ATOMATON_RUN_TYPE="$ATOMATON_RUN_TYPE"
+  NUMBER="$NUMBER"
+  NOTIFY="$NOTIFY"
+  TYPE="$TYPE"
   ATOMATON_RELOAD_COUNT="$ATOMATON_RELOAD_COUNT"
   ATOMATON_DISPATCHED_BY="$ATOMATON_DISPATCHED_BY"
   ATOMATON_OPS_LOG="$ATOMATON_OPS_LOG"
@@ -1141,8 +1144,8 @@ const recordRunMetadataStep = new TypedOutputsStep({
     agent: "${{ inputs.agent }}",
     "snapshot-hash": buildContextStep.outputs.context_snapshot_hash,
     "event-count": buildContextStep.outputs.context_event_count,
-    type: fetchEventsStep.outputs.resolved_type,
-    "resolved-number": fetchEventsStep.outputs.resolved_number,
+    type: fetchEventsStep.outputs.session_type,
+    "session-number": fetchEventsStep.outputs.session_number,
   })}\n`,
 });
 
@@ -1169,8 +1172,8 @@ const saveSessionStep = new TypedOutputsStep({
   shell: "bash",
   run: `${scriptCommandWithArgs(saveAgentSessionRef, {
     session: `${RUN_DIR}/session.json`,
-    type: fetchEventsStep.outputs.resolved_type,
-    number: fetchEventsStep.outputs.resolved_number,
+    type: fetchEventsStep.outputs.session_type,
+    number: fetchEventsStep.outputs.session_number,
     agent: "${{ inputs.agent }}",
   })}\n`,
 });

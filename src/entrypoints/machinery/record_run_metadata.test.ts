@@ -15,7 +15,7 @@ describe("record_run_metadata.ts", () => {
       snapshotHash: "hash-2",
       eventCount: 4,
       type: "issue",
-      resolvedNumber: 7,
+      sessionNumber: 7,
     });
 
     expect(session.metadata?.github_context).toEqual({
@@ -25,7 +25,7 @@ describe("record_run_metadata.ts", () => {
       event_count: 4,
       agent: "engineer",
       type: "issue",
-      resolved_number: 7,
+      session_number: 7,
     });
     expect(session.messages?.[0]?.atoma_metadata?.github_comment_id).toBe(123);
   });

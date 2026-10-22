@@ -31,6 +31,7 @@
  */
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { logDispatch } from "../../adapters/runner/ops-log.ts";
+import { nodeNumber } from "../runner/run-node.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
 import { checkDispatchMarker, type MarkerCheck } from "../../adapters/github/thread.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
@@ -105,6 +106,27 @@ export interface RunnerDispatch {
    * already has one.
    */
   answersRequest?: boolean;
+  /**
+   * This dispatch is the run's own conclusion continuing the chain — on another node.
+   *
+   * The default classification compares the target with the node the run sits on:
+   * onto it moves the turn on, under it starts work and leaves the node waiting. One
+   * dispatch fits neither: a merged pull request's re-invocation of the issue it
+   * delivers. The run sits on the pull request, the run it wakes sits on the parent
+   * issue, and the dispatch is not work under the pull request — it IS the pull
+   * request's outcome. The caller knows that; no node comparison can recover it. So
+   * the caller says so, the op is logged as `dispatch`, and `chain_continues` — which
+   * reads that op — stays true: the merged pull request's result comment must not
+   * claim that nothing runs next while a run has just been started.
+   *
+   * Before the node env was renamed (#259) the comparison stumbled into this by
+   * accident: the env then held the session's canonical issue, which on a pull
+   * request run is exactly the parent the dispatch wakes.
+   *
+   * Set by `dispatchPostMergeAgent` and by `merge_pr`'s close-directly fallback;
+   * nowhere else.
+   */
+  continuesChain?: boolean;
   log?: (message: string) => void;
 }
 
@@ -379,12 +401,14 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
     "--field", `dispatched_by=${d.dispatchedBy ?? ""}`,
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) return "failed";
-  // Which of the two this dispatch is, judged by the target node: a run started on
-  // THIS node moves its turn on, one started on another node leaves this node waiting.
-  // The caller passes the number of the node it is on, so the comparison is exact
-  // rather than a guess. See `ops-log.ts` for what the two op names decide.
-  const here = (process.env.ISSUE_NUMBER ?? "").trim();
-  const elsewhere = here !== "" && String(d.number) !== here;
+  // The default classification compares the target with this run's own node
+  // (`run-node.ts`): onto it moves the turn on, under it starts work and leaves this
+  // node waiting. `continuesChain` overrides it for the dispatch that is the run's
+  // own conclusion landing on another node — neither on it nor under it — whose
+  // caller passes the fact the comparison cannot recover. See `RunnerDispatch` and
+  // `ops-log.ts` for what the two op names decide.
+  const here = nodeNumber();
+  const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...(elsewhere ? { elsewhere: true } : {}) });
   return "dispatched";
 }

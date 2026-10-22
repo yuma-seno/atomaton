@@ -205,6 +205,29 @@ encoder works; the search still functions if it fails to load, falling back to
 the first stage's own order — [which is the stage this setting does not
 touch](how-it-works/how-the-issue-search-ranks.md).
 
+### `branch`
+
+The orphan branch documents are published onto. Like
+[`reranker_model`](#reranker_model) above, it sits under the server because the
+server itself reads it.
+
+```yaml
+tools:
+  servers:
+    attachments:
+      settings:
+        branch: business-docs
+```
+
+It is also the only way the branch is chosen: `publish_draft` takes no branch
+argument, because naming a branch from the outside is what let a publish land on
+somebody's work branch. The tool refuses the remote's default branch and the
+branch the run has checked out, so a settings mistake surfaces as a refusal on
+the pull request that tried to publish rather than as a document in the tree
+people review.
+
+Leave it out for the default, `business-docs`.
+
 ## `tools.packages`
 
 What a server of **yours** needs installed on the runner before anything starts.

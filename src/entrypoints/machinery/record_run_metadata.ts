@@ -14,7 +14,7 @@
  * Usage:
  *   record_run_metadata.ts --session session.json
  *     [--comment-id ID --agent NAME]
- *     [--snapshot-hash HASH --event-count N --type issue|pr --resolved-number N]
+ *     [--snapshot-hash HASH --event-count N --type issue|pr --session-number N]
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -28,7 +28,7 @@ export interface RecordRunMetadataArgs {
   "snapshot-hash"?: string;
   "event-count"?: string | number;
   type?: string;
-  "resolved-number"?: string | number;
+  "session-number"?: string | number;
 }
 
 export const ref = defineScript<RecordRunMetadataArgs>(import.meta.url);
@@ -39,7 +39,7 @@ export interface RunMetadataUpdate {
   snapshotHash?: string;
   eventCount?: string | number;
   type?: string;
-  resolvedNumber?: string | number;
+  sessionNumber?: string | number;
 }
 
 export function updateRunMetadata(session: Session, update: RunMetadataUpdate): void {
@@ -63,7 +63,7 @@ export function updateRunMetadata(session: Session, update: RunMetadataUpdate): 
       event_count: Number(update.eventCount ?? 0),
       agent: update.agent,
       type: update.type,
-      resolved_number: update.resolvedNumber,
+      session_number: update.sessionNumber,
     };
     session.metadata = metadata;
   }
@@ -79,7 +79,7 @@ function main(): void {
       "snapshot-hash": { type: "string" },
       "event-count": { type: "string" },
       type: { type: "string" },
-      "resolved-number": { type: "string" },
+      "session-number": { type: "string" },
     },
   });
 
@@ -95,7 +95,7 @@ function main(): void {
     snapshotHash: values["snapshot-hash"],
     eventCount: values["event-count"],
     type: values.type,
-    resolvedNumber: values["resolved-number"],
+    sessionNumber: values["session-number"],
   });
   if (values["comment-id"] !== undefined) console.error(`Tagged last assistant message with github_comment_id=${values["comment-id"]}`);
   if (values["snapshot-hash"] !== undefined) {

@@ -88,3 +88,15 @@ flowchart TD
 What is restored and saved at either end is
 [what a run leaves behind](../../records/how-it-works.md); the guard the last step
 releases is [what keeps two runs off one issue](what-keeps-two-runs-off-one-issue.md).
+
+**The node a run sits on and the conversation it joins are two different things.**
+One run sits on exactly one node — an issue or a pull request — and the runner puts
+that node's number in the agent's `NUMBER` and its kind in `TYPE`. The conversation
+the run resumes is keyed to a *canonical* node instead, which `fetch_events` writes
+to the workflow as `session_type` / `session_number`. The two are the same on an
+issue run, and they differ in exactly one case: a pull request run joins its parent
+issue's conversation, so the review run and the issue's own runs share one session.
+A sub-issue's run joins itself. The tools read the node
+(`adapters/runner/run-node.ts`), the session plumbing reads the conversation, and
+the one environment name that used to carry both is what made a pull request run
+default its numbers to the parent issue.

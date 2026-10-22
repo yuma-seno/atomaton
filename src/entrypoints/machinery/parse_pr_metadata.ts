@@ -31,7 +31,7 @@ function main(): void {
   //
   // `sub_number` was `closedIssueNumber(body)` and `parent_number` was this tag —
   // and the two were the SAME NUMBER every time, because `injectParentIssue` wrote
-  // both from one `ISSUE_NUMBER`. The only consumer fed `sub_number` to
+  // both from the run's one issue number. The only consumer fed `sub_number` to
   // `parentIssueOf` to find the issue's own parent, so which of the two it was
   // handed made no difference.
   //

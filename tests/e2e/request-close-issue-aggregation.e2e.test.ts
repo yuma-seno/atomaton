@@ -234,7 +234,8 @@ You are a test orchestrator agent.
         env: {
           ...fakeGh.env,
           GITHUB_REPOSITORY: "owner/repo",
-          ISSUE_NUMBER: String(CHILD),
+          NUMBER: String(CHILD),
+          TYPE: "issue",
           GITHUB_EVENT_NAME: "issues",
           OPENAI_BASE_URL: mock.url,
           OPENAI_API_KEY: "dummy-test-key",
