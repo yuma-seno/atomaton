@@ -23,6 +23,16 @@ export interface FakeGhRule {
   match: string[];
   stdout?: string;
   code?: number;
+  /**
+   * Match only the Nth invocation of this rule, counting from 1.
+   *
+   * Implemented by `testing/bin/gh` from `FAKE_GH_LOG` -- each invocation is its
+   * own process and the log is the only state they share, so that header comment
+   * carries the full semantics. A rule without it matches every time; a test that
+   * needs the first read and the first poll of one endpoint to answer differently
+   * writes one rule per attempt.
+   */
+  attempt?: number;
 }
 
 export interface RunWithFakeGhResult {
