@@ -22,6 +22,7 @@ function argv(overrides: Record<string, string> = {}): string[] {
     "--run-started-at", overrides["run-started-at"] ?? START,
     "--run-url", overrides["run-url"] ?? RUN_URL,
     ...(overrides.conclusion === undefined ? [] : ["--conclusion", overrides.conclusion]),
+    ...(overrides["run-event"] === undefined ? [] : ["--run-event", overrides["run-event"]]),
   ];
 }
 
@@ -31,6 +32,7 @@ function apiComment(body: string, createdAt: string, isHuman = false): Record<st
 }
 
 const BEFORE = "2026-10-20T09:00:00Z";
+const DURING = "2026-10-22T11:00:00Z";
 const AFTER = "2026-10-23T09:00:00Z";
 
 /** The dispatch marker the machinery posts when it is about to start a run. */
@@ -151,14 +153,17 @@ describe("reconcile_run_ending.ts", () => {
 
   test("an entry run that dispatched inside its own lifetime gets the notice, naming the thread's agent", () => {
     // The entry path: the title carries the node alone, and the marker the
-    // machinery posted during the run is the proof it took the turn. The ending
-    // from the turn BEFORE is what answers the label rule — a thread with no
-    // readable ending keeps its label.
+    // machinery posted during the run is the proof it took the turn. The entry
+    // run here is one a NEW ISSUE started (`run-event: issues`) — an issue's
+    // body can name an agent — which also pins that the marker branch of the
+    // gate is not gated on the run consuming commands. The ending from the turn
+    // BEFORE is what answers the label rule — a thread with no readable ending
+    // keeps its label.
     const comments = [
       apiComment("<!-- atomaton:ended=done -->\nDone.", BEFORE),
       apiComment(MARKER, AFTER),
     ];
-    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments }));
+    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issues" }), rulesFor({ comments }));
     expect(r.status).toBe(0);
     const body = postedNotice(r);
     expect(body).toContain("atomaton:ended=done");
@@ -167,18 +172,45 @@ describe("reconcile_run_ending.ts", () => {
   });
 
   test("an entry run that died before any marker still gets the notice, off the person's command", () => {
-    // The command alone on its line, instructions below — what the parser reads.
+    // The command's own run (started by that comment, `run-event:
+    // issue_comment`), dead between the parse and the dispatch: the command —
+    // written before the run started, because it is what started it — is the
+    // thread's only record that a run was asked for.
     const command = apiComment("/engineer\nfix the flake please", BEFORE, true);
-    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [command] }));
+    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issue_comment" }), rulesFor({ comments: [command] }));
     expect(r.status).toBe(0);
     expect(postedNotice(r)).toContain(AGENT);
+  });
+
+  test("an entry run a new issue started never claims a person's command — the command is the run it started's ask (#281)", () => {
+    // The incident, both directions of the same thread. The entry run
+    // (`issues: opened`) completed while the command's own run was still
+    // working; before the fix it claimed the command and posted the notice
+    // beside a live run. The event that started the run is what separates the
+    // two watches below — the passing of `--run-event` is the point of the test.
+    const command = apiComment("/atomaton\nplease look", DURING, true);
+    const issueRun = run(
+      argv({ "display-title": `#${NUMBER}`, "run-event": "issues" }),
+      rulesFor({ comments: [command] }),
+    );
+    expect(issueRun.status).toBe(0);
+    expect(issueRun.ghCalls.filter((call) => call.includes("comment"))).toEqual([]);
+
+    // The same thread watched for the command's OWN run — which started after
+    // the command — still gets the notice when that run dies without one.
+    const commandRun = run(
+      argv({ "display-title": `#${NUMBER}`, "run-started-at": AFTER, "run-event": "issue_comment" }),
+      rulesFor({ comments: [command] }),
+    );
+    expect(commandRun.status).toBe(0);
+    expect(postedNotice(commandRun)).toBeDefined();
   });
 
   test("an entry run that took no turn stays silent — a notice there would unjam a LIVE run", () => {
     // The guard-only completion: a person's remark raced a run in flight, the
     // guard removed it, and this run completed. The thread's marker is an OLDER
     // run's — posting here would hand the turn back while that run still holds it.
-    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [apiComment(MARKER, BEFORE)] }));
+    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issue_comment" }), rulesFor({ comments: [apiComment(MARKER, BEFORE)] }));
     expect(r.status).toBe(0);
     expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
@@ -197,7 +229,7 @@ describe("reconcile_run_ending.ts", () => {
   });
 
   test("an entry run over an untouched thread stays silent", () => {
-    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [apiComment("just a remark", AFTER, true)] }));
+    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issues" }), rulesFor({ comments: [apiComment("just a remark", AFTER, true)] }));
     expect(r.status).toBe(0);
     expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });

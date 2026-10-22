@@ -123,21 +123,53 @@ describe("tookTurn", () => {
   const BEFORE = "2026-10-20T09:00:00Z";
   const DURING = "2026-10-22T11:00:00Z";
 
+  /**
+   * The two kinds of watched run the caller distinguishes, by the event that
+   * started the run: one whose trigger consumes a person's command (a comment's
+   * own run), and one that never consumes one (a run a new issue started — the
+   * shape that mistook #281's command for its own). The event names stay with the
+   * caller; the domain sees only this flag.
+   */
+  const CONSUMES_COMMANDS = true;
+  const CONSUMES_NONE = false;
+
   function entry(body: string, isHuman: boolean, createdAt: string): WatchComment {
     return { body, isHuman, createdAt };
   }
 
   test("a marker posted inside the run is the run taking the turn", () => {
-    expect(tookTurn([entry(MARKER, false, DURING)], START, readers)).toBe(true);
+    expect(tookTurn([entry(MARKER, false, DURING)], START, readers, CONSUMES_COMMANDS)).toBe(true);
   });
 
   test("a marker older than the run is another run's", () => {
-    expect(tookTurn([entry(MARKER, false, BEFORE)], START, readers)).toBe(false);
+    expect(tookTurn([entry(MARKER, false, BEFORE)], START, readers, CONSUMES_COMMANDS)).toBe(false);
   });
 
-  test("a person's command is the run's doing at any time — a run can die before any marker", () => {
+  test("a marker inside the run takes the turn whatever the trigger — the marker branch is not gated", () => {
+    // An entry run a new issue started can dispatch (the issue's body named an
+    // agent), and the marker it posts during its own lifetime is its doing.
+    expect(tookTurn([entry(MARKER, false, DURING)], START, readers, CONSUMES_NONE)).toBe(true);
+  });
+
+  test("a person's command written before the run started is the run's doing — a command-consuming run can die before any marker", () => {
     // The command alone on its line, instructions below — what the parser reads.
-    expect(tookTurn([entry("/engineer\nplease fix it", true, BEFORE)], START, readers)).toBe(true);
+    expect(tookTurn([entry("/engineer\nplease fix it", true, BEFORE)], START, readers, CONSUMES_COMMANDS)).toBe(true);
+  });
+
+  test("a person's command is not a run's ask when that run's trigger consumes no command (#281)", () => {
+    // The watch fired for an entry run a new issue started, three seconds before
+    // the person commented; the command's own run was still working. The command
+    // was the LIVE ask, but it was not THIS run's doing — the flag alone says so,
+    // at any command time.
+    expect(tookTurn([entry("/atomaton\nplease look", true, DURING)], START, readers, CONSUMES_NONE)).toBe(false);
+    expect(tookTurn([entry("/atomaton\nplease look", true, BEFORE)], START, readers, CONSUMES_NONE)).toBe(false);
+  });
+
+  test("a command written during a command-consuming run is the next run's ask", () => {
+    // With only "the newest ask wins" to go by, a command that raced the run from
+    // inside its own lifetime was handed back to it; it belongs to the run it
+    // itself starts.
+    expect(tookTurn([entry("/engineer\nplease fix it", true, DURING)], START, readers, CONSUMES_COMMANDS)).toBe(false);
   });
 
   test("a command that raced a live run does not survive the shaping, so it cannot claim the turn", () => {
@@ -147,12 +179,12 @@ describe("tookTurn", () => {
       entry(MARKER, false, BEFORE),
       entry("/reviewer sneak in", true, "2026-10-21T09:00:00Z"),
     ];
-    expect(tookTurn(comments, START, readers)).toBe(false);
+    expect(tookTurn(comments, START, readers, CONSUMES_COMMANDS)).toBe(false);
   });
 
   test("an ordinary remark asks for nothing and takes no turn", () => {
-    expect(tookTurn([entry("looks broken to me", true, DURING)], START, readers)).toBe(false);
-    expect(tookTurn([], START, readers)).toBe(false);
+    expect(tookTurn([entry("looks broken to me", true, DURING)], START, readers, CONSUMES_COMMANDS)).toBe(false);
+    expect(tookTurn([], START, readers, CONSUMES_COMMANDS)).toBe(false);
   });
 
   test("a quotation's ask is the deleted author's, not the machinery's", () => {
@@ -164,12 +196,17 @@ describe("tookTurn", () => {
       quoted: true,
       createdAt: DURING,
     };
-    expect(tookTurn([quoted], START, readers)).toBe(false);
+    expect(tookTurn([quoted], START, readers, CONSUMES_COMMANDS)).toBe(false);
   });
 
   test("an unreadable time on a machinery marker lands on silence", () => {
-    expect(tookTurn([entry(MARKER, false, "")], START, readers)).toBe(false);
-    expect(tookTurn([entry(MARKER, false, DURING)], undefined, readers)).toBe(false);
+    expect(tookTurn([entry(MARKER, false, "")], START, readers, CONSUMES_COMMANDS)).toBe(false);
+    expect(tookTurn([entry(MARKER, false, DURING)], undefined, readers, CONSUMES_COMMANDS)).toBe(false);
+  });
+
+  test("an unreadable time on a person's command lands on silence too", () => {
+    expect(tookTurn([entry("/engineer", true, "")], START, readers, CONSUMES_COMMANDS)).toBe(false);
+    expect(tookTurn([entry("/engineer", true, BEFORE)], undefined, readers, CONSUMES_COMMANDS)).toBe(false);
   });
 });
 

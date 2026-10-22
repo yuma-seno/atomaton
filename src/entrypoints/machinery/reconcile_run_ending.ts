@@ -50,7 +50,14 @@
  *     and unjam the guard while that run was still working. So the notice waits on
  *     `requestOutstanding` (the thread is stuck at an ask) AND `tookTurn` (that ask
  *     is this run's doing — a dispatch marker posted inside the run, or a person's
- *     command, which dies with the run before any marker exists).
+ *     command, when this run is one whose trigger consumes a command and the
+ *     command was written before the run started).
+ *
+ * Which runs consume a command is the caller's knowledge, not the domain's: it
+ * arrives as `--run-event`, the watched run's `workflow_run.event`, and
+ * `runConsumesCommands` below maps it. #281 is what pinned the distinction — an
+ * entry run started by a new issue found the command the person posted seconds
+ * later and claimed it, posting the notice while the command's own run worked.
  *
  * ## What it deliberately does not do
  *
@@ -91,7 +98,7 @@
  *
  * Usage:
  *   reconcile_run_ending.ts --display-title "agent on #N" | "#N"
- *     [--run-started-at ISO] [--run-url URL] [--conclusion WORD]
+ *     [--run-started-at ISO] [--run-url URL] [--conclusion WORD] [--run-event EVENT]
  *
  * Requires GITHUB_REPOSITORY (owner/repo) in the environment.
  */
@@ -121,9 +128,32 @@ export interface ReconcileRunEndingArgs {
   "run-url"?: string;
   /** The watched run's conclusion; `skipped` means no run happened to reconcile. */
   conclusion?: string;
+  /** The GitHub event that started the watched run — `workflow_run.event`. */
+  "run-event"?: string;
 }
 
 export const ref = defineScript<ReconcileRunEndingArgs>(import.meta.url);
+
+/**
+ * Whether the event that started the watched run is one that can consume a
+ * person's command — the only kind of run a command on the thread can be the ask
+ * OF.
+ *
+ * The event arrives as `workflow_run.event`, so the mapping is spelled here and
+ * the domain stays ignorant of event names. In this repository exactly one
+ * surface consumes a comment: an `issue_comment` run of `Atomaton Manual
+ * Comment` on an issue. `Atomaton Entry` starts from `issues: opened` — the new
+ * issue's body is its ask, and it consumes no comment — so a command sitting on
+ * that thread belongs to the run the command itself started. The runner runs
+ * from `workflow_dispatch`, and a manual-comment run for a comment on a PULL
+ * REQUEST takes no turn either — but its title names no node, so it never
+ * reaches this gate. Anything unknown lands on false: a watch that cannot say
+ * what started the run stays silent, the same direction the unreadable-time
+ * cases take.
+ */
+export function runConsumesCommands(runEvent: string | undefined): boolean {
+  return runEvent === "issue_comment";
+}
 
 /**
  * The notice a run that never reported leaves behind, addressed to a person.
@@ -178,6 +208,7 @@ function main(): void {
       "run-started-at": { type: "string" },
       "run-url": { type: "string" },
       conclusion: { type: "string" },
+      "run-event": { type: "string" },
     },
   });
 
@@ -216,11 +247,13 @@ function main(): void {
   // A runner run's title carries the agent, and its only question is whether an
   // ending postdates it. An entry run's title carries the node alone, and most of
   // its runs never took a turn at all — so the notice waits on the thread being
-  // stuck at an ask AND that ask being this run's doing (see `tookTurn`).
+  // stuck at an ask AND that ask being this run's doing (see `tookTurn`): the
+  // event that started the run decides whether a person's command can be that
+  // ask, and the domain never learns event names.
   const endingMissing = titledAgent !== undefined
     ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders)
     : requestOutstanding(thread.events) &&
-      tookTurn(thread.entries, values["run-started-at"], readers);
+      tookTurn(thread.entries, values["run-started-at"], readers, runConsumesCommands(values["run-event"]));
   if (!endingMissing) {
     console.error(`reconcile_run_ending: the run on #${number} owes no ending; nothing to do`);
     return;

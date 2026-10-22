@@ -163,12 +163,26 @@ export interface WatchComment extends ThreadEntry {
  *   - the machinery posted a dispatch marker at or after the run started. The
  *     marker is written by the machinery about to start a run, so one inside the
  *     watched run's lifetime is that run taking the turn; or
- *   - the ask is a person's command, whatever its time. A person's comment starts
- *     the entry run that handles it, and that run can die before the machinery
- *     posts any marker — between the parse and the dispatch — leaving the command
- *     as the thread's only record that a run was asked for. It survives the
- *     shaping only when it was made on a person's turn, so a command that raced a
- *     live run — deleted, or on its way out — cannot reach this branch.
+ *   - the ask is a person's command, the run is one whose trigger consumes a
+ *     command, and the command was written before the run started. Both
+ *     conditions come from #281: a run started by anything else — a new issue, a
+ *     dispatch — that finds a person's command on the thread is finding the ask
+ *     the command's OWN run is working on, and claiming it posts a notice beside
+ *     a live run. And a command written during the run is the NEXT run's ask:
+ *     with only "the newest ask wins" to go by, a command that raced the run from
+ *     inside its own lifetime would be handed back to it. Either condition
+ *     unreadable — no command-consuming trigger to point at, or a time that
+ *     cannot be placed — lands on silence, like the marker branch below. The
+ *     residue is caught when the run that did take the command completes: that
+ *     run's marker or its own command answers there.
+ *
+ * The command-consuming case still covers the death it exists for: a run started
+ * by a person's command can die between the parse and the dispatch, before the
+ * machinery posts any marker, leaving the command — written before the run
+ * started, because it is what started it — as the thread's only record that a
+ * run was asked for. It survives the shaping only when it was made on a person's
+ * turn, so a command that raced a live run — deleted, or on its way out — cannot
+ * reach this branch.
  *
  * A machinery marker OLDER than the run is another run's: the run still working
  * when the watch fired for a guard-only completion, whose death its own completion
@@ -184,13 +198,20 @@ export function tookTurn(
   comments: readonly WatchComment[],
   runStartedAt: string | undefined,
   readers: TurnReaders,
+  /** Whether the watched run's trigger consumes a person's command; the caller derives it, so no event name reaches here. */
+  consumesCommands: boolean,
 ): boolean {
   const { comments: kept } = shapedThread(comments, readers);
   for (let index = kept.length - 1; index >= 0; index -= 1) {
     const entry = kept[index]!;
     if (entry.quoted) continue;
     if (readers.requestedAgent(entry.body) === "") continue;
-    if (entry.isHuman) return true;
+    if (entry.isHuman) {
+      if (!consumesCommands) return false;
+      const at = Date.parse(entry.createdAt);
+      const start = Date.parse(runStartedAt ?? "");
+      return !Number.isNaN(at) && !Number.isNaN(start) && at < start;
+    }
     const at = Date.parse(entry.createdAt);
     const start = Date.parse(runStartedAt ?? "");
     return !Number.isNaN(at) && !Number.isNaN(start) && at >= start;
