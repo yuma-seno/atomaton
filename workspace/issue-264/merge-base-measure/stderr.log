@@ -1,0 +1,27 @@
+To /tmp/atomaton-workspace/merge-base-measure/run/remote.git
+ * [new branch]      main -> main
+Cloning into '/tmp/atomaton-workspace/merge-base-measure/run/work'...
+done.
+Switched to a new branch 'atomaton/issue-264'
+To /tmp/atomaton-workspace/merge-base-measure/run/remote.git
+ * [new branch]      atomaton/issue-264 -> atomaton/issue-264
+Already on 'main'
+To /tmp/atomaton-workspace/merge-base-measure/run/remote.git
+   8393b2d..b8edc12  main -> main
+[atomaton-github] this process is now unreadable to its peers
+[atomaton-github] also removed 9 PATH entries this process cannot inspect
+[atomaton-github] Starting for yuma-seno/atomaton
+[atomaton-github] this process is now unreadable to its peers
+[atomaton-github] also removed 9 PATH entries this process cannot inspect
+[atomaton-github] Starting for yuma-seno/atomaton
+3 | <<<<<<< HEAD
+    ^
+error: Expected string but found "<<<<<<<"
+    at /tmp/atomaton-workspace/merge-base-measure/run/work/package.json:3:1
+[atomaton-github] Tool error for commit_and_push: The merge in progress still has unresolved conflicts: package.json. Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge.
+[atomaton-github] this process is now unreadable to its peers
+[atomaton-github] also removed 9 PATH entries this process cannot inspect
+[atomaton-github] Starting for yuma-seno/atomaton
+[atomaton-github] this process is now unreadable to its peers
+[atomaton-github] also removed 9 PATH entries this process cannot inspect
+[atomaton-github] Starting for yuma-seno/atomaton
