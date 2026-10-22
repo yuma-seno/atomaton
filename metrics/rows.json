@@ -7858,8 +7858,8 @@
   {
     "path": "sessions/issue-283/reviewer.json",
     "agent": "reviewer",
-    "messages": 149,
-    "calls": 86,
+    "messages": 157,
+    "calls": 90,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -7869,8 +7869,8 @@
     "tools": {
       "read": 31,
       "grep": 36,
-      "get_pr": 1,
-      "get_issue_comments": 6,
+      "get_pr": 2,
+      "get_issue_comments": 7,
       "get_pr_diff": 2,
       "glob": 1,
       "list_prs": 1,
@@ -7878,7 +7878,8 @@
       "get_issue": 3,
       "get_check_runs": 2,
       "atoma_builtin__load_skill": 1,
-      "check_merge_readiness": 1
+      "check_merge_readiness": 2,
+      "get_branch": 1
     },
     "acts": {},
     "runs": [
@@ -7926,6 +7927,22 @@
           }
         },
         "started": "2026-10-22T15:32:46Z"
+      },
+      {
+        "ended": "2026-10-22T15:38:41Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 157,
+        "seconds": 42,
+        "server_calls": {
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1
+          }
+        },
+        "started": "2026-10-22T15:37:59Z"
       }
     ]
   },
