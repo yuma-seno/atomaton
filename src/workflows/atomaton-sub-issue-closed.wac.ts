@@ -12,7 +12,7 @@ import { ref as pruneAtomaDataRef } from "../entrypoints/machinery/prune_atomato
 import { ref as stopOnCloseRef } from "../entrypoints/machinery/stop_on_close.ts";
 
 // FALLBACK for manually closed sub-issues.
-// Primary aggregation happens in atomaton-pr-merged.wac.ts (pull_request_target).
+// Primary aggregation happens in atomaton-pr-closed.wac.ts (pull_request_target).
 // This handles the case where a human closes a sub-issue manually.
 //
 // Job graph:

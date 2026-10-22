@@ -12,10 +12,10 @@ covers the whole untrusted surface.
 
 The workflows themselves hold `GITHUB_TOKEN` and the write scopes they declare,
 which is what they mutate issues, pull requests and workflow dispatches with.
-`atomaton-pr-merged.yml` is the one that listens rather than being dispatched, and
+`atomaton-pr-closed.yml` is the one that listens rather than being dispatched, and
 it listens with `pull_request_target`, which executes in the base repository's
-context: review that trust model before extending it to anything wider than
-detecting a merge.
+context — and which now acts on both of a pull request's outcomes, a merge and a
+close without one: review that trust model before extending it further.
 
 What an agent's *tools* can and cannot reach is a different boundary —
 [what a tool can and cannot be protected from](../tools/boundaries.md#what-a-tool-can-and-cannot-be-protected-from).

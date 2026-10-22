@@ -5,15 +5,16 @@
  * `reinvoke-origin-agent` reads the pull request body itself (`atomaton:parent-issue`,
  * `atomaton:origin-agent`) and uses nothing `resolve-parent` answers. Gating it on that
  * resolution meant a root issue -- which has no parent, so the answer is "" -- was never
- * re-invoked after its pull request merged: `Atomaton PR Merged` run 39274230329
- * succeeded with `reinvoke-origin-agent`, `notify-parent` and `aggregate-sub-issues`
- * all skipped (#203, observed on #206 / pull request #233).
+ * re-invoked after its pull request merged: `Atomaton PR Closed`'s earlier self, run
+ * 39274230329, succeeded with `reinvoke-origin-agent`, `notify-parent` and
+ * `aggregate-sub-issues` all skipped (#203, observed on #206 / pull request #233).
  *
  * The merge gate is a separate question. It used to be inherited from `parse` through
- * `needs` -- GitHub skips a job whose needed job was skipped -- so dropping `needs`
- * dropped it too, and `pull_request_target: closed` fires for a close that merged
- * nothing. A closed-unmerged pull request would then post "the pull request for this
- * issue merged" on its issue and start a run on it.
+ * `needs` -- GitHub skips a job whose needed job was skipped -- and `parse` was the only
+ * job testing the event. Since #267 `parse` runs for BOTH outcomes of `closed` (the
+ * rejection side reads its output), so no gate can be inherited any more and every
+ * merge-side job states its own -- which is also what keeps a close that merged nothing
+ * from commenting on the parent about a merge that did not happen, or aggregating one.
  *
  * The other two still need the parent: one writes to it, the other aggregates into it.
  * That difference is the thing worth holding -- a job may be free of an answer only
@@ -28,7 +29,7 @@ interface Job {
 }
 
 function jobs(): Record<string, Job> {
-  const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-pr-merged.yml", "utf8")) as {
+  const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-pr-closed.yml", "utf8")) as {
     jobs: Record<string, Job>;
   };
   return workflow.jobs;
@@ -58,5 +59,34 @@ describe("post-merge re-invocation", () => {
         "resolve-parent.outputs.parent_issue",
       );
     }
+  });
+
+  /**
+   * Every merge-side job now states the merge itself, because the gate it used
+   * to inherit from `parse` is gone: parse runs for both outcomes of `closed`
+   * so the rejection side can read its output (#267). A close that merged
+   * nothing must not reach any of these three.
+   */
+  test("the merge-side jobs still test the merge themselves", () => {
+    const all = jobs();
+    for (const name of ["notify-parent", "reinvoke-origin-agent", "aggregate-sub-issues"]) {
+      expect(all[name]?.if ?? "", `${name} must not run for a close that merged nothing`).toContain(
+        "github.event.pull_request.merged == true",
+      );
+    }
+  });
+
+  /**
+   * The rejection half (#267): the close that merged nothing is returned to the
+   * origin agent, and only that close -- the merged outcome belongs to the
+   * three jobs above. It reads the issue from `parse` and decides everything
+   * else itself, so `parse` is the one thing it waits on.
+   */
+  test("the close that merged nothing goes to dispatch-rejected, and only that close", () => {
+    const rejected = jobs()["dispatch-rejected"];
+    expect(rejected, "run `bun run synth` first").toBeDefined();
+    expect(rejected?.if ?? "").toContain("github.event.pull_request.merged == false");
+    expect(needs(rejected), "it reads the linked issue from parse").toContain("parse");
+    expect(needs(rejected), "it uses nothing that resolution answers").not.toContain("resolve-parent");
   });
 });

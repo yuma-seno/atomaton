@@ -7,7 +7,7 @@
  * before this existed, that was 6 independently hand-copied object literals
  * with no compiler link between them, free to silently drift apart (e.g. one
  * file's permissions getting tightened/loosened without the others noticing).
- * `atomaton-pr-merged` is the one legitimate exception (`pull-requests: "read"`,
+ * `atomaton-pr-closed` is the one legitimate exception (`pull-requests: "read"`,
  * it only ever reads PR metadata) -- spread `ATOMATON_WORKFLOW_PERMISSIONS` and
  * override just that key there, rather than duplicating the whole object.
  */

@@ -32,3 +32,27 @@ on the pull request, and the engineer is dispatched to fix them — the same han
 as failing CI, including the retry limit. The agent sent to fix it is unaffected by
 the breakage, because a run reads its machinery from
 [the default branch](../pipeline/how-it-works.md) rather than from the pull request.
+
+## When a person closes it without merging
+
+A close that merged nothing used to start nothing at all: every job in the
+workflow listening for a pull request's close was gated on `merged == true`
+(`atomaton-pr-closed.yml`, before it carried that name), so a rejected pull
+request left its branch behind, its issue open, and nobody told.
+
+The close is now returned to the agent tagged `atomaton:origin-agent` in the
+pull request's body — as a judgement for that agent to make, not a verdict the
+machine has reached. A close is a person's decision, but whether it means
+"rejected" or "shipped some other way" is not readable from the event, so the
+machine closes nothing: the agent decides whether what the issue asked for is
+settled, concludes the issue when the close settled it, and carries on from
+where the pull request left off when the work is still needed.
+
+Two closes return nothing. The linked issue is already closed — the person
+closing the pull request is saying the issue is finished. And a pull request
+with no `atomaton:origin-agent` tag — a person's own — gets no directive
+written for it: the machinery does not post instructions on work no run of its
+own opened.
+
+A rejected branch is not deleted. It is where the agent resumes when it decides
+the work is still needed, and a second pull request can be opened from it.

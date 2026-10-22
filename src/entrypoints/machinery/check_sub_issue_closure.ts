@@ -19,7 +19,7 @@
  * ## Why it no longer asks whether a merged PR closed this issue
  *
  * It used to, and used the answer to skip the whole aggregation: "a merged PR
- * links this sub-issue, so atomaton-pr-merged.wac.ts already handled the parent".
+ * links this sub-issue, so atomaton-pr-closed.wac.ts already handled the parent".
  * That is a fact about the SUB-ISSUE standing in for a fact about the PARENT, and
  * the two are different questions at different levels of the tree. A pull request
  * that closes a sub-issue says the sub-issue's work was delivered; it says nothing
@@ -28,7 +28,7 @@
  * The inference was wrong in the direction that loses work, and measurably so. An
  * agent's merge (`merge_pr`, permitted by the shipped `merge.policy: auto`) runs as
  * GITHUB_TOKEN, and GitHub raises no event cascade for its own token's actions — so
- * atomaton-pr-merged never fires for that merge, while the merged PR still appears
+ * atomaton-pr-closed never fires for that merge, while the merged PR still appears
  * in `closedByPullRequestsReferences`. The guard answered `closed_via_pr=true` and
  * skipped a close whose primary path had not run at all; the skip left no comment,
  * no failure, and a green workflow — the same silent-loss shape as #143. The
