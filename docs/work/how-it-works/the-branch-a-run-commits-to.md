@@ -22,7 +22,8 @@
   child's or a sibling's branch and nothing cascades, so two siblings catching up
   with the same parent never touch each other's work, and there is no shared state
   to keep consistent. A pull request run brings in the base its own pull request
-  aims at, which is the same branch.
+  aims at, which is the same branch. It is also the route a stacked child takes to
+  its parent's newer commits — the one it did not have before this.
 - The base arrives as a merge commit, never as a rebase: the branch's own commits
   keep their hashes, and the merge records where it came from. A conflict stops it
   — the markers stay in the worktree and nothing is committed — and the run
