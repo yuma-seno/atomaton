@@ -6422,31 +6422,36 @@
   {
     "path": "sessions/issue-267/atomaton.json",
     "agent": "atomaton",
-    "messages": 212,
-    "calls": 120,
-    "failed": 1,
-    "refused": 0,
+    "messages": 239,
+    "calls": 132,
+    "failed": 0,
+    "refused": 1,
     "skills": [
       "project/conventions"
     ],
     "reported": true,
     "tools": {
       "atoma_builtin__load_skill": 1,
-      "bash": 50,
+      "bash": 56,
       "get_issue": 1,
       "read": 16,
       "grep": 2,
-      "list_prs": 1,
+      "list_prs": 2,
       "edit": 42,
       "write": 3,
       "commit_and_push": 2,
       "create_pr": 1,
-      "get_check_runs": 1
+      "get_check_runs": 1,
+      "check_merge_readiness": 1,
+      "get_branch": 1,
+      "get_pr_diff": 1,
+      "search_issues": 1,
+      "fetch": 1
     },
     "acts": {
-      "other": 8,
-      "open": 13,
-      "search": 20,
+      "other": 11,
+      "open": 14,
+      "search": 22,
       "edit": 1,
       "verify": 8
     },
@@ -6496,6 +6501,31 @@
           }
         },
         "started": "2026-10-22T02:07:40Z"
+      },
+      {
+        "ended": "2026-10-22T03:03:45Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "messages": 239,
+        "seconds": 575,
+        "server_calls": {
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_pr_diff": 1,
+            "list_prs": 1
+          },
+          "search": {
+            "search_issues": 1
+          },
+          "shell": {
+            "bash": 6
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-10-22T02:54:10Z"
       }
     ]
   },
