@@ -125,7 +125,7 @@ const validateStep = new TypedOutputsStep(
       "deliverable-report": DELIVERABLE_REPORT,
     })}\n`,
   },
-  ["next_agent", "conclusion", "summary"] as const,
+  ["next_agent", "conclusion", "verdict_passed", "summary"] as const,
 );
 
 export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
@@ -210,6 +210,7 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           AGENT: validateStep.outputs.next_agent,
           NUMBER: "${{ inputs.number }}",
           SUMMARY: validateStep.outputs.summary,
+          VERDICT_PASSED: validateStep.outputs.verdict_passed,
           REPO: "${{ github.repository }}",
         },
         run: `${scriptCommandWithArgs(dispatchAgentRef, {
@@ -221,8 +222,15 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           // a person typed, or the reviewer line `create_pr` wrote. The thread's last
           // turn-changing event is that request, so without this the
           // outstanding-request check would read it as somebody else's and refuse the
-          // one dispatch that should happen.
+          // one dispatch that should happen. The claim is verified in
+          // `dispatchRunner` itself (#283): a thread whose ball moved while CI ran --
+          // a reviewer already dispatched and finished -- refuses quietly.
           "answers-request": "true",
+          // What this run's verdict said about the work, so the check can tell a
+          // verdict it would re-deliver (#282) from the fix push it exists to hand
+          // back to the reviewer: green confirms the thread's newest `returned`
+          // verdict, red refutes it and the retry goes.
+          "verdict-passed": "\${VERDICT_PASSED}",
           context: "validation of #\${NUMBER} finished: \${SUMMARY}",
         })}
 `,

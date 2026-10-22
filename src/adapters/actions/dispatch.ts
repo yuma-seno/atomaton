@@ -33,7 +33,7 @@ import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { logDispatch } from "../../adapters/runner/ops-log.ts";
 import { nodeNumber } from "../runner/run-node.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
-import { checkDispatchMarker, type MarkerCheck } from "../../adapters/github/thread.ts";
+import { checkDispatchMarker, readLastTurnEvent, type LastTurnRead, type MarkerCheck } from "../../adapters/github/thread.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-target.ts";
 
@@ -92,20 +92,66 @@ export interface RunnerDispatch {
    * Whether this dispatch takes up a request already in the thread, rather than
    * starting a turn nobody asked for.
    *
-   * Two callers set it, and both would otherwise be refused by the
-   * outstanding-request check below for the same reason: the thread's last
-   * turn-changing event is a request, and that request is this dispatch's own.
+   * The claim is the caller's; the verification lives here (`refuseResolvedWait`
+   * below). Two callers set it, and both would otherwise be refused by the
+   * outstanding-request check for the same reason: the thread's last turn-changing
+   * event is a request, and that request is this dispatch's own.
    *
    *   - `reload_environment`: the agent running right now is restarting itself, so
-   *     the request is the command that started that very run.
-   *   - validation: the dispatch fulfils the command a person typed, so the request
-   *     is that command.
+   *     the request is the command that started that very run. It posts its handoff
+   *     comment first and passes its id as `freshnessProbeId`, so the check sees the
+   *     comment the claim rests on before it judges.
+   *   - validation: the dispatch fulfils the request the pull request carries — the
+   *     command a person typed, or the reviewer line `create_pr` wrote. The check is
+   *     what keeps that premise honest: CI can hold the dispatch for minutes, and the
+   *     thread it lands on is the one that exists at the end of the wait, not the one
+   *     the caller saw at the start. A ball that moved in the meantime — a reviewer
+   *     already dispatched and finished — is a request already answered, and handing
+   *     it to the named agent anyway reviewed the same head twice (#283).
    *
    * Omitted everywhere else, which is the honest default: a dispatch that is not
    * taking up a request is a new turn, and a new turn must not start on a node that
    * already has one.
    */
   answersRequest?: boolean;
+  /**
+   * A comment this dispatch's caller wrote moments before asking to be dispatched,
+   * which the answers-request check must be able to see before it judges the thread —
+   * the freshness probe, the same instrument the marker is for the ordering check
+   * (`MarkerCheck`).
+   *
+   * `reload_environment` passes the handoff comment it posts immediately before
+   * dispatching: until that comment is visible, the read may still predate the write
+   * the `handed-off` answer rests on, and refusing on it would break the reload over
+   * read-after-write lag. A comment that never posted leaves no id, and the check
+   * then judges the thread as it stands — which refuses, rightly, because the
+   * handoff the claim rests on is not in it. Validation has no such write — its
+   * thread was last touched minutes ago — and passes nothing, which reads once.
+   *
+   * Omitted everywhere else. Only an answers-request dispatch has a claim about the
+   * thread's present state to verify, and only one of those has just written to it.
+   */
+  freshnessProbeId?: number | string;
+  /**
+   * Whether the verdict this dispatch rides on judged the work `passed` — for
+   * validation, `contextsPassed` of the verdict it wrote the checks from; for every
+   * other caller, unsupplied.
+   *
+   * The answers-request check reads it in one place only: the thread's last event is a
+   * `returned` verdict of the agent being dispatched. That verdict is then the
+   * thread's newest word on the work, and what the caller judged decides whether it
+   * still stands — a green run confirms it, and dispatching the same agent again would
+   * re-deliver a judgement the thread already holds (#282); a red one refutes it, and
+   * the engineer's "done" was wrong about its own push, so the retry must go. The
+   * thread cannot carry this: a verdict comment does not name the commit it judged.
+   * Unsupplied, the standing verdict is treated as unrefuted — the conservative
+   * reading, and the one that keeps #282's refusal for a caller that forgot the fact.
+   *
+   * A `returned` from another agent never reaches this field: the fix push that
+   * answers a reviewer's directive ends `returned` with the engineer's name on it, and
+   * the reviewer it routes to has not spoken on that work at all.
+   */
+  verdictPassed?: boolean;
   /**
    * This dispatch is the run's own conclusion continuing the chain — on another node.
    *
@@ -155,6 +201,22 @@ export type DispatchOutcome =
    * could not be ruled out and starting one would risk two runs on one node.
    */
   | "unconfirmed"
+  /**
+   * The wait this dispatch was answering had already resolved, or the thread could not
+   * be read well enough to rule that out. Nobody was dispatched, nothing is posted,
+   * and no marker was written — the answers-request dispatch makes no marker to take
+   * back.
+   *
+   * Quiet on purpose, which is what separates it from every other refusal here. In the
+   * resolved case the thread already holds the judgement the dispatch would have
+   * produced — a reviewer has reviewed, a run has handed the ball back — so a notice
+   * would restate what a person can read above it and make the newest judgement harder
+   * to find, which is the second half of the harm #283 reports. In the unreadable case
+   * there is nobody whose attention the refusal needs: the caller decides what a
+   * refused reload or a refused validation means, and both have a path for it. One log
+   * line is the whole account, either way.
+   */
+  | "superseded"
   /** GitHub rejected the dispatch. Nothing is running and nothing will retry. */
   | "failed";
 
@@ -354,7 +416,136 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
 }
 
 /**
- * Dispatch the runner, unless the target is not open or already has a turn.
+ * Refuse an answers-request dispatch whose wait has already resolved.
+ *
+ * `answersRequest` claims the thread still waits for what this dispatch delivers.
+ * Like every claim this module acts on, it is verified here rather than trusted: CI
+ * can hold a validation for minutes, and the thread it lands on is the one that exists
+ * at the END of the wait. #283 is what skipping the verification cost: while the
+ * validation polled CI, the run it was validating handed off to the reviewer, that
+ * reviewer reviewed and gave the ball back to a person — and five minutes after the
+ * ball had settled, the validation dispatched the same reviewer onto the same head.
+ * The marker the second dispatch would have posted is skipped too, so the thread did
+ * not even show who started it.
+ *
+ * ## The rule
+ *
+ * The thread's last turn event decides:
+ *
+ *   - `waiting` — the run that was asked for ended inside a child-starting tool, and
+ *     the node waits on CI or a child. This dispatch is the answer the node is still
+ *     owed. It goes.
+ *   - `handed-off` — the caller just wrote its own handoff and is dispatching the
+ *     agent it named (the reload). It goes.
+ *   - `asked` — a request stands untaken, so a run is queued or in flight on this
+ *     node already. A second dispatch would be a second run on one node — the same
+ *     answer the outstanding-request check gives a dispatch that posts a marker.
+ *   - no events at all — nothing in the thread has moved since the node was opened.
+ *     There is no evidence the wait resolved, and the request this fulfils is the
+ *     body's own line, which `requestOutstandingOn` does not read for exactly this
+ *     reason. It goes.
+ *   - `returned` — the ball came back, and WHOSE verdict it was decides, because a
+ *     return is two different facts wearing one event:
+ *
+ *       - Another agent's verdict — the ordinary fix cycle. The reviewer asked for a
+ *         fix, the engineer pushed one and ended with no directive of its own
+ *         (`ended=done`), and the green validation routes that push to the reviewer
+ *         whose directive it answered. The agent being dispatched has not spoken on
+ *         this work; refusing here would strand the pull request green with no
+ *         verdict, and strand the red retry the same way. It goes.
+ *       - The dispatched agent's own verdict. The thread's newest word on the work is
+ *         then exactly the judgement this dispatch would commission again — #282's
+ *         reviewer, whose "no defects" was already on the thread when the validation
+ *         it was racing came to dispatch the same reviewer onto the same head. What
+ *         the caller judged decides whether that word still stands: a passed verdict
+ *         confirms it, and the dispatch is refused; a failed one refutes it — CI
+ *         called the engineer's "done" wrong — and the retry must go, so
+ *         `verdictPassed: false` lets it. Unsupplied reads as unrefuted: the
+ *         conservative side, and #282's answer survives a caller that forgot the
+ *         fact. A verdict whose comment names no agent is treated as the dispatched
+ *         agent's own, for the same reason.
+ *
+ * A refused dispatch posts nothing: the person already holds the judgement, and a
+ * notice restating it is the confusion #283 reports rather than a cure. One log line
+ * is the account.
+ *
+ * ## Why the read is probed before it is trusted
+ *
+ * A caller that wrote to the thread moments before dispatching (`reload_environment`'s
+ * handoff comment) passes its id as `freshnessProbeId`, and the read is retried until
+ * that comment is visible — the same read-after-write instrument the ordering check
+ * runs on its marker. Judging before the read catches up could refuse the reload over
+ * a lag, and the reload is the path this check exists to keep open. A probe that never
+ * becomes visible is a read that cannot be trusted, and the answer is the one this
+ * module gives every untrusted read: stand down, quietly.
+ *
+ * A read that fails refuses too — the module's standing asymmetry: an answer nobody
+ * could determine must not be the one that lets work through.
+ *
+ * Returns the refusal, or `undefined` when the dispatch may proceed.
+ */
+function refuseResolvedWait(d: RunnerDispatch): "superseded" | undefined {
+  const log = d.log ?? ((message: string) => console.error(message));
+  // The repository as a `gh` path segment, the same way `postDispatchMarker` writes
+  // it, for the same reason `refuseOutstandingRequest` does.
+  const repoPath = d.repo ?? "{owner}/{repo}";
+
+  // Widening, like the marker check's: the point is to outlast a lag, not to sit out
+  // an outage. A run holds a runner while this sleeps, so the total is bounded.
+  const delays = [1_000, 2_000, 4_000];
+  let read: LastTurnRead | undefined;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      read = readLastTurnEvent(repoPath, d.number, d.freshnessProbeId);
+    } catch (e) {
+      log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
+      return "superseded";
+    }
+    if (d.freshnessProbeId === undefined || read.probeVisible) break;
+    const delay = delays[attempt];
+    if (delay === undefined) break;
+    log(
+      `${d.context}: the comment this dispatch answers on #${d.number} is not visible yet; ` +
+        `waiting ${delay}ms and reading again`,
+    );
+    Bun.sleepSync(delay);
+  }
+
+  if (read === undefined || (d.freshnessProbeId !== undefined && !read.probeVisible)) {
+    log(
+      `${d.context}: whether #${d.number} still waits for ${d.agent} could not be established ` +
+        "(the thread would not confirm it had caught up), so nothing was started",
+    );
+    return "superseded";
+  }
+
+  const last = read.last;
+  if (last === undefined || last === "waiting" || last === "handed-off") return undefined;
+  if (last === "returned") {
+    // A `returned` verdict is two facts wearing one event. Another agent's return is
+    // the fix cycle this dispatch exists to answer; the dispatched agent's own return
+    // is a judgement already in the thread, which only a verdict that refutes it can
+    // send this dispatch after.
+    const own = read.lastAgent === undefined || read.lastAgent === d.agent;
+    if (!own) return undefined;
+    if (d.verdictPassed === false) return undefined;
+    log(
+      `${d.context}: the wait on #${d.number} had already resolved (the thread's newest word on the work is ` +
+        `${read.lastAgent ?? d.agent}'s own verdict${d.verdictPassed === true ? ", and the caller's confirms it" : ""}), ` +
+        `so ${d.agent} was not started`,
+    );
+    return "superseded";
+  }
+  log(
+    `${d.context}: the wait on #${d.number} had already resolved (the thread's last turn event is \`${last}\`), ` +
+      `so ${d.agent} was not started`,
+  );
+  return "superseded";
+}
+
+/**
+ * Dispatch the runner, unless the target is not open, already has a turn, or — for a
+ * dispatch that answers a request — the wait it answers has already resolved.
  *
  * Callers that have a fallback (closing an issue directly rather than asking an agent
  * to) branch on the outcome; callers that do not should at least not treat anything
@@ -380,9 +571,14 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
   if (!mayStartWorkOn(state)) return refuseClosedTarget(d, state);
 
   // The marker goes out before the check, so the check has something to be ordered
-  // against. A dispatch that answers a request skips both: the request it would find
-  // is its own, and the marker would be a second one for one turn.
-  if (!d.answersRequest) {
+  // against. A dispatch that answers a request posts no marker — the request it would
+  // find is its own, and the marker would be a second one for one turn — so instead of
+  // the ordering check its claim is verified the other way: the thread must still be
+  // waiting for it (#283).
+  if (d.answersRequest) {
+    const refusal = refuseResolvedWait(d);
+    if (refusal !== undefined) return refusal;
+  } else {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined) return refusal;
