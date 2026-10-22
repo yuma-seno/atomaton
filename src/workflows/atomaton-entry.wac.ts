@@ -32,6 +32,15 @@ const resolveStep = new TypedOutputsStep(
 
 export const atomaEntry = new Workflow("atomaton-entry", {
   name: "Atomaton Entry",
+  // The run's own name, carrying the node. The run watch (atomaton-run-watch)
+  // triggers on this workflow's completion, and a `workflow_run` event carries no
+  // inputs — the display title is how it learns the node. `run-name` is evaluated
+  // before any job runs, so the agent the route would choose is not available
+  // here, and a title naming this workflow instead ("Atomaton Entry on #N") would
+  // read as an agent called "Atomaton Entry" — a name no person could resume with.
+  // The title carries the node alone; the watch reads the agent off the thread
+  // when its notice needs one.
+  "run-name": "#${{ github.event.issue.number }}",
   on: {
     issues: { types: ["opened"] },
   },

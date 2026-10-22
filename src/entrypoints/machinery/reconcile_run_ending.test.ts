@@ -26,12 +26,15 @@ function argv(overrides: Record<string, string> = {}): string[] {
 }
 
 /** A comment as the Issues API returns it. */
-function apiComment(body: string, createdAt: string): Record<string, string> {
-  return { body, created_at: createdAt };
+function apiComment(body: string, createdAt: string, isHuman = false): Record<string, unknown> {
+  return { body, created_at: createdAt, user: { type: isHuman ? "User" : "Bot" } };
 }
 
 const BEFORE = "2026-10-20T09:00:00Z";
 const AFTER = "2026-10-23T09:00:00Z";
+
+/** The dispatch marker the machinery posts when it is about to start a run. */
+const MARKER = "<!-- atomaton:dispatch=engineer -->";
 
 function configDir(): string {
   // The label's name read from a config this test wrote, not from whichever
@@ -44,10 +47,15 @@ const LABELS_OFF = JSON.stringify(["other"]);
 
 type FakeGhRules = NonNullable<Parameters<typeof runWithFakeGh>[2]>["rules"];
 
-function rulesFor(opts: { comments?: Record<string, string>[]; commentsStdout?: string; labels?: string; postCode?: number } = {}): FakeGhRules {
+function rulesFor(opts: { comments?: Record<string, unknown>[]; commentsStdout?: string; labels?: string; postCode?: number } = {}): FakeGhRules {
   return [
     // Order matters: the comments path CONTAINS the issue path, so the more
-    // specific rule is listed first.
+    // specific rule is listed first. The `--jq` form is `mostRecentAgentOn`'s
+    // read, which asks for the bodies alone and only fires on the notice path.
+    {
+      match: ["api", `repos/${REPO}/issues/${NUMBER}/comments`, "--jq"],
+      stdout: JSON.stringify([MARKER, "/engineer continue here"]),
+    },
     {
       match: ["api", `repos/${REPO}/issues/${NUMBER}/comments`],
       stdout: opts.commentsStdout ?? JSON.stringify(opts.comments ?? []),
@@ -139,6 +147,46 @@ describe("reconcile_run_ending.ts", () => {
       expect(r.status, title).toBe(0);
       expect(r.ghCalls, title).toEqual([]);
     }
+  });
+
+  test("an entry run that dispatched inside its own lifetime gets the notice, naming the thread's agent", () => {
+    // The entry path: the title carries the node alone, and the marker the
+    // machinery posted during the run is the proof it took the turn. The ending
+    // from the turn BEFORE is what answers the label rule — a thread with no
+    // readable ending keeps its label.
+    const comments = [
+      apiComment("<!-- atomaton:ended=done -->\nDone.", BEFORE),
+      apiComment(MARKER, AFTER),
+    ];
+    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments }));
+    expect(r.status).toBe(0);
+    const body = postedNotice(r);
+    expect(body).toContain("atomaton:ended=done");
+    expect(body).toContain(AGENT);
+    expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(true);
+  });
+
+  test("an entry run that died before any marker still gets the notice, off the person's command", () => {
+    // The command alone on its line, instructions below — what the parser reads.
+    const command = apiComment("/engineer\nfix the flake please", BEFORE, true);
+    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [command] }));
+    expect(r.status).toBe(0);
+    expect(postedNotice(r)).toContain(AGENT);
+  });
+
+  test("an entry run that took no turn stays silent — a notice there would unjam a LIVE run", () => {
+    // The guard-only completion: a person's remark raced a run in flight, the
+    // guard removed it, and this run completed. The thread's marker is an OLDER
+    // run's — posting here would hand the turn back while that run still holds it.
+    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [apiComment(MARKER, BEFORE)] }));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
+  });
+
+  test("an entry run over an untouched thread stays silent", () => {
+    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [apiComment("just a remark", AFTER, true)] }));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
 
   test("a skipped run is not a run to reconcile", () => {

@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { parseRunTitle, needsEnding, lastEndingComment, releasesLabel, type DatedComment } from "./run-report.ts";
-import { endingWalkReaders } from "../../adapters/github/thread.ts";
+import {
+  parseRunTitle,
+  needsEnding,
+  lastEndingComment,
+  releasesLabel,
+  tookTurn,
+  type DatedComment,
+  type WatchComment,
+} from "./run-report.ts";
+import { endingWalkReaders, readers } from "../../adapters/github/thread.ts";
 
 /**
  * The run watch's judgement, asked of strings alone. The readers are the REAL
@@ -43,9 +51,14 @@ describe("parseRunTitle", () => {
     expect(parseRunTitle(undefined)).toBeUndefined();
   });
 
+  test("reads the entry workflows' agent-less shape, which their run-name writes", () => {
+    expect(parseRunTitle("#252")).toEqual({ agent: undefined, number: 252 });
+  });
+
   test("reads nothing in a node number that cannot exist", () => {
     expect(parseRunTitle("engineer on #0")).toBeUndefined();
     expect(parseRunTitle("engineer on #-3")).toBeUndefined();
+    expect(parseRunTitle("#0")).toBeUndefined();
   });
 });
 
@@ -101,6 +114,62 @@ describe("needsEnding", () => {
     const comments = [comment("<!-- atomaton:ended=done -->\nDone.", START)];
     expect(needsEnding(comments, undefined, endingWalkReaders)).toBe(true);
     expect(needsEnding(comments, "not a timestamp", endingWalkReaders)).toBe(true);
+  });
+});
+
+describe("tookTurn", () => {
+  /** The dispatch marker the machinery posts when it is about to start a run. */
+  const MARKER = "<!-- atomaton:dispatch=engineer -->";
+  const BEFORE = "2026-10-20T09:00:00Z";
+  const DURING = "2026-10-22T11:00:00Z";
+
+  function entry(body: string, isHuman: boolean, createdAt: string): WatchComment {
+    return { body, isHuman, createdAt };
+  }
+
+  test("a marker posted inside the run is the run taking the turn", () => {
+    expect(tookTurn([entry(MARKER, false, DURING)], START, readers)).toBe(true);
+  });
+
+  test("a marker older than the run is another run's", () => {
+    expect(tookTurn([entry(MARKER, false, BEFORE)], START, readers)).toBe(false);
+  });
+
+  test("a person's command is the run's doing at any time — a run can die before any marker", () => {
+    // The command alone on its line, instructions below — what the parser reads.
+    expect(tookTurn([entry("/engineer\nplease fix it", true, BEFORE)], START, readers)).toBe(true);
+  });
+
+  test("a command that raced a live run does not survive the shaping, so it cannot claim the turn", () => {
+    // The person commanded mid-run: the machinery's marker was the live ask, so
+    // the shaping drops their comment — the same walk the guard deletes by.
+    const comments = [
+      entry(MARKER, false, BEFORE),
+      entry("/reviewer sneak in", true, "2026-10-21T09:00:00Z"),
+    ];
+    expect(tookTurn(comments, START, readers)).toBe(false);
+  });
+
+  test("an ordinary remark asks for nothing and takes no turn", () => {
+    expect(tookTurn([entry("looks broken to me", true, DURING)], START, readers)).toBe(false);
+    expect(tookTurn([], START, readers)).toBe(false);
+  });
+
+  test("a quotation's ask is the deleted author's, not the machinery's", () => {
+    // The quoted flag is the adapter's (`entryOf` reads the tag); the domain folds
+    // on the flag, so the test sets it the way the real entry would arrive.
+    const quoted: WatchComment = {
+      body: ["<!-- atomaton:quotes=9 -->", "<details><summary>Your comment</summary>", "```", "/engineer", "```", "</details>"].join("\n"),
+      isHuman: false,
+      quoted: true,
+      createdAt: DURING,
+    };
+    expect(tookTurn([quoted], START, readers)).toBe(false);
+  });
+
+  test("an unreadable time on a machinery marker lands on silence", () => {
+    expect(tookTurn([entry(MARKER, false, "")], START, readers)).toBe(false);
+    expect(tookTurn([entry(MARKER, false, DURING)], undefined, readers)).toBe(false);
   });
 });
 

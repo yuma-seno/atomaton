@@ -358,6 +358,14 @@ Atomaton: \\\`\${AGENT}\\\` will start once CI finishes on this pull request."
 
 export const atomaManualComment = new Workflow("atomaton-manual-comment", {
   name: "Atomaton Manual Comment",
+  // The run's own name, carrying the node. The run watch (atomaton-run-watch)
+  // triggers on this workflow's completion, and a `workflow_run` event carries no
+  // inputs — the display title is how it learns the node. Most of this workflow's
+  // runs dispatch nothing (an ordinary remark, a comment the guard removed), and
+  // the watch's second gate is what keeps it silent on those; the title only has
+  // to name the node. The agent, when the notice needs one, is read off the
+  // thread — the person's own command is right there.
+  "run-name": "#${{ github.event.issue.number }}",
   on: {
     issue_comment: { types: ["created"] },
   },

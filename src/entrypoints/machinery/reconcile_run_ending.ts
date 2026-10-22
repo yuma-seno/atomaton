@@ -15,8 +15,15 @@
  * the answer and it still says "an agent holds the turn". That is #252.
  *
  * This script runs in `Atomaton Run Watch`, triggered by `workflow_run: completed`
- * of `Atomaton Runner` itself. The runner's completion fires only after all of its
- * own steps have finished, so:
+ * of the three workflows that can take a node's turn: `Atomaton Runner` itself, and
+ * the two entry workflows whose runs START a chain. The distinction matters, because
+ * GitHub records no run for a CALLED workflow: `Atomaton Entry` and `Atomaton
+ * Manual Comment` execute the runner as a reusable workflow, so the first run of
+ * every chain — the one a person's command or a new issue starts — exists only as
+ * its CALLER's run. Without the callers in the trigger list, a first run that was
+ * cancelled or timed out would jam its thread with no watch on it at all — the
+ * commonest path a person walks, invisible. The runner's completion, meanwhile,
+ * fires only after all of its own steps have finished, so:
  *
  *   - a run that reported (its own result comment, or its failure notice) has the
  *     ending on the thread ALREADY, timestamped at or after the run's start — and
@@ -30,6 +37,21 @@
  *     failure notice uses — and releases the `atomaton/in-progress` label the dead
  *     run left behind.
  *
+ * ## The two gates
+ *
+ * Which gate decides "this run owes an ending" follows the title, because the title
+ * is what says which kind of run completed:
+ *
+ *   - a runner run's title carries the agent ("`agent` on `#N`"), and the question
+ *     is only `needsEnding` — is there no ending at or after the run started?
+ *   - an entry run's title carries the node alone ("`#N`"), and most of its runs
+ *     never took a turn at all — a comment the guard removed, an ordinary remark, a
+ *     route that chose no agent. A notice on one would land mid another run's turn
+ *     and unjam the guard while that run was still working. So the notice waits on
+ *     `requestOutstanding` (the thread is stuck at an ask) AND `tookTurn` (that ask
+ *     is this run's doing — a dispatch marker posted inside the run, or a person's
+ *     command, which dies with the run before any marker exists).
+ *
  * ## What it deliberately does not do
  *
  * It does not ask WHY the run went silent (that is #12/#11's ground), does not
@@ -39,11 +61,14 @@
  * ## The title
  *
  * A `workflow_run` event carries no inputs, so the node is read out of the
- * runner's `run-name` ("`agent` on `#N`", its display title). Anything the title
- * reader does not recognise — the runner's own name before `run-name` existed, a
- * title GitHub or another workflow wrote — exits 0 and does nothing: silence on
- * what cannot be read is the safe direction here, because a guessed node would
- * post a notice onto a thread whose run may be fine.
+ * watched run's display title. Two shapes arrive — the runner's "`agent` on `#N`"
+ * and the entry workflows' "`#N`" — and anything else (old-format titles, runs of
+ * unrelated workflows) exits 0 and does nothing: silence on what cannot be read is
+ * the safe direction here, because a guessed node would post a notice onto a
+ * thread whose run may be fine. An entry run's agent, when the notice needs one,
+ * is read off the thread (`mostRecentAgentOn` — the person's command, or the
+ * dispatch marker), falling back to `atomaton`, whose command is the one path that
+ * always resumes a node.
  *
  * Conclusion `skipped` is silent for the same reason by a different route: the
  * calling job's condition never started the runner, so there is no run here to
@@ -65,28 +90,30 @@
  * cache.
  *
  * Usage:
- *   reconcile_run_ending.ts --display-title "agent on #N"
+ *   reconcile_run_ending.ts --display-title "agent on #N" | "#N"
  *     [--run-started-at ISO] [--run-url URL] [--conclusion WORD]
  *
  * Requires GITHUB_REPOSITORY (owner/repo) in the environment.
  */
 import { parseArgs } from "node:util";
-import { gh, ghRead, ghPaginated } from "../../adapters/github/gh.ts";
+import { gh, ghRead } from "../../adapters/github/gh.ts";
+import { mostRecentAgentOn } from "../../adapters/github/agent-on-issue.ts";
 import { getLabel } from "../../adapters/runner/config.ts";
-import { endingWalkReaders } from "../../adapters/github/thread.ts";
+import { endingWalkReaders, readRunWatchThread, readers, type RunWatchThread } from "../../adapters/github/thread.ts";
 import { turnHeader } from "../../adapters/github/turn-comment.ts";
 import { recoveryLines } from "../../domain/work/comment-command.ts";
+import { requestOutstanding } from "../../domain/work/thread.ts";
 import {
   lastEndingComment,
   needsEnding,
   parseRunTitle,
   releasesLabel,
-  type DatedComment,
+  tookTurn,
 } from "../../domain/work/run-report.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ReconcileRunEndingArgs {
-  /** The triggering run's display title — `run-name`, which the runner sets to "`agent` on `#N`". */
+  /** The triggering run's display title — the runner's "`agent` on `#N`", or an entry run's "`#N`". */
   "display-title": string;
   /** When the watched run started running; endings before it are earlier turns'. */
   "run-started-at"?: string;
@@ -171,26 +198,39 @@ function main(): void {
     return;
   }
 
-  const { agent, number } = title;
+  const { agent: titledAgent, number } = title;
 
   // The thread decides, so the thread must be readable. A failed read is the one
   // thing this script refuses to guess past — "no ending" drawn from an unreadable
   // thread would post a notice beside a run that may have reported fine.
-  let comments: DatedComment[];
+  let thread: RunWatchThread;
   try {
-    comments = ghPaginated<{ body?: string; created_at?: string }>(
-      "api", `repos/${repo}/issues/${number}/comments`,
-    ).map((comment) => ({ body: comment.body ?? "", createdAt: comment.created_at ?? "" }));
+    thread = readRunWatchThread(repo, number);
   } catch (error) {
     console.error(`::error::reconcile_run_ending: could not read the thread on #${number}: ${(error as Error).message}`);
     process.exitCode = 1;
     return;
   }
 
-  if (!needsEnding(comments, values["run-started-at"], endingWalkReaders)) {
-    console.error(`reconcile_run_ending: the run on #${number} posted its ending; nothing to do`);
+  // Which kind of watched run this is decides the gate, and the title is what says.
+  // A runner run's title carries the agent, and its only question is whether an
+  // ending postdates it. An entry run's title carries the node alone, and most of
+  // its runs never took a turn at all — so the notice waits on the thread being
+  // stuck at an ask AND that ask being this run's doing (see `tookTurn`).
+  const endingMissing = titledAgent !== undefined
+    ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders)
+    : requestOutstanding(thread.events) &&
+      tookTurn(thread.entries, values["run-started-at"], readers);
+  if (!endingMissing) {
+    console.error(`reconcile_run_ending: the run on #${number} owes no ending; nothing to do`);
     return;
   }
+
+  // The agent the notice names: the title's for a runner run; off the thread for an
+  // entry run — the person's command, or the marker the machinery posted — and
+  // `atomaton` when the thread names nobody, whose command is the one path that
+  // always resumes a node.
+  const agent = titledAgent ?? (mostRecentAgentOn(repo, number) || "atomaton");
 
   // The ending the run owed. Posted before the label work, because the comment —
   // not the label — is what the guard reads: this is the step that unjams the
@@ -205,12 +245,12 @@ function main(): void {
   console.error(`reconcile_run_ending: posted the missing-ending notice on #${number}`);
 
   // The label the dead run left, judged by the turn the thread had BEFORE it took
-  // the ball — `comments` predates the notice above, so the notice's own ending
+  // the ball — `thread` predates the notice above, so the notice's own ending
   // cannot answer here. Best-effort: a warning, never a failed step, because the
   // thread is healed and the label is a cache of an answer the thread now gives.
   const label = getLabel("in_progress");
   if (!hasLabel(repo, number, label)) return;
-  if (!releasesLabel(lastEndingComment(comments, endingWalkReaders), endingWalkReaders)) {
+  if (!releasesLabel(lastEndingComment(thread.dated, endingWalkReaders), endingWalkReaders)) {
     console.error(`reconcile_run_ending: '${label}' stays on #${number}; the thread's last ending keeps the turn with an agent`);
     return;
   }
