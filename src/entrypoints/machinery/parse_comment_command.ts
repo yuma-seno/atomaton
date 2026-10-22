@@ -12,8 +12,10 @@
  * and with the refusal that keeps an agent from writing a command into a body.
  *
  * Env: ATOMATON_COMMENT_BODY
- * Writes `matched`, `agent`, `control`, `session_mode`, and `error` to
- * $GITHUB_OUTPUT.
+ * Writes `parsed`, `matched`, `agent`, `control`, `session_mode`, and `error` to
+ * $GITHUB_OUTPUT. `parsed` is `true` whenever this script ran -- a step that does not
+ * run leaves every output empty, and a comment with no command in it writes
+ * `matched=false`, so the guard cannot tell those apart without it.
  */
 import { appendFileSync } from "node:fs";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
@@ -28,6 +30,12 @@ function main(): void {
 
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput) {
+    // `parsed` says this step RAN, which `matched` cannot: a step that does not run
+    // leaves every output empty, and so does a comment with no command in it. The
+    // guard's commands rule turns on the difference -- a comment from somebody who is
+    // not a repository member is never read here, so it must not be refused for what it
+    // would have asked for (#217).
+    appendFileSync(githubOutput, `parsed=true\n`);
     appendFileSync(githubOutput, `matched=${matched}\nagent=${agent}\ncontrol=${control}\n`);
     appendFileSync(githubOutput, `session_mode=${sessionMode}\nerror=${error}\n`);
   }

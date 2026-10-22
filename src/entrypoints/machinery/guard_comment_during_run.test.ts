@@ -150,6 +150,7 @@ describe("guard_comment_during_run.ts", () => {
               ["just a remark", true],
               ["/atomaton", true],
             ]),
+            readBack(101, "just a remark"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
           ],
@@ -157,8 +158,9 @@ describe("guard_comment_during_run.ts", () => {
       );
       expect(r.status).toBe(0);
       expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
-      // The guard reads comments alone: the body read it used to make is gone.
-      expect(r.ghCalls.some((c) => c.includes("--jq"))).toBe(false);
+      // The body is read to count commands (#217) — one command here, so the reason to
+      // take it away never arises. It is not the thread that decides this one.
+      expect(noticeOf(r.ghCalls)).toBe("");
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
@@ -194,10 +196,154 @@ describe("guard_comment_during_run.ts", () => {
     }
   });
 
+  // #217: a comment asking for two agents starts one and silently loses the other. The
+  // machinery reads the first command and takes the rest for prose, so which request won
+  // is invisible on the page. Refused on a person's turn too: nothing about the turn
+  // makes the second request reachable.
+  test("deletes a comment carrying more than one command, and says which", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const body = "/engineer\n直してほしい\n\n/reviewer\nも見てほしい";
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "101", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([["<!-- atomaton:ended=done -->\nDone.", false]]),
+            readBack(101, body),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/101"))).toBe(true);
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("more than one command");
+      expect(notice).toContain("/engineer");
+      expect(notice).toContain("/reviewer");
+      // The text survives on the page, like the in-progress notice's does.
+      expect(notice).toContain("直してほしい");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // The strict reader, so a request written in reply to a quotation stays one request:
+  // `> /engineer` is prose here, and the machinery would not act on it either.
+  test("a quoted command is not a second command", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const body = "> /engineer で始めてください\n\n/reviewer";
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "101", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([["<!-- atomaton:ended=done -->\nDone.", false]]),
+            readBack(101, body),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // The parse step does not run for somebody who is not a repository member, so their
+  // comment is never dispatched: deleting it and saying "it would have started the
+  // first" would be a lie about a comment nobody was going to read.
+  test("does not refuse two commands when the parse step never ran", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "101", "--commenter", "outsider", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([["<!-- atomaton:ended=done -->\nDone.", false]]),
+            readBack(101, "/engineer\n/reviewer"),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // A closed node's commands are the closed guard's to answer, and its answer is to keep
+  // the comment: nothing is running, so the deletion costs and gains nothing.
+  test("does not refuse two commands on a closed node", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "101", "--commenter", "octocat", "--parsed", "true", "--state", "closed"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([["<!-- atomaton:ended=done -->\nDone.", false]]),
+            readBack(101, "/engineer\n/reviewer"),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // Both reasons in one notice, so the person does not split the comment, post the first
+  // half, and get a second notice for the reason they could have been told now.
+  test("says the ball is with an agent too when both rules hold", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "101", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([["/engineer", true]]),
+            readBack(101, "/engineer\n/reviewer"),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/101"))).toBe(true);
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("more than one command");
+      expect(notice).toContain("The ball is also with an agent");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   // A pull request body naming a reviewer is a request the validation dispatch is
-  // already handling. The guard reads comments alone — it does not read the body at
-  // all — so it does not delete a person's comment on the strength of it, which would
-  // tell them to wait for a run their comment was not racing.
+  // already handling. The guard reads comments alone — it never reads the node's body —
+  // so it does not delete a person's comment on the strength of it, which would tell
+  // them to wait for a run their comment was not racing.
   test("a pull request body naming a reviewer does not block a comment", () => {
     const configDir = makeConfigDir({});
     try {
