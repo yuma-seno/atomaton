@@ -196,6 +196,25 @@ export const SUB_RESULT_TAG = numericTag("sub-result");
  */
 export const CI_RETRY_TAG = numericTag("ci-retry");
 
+/**
+ * The machinery's notice that preserves a removed person's comment, and the id of the
+ * comment it quotes.
+ *
+ * Written by the mid-run guard (`guard_comment_during_run.ts`) on the notice that
+ * replaces a deleted comment: the notice reads the removed comment's body back before
+ * the delete and folds it in inside a `<details>` block, so what somebody spent time
+ * writing survives on the page. The value is the deleted comment's id -- the record of
+ * what the notice is quoting, though the comment it names is gone.
+ *
+ * Read by `adapters/github/thread.ts` when it builds a thread entry: a comment carrying
+ * this tag is a QUOTATION of a person's words, and the fold must not take what is
+ * inside it for the machinery speaking. See `domain/work/thread.ts`'s `quoted`, which
+ * is what this tag becomes -- a `/agent` line in the quoted text must not name an agent
+ * and a tag the quoted text carries must not end the turn, or the notice hands the
+ * deleted comment back the power the guard removed it to take away.
+ */
+export const QUOTES_TAG = numericTag("quotes");
+
 // `readAnyParentTag` was here: `PARENT_TAG.read(text) ?? PARENT_ISSUE_TAG.read(text)`,
 // for a walk that did not know whether it held an issue or a pull request. With one
 // tag left there is nothing to choose between, and the one caller that walks upward

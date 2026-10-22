@@ -109,4 +109,42 @@ describe("latestRequestOn", () => {
     expect(request.newestRequestedAgent).toBe("reviewer");
     expect(request.latestAsk).toBeUndefined();
   });
+
+  // The guard's notice preserving a removed comment carries `atomaton:quotes` and the
+  // removed text verbatim. It is a QUOTATION of a person's words, not the machinery
+  // speaking: the `/engineer` line inside it must not become the standing request, or
+  // the deleted comment names the next agent after all — the power the guard removed
+  // it to take away, handed back through the message that replaced it.
+  test("the guard's quotation does not name the next agent", () => {
+    const request = latestRequest("/reviewer", [
+      comment(1, "2026-10-19T18:00:00Z", "<!-- atomaton:dispatch=reviewer -->\nAtomaton: `reviewer` starting."),
+      comment(
+        2,
+        "2026-10-19T18:05:00Z",
+        [
+          "<!-- atomaton:quotes=9 -->",
+          "<details><summary>Your comment, as you wrote it</summary>",
+          "",
+          "```",
+          "/engineer",
+          "```",
+          "",
+          "</details>",
+        ].join("\n"),
+      ),
+    ]) as { newestRequestedAgent: string };
+
+    expect(request.newestRequestedAgent).toBe("reviewer");
+  });
+
+  // The tag is read only on a machinery comment. A person writing `atomaton:quotes` in
+  // their own text is prose about the machinery, and their command stays theirs: the
+  // tag must not turn their comment into a quotation and silence it.
+  test("a person's own comment carrying the quotes tag is not a quotation", () => {
+    const request = latestRequest("/reviewer", [
+      comment(1, "2026-10-19T18:00:00Z", "<!-- atomaton:quotes=3 -->\nPlease run this instead:\n\n/engineer", "User"),
+    ]) as { newestRequestedAgent: string };
+
+    expect(request.newestRequestedAgent).toBe("engineer");
+  });
 });

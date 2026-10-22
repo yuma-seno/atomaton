@@ -34,7 +34,7 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead } from "./gh.ts";
-import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG } from "./tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, QUOTES_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
@@ -117,6 +117,27 @@ function isHumanComment(comment: Comment): boolean {
 }
 
 /**
+ * A comment as the shaping needs it, including whether it is a quotation.
+ *
+ * The ONE place `quoted` is read. A quotation is the machinery's notice that preserves
+ * a removed person's comment (`atomaton:quotes`, see `guard_comment_during_run.ts`),
+ * and the words inside it are the removed author's -- so the readers must not take
+ * them for the machinery speaking, which is the `quoted` the domain folds on. Read
+ * from the tag, and only on a NON-human comment: a person writing the same tag in
+ * their own text is prose about the machinery, and their commands stay theirs.
+ */
+function entryOf(comment: Comment): ThreadEntry & { at?: string } {
+  const isHuman = isHumanComment(comment);
+  const body = comment.body ?? "";
+  return {
+    body,
+    isHuman,
+    quoted: !isHuman && QUOTES_TAG.has(body),
+    at: comment.created_at,
+  };
+}
+
+/**
  * Which of a list of comments survive the guard's shaping, by id.
  *
  * For a caller that has already fetched the comments and wants to drop the ones the
@@ -127,11 +148,7 @@ function isHumanComment(comment: Comment): boolean {
  * The comments must be oldest first, which is the order the API returns them in.
  */
 export function keptCommentIds(comments: readonly Comment[]): Set<number> {
-  const entries = comments.map((comment) => ({
-    id: comment.id,
-    body: comment.body ?? "",
-    isHuman: isHumanComment(comment),
-  }));
+  const entries = comments.map((comment) => ({ id: comment.id, ...entryOf(comment) }));
   return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
 }
 
@@ -163,7 +180,7 @@ function readComments(repo: string, number: string | number, excludeCommentId?: 
   const excluded = String(excludeCommentId ?? "").trim();
   const comments: DatedEntry[] = listComments(repo, number)
     .filter((comment) => String(comment.id) !== excluded)
-    .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment), at: comment.created_at }));
+    .map(entryOf);
 
   return shapedThread(comments, readers);
 }
@@ -216,7 +233,7 @@ export function commentWouldBeRemoved(repo: string, number: string | number, com
   if (listed === undefined) {
     // Read-after-write lag: the comment being judged is newer than the listing. Judge
     // it as the latest arrival, which is whose turn the whole listed thread leaves.
-    const entries = comments.map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+    const entries = comments.map(entryOf);
     return whoseTurn(shapedThread(entries, readers).events) === "agent";
   }
   return !keptCommentIds(comments).has(listed.id);
@@ -315,7 +332,7 @@ export function checkDispatchMarker(
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
   const entries: ThreadEntry[] = comments
     .filter((comment) => String(comment.id) !== marker)
-    .map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+    .map(entryOf);
 
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
