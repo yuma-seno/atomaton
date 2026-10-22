@@ -344,11 +344,11 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## All time
 
-105 sessions.
+106 sessions.
 
 **Ran to an end without a report:** 24 of 102 sessions whose last run the core recorded as `completed` — 23.5%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-Neither figure covers 1 session with no run record at all — without one, neither question can be asked. Everything from before atoma recorded its runs is in there.
+Neither figure covers 2 sessions with no run record at all — without one, neither question can be asked. Everything from before atoma recorded its runs is in there.
 
 **466,026,211 tokens** over 131 runs that reported them, **97.4% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
@@ -357,13 +357,13 @@ Neither figure covers 1 session with no run record at all — without one, neith
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,396,082 | 6,183,128 | 39,097,860 | 73,718,100 | 466,026,211 |
-| messages per session | 151 | 402 | 705 | 715 | 20,373 |
+| messages per session | 151 | 402 | 705 | 715 | 20,375 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `atomaton` | 50 | 47.6% |
-| `reviewer` | 37 | 35.2% |
-| `engineer` | 18 | 17.1% |
+| `atomaton` | 51 | 48.1% |
+| `reviewer` | 37 | 34.9% |
+| `engineer` | 18 | 17% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
