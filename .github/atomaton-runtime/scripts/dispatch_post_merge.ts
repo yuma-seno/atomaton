@@ -161,9 +161,9 @@ var AGENT_ENV_NAMES = [
   MACHINERY_ROOT_VAR,
   "GITHUB_REPOSITORY",
   "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
   "ATOMATON_RUN_DIR",
@@ -220,6 +220,12 @@ function logOp(op, payload = {}) {
 function logDispatch(target, agent, extra = {}) {
   const { elsewhere, ...rest } = extra;
   logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
+}
+
+// src/adapters/runner/run-node.ts
+function nodeNumber() {
+  const parsed = Number((process.env.NUMBER ?? "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 // src/adapters/github/outcome.ts
@@ -572,8 +578,8 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  const here = (process.env.ISSUE_NUMBER ?? "").trim();
-  const elsewhere = here !== "" && String(d.number) !== here;
+  const here = nodeNumber();
+  const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }
@@ -751,6 +757,7 @@ function dispatchPostMergeAgent(repo, subIssueNum, agent) {
     number: subIssueNum,
     notify,
     repo,
+    continuesChain: true,
     log: log3
   }) === "dispatched";
 }

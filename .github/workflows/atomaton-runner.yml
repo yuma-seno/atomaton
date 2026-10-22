@@ -491,7 +491,7 @@ jobs:
         id: restore-session
         shell: bash
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/restore_agent_session.ts" --type "${{ steps.fetch.outputs.resolved_type }}" --number "${{ steps.fetch.outputs.resolved_number }}" --agent "${{ inputs.agent }}" --out "${RUNNER_TEMP}/atomaton-run/session.json" --session-mode "${{ inputs.session_mode }}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/restore_agent_session.ts" --type "${{ steps.fetch.outputs.session_type }}" --number "${{ steps.fetch.outputs.session_number }}" --agent "${{ inputs.agent }}" --out "${RUNNER_TEMP}/atomaton-run/session.json" --session-mode "${{ inputs.session_mode }}"
       - name: Restore the agent's workspace
         id: workspace
         shell: bash
@@ -712,10 +712,10 @@ jobs:
         continue-on-error: true
         env:
           GITHUB_RUN_ID: ${{ github.run_id }}
-          ISSUE_NUMBER: ${{ steps.fetch.outputs.resolved_number }}
-          ATOMATON_RUN_TYPE: ${{ inputs.type }}
+          NUMBER: ${{ inputs.number }}
+          TYPE: ${{ inputs.type }}
           ATOMATON_RELOAD_COUNT: ${{ inputs.reload_count }}
-          ISSUE_NOTIFY: ${{ steps.notify.outputs.notify }}
+          NOTIFY: ${{ steps.notify.outputs.notify }}
           ATOMATON_DISPATCHED_BY: ${{ inputs.dispatched_by }}
           ATOMATON_OPS_LOG: ${{ runner.temp }}/atomaton-run/atomaton_ops.log
           OPENAI_BASE_URL_IN: ${{ vars.OPENAI_BASE_URL }}
@@ -731,7 +731,7 @@ jobs:
           # Exported because the invocation below passes each one explicitly to `env`, and a
           # step's `env:` block is present in the shell's environment already -- this makes
           # the dependency visible rather than implicit.
-          export GITHUB_RUN_ID ISSUE_NUMBER ISSUE_NOTIFY ATOMATON_RUN_TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY
+          export GITHUB_RUN_ID NUMBER NOTIFY TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY
 
           # The tools file is written now, from the config, rather than shipped. See
           # `scripts/write_tools_file.ts` for what shipping a generated file cost.
@@ -795,9 +795,9 @@ jobs:
             ATOMATON_MACHINERY_ROOT="$ATOMATON_MACHINERY_ROOT"
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY"
             BRANCH="${BRANCH:-}"
-            ISSUE_NUMBER="$ISSUE_NUMBER"
-            ISSUE_NOTIFY="$ISSUE_NOTIFY"
-            ATOMATON_RUN_TYPE="$ATOMATON_RUN_TYPE"
+            NUMBER="$NUMBER"
+            NOTIFY="$NOTIFY"
+            TYPE="$TYPE"
             ATOMATON_RELOAD_COUNT="$ATOMATON_RELOAD_COUNT"
             ATOMATON_DISPATCHED_BY="$ATOMATON_DISPATCHED_BY"
             ATOMATON_OPS_LOG="$ATOMATON_OPS_LOG"
@@ -992,12 +992,12 @@ jobs:
       - name: Record run metadata
         shell: bash
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/record_run_metadata.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --comment-id "${{ steps.post-result.outputs.comment_id }}" --agent "${{ inputs.agent }}" --snapshot-hash "${{ steps.context.outputs.context_snapshot_hash }}" --event-count "${{ steps.context.outputs.context_event_count }}" --type "${{ steps.fetch.outputs.resolved_type }}" --resolved-number "${{ steps.fetch.outputs.resolved_number }}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/record_run_metadata.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --comment-id "${{ steps.post-result.outputs.comment_id }}" --agent "${{ inputs.agent }}" --snapshot-hash "${{ steps.context.outputs.context_snapshot_hash }}" --event-count "${{ steps.context.outputs.context_event_count }}" --type "${{ steps.fetch.outputs.session_type }}" --session-number "${{ steps.fetch.outputs.session_number }}"
         if: steps.atoma.outcome == 'success' && steps.post-result.outputs.comment_id != ''
       - name: Save session to atomaton-data branch
         shell: bash
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/save_agent_session.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --type "${{ steps.fetch.outputs.resolved_type }}" --number "${{ steps.fetch.outputs.resolved_number }}" --agent "${{ inputs.agent }}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/save_agent_session.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --type "${{ steps.fetch.outputs.session_type }}" --number "${{ steps.fetch.outputs.session_number }}" --agent "${{ inputs.agent }}"
         if: always() && steps.atoma.outcome != 'skipped'
       - name: Save the agent's workspace
         shell: bash

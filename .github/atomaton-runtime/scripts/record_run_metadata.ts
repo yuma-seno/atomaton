@@ -52,7 +52,7 @@ function updateRunMetadata(session, update) {
       event_count: Number(update.eventCount ?? 0),
       agent: update.agent,
       type: update.type,
-      resolved_number: update.resolvedNumber
+      session_number: update.sessionNumber
     };
     session.metadata = metadata;
   }
@@ -67,7 +67,7 @@ function main() {
       "snapshot-hash": { type: "string" },
       "event-count": { type: "string" },
       type: { type: "string" },
-      "resolved-number": { type: "string" }
+      "session-number": { type: "string" }
     }
   });
   if (!values.session) {
@@ -81,7 +81,7 @@ function main() {
     snapshotHash: values["snapshot-hash"],
     eventCount: values["event-count"],
     type: values.type,
-    resolvedNumber: values["resolved-number"]
+    sessionNumber: values["session-number"]
   });
   if (values["comment-id"] !== undefined)
     console.error(`Tagged last assistant message with github_comment_id=${values["comment-id"]}`);

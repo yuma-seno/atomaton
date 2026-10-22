@@ -6893,9 +6893,9 @@ var AGENT_ENV_NAMES = [
   MACHINERY_ROOT_VAR,
   "GITHUB_REPOSITORY",
   "BRANCH",
-  "ISSUE_NUMBER",
-  "ISSUE_NOTIFY",
-  "ATOMATON_RUN_TYPE",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
   "ATOMATON_RELOAD_COUNT",
   "ATOMATON_OPS_LOG",
   "ATOMATON_RUN_DIR",
@@ -7592,6 +7592,7 @@ function issueLinks(repo, number) {
   if (issue.__typename === "PullRequest") {
     const closes = issue.closingIssuesReferences?.nodes ?? [];
     return {
+      kind: "pull_request",
       parent: closes[0] ? normalise(closes[0]) : undefined,
       children: [],
       pullRequests: []
@@ -7600,6 +7601,7 @@ function issueLinks(repo, number) {
   const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
   const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number).map(asPr);
   return {
+    kind: "issue",
     parent: issue.parent ? normalise(issue.parent) : undefined,
     children: (issue.subIssues?.nodes ?? []).map(asChild),
     pullRequests: dedupeByNumber(declared, referenced)
@@ -7801,6 +7803,25 @@ function logDispatch(target, agent, extra = {}) {
   logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
 }
 
+// src/adapters/runner/run-node.ts
+function nodeType() {
+  const raw = (process.env.TYPE ?? "").trim().toLowerCase();
+  return raw === "issue" || raw === "pr" ? raw : undefined;
+}
+function isPrRun() {
+  return nodeType() === "pr";
+}
+function isIssueRun() {
+  return nodeType() === "issue";
+}
+function nodeNumber() {
+  const parsed = Number((process.env.NUMBER ?? "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+function refusePrRun(tool, instead) {
+  throw new Error(`${tool} is for an issue run, and this run is on a pull request \u2014 a leaf of the work tree, ` + "which reviews or fixes one pull request and adds nothing below it. " + instead);
+}
+
 // src/adapters/github/target-state.ts
 function readTargetState(number, repo) {
   const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
@@ -7998,8 +8019,8 @@ function dispatchRunner(d) {
   ];
   if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
     return "failed";
-  const here = (process.env.ISSUE_NUMBER ?? "").trim();
-  const elsewhere = here !== "" && String(d.number) !== here;
+  const here = nodeNumber();
+  const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
 }
@@ -8116,7 +8137,8 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
     type: "issue",
     number: opts.parent,
     notify: resolveNotify(opts.repo, opts.parent),
-    repo: opts.repo
+    repo: opts.repo,
+    continuesChain: opts.continuesChain
   });
   const takeBackMarker = (why) => {
     const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);
@@ -8149,7 +8171,7 @@ function withNotice(opts, result) {
   } catch {}
   return result;
 }
-async function dispatchOrchestratorIfSubIssueReady(repo, subIssueNum) {
+async function dispatchOrchestratorIfSubIssueReady(repo, subIssueNum, options = {}) {
   const found = parentIssueOf(repo, subIssueNum);
   if (!found.known) {
     const why = `could not read the parent of #${subIssueNum}: ${found.why}`;
@@ -8160,7 +8182,7 @@ async function dispatchOrchestratorIfSubIssueReady(repo, subIssueNum) {
     console.error(`issue #${subIssueNum} is not a sub-issue of anything, nothing to do`);
     return { kind: "not-tracked" };
   }
-  return dispatchOrchestratorIfReady({ repo, parent: found.parent, closedNum: subIssueNum, retry: true });
+  return dispatchOrchestratorIfReady({ repo, parent: found.parent, closedNum: subIssueNum, retry: true, continuesChain: options.continuesChain });
 }
 
 // src/adapters/mcp/mcp-report.ts
@@ -19491,10 +19513,9 @@ function stackedPrBase(repo) {
   return code === 0 && stdout.trim() ? parentBranch : undefined;
 }
 function runIssueNumber() {
-  if (process.env.ATOMATON_RUN_TYPE !== "issue")
+  if (!isIssueRun())
     return;
-  const issue = Number((process.env.ISSUE_NUMBER ?? "").trim());
-  return Number.isInteger(issue) && issue > 0 ? issue : undefined;
+  return nodeNumber();
 }
 
 // src/domain/delivery/deploy-jobs.ts
@@ -19629,6 +19650,7 @@ function dispatchPostMergeAgent(repo, subIssueNum, agent) {
     number: subIssueNum,
     notify,
     repo,
+    continuesChain: true,
     log: log5
   }) === "dispatched";
 }
@@ -19938,11 +19960,8 @@ var PR_NUMBER_ARG = "pull_number";
 var ISSUE_NUMBER_ARG_SCHEMA = objectType({
   [ISSUE_NUMBER_ARG]: positiveInt("Positive GitHub issue number, without a leading '#'.")
 });
-var PR_NUMBER_ARG_SCHEMA = objectType({
-  [PR_NUMBER_ARG]: positiveInt("Positive GitHub pull request number, without a leading '#'.")
-});
 var ISSUE_CONTEXT_NUMBER_ARG_SCHEMA = objectType({
-  [ISSUE_NUMBER_ARG]: positiveInt("Positive GitHub issue number, without a leading '#'. " + "Omit to use the issue this run is already operating on.").optional()
+  [ISSUE_NUMBER_ARG]: positiveInt("Positive GitHub issue number, without a leading '#'. " + "Omit to use the node this run is already on (an issue's number, or the pull request's on a pull request run).").optional()
 });
 var PR_CONTEXT_NUMBER_ARG_SCHEMA = objectType({
   [PR_NUMBER_ARG]: positiveInt("Positive pull request number, without a leading '#'. " + "Omit only on a pull request run, to use the pull request this run is reviewing; " + "on an issue run, pass the number of the pull request that closes it.").optional()
@@ -19955,37 +19974,23 @@ var ISSUE_COMMENTS_SCHEMA = objectType({
 function issueContextNumber(args) {
   if (args[ISSUE_NUMBER_ARG] !== undefined)
     return args[ISSUE_NUMBER_ARG];
-  const raw = (process.env.ISSUE_NUMBER ?? "").trim();
-  const parsed = Number(raw);
-  if (!raw || !Number.isInteger(parsed) || parsed <= 0) {
-    mcpFail(`\`${ISSUE_NUMBER_ARG}\` was omitted and this run has no current issue number. ` + `Pass \`${ISSUE_NUMBER_ARG}\` explicitly.`);
+  const node = nodeNumber();
+  if (node === undefined) {
+    mcpFail(`\`${ISSUE_NUMBER_ARG}\` was omitted and this run has no node number in its environment. ` + `Pass \`${ISSUE_NUMBER_ARG}\` explicitly.`);
   }
-  return parsed;
-}
-function omittedNumberGuidance() {
-  return (args) => {
-    if (PR_NUMBER_ARG in args)
-      return;
-    if (process.env.ATOMATON_RUN_TYPE !== "pr")
-      return;
-    const raw = (process.env.ISSUE_NUMBER ?? "").trim();
-    if (!/^[0-9]+$/.test(raw))
-      return;
-    return `\`${PR_NUMBER_ARG}\` is required and was omitted. This tool changes GitHub, so unlike the ` + "read-only tools it will not infer its target -- a guessed number here is a wrong " + `merge or a wrong close, not an error message. This run is working on pull request ` + `#${raw}; if that is the one you mean, call this again with {"${PR_NUMBER_ARG}": ${raw}}.`;
-  };
+  return node;
 }
 function prContextNumber(args) {
   if (args[PR_NUMBER_ARG] !== undefined)
     return args[PR_NUMBER_ARG];
-  if (process.env.ATOMATON_RUN_TYPE !== "pr") {
-    mcpFail(`\`${PR_NUMBER_ARG}\` was omitted, and this run is working on an issue rather than a ` + "pull request. Pass the pull request's number explicitly \u2014 an issue's number is not a " + "pull request's.");
+  if (!isPrRun()) {
+    mcpFail(`\`${PR_NUMBER_ARG}\` was omitted, and this run is on ` + (isIssueRun() ? `issue #${nodeNumber()}` : "neither an issue nor a pull request") + ". Pass the pull request's number explicitly \u2014 an issue's number is not a pull request's.");
   }
-  const raw = (process.env.ISSUE_NUMBER ?? "").trim();
-  const parsed = Number(raw);
-  if (!raw || !Number.isInteger(parsed) || parsed <= 0) {
-    mcpFail(`\`${PR_NUMBER_ARG}\` was omitted and this run has no current pull request number. ` + `Pass \`${PR_NUMBER_ARG}\` explicitly.`);
+  const node = nodeNumber();
+  if (node === undefined) {
+    mcpFail(`\`${PR_NUMBER_ARG}\` was omitted and this run has no node number in its environment. ` + `Pass \`${PR_NUMBER_ARG}\` explicitly.`);
   }
-  return parsed;
+  return node;
 }
 var ISSUE_ARGS_SCHEMA = objectType({
   title: stringType().min(1).describe("Concise issue title."),
@@ -20024,7 +20029,7 @@ var COMMIT_AND_PUSH_SCHEMA = objectType({
 function notifyTagPrefix(body, what) {
   if (NOTIFY_TAG.has(body))
     mcpFail(`${what} body already contains a notify tag; refusing to add another`);
-  const login = (process.env.ISSUE_NOTIFY ?? "").trim();
+  const login = (process.env.NOTIFY ?? "").trim();
   return login ? `${NOTIFY_TAG.write(login)}
 ` : "";
 }
@@ -20034,12 +20039,12 @@ function checkedIssueBody(body, instead) {
 }
 async function createSubIssue(a) {
   const title = a.title;
-  const parentNum = (process.env.ISSUE_NUMBER ?? "").trim();
-  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
-    mcpFail("create_sub_issue is for an issue run that is decomposing work into sub-issues. " + "This run is on a pull request, which reviews or fixes one pull request rather than " + "decomposing it. Use create_root_issue to report a defect that is nobody's child, " + "create_pr to hand this pull request to a reviewer, or request_close_issue to conclude it.");
+  if (isPrRun()) {
+    refusePrRun("create_sub_issue", "Use create_root_issue to report a defect that is nobody's child, " + "create_pr to hand this pull request to a reviewer, or merge_pr to merge it once its review passes.");
   }
-  if (!parentNum) {
-    mcpFail("create_sub_issue links its issue under the issue this run is working on, and this run " + "has no current issue to link it under. Use create_root_issue to file an issue that is " + "nobody's child.");
+  const parentNum = nodeNumber();
+  if (parentNum === undefined) {
+    mcpFail("create_sub_issue links its issue under the node this run sits on, and this run " + "has no node number in its environment. Use create_root_issue to file an issue that is " + "nobody's child.");
   }
   const body = checkedIssueBody(a.body ?? "", "Use `launch_sub_agent` to start an agent on a sub-issue.");
   let labels = a.labels ?? [];
@@ -20061,18 +20066,18 @@ async function createSubIssue(a) {
   if (!Number.isFinite(num))
     mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
   try {
-    const pid = await resolveIssueId(Number(parentNum));
+    const pid = await resolveIssueId(parentNum);
     const sid = await resolveIssueId(num);
     ghGraphql("mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}", { parent: pid, sub: sid });
     log7(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
   } catch (e) {
     mcpFail(`Issue #${num} was created, but could not be linked under #${parentNum} as a sub-issue: ${e}. ` + `Nothing records that edge except the link, so #${num} is currently a root issue and no aggregation ` + `will pick it up. Do not create it again \u2014 add it under #${parentNum} in the web UI, or retry the link.`);
   }
-  logOp("create_sub_issue", { number: num, title, parent: Number(parentNum) });
+  logOp("create_sub_issue", { number: num, title, parent: parentNum });
   return JSON.stringify({
     number: num,
     url: stdout.trim(),
-    parent: Number(parentNum)
+    parent: parentNum
   });
 }
 async function createRootIssue(a) {
@@ -20112,6 +20117,7 @@ function getIssue(a) {
   const { comments, body, ...rest } = issue ?? {};
   const links = issueLinks(REPO, number);
   return JSON.stringify({
+    ...links.kind ? { kind: links.kind } : {},
     ...rest,
     body: typeof body === "string" ? capText(body).text : body,
     total_comments: comments?.length ?? 0,
@@ -20143,6 +20149,7 @@ function getIssueComments(a) {
   return JSON.stringify({
     issue: {
       number,
+      ...links.kind ? { kind: links.kind } : {},
       title: issue?.title,
       state: issue?.state,
       total_comments: all.length,
@@ -20178,7 +20185,7 @@ function closeIssue(a) {
   logOp("close_issue", { number: num, closed: true });
   return true;
 }
-async function closeIssueAndDispatch(a) {
+async function closeIssueAndDispatch(a, options = {}) {
   const closed = closeIssue(a);
   const num = a[ISSUE_NUMBER_ARG];
   if (!closed) {
@@ -20190,7 +20197,7 @@ async function closeIssueAndDispatch(a) {
   }
   let aggregation;
   try {
-    aggregation = await dispatchOrchestratorIfSubIssueReady(REPO, num);
+    aggregation = await dispatchOrchestratorIfSubIssueReady(REPO, num, options);
   } catch (e) {
     const why = e.message ?? String(e);
     log7(`closeIssueAndDispatch: aggregation check failed for #${num}: ${why}`);
@@ -20214,7 +20221,7 @@ function refuseCommandLines(text, what, instead) {
     mcpFail(refusal);
 }
 function withCheckedMentions(body) {
-  const checked = escapeUnknownMentions(body, knownParticipants(REPO, (process.env.ISSUE_NUMBER ?? "").trim()));
+  const checked = escapeUnknownMentions(body, knownParticipants(REPO, nodeNumber() === undefined ? "" : String(nodeNumber())));
   if (checked.escaped.length === 0)
     return body;
   log7(`escaped ${checked.escaped.length} unconfirmed mention(s): ${checked.escaped.join(", ")}`);
@@ -20224,7 +20231,7 @@ function withCheckedMentions(body) {
 ${notice}`;
 }
 function injectParentIssue(body, reviewer) {
-  const parent = (process.env.ISSUE_NUMBER ?? "").trim();
+  const parent = nodeNumber() === undefined ? "" : String(nodeNumber());
   refuseClosingKeywords(body, "pull request body");
   refuseCommandLines(body, "pull request body", "Pass the agent as the `reviewer` argument instead; the machinery writes the line for you.");
   body = notifyTagPrefix(body, "PR") + withCheckedMentions(body);
@@ -20258,8 +20265,8 @@ _Opened by ${who}_
 function createPr(a) {
   const title = a.title;
   let body = a.body ?? "";
-  if ((process.env.ATOMATON_RUN_TYPE ?? "").trim() === "pr") {
-    mcpFail("create_pr opens the pull request for an ISSUE's branch. This run is on a pull " + "request, which is a leaf of the tree -- it reviews or fixes one pull request rather " + "than opening another. Use commit_and_push to push a fix onto this pull " + "request's branch, or request_close_issue to conclude it.");
+  if (isPrRun()) {
+    refusePrRun("create_pr", "Use commit_and_push to push a fix onto this pull request's branch, " + "or merge_pr to merge it once its review passes.");
   }
   const base = stackedPrBase(REPO) ?? getBaseBranch();
   const reviewer = (a.reviewer ?? "").trim();
@@ -20301,13 +20308,13 @@ function createPr(a) {
     mcpFail(`gh pr create: unexpected output: ${stdout.slice(0, 300)}`);
   logOp("create_pr", { number: num, title });
   const validationDispatched = dispatchPrValidation(REPO, num, branch);
-  const currentIssue = (process.env.ISSUE_NUMBER ?? "").trim();
-  if (currentIssue) {
+  const node = nodeNumber();
+  if (node !== undefined) {
     const next = !validationDispatched ? "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log." : reviewer ? `Running CI; \`${reviewer}\` follows if it passes.` : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
     const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;
     const body = validationDispatched ? turnCommentBody({ ended: "waiting", audience: "person", body: text }) : `${LLM_CONTEXT_TAG.write("exclude")}
 ${text}`;
-    postTurnComment({ number: currentIssue, repo: REPO, body, sessionEnds: validationDispatched });
+    postTurnComment({ number: String(node), repo: REPO, body, sessionEnds: validationDispatched });
   }
   if (!isAttended({ ...reviewer ? { next: { agent: reviewer } } : {}, body: body ?? "" })) {
     const openedBy = (process.env.AGENT ?? "").trim() || "an agent";
@@ -20545,8 +20552,14 @@ function deleteMergedBranch(branch) {
   }
   log7(`mergePr: deleted merged branch ${branch}`);
 }
-async function mergePr(a) {
-  const num = a[PR_NUMBER_ARG];
+async function mergePr() {
+  if (!isPrRun()) {
+    mcpFail("`merge_pr` merges the pull request this run is on and takes no number: the run's own node is the only " + "pull request it will merge. This run is on " + (isIssueRun() ? `issue #${nodeNumber()}` : "neither an issue nor a pull request") + ". A pull request is merged by the run sitting on it \u2014 its reviewer once the checks pass, or the engineer the review sends back.");
+  }
+  const num = nodeNumber();
+  if (num === undefined) {
+    mcpFail("merge_pr could not read this run's own pull request number (the environment's NUMBER is unset or not a positive integer).");
+  }
   const { signals, refs } = gatherMergeSignals(REPO, num, mcpFail);
   const { headRefName, baseRefName } = refs;
   const readiness = decideMergeReadiness(signals);
@@ -20605,7 +20618,7 @@ ${formatBlockers(readiness.blockers)}`
 }
 async function closeParentAndReport(parentIssue) {
   try {
-    const outcome = JSON.parse(await closeIssueAndDispatch({ [ISSUE_NUMBER_ARG]: parentIssue }));
+    const outcome = JSON.parse(await closeIssueAndDispatch({ [ISSUE_NUMBER_ARG]: parentIssue }, { continuesChain: true }));
     if (outcome.close_requested !== undefined) {
       return JSON.stringify({
         merged: true,
@@ -20646,9 +20659,9 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
     schema: ISSUE_ARGS_SCHEMA,
     handler: createRootIssue
   }),
-  defineMcpTool({ name: "get_issue", description: "Retrieve one issue's title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). It does NOT return the comments themselves \u2014 use get_issue_comments for those, which takes a range. Returns a JSON issue object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
+  defineMcpTool({ name: "get_issue", description: "Retrieve one issue's \u2014 or, when the number names one, pull request's \u2014 title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). The result carries `kind` (`issue` or `pull_request`) because the two share one number space, so a read pointed at the other kind still resolves. It does NOT return the comments themselves \u2014 use get_issue_comments for those, which takes a range. Returns a JSON object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),
-  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
+  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, `kind` (`issue` or `pull_request`), parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
   defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
@@ -20678,9 +20691,8 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "merge_pr",
-    description: "Merge a pull request, then continue Atomaton's issue handoff. Refuses and returns merged:false with a `blockers` list whenever the PR is not mergeable. The list is open-ended, so read it rather than assuming a fixed set: it covers failing, pending and absent required checks, conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. A refusal is a decision or a real defect, never a condition to retry around \u2014 read `blockers`, and use check_merge_readiness for detail. On success this may merge the PR, close its linked issue, and dispatch follow-up work.",
-    schema: PR_NUMBER_ARG_SCHEMA,
-    guidance: omittedNumberGuidance(),
+    description: "Merge the pull request this run is on \u2014 it takes no arguments, and the run's own node is the only pull request it will merge; the call is refused when this run is on an issue. Then continues Atomaton's issue handoff. Refuses and returns merged:false with a `blockers` list whenever the PR is not mergeable. The list is open-ended, so read it rather than assuming a fixed set: it covers failing, pending and absent required checks, conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. A refusal is a decision or a real defect, never a condition to retry around \u2014 read `blockers`, and use check_merge_readiness for detail. On success this may merge the PR, close its linked issue, and dispatch follow-up work.",
+    schema: objectType({}),
     handler: mergePr
   })
 ]);
