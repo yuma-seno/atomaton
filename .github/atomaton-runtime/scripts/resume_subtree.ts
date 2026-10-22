@@ -405,6 +405,7 @@ var askReaders = {
   requestedAgent: (body) => parseMangledCommand(body).agent,
   authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
 };
+var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }

@@ -419,6 +419,7 @@ var askReaders = {
   requestedAgent: (body) => parseMangledCommand(body).agent,
   authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
 };
+var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
@@ -544,7 +545,20 @@ function reportFailure(repo, number, attempt, runUrl, summary, details = []) {
   if (posted.code)
     log(`WARN could not post the failure comment: ${posted.stderr}`);
 }
-function runCiAndWait(repo, workflow, branch, headSha, timeoutSeconds) {
+function notifyCiWaiting(repo, number, askedByPerson, runUrl) {
+  if (!askedByPerson)
+    return;
+  const body = [
+    LLM_CONTEXT_TAG.write("exclude"),
+    `Atomaton: CI is running on this pull request (${runUrl}). Its result decides who works next.`
+  ].join(`
+`);
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
+  if (posted.code)
+    log(`WARN could not post the CI-waiting comment: ${posted.stderr}`);
+}
+function runCiAndWait(repo, number, workflow, branch, headSha, timeoutSeconds, askedByPerson) {
+  const runUrlFor = (id) => `https://github.com/${repo}/actions/runs/${id}`;
   const listRuns = () => {
     const listed = gh("api", `repos/${repo}/actions/runs?event=workflow_dispatch&head_sha=${headSha}`).stdout;
     const { workflow_runs = [] } = JSON.parse(listed || "{}");
@@ -554,12 +568,14 @@ function runCiAndWait(repo, workflow, branch, headSha, timeoutSeconds) {
   const reusable = existing?.status === "completed" && existing.conclusion && existing.conclusion !== "cancelled";
   if (reusable) {
     log(`reusing CI run ${existing.id} for ${headSha.slice(0, 7)}: ${existing.conclusion}`);
-    return { conclusion: existing.conclusion, runUrl: `https://github.com/${repo}/actions/runs/${existing.id}` };
+    return { conclusion: existing.conclusion, runUrl: runUrlFor(existing.id) };
   }
   const alreadyRunning = existing !== undefined && existing.status !== "completed";
   const since = new Date().toISOString();
+  let notified = alreadyRunning;
   if (alreadyRunning) {
     log(`CI run ${existing.id} is already ${existing.status} for ${headSha.slice(0, 7)}; waiting for it`);
+    notifyCiWaiting(repo, number, askedByPerson, runUrlFor(existing.id));
   } else {
     if (!dispatchWorkflow(`validate_pull_request: CI for ${branch}`, workflow, ["--repo", repo, "--ref", branch], log)) {
       process.exit(1);
@@ -571,11 +587,15 @@ function runCiAndWait(repo, workflow, branch, headSha, timeoutSeconds) {
     const run = alreadyRunning ? listRuns().find((candidate) => candidate.id === existing.id) : pickDispatchedRun(listRuns(), headSha, since);
     if (!run)
       continue;
+    if (!notified && run.status !== "completed") {
+      notifyCiWaiting(repo, number, askedByPerson, runUrlFor(run.id));
+      notified = true;
+    }
     if (run.status !== "completed")
       continue;
     const conclusion = run.conclusion ?? "";
     log(`CI run ${run.id} concluded ${conclusion}`);
-    return { conclusion, runUrl: `https://github.com/${repo}/actions/runs/${run.id}` };
+    return { conclusion, runUrl: runUrlFor(run.id) };
   }
   log(`no conclusion within ${timeoutSeconds}s`);
   return { conclusion: "", runUrl: "" };
@@ -641,7 +661,7 @@ function main() {
   } else if (requiredContexts.length === 0) {
     log(`::warning::${baseRef} requires no status checks, so CI results gate nothing here. ` + "Import .github/atomaton/rulesets/main.json if that was not intended.");
   }
-  const { conclusion, runUrl } = deliverableProblems.length > 0 ? { conclusion: "", runUrl: "" } : runCiAndWait(repo, workflow, branch, headSha, Number(values["timeout-seconds"] ?? "1800"));
+  const { conclusion, runUrl } = deliverableProblems.length > 0 ? { conclusion: "", runUrl: "" } : runCiAndWait(repo, values.number ?? "", workflow, branch, headSha, Number(values["timeout-seconds"] ?? "1800"), isTrue(values["asked-by-person"]));
   const priorRetries = countPriorRetries(repo, values.number ?? "");
   const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";

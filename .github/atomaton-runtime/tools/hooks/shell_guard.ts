@@ -126,6 +126,9 @@ var ROUTED_GIT_COMMANDS = new Set([
   "branch",
   "tag"
 ]);
+var ROUTED_GIT_ADVICE = {
+  merge: " To bring the base branch into this branch, call merge_base_into_branch."
+};
 var READ_ONLY_BRANCH_FLAG = /^(-a|-r|-v|-vv|--all|--remotes|--verbose|--list|-l|--show-current|--merged|--no-merged|--contains|--points-at|--sort=.+|--format=.+|--color|--no-color)$/;
 var READ_ONLY_TAG_FLAG = /^(-l|--list|-n\d*|--sort=.+|--contains|--points-at|--merged|--no-merged)$/;
 var READ_ONLY_GIT_FORMS = {
@@ -208,7 +211,7 @@ function checkInvocation(invocation) {
     const routed = ROUTED_GIT_COMMANDS.has(gitCommand);
     return {
       allow: false,
-      reason: routed ? `Raw 'git ${gitCommand}' is disabled. Use the github tools for Git mutations and branch synchronization.` : `Raw 'git ${gitCommand}' is disabled, and there is no MCP tool for it: this run does not do that. ` + `Commit with commit_and_push; read-only inspection (status, diff, log) runs normally.`
+      reason: routed ? `Raw 'git ${gitCommand}' is disabled. Use the github tools for Git mutations and branch synchronization.` + (ROUTED_GIT_ADVICE[gitCommand] ?? "") : `Raw 'git ${gitCommand}' is disabled, and there is no MCP tool for it: this run does not do that. ` + `Commit with commit_and_push; read-only inspection (status, diff, log) runs normally.`
     };
   }
   const [environPattern, environReason] = PROCESS_ENVIRONMENT_READ;

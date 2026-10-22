@@ -104,6 +104,17 @@ function turnHeader(h) {
   return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
 }
 
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+function recoveryLines(agent) {
+  return [
+    `- Continue: comment \`/${agent}\` and put what to do next on the following lines.`,
+    `- Start clean: comment \`/${agent} recover\`, which archives this session and rebuilds`,
+    "  it from the issue."
+  ];
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -146,9 +157,7 @@ function failureNotice(agent, notify, runUrl, excerpt) {
     "",
     "**The session was saved.** What this run worked out is still there.",
     "",
-    `- Continue: comment \`/${agent}\` and put what to do next on the following lines.`,
-    `- Start clean: comment \`/${agent} recover\`, which archives this session and rebuilds`,
-    "  it from the issue.",
+    ...recoveryLines(agent),
     "",
     `Workflow logs: ${runUrl}`
   ];

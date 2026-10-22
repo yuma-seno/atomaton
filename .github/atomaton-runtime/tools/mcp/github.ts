@@ -6600,6 +6600,10 @@ var require_dist = __commonJS(function(exports, module) {
   exports.default = formatsPlugin;
 });
 
+// src/entrypoints/tools/mcp/github.ts
+import { readFileSync as readFileSync3 } from "fs";
+import { join } from "path";
+
 // src/adapters/github/gh.ts
 function run(cmd) {
   const proc = Bun.spawnSync({
@@ -6831,13 +6835,13 @@ function decideMergeReadiness(signals) {
     case "DIRTY":
       blockers.push({
         kind: "conflicting",
-        detail: "branch conflicts with the base; call sync_branch and resolve before merging"
+        detail: "branch conflicts with the base; call merge_base_into_branch, resolve the conflicts it leaves, " + "then commit_and_push before merging"
       });
       break;
     case "BEHIND":
       blockers.push({
         kind: "behind",
-        detail: "branch is behind the base and the ruleset requires it current; call sync_branch"
+        detail: "branch is behind the base and the ruleset requires it current; call merge_base_into_branch " + "(sync_branch only fast-forwards this branch from its own remote branch)"
       });
       break;
     case "BLOCKED": {
@@ -7806,6 +7810,7 @@ var askReaders = {
   requestedAgent: (body) => parseMangledCommand(body).agent,
   authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
 };
+var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
@@ -20069,7 +20074,7 @@ var LIST_ISSUES_SCHEMA = objectType({
 var CREATE_PR_SCHEMA = objectType({
   title: stringType().min(1).describe("Concise pull request title."),
   body: stringType().optional().describe("Pull request body in GitHub-flavored Markdown. Atomaton adds issue traceability metadata automatically."),
-  reviewer: stringType().optional().describe("Which agent should review this once CI passes, for example 'reviewer'. Nothing reviews a pull request " + "unless you ask: opening one no longer starts anyone by itself. Omit it only when a review is genuinely " + "not wanted -- a person is then told the pull request is waiting, by name, so it does not sit unnoticed.")
+  reviewer: stringType().optional().describe("Which agent should review this once CI passes, for example 'reviewer'. Nothing reviews a pull request " + "unless you ask: opening one no longer starts anyone by itself. Omit it only when a review is genuinely " + "not wanted -- a person is then told the pull request is waiting, by name, so it does not sit unnoticed. " + "That a person will merge it is not a reason to omit it: the review is what tells them whether it may " + "be merged at all.")
 });
 var LIST_PRS_SCHEMA = objectType({
   state: enumType(["open", "closed", "merged", "all"]).optional().describe("Pull request state filter. Defaults to 'open'."),
@@ -20399,36 +20404,43 @@ ${text}`;
     meta: validationDispatched ? { session_ends: true } : {}
   };
 }
-function commitAndPush(a) {
-  const message = a.message;
-  refuseClosingKeywords(message, "commit message");
-  const branch = branchForCommit(REPO);
-  {
-    const { code, stdout, stderr } = gitRun("add", "-A");
-    if (code)
-      mcpFail(stderr || stdout);
+function mergeMessage() {
+  const dir = gitRun("rev-parse", "--git-dir");
+  if (dir.code)
+    return "";
+  try {
+    const text = readFileSync3(join(dir.stdout.trim(), "MERGE_MSG"), "utf8");
+    return text.split(`
+`).map((line) => line.trim()).find((line) => line && !line.startsWith("#")) ?? "";
+  } catch {
+    return "";
   }
-  let committed = true;
-  {
-    const result = gitRun("commit", "-m", message);
-    if (result.code) {
-      if (!nothingToCommit(result))
-        mcpFail(result.stderr || result.stdout);
-      committed = false;
+}
+function unfinishedMerge() {
+  const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
+  if (head.code !== 0)
+    return;
+  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+  const paths = unmerged.code === 0 ? unmerged.stdout.split(`
+`).map((line) => line.trim()).filter(Boolean) : [];
+  const unresolved = paths.filter((path) => {
+    try {
+      return /^(?:<{7} |>{7} )/m.test(readFileSync3(path, "utf8"));
+    } catch {
+      return false;
     }
-  }
-  let pushed = true;
-  {
-    const { code, stdout, stderr } = gitRun("push", "-u", "origin", branch);
-    if (code)
-      mcpFail(stderr || stdout);
-    pushed = !/Everything up-to-date/i.test(`${stdout} ${stderr}`);
-  }
-  const moved = committed || pushed;
-  if (moved)
-    logOp("commit_and_push", { committed });
-  const open = moved ? gh("pr", "list", "--repo", REPO, "--head", branch, "--state", "open", "--json", "number") : { code: 1, stdout: "", stderr: "" };
-  if (moved && !open.code) {
+  });
+  return { head: head.stdout.trim(), unresolved, description: mergeMessage() };
+}
+function pushBranch(branch) {
+  const { code, stdout, stderr } = gitRun("push", "-u", "origin", branch);
+  if (code)
+    mcpFail(stderr || stdout);
+  const pushed = !/Everything up-to-date/i.test(`${stdout} ${stderr}`);
+  if (!pushed)
+    return false;
+  const open = gh("pr", "list", "--repo", REPO, "--head", branch, "--state", "open", "--json", "number");
+  if (!open.code) {
     try {
       const [pr] = JSON.parse(open.stdout || "[]");
       if (pr)
@@ -20437,7 +20449,37 @@ function commitAndPush(a) {
       report("warning", "could not read the open pull request list, so CI validation was NOT dispatched for this push");
     }
   }
-  return JSON.stringify({ ok: true, committed, pushed });
+  return true;
+}
+function commitAndPush(a) {
+  const message = a.message;
+  refuseClosingKeywords(message, "commit message");
+  const branch = branchForCommit(REPO);
+  const merge = unfinishedMerge();
+  if (merge && merge.unresolved.length > 0) {
+    mcpFail(`The merge in progress still has unresolved conflicts: ${merge.unresolved.join(", ")}. ` + "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge.");
+  }
+  {
+    const { code, stdout, stderr } = gitRun("add", "-A");
+    if (code)
+      mcpFail(stderr || stdout);
+  }
+  const commitMessage = merge ? `${message}
+
+${merge.description || `Merge ${merge.head}`}` : message;
+  let committed = true;
+  {
+    const result = gitRun("commit", "-m", commitMessage);
+    if (result.code) {
+      if (!nothingToCommit(result))
+        mcpFail(result.stderr || result.stdout);
+      committed = false;
+    }
+  }
+  const pushed = pushBranch(branch);
+  if (committed || pushed)
+    logOp("commit_and_push", { committed });
+  return JSON.stringify({ ok: true, committed, pushed, ...merge ? { merge_head: merge.head } : {} });
 }
 function syncBranch(a) {
   const branch = a.branch?.trim() || resolveBranch();
@@ -20481,6 +20523,88 @@ function syncBranch(a) {
   const status = ahead > 0 && behind > 0 ? "diverged" : ahead > 0 ? "ahead" : "up_to_date";
   logOp("sync_branch", { branch, status, ahead, behind });
   return JSON.stringify({ branch, status, ahead, behind });
+}
+function baseBranchForMerge() {
+  const number = nodeNumber();
+  if (isPrRun() && number !== undefined) {
+    const pr = ghJsonOrThrow("pr", "view", String(number), "--repo", REPO, "--json", "baseRefName");
+    const fromPullRequest = (pr?.baseRefName ?? "").trim();
+    if (fromPullRequest)
+      return fromPullRequest;
+  }
+  const fromTree = stackedPrBase(REPO) ?? getBaseBranch();
+  if (fromTree)
+    return fromTree;
+  const repository = ghJsonOrThrow("repo", "view", REPO, "--json", "defaultBranchRef");
+  const defaultBranch = (repository?.defaultBranchRef?.name ?? "").trim();
+  if (!defaultBranch) {
+    mcpFail(`Cannot tell which branch this work is based on: no base branch is configured, and the repository's ` + `default branch could not be read from GitHub.`);
+  }
+  return defaultBranch;
+}
+function mergeBaseIntoBranch() {
+  try {
+    return mergeBaseIntoBranchOrThrow();
+  } catch (error) {
+    logOp("merge_base_into_branch", { status: "failed", reason: error.message });
+    throw error;
+  }
+}
+function mergeBaseIntoBranchOrThrow() {
+  const branch = resolveBranch();
+  if (unfinishedMerge()) {
+    mcpFail("A merge is already in progress on this branch. Resolve its conflicts and call commit_and_push to close " + "it before bringing another base in.");
+  }
+  const worktree = gitRun("status", "--porcelain");
+  if (worktree.code)
+    mcpFail(worktree.stderr || worktree.stdout);
+  if (worktree.stdout.trim()) {
+    mcpFail("Cannot merge the base branch into a branch with uncommitted changes. Call commit_and_push first.");
+  }
+  const base = baseBranchForMerge();
+  if (base === branch) {
+    mcpFail(`'${base}' is both the branch this run is on and its base, so there is nothing to bring in.`);
+  }
+  const remoteRef = `refs/remotes/origin/${base}`;
+  const fetch = gitRun("fetch", "origin", `refs/heads/${base}:${remoteRef}`);
+  if (fetch.code)
+    mcpFail(`Cannot fetch base branch '${base}': ${fetch.stderr || fetch.stdout}`);
+  const resolved = gitRun("rev-parse", remoteRef);
+  if (resolved.code)
+    mcpFail(`Cannot resolve base branch '${base}': ${resolved.stderr || resolved.stdout}`);
+  const baseSha = resolved.stdout.trim();
+  const ancestor = gitRun("merge-base", "--is-ancestor", remoteRef, "HEAD");
+  if (ancestor.code === 0) {
+    logOp("merge_base_into_branch", { branch, base, status: "up_to_date", base_sha: baseSha });
+    return JSON.stringify({ status: "up_to_date", branch, base, base_sha: baseSha });
+  }
+  if (ancestor.code !== 1) {
+    mcpFail(`Cannot compare '${branch}' with '${base}': ${ancestor.stderr || ancestor.stdout}`);
+  }
+  const merge = gitRun("merge", "--no-ff", "-m", `Merge base branch '${base}' (${baseSha.slice(0, 12)}) into '${branch}'`, remoteRef);
+  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+  const files = unmerged.stdout.split(`
+`).map((line) => line.trim()).filter(Boolean);
+  if (files.length > 0) {
+    logOp("merge_base_into_branch", { branch, base, status: "conflicts", base_sha: baseSha, files });
+    return JSON.stringify({
+      status: "conflicts",
+      branch,
+      base,
+      base_sha: baseSha,
+      files,
+      note: "Nothing was committed. The conflicts are in the worktree with their markers; resolve them, then call " + "commit_and_push to close the merge."
+    });
+  }
+  if (merge.code)
+    mcpFail(`Merging '${base}' into '${branch}' failed: ${merge.stderr || merge.stdout}`);
+  const head = gitRun("rev-parse", "HEAD");
+  if (head.code)
+    mcpFail(`Cannot resolve HEAD after the merge: ${head.stderr || head.stdout}`);
+  const commit = head.stdout.trim();
+  pushBranch(branch);
+  logOp("merge_base_into_branch", { branch, base, status: "merged", base_sha: baseSha, commit });
+  return JSON.stringify({ status: "merged", branch, base, base_sha: baseSha, commit });
 }
 var PER_ITEM_BUDGET = Math.floor(TOOL_OUTPUT_BUDGET / 5);
 function pick2(source, keys) {
@@ -20734,9 +20858,15 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "get_branch", description: "Retrieve GitHub's branch metadata for an exact branch name, or report that no such branch exists. Use this to inspect remote branch identity and protection information, not local worktree state. A branch that is not there is an answer, not an error: it returns `{branch, exists: false}`, so this is the tool for checking before you create one. When the branch does exist it returns `branch`, `exists`, `sha` and `protected` -- the head commit's SHA, not the commit itself; use get_pr_diff or bash git log for commit content. Does not mutate GitHub.", schema: GET_BRANCH_SCHEMA, handler: getBranch }),
   defineMcpTool({
     name: "sync_branch",
-    description: "Synchronize the checked-out branch with its remote counterpart and report ahead/behind status. Use this after a non-fast-forward push failure or before retrying branch publication; it fast-forwards only when safe. It never rebases or force-pushes, and reports diverged branches for explicit resolution.",
+    description: "Synchronize the checked-out branch with its remote counterpart and report ahead/behind status. Use this after a non-fast-forward push failure or before retrying branch publication; it fast-forwards only when safe. It never rebases or force-pushes, and reports diverged branches for explicit resolution. It does NOT bring the base branch in \u2014 a branch behind its base is merge_base_into_branch's job.",
     schema: SYNC_BRANCH_SCHEMA,
     handler: syncBranch
+  }),
+  defineMcpTool({
+    name: "merge_base_into_branch",
+    description: "Bring this run's base branch into the checked-out branch, as a merge commit, and push it. The base is resolved the way create_pr resolves it: a sub-issue's is its parent's branch, anything else the configured base branch, and a pull request run's is the base the pull request aims at. It takes no arguments and touches no branch but this one: no cascade, no writes to a child's or sibling's branch, no rebase, no force-push. Returns {status: 'up_to_date'} when the base is already an ancestor, {status: 'merged', base, base_sha, commit} after a clean merge, or {status: 'conflicts', base, base_sha, files} \u2014 in which case nothing is committed and the conflict markers are left in the worktree: resolve them and call commit_and_push to close the merge. Every outcome is recorded in the ops log.",
+    schema: objectType({}),
+    handler: mergeBaseIntoBranch
   }),
   defineMcpTool({ name: "get_check_runs", description: "Retrieve GitHub Actions and other check runs for a commit, branch, or tag. Use this to verify CI status after pushing or before merge decisions. Returns one object per check with `name`, `status`, `conclusion` and `html_url` -- follow the URL for a failing check's log, which is not included. Does not wait for incomplete checks.", schema: GET_CHECK_RUNS_SCHEMA, handler: getCheckRuns }),
   defineMcpTool({
@@ -20749,7 +20879,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_pr_review_comments", description: "Retrieve line-level review comments for one pull request. Use this to find file- and line-specific feedback; use get_pr_reviews for overall review decisions. Returns { total, omitted, comments } where each comment has `author`, `path`, `line`, `in_reply_to` and `body`; the surrounding code is not included, read it with the `read` tool or get_pr_diff, and a non-zero `omitted` means the rest did not fit. Does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: listPrReviewComments }),
   defineMcpTool({
     name: "commit_and_push",
-    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history.",
+    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush
   }),

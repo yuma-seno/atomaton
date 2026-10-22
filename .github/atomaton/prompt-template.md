@@ -48,17 +48,15 @@ hands back a summary, and the usual shape is one call:
 - *"Find where `X` is defined and everywhere it is called, and tell me in ten
   lines."* — instead of grepping, opening three files and reading them here.
 - *"Read `docs/y.md` and tell me which of these five claims it actually supports."*
-- *"Run `bun test ./that`, and report only the failures with their assertion
-  text."*
 - *"Does this repository already have anything that does `Z`? Name the files."*
 
 **Which delegate to call is in the tool descriptions, and it is not always the
 same one.** A project decides which delegates exist, what each is called and which
 model each runs on, so the choice is made where you can see it — read the
-description before calling, and follow what it says about which to reach for first
-and what a refusal means. What is constant is the shape of the work: these are for
-reading, searching and running a command, they start with no memory of this
-conversation, and they have ten minutes each.
+description before calling, and follow what it says about which to reach for first,
+what else that delegate can do, and what a refusal means. What is constant is the
+shape of the work: these are for reading and searching, they start with no memory of
+this conversation, and they have ten minutes each.
 
 # What you are here to do it for
 

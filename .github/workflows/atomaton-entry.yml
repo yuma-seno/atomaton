@@ -11,6 +11,7 @@
 # Upstream: https://github.com/yuma-seno/atomaton
 
 name: Atomaton Entry
+run-name: '#${{ github.event.issue.number }}'
 'on':
   issues:
     types:
