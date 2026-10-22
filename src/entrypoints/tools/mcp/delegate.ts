@@ -283,6 +283,8 @@ interface ResolvedDelegate extends DelegateDef {
   servers: string[];
   /** Whether the sub-run may change the tree — see the `canWrite` branch below. */
   canWrite: boolean;
+  /** Whether the sub-run has a shell, and so can run a command — see the `hasShell` branch below. */
+  hasShell: boolean;
   /** The role prompt, which the tool's description is built from. */
   role: string;
 }
@@ -326,7 +328,11 @@ const DEFAULTS: ResolvedDelegate[] = MINE.map((def) => {
   // the tree, and the allowlist is what makes the other read-only rather than the
   // program being different.
   const canWrite = servers.includes("files");
-  return { ...def, tools, servers, canWrite, role: rolePrompt(readFileSync(def.agentFile, "utf8")) };
+  // `shell` is a separate reach, and a second false promise waits where it is
+  // assumed: the read-only sub-run has no shell — a shell is a way to write, as its
+  // own tools file says — so the command promise belongs to the branch that has one.
+  const hasShell = servers.includes("shell");
+  return { ...def, tools, servers, canWrite, hasShell, role: rolePrompt(readFileSync(def.agentFile, "utf8")) };
 });
 
 /**
@@ -369,7 +375,9 @@ const DELEGATE_RUN_SCHEMA = z.object({
     .min(1)
     .describe(
       "What to do, as an instruction to the delegate. One small piece of work: read and report, " +
-        "search and report, make one change, run one command. It cannot reach GitHub, cannot open " +
+        "search and report. Whether this delegate can also change files or run a command is said " +
+        "in its own description, not here — every delegate this server offers reads this text, " +
+        "and they do not all have the same reach. It cannot reach GitHub, cannot open " +
         "an issue or a pull request, and cannot delegate further. " +
         "It CAN look around on its own, so a task that is a question rather than a file is " +
         "delegatable too — and that is often the better call, because the searching is what fills " +
@@ -592,12 +600,14 @@ async function handleDelegateRun(def: ResolvedDelegate, args: z.infer<typeof DEL
  *
  * Written once and shared by every delegate this server offers, because the
  * differences that matter are facts about the definition rather than about the
- * program: `canWrite` decides two sentences, and the role prompt says the rest. A
- * description per definition would be four copies of this drifting apart.
+ * program: `canWrite` and `hasShell` decide one sentence each, and the role prompt
+ * says the rest. A description per definition would be four copies of this drifting apart.
  *
- * The middle sentence — what the sub-run holds — is the one a caller cannot see for
- * itself, and the `canWrite` branch is why it is here rather than in the definition:
- * the servers decide the reach, and the servers come from the tools file.
+ * The middle sentences — what the sub-run holds — are the ones a caller cannot see
+ * for itself, and the `canWrite` and `hasShell` branches are why they are here rather
+ * than in the definition: the servers decide the reach, and the servers come from the
+ * tools file. A promise left in the shared text reached every roster regardless of
+ * reach, and the caller learned it was hollow only after spending a run on it.
  *
  * ## Why the tier is described here rather than in the caller's prompt
  *
@@ -614,9 +624,8 @@ async function handleDelegateRun(def: ResolvedDelegate, args: z.infer<typeof DEL
  */
 function delegateDescription(def: ResolvedDelegate, shared: string): string {
   return (
-    "Do one small piece of work in a separate run and return what it found. Use it for reading, " +
-    "searching and changing files, and for running one command to answer a question — the work " +
-    "whose transcript you do not want in this session. " +
+    "Do one small piece of work in a separate run and return what it found. Use it for reading " +
+    "and searching — the work whose transcript you do not want in this session. " +
     "The investigation you do not know how to start is the case it is most for: it does have " +
     "its own `grep`, `glob` and `read`, so \"find where X is defined and everywhere it is " +
     "called\" is a task you can hand over rather than a search you have to do first. Say what " +
@@ -627,9 +636,16 @@ function delegateDescription(def: ResolvedDelegate, shared: string): string {
     "It CANNOT reach GitHub — no issues, no pull requests, no comments — cannot dispatch anything, " +
     "and cannot delegate further. " +
     (def.canWrite
-      ? "It works in the same tree, so a change it makes is a change you will commit. "
+      ? "Use it for changing files too: it works in the same tree, so a change it makes is a " +
+        "change you will commit. "
       : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " +
         "comes back as a description rather than as an edit. ") +
+    (def.hasShell
+      ? "It can also run one command to answer a question — the measurement a static reading of " +
+        "the code cannot give you. "
+      : "It CANNOT run commands: it has no shell, so a task that needs a measured result — stdout, " +
+        "an exit code, a test run — comes back as a reading, not a measurement. Ask a run that has " +
+        "a shell, or a person, for that. ") +
     "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " +
     "resumes it. If the task is larger than that, or needs a decision, do it here instead." +
     shared
