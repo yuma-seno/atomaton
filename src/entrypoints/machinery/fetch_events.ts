@@ -26,9 +26,14 @@
  * puts the run's own node in the agent's `NUMBER` / `TYPE` (see
  * `adapters/runner/run-node.ts`). One env name carrying both meanings was what
  * #248 was.
+ *
+ * An issue with a parent carries `**Sub-issue of:** #N` on its body event —
+ * the issue-side counterpart of the PR body's `**Linked Issue:** #N` — so a
+ * child run can see where it sits in the tree without a lookup of its own.
  */
 import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
 import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
 import { keptCommentIds } from "../../adapters/github/thread.ts";
@@ -193,11 +198,24 @@ function fetchIssueEvents(
 ): GithubEvent[] {
   const issue = requiredJson<GhIssueApi>(`issue #${issueNum}`, "api", `repos/${owner}/${repo}/issues/${issueNum}`);
 
+  // The parent, in the body event itself, because a sub-issue's run otherwise never
+  // sees its parent anywhere: it would have to know to call `get_issue` and read the
+  // native link for itself before it could learn there was anyone above it. The pull
+  // request half of this is `**Linked Issue:** #N` below; this is the issue half,
+  // and the pair is what makes the tree visible from inside a run's context.
+  //
+  // `known` is the distinction the read exists for: `parent: 0` is a root, and a
+  // read that failed is neither answer. A failed read adds no line either -- adding
+  // nothing is the honest "we do not know" here, and `parentIssueOf` has already
+  // logged why. This is enrichment, so it never fails the run the way the issue
+  // fetch above does.
+  const found = parentIssueOf(`${owner}/${repo}`, issueNum);
+  const parentLine = found.known && found.parent > 0 ? `**Sub-issue of:** #${found.parent}\n` : "";
   const labelsLine = issue.labels.length > 0 ? `**Labels:** ${issue.labels.map((l) => l.name).join(", ")}\n` : "";
   const openedEvent: GithubEvent = {
     id: `${idPrefix}-${issue.number}`,
     event_type: openedType,
-    content: `Issue #${issue.number}: ${issue.title}\n${labelsLine}\n${issue.body ?? ""}`,
+    content: `Issue #${issue.number}: ${issue.title}\n${labelsLine}${parentLine}\n${issue.body ?? ""}`,
     author: issue.user.login,
     author_type: issue.user.type,
     created_at: issue.created_at,

@@ -492,6 +492,9 @@ const { tools: TOOLS, dispatch } = buildMcpTools([
       "Dispatch Atomaton agents onto sub-issues and immediately end the atomaton session. " +
       "Call this ONCE after creating all sub-issues via GitHub MCP. " +
       "Each sub-issue can be assigned a different agent. " +
+      "Each sub-issue's body is the hand-off: write there how the work divides among its siblings, " +
+      "any interface they share, and what has already been decided — the child starts from its own " +
+      "issue's thread, not from this one's. " +
       "Put your report in `summary`: the atomaton session ends immediately after this call " +
       "returns, so there is no turn afterwards in which to write one. " +
       "The atomaton will be automatically re-invoked when ALL sub-issues are closed.",
