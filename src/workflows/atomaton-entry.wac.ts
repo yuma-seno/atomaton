@@ -39,7 +39,8 @@ export const atomaEntry = new Workflow("atomaton-entry", {
   // here, and a title naming this workflow instead ("Atomaton Entry on #N") would
   // read as an agent called "Atomaton Entry" — a name no person could resume with.
   // The title carries the node alone; the watch reads the agent off the thread
-  // when its notice needs one.
+  // when its notice needs one. (`issues.opened` never fires for a pull request,
+  // so no PR-shaped title can arrive from here.)
   "run-name": "#${{ github.event.issue.number }}",
   on: {
     issues: { types: ["opened"] },

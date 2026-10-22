@@ -183,6 +183,19 @@ describe("reconcile_run_ending.ts", () => {
     expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
 
+  test("a manual-comment run on a pull request keeps the workflow's name and stays silent", () => {
+    // The second reviewer finding: `issue_comment` fires for pull requests too, and
+    // a PR command dispatches validation instead of calling the runner — the run
+    // completes without ever taking the turn. Its run-name is the workflow's own
+    // name (the PR case of the expression), which no title shape reads as a node,
+    // so the watch does nothing — not even the read. The PR chain is watched
+    // through the runner run validation eventually starts.
+    const command = apiComment("/reviewer ship it", BEFORE, true);
+    const r = run(argv({ "display-title": "Atomaton Manual Comment" }), rulesFor({ comments: [command] }));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls).toEqual([]);
+  });
+
   test("an entry run over an untouched thread stays silent", () => {
     const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [apiComment("just a remark", AFTER, true)] }));
     expect(r.status).toBe(0);

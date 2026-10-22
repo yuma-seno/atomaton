@@ -101,6 +101,40 @@ describe("generated workflows", () => {
   });
 
   /**
+   * The run watch learns the node it reconciles from the watched run's title, and
+   * a `workflow_run` event carries no inputs — so the titles are the only channel.
+   * A regression in any of these three leaves the watch blind (or, for the PR
+   * case, shouting): the trigger list must name every workflow whose completion
+   * can leave a turn unreported, and the manual-comment title must NOT read as a
+   * node when the comment is on a pull request — that run dispatches validation
+   * and takes no turn, and a `#N` title there would draw a false "run ended
+   * without reporting" notice while validation and the runner were still to come.
+   */
+  test("the run watch's triggers and the callers' node titles survive generation", () => {
+    type WatchDocument = {
+      on?: { workflow_run?: { workflows?: string[]; types?: string[] } };
+      concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+    };
+    const watch = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-run-watch.yml", "utf8")) as WatchDocument;
+    expect(watch.on?.workflow_run?.workflows).toEqual(["Atomaton Runner", "Atomaton Entry", "Atomaton Manual Comment"]);
+    expect(watch.on?.workflow_run?.types).toEqual(["completed"]);
+    // Per watched node, so two watches for one node serialize — and different
+    // nodes do not queue behind each other.
+    expect(watch.concurrency?.group).toContain("github.event.workflow_run.display_title");
+    expect(watch.concurrency?.["cancel-in-progress"]).toBe(false);
+
+    type TitledWorkflow = { name?: string; "run-name"?: string; on?: Record<string, unknown> };
+    const entry = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-entry.yml", "utf8")) as TitledWorkflow;
+    expect(entry["run-name"]).toBe("#${{ github.event.issue.number }}");
+
+    const manual = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-manual-comment.yml", "utf8")) as TitledWorkflow;
+    // The PR case must fall out of the node title: the expression yields the
+    // workflow's own name unless the comment is NOT on a pull request.
+    expect(manual["run-name"]).toContain("github.event.issue.pull_request == null");
+    expect(manual["run-name"]).toContain("format('#{0}', github.event.issue.number)");
+  });
+
+  /**
    * The "CI is running" comment does not belong to the workflow that hands a command
    * to validation.
    *

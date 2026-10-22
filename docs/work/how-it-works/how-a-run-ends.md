@@ -79,8 +79,14 @@ thread as it was, and the watch has nothing to say.
 The watch reads which node a run worked on out of the run's title. The runner
 writes `run-name: "agent on #N"`; the two entry workflows write `#N` alone,
 because `run-name` is evaluated before any job runs and the agent is a route's
-decision — the notice reads the agent off the thread. Titles matching neither
-shape — runs from before this existed — are left alone.
+decision — the notice reads the agent off the thread. One exception: a
+manual-comment run for a comment on a **pull request** keeps the workflow's own
+name, because `issue_comment` fires on pull requests too and a PR command
+dispatches validation rather than calling the runner — that run takes no turn,
+and a `#N` title there would draw a false notice while validation and the
+runner were still to come. The PR chain is watched through the runner run that
+validation eventually starts, whose title carries the agent. Titles matching
+neither shape — runs from before this existed — are left alone.
 
 The restore is the same for every kind of death: **re-run the failed run**.
 "Re-run failed jobs" from the run's page, or by hand:
