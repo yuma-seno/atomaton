@@ -266,6 +266,38 @@ function reportFailure(
 }
 
 /**
+ * Tell the person who asked for this run that CI is actually running, and where to
+ * watch it.
+ *
+ * A person's `/agent` on a pull request is handed to validation, and the wait is
+ * minutes long; a person who typed a command and saw nothing happen has no way to
+ * tell a queued run from a broken workflow. So validation itself says the one fact
+ * that is true while the run goes -- and nothing more. It does not name the agent
+ * that will work next, because the result decides that: checks that fail dispatch
+ * the engineer who opened the pull request, not the agent the person named. The
+ * workflow-side comment this replaces promised the agent unconditionally, and said
+ * it even when CI was never going to run -- validation reuses a run that already
+ * finished, so its most common case was a promise about a wait that did not exist
+ * (#271).
+ *
+ * Person-asked only. An agent's push already knows its validation is running -- the
+ * tool that started it says so in its result -- and a comment on every push would be
+ * noise on the thread the agent is working in. A reused completed run says nothing
+ * either: the person's own command is the record the run was asked for, the verdict
+ * that reuse returns is seconds old, and the agent the verdict dispatches starts
+ * seconds later. There is no wait left to describe.
+ */
+function notifyCiWaiting(repo: string, number: string, askedByPerson: boolean, runUrl: string): void {
+  if (!askedByPerson) return;
+  const body = [
+    LLM_CONTEXT_TAG.write("exclude"),
+    `Atomaton: CI is running on this pull request (${runUrl}). Its result decides who works next.`,
+  ].join("\n");
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
+  if (posted.code) log(`WARN could not post the CI-waiting comment: ${posted.stderr}`);
+}
+
+/**
  * Dispatch CI and wait for it, or reuse a run that already exists, returning what
  * it concluded.
  *
@@ -274,6 +306,10 @@ function reportFailure(
  * and a person's `/agent` comment each start a validation -- and each used to run CI
  * again from scratch. The commit has not changed between them, so the verdict cannot
  * have. See `findExistingCiRun`.
+ *
+ * When there is something to wait for -- a run already going, or one this call
+ * dispatched -- it says so through `notifyCiWaiting`, which holds the rules for when
+ * that comment is worth a person's thread and when it is noise.
  *
  * A function rather than the body of `main`, so the one caller that must NOT run it
  * — a pull request whose own `.github/atomaton/` is broken — can skip it by not
@@ -286,11 +322,15 @@ function reportFailure(
  */
 function runCiAndWait(
   repo: string,
+  number: string,
   workflow: string,
   branch: string,
   headSha: string,
   timeoutSeconds: number,
+  askedByPerson: boolean,
 ): { conclusion: string; runUrl: string } {
+  const runUrlFor = (id: number): string => `https://github.com/${repo}/actions/runs/${id}`;
+
   // Filtered by `head_sha` server-side, because both callers below want only runs on
   // this commit and an unfiltered list is a bounded page: on a busy repository the
   // just-dispatched run is not on the first page, so the poll never finds it and
@@ -309,7 +349,7 @@ function runCiAndWait(
   const reusable = existing?.status === "completed" && existing.conclusion && existing.conclusion !== "cancelled";
   if (reusable) {
     log(`reusing CI run ${existing.id} for ${headSha.slice(0, 7)}: ${existing.conclusion}`);
-    return { conclusion: existing.conclusion!, runUrl: `https://github.com/${repo}/actions/runs/${existing.id}` };
+    return { conclusion: existing.conclusion!, runUrl: runUrlFor(existing.id) };
   }
 
   // A run already going for this commit is waited for rather than duplicated. It is
@@ -317,8 +357,13 @@ function runCiAndWait(
   // question twice.
   const alreadyRunning = existing !== undefined && existing.status !== "completed";
   const since = new Date().toISOString();
+  // The person asked for a run and got silence so far; this is where a wait became
+  // a fact, so this is where they are told. A reused run never reaches this, which
+  // is the point -- see `notifyCiWaiting` for who is told and who is not.
+  let notified = alreadyRunning;
   if (alreadyRunning) {
     log(`CI run ${existing.id} is already ${existing.status} for ${headSha.slice(0, 7)}; waiting for it`);
+    notifyCiWaiting(repo, number, askedByPerson, runUrlFor(existing.id));
   } else {
     // `dispatchWorkflow` rather than a `gh workflow run` built here. This is the sixth
     // stand-in for the same hole — GitHub starts no workflow run for an event its own
@@ -344,10 +389,18 @@ function runCiAndWait(
       ? listRuns().find((candidate) => candidate.id === existing.id)
       : pickDispatchedRun(listRuns(), headSha, since);
     if (!run) continue;
+    // First sight of a run this call dispatched: say where to watch it, while it is
+    // still going. A first sighting that is already completed says nothing -- "CI is
+    // running" posted after it finished is the same lie the workflow-side comment
+    // told -- and the verdict follows within seconds either way.
+    if (!notified && run.status !== "completed") {
+      notifyCiWaiting(repo, number, askedByPerson, runUrlFor(run.id));
+      notified = true;
+    }
     if (run.status !== "completed") continue;
     const conclusion = run.conclusion ?? "";
     log(`CI run ${run.id} concluded ${conclusion}`);
-    return { conclusion, runUrl: `https://github.com/${repo}/actions/runs/${run.id}` };
+    return { conclusion, runUrl: runUrlFor(run.id) };
   }
 
   log(`no conclusion within ${timeoutSeconds}s`);
@@ -452,7 +505,15 @@ function main(): void {
   const { conclusion, runUrl } =
     deliverableProblems.length > 0
       ? { conclusion: "", runUrl: "" }
-      : runCiAndWait(repo, workflow, branch, headSha, Number(values["timeout-seconds"] ?? "1800"));
+      : runCiAndWait(
+          repo,
+          values.number ?? "",
+          workflow,
+          branch,
+          headSha,
+          Number(values["timeout-seconds"] ?? "1800"),
+          isTrue(values["asked-by-person"]),
+        );
 
   // How many times validation already sent this pull request back. Counted from
   // its own comments rather than held anywhere, so it survives a re-dispatch and
