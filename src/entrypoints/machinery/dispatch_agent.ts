@@ -20,9 +20,11 @@
  *
  * ## What each exit code means
  *
- * - `0` — the run was dispatched, or it was refused because the target is not open or
- *   already has an agent asked for on it. A refusal is not a fault: nothing is running,
- *   and the person who asked has already been told on the target itself. Failing the
+ * - `0` — the run was dispatched, or it was refused: the target is not open, already
+ *   has an agent asked for on it, or the wait the dispatch was answering had already
+ *   resolved (`superseded` — refused quietly, because the thread already holds the
+ *   judgement a notice would restate). A refusal is not a fault: nothing is running,
+ *   and a person who needs telling has been told on the target itself. Failing the
  *   step here would report the refusal as a broken workflow.
  * - `1` — GitHub rejected the dispatch, or the arguments were not usable. Nothing is
  *   running and nothing will retry, which is worth failing the job over.

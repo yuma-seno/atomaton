@@ -457,10 +457,12 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
     number,
     notify: (process.env.NOTIFY ?? "").trim(),
     reloadCount: next,
-    // The same turn, continued: the agent running right now is restarting itself, so
-    // the thread's last event is the command that started this very run. Without this
-    // the outstanding-request check would read the reload as a second request.
+    // The same turn, continued: the handoff comment above is the thread's last event,
+    // and `freshnessProbeId` is how the answers-request check sees it before judging.
+    // Without the probe, read-after-write lag would show the command that started this
+    // run and refuse the restart it is itself.
     answersRequest: true,
+    freshnessProbeId: endingCommentId,
     log,
   });
   if (outcome === "refused-closed") {

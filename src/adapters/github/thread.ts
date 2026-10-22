@@ -395,6 +395,46 @@ export function checkDispatchMarker(
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
 
+/** What an answers-request dispatch learns from one read of the thread. */
+export interface LastTurnRead {
+  /**
+   * Whether the comment the caller named as its freshness probe is in the listing yet,
+   * or `undefined` when it named none. The same instrument the dispatch marker is for
+   * `MarkerCheck`: while the caller's own recent write is not visible, the read has not
+   * caught up, and an answer judged on it is an answer about an older thread.
+   */
+  probeVisible: boolean | undefined;
+  /** The newest turn event in the shaped thread, or `undefined` when it carries none. */
+  last: TurnEvent | undefined;
+}
+
+/**
+ * Read a node's thread once and answer what an answers-request dispatch judges on.
+ *
+ * `answersRequest` claims the request this dispatch fulfils is the thread's own to
+ * still be waiting for; the claim is the caller's, and this read is what makes it
+ * checkable — see `adapters/actions/dispatch.ts`, which owns the judgement. The probe
+ * is the caller's just-written comment, when it has one (`reload_environment`'s
+ * handoff comment): until the listing shows it, the read may predate the write the
+ * `handed-off` answer rests on, and judging then would judge the thread as it stood
+ * before the caller spoke. Shaped like every other read, so a comment the guard is
+ * removing cannot be the event the answer turns on. Throws when the read fails, like
+ * every other reader here.
+ */
+export function readLastTurnEvent(
+  repo: string,
+  number: string | number,
+  probeId?: string | number,
+): LastTurnRead {
+  const comments = listComments(repo, number);
+  const probe = probeId === undefined ? undefined : String(probeId);
+  const events = shapedThread(comments.map(entryOf), readers).events;
+  return {
+    probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
+    last: events[events.length - 1],
+  };
+}
+
 /**
  * The two answers the validation routing asks of one thread.
  *
