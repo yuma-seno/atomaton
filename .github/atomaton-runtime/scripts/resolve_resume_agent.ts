@@ -25,6 +25,55 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function splitConcatenatedJson(text) {
+  const results = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped)
+        escaped = false;
+      else if (c === "\\")
+        escaped = true;
+      else if (c === '"')
+        inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === "{" || c === "[") {
+      if (depth === 0)
+        start = i;
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        results.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
+function ghPaginated(...args) {
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code !== 0) {
+    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
+  }
+  if (!stdout.trim())
+    return [];
+  const flat = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
 
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
@@ -70,6 +119,10 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
+function isQuotation(body) {
+  return QUOTES_TAG.has(body);
+}
 
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
@@ -119,6 +172,8 @@ function parseCommentCommand(body) {
 function mostRecentAgent(bodies) {
   for (let i = bodies.length - 1;i >= 0; i--) {
     const body = bodies[i] ?? "";
+    if (isQuotation(body))
+      continue;
     const result = AGENT_TAG.read(body);
     if (result)
       return result;
@@ -129,11 +184,8 @@ function mostRecentAgent(bodies) {
   return "";
 }
 function mostRecentAgentOn(repo, number) {
-  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (code !== 0)
-    return "";
   try {
-    return mostRecentAgent(JSON.parse(stdout || "[]"));
+    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
   } catch {
     return "";
   }
@@ -173,16 +225,11 @@ function main() {
     process.exit(2);
   }
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const { code, stdout, stderr } = gh("api", `repos/${repo}/issues/${values.number}/comments`, "--paginate", "--jq", "[.[].body]");
   let agent = "";
-  if (code === 0) {
-    try {
-      agent = mostRecentAgent(JSON.parse(stdout || "[]"));
-    } catch {
-      agent = "";
-    }
-  } else {
-    console.error(`Could not read comments on #${values.number}: ${stderr || stdout}`);
+  try {
+    agent = mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${values.number}/comments`, "--jq", "[.[].body]"));
+  } catch (error) {
+    console.error(`Could not read comments on #${values.number}: ${error instanceof Error ? error.message : error}`);
   }
   if (!agent) {
     gh("issue", "comment", String(values.number), "--repo", repo, "--body", [

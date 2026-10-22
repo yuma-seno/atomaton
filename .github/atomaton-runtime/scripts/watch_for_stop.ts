@@ -70,6 +70,10 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
+function isQuotation(body) {
+  return QUOTES_TAG.has(body);
+}
 
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
@@ -101,6 +105,8 @@ var ref = defineScript(import.meta.url);
 var DEFAULT_INTERVAL_SECONDS = 30;
 function stopRequested(comments, since) {
   return comments.some((c) => {
+    if (isQuotation(c.body ?? ""))
+      return false;
     if (!STOP_TAG.has(c.body ?? ""))
       return false;
     const at = c.created_at ? Date.parse(c.created_at) : NaN;

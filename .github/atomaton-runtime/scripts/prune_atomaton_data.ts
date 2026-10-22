@@ -141,6 +141,7 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
 
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
@@ -220,11 +221,13 @@ function isHumanActor(type) {
 }
 
 // src/domain/work/thread.ts
-function eventOf(body, readers) {
-  const ending = readers.ending(body);
+function eventOf(entry, readers) {
+  if (entry.quoted)
+    return;
+  const ending = readers.ending(entry.body);
   if (ending !== "")
     return ending;
-  if (readers.requestedAgent(body) !== "")
+  if (readers.requestedAgent(entry.body) !== "")
     return "asked";
   return;
 }
@@ -239,7 +242,7 @@ function shapedThread(comments, readers) {
     if (entry.isHuman && whoseTurn(events) === "agent")
       continue;
     kept.push(entry);
-    const event = eventOf(entry.body, readers);
+    const event = eventOf(entry, readers);
     if (event !== undefined)
       events.push(event);
   }
@@ -269,6 +272,16 @@ var askReaders = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
+function entryOf(comment) {
+  const isHuman = isHumanComment(comment);
+  const body = comment.body ?? "";
+  return {
+    body,
+    isHuman,
+    quoted: !isHuman && QUOTES_TAG.has(body),
+    at: comment.created_at
+  };
+}
 function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
@@ -277,7 +290,7 @@ function listComments(repo, number) {
 }
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment), at: comment.created_at }));
+  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
   return shapedThread(comments, readers);
 }
 function runInFlight(repo, number) {

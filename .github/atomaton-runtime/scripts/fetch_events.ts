@@ -184,6 +184,7 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
 function withoutTags(text) {
   const tags = EVERY_TAG_PATTERN.join("|");
   const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;
@@ -268,11 +269,13 @@ function isHumanActor(type) {
 }
 
 // src/domain/work/thread.ts
-function eventOf(body, readers) {
-  const ending = readers.ending(body);
+function eventOf(entry, readers) {
+  if (entry.quoted)
+    return;
+  const ending = readers.ending(entry.body);
   if (ending !== "")
     return ending;
-  if (readers.requestedAgent(body) !== "")
+  if (readers.requestedAgent(entry.body) !== "")
     return "asked";
   return;
 }
@@ -287,7 +290,7 @@ function shapedThread(comments, readers) {
     if (entry.isHuman && whoseTurn(events) === "agent")
       continue;
     kept.push(entry);
-    const event = eventOf(entry.body, readers);
+    const event = eventOf(entry, readers);
     if (event !== undefined)
       events.push(event);
   }
@@ -317,12 +320,18 @@ var askReaders = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
+function entryOf(comment) {
+  const isHuman = isHumanComment(comment);
+  const body = comment.body ?? "";
+  return {
+    body,
+    isHuman,
+    quoted: !isHuman && QUOTES_TAG.has(body),
+    at: comment.created_at
+  };
+}
 function keptCommentIds(comments) {
-  const entries = comments.map((comment) => ({
-    id: comment.id,
-    body: comment.body ?? "",
-    isHuman: isHumanComment(comment)
-  }));
+  const entries = comments.map((comment) => ({ id: comment.id, ...entryOf(comment) }));
   return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
 }
 
@@ -481,11 +490,11 @@ ${comment.body}`,
   return { events, parentIssue };
 }
 function linkedPrNumbers(owner, repo, issueNumber) {
-  const prs = ghJson("pr", "list", "--repo", `${owner}/${repo}`, "--state", "all", "--search", `${PARENT_ISSUE_TAG.search(issueNumber)} in:body`, "--limit", "1000", "--json", "number") ?? [];
+  const prs = ghJson("pr", "list", "--repo", `${owner}/${repo}`, "--state", "all", "--search", `"${PARENT_ISSUE_TAG.search(issueNumber)}" in:body`, "--limit", "1000", "--json", "number,body") ?? [];
   if (prs.length === 1000) {
     console.error(`::warning::Linked PR search for Issue #${issueNumber} reached GitHub's 1000-result search limit.`);
   }
-  return prs.map((pr) => pr.number);
+  return prs.filter((pr) => PARENT_ISSUE_TAG.read(pr.body ?? "") === issueNumber).map((pr) => pr.number);
 }
 function tryLinkedPrNumbers(owner, repo, issueNumber) {
   try {

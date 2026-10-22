@@ -17476,6 +17476,7 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
 function withoutTags(text) {
   const tags = EVERY_TAG_PATTERN.join("|");
   const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;

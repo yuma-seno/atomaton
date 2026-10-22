@@ -91,6 +91,7 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
 
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
@@ -170,11 +171,13 @@ function isHumanActor(type) {
 }
 
 // src/domain/work/thread.ts
-function eventOf(body, readers) {
-  const ending = readers.ending(body);
+function eventOf(entry, readers) {
+  if (entry.quoted)
+    return;
+  const ending = readers.ending(entry.body);
   if (ending !== "")
     return ending;
-  if (readers.requestedAgent(body) !== "")
+  if (readers.requestedAgent(entry.body) !== "")
     return "asked";
   return;
 }
@@ -189,7 +192,7 @@ function shapedThread(comments, readers) {
     if (entry.isHuman && whoseTurn(events) === "agent")
       continue;
     kept.push(entry);
-    const event = eventOf(entry.body, readers);
+    const event = eventOf(entry, readers);
     if (event !== undefined)
       events.push(event);
   }
@@ -219,12 +222,18 @@ var askReaders = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
+function entryOf(comment) {
+  const isHuman = isHumanComment(comment);
+  const body = comment.body ?? "";
+  return {
+    body,
+    isHuman,
+    quoted: !isHuman && QUOTES_TAG.has(body),
+    at: comment.created_at
+  };
+}
 function keptCommentIds(comments) {
-  const entries = comments.map((comment) => ({
-    id: comment.id,
-    body: comment.body ?? "",
-    isHuman: isHumanComment(comment)
-  }));
+  const entries = comments.map((comment) => ({ id: comment.id, ...entryOf(comment) }));
   return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
 }
 function listComments(repo, number) {
@@ -237,7 +246,7 @@ function commentWouldBeRemoved(repo, number, commentId) {
   const comments = listComments(repo, number);
   const listed = comments.find((comment) => String(comment.id) === String(commentId));
   if (listed === undefined) {
-    const entries = comments.map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+    const entries = comments.map(entryOf);
     return whoseTurn(shapedThread(entries, readers).events) === "agent";
   }
   return !keptCommentIds(comments).has(listed.id);
@@ -270,6 +279,42 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/guard_comment_during_run.ts
 var ref = defineScript(import.meta.url);
+var MAX_PRESERVED_CHARS = 30000;
+function fenceFor(text) {
+  let longest = 0;
+  for (const run of text.match(/`+/g) ?? [])
+    longest = Math.max(longest, run.length);
+  return "`".repeat(Math.max(3, longest + 1));
+}
+function noticeBody(opts) {
+  const quote = opts.deleted && !opts.couldNotRead && opts.original !== "";
+  const what = opts.deleted ? "Your comment was removed because" : "Your comment could not be removed, and will not be acted on, because";
+  const lines = [
+    LLM_CONTEXT_TAG.write("exclude"),
+    ...quote ? [QUOTES_TAG.write(Number(opts.commentId))] : [],
+    `${opts.mention}${what} the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, and it has not come back to a person yet. Please wait for that to finish, then comment again.`
+  ];
+  if (quote) {
+    const truncated = opts.original.length > MAX_PRESERVED_CHARS;
+    const kept = truncated ? opts.original.slice(0, MAX_PRESERVED_CHARS) : opts.original;
+    const fence = fenceFor(kept);
+    lines.push([
+      "<details><summary>Your comment, as you wrote it</summary>",
+      "",
+      fence,
+      kept,
+      fence,
+      ...truncated ? ["", `The comment was longer than ${MAX_PRESERVED_CHARS.toLocaleString("en-US")} characters; the rest is not preserved here.`] : [],
+      "",
+      "</details>"
+    ].join(`
+`));
+  } else if (opts.deleted && opts.couldNotRead) {
+    lines.push("The text of that comment could not be read back before it was removed, so it is not preserved here.");
+  }
+  return lines.join(`
+`);
+}
 function main() {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
@@ -298,18 +343,22 @@ function main() {
 `);
     return;
   }
+  const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
+  const couldNotRead = readBack.code !== 0;
+  const original = couldNotRead ? "" : readBack.stdout ?? "";
   const { code: delCode, stdout: delOut, stderr: delErr } = gh("api", "--method", "DELETE", `repos/${repo}/issues/comments/${values["comment-id"]}`);
   const deleted = delCode === 0;
   if (!deleted) {
     console.error(`Warning: failed to delete comment #${values["comment-id"]} on #${values.number}: ${delErr || delOut}`);
   }
   const mention = mentionPrefix(values.commenter);
-  const what = deleted ? "Your comment was removed because" : "Your comment could not be removed, and will not be acted on, because";
-  gh("issue", "comment", String(values.number), "--repo", repo, "--body", [
-    LLM_CONTEXT_TAG.write("exclude"),
-    `${mention}${what} the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, and it has not come back to a person yet. Please wait for that to finish, then comment again.`
-  ].join(`
-`));
+  gh("issue", "comment", String(values.number), "--repo", repo, "--body", noticeBody({
+    mention,
+    deleted,
+    couldNotRead,
+    original,
+    commentId: values["comment-id"]
+  }));
   if (githubOutput)
     appendFileSync(githubOutput, `blocked=true
 `);

@@ -90,6 +90,55 @@ function ghGraphqlRead(query, variables = {}) {
 function gitRun(...args) {
   return run(["git", ...args]);
 }
+function splitConcatenatedJson(text) {
+  const results = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped)
+        escaped = false;
+      else if (c === "\\")
+        escaped = true;
+      else if (c === '"')
+        inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === "{" || c === "[") {
+      if (depth === 0)
+        start = i;
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        results.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
+function ghPaginated(...args) {
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code !== 0) {
+    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
+  }
+  if (!stdout.trim())
+    return [];
+  const flat = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -248,6 +297,10 @@ var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
+function isQuotation(body) {
+  return QUOTES_TAG.has(body);
+}
 
 // src/adapters/github/outcome.ts
 function issueOutcome(reason) {
@@ -424,11 +477,13 @@ function isHumanActor(type) {
 }
 
 // src/domain/work/thread.ts
-function eventOf(body, readers) {
-  const ending = readers.ending(body);
+function eventOf(entry, readers) {
+  if (entry.quoted)
+    return;
+  const ending = readers.ending(entry.body);
   if (ending !== "")
     return ending;
-  if (readers.requestedAgent(body) !== "")
+  if (readers.requestedAgent(entry.body) !== "")
     return "asked";
   return;
 }
@@ -446,7 +501,7 @@ function shapedThread(comments, readers) {
     if (entry.isHuman && whoseTurn(events) === "agent")
       continue;
     kept.push(entry);
-    const event = eventOf(entry.body, readers);
+    const event = eventOf(entry, readers);
     if (event !== undefined)
       events.push(event);
   }
@@ -479,6 +534,16 @@ var askReaders = {
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
+function entryOf(comment) {
+  const isHuman = isHumanComment(comment);
+  const body = comment.body ?? "";
+  return {
+    body,
+    isHuman,
+    quoted: !isHuman && QUOTES_TAG.has(body),
+    at: comment.created_at
+  };
+}
 function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
@@ -487,7 +552,7 @@ function listComments(repo, number) {
 }
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
-  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment), at: comment.created_at }));
+  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
   return shapedThread(comments, readers);
 }
 function wasLaunchedOn(repo, number) {
@@ -497,7 +562,7 @@ function checkDispatchMarker(repo, number, markerId) {
   const comments = listComments(repo, number);
   const marker = String(markerId);
   const markerVisible = comments.some((comment) => String(comment.id) === marker);
-  const entries = comments.filter((comment) => String(comment.id) !== marker).map((comment) => ({ body: comment.body ?? "", isHuman: isHumanComment(comment) }));
+  const entries = comments.filter((comment) => String(comment.id) !== marker).map(entryOf);
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
 
@@ -825,6 +890,8 @@ function resolveNotify(repo, number) {
 function mostRecentAgent(bodies) {
   for (let i = bodies.length - 1;i >= 0; i--) {
     const body = bodies[i] ?? "";
+    if (isQuotation(body))
+      continue;
     const result = AGENT_TAG.read(body);
     if (result)
       return result;
@@ -835,11 +902,8 @@ function mostRecentAgent(bodies) {
   return "";
 }
 function mostRecentAgentOn(repo, number) {
-  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (code !== 0)
-    return "";
   try {
-    return mostRecentAgent(JSON.parse(stdout || "[]"));
+    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
   } catch {
     return "";
   }
