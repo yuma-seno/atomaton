@@ -252,8 +252,14 @@ export function gitRunWith(options: GitRunOptions, ...args: string[]): RunResult
  * parsed values -- what `gh api ... --paginate` (without `--jq`) actually
  * emits on stdout: each page's whole response body written in sequence, not
  * a single valid JSON document.
+ *
+ * Exported for the callers that must keep a RETRYING read (`ghRead`) and so
+ * cannot go through `ghPaginated` (which runs `gh` once and throws): they read
+ * with `--jq "[.[].body]"`, whose per-page result is one JSON array per page
+ * written in sequence, and split the pages themselves. Every other caller
+ * should prefer `ghPaginated`, which wraps this.
  */
-function splitConcatenatedJson(text: string): unknown[] {
+export function splitConcatenatedJson(text: string): unknown[] {
   const results: unknown[] = [];
   let depth = 0;
   let start = -1;

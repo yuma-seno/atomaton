@@ -196,6 +196,49 @@ export const SUB_RESULT_TAG = numericTag("sub-result");
  */
 export const CI_RETRY_TAG = numericTag("ci-retry");
 
+/**
+ * The machinery's notice that preserves a removed person's comment, and the id of the
+ * comment it quotes.
+ *
+ * Written by the mid-run guard (`guard_comment_during_run.ts`) on the notice that
+ * replaces a deleted comment: the notice reads the removed comment's body back before
+ * the delete and folds it in inside a `<details>` block, so what somebody spent time
+ * writing survives on the page. The value is the deleted comment's id -- the record of
+ * what the notice is quoting, though the comment it names is gone.
+ *
+ * Read by `adapters/github/thread.ts` when it builds a thread entry: a comment carrying
+ * this tag is a QUOTATION of a person's words, and the fold must not take what is
+ * inside it for the machinery speaking. See `domain/work/thread.ts`'s `quoted`, which
+ * is what this tag becomes -- a `/agent` line in the quoted text must not name an agent
+ * and a tag the quoted text carries must not end the turn, or the notice hands the
+ * deleted comment back the power the guard removed it to take away.
+ */
+export const QUOTES_TAG = numericTag("quotes");
+
+/**
+ * Whether this body is the machinery's notice that preserves a removed person's
+ * comment.
+ *
+ * The domain reads the same fact as `ThreadEntry.quoted`, through the one entry
+ * builder (`adapters/github/thread.ts`'s `entryOf`). But agent routing is not decided
+ * by the thread fold alone: several readers scan RAW comment bodies -- `mostRecentAgent`
+ * for `/resume` and the aggregation gate, `lastEnding` for a subtree resume,
+ * `stopRequested` for the stop poll, the CI-retry count and the dispatch-chain tally.
+ * None of them builds an entry, so none of them can see `quoted` -- and the quoted
+ * text is verbatim, so a `/agent` line or a tag inside it would be taken for this
+ * repository's own speech, handing the deleted comment back the power the guard
+ * removed it to take away. They ask the tag here instead.
+ *
+ * The tag is written by exactly one writer -- the guard -- so on a raw body it marks a
+ * quotation. A person writing the same tag in their own text is prose about the
+ * machinery, and their command was already acted on when the comment was posted; a
+ * reader that steps over the body falls through to the record underneath rather than
+ * losing anything that has not already been spent.
+ */
+export function isQuotation(body: string): boolean {
+  return QUOTES_TAG.has(body);
+}
+
 // `readAnyParentTag` was here: `PARENT_TAG.read(text) ?? PARENT_ISSUE_TAG.read(text)`,
 // for a walk that did not know whether it held an issue or a pull request. With one
 // tag left there is nothing to choose between, and the one caller that walks upward

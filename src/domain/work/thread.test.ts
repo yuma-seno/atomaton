@@ -373,4 +373,84 @@ describe("latestAsk", () => {
   test("an ordinary comment is not an ask", () => {
     expect(latestAsk("", [timed("08:00:00", human("looks good"))], askReaders)).toBeUndefined();
   });
+
+  // The machinery's notice preserving a removed comment: the words inside it are the
+  // removed author's, and the machinery already told that author the comment would not
+  // be acted on. So the walk steps over the notice and finds the ask underneath — the
+  // one the removed comment raced. Without `quoted`, the notice's own `/engineer` line
+  // reads as an ask with no authoring tag, and the walk stops there (undefined) —
+  // which is the behaviour `quoted` exists to correct.
+  test("the walk finds the ask underneath a quotation", () => {
+    const notice: ThreadEntry & { at: string } = {
+      body: "A comment was removed. As it was written:\n\n/engineer",
+      isHuman: false,
+      quoted: true,
+      at: "08:41:00",
+    };
+    const thread = [timed("08:40:00", machine("RESULT handoff BY reviewer\n/engineer")), notice];
+    expect(latestAsk("", thread, askReaders)).toEqual({
+      agent: "engineer",
+      author: { kind: "agent", agent: "reviewer" },
+      at: "08:40:00",
+    });
+    expect(latestAsk("", [thread[0]!, { ...notice, quoted: undefined }], askReaders)).toBeUndefined();
+  });
+});
+
+/**
+ * The machinery's notice that preserves a removed person's comment, as a quotation.
+ *
+ * The guard deleted the comment so it could not name an agent or end a turn; the
+ * notice quoting it verbatim must not give that back. Everything in these tests rides
+ * on the quoted text being verbatim: it can carry a `/agent` line, or -- if it quoted
+ * machinery output -- the tags machinery output carries.
+ */
+describe("quoted entries", () => {
+  const quoted = (body: string): ThreadEntry => ({ body, isHuman: false, quoted: true });
+
+  /**
+   * The stubs here mirror the REAL readers' shapes, which the ones at the top of this
+   * file deliberately narrow: the ending tag is read ANYWHERE in a body, and a command
+   * is ANY line, not the body's start. The quoted text is verbatim, so a tag or a
+   * command line sits mid-body where the top stubs cannot see it -- and neither can a
+   * test written against them, which would pass for the wrong reason.
+   */
+  const lineReaders: TurnReaders = {
+    ending: (body) => {
+      if (body.includes("atomaton:ended=handoff")) return "handed-off";
+      if (body.includes("atomaton:ended=done")) return "returned";
+      return "";
+    },
+    requestedAgent: (body) => {
+      for (const raw of body.split("\n")) {
+        const line = raw.trim();
+        if (line.startsWith("/")) return line.slice(1).split(/\s/)[0]!;
+      }
+      return "";
+    },
+    isDispatchMarker: (body) => body.startsWith("DISPATCH"),
+  };
+
+  // A `/agent` line inside the quoted text must not name the next agent: that would
+  // make the deleted comment the request the fold acts on, handing it back the power
+  // the guard removed it to take away.
+  test("a quotation does not name the next agent, even when the quoted text carries a command", () => {
+    const notice = quoted("A comment was removed. As it was written:\n\n/engineer");
+    expect(latestRequestedAgent("/reviewer", [machine("RESULT handoff"), notice], lineReaders)).toBe("reviewer");
+  });
+
+  // The quoted text is verbatim: if it quoted machinery output, it carries the tags
+  // machinery output carries. Reading the ending before the quotation would take the
+  // notice for the turn the quoted text names — which the second assertion shows is
+  // what an unquoted copy of the same body does.
+  test("a quotation is not an event, even when the quoted text carries an ending tag", () => {
+    const notice = quoted("A comment was removed. It said:\n\n<!-- atomaton:ended=done -->");
+    const shaped = shapedThread([human("/engineer"), notice], lineReaders);
+    expect(shaped.events).toEqual(["asked"]);
+    expect(shaped.comments).toHaveLength(2);
+    expect(shapedThread([human("/engineer"), { ...notice, quoted: undefined }], lineReaders).events).toEqual([
+      "asked",
+      "returned",
+    ]);
+  });
 });

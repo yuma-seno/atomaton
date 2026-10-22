@@ -32,7 +32,7 @@ import { handoffsSincePerson, resolveHandoffLimit, type ChainComment } from "../
 import { resolveNoProgressLimit, runsWithoutChange, stopReason } from "../../domain/work/progress.ts";
 import { getHandoffLimit, getNoProgressLimit } from "../../adapters/runner/config.ts";
 import { gh } from "../../adapters/github/gh.ts";
-import { AGENT_TAG, CHANGED_TAG } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, CHANGED_TAG, isQuotation } from "../../adapters/github/tags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ManageDispatchLoopArgs {
@@ -103,15 +103,20 @@ function main(): void {
   const { comments, read } = readComments(repo, number);
   if (!read) console.error(`WARN could not read comments on ${repo}#${number}; treating the chain as fresh`);
 
-  const handoffs = handoffsSincePerson(comments, (body) => AGENT_TAG.has(body));
+  // The notice quoting a removed comment carries that comment verbatim: an
+  // `atomaton:agent` tag inside it is the DELETED author's words, and counting it as a
+  // handoff would read the deleted comment as a run the notice's own line says will
+  // not be acted on. See `isQuotation`. The domain stays pure; the tag rule is
+  // composed into the reader here, which is where the raw bodies arrive.
+  const handoffs = handoffsSincePerson(comments, (body) => !isQuotation(body) && AGENT_TAG.has(body));
   // A result comment that says it changed nothing. Both halves: the agent tag says
   // it is a result comment at all, and the changed tag says what the run did. A
   // comment from before this tag existed has no `changed` value and is read as
   // something else, which ends the walk -- old threads count zero rather than
-  // guessing.
+  // guessing. Quotations are excluded for the same reason as above.
   const stalled = runsWithoutChange(
     comments,
-    (body) => AGENT_TAG.has(body) && CHANGED_TAG.read(body) === "no",
+    (body) => !isQuotation(body) && AGENT_TAG.has(body) && CHANGED_TAG.read(body) === "no",
   );
   const decision = stopReason({
     handoffs,

@@ -38,4 +38,24 @@ describe("watch_for_stop.ts", () => {
   test("nothing at all is not a stop", () => {
     expect(stopRequested([], since)).toBe(false);
   });
+
+  // The guard's notice preserving a removed comment carries that comment verbatim, and
+  // machinery text quotes machinery text: a stop tag inside the quoted text is the
+  // DELETED author's words, on a notice whose own line says the comment will not be
+  // acted on. Reading it would stop a run that nobody asked to stop.
+  test("a stop tag inside a quoted notice is not a stop request", () => {
+    const notice = [
+      "<!-- atomaton:llm-context=exclude -->",
+      "<!-- atomaton:quotes=7 -->",
+      "@octocat Your comment was removed because the ball is with an agent on this issue/PR.",
+      "<details><summary>Your comment, as you wrote it</summary>",
+      "",
+      "```",
+      REQUEST,
+      "```",
+      "",
+      "</details>",
+    ].join("\n");
+    expect(stopRequested([{ body: notice, created_at: "2026-09-06T12:00:30Z" }], since)).toBe(false);
+  });
 });
