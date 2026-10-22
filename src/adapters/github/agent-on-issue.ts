@@ -42,7 +42,7 @@
  * defined.
  */
 import { gh } from "./gh.ts";
-import { AGENT_TAG } from "./tags.ts";
+import { AGENT_TAG, isQuotation } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 
 /**
@@ -81,6 +81,12 @@ import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 export function mostRecentAgent(bodies: readonly string[]): string {
   for (let i = bodies.length - 1; i >= 0; i--) {
     const body = bodies[i] ?? "";
+    // The notice quoting a removed comment carries that comment verbatim: an
+    // `atomaton:agent` tag or a `/agent` line inside it is the DELETED author's
+    // words, not this repository's, and reading it would name the agent the guard
+    // deleted the comment to prevent naming -- which the notice's own line says will
+    // not be acted on. See `isQuotation`.
+    if (isQuotation(body)) continue;
     const result = AGENT_TAG.read(body);
     if (result) return result;
     // `parseCommentCommand` reads both a person's `/agent` command and the

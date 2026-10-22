@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { findExistingCiRun, pickDispatchedRun } from "./validate_pull_request.ts";
+import { join } from "node:path";
+import { FAKE_GH_IMPL } from "./testing/fake-gh-env.ts";
+import { countPriorRetries, findExistingCiRun, pickDispatchedRun } from "./validate_pull_request.ts";
 
 type Run = Parameters<typeof pickDispatchedRun>[0][number];
 type CiRun = Parameters<typeof findExistingCiRun>[0][number];
@@ -116,5 +118,66 @@ describe("findExistingCiRun", () => {
       ciRun({ id: 2, created_at: "2026-08-15T10:05:00Z" }),
     ];
     expect(findExistingCiRun(runs, ci, "abc123")?.id).toBe(2);
+  });
+});
+
+/**
+ * The retry count, as the real script reads it with a fake `gh` answering. The count
+ * is the retry bound, and the notice the guard posts preserving a removed comment is
+ * on the same page as this script's own markers: its text is VERBATIM, so a `ci-retry`
+ * marker inside the quoted text would be counted as a retry this script never made --
+ * firing the limit early, on a turn the notice's own line says will not be acted on.
+ */
+const VALIDATE_SRC = join(import.meta.dir, "validate_pull_request.ts");
+
+function retries(bodies: string[]): number {
+  const script = `
+    const { countPriorRetries } = await import(${JSON.stringify(VALIDATE_SRC)});
+    process.stdout.write(String(countPriorRetries("o/r", "7")));
+  `;
+  const proc = Bun.spawnSync({
+    cmd: [process.execPath, "-e", script],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      ATOMATON_FAKE_GH: FAKE_GH_IMPL,
+      FAKE_GH_RESPONSES: JSON.stringify([
+        { match: ["repos/o/r/issues/7/comments"], stdout: JSON.stringify(bodies) },
+      ]),
+      // Nothing here may reach the real CLI; see `fake-gh-env.ts`.
+      GH_TOKEN: "fake-gh-must-be-used",
+      GITHUB_TOKEN: "fake-gh-must-be-used",
+    },
+  });
+  const out = proc.stdout.toString();
+  if (proc.exitCode !== 0) throw new Error(`child failed: ${proc.stderr.toString() || out}`);
+  return Number(out.trim());
+}
+
+describe("countPriorRetries", () => {
+  test("counts this script's own markers", () => {
+    expect(retries(["<!-- atomaton:ci-retry=1 -->\nCI failed.", "<!-- atomaton:ci-retry=2 -->\nCI failed."])).toBe(2);
+  });
+
+  // The quoted text is verbatim: if it quoted a CI failure comment, it carries the
+  // `ci-retry` marker that comment carried. Counting it would fire the retry limit
+  // early.
+  test("the notice quoting a removed comment is not a retry", () => {
+    const notice = [
+      "<!-- atomaton:llm-context=exclude -->",
+      "<!-- atomaton:quotes=5 -->",
+      "@octocat Your comment was removed because the ball is with an agent on this issue/PR.",
+      "<details><summary>Your comment, as you wrote it</summary>",
+      "",
+      "```",
+      "<!-- atomaton:ci-retry=1 -->",
+      "CI failed.",
+      "```",
+      "",
+      "</details>",
+    ].join("\n");
+    expect(retries([notice])).toBe(0);
+    expect(retries([notice, "<!-- atomaton:ci-retry=2 -->\nCI failed."])).toBe(1);
   });
 });

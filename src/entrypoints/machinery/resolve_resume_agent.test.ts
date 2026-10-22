@@ -38,4 +38,26 @@ describe("resolve_resume_agent.ts", () => {
     expect(mostRecentAgent([from("atomaton"), asked("engineer")])).toBe("engineer");
     expect(mostRecentAgent([asked("engineer"), from("atomaton")])).toBe("atomaton");
   });
+
+  // The guard's notice preserving a removed comment is the newest body on the node,
+  // and the removed text is inside it VERBATIM -- `/engineer` on a line of its own.
+  // Reading it would make the deleted comment name the next agent after all, which is
+  // the power the guard removed it to take away; the notice's own line says the
+  // comment will not be acted on. The walk steps over it and finds the record
+  // underneath -- the dispatch marker that actually started the run.
+  test("the notice quoting a removed comment does not name the next agent", () => {
+    const notice = [
+      "<!-- atomaton:llm-context=exclude -->",
+      "<!-- atomaton:quotes=123 -->",
+      "@octocat Your comment was removed because the ball is with an agent on this issue/PR.",
+      "<details><summary>Your comment, as you wrote it</summary>",
+      "",
+      "```",
+      "/engineer",
+      "```",
+      "",
+      "</details>",
+    ].join("\n");
+    expect(mostRecentAgent([dispatched("atomaton"), notice])).toBe("atomaton");
+  });
 });

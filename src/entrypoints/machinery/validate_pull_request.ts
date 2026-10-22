@@ -86,7 +86,7 @@ import { parseArgs } from "node:util";
 import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-validation.ts";
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
-import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
+import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG, isQuotation } from "../../adapters/github/tags.ts";
 import { latestRequestOn } from "../../adapters/github/thread.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
 import { isTrue } from "./lib/flags.ts";
@@ -203,8 +203,14 @@ export function findExistingCiRun(runs: CiRun[], workflow: string, headSha: stri
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
 
-/** Comments this script has left on the pull request, each marking one hand-back. */
-function countPriorRetries(repo: string, number: string): number {
+/**
+ * Comments this script has left on the pull request, each marking one hand-back.
+ *
+ * Exported for its test: the quotation exclusion is the part that is easy to get
+ * subtly wrong, and getting it wrong counts the removed text the notice preserves as
+ * retries this script never made.
+ */
+export function countPriorRetries(repo: string, number: string): number {
   // `--paginate`, because this count is the retry bound and a truncated read would
   // under-count it: on a pull request with more than a page of comments the markers
   // beyond the first page are invisible, `CI_RETRY_LIMIT` never fires, and the
@@ -214,7 +220,11 @@ function countPriorRetries(repo: string, number: string): number {
   if (code) return 0;
   try {
     const bodies = JSON.parse(stdout || "[]") as string[];
-    return bodies.filter((body) => CI_RETRY_TAG.has(body ?? "")).length;
+    // The notice quoting a removed comment carries that comment verbatim, and a
+    // `ci-retry` marker inside it is the DELETED author's words -- counting it would
+    // fire the retry limit early, on a turn the notice's own line says will not be
+    // acted on. See `isQuotation`.
+    return bodies.filter((body) => !isQuotation(body ?? "") && CI_RETRY_TAG.has(body ?? "")).length;
   } catch {
     return 0;
   }

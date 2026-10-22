@@ -215,6 +215,30 @@ export const CI_RETRY_TAG = numericTag("ci-retry");
  */
 export const QUOTES_TAG = numericTag("quotes");
 
+/**
+ * Whether this body is the machinery's notice that preserves a removed person's
+ * comment.
+ *
+ * The domain reads the same fact as `ThreadEntry.quoted`, through the one entry
+ * builder (`adapters/github/thread.ts`'s `entryOf`). But agent routing is not decided
+ * by the thread fold alone: several readers scan RAW comment bodies -- `mostRecentAgent`
+ * for `/resume` and the aggregation gate, `lastEnding` for a subtree resume,
+ * `stopRequested` for the stop poll, the CI-retry count and the dispatch-chain tally.
+ * None of them builds an entry, so none of them can see `quoted` -- and the quoted
+ * text is verbatim, so a `/agent` line or a tag inside it would be taken for this
+ * repository's own speech, handing the deleted comment back the power the guard
+ * removed it to take away. They ask the tag here instead.
+ *
+ * The tag is written by exactly one writer -- the guard -- so on a raw body it marks a
+ * quotation. A person writing the same tag in their own text is prose about the
+ * machinery, and their command was already acted on when the comment was posted; a
+ * reader that steps over the body falls through to the record underneath rather than
+ * losing anything that has not already been spent.
+ */
+export function isQuotation(body: string): boolean {
+  return QUOTES_TAG.has(body);
+}
+
 // `readAnyParentTag` was here: `PARENT_TAG.read(text) ?? PARENT_ISSUE_TAG.read(text)`,
 // for a walk that did not know whether it held an issue or a pull request. With one
 // tag left there is nothing to choose between, and the one caller that walks upward
