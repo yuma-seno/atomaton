@@ -336,6 +336,23 @@ ${scriptCommandWithArgs(dispatchPrValidationRef, {
 
 export const atomaManualComment = new Workflow("atomaton-manual-comment", {
   name: "Atomaton Manual Comment",
+  // The run's own name, carrying the node. The run watch (atomaton-run-watch)
+  // triggers on this workflow's completion, and a `workflow_run` event carries no
+  // inputs — the display title is how it learns the node. Most of this workflow's
+  // runs dispatch nothing (an ordinary remark, a comment the guard removed), and
+  // the watch's second gate is what keeps it silent on those; the title only has
+  // to name the node.
+  //
+  // NOT on a pull request, though: `issue_comment` fires for pull requests too,
+  // and a PR command dispatches validation instead of calling the runner, so that
+  // run completes without taking the turn at all. A `#N` title there would read as
+  // a node mid-run — the watch would post its "run ended without reporting" notice
+  // while validation and the runner were still to come, and hand the guard to the
+  // person while a run was about to take it. So PR runs keep the workflow's own
+  // name, which no title shape reads as a node; the PR chain is watched through
+  // the runner run that validation eventually starts, whose title carries the
+  // agent. (`issue.pull_request` is present only when the comment is on one.)
+  "run-name": "${{ github.event.issue.pull_request == null && format('#{0}', github.event.issue.number) || 'Atomaton Manual Comment' }}",
   on: {
     issue_comment: { types: ["created"] },
   },

@@ -60,6 +60,18 @@ describe("report_run_failure.ts", () => {
   });
 
   /**
+   * The two ways forward are `recoveryLines`' — the run watch's notice says the
+   * same two lines for a run that never got far enough to report anything — and
+   * the sharing is the point, not a convenience: a second copy of the syntax would
+   * be a second definition of it, free to drift from the parser.
+   */
+  test("says recovery the same way the run watch does", async () => {
+    const { recoveryLines } = await import("../../domain/work/comment-command.ts");
+    const body = failureNotice("engineer", "octocat", "u", "");
+    for (const line of recoveryLines("engineer")) expect(body).toContain(line);
+  });
+
+  /**
    * #236: the run's colour is decided by whether THIS comment posted. A notice that
    * landed leaves the run green, so a body that still said "the run failed" would
    * contradict the run the reader can see — and a person told both has no way to

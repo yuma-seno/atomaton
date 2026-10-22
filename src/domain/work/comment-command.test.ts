@@ -5,6 +5,7 @@ import {
   lineForms,
   parseCommentCommand,
   parseMangledCommand,
+  recoveryLines,
 } from "./comment-command.ts";
 
 describe("parseCommentCommand", () => {
@@ -198,5 +199,27 @@ describe("commandInBodyRefusal", () => {
   test("it says how to mention a command without it being one", () => {
     const refusal = commandInBodyRefusal(["/reviewer"], "issue body", "Use launch_sub_agent.")!;
     expect(refusal).toContain("inside a sentence");
+  });
+});
+
+describe("recoveryLines", () => {
+  /** The syntax these lines spell is this file's own; the lines must stay pronounceable by the parser. */
+  test("both ways forward, for the agent they name", () => {
+    const lines = recoveryLines("engineer");
+    expect(lines.join("\n")).toContain("`/engineer` and put what to do next on the following lines");
+    expect(lines.join("\n")).toContain("`/engineer recover`");
+  });
+
+  test("each line it suggests is a command the parser accepts", () => {
+    for (const line of recoveryLines("reviewer")) {
+      const bare = line.replace(/^[^`]*`\/([a-z-]+)[^`]*`.*$/, "/$1");
+      if (bare === line) continue;
+      const parsed = parseCommentCommand(bare);
+      expect(parsed.agent, bare).toBe("reviewer");
+  }
+  });
+
+  test("the recover line parses with the recover session mode", () => {
+    expect(parseCommentCommand("/engineer recover").sessionMode).toBe("recover");
   });
 });

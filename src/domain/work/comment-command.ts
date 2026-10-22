@@ -49,6 +49,30 @@ export const SESSION_MODES = ["continue", "recover"] as const;
 
 export type SessionMode = (typeof SESSION_MODES)[number];
 
+/**
+ * The two ways a person restarts work after a run that ended, as the notices say them.
+ *
+ * Every notice that hands a node back to a person after a run that left no usable
+ * report — the failure notice (`report_run_failure.ts`), the run watch's notice
+ * (`reconcile_run_ending.ts`) — says the same two things next, because the person
+ * reading it has the same decision: carry the history, or archive it and start
+ * clean. Which of those is right is a judgement about the work, and it belongs to
+ * the person rather than to the machinery, so the notices name both and decide
+ * nothing.
+ *
+ * Here rather than in either script, because the lines spell the two commands this
+ * file is the one definition of — `/<agent>` and `/<agent> recover`, the two
+ * `SESSION_MODES` — and a second copy of them beside the parser is a second
+ * definition of the syntax waiting to disagree with it.
+ */
+export function recoveryLines(agent: string): string[] {
+  return [
+    `- Continue: comment \`/${agent}\` and put what to do next on the following lines.`,
+    `- Start clean: comment \`/${agent} recover\`, which archives this session and rebuilds`,
+    "  it from the issue.",
+  ];
+}
+
 export interface ParsedCommentCommand {
   agent: string;
   control: ControlCommand;

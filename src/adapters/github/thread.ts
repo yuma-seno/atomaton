@@ -33,8 +33,8 @@
  * script's `ref`, and the machinery scripts are bundled one per file — so the shared
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
-import { gh, ghRead } from "./gh.ts";
-import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, QUOTES_TAG } from "./tags.ts";
+import { gh, ghRead, ghPaginated } from "./gh.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, QUOTES_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
@@ -48,9 +48,11 @@ import {
   type LatestAsk,
   type ShapedThread,
   type ThreadEntry,
+  type TurnEvent,
   type TurnHolder,
   type TurnReaders,
 } from "../../domain/work/thread.ts";
+import type { DatedComment, EndingWalkReaders, WatchComment } from "../../domain/work/run-report.ts";
 
 /**
  * The readers, from the modules that own each format.
@@ -96,6 +98,20 @@ const askReaders: AskReaders = {
   authoringAgent: (body) => AGENT_TAG.read(body) ?? "",
 };
 
+/**
+ * The walk readers for counting endings over a whole thread — the turn's ending
+ * reader, and the quotation skip beside it.
+ *
+ * The skip is load-bearing on its own: the guard's notice preserving a removed
+ * comment carries that comment's text verbatim, so an `atomaton:ended` tag inside
+ * it is the DELETED author's words, and a walk that read it would take the
+ * quotation for the thread's own ending. `lastEnding` (work-tree.ts) applies the
+ * same skip by hand; this is the shared form, so a walk written tomorrow reaches
+ * for one definition instead of a third copy. See `run-report.ts`, which folds on
+ * exactly these two readers.
+ */
+export const endingWalkReaders: EndingWalkReaders = { ending: readers.ending, quoted: isQuotation };
+
 /** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
 interface Comment {
   id: number;
@@ -134,6 +150,48 @@ function entryOf(comment: Comment): ThreadEntry & { at?: string } {
     isHuman,
     quoted: !isHuman && QUOTES_TAG.has(body),
     at: comment.created_at,
+  };
+}
+
+/** What the run watch asks of a node's thread, from one read of it. */
+export interface RunWatchThread {
+  /** The comments oldest first, as `needsEnding` and `lastEndingComment` fold them. */
+  dated: DatedComment[];
+  /** The same comments as thread entries, carrying who wrote them and when. */
+  entries: WatchComment[];
+  /** The shaped thread's turn events, oldest first — `requestOutstanding`'s input. */
+  events: TurnEvent[];
+}
+
+/**
+ * Read a node's thread once and return every view the run watch asks from it.
+ *
+ * The watch asks three questions of the same listing — whether an ending is
+ * missing (`needsEnding`, over the dated bodies), whether the thread is stuck at
+ * an ask (`requestOutstanding`, over the shaped events), and whether the watched
+ * run took the turn (`tookTurn`, over the shaped entries). Reading the thread once
+ * per question would triple a watch's API calls and let the answers disagree as
+ * the thread moves; one read returns all three views, shaped once.
+ *
+ * `ghPaginated`, not `listComments`: past one page `gh --paginate` writes
+ * back-to-back arrays, which a whole-output `JSON.parse` throws on — the shape
+ * `mostRecentAgentOn`'s comment guards against, and a watch that threw there would
+ * fail every notice on a long thread. Throws when the read fails, like every other
+ * reader here: a watch deciding whether to post must not read a failed read as
+ * "no ending".
+ */
+export function readRunWatchThread(repo: string, number: string | number): RunWatchThread {
+  const listed = ghPaginated<{ id: number; body?: string; created_at?: string; user?: { type?: string } }>(
+    "api", `repos/${repo}/issues/${number}/comments`,
+  );
+  const entries: WatchComment[] = listed.map((comment) => ({
+    ...entryOf(comment),
+    createdAt: comment.created_at ?? "",
+  }));
+  return {
+    dated: entries.map((entry) => ({ body: entry.body, createdAt: entry.createdAt })),
+    entries,
+    events: shapedThread(entries, readers).events,
   };
 }
 
