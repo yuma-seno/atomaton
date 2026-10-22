@@ -1,8 +1,0 @@
-["api","graphql","-f","query=query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){issue(number:$num){parent{number}}}}","-F","owner=yuma-seno","-F","repo=atomaton","-F","num=264"]
-["repo","view","yuma-seno/atomaton","--json","defaultBranchRef"]
-["pr","list","--repo","yuma-seno/atomaton","--head","atomaton/issue-264","--state","open","--json","number"]
-["api","graphql","-f","query=query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){issue(number:$num){parent{number}}}}","-F","owner=yuma-seno","-F","repo=atomaton","-F","num=264"]
-["repo","view","yuma-seno/atomaton","--json","defaultBranchRef"]
-["api","graphql","-f","query=query($owner:String!,$repo:String!,$num:Int!){repository(owner:$owner,name:$repo){issue(number:$num){parent{number}}}}","-F","owner=yuma-seno","-F","repo=atomaton","-F","num=264"]
-["repo","view","yuma-seno/atomaton","--json","defaultBranchRef"]
-["pr","list","--repo","yuma-seno/atomaton","--head","atomaton/issue-264","--state","open","--json","number"]
