@@ -68,8 +68,12 @@ function main(): void {
   });
   if (!dispatched) {
     // Fatal, unlike most dispatches. The person asked for a run and nothing was
-    // started; saying so in the log is the only place left, because the comment
-    // that would carry it is the one this step was going to post.
+    // started; saying so in the log is the only place left, because nothing on this
+    // workflow's path posts before validation -- the "CI is running" comment a
+    // person may eventually see comes from validation itself, which never runs when
+    // its own dispatch failed. (An earlier version of this comment blamed the
+    // waiting comment this step used to post; that step is gone -- #271 moved the
+    // comment into validation.)
     console.error(`::error::could not dispatch validation for PR #${number}; no agent will run`);
     process.exit(1);
   }
