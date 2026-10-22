@@ -135,8 +135,8 @@ function noticeBody(opts: {
     : "Your comment could not be removed, and will not be acted on, because";
   const reason = opts.several
     ? `it carries more than one command (${opts.commands.join(", ")}). Atomaton acts on one command per ` +
-      "comment: it would have started the first and read the rest as prose, and which one won is not " +
-      "visible on the page. Comment each command on its own, with what you want done on the lines under it."
+      "comment: it acts on the first and drops the rest, and which one won is not visible on the page. " +
+      "Comment each command on its own, with what you want done on the lines under it."
     : "the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, " +
       "and it has not come back to a person yet. Please wait for that to finish, then comment again.";
   const lines = [

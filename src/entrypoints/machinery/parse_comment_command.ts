@@ -12,8 +12,10 @@
  * and with the refusal that keeps an agent from writing a command into a body.
  *
  * Env: ATOMATON_COMMENT_BODY
- * Writes `matched`, `agent`, `control`, `session_mode`, and `error` to
- * $GITHUB_OUTPUT.
+ * Writes `parsed`, `matched`, `agent`, `control`, `session_mode`, and `error` to
+ * $GITHUB_OUTPUT. `parsed` is `true` whenever this script ran -- a step that does not
+ * run leaves every output empty, and a comment with no command in it writes
+ * `matched=false`, so the guard cannot tell those apart without it.
  */
 import { appendFileSync } from "node:fs";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
