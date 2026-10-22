@@ -36,6 +36,7 @@
  */
 // `@huggingface/transformers` is NOT imported here. See `loadRerankerOnce`.
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, withoutBookkeeping, z } from "../../../adapters/mcp/mcp-tool.ts";
+import { nodeNumber } from "../../../adapters/runner/run-node.ts";
 import { report } from "../../../adapters/mcp/mcp-report.ts";
 import { buildIndex, rankIssues, score, type Bm25Index, type Chunk } from "../../../shared/bm25.ts";
 import { corpusFrom } from "../../../domain/machinery/code-corpus.ts";
@@ -134,7 +135,7 @@ function log(message: string): void {
 hardenCredentialHolder(log);
 
 /**
- * The issue this run is working on, which is never a useful search result.
+ * The node this run sits on, which is never a useful search result.
  *
  * Its whole text is already in the prompt, so returning it spends a slot on
  * something the reader has in front of them. That would be a small waste if it
@@ -144,10 +145,16 @@ hardenCredentialHolder(log);
  * is the most relevant one, and the cross encoder agreed with BM25 about it
  * every time. What disqualifies it is identity, not relevance, so it is removed
  * by identity.
+ *
+ * The node, not the session: on a pull request run the number is the pull
+ * request's, which the index of issues does not hold, so the exclusion is a
+ * no-op there — the parent issue the run's conversation resolves to is no
+ * longer in this process's environment to name, and naming the node is the one
+ * fact that stays true on every run. See `adapters/runner/run-node.ts` for the
+ * two axes, and #248 for what conflating them cost.
  */
 function currentIssue(): number | undefined {
-  const parsed = Number((process.env.ISSUE_NUMBER ?? "").trim());
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  return nodeNumber();
 }
 
 /**

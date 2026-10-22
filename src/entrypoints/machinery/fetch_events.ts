@@ -18,9 +18,14 @@
  *   fetch_events.ts --type issue|pr --number N [--max-diff-chars N] --out events.json
  *
  * Requires GITHUB_REPOSITORY (owner/repo) in the environment.
- * Writes `resolved_type` / `resolved_number` to $GITHUB_OUTPUT. A PR linked
- * via `<!-- atomaton:parent-issue=N -->` resolves to that canonical Issue so
- * Issue and PR runs share one serial conversation/session.
+ * Writes `session_type` / `session_number` to $GITHUB_OUTPUT: the node of the
+ * CONVERSATION this run joins. A PR linked via `<!-- atomaton:parent-issue=N -->`
+ * resolves to that canonical issue so issue and PR runs share one serial
+ * conversation/session; a sub-issue resolves to itself. That resolution is
+ * deliberate, and it is deliberately NOT the node the run sits on — the runner
+ * puts the run's own node in the agent's `NUMBER` / `TYPE` (see
+ * `adapters/runner/run-node.ts`). One env name carrying both meanings was what
+ * #248 was.
  *
  * An issue with a parent carries `**Sub-issue of:** #N` on its body event —
  * the issue-side counterpart of the PR body's `**Linked Issue:** #N` — so a
@@ -126,8 +131,8 @@ interface GhReviewCommentApi {
 
 export interface FetchEventsResult {
   events: GithubEvent[];
-  resolvedType: "issue" | "pr";
-  resolvedNumber: number;
+  sessionType: "issue" | "pr";
+  sessionNumber: number;
 }
 
 function repoParts(): [string, string] {
@@ -376,7 +381,7 @@ export function fetchEvents(
       appendPrEvents(events, owner, repo, prNumber, maxDiffChars);
     }
     events.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    return { events, resolvedType: "issue", resolvedNumber: number };
+    return { events, sessionType: "issue", sessionNumber: number };
   }
 
   const prResult = fetchPrEvents(owner, repo, number, maxDiffChars);
@@ -392,15 +397,15 @@ export function fetchEvents(
     } catch {
       console.error(`::warning::Linked Issue #${prResult.parentIssue} not found or inaccessible — using PR-local context.`);
       events.sort((a, b) => a.created_at.localeCompare(b.created_at));
-      return { events, resolvedType: "pr", resolvedNumber: number };
+      return { events, sessionType: "pr", sessionNumber: number };
     }
   }
 
   events.sort((a, b) => a.created_at.localeCompare(b.created_at));
   return {
     events,
-    resolvedType: prResult.parentIssue ? "issue" : "pr",
-    resolvedNumber: prResult.parentIssue ?? number,
+    sessionType: prResult.parentIssue ? "issue" : "pr",
+    sessionNumber: prResult.parentIssue ?? number,
   };
 }
 
@@ -421,7 +426,7 @@ function main(): void {
   }
 
   const maxDiffChars = Number(values["max-diff-chars"] ?? 30000);
-  const { events, resolvedType, resolvedNumber } = fetchEvents(values.type, Number(values.number), maxDiffChars);
+  const { events, sessionType, sessionNumber } = fetchEvents(values.type, Number(values.number), maxDiffChars);
 
   // One place, because there are six kinds of body above -- issue, pull request,
   // their comments, reviews, inline review comments -- and a seventh added later
@@ -441,7 +446,7 @@ function main(): void {
   writeFileSync(values.out, JSON.stringify(withoutBookkeeping, null, 2));
 
   const githubOutput = process.env.GITHUB_OUTPUT;
-  if (githubOutput) appendFileSync(githubOutput, `resolved_type=${resolvedType}\nresolved_number=${resolvedNumber}\n`);
+  if (githubOutput) appendFileSync(githubOutput, `session_type=${sessionType}\nsession_number=${sessionNumber}\n`);
 
   console.error(`Fetched ${events.length} events → ${values.out}`);
 }

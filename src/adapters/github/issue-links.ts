@@ -171,6 +171,7 @@ export function issueLinks(repo: string, number: number): IssueLinks {
   if (issue.__typename === "PullRequest") {
     const closes = issue.closingIssuesReferences?.nodes ?? [];
     return {
+      kind: "pull_request",
       parent: closes[0] ? normalise(closes[0]) : undefined,
       children: [],
       pullRequests: [],
@@ -198,6 +199,7 @@ export function issueLinks(repo: string, number: number): IssueLinks {
     .map(asPr);
 
   return {
+    kind: "issue",
     parent: issue.parent ? normalise(issue.parent) : undefined,
     children: (issue.subIssues?.nodes ?? []).map(asChild),
     pullRequests: dedupeByNumber(declared, referenced),

@@ -12,6 +12,7 @@
  */
 import { gh, gitRun } from "./gh.ts";
 import { parentIssueOf, type ParentIssue } from "./parent-issue.ts";
+import { isIssueRun, nodeNumber } from "../runner/run-node.ts";
 import { nextOrdinal } from "../../domain/work/issue-branch.ts";
 import { collectIssueBranches } from "./issue-branches.ts";
 
@@ -175,9 +176,9 @@ export function branchForCommit(repo: string): string {
   const onBranch = current.code === 0 ? current.stdout.trim() : "";
   if (isIssueBranch(onBranch)) return onBranch;
 
-  // Only an issue run may name a branch. On a pull request run `ISSUE_NUMBER`
-  // holds the PR's number and the checkout is already the branch under review,
-  // so naming one from it would move the work off the pull request.
+  // Only an issue run may name a branch. On a pull request run `NUMBER` holds the
+  // PR's number and the checkout is already the branch under review, so naming one
+  // from it would move the work off the pull request.
   const issue = runIssueNumber();
   if (issue === undefined) return resolveBranch();
 
@@ -240,11 +241,10 @@ export function stackedPrBase(repo: string): string | undefined {
  *
  * Both callers above need the same two conditions — the run is an issue run,
  * and the number is a real one — and both are wrong in the same way if either
- * is dropped: a pull request run's `ISSUE_NUMBER` is the pull request's number,
+ * is dropped: a pull request run's `NUMBER` is the pull request's number,
  * and treating it as an issue moves work off the branch under review.
  */
 function runIssueNumber(): number | undefined {
-  if (process.env.ATOMATON_RUN_TYPE !== "issue") return undefined;
-  const issue = Number((process.env.ISSUE_NUMBER ?? "").trim());
-  return Number.isInteger(issue) && issue > 0 ? issue : undefined;
+  if (!isIssueRun()) return undefined;
+  return nodeNumber();
 }

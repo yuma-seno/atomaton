@@ -60,6 +60,16 @@ export interface LinkedChild extends LinkedIssue {
 export type LinkedPr = LinkedIssue;
 
 export interface IssueLinks {
+  /**
+   * What the number resolved to: `issue` or `pull_request`.
+   *
+   * The same GraphQL request already answers it (`issueOrPullRequest` exists
+   * because `issue(number:)` answers only for an issue), so carrying it costs
+   * nothing — and it is what lets an issue-shaped read that was pointed at a
+   * pull request say so, instead of leaving the caller to wonder why the links
+   * read like a leaf. Absent when the links could not be read at all.
+   */
+  kind?: "issue" | "pull_request";
   parent?: LinkedIssue;
   children: LinkedChild[];
   pullRequests: LinkedPr[];

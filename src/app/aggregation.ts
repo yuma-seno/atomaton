@@ -87,6 +87,16 @@ export interface DispatchGateOptions {
   progressMessage?: (remaining: number) => string;
   /** Run just before posting the "all done" comment + dispatching -- aggregate_sub_issues.ts uses this to inject sub-issue results into the atomaton's persisted session first. */
   beforeDispatch?: () => Promise<void> | void;
+  /**
+   * The dispatch this gate is about to start is the calling run's own conclusion
+   * continuing on the parent — not work started under the caller's node. Passed
+   * through to `dispatchRunner` so the ops log records `dispatch` rather than
+   * `dispatch-elsewhere`, and `chain_continues` stays true. Set by `merge_pr`'s
+   * close-directly fallback, which concludes the pull request's own issue; the
+   * machinery callers omit it, because their dispatches are work under the node
+   * that closed the sub-issue. See `RunnerDispatch.continuesChain`.
+   */
+  continuesChain?: boolean;
 }
 
 /**
@@ -302,6 +312,7 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
     number: opts.parent,
     notify: resolveNotify(opts.repo, opts.parent),
     repo: opts.repo,
+    continuesChain: opts.continuesChain,
   });
 
   // Reported rather than assumed. The marker is a claim that this completion has been
@@ -409,7 +420,11 @@ function withNotice(opts: DispatchGateOptions, result: DispatchGateResult): Disp
  * author was merely asked to close it is still open, and asking this about it
  * would be asking whether every sibling is closed while holding one that is not.
  */
-export async function dispatchOrchestratorIfSubIssueReady(repo: string, subIssueNum: number): Promise<DispatchGateResult> {
+export async function dispatchOrchestratorIfSubIssueReady(
+  repo: string,
+  subIssueNum: number,
+  options: { continuesChain?: boolean } = {},
+): Promise<DispatchGateResult> {
   // `adapters/github/parent-issue.ts`, the same reader `countOpenSiblings` now agrees with.
   //
   // This used to insist on the `atomaton:parent` tag alone and said why: the sibling
@@ -433,5 +448,5 @@ export async function dispatchOrchestratorIfSubIssueReady(repo: string, subIssue
     console.error(`issue #${subIssueNum} is not a sub-issue of anything, nothing to do`);
     return { kind: "not-tracked" };
   }
-  return dispatchOrchestratorIfReady({ repo, parent: found.parent, closedNum: subIssueNum, retry: true });
+  return dispatchOrchestratorIfReady({ repo, parent: found.parent, closedNum: subIssueNum, retry: true, continuesChain: options.continuesChain });
 }

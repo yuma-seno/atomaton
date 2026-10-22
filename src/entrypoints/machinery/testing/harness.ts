@@ -38,7 +38,7 @@ export interface RunWithFakeGhResult {
  *
  * A test spawns a child with `...process.env` so it inherits PATH, HOME and the rest
  * of what a program needs. That is right until an agent runs the suite: the runner
- * sets `ATOMATON_RUN_TYPE`, `ISSUE_NUMBER` and `ATOMATON_MACHINERY_ROOT` in the environment
+ * sets `TYPE`, `NUMBER`, `NOTIFY` and `ATOMATON_MACHINERY_ROOT` in the environment
  * the agent works in, and they flow straight into every child a test starts. Seventeen
  * tests failed that way in one run -- `run_checks` reading a machinery root that was
  * not the fixture, a github tool defaulting a number the test meant to leave out --
@@ -64,7 +64,7 @@ export interface RunWithFakeGhResult {
 export function hermeticEnv(): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("ATOMA_") || key.startsWith("ATOMATON_") || key === "ISSUE_NUMBER" || key.startsWith("FAKE_GH_")) continue;
+    if (key.startsWith("ATOMA_") || key.startsWith("ATOMATON_") || key === "NUMBER" || key === "TYPE" || key === "NOTIFY" || key.startsWith("FAKE_GH_")) continue;
     // `git` finds its repository through these, and they OVERRIDE `cwd`: a child started
     // with `cwd: tempDir` and `GIT_DIR` set runs every `git` command against `GIT_DIR`,
     // not the temp dir. A test that reconstructs another branch's tree and runs the

@@ -137,6 +137,40 @@ export function getRerankerModel(): string {
   return settings?.reranker_model?.trim() || DEFAULT_RERANKER;
 }
 
+/** The orphan branch documents are published onto, and its default. */
+export const DEFAULT_DOCS_BRANCH = "business-docs";
+
+/**
+ * The branch `publish_draft` puts documents onto.
+ *
+ * Configurable because the default was picked for this template, and an adopter
+ * whose document branch is named differently should be able to say so without
+ * forking anything. It is also the ONLY way the branch is chosen: the tool takes no
+ * branch argument, because naming a branch from the outside is what let a publish
+ * land on somebody's work branch (#254). A settings mistake then surfaces on the
+ * pull request that tried to publish — refused by the tool's own default-branch and
+ * work-branch guards — rather than as a document in the tree people review.
+ */
+export function getDocsBranch(): string {
+  // Tolerant of a MISSING config.yaml for the same reason `getBaseBranch` is: no
+  // config means no override, which is the same answer as a config without the
+  // key, and the tool should not start failing over a setting whose absence is
+  // the normal case. A config that exists and will not parse still throws.
+  // Narrowed here rather than in `AtomaConfig`, like `getRerankerModel` above: the
+  // cast lives with the one reader of the one reserved key.
+  let branch: string | undefined;
+  try {
+    const settings = loadConfig().tools?.servers?.attachments?.settings as { branch?: string } | undefined;
+    branch = settings?.branch;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  // `refs/heads/x` and `x` are the same branch, and the push below adds the prefix
+  // itself — normalised rather than refused, because it is the spelling somebody
+  // reading `ls-remote` output has in front of them.
+  return branch?.trim().replace(/^refs\/heads\//, "") || DEFAULT_DOCS_BRANCH;
+}
+
 /**
  * Paths whose change makes a merge a person's to perform.
  *

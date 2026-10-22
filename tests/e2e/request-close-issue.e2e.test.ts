@@ -74,7 +74,8 @@ You are a test orchestrator agent.
         env: {
           ...fakeGh.env,
           GITHUB_REPOSITORY: "owner/repo",
-          ISSUE_NUMBER: "99",
+          NUMBER: "99",
+          TYPE: "issue",
           OPENAI_BASE_URL: mock.url,
           OPENAI_API_KEY: "dummy-test-key",
           ATOMA_PROVIDER: "openai",

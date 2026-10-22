@@ -49,8 +49,8 @@ describe("fetch_events.ts", () => {
       expect(events[0]?.content).toContain("**Labels:** bug");
       expect(events[1]?.content).toBe("on it");
       const out = parseGithubOutput(readFileSync(outputFile, "utf8"));
-      expect(out.resolved_type).toBe("issue");
-      expect(out.resolved_number).toBe("5");
+      expect(out.session_type).toBe("issue");
+      expect(out.session_number).toBe("5");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -305,7 +305,7 @@ describe("fetch_events.ts", () => {
       expect(result.status).toBe(0);
       expect(JSON.parse(readFileSync(eventsFile, "utf8"))).toHaveLength(1);
       expect(result.stderr).toContain("Could not search linked PRs for Issue #5");
-      expect(parseGithubOutput(readFileSync(outputFile, "utf8"))).toMatchObject({ resolved_type: "issue", resolved_number: "5" });
+      expect(parseGithubOutput(readFileSync(outputFile, "utf8"))).toMatchObject({ session_type: "issue", session_number: "5" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -388,8 +388,8 @@ describe("fetch_events.ts", () => {
       expect(issueRun.status).toBe(0);
       expect(prRun.status).toBe(0);
       expect(JSON.parse(readFileSync(issueEventsFile, "utf8"))).toEqual(JSON.parse(readFileSync(prEventsFile, "utf8")));
-      expect(parseGithubOutput(readFileSync(issueOutput, "utf8"))).toMatchObject({ resolved_type: "issue", resolved_number: "5" });
-      expect(parseGithubOutput(readFileSync(prOutput, "utf8"))).toMatchObject({ resolved_type: "issue", resolved_number: "5" });
+      expect(parseGithubOutput(readFileSync(issueOutput, "utf8"))).toMatchObject({ session_type: "issue", session_number: "5" });
+      expect(parseGithubOutput(readFileSync(prOutput, "utf8"))).toMatchObject({ session_type: "issue", session_number: "5" });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
