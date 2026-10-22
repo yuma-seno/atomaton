@@ -73,16 +73,20 @@ the one a person's command or a new issue starts — exists only as its caller's
 run. Most entry runs dispatch nothing (an ordinary remark, a comment the guard
 removed), so the watch posts on one only when the thread is stuck at an ask AND
 that ask is that run's doing — a dispatch marker posted inside it, or the
-person's own command, when the run was started by a comment the run could
-consume and the command was written before the run started. A command written
-while a run is already going belongs to the run that command itself starts, and
-an entry run started by a new issue consumes no comment at all — its ask is the
-issue's body, so a command sitting on that thread is never its doing. That
-distinction is what keeps the watch silent while the command's own run works:
-opening an issue and commenting seconds later must not make the issue's entry
-run claim the command and post a notice beside a run that is still going. A run
-that completed without taking the turn leaves the thread as it was, and the
-watch has nothing to say.
+person's own command, when three things hold: the run was started by a comment
+the run could consume, the run did not end successfully, and the command was
+written before the run started. A command written while a run is already going
+belongs to the run that command itself starts; an entry run started by a new
+issue consumes no comment at all — its ask is the issue's body, so a command
+sitting on that thread is never its doing; and a run that ended successfully
+carried its own judgment all the way through — it dispatched, and its marker is
+on the thread, or it decided there was nothing to do — so only a run that died
+before posting any marker may fall back to the command. Those distinctions are
+what keep the watch silent while the command's own run works: opening an issue
+and commenting seconds later must not make the issue's entry run claim the
+command, and a run that decided not to dispatch must not post a notice beside
+the run a later command started. A run that completed without taking the turn
+leaves the thread as it was, and the watch has nothing to say.
 
 The watch reads which node a run worked on out of the run's title. The runner
 writes `run-name: "agent on #N"`; the two entry workflows write `#N` alone,

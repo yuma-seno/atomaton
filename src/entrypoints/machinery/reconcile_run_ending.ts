@@ -50,14 +50,25 @@
  *     and unjam the guard while that run was still working. So the notice waits on
  *     `requestOutstanding` (the thread is stuck at an ask) AND `tookTurn` (that ask
  *     is this run's doing — a dispatch marker posted inside the run, or a person's
- *     command, when this run is one whose trigger consumes a command and the
- *     command was written before the run started).
+ *     command, when this run is one whose trigger consumes a command, the run did
+ *     not end `success`, and the command was written before the run started).
  *
- * Which runs consume a command is the caller's knowledge, not the domain's: it
- * arrives as `--run-event`, the watched run's `workflow_run.event`, and
- * `runConsumesCommands` below maps it. #281 is what pinned the distinction — an
- * entry run started by a new issue found the command the person posted seconds
- * later and claimed it, posting the notice while the command's own run worked.
+ * Two of those facts are the caller's knowledge, not the domain's, and each
+ * arrives as an argument the caller derives:
+ *
+ *   - which runs consume a command comes from `--run-event`, the watched run's
+ *     `workflow_run.event`, and `runConsumesCommands` below maps it. #281 pinned
+ *     the distinction: an entry run started by a new issue found the command the
+ *     person posted seconds later and claimed it, posting the notice while the
+ *     command's own run worked.
+ *   - whether the run may fall back to a command at all comes from
+ *     `--conclusion`, which the workflow already passed, and
+ *     `runEndedUnsuccessfully` below maps it. A second measurement on the same
+ *     issue pinned this one: a run that ended `success` decided something — it
+ *     dispatched, with its marker on the thread, or it decided there was nothing
+ *     to do — so only a run that died before any marker may fall back to the
+ *     command. The first incident's shape was `issues` × success, the second's
+ *     `issue_comment` × success; the two flags between them close both.
  *
  * ## What it deliberately does not do
  *
@@ -156,6 +167,25 @@ export function runConsumesCommands(runEvent: string | undefined): boolean {
 }
 
 /**
+ * Whether the watched run ended other than by carrying its own judgment through
+ * — the only shape the person's-command fallback of `tookTurn` exists for.
+ *
+ * A run that ends `success` decided something: it dispatched, and its marker is
+ * on the thread where `tookTurn`'s marker branch reads it whatever the
+ * conclusion, or it decided there was nothing to do, which is exactly the
+ * silence this gate owes the thread. The fallback is for a run that died before
+ * posting any marker, and GitHub reports that death as anything but `success` —
+ * `cancelled`, `failure`, `timed_out`, `startup_failure`. An absent or
+ * unreadable conclusion lands on false, the silent direction every unreadable
+ * input here takes: the workflow always passes one, so this only answers a
+ * caller from before the field existed.
+ */
+export function runEndedUnsuccessfully(conclusion: string | undefined): boolean {
+  const word = (conclusion ?? "").trim();
+  return word !== "" && word !== "success";
+}
+
+/**
  * The notice a run that never reported leaves behind, addressed to a person.
  *
  * It says what happened, that nothing was decided, and the two ways forward —
@@ -249,11 +279,18 @@ function main(): void {
   // its runs never took a turn at all — so the notice waits on the thread being
   // stuck at an ask AND that ask being this run's doing (see `tookTurn`): the
   // event that started the run decides whether a person's command can be that
-  // ask, and the domain never learns event names.
+  // ask, and whether the run ended `success` decides whether it may fall back
+  // to one — the domain learns neither vocabulary.
   const endingMissing = titledAgent !== undefined
     ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders)
     : requestOutstanding(thread.events) &&
-      tookTurn(thread.entries, values["run-started-at"], readers, runConsumesCommands(values["run-event"]));
+      tookTurn(
+        thread.entries,
+        values["run-started-at"],
+        readers,
+        runConsumesCommands(values["run-event"]),
+        runEndedUnsuccessfully(values["conclusion"]),
+      );
   if (!endingMissing) {
     console.error(`reconcile_run_ending: the run on #${number} owes no ending; nothing to do`);
     return;
