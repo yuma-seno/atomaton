@@ -2,7 +2,7 @@ import { Workflow } from "@github-actions-workflow-ts/lib";
 import type { PullRequestClosedEvent } from "@octokit/webhooks-types";
 import { ActionsCheckoutV4 } from "@github-actions-workflow-ts/actions";
 import { DefinedJob, JobCondition, SCRIPT_JOB_TIMEOUT_MINUTES, TypedOutputsStep } from "./actions/base.ts";
-import { githubEvent, githubEventRaw } from "./actions/github-context.ts";
+import { isOwnPullRequest, githubEvent, githubEventRaw } from "./actions/github-context.ts";
 import { ATOMATON_WORKFLOW_PERMISSIONS } from "./actions/permissions.ts";
 import { scriptCommand, scriptCommandWithArgs } from "./actions/script-call.ts";
 import { SetupBunAction } from "./actions/third-party.ts";
@@ -48,7 +48,10 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 // open, and nobody told (#267). `dispatch-rejected` now returns that close to
 // the origin agent as a rejection -- as a judgement for the agent to make, not
 // a verdict the machine has reached; `decideRejectionHandoff` holds the branch
-// list and why the machine closes nothing on this side.
+// list and why the machine closes nothing on this side. It is gated on the
+// pull request's head branch being this repository's: a merge is the one
+// outcome an outside contributor cannot produce, a close is not, and an
+// agent only starts when a repository member triggered it.
 //
 // NOTE: this workflow never runs for an agent's own actions -- GITHUB_TOKEN's own
 // actions raise no event cascade, so `pull_request_target: closed` fires only for a
@@ -64,7 +67,9 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 //                        \-> aggregate-sub-issues (merged)
 //   reinvoke-origin-agent (merged; no `needs` -- it decides from the pull request's
 //          own body, and carries its merge gate itself for the reason recorded on it)
-//   dispatch-rejected (NOT merged; parse's issue, the body's origin agent)
+//   dispatch-rejected (NOT merged, and the pull request's head branch is this
+//          repository's -- the membership gate that keeps a fork's forged body
+//          from starting anything)
 
 const parseMetadataStep = new TypedOutputsStep(
   {
@@ -221,7 +226,10 @@ const reinvokeJob = new DefinedJob(
  * The linked issue is parse's output -- read once, for both outcomes, rather
  * than a second reader of the same body tag. Everything else (the origin agent,
  * the state of the issue) is decided in the script, the place that has the
- * inputs for it; the job carries only the event test that picks this outcome.
+ * inputs for it; the job carries only the event test that picks this outcome --
+ * plus the membership test, which lives on the job because it is about the
+ * EVENT, not about what the body asks for (see the job's comment: the head
+ * repository, not the author's association).
  *
  * ## Why a failed dispatch fails the job
  *
@@ -251,9 +259,30 @@ const dispatchRejectedJob = new DefinedJob(
   {
     "runs-on": "ubuntu-latest",
     "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
-    // Only the close that merged nothing. The merged outcome is the three jobs
-    // above; this one exists because that close used to start nothing at all.
-    if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), false),
+    // Only the close that merged nothing, and only for this repository's own
+    // pull requests. The second test is the trust boundary, and it exists
+    // because the two outcomes of `closed` are not symmetric in who can cause
+    // them: a merge is the one outcome an outside contributor cannot produce
+    // (`merged == true` is already member-only, which is why the three
+    // merge-side jobs need no membership test), but a close is not -- a
+    // contributor can close their own pull request, and a maintainer rejecting
+    // an outside contribution fires the same event with the same body. Without
+    // the head-repository test, two forged tags in that body would start an
+    // agent on a number the contributor chose -- the boundary
+    // `docs/work/boundaries.md` states: an agent only starts when a repository
+    // member triggered it.
+    //
+    // The test is the HEAD REPOSITORY, not `author_association`: an agent's
+    // pull request is authored by `github-actions[bot]`, association `NONE`, so
+    // an association test would be false for every pull request the machinery
+    // opened and the feature would never fire (the trap recorded on
+    // `atomaton-sub-issue-closed.wac.ts`). The head repository holds both ways.
+    if: JobCondition.is(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.merged), false).and(
+      // `head.repo` is nullable in the webhook schema (a deleted fork head), so
+      // the accessor reads through optional chaining; the recorded path is the
+      // same, and a null head cannot be this repository's own.
+      JobCondition.from(isOwnPullRequest(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.head.repo?.full_name))),
+    ),
     // For the linked issue `parse` produced. Parse runs for both outcomes, so
     // this wait is never a skip.
     needs: [parseJob],

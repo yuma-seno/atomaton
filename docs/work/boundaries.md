@@ -14,8 +14,12 @@ The workflows themselves hold `GITHUB_TOKEN` and the write scopes they declare,
 which is what they mutate issues, pull requests and workflow dispatches with.
 `atomaton-pr-closed.yml` is the one that listens rather than being dispatched, and
 it listens with `pull_request_target`, which executes in the base repository's
-context — and which now acts on both of a pull request's outcomes, a merge and a
-close without one: review that trust model before extending it further.
+context. It acts on both of a pull request's outcomes — a merge, and a close
+without one — and the close is gated on the pull request's head branch living in
+the repository the workflow runs in, because a merge is the one outcome an
+outside contributor cannot produce and a close is not: without that gate, two
+forged tags in a fork's pull request body would start an agent. Review that
+trust model before extending it further.
 
 What an agent's *tools* can and cannot reach is a different boundary —
 [what a tool can and cannot be protected from](../tools/boundaries.md#what-a-tool-can-and-cannot-be-protected-from).

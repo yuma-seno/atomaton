@@ -48,11 +48,13 @@ machine closes nothing: the agent decides whether what the issue asked for is
 settled, concludes the issue when the close settled it, and carries on from
 where the pull request left off when the work is still needed.
 
-Two closes return nothing. The linked issue is already closed — the person
-closing the pull request is saying the issue is finished. And a pull request
-with no `atomaton:origin-agent` tag — a person's own — gets no directive
-written for it: the machinery does not post instructions on work no run of its
-own opened.
+Three closes return nothing. The linked issue is already closed — the person
+closing the pull request is saying the issue is finished. A pull request with no
+`atomaton:origin-agent` tag — a person's own — gets no directive written for it:
+the machinery does not post instructions on work no run of its own opened. And a
+pull request whose head branch is not the repository's own — a fork — starts
+nothing at all, however its body is written: an agent only starts when a
+repository member triggered it, and closing a fork's pull request is not that.
 
 A rejected branch is not deleted. It is where the agent resumes when it decides
 the work is still needed, and a second pull request can be opened from it.

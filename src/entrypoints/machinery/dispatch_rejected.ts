@@ -22,6 +22,27 @@
  * request) returns nothing too — no directive is written for a pull request no
  * run of ours opened. `decideRejectionHandoff` holds that branch list.
  *
+ * ## Who can reach it
+ *
+ * The job's `if:` carries the second half of the gate, and it is the trust
+ * boundary: the head branch living in this repository (`isOwnPullRequest`),
+ * beside `merged == false`. A merge is the one outcome an outside contributor
+ * cannot produce, so the merge-side jobs need no membership test; a close is
+ * not — a contributor can close their own pull request, and a maintainer
+ * rejecting an outside contribution fires the same event with the same body.
+ * Without the head-repository test, two forged tags in that body would start an
+ * agent on a number the contributor chose. The rule is the one
+ * `docs/work/boundaries.md` states: an agent only starts when a repository
+ * member triggered it.
+ *
+ * The test is the HEAD REPOSITORY, not `author_association` — an agent's pull
+ * request is authored by `github-actions[bot]`, association `NONE`, so an
+ * association test would be false for every pull request the machinery opened
+ * and the feature would never fire (the trap recorded on
+ * `atomaton-sub-issue-closed.wac.ts`). The head repository holds both ways: in
+ * this repository means pushed by write access or by the bot; a fork's means
+ * outside.
+ *
  * ## What it does not write
  *
  * No `$GITHUB_OUTPUT`. The merge route reports `reinvoked=` so the aggregate

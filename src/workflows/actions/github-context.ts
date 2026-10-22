@@ -105,3 +105,28 @@ const MEMBER_ASSOCIATIONS = ["OWNER", "MEMBER", "COLLABORATOR"] as const;
 export function isRepositoryMember(association: EventRef): Condition<EventRef> {
   return Condition.of(`contains(fromJson('${JSON.stringify(MEMBER_ASSOCIATIONS)}'), ${association})`);
 }
+
+/**
+ * A condition asserting that a pull request's head branch lives in the
+ * repository the workflow runs in, for gating a dispatch on the pull request
+ * being this repository's own.
+ *
+ * `author_association` cannot do this job, and the trap is recorded on
+ * `atomaton-sub-issue-closed.wac.ts`: an agent's pull request is authored by
+ * `github-actions[bot]`, whose association is `NONE`, so an association test is
+ * false for exactly the pull requests the machinery opened and true for a
+ * person's -- the boundary inverted. The head repository is the signal that
+ * holds both ways: a head branch inside this repository was pushed by someone
+ * with write access or by the bot, a fork's was not, and an outside
+ * contributor's pull request is always a fork's.
+ *
+ * The workflow-side half (`github.repository`) is a constant of the runner, not
+ * an event field, so it stays a literal here rather than an `EventRef` -- there
+ * is no selector on it to typo.
+ *
+ * @example
+ *   isOwnPullRequest(githubEventRaw<PullRequestClosedEvent>((e) => e.pull_request.head.repo?.full_name))
+ */
+export function isOwnPullRequest(headRepo: EventRef): Condition<EventRef> {
+  return Condition.of(`${headRepo} == github.repository`);
+}

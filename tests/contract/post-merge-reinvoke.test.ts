@@ -89,4 +89,24 @@ describe("post-merge re-invocation", () => {
     expect(needs(rejected), "it reads the linked issue from parse").toContain("parse");
     expect(needs(rejected), "it uses nothing that resolution answers").not.toContain("resolve-parent");
   });
+
+  /**
+   * The membership gate the reviewer required on #269, and the one test that
+   * catches its absence: this is the only event-driven dispatch in the
+   * repository that fires on an outcome an outside contributor can produce, so
+   * without this test the boundary in `docs/work/boundaries.md` -- an agent
+   * only starts when a repository member triggered it -- is a paragraph, not a
+   * property. A fork's pull request closed unmerged must start nothing,
+   * however its body is written.
+   *
+   * The signal is the head repository, not `author_association`: an agent's
+   * pull request is authored by `github-actions[bot]`, association `NONE`, so
+   * an association test would be false for every pull request the machinery
+   * opened (the trap recorded on `atomaton-sub-issue-closed.wac.ts`).
+   */
+  test("dispatch-rejected fires only for a pull request whose head branch is this repository's", () => {
+    const rejected = jobs()["dispatch-rejected"];
+    expect(rejected, "run `bun run synth` first").toBeDefined();
+    expect(rejected?.if ?? "").toContain("github.event.pull_request.head.repo.full_name == github.repository");
+  });
 });

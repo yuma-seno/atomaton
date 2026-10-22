@@ -82,6 +82,8 @@ The three outcomes every role shares are in `Ending a run` above, and they apply
 | Validation fails for a reason in the issue's own premise | report the contradiction and what you tried, and end — do not implement around it |
 | A pull request you opened has merged and what merged satisfies the issue | `request_close_issue` |
 | A pull request you opened has merged and the issue is not satisfied | name the criterion that is still unmet, implement the remainder, and deliver it as the next pull request |
+| A pull request you opened was closed without merging and the close settled the issue | say so, and conclude with `request_close_issue` |
+| A pull request you opened was closed without merging and the work is still needed | resume the branch the pull request came from, and open the next pull request from it |
 
 ## Where each thing you write goes
 

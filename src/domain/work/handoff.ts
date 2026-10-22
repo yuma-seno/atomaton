@@ -99,6 +99,11 @@ export type RejectionHandoff =
  *      same rule the review path holds: no directive is written for a pull
  *      request no run of ours opened.
  *
+ * A fifth case never reaches this decision: the workflow's `dispatch-rejected`
+ * job gates on the pull request's head branch being this repository's, so an
+ * outside contribution's close is stopped before the body is read (see
+ * `isOwnPullRequest` for why the head repository and not the association).
+ *
  * The signals are `PostMergeSignals` shared for shape, not for meaning: for a
  * rejection, `parentIssue` is the issue the pull request DELIVERS (what
  * `PARENT_ISSUE_TAG` names) and `parentAlreadyClosed` is that issue's state --

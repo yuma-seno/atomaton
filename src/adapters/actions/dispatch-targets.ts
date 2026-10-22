@@ -182,11 +182,15 @@ export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent:
  * diff. See `decideRejectionHandoff` for the two cases that return nothing.
  *
  * The agent is named by the `atomaton:origin-agent` tag the pull request body
- * carries, on the issue the pull request delivers. Returns whether the dispatch
- * was sent. There is NO fallback on this side, unlike the merge route's
- * aggregate job: if this does not dispatch, the close has gone unjudged, which
- * is the exact defect #267 exists to remove -- so the caller fails its job and
- * the silence is at least red.
+ * carries, on the issue the pull request delivers. The CALLER gates who gets
+ * this far — the workflow's `dispatch-rejected` job tests that the pull
+ * request's head branch is this repository's, beside `merged == false`, so an
+ * outside contribution's close never reaches this function however its body is
+ * written; this function sees only the tags. Returns whether the dispatch was
+ * sent. There is NO fallback on this side, unlike the merge route's aggregate
+ * job: if this does not dispatch, the close has gone unjudged, which is the
+ * exact defect #267 exists to remove -- so the caller fails its job and the
+ * silence is at least red.
  *
  * ## The comment asks for a judgement, not for a resumption
  *
@@ -196,6 +200,13 @@ export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent:
  * "rejected" or "already shipped elsewhere". The agent decides -- conclude the
  * issue when the close settled it, carry on from where the pull request left
  * off when the work is still needed.
+ *
+ * And like the merge route, the comment is half of a pair that moves together:
+ * `prompt-template.md`'s "After a pull request you opened was closed without
+ * merging" paragraph is the other half. Either half alone leaves the re-invoked
+ * agent with a rule the prompt contradicts or never mentions -- there, that a
+ * merged pull request is not evidence of satisfied criteria; here, that a
+ * rejected one leaves the branch alive and the decision open.
  *
  * ## Why a failed directive post dispatches nothing
  *
