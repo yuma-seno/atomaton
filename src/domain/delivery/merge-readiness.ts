@@ -323,13 +323,17 @@ export function decideMergeReadiness(signals: MergeSignals): MergeReadiness {
     case "DIRTY":
       blockers.push({
         kind: "conflicting",
-        detail: "branch conflicts with the base; call sync_branch and resolve before merging",
+        detail:
+          "branch conflicts with the base; call merge_base_into_branch, resolve the conflicts it leaves, " +
+          "then commit_and_push before merging",
       });
       break;
     case "BEHIND":
       blockers.push({
         kind: "behind",
-        detail: "branch is behind the base and the ruleset requires it current; call sync_branch",
+        detail:
+          "branch is behind the base and the ruleset requires it current; call merge_base_into_branch " +
+          "(sync_branch only fast-forwards this branch from its own remote branch)",
       });
       break;
     case "BLOCKED": {
