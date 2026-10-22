@@ -291,33 +291,39 @@ function parseCommentCommand(body) {
     return NOTHING;
   for (const rawLine of body.split(`
 `)) {
-    const line = rawLine.trim();
-    const commandMatch = COMMAND_RE.exec(line);
-    if (commandMatch) {
-      const name = commandMatch[1];
-      const modifier = commandMatch[2]?.trim() ?? "";
-      if (isControlCommand(name)) {
-        if (!modifier)
-          return { ...NOTHING, control: name };
-        return {
-          ...NOTHING,
-          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
-        };
-      }
-      if (!modifier)
-        return { ...NOTHING, agent: name };
-      if (modifier === "recover")
-        return { ...NOTHING, agent: name, sessionMode: "recover" };
-      return {
-        ...NOTHING,
-        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
-      };
-    }
-    const dispatchMatch = DISPATCH_RE.exec(line);
-    if (dispatchMatch)
-      return { ...NOTHING, agent: dispatchMatch[1] };
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined)
+      return parsed;
   }
   return NOTHING;
+}
+function parseCommandLine(rawLine) {
+  const line = rawLine.trim();
+  const commandMatch = COMMAND_RE.exec(line);
+  if (commandMatch) {
+    const name = commandMatch[1];
+    const modifier = commandMatch[2]?.trim() ?? "";
+    if (isControlCommand(name)) {
+      if (!modifier)
+        return { ...NOTHING, control: name };
+      return {
+        ...NOTHING,
+        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+      };
+    }
+    if (!modifier)
+      return { ...NOTHING, agent: name };
+    if (modifier === "recover")
+      return { ...NOTHING, agent: name, sessionMode: "recover" };
+    return {
+      ...NOTHING,
+      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+    };
+  }
+  const dispatchMatch = DISPATCH_RE.exec(line);
+  if (dispatchMatch)
+    return { ...NOTHING, agent: dispatchMatch[1] };
+  return;
 }
 function lineForms(rawLine) {
   let line = rawLine.trim();

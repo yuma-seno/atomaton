@@ -55,8 +55,10 @@ jobs:
           NUMBER: ${{ github.event.issue.number }}
           COMMENT_ID: ${{ github.event.comment.id }}
           COMMENTER: ${{ github.event.comment.user.login }}
+          PARSED: ${{ steps.command.outputs.parsed }}
+          STATE: ${{ github.event.issue.state }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/guard_comment_during_run.ts" --number "${NUMBER}" --comment-id "${COMMENT_ID}" --commenter "${COMMENTER}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/guard_comment_during_run.ts" --number "${NUMBER}" --comment-id "${COMMENT_ID}" --commenter "${COMMENTER}" --parsed "${PARSED}" --state "${STATE}"
         if: (github.event.comment.user.type != 'Bot') && steps.command.outputs.control != 'stop'
       - name: 'Guard: refuse a command on a closed issue or pull request'
         id: closed-guard
