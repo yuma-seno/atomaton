@@ -260,17 +260,42 @@ describe("the answers-request check (#283)", () => {
     );
   });
 
-  test("an untaken request (`asked`) is refused — a run is already coming", () => {
-    // The same shape with the reviewer still queued: the hand-off's marker is the
-    // last event, so the run it starts is on its way and a second dispatch would be
+  test("a machinery dispatch marker (`asked`) is refused — a run is already coming", () => {
+    // The marker is the machinery saying it started a run: a second dispatch would be
     // a second run on one node.
     const marker = [threadRule(300, [{ id: 1, body: "<!-- atomaton:dispatch=reviewer -->", user: { type: "Bot" } }])];
     expect(runAnswers({ target: 300, thread: marker }).outcome).toBe("superseded");
+  });
 
-    // A person's outstanding command is the same answer: the machinery's dispatch of
-    // it is the run that is coming.
-    const command = [threadRule(300, [{ id: 3, body: "/reviewer", user: { type: "User" } }])];
-    expect(runAnswers({ target: 300, thread: command }).outcome).toBe("superseded");
+  test("a person's command (`asked`) is dispatched — validation is what starts it", () => {
+    // A person's `/reviewer` on a pull request reaches validation, not a runner: no
+    // dispatch is queued for the node, and this dispatch is the only thing that turns
+    // the command into a run. Refusing it dropped every review a person asked for
+    // (found when a /reviewer typed on a pull request started nothing).
+    const { outcome, ghCalls } = runAnswers({
+      target: 300,
+      thread: [threadRule(300, [{ id: 3, body: "/reviewer", user: { type: "User" } }])],
+    });
+    expect(outcome).toBe("dispatched");
+    expect(ghCalls.some((call) => call[0] === "workflow")).toBe(true);
+  });
+
+  test("a marker followed by a dropped person's command is still refused", () => {
+    // The command arrived while the ball was with the agent the marker announces, so
+    // `shapedThread` drops it and the thread's last event is the MARKER. Whose event
+    // the answer turns on must come from the same walk as `last`: reading the raw
+    // entries found the dropped command and let a second run onto a node whose marker
+    // already says one is coming.
+    const { outcome } = runAnswers({
+      target: 300,
+      thread: [
+        threadRule(300, [
+          { id: 1, body: "<!-- atomaton:dispatch=reviewer -->", user: { type: "Bot" } },
+          { id: 3, body: "/reviewer", user: { type: "User" } },
+        ]),
+      ],
+    });
+    expect(outcome).toBe("superseded");
   });
 
   test("a thread the caller just handed off (`handed-off`) is dispatched — the reload keeps working", () => {
