@@ -6237,6 +6237,62 @@
     ]
   },
   {
+    "path": "sessions/issue-263/reviewer.json",
+    "agent": "reviewer",
+    "messages": 79,
+    "calls": 50,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "get_pr": 1,
+      "get_pr_diff": 1,
+      "atoma_builtin__load_skill": 1,
+      "read": 14,
+      "grep": 24,
+      "get_check_runs": 1,
+      "glob": 1,
+      "list": 2,
+      "check_merge_readiness": 1,
+      "delegate_readonly": 1,
+      "delegate_readonly_large": 1,
+      "create_root_issue": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-22T01:40:29Z",
+        "ended_because": "completed",
+        "iterations": 21,
+        "messages": 79,
+        "seconds": 272,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1,
+            "delegate_readonly_large": 1
+          },
+          "files_readonly": {
+            "glob": 1,
+            "grep": 24,
+            "list": 2,
+            "read": 14
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "create_root_issue": 2,
+            "get_check_runs": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          }
+        },
+        "started": "2026-10-22T01:35:57Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-3/atomaton.json",
     "agent": "atomaton",
     "messages": 100,
