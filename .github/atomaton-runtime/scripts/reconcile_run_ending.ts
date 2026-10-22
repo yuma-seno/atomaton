@@ -485,7 +485,7 @@ function needsEnding(comments, runStartedAt, readers) {
     return true;
   return endedAt < startedAt;
 }
-function tookTurn(comments, runStartedAt, readers) {
+function tookTurn(comments, runStartedAt, readers, consumesCommands, endedUnsuccessfully) {
   const { comments: kept } = shapedThread(comments, readers);
   for (let index = kept.length - 1;index >= 0; index -= 1) {
     const entry = kept[index];
@@ -493,8 +493,15 @@ function tookTurn(comments, runStartedAt, readers) {
       continue;
     if (readers.requestedAgent(entry.body) === "")
       continue;
-    if (entry.isHuman)
-      return true;
+    if (entry.isHuman) {
+      if (!consumesCommands)
+        return false;
+      if (!endedUnsuccessfully)
+        return false;
+      const at = Date.parse(entry.createdAt);
+      const start = Date.parse(runStartedAt ?? "");
+      return !Number.isNaN(at) && !Number.isNaN(start) && at < start;
+    }
     const at = Date.parse(entry.createdAt);
     const start = Date.parse(runStartedAt ?? "");
     return !Number.isNaN(at) && !Number.isNaN(start) && at >= start;
@@ -519,6 +526,13 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/reconcile_run_ending.ts
 var ref = defineScript(import.meta.url);
+function runConsumesCommands(runEvent) {
+  return runEvent === "issue_comment";
+}
+function runEndedUnsuccessfully(conclusion) {
+  const word = (conclusion ?? "").trim();
+  return word !== "" && word !== "success";
+}
 function missingEndingNotice(agent, runUrl) {
   const lines = [
     ...turnHeader({ ended: "done", audience: "person" }),
@@ -553,7 +567,8 @@ function main() {
       "display-title": { type: "string" },
       "run-started-at": { type: "string" },
       "run-url": { type: "string" },
-      conclusion: { type: "string" }
+      conclusion: { type: "string" },
+      "run-event": { type: "string" }
     }
   });
   const repo = process.env.GITHUB_REPOSITORY ?? "";
@@ -575,7 +590,7 @@ function main() {
     process.exitCode = 1;
     return;
   }
-  const endingMissing = titledAgent !== undefined ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders) : requestOutstanding(thread.events) && tookTurn(thread.entries, values["run-started-at"], readers);
+  const endingMissing = titledAgent !== undefined ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders) : requestOutstanding(thread.events) && tookTurn(thread.entries, values["run-started-at"], readers, runConsumesCommands(values["run-event"]), runEndedUnsuccessfully(values["conclusion"]));
   if (!endingMissing) {
     console.error(`reconcile_run_ending: the run on #${number} owes no ending; nothing to do`);
     return;
@@ -605,5 +620,7 @@ if (import.meta.main)
   main();
 export {
   missingEndingNotice,
-  ref
+  ref,
+  runConsumesCommands,
+  runEndedUnsuccessfully
 };
