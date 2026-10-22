@@ -40,7 +40,6 @@ import { isHumanActor } from "../../domain/work/actor.ts";
 import {
   latestAsk,
   latestRequestedAgent,
-  newestEventBody,
   newestEventEntry,
   requestOutstanding,
   shapedThread,
@@ -462,15 +461,19 @@ export function readLastTurnEvent(
   const shaped = shapedThread(entries, readers);
   const last = shaped.events[shaped.events.length - 1];
   const probe = probeId === undefined ? undefined : String(probeId);
-  const source = newestEventEntry(entries, readers);
+  // The SHAPED list, because that is the list `last` came from: a person's comment that
+  // arrived while the ball was with an agent is dropped there and is not the event the
+  // answer turns on. Reading the raw entries let a dropped `/reviewer` stand in for the
+  // machinery's marker before it -- the marker says a run is coming and was answered
+  // with "a person asked, let it go".
+  const source = newestEventEntry(shaped.comments, readers);
   return {
     probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
     last,
     // Only a `returned` verdict is attributed to an agent: the other events name no
     // agent in their body. Whether the newest event was the machinery's own write is
     // asked of `asked` alone, but read here from the same walk.
-    lastAgent:
-      last === "returned" ? AGENT_TAG.read(newestEventBody(entries, readers) ?? "") : undefined,
+    lastAgent: last === "returned" ? AGENT_TAG.read(source?.body ?? "") : undefined,
     lastIsMachinery: source !== undefined && !source.isHuman,
   };
 }

@@ -280,6 +280,24 @@ describe("the answers-request check (#283)", () => {
     expect(ghCalls.some((call) => call[0] === "workflow")).toBe(true);
   });
 
+  test("a marker followed by a dropped person's command is still refused", () => {
+    // The command arrived while the ball was with the agent the marker announces, so
+    // `shapedThread` drops it and the thread's last event is the MARKER. Whose event
+    // the answer turns on must come from the same walk as `last`: reading the raw
+    // entries found the dropped command and let a second run onto a node whose marker
+    // already says one is coming.
+    const { outcome } = runAnswers({
+      target: 300,
+      thread: [
+        threadRule(300, [
+          { id: 1, body: "<!-- atomaton:dispatch=reviewer -->", user: { type: "Bot" } },
+          { id: 3, body: "/reviewer", user: { type: "User" } },
+        ]),
+      ],
+    });
+    expect(outcome).toBe("superseded");
+  });
+
   test("a thread the caller just handed off (`handed-off`) is dispatched — the reload keeps working", () => {
     const { outcome, ghCalls } = runAnswers({ target: 300, thread: [threadRule(300, [HANDOFF])] });
     expect(outcome).toBe("dispatched");
