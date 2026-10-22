@@ -73,8 +73,11 @@ export const atomaRunWatch = new Workflow("atomaton-run-watch", {
       // new issue) exists only as its caller's run, and a caller that was cancelled
       // or timed out would jam its thread with no watch on it at all. Most entry
       // runs never took a turn; `reconcile_run_ending`'s second gate (`tookTurn`)
-      // is what keeps the watch silent on those. This workflow's own runs are not
-      // in the list and never re-trigger it.
+      // is what keeps the watch silent on those, and it reads the event that
+      // started the watched run (`workflow_run.event`, below) to tell a
+      // command-consuming run from one — an entry run started by a new issue —
+      // that must never claim a person's command as its own. This workflow's own
+      // runs are not in the list and never re-trigger it.
       workflows: ["Atomaton Runner", "Atomaton Entry", "Atomaton Manual Comment"],
       types: ["completed"],
     },
@@ -112,12 +115,20 @@ export const atomaRunWatch = new Workflow("atomaton-run-watch", {
         RUN_STARTED_AT: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.run_started_at),
         RUN_URL: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.html_url),
         CONCLUSION: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.conclusion),
+        // The watched run's own trigger and conclusion — the two facts the title
+        // cannot answer about an entry run. `reconcile_run_ending` maps the event
+        // to whether that run could have consumed a person's command, and the
+        // conclusion to whether it may fall back to one: a run that ended
+        // `success` decided something — dispatched, or nothing to do — so only a
+        // run that died before any marker may claim a command as its ask.
+        RUN_EVENT: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.event),
       },
       run: `${scriptCommandWithArgs(reconcileRunEndingRef, {
         "display-title": "\${DISPLAY_TITLE}",
         "run-started-at": "\${RUN_STARTED_AT}",
         "run-url": "\${RUN_URL}",
         conclusion: "\${CONCLUSION}",
+        "run-event": "\${RUN_EVENT}",
       })}
 `,
     }),
