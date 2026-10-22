@@ -18,9 +18,17 @@
  * so a `/engineer` followed by a `/reviewer` silently starts one agent and loses the
  * other -- and the person cannot see which of two requests won. Refused, the comment
  * is deleted and the notice says which commands it carried and that each belongs in its
- * own comment. The commands are counted with the same line reader the dispatch uses, so
- * a directive quoted inside somebody's prose (`> /engineer`) is not a second command:
- * it is not one the machinery would act on either.
+ * own comment. A malformed first line counts too: the parser stops there, so the valid
+ * command under it is lost exactly as silently and the person is only ever told about
+ * the first line's error. The commands are counted with the same line reader the
+ * dispatch uses, so a directive quoted inside somebody's prose (`> /engineer`) is not a
+ * second command: it is not one the machinery would act on either.
+ *
+ * Two gates keep the rule from answering comments the machinery would not have read:
+ * `--parsed` (the parse step ran -- it does not for somebody who is not a repository
+ * member) and `--state` (a closed node's commands belong to the closed guard, which
+ * keeps the comment because nothing is running). A caller that passes neither gets no
+ * commands rule: the comment stays, which is the side that loses nothing.
  *
  * A comment whose FIRST command is `/stop` is not read here at all -- the workflow
  * skips this step for it (`control != 'stop'`), because a stop has to reach a running
@@ -58,6 +66,10 @@ export interface GuardCommentDuringRunArgs {
   number: string | number;
   "comment-id": string | number;
   commenter: string;
+  /** `"true"` when the parse step ran for this comment; see the rule in the header. */
+  parsed?: string;
+  /** The node's `open`/`closed` state; see the rule in the header. */
+  state?: string;
 }
 
 export const ref = defineScript<GuardCommentDuringRunArgs>(import.meta.url);
@@ -169,11 +181,17 @@ function main(): void {
       number: { type: "string" },
       "comment-id": { type: "string" },
       commenter: { type: "string" },
+      // `true` when the parse step ran for this comment -- it does not run for a person
+      // who is not a repository member -- so the commands rule only speaks where the
+      // command would have been read.
+      parsed: { type: "string" },
+      // The node's state; a closed node's commands are the closed guard's to answer.
+      state: { type: "string" },
     },
   });
 
   if (!values.number || !values["comment-id"]) {
-    console.error("usage: guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN");
+    console.error("usage: guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN [--parsed true] [--state open]");
     process.exit(2);
   }
 
@@ -187,12 +205,24 @@ function main(): void {
   const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
   const couldNotRead = readBack.code !== 0;
   const original = couldNotRead ? "" : readBack.stdout ?? "";
-  const commands = commandsIn(original).map((c) => (c.control ? `/${c.control}` : `/${c.agent}`));
+  const commands = commandsIn(original).map((c) =>
+    c.command.error !== "" ? c.line : c.command.control ? `/${c.command.control}` : `/${c.command.agent}`,
+  );
+
+  // The rules only reach a comment the machinery would have read. A command from
+  // somebody who is not a repository member is refused by the parse step (which does not
+  // run), and a command on a closed node is the closed guard's to answer -- it keeps the
+  // comment, on the grounds that nothing is running, and deleting it here would take
+  // that answer away with a reason that does not hold. `parsed` is the parse step's own
+  // word that it ran (see `parse_comment_command.ts`); a caller that passes nothing gets
+  // no commands rule, which is the side that keeps the comment.
+  const parsed = values.parsed === "true";
+  const closed = values.state === "closed";
 
   // The first rule: a comment carrying two commands starts one and loses the rest.
-  // Refused whoever's turn it is -- nothing about the turn makes the second request
-  // reachable.
-  const several = commands.length > 1;
+  // Refused whoever's turn it is — nothing about the turn makes the second request
+  // reachable — as long as it would have been read at all.
+  const several = parsed && !closed && commands.length > 1;
 
   // The second rule is `shapedThread`'s, applied to the whole thread in order: a person's
   // comment is removed when the ball was already with an agent WHEN IT ARRIVED. The
@@ -205,17 +235,25 @@ function main(): void {
   // Comments alone, not the body: a pull request body naming a reviewer is a request
   // the validation dispatch is already handling, and deleting a person's comment on
   // the strength of it would tell them to wait for a run their comment was not racing.
+  //
+  // Asked even when the commands rule already decides, because a person about to split
+  // the comment in two needs to know the ball is with an agent as well — otherwise they
+  // post the first half, it is refused by this same guard, and they are told the other
+  // reason a comment later.
   let removed = false;
-  if (!several) {
-    try {
-      removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
-    } catch (e) {
-      // A failed read is not "the ball is with a person". This script exists to keep a
-      // comment out of a race with a running agent, so the answer it could not determine
-      // must not be the one that lets the comment through.
+  try {
+    removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
+  } catch (e) {
+    // A failed read is not "the ball is with a person" when this is the only rule in
+    // play. This script exists to keep a comment out of a race with a running agent, so
+    // the answer it could not determine must not be the one that lets the comment
+    // through. When the commands rule already removes it, the turn does not have to be
+    // known to answer, so the comment is not left alone over a failed read.
+    if (!several) {
       console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
       process.exit(1);
     }
+    console.error(`Could not read the thread on #${values.number} (${e}); removing the comment for its commands`);
   }
 
   if (!removed && !several) {

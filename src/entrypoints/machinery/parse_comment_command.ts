@@ -28,6 +28,12 @@ function main(): void {
 
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput) {
+    // `parsed` says this step RAN, which `matched` cannot: a step that does not run
+    // leaves every output empty, and so does a comment with no command in it. The
+    // guard's commands rule turns on the difference -- a comment from somebody who is
+    // not a repository member is never read here, so it must not be refused for what it
+    // would have asked for (#217).
+    appendFileSync(githubOutput, `parsed=true\n`);
     appendFileSync(githubOutput, `matched=${matched}\nagent=${agent}\ncontrol=${control}\n`);
     appendFileSync(githubOutput, `session_mode=${sessionMode}\nerror=${error}\n`);
   }

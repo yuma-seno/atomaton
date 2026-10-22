@@ -188,27 +188,36 @@ describe("commandLinesIn", () => {
 describe("commandsIn", () => {
   // The same reader the parser uses, so the count and the dispatch cannot disagree.
   test("counts every command, in the order they appear", () => {
-    expect(commandsIn("/engineer\n\n/reviewer").map((c) => c.agent)).toEqual(["engineer", "reviewer"]);
+    expect(commandsIn("/engineer\n\n/reviewer").map((c) => c.command.agent)).toEqual(["engineer", "reviewer"]);
   });
 
   test("counts control commands, which are commands too", () => {
-    expect(commandsIn("/engineer\n/stop").map((c) => c.control || c.agent)).toEqual(["engineer", "stop"]);
+    expect(commandsIn("/engineer\n/stop").map((c) => c.command.control || c.command.agent)).toEqual([
+      "engineer",
+      "stop",
+    ]);
   });
 
   // A quoted or otherwise embedded command is not one the machinery would act on, so
   // it is not a second request either.
   test("a command that is prose is not counted", () => {
-    expect(commandsIn("> /engineer\n\n/reviewer").map((c) => c.agent)).toEqual(["reviewer"]);
+    expect(commandsIn("> /engineer\n\n/reviewer").map((c) => c.command.agent)).toEqual(["reviewer"]);
     expect(commandsIn("Comment /reviewer to have it reviewed.")).toEqual([]);
   });
 
-  // The parser reports these and starts nothing, so a second command cannot lose them.
-  test("a malformed command is not counted", () => {
-    expect(commandsIn("/engineer fix the bug\n/reviewer").map((c) => c.agent)).toEqual(["reviewer"]);
+  // The parser stops at the FIRST command line, so a malformed one hides every command
+  // under it: the person is told about the syntax error on that line and never that the
+  // second request was dropped. The line comes back with the error so the guard can say
+  // what was written.
+  test("a malformed command is counted, with its line", () => {
+    const found = commandsIn("/engineer fix the bug\n/reviewer");
+    expect(found.map((c) => c.line)).toEqual(["/engineer fix the bug", "/reviewer"]);
+    expect(found[0]?.command.error).not.toBe("");
+    expect(found[1]?.command.agent).toBe("reviewer");
   });
 
   test("the dispatch marker counts, because it is a request", () => {
-    expect(commandsIn("<!-- atomaton:dispatch=reviewer -->").map((c) => c.agent)).toEqual(["reviewer"]);
+    expect(commandsIn("<!-- atomaton:dispatch=reviewer -->").map((c) => c.command.agent)).toEqual(["reviewer"]);
   });
 
   test("an empty body has none", () => {

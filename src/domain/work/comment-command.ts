@@ -92,6 +92,14 @@ export function parseCommentCommand(body: string): ParsedCommentCommand {
   return NOTHING;
 }
 
+/** One line that reads as a command, with the line itself for telling a person what it was. */
+export interface CommentCommandLine {
+  /** The line as it was written, trimmed. */
+  line: string;
+  /** What the parser makes of it — a command, or the error that stops it. */
+  command: ParsedCommentCommand;
+}
+
 /**
  * Every command a comment asks for, in the order they appear.
  *
@@ -100,18 +108,22 @@ export function parseCommentCommand(body: string): ParsedCommentCommand {
  * guard can refuse a comment that asks for two: the second would be read by nobody, and
  * which one wins is not visible on the page.
  *
+ * A line the parser rejects is counted too. `parseCommentCommand` stops at the FIRST
+ * command line, so a malformed one above a valid one loses the valid one as thoroughly
+ * as a well-formed one above it would — only the error on the first line is reported,
+ * and the person is never told the second request existed. Counting it is what lets the
+ * guard say so.
+ *
  * Strict, like the parser it shares its line reader with — a command is a line that
  * begins with one. A directive quoted inside somebody's prose (`> /engineer`) is not a
  * request the machinery would act on, so it is not a second command here either.
  */
-export function commandsIn(body: string): ParsedCommentCommand[] {
-  const found: ParsedCommentCommand[] = [];
+export function commandsIn(body: string): CommentCommandLine[] {
+  const found: CommentCommandLine[] = [];
   if (!body) return found;
   for (const rawLine of body.split("\n")) {
     const parsed = parseCommandLine(rawLine);
-    // A line the parser rejects (a malformed modifier) starts nothing, so it is not a
-    // command that would be lost to a second one.
-    if (parsed !== undefined && (parsed.agent !== "" || parsed.control !== "")) found.push(parsed);
+    if (parsed !== undefined) found.push({ line: rawLine.trim(), command: parsed });
   }
   return found;
 }

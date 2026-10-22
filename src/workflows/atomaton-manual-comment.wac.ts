@@ -67,7 +67,7 @@ const parseCommandStep = new TypedOutputsStep(
     },
     run: `${scriptCommand(parseCommentCommandRef)}\n`,
   },
-  ["matched", "agent", "control", "session_mode", "error"] as const,
+  ["parsed", "matched", "agent", "control", "session_mode", "error"] as const,
 );
 
 /**
@@ -91,8 +91,13 @@ const guardStep = new TypedOutputsStep(
       NUMBER: githubEvent<IssueCommentCreatedEvent>((e) => e.issue.number),
       COMMENT_ID: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.id),
       COMMENTER: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.user.login),
+      // The parse step's own word that it ran, and the node's state: the two facts the
+      // commands rule (#217) needs to speak only where the machinery would have read the
+      // comment at all. See `guard_comment_during_run.ts`.
+      PARSED: parseCommandStep.outputs.parsed,
+      STATE: githubEvent<IssueCommentCreatedEvent>((e) => e.issue.state),
     },
-    run: `${scriptCommandWithArgs(guardCommentRef, { number: "\${NUMBER}", "comment-id": "\${COMMENT_ID}", commenter: "\${COMMENTER}" })}\n`,
+    run: `${scriptCommandWithArgs(guardCommentRef, { number: "\${NUMBER}", "comment-id": "\${COMMENT_ID}", commenter: "\${COMMENTER}", parsed: "\${PARSED}", state: "\${STATE}" })}\n`,
   },
   ["blocked"] as const,
 );
