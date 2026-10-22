@@ -2131,6 +2131,50 @@ describe("mcp/atomaton.ts", () => {
     }
   });
 
+  /**
+   * #231: a dispatch that refused every task still posted the report on the parent.
+   *
+   * The run's own report is not this call's to post when nothing was dispatched: the
+   * tool refuses, the session stays OPEN, and the agent writes its result comment on
+   * the next turn. Posted here it landed BEFORE that comment, as a summary with no
+   * dispatch line above it, and read as a conclusion the next comment contradicted.
+   */
+  test("launch_sub_agent posts no comment when nothing was dispatched", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-nothing-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 34, method: "tools/call",
+          params: {
+            name: "launch_sub_agent",
+            arguments: {
+              tasks: [{ issue: 7, agent: "engineer" }],
+              summary: "Created #230 as a root issue and started it there.",
+            },
+          },
+        },
+        {
+          ...fakeGhSeam(),
+          NUMBER: "3",
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // #7 is a root issue, so the one task is refused and nothing is dispatched.
+            { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+          ]),
+        },
+      );
+      expect(r.result.isError).toBe(true);
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      // No dispatch, and no comment on the parent: the refusal is the whole outcome.
+      expect(calls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(false);
+      expect(calls.some((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "3")).toBe(false);
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
   /** The converse: a child of SOME OTHER issue is not this one's to dispatch. */
   test("launch_sub_agent refuses an issue that is a child of a different parent", async () => {
     const r = await sendRequest(

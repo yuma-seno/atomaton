@@ -198,7 +198,7 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     }
   }
 
-  // One comment on the PARENT issue, not two.
+  // One comment on the PARENT issue, not two -- and only when something was dispatched.
   //
   // The audit line and the report used to be separate comments: the machine's
   // list of what it dispatched, and the report the run concluded. Two comments
@@ -216,13 +216,19 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
   //
   // Posted even on a partial dispatch: the session stays open there, but a report
   // the agent has already written is not worth discarding for that.
+  //
+  // NOT posted when nothing was dispatched (#231). The tool refuses below and the
+  // session stays open, so the report still reaches the thread -- as the agent's own
+  // result comment on the next turn. Posted here it landed BEFORE that comment, as a
+  // summary with no dispatch line above it, and read as a conclusion the next comment
+  // then contradicted.
   const summary = (args.summary ?? "").trim();
   // The session ends only when every task was dispatched -- see below. Written here
   // because the `waiting` tag means exactly that: the run is over and a child carries
   // it. A partial dispatch keeps the session OPEN, so it is not waiting and must not
   // carry the tag.
   const complete = errors.length === 0;
-  if (parentIssue && (dispatched.length || summary)) {
+  if (parentIssue && dispatched.length) {
     // The ending goes on through `turnHeader`, and only when the session really ends.
     // `launch_sub_agent` ends the session on a COMPLETE dispatch and posts no result
     // comment then, so without `waiting` the node's last event reverts to the `asked`
