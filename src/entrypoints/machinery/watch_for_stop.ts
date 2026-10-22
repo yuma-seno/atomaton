@@ -31,7 +31,7 @@
 import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { STOP_TAG } from "../../adapters/github/tags.ts";
+import { STOP_TAG, isQuotation } from "../../adapters/github/tags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface WatchForStopArgs {
@@ -69,6 +69,11 @@ export interface StopComment {
  */
 export function stopRequested(comments: StopComment[], since: Date): boolean {
   return comments.some((c) => {
+    // The notice quoting a removed comment carries that comment verbatim: a stop tag
+    // inside it is the DELETED author's words, and the notice's own line says the
+    // comment will not be acted on. Acting on the quotation would do exactly that --
+    // stop a run the notice told somebody would keep going. See `isQuotation`.
+    if (isQuotation(c.body ?? "")) return false;
     if (!STOP_TAG.has(c.body ?? "")) return false;
     const at = c.created_at ? Date.parse(c.created_at) : NaN;
     // An unparseable timestamp is not a reason to ignore a stop somebody asked for.

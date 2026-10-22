@@ -28,6 +28,25 @@ const threadAs = (specs: ReadonlyArray<readonly [string, boolean]>) => [
   },
 ];
 
+/**
+ * The one comment the guard reads back before deleting it, as
+ * `gh api repos/.../issues/comments/{id} --jq .body` returns it. `--jq` is in the
+ * match so the rule cannot catch the DELETE to the same id -- the fake's first
+ * matching rule wins, and the DELETE carries no `--jq`.
+ */
+const readBack = (id: number, body: string, code = 0) => ({
+  match: ["api", `issues/comments/${id}`, "--jq"],
+  stdout: body,
+  code,
+});
+
+/** The exact `--body` of the notice the guard posted, or "" when it posted none. */
+const noticeOf = (calls: string[][]): string => {
+  const call = calls.find((c) => c.includes("comment"));
+  if (!call) return "";
+  return call[call.indexOf("--body") + 1] ?? "";
+};
+
 describe("guard_comment_during_run.ts", () => {
   // The window this exists to close: a person asked for an agent, and before the
   // runner started another person commented. The ball is still the agent's.
@@ -47,6 +66,7 @@ describe("guard_comment_during_run.ts", () => {
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
             ...thread("", ["/engineer"]),
+            readBack(123, "my careful note"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
           ],
@@ -54,8 +74,13 @@ describe("guard_comment_during_run.ts", () => {
       );
       expect(r.status).toBe(0);
       expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/123"))).toBe(true);
-      const commentCall = r.ghCalls.find((c) => c.includes("comment"));
-      expect(commentCall?.join(" ")).toContain("@octocat");
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("@octocat");
+      // The text somebody spent time writing is folded into the notice, tagged as a
+      // quotation of the deleted comment. See the tests below for each half.
+      expect(notice).toContain("atomaton:quotes=123");
+      expect(notice).toContain("<details>");
+      expect(notice).toContain("my careful note");
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
@@ -156,6 +181,7 @@ describe("guard_comment_during_run.ts", () => {
               ["/engineer", true],
               ["just a remark", true],
             ]),
+            readBack(101, "just a remark"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
           ],
@@ -206,6 +232,7 @@ describe("guard_comment_during_run.ts", () => {
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
             ...thread("", ["/engineer"]),
+            readBack(123, "my careful note"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
           ],
@@ -237,6 +264,158 @@ describe("guard_comment_during_run.ts", () => {
       );
       expect(r.status).toBe(1);
       expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // The body has to be read back BEFORE the delete: afterwards the id is gone and the
+  // read 404s. The content somebody spent time writing is only retrievable while the
+  // comment still exists.
+  test("reads the comment's body back before deleting it", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer"]),
+            readBack(123, "my careful note"),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      const calls = r.ghCalls.map((c) => c.join(" "));
+      const readAt = calls.findIndex((c) => c.includes("--jq") && c.includes("issues/comments/123"));
+      const deleteAt = calls.findIndex((c) => c.includes("DELETE"));
+      expect(readAt).toBeGreaterThanOrEqual(0);
+      expect(deleteAt).toBeGreaterThan(readAt);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // The quotation is kept verbatim, and a comment that itself carries a code fence —
+  // somebody's own code block, exactly the thing worth preserving — must not close the
+  // fence around it: everything after would leave the block and be read as this
+  // notice's speech. The fence is one run longer than the longest run in the text.
+  test("the preserved body is fenced one longer than any fence inside it", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer"]),
+            readBack(123, "look:\n\n```\nsome code\n```\n\ndone"),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("````");
+      expect(notice).toContain("some code");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // A read-back that failed is said, not papered over: presenting the notice as
+  // complete when the text is gone would be the loss the notice exists to prevent,
+  // wearing a message that claims otherwise. The tag is absent too — nothing was
+  // preserved, so the notice is not a quotation.
+  test("says the text could not be preserved when the read-back fails", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer"]),
+            readBack(123, "", 1),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("could not be read back");
+      expect(notice).not.toContain("<details>");
+      expect(notice).not.toContain("atomaton:quotes=");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // A delete that failed leaves the comment on the page: quoting it in the notice
+  // would be showing it twice. The notice still goes out — it says "could not be
+  // removed", which is the case it names.
+  test("does not quote the body when the deletion failed", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer"]),
+            readBack(123, "my careful note"),
+            { match: ["api", "DELETE"], code: 1 },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("could not be removed");
+      expect(notice).not.toContain("<details>");
+      expect(notice).not.toContain("my careful note");
+      expect(notice).not.toContain("atomaton:quotes=");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  // The ceiling keeps the notice under GitHub's 65,536-character limit on a comment
+  // body, so a very long comment cannot turn the notice itself into the thing that
+  // fails. The cut is said.
+  test("truncates a body over the ceiling, and says so", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer"]),
+            readBack(123, "x".repeat(30_001)),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("longer than 30,000 characters");
+      expect(notice.length).toBeLessThan(65_536);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }

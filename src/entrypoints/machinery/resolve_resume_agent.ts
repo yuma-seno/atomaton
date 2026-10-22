@@ -20,7 +20,7 @@
  */
 import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { gh } from "../../adapters/github/gh.ts";
+import { gh, ghPaginated } from "../../adapters/github/gh.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { mostRecentAgent, mostRecentAgentOn } from "../../adapters/github/agent-on-issue.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -46,19 +46,16 @@ function main(): void {
   }
 
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const { code, stdout, stderr } = gh(
-    "api", `repos/${repo}/issues/${values.number}/comments`, "--paginate", "--jq", "[.[].body]",
-  );
-
+  // `ghPaginated`, not a `JSON.parse` of the whole stdout: with `--paginate`, `gh`
+  // evaluates `--jq` once per page and writes each page's result to the same
+  // stream, so past one page the output is back-to-back arrays and a whole-output
+  // parse throws -- which would read "" here, and "" is "no previous run", the
+  // answer that silently starts nothing.
   let agent = "";
-  if (code === 0) {
-    try {
-      agent = mostRecentAgent(JSON.parse(stdout || "[]") as string[]);
-    } catch {
-      agent = "";
-    }
-  } else {
-    console.error(`Could not read comments on #${values.number}: ${stderr || stdout}`);
+  try {
+    agent = mostRecentAgent(ghPaginated<string>("api", `repos/${repo}/issues/${values.number}/comments`, "--jq", "[.[].body]"));
+  } catch (error) {
+    console.error(`Could not read comments on #${values.number}: ${error instanceof Error ? error.message : error}`);
   }
 
   if (!agent) {

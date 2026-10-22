@@ -6,7 +6,7 @@ import {
   resolveHandoffLimit,
   type ChainComment,
 } from "./dispatch-chain.ts";
-import { AGENT_TAG, CI_RETRY_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, CI_RETRY_TAG, isQuotation, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 
 /**
  * These replace `manage_dispatch_loop.test.ts`, which was green and testing
@@ -38,6 +38,14 @@ const operational = (): ChainComment => ({
 });
 
 const tally = (comments: ChainComment[]): number => handoffsSincePerson(comments, (body) => AGENT_TAG.has(body));
+
+/**
+ * The tally as `manage_dispatch_loop.ts` now composes the reader: quotations are
+ * excluded at the caller, because the raw bodies arrive there and the domain stays a
+ * pure function of what it is handed.
+ */
+const tallyWithQuotations = (comments: ChainComment[]): number =>
+  handoffsSincePerson(comments, (body) => !isQuotation(body) && AGENT_TAG.has(body));
 
 describe("counting agent handoffs since a person last spoke", () => {
   test("an empty issue has no handoffs", () => {
@@ -107,6 +115,33 @@ describe("counting agent handoffs since a person last spoke", () => {
 
   test("a missing body is not an agent comment", () => {
     expect(tally([{ authorType: "Bot" }, agent()])).toBe(1);
+  });
+
+  /**
+   * The guard's notice preserving a removed comment is a bot comment, and the removed
+   * text inside it is VERBATIM -- if that text was an agent's result, it carries the
+   * agent tag. Counting it would read the deleted comment as a handoff the notice's
+   * own line says will not be acted on. The reader the caller composes excludes it.
+   */
+  test("a quotation of an agent result is not a handoff", () => {
+    const notice: ChainComment = {
+      authorType: "Bot",
+      body: [
+        "<!-- atomaton:quotes=9 -->",
+        "@octocat Your comment was removed because the ball is with an agent on this issue/PR.",
+        "<details><summary>Your comment, as you wrote it</summary>",
+        "",
+        "```",
+        AGENT_TAG.write("engineer"),
+        "```",
+        "",
+        "</details>",
+      ].join("\n"),
+    };
+    expect(tallyWithQuotations([agent(), notice])).toBe(1);
+    // And the unquoted equivalent, with the tag the caller's reader would read, is
+    // what the composition exists to exclude.
+    expect(tally([{ authorType: "Bot", body: AGENT_TAG.write("engineer") }, agent()])).toBe(2);
   });
 });
 

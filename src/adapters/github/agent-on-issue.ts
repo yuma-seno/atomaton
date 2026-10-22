@@ -41,8 +41,8 @@
  * modules that read a thread, and the tag format stays in `tags.ts` where it is
  * defined.
  */
-import { gh } from "./gh.ts";
-import { AGENT_TAG } from "./tags.ts";
+import { ghPaginated } from "./gh.ts";
+import { AGENT_TAG, isQuotation } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 
 /**
@@ -81,6 +81,12 @@ import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 export function mostRecentAgent(bodies: readonly string[]): string {
   for (let i = bodies.length - 1; i >= 0; i--) {
     const body = bodies[i] ?? "";
+    // The notice quoting a removed comment carries that comment verbatim: an
+    // `atomaton:agent` tag or a `/agent` line inside it is the DELETED author's
+    // words, not this repository's, and reading it would name the agent the guard
+    // deleted the comment to prevent naming -- which the notice's own line says will
+    // not be acted on. See `isQuotation`.
+    if (isQuotation(body)) continue;
     const result = AGENT_TAG.read(body);
     if (result) return result;
     // `parseCommentCommand` reads both a person's `/agent` command and the
@@ -101,12 +107,13 @@ export function mostRecentAgent(bodies: readonly string[]): string {
  * transient API error into work that never resumes.
  */
 export function mostRecentAgentOn(repo: string, number: number): string {
-  const { code, stdout } = gh(
-    "api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]",
-  );
-  if (code !== 0) return "";
+  // `ghPaginated`, not a `JSON.parse` of the whole stdout: with `--paginate`, `gh`
+  // evaluates `--jq` once per page and writes each page's result to the same
+  // stream, so past one page the output is back-to-back arrays and a whole-output
+  // parse throws -- which would return "" here, and `/resume` reads "" as "nobody
+  // to start", silently skipping the node.
   try {
-    return mostRecentAgent(JSON.parse(stdout || "[]") as string[]);
+    return mostRecentAgent(ghPaginated<string>("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
   } catch {
     return "";
   }

@@ -19,6 +19,12 @@ that looks like from the thread.
 **A comment made while a run is going is deleted.** It would otherwise reach the
 agent mid-turn as though it had been part of the conversation all along, so the
 machinery removes it and tells whoever wrote it to say it again once the run ends.
+The removed text is not lost with the comment: the notice reads it back before the
+delete and folds it in inside a `<details>` block, tagged
+`atomaton:quotes=<comment-id>` as a quotation. The thread reads a quotation as
+somebody else's words rather than as the machinery speaking, so a command line in
+the preserved text cannot name an agent or end the turn — the deletion stays the
+deletion, and what was written stays readable.
 
 `/stop` is the one exemption, and it has to be: its whole meaning is "act on the
 run happening right now", so guarding it would make it unusable exactly when it is

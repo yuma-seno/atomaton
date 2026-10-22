@@ -124,6 +124,21 @@ export interface ThreadEntry {
   body: string;
   /** Whether a person wrote it, rather than the machinery. */
   isHuman: boolean;
+  /**
+   * Whether this body is a quotation of somebody else's words.
+   *
+   * The machinery's notice that preserves a removed person's comment carries the
+   * removed text verbatim inside a `<details>` block (`atomaton:quotes`, read by the
+   * adapter). The words in it are the REMOVED author's, not the machinery's, and
+   * nothing in this fold may take them for the machinery speaking: read as the
+   * machinery's, a `/agent` line in the quoted text would name the next agent and a
+   * tag the quoted text carries would end the turn -- which hands the deleted comment
+   * back the power its deletion existed to take away.
+   *
+   * Read from the tag, and only on a NON-human comment: a person writing the same tag
+   * in their own text is prose about the machinery, and their commands stay theirs.
+   */
+  quoted?: boolean;
 }
 
 /**
@@ -150,13 +165,17 @@ export interface ShapedThread<T extends ThreadEntry = ThreadEntry> {
  * an ending nor a request for one is not an event, and reading it as though it were
  * would hand the node back to a person every time somebody said anything.
  *
- * The ending is read first, because an ending's body may quote a command in its report
- * and the ending is the stronger claim about what the body is. See `TurnReaders`.
+ * A quotation is read BEFORE the ending, and is never one: the quoted text is verbatim,
+ * so if it quotes machinery output it carries the tags machinery output carries, and an
+ * ending read first would take the notice for the turn the quoted text names. The
+ * ending is read next, because an ending's body may quote a command in its report and
+ * the ending is the stronger claim about what the body is. See `TurnReaders`.
  */
-function eventOf(body: string, readers: TurnReaders): TurnEvent | undefined {
-  const ending = readers.ending(body);
+function eventOf(entry: Pick<ThreadEntry, "body" | "quoted">, readers: TurnReaders): TurnEvent | undefined {
+  if (entry.quoted) return undefined;
+  const ending = readers.ending(entry.body);
   if (ending !== "") return ending;
-  if (readers.requestedAgent(body) !== "") return "asked";
+  if (readers.requestedAgent(entry.body) !== "") return "asked";
   return undefined;
 }
 
@@ -170,7 +189,7 @@ function eventOf(body: string, readers: TurnReaders): TurnEvent | undefined {
 export function turnEvents(bodies: readonly string[], readers: TurnReaders): TurnEvent[] {
   const events: TurnEvent[] = [];
   for (const body of bodies) {
-    const event = eventOf(body, readers);
+    const event = eventOf({ body }, readers);
     if (event !== undefined) events.push(event);
   }
   return events;
@@ -258,7 +277,7 @@ export function shapedThread<T extends ThreadEntry>(comments: readonly T[], read
   for (const entry of comments) {
     if (entry.isHuman && whoseTurn(events) === "agent") continue;
     kept.push(entry);
-    const event = eventOf(entry.body, readers);
+    const event = eventOf(entry, readers);
     if (event !== undefined) events.push(event);
   }
   return { comments: kept, events };
@@ -275,12 +294,19 @@ export function shapedThread<T extends ThreadEntry>(comments: readonly T[], read
  * Read from the SHAPED thread, so a comment the guard is removing does not get to name
  * the next agent in the window before it disappears.
  *
+ * Quotations are skipped: the notice preserving a removed comment carries the removed
+ * text verbatim, and reading a `/agent` line out of it would make the deleted comment
+ * name the next agent after all -- the power the guard removed it to take away,
+ * handed back through the message that replaced it.
+ *
  * Returns "" when nothing in the thread asks for an agent.
  */
 export function latestRequestedAgent(body: string, comments: readonly ThreadEntry[], readers: TurnReaders): string {
   const { comments: kept } = shapedThread(comments, readers);
   for (let index = kept.length - 1; index >= 0; index -= 1) {
-    const agent = readers.requestedAgent(kept[index]!.body);
+    const entry = kept[index]!;
+    if (entry.quoted) continue;
+    const agent = readers.requestedAgent(entry.body);
     if (agent !== "") return agent;
   }
   return readers.requestedAgent(body);
@@ -354,6 +380,15 @@ export interface AskReaders extends TurnReaders {
  * would be wrong in a way dispatching nobody is not. Undefined is the caller's cue
  * to route by the standing request, which is the behaviour that predated this fold.
  *
+ * ## Why quotations are skipped
+ *
+ * The notice preserving a removed person's comment carries the removed text verbatim,
+ * and its words are the removed author's -- but the notice itself is the machinery
+ * PRESERVING a comment, not making an ask, and the machinery already told the author
+ * the comment would not be acted on. Stepped over, the walk finds the ask underneath:
+ * the one the removed comment raced. A quotation is an entry like any other here, and
+ * never the ask the walk returns.
+ *
  * Entries may carry `at` (the comment's creation time). The ask reports it, so the
  * caller can tell an ask the push postdates from one it predates; an entry without
  * one yields an ask with `at: ""`, which the caller must treat as unreadable.
@@ -366,6 +401,7 @@ export function latestAsk<T extends ThreadEntry & { at?: string }>(
   const { comments: kept } = shapedThread(comments, readers);
   for (let index = kept.length - 1; index >= 0; index -= 1) {
     const entry = kept[index]!;
+    if (entry.quoted) continue;
     const agent = readers.requestedAgent(entry.body);
     if (agent === "") continue;
     if (readers.isDispatchMarker(entry.body)) continue;
