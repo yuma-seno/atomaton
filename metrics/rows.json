@@ -8046,23 +8046,23 @@
   {
     "path": "sessions/issue-285/atomaton.json",
     "agent": "atomaton",
-    "messages": 88,
-    "calls": 49,
+    "messages": 120,
+    "calls": 64,
     "failed": 0,
-    "refused": 0,
+    "refused": 1,
     "skills": [
       "project/conventions"
     ],
     "reported": false,
     "tools": {
-      "bash": 9,
+      "bash": 11,
       "list": 1,
-      "grep": 2,
-      "read": 36,
+      "grep": 3,
+      "read": 48,
       "atoma_builtin__load_skill": 1
     },
     "acts": {
-      "other": 9
+      "other": 11
     },
     "runs": [
       {
@@ -8082,6 +8082,23 @@
           }
         },
         "started": "2026-10-22T15:51:27Z"
+      },
+      {
+        "ended": "2026-10-22T17:36:15Z",
+        "ended_because": "failed",
+        "iterations": 11,
+        "messages": 120,
+        "seconds": 2052,
+        "server_calls": {
+          "files": {
+            "grep": 1,
+            "read": 12
+          },
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-10-22T17:02:03Z"
       }
     ]
   },
