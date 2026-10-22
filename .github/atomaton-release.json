@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.22",
+  "version": "v0.21.26",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -33,6 +33,7 @@
     ".github/atomaton-runtime/scripts/read_run_ending.ts",
     ".github/atomaton-runtime/scripts/read_secret_names.ts",
     ".github/atomaton-runtime/scripts/reconcile_github_session.ts",
+    ".github/atomaton-runtime/scripts/reconcile_run_ending.ts",
     ".github/atomaton-runtime/scripts/record_run_metadata.ts",
     ".github/atomaton-runtime/scripts/redact_stream.ts",
     ".github/atomaton-runtime/scripts/report_config_findings.ts",
@@ -100,6 +101,7 @@
     ".github/workflows/atomaton-entry.yml",
     ".github/workflows/atomaton-manual-comment.yml",
     ".github/workflows/atomaton-pr-closed.yml",
+    ".github/workflows/atomaton-run-watch.yml",
     ".github/workflows/atomaton-runner.yml",
     ".github/workflows/atomaton-sub-issue-closed.yml",
     ".github/workflows/atomaton-validate-pr.yml"

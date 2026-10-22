@@ -79,6 +79,9 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
+function isQuotation(body) {
+  return QUOTES_TAG.has(body);
+}
 
 // src/domain/delivery/merge-readiness.ts
 var CI_WOULD_BE_WASTED = new Set([
@@ -263,6 +266,7 @@ var askReaders = {
   requestedAgent: (body) => parseMangledCommand(body).agent,
   authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
 };
+var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
 // src/adapters/github/branch-placement.ts
 var NO_BRANCH_MESSAGE = "This run is on a detached checkout with no local branch, so there is no branch to push: " + "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 

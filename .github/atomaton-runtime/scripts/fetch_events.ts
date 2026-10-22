@@ -185,6 +185,9 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
+function isQuotation(body) {
+  return QUOTES_TAG.has(body);
+}
 function withoutTags(text) {
   const tags = EVERY_TAG_PATTERN.join("|");
   const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;
@@ -317,6 +320,7 @@ var askReaders = {
   requestedAgent: (body) => parseMangledCommand(body).agent,
   authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
 };
+var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }

@@ -11,6 +11,7 @@
 # Upstream: https://github.com/yuma-seno/atomaton
 
 name: Atomaton Manual Comment
+run-name: ${{ github.event.issue.pull_request == null && format('#{0}', github.event.issue.number) || 'Atomaton Manual Comment' }}
 'on':
   issue_comment:
     types:
@@ -141,16 +142,6 @@ jobs:
           gh issue comment "${NUMBER}" --body "<!-- atomaton:llm-context=exclude -->
           Atomaton command error: ${ERROR}"
         if: steps.command.outputs.error != ''
-      - name: Say the run is waiting for CI
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NUMBER: ${{ steps.target.outputs.number }}
-          AGENT: ${{ steps.dispatch.outputs.agent }}
-        run: |
-          gh issue comment "$NUMBER" --body "<!-- atomaton:llm-context=exclude -->
-          Atomaton: \`${AGENT}\` will start once CI finishes on this pull request."
-        if: steps.dispatch.outputs.agent != '' && steps.target.outputs.type == 'pr' && steps.guard.outputs.blocked != 'true' && steps.closed-guard.outputs.blocked != 'true'
       - name: Hand the pull request to validation, which waits for CI
         shell: bash
         env:

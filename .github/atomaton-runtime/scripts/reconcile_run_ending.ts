@@ -1,0 +1,609 @@
+#!/usr/bin/env bun
+// @bun
+
+// src/entrypoints/machinery/reconcile_run_ending.ts
+import { parseArgs } from "util";
+
+// src/adapters/github/gh.ts
+function run(cmd) {
+  const proc = Bun.spawnSync({
+    cmd,
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : ""
+  };
+}
+function ghCommand() {
+  const fake = (process.env.ATOMATON_FAKE_GH ?? "").trim();
+  return fake ? [process.execPath, fake] : ["gh"];
+}
+function gh(...args) {
+  return run([...ghCommand(), ...args]);
+}
+function ghRead(...args) {
+  let result = gh(...args);
+  for (const delay of [2000, 6000]) {
+    if (result.code === 0 || !looksTransient(result))
+      return result;
+    console.error(`::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`);
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+function looksTransient(result) {
+  const text = `${result.stderr} ${result.stdout}`;
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
+    return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
+function splitConcatenatedJson(text) {
+  const results = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped)
+        escaped = false;
+      else if (c === "\\")
+        escaped = true;
+      else if (c === '"')
+        inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === "{" || c === "[") {
+      if (depth === 0)
+        start = i;
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        results.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
+function ghPaginated(...args) {
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code !== 0) {
+    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
+  }
+  if (!stdout.trim())
+    return [];
+  const flat = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
+
+// src/domain/work/agent-name.ts
+var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
+var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
+
+// src/domain/work/mention.ts
+var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+
+// src/adapters/github/tags.ts
+var TAG_PREFIX = `atomaton:`;
+var EVERY_TAG_PATTERN = [];
+function makeTag(key, valuePattern, parse, render) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read: (text) => {
+      const m = re.exec(text);
+      return m ? parse(m[1]) : undefined;
+    },
+    has: (text) => re.test(text),
+    search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
+  };
+}
+function numericTag(key) {
+  return makeTag(key, "\\d+", Number, String);
+}
+function stringTag(key, valuePattern) {
+  return makeTag(key, valuePattern, (raw) => raw, (value) => value);
+}
+var STOP_TAG = stringTag("stop", "requested");
+var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var PARENT_ISSUE_TAG = numericTag("parent-issue");
+var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
+var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
+var DISPATCH_TAG = stringTag("dispatch", AGENT_NAME_PATTERN);
+var AGENT_TAG = stringTag("agent", AGENT_NAME_PATTERN);
+var CHANGED_TAG = stringTag("changed", "yes|no");
+var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
+var AGGREGATED_TAG = numericTag("aggregated");
+var SUB_RESULT_TAG = numericTag("sub-result");
+var CI_RETRY_TAG = numericTag("ci-retry");
+var QUOTES_TAG = numericTag("quotes");
+function isQuotation(body) {
+  return QUOTES_TAG.has(body);
+}
+
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+function recoveryLines(agent) {
+  return [
+    `- Continue: comment \`/${agent}\` and put what to do next on the following lines.`,
+    `- Start clean: comment \`/${agent} recover\`, which archives this session and rebuilds`,
+    "  it from the issue."
+  ];
+}
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const line = rawLine.trim();
+    const commandMatch = COMMAND_RE.exec(line);
+    if (commandMatch) {
+      const name = commandMatch[1];
+      const modifier = commandMatch[2]?.trim() ?? "";
+      if (isControlCommand(name)) {
+        if (!modifier)
+          return { ...NOTHING, control: name };
+        return {
+          ...NOTHING,
+          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+        };
+      }
+      if (!modifier)
+        return { ...NOTHING, agent: name };
+      if (modifier === "recover")
+        return { ...NOTHING, agent: name, sessionMode: "recover" };
+      return {
+        ...NOTHING,
+        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+      };
+    }
+    const dispatchMatch = DISPATCH_RE.exec(line);
+    if (dispatchMatch)
+      return { ...NOTHING, agent: dispatchMatch[1] };
+  }
+  return NOTHING;
+}
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function parseMangledCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "")
+        return parsed;
+    }
+  }
+  return NOTHING;
+}
+
+// src/adapters/github/agent-on-issue.ts
+function mostRecentAgent(bodies) {
+  for (let i = bodies.length - 1;i >= 0; i--) {
+    const body = bodies[i] ?? "";
+    if (isQuotation(body))
+      continue;
+    const result = AGENT_TAG.read(body);
+    if (result)
+      return result;
+    const asked = parseCommentCommand(body).agent;
+    if (asked)
+      return asked;
+  }
+  return "";
+}
+function mostRecentAgentOn(repo, number) {
+  try {
+    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+  } catch {
+    return "";
+  }
+}
+
+// src/adapters/runner/config.ts
+import { readFileSync } from "fs";
+
+// src/domain/delivery/merge-readiness.ts
+var CI_WOULD_BE_WASTED = new Set([
+  "not-open",
+  "draft",
+  "conflicting",
+  "behind",
+  "mergeability-unknown",
+  "checks-pending",
+  "checks-failing"
+]);
+var PASSING = new Set(["success", "neutral", "skipped"]);
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${USER_ROOT}/delegates`;
+var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
+
+// src/domain/delivery/declared-secrets.ts
+var RUN_CREDENTIALS = [
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "ORCAROUTER_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "ATOMA_COPILOT_TOKEN",
+  "GH_TOKEN"
+];
+var AGENT_ENV_NAMES = [
+  "HOME",
+  "PATH",
+  "AGENT",
+  MACHINERY_ROOT_VAR,
+  "GITHUB_REPOSITORY",
+  "BRANCH",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
+  "ATOMATON_RELOAD_COUNT",
+  "ATOMATON_OPS_LOG",
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
+  "ATOMATON_DISPATCHED_BY",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "BUN_INSTALL_CACHE_DIR",
+  "npm_config_cache",
+  "PIP_CACHE_DIR",
+  "CARGO_HOME",
+  "OPENAI_BASE_URL",
+  "ATOMA_PROVIDER"
+];
+var RUN_STEP_NAMES = [
+  "GITHUB_RUN_ID",
+  "OPENROUTER_BASE_URL",
+  "ORCAROUTER_BASE_URL",
+  "ANTHROPIC_BASE_URL",
+  "COPILOT_BASE_URL",
+  "ATOMA_PROVIDER_IN",
+  "OPENAI_BASE_URL_IN"
+];
+var TOOL_SECRETS = {
+  field: "tools.secrets",
+  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
+};
+var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
+
+// src/domain/delivery/check-jobs.ts
+var CHECKS_FROM_PULL_REQUEST = {
+  where: "checks.from_pull_request",
+  secrets: {
+    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
+  }
+};
+var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
+
+// src/adapters/runner/machinery.ts
+function machineryRoot() {
+  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
+}
+function machineryPath(relative) {
+  const root = machineryRoot();
+  return root ? `${root}/${relative}` : relative;
+}
+
+// src/adapters/runner/config.ts
+function configPath() {
+  return machineryPath(CONFIG_FILE);
+}
+var cached;
+function loadConfig() {
+  if (!cached) {
+    cached = Bun.YAML.parse(readFileSync(configPath(), "utf8"));
+  }
+  return cached;
+}
+var DEFAULT_LABELS = {
+  sub_issue: "atomaton/sub-issue",
+  launched: "atomaton/launched",
+  in_progress: "atomaton/in-progress"
+};
+function getLabel(key) {
+  return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
+}
+
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
+// src/domain/work/thread.ts
+function eventOf(entry, readers) {
+  if (entry.quoted)
+    return;
+  const ending = readers.ending(entry.body);
+  if (ending !== "")
+    return ending;
+  if (readers.requestedAgent(entry.body) !== "")
+    return "asked";
+  return;
+}
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" ? "agent" : "person";
+}
+function requestOutstanding(events) {
+  return events[events.length - 1] === "asked";
+}
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  for (const entry of comments) {
+    if (entry.isHuman && whoseTurn(events) === "agent")
+      continue;
+    kept.push(entry);
+    const event = eventOf(entry, readers);
+    if (event !== undefined)
+      events.push(event);
+  }
+  return { comments: kept, events };
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  ending: (body) => {
+    const ended = ENDED_TAG.read(body);
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done")
+      return "returned";
+    return "";
+  },
+  requestedAgent: (body) => parseCommentCommand(body).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
+};
+var askReaders = {
+  ...readers,
+  requestedAgent: (body) => parseMangledCommand(body).agent,
+  authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
+};
+var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
+function isHumanComment(comment) {
+  return isHumanActor(comment.user?.type);
+}
+function entryOf(comment) {
+  const isHuman = isHumanComment(comment);
+  const body = comment.body ?? "";
+  return {
+    body,
+    isHuman,
+    quoted: !isHuman && QUOTES_TAG.has(body),
+    at: comment.created_at
+  };
+}
+function readRunWatchThread(repo, number) {
+  const listed = ghPaginated("api", `repos/${repo}/issues/${number}/comments`);
+  const entries = listed.map((comment) => ({
+    ...entryOf(comment),
+    createdAt: comment.created_at ?? ""
+  }));
+  return {
+    dated: entries.map((entry) => ({ body: entry.body, createdAt: entry.createdAt })),
+    entries,
+    events: shapedThread(entries, readers).events
+  };
+}
+
+// src/adapters/github/turn-comment.ts
+function turnHeader(h) {
+  const context = h.audience === "model" ? "include" : "exclude";
+  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+}
+
+// src/domain/work/run-report.ts
+function parseRunTitle(displayTitle) {
+  const match = /^(?:(\S+) on )?#(\d+)$/.exec((displayTitle ?? "").trim());
+  if (!match)
+    return;
+  const number = Number(match[2]);
+  if (!Number.isInteger(number) || number <= 0)
+    return;
+  return { agent: match[1], number };
+}
+function lastEndingComment(comments, readers) {
+  for (let index = comments.length - 1;index >= 0; index -= 1) {
+    const comment = comments[index];
+    if (readers.quoted(comment.body))
+      continue;
+    if (readers.ending(comment.body) !== "")
+      return comment;
+  }
+  return;
+}
+function needsEnding(comments, runStartedAt, readers) {
+  const last = lastEndingComment(comments, readers);
+  if (last === undefined)
+    return true;
+  const endedAt = Date.parse(last.createdAt);
+  if (Number.isNaN(endedAt))
+    return true;
+  const startedAt = Date.parse(runStartedAt ?? "");
+  if (Number.isNaN(startedAt))
+    return true;
+  return endedAt < startedAt;
+}
+function tookTurn(comments, runStartedAt, readers) {
+  const { comments: kept } = shapedThread(comments, readers);
+  for (let index = kept.length - 1;index >= 0; index -= 1) {
+    const entry = kept[index];
+    if (entry.quoted)
+      continue;
+    if (readers.requestedAgent(entry.body) === "")
+      continue;
+    if (entry.isHuman)
+      return true;
+    const at = Date.parse(entry.createdAt);
+    const start = Date.parse(runStartedAt ?? "");
+    return !Number.isNaN(at) && !Number.isNaN(start) && at >= start;
+  }
+  return false;
+}
+function releasesLabel(lastEnding, readers) {
+  if (lastEnding === undefined)
+    return false;
+  const event = readers.ending(lastEnding.body);
+  if (event === "")
+    return false;
+  return whoseTurn([event]) === "person";
+}
+
+// src/entrypoints/machinery/lib/script-ref.ts
+import { basename } from "path";
+import { fileURLToPath } from "url";
+function defineScript(importMetaUrl) {
+  return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
+}
+
+// src/entrypoints/machinery/reconcile_run_ending.ts
+var ref = defineScript(import.meta.url);
+function missingEndingNotice(agent, runUrl) {
+  const lines = [
+    ...turnHeader({ ended: "done", audience: "person" }),
+    `Atomaton: \`${agent}\`'s run ended without posting its result. It was cancelled, lost its runner, timed out, or finished without reporting one.`,
+    "",
+    "Nothing was decided by that run: whatever it reached \u2014 commits, pull requests,",
+    "saved history \u2014 is whatever reached GitHub before it stopped. Its log:",
+    runUrl,
+    "",
+    ...recoveryLines(agent)
+  ];
+  return lines.join(`
+`);
+}
+function hasLabel(repo, number, label) {
+  const read = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", "[.labels[].name]");
+  if (read.code !== 0) {
+    console.error(`Warning: could not read #${number}'s labels, so the stale label is not touched: ${read.stderr || read.stdout}`);
+    return false;
+  }
+  try {
+    return JSON.parse(read.stdout || "[]").includes(label);
+  } catch {
+    console.error(`Warning: #${number}'s labels were not readable as a list, so the stale label is not touched`);
+    return false;
+  }
+}
+function main() {
+  const { values } = parseArgs({
+    args: Bun.argv.slice(2),
+    options: {
+      "display-title": { type: "string" },
+      "run-started-at": { type: "string" },
+      "run-url": { type: "string" },
+      conclusion: { type: "string" }
+    }
+  });
+  const repo = process.env.GITHUB_REPOSITORY ?? "";
+  if ((values.conclusion ?? "") === "skipped") {
+    console.error("reconcile_run_ending: the run was skipped before it started; nothing to reconcile");
+    return;
+  }
+  const title = parseRunTitle(values["display-title"]);
+  if (title === undefined) {
+    console.error(`reconcile_run_ending: title "${values["display-title"] ?? ""}" names no node; nothing to do`);
+    return;
+  }
+  const { agent: titledAgent, number } = title;
+  let thread;
+  try {
+    thread = readRunWatchThread(repo, number);
+  } catch (error) {
+    console.error(`::error::reconcile_run_ending: could not read the thread on #${number}: ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+  const endingMissing = titledAgent !== undefined ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders) : requestOutstanding(thread.events) && tookTurn(thread.entries, values["run-started-at"], readers);
+  if (!endingMissing) {
+    console.error(`reconcile_run_ending: the run on #${number} owes no ending; nothing to do`);
+    return;
+  }
+  const agent = titledAgent ?? (mostRecentAgentOn(repo, number) || "atomaton");
+  const body = missingEndingNotice(agent, values["run-url"] ?? "");
+  const posted = gh("issue", "comment", String(number), "--repo", repo, "--body", body);
+  if (posted.code !== 0) {
+    console.error(`::error::reconcile_run_ending: could not post the notice on #${number}: ${posted.stderr || posted.stdout}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.error(`reconcile_run_ending: posted the missing-ending notice on #${number}`);
+  const label = getLabel("in_progress");
+  if (!hasLabel(repo, number, label))
+    return;
+  if (!releasesLabel(lastEndingComment(thread.dated, endingWalkReaders), endingWalkReaders)) {
+    console.error(`reconcile_run_ending: '${label}' stays on #${number}; the thread's last ending keeps the turn with an agent`);
+    return;
+  }
+  const removed = gh("issue", "edit", String(number), "--repo", repo, "--remove-label", label);
+  if (removed.code !== 0) {
+    console.error(`Warning: could not remove '${label}' from #${number}: ${removed.stderr || removed.stdout}`);
+  }
+}
+if (import.meta.main)
+  main();
+export {
+  missingEndingNotice,
+  ref
+};
