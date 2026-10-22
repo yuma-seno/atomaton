@@ -41,6 +41,7 @@ import {
   latestAsk,
   latestRequestedAgent,
   newestEventBody,
+  newestEventEntry,
   requestOutstanding,
   shapedThread,
   wasLaunched,
@@ -426,6 +427,16 @@ export interface LastTurnRead {
    * verdict whose comment names nobody.
    */
   lastAgent: string | undefined;
+  /**
+   * Whether the newest event was written by the machinery rather than a person.
+   *
+   * `asked` is the event this matters for, and it is two situations wearing one name:
+   * a person's command — a request nothing has taken up yet, which on a pull request
+   * reached validation instead of a runner, so an answers-request dispatch is the only
+   * thing that turns it into a run — and a dispatch marker, which IS the machinery
+   * starting that run. Only the second means a run is already coming.
+   */
+  lastIsMachinery: boolean;
 }
 
 /**
@@ -451,13 +462,16 @@ export function readLastTurnEvent(
   const shaped = shapedThread(entries, readers);
   const last = shaped.events[shaped.events.length - 1];
   const probe = probeId === undefined ? undefined : String(probeId);
+  const source = newestEventEntry(entries, readers);
   return {
     probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
     last,
-    // Only a `returned` verdict is attributed: `asked` is refused without asking who
-    // made it, and the other events name no agent to attribute.
+    // Only a `returned` verdict is attributed to an agent: the other events name no
+    // agent in their body. Whether the newest event was the machinery's own write is
+    // asked of `asked` alone, but read here from the same walk.
     lastAgent:
       last === "returned" ? AGENT_TAG.read(newestEventBody(entries, readers) ?? "") : undefined,
+    lastIsMachinery: source !== undefined && !source.isHuman,
   };
 }
 

@@ -437,9 +437,22 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
  *     owed. It goes.
  *   - `handed-off` — the caller just wrote its own handoff and is dispatching the
  *     agent it named (the reload). It goes.
- *   - `asked` — a request stands untaken, so a run is queued or in flight on this
- *     node already. A second dispatch would be a second run on one node — the same
- *     answer the outstanding-request check gives a dispatch that posts a marker.
+ *   - `asked` — a request stands untaken, and who made it decides, because `asked`
+ *     is two situations wearing one event:
+ *
+ *       - The machinery's dispatch marker — the run it starts is on its way. A second
+ *         dispatch would be a second run on one node, the same answer the
+ *         outstanding-request check gives a dispatch that posts a marker. Refused.
+ *       - A person's command — the request this dispatch exists to answer. On a pull
+ *         request that command reached validation, not a runner, so nothing else turns
+ *         it into a run: refusing it is what dropped every `/reviewer` a person typed
+ *         on a pull request, and the review the person asked for never started. It goes.
+ *
+ *     The residue is a second validation that starts while the first dispatch's run is
+ *     still going: no marker was written, so the thread still shows the person's ask.
+ *     `atomaton-validate-<number>` cancels overlapping validations, so the window needs
+ *     a push or an edit mid-review; #285's `took` claim (written by the runner at
+ *     start) is what closes it exactly.
  *   - no events at all — nothing in the thread has moved since the node was opened.
  *     There is no evidence the wait resolved, and the request this fulfils is the
  *     body's own line, which `requestOutstandingOn` does not read for exactly this
@@ -521,6 +534,16 @@ function refuseResolvedWait(d: RunnerDispatch): "superseded" | undefined {
 
   const last = read.last;
   if (last === undefined || last === "waiting" || last === "handed-off") return undefined;
+  if (last === "asked") {
+    // A person's command is the request this dispatch answers; the machinery's marker
+    // means the run it announces is already coming. See the rule above.
+    if (!read.lastIsMachinery) return undefined;
+    log(
+      `${d.context}: #${d.number} already has the machinery's dispatch marker on it, ` +
+        `so ${d.agent} was not started`,
+    );
+    return "superseded";
+  }
   if (last === "returned") {
     // A `returned` verdict is two facts wearing one event. Another agent's return is
     // the fix cycle this dispatch exists to answer; the dispatched agent's own return
