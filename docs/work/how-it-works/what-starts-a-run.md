@@ -55,7 +55,9 @@ These listen for a person's action:
 
 - `atomaton-entry.yml` for `issues.opened`
 - `atomaton-manual-comment.yml` for `issue_comment.created`
-- `atomaton-pr-merged.yml` for merged pull request aggregation
+- `atomaton-pr-closed.yml` for what a pull request's close means — a merge
+  aggregates the parent, a close without one is returned to the issue's agent
+  as a rejection, the repository's own pull requests only
 - `atomaton-sub-issue-closed.yml` for the manual sub-issue close fallback
 
 This one is dispatched rather than triggered:

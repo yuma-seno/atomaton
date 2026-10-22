@@ -20,6 +20,14 @@
  * | `dispatchPostMergeAgent` | `pull_request.closed`, when an agent did the merging |
  * | `dispatchRunner` (`dispatch.ts`) | every hand-off from one agent to the next |
  *
+ * One entry is here without being a stand-in: `dispatchRejectedPrAgent`
+ * accompanies an event that DID fire -- a person closing a pull request without
+ * merging (#267) -- and hands the close to the origin agent as a rejection. It
+ * is listed because the table's job is that a reader asking "who starts runs
+ * from here" sees every bridge in one place, not only the suppressed ones; the
+ * same table already carries `dispatchPostMergeAgent`, whose workflow caller
+ * reacts to an event that fired too.
+ *
  * This header said "All four" while there were five, and three more had been
  * written outside it — two of those in a workflow's own bash, so they ran without
  * `dispatchRunner`'s closed-target guard and wrote no ops-log entry, which is the
@@ -155,6 +163,89 @@ export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent:
       // would log `dispatch-elsewhere` — and the merged pull request's result comment
       // would then claim no agent will run next while one has just been started. See
       // `RunnerDispatch.continuesChain`.
+      continuesChain: true,
+      log,
+    }) === "dispatched"
+  );
+}
+
+/**
+ * After a pull request is closed WITHOUT merging, return the close to the agent
+ * that opened it, as a rejection.
+ *
+ * The event behind this is a person's (an agent's own actions raise no events),
+ * and it used to start nothing: every job listening for a close was gated on
+ * `merged == true`, so a rejected pull request left its branch behind, its
+ * issue open, and nobody told (#267). Whether the close means "rejected" or
+ * "shipped some other way" is a judgement, so the machine does not make it --
+ * it returns the close to the origin agent, the way a merge returns the merged
+ * diff. See `decideRejectionHandoff` for the two cases that return nothing.
+ *
+ * The agent is named by the `atomaton:origin-agent` tag the pull request body
+ * carries, on the issue the pull request delivers. The CALLER gates who gets
+ * this far — the workflow's `dispatch-rejected` job tests that the pull
+ * request's head branch is this repository's, beside `merged == false`, so an
+ * outside contribution's close never reaches this function however its body is
+ * written; this function sees only the tags. Returns whether the dispatch was
+ * sent. There is NO fallback on this side, unlike the merge route's aggregate
+ * job: if this does not dispatch, the close has gone unjudged, which is the
+ * exact defect #267 exists to remove -- so the caller fails its job and the
+ * silence is at least red.
+ *
+ * ## The comment asks for a judgement, not for a resumption
+ *
+ * Like `dispatchPostMergeAgent`'s comment, this is the first user message the
+ * re-invoked agent reads, so it carries the situation and not the answer: the
+ * machine does not know whether the person closing the pull request meant
+ * "rejected" or "already shipped elsewhere". The agent decides -- conclude the
+ * issue when the close settled it, carry on from where the pull request left
+ * off when the work is still needed.
+ *
+ * And like the merge route, the comment is half of a pair that moves together:
+ * `prompt-template.md`'s "After a pull request you opened was closed without
+ * merging" paragraph is the other half. Either half alone leaves the re-invoked
+ * agent with a rule the prompt contradicts or never mentions -- there, that a
+ * merged pull request is not evidence of satisfied criteria; here, that a
+ * rejected one leaves the branch alive and the decision open.
+ *
+ * ## Why a failed directive post dispatches nothing
+ *
+ * The comment is what tells the agent why it was woken. Dispatching without it
+ * starts a run that reads a closed pull request and a normal-looking issue and
+ * has to guess at the reason -- worse than not waking anybody, because a wrong
+ * guess is invisible. So a failed post is a failed hand-off, and the caller
+ * treats it like any outcome but "dispatched".
+ */
+export function dispatchRejectedPrAgent(repo: string, issueNumber: number, agent: string, prNumber: number): boolean {
+  const notify = resolveNotify(repo, issueNumber);
+  // Tagged `include`, like `dispatchPostMergeAgent`'s: this is the first user
+  // message the re-invoked agent reads, and the one comment here that MUST
+  // reach the model -- the opposite decision from the notices addressed to a
+  // person.
+  const { code, stdout, stderr } = gh(
+    "issue", "comment", String(issueNumber), "--repo", repo,
+    "--body",
+    `${LLM_CONTEXT_TAG.write("include")}\n` +
+      `Atomaton: pull request #${prNumber} for this issue was closed without merging. Nobody has decided ` +
+      "whether what this issue asked for is settled by that. Decide which acceptance criteria the closed " +
+      "pull request met; conclude the issue when closing it settled them, and carry on from where the " +
+      "pull request left off when the work is still needed.",
+  );
+  if (code) {
+    log(`dispatchRejectedPrAgent: could not post rejection comment on #${issueNumber}: ${stderr || stdout}`);
+    return false;
+  }
+  return (
+    dispatchRunner({
+      context: `pull request #${prNumber} for #${issueNumber} was closed without merging, so ${agent} was to judge whether the issue is settled`,
+      agent,
+      type: "issue",
+      number: issueNumber,
+      notify,
+      repo,
+      // Same reason as the post-merge restart: the run that closed the pull
+      // request is over, the run this wakes sits on the issue, and the dispatch
+      // is the close's own outcome. See `RunnerDispatch.continuesChain`.
       continuesChain: true,
       log,
     }) === "dispatched"

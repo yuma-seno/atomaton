@@ -9,7 +9,7 @@
  * names the `atomaton:origin-agent` tagged in the pull request body, and
  * `dispatchPostMergeAgent` re-invokes it. But a merge made by a PERSON — the only
  * route under `merge.policy: manual`, and always available — goes through
- * `atomaton-pr-merged.wac.ts` instead, and that workflow only aggregated the parent.
+ * `atomaton-pr-closed.wac.ts` instead, and that workflow only aggregated the parent.
  *
  * So a sub-issue's pull request merged by hand skipped the judgement entirely: the
  * parent was aggregated while the sub-issue was still open, on the belief that a
