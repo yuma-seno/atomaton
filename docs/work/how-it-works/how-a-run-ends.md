@@ -53,6 +53,41 @@ keeps removing what a person writes next, and it suppresses the dispatch as well
 no run arrives to heal the thread. Comments that keep vanishing with no run behind
 them are this shape.
 
+**The run watch is the outside check for exactly this.** When a run completes,
+`Atomaton Run Watch` reads the node's thread and asks whether an ending comment
+was written at or after that run started. A run that reported has one — the two
+above are steps of the run itself, which finished before the watch could ever
+look — so the watch stays silent. A run that never got to write one gets a
+notice: the turn-ending header that puts the node back with a person, the fact
+that nothing was decided, the run's link, and the two ways forward. The watch
+also removes the `atomaton/in-progress` label the dead run left, by the same
+turn rule the runner itself applies. It cannot double-post: the watched run's
+completion fires only after its own steps are done, so a report that landed at
+all landed first.
+
+The watch triggers on three workflows: `Atomaton Runner` itself — the
+continuations a chain dispatches — and `Atomaton Entry` and `Atomaton Manual
+Comment`, because GitHub records no run for a **called** workflow: those two
+execute the runner as a reusable workflow, so the first run of every chain —
+the one a person's command or a new issue starts — exists only as its caller's
+run. Most entry runs dispatch nothing (an ordinary remark, a comment the guard
+removed), so the watch posts on one only when the thread is stuck at an ask AND
+that ask is that run's doing — a dispatch marker posted inside it, or the
+person's own command. A run that completed without taking the turn leaves the
+thread as it was, and the watch has nothing to say.
+
+The watch reads which node a run worked on out of the run's title. The runner
+writes `run-name: "agent on #N"`; the two entry workflows write `#N` alone,
+because `run-name` is evaluated before any job runs and the agent is a route's
+decision — the notice reads the agent off the thread. One exception: a
+manual-comment run for a comment on a **pull request** keeps the workflow's own
+name, because `issue_comment` fires on pull requests too and a PR command
+dispatches validation rather than calling the runner — that run takes no turn,
+and a `#N` title there would draw a false notice while validation and the
+runner were still to come. The PR chain is watched through the runner run that
+validation eventually starts, whose title carries the agent. Titles matching
+neither shape — runs from before this existed — are left alone.
+
 The restore is the same for every kind of death: **re-run the failed run**.
 "Re-run failed jobs" from the run's page, or by hand:
 
@@ -61,4 +96,9 @@ gh workflow run atomaton-runner.yml -f number=N -f agent=X -f type=issue
 ```
 
 The job runs again from the saved session and writes the ending it owed — and once
-the ending is on the thread, comments go through again.
+the ending is on the thread, comments go through again. The watch is what makes
+the thread survivable in the meantime; only the re-run makes the work continue.
+Three deaths it cannot cover, because nothing outside GitHub can: GitHub itself
+down (nobody can write anything), a run queued forever (its completion never
+fires), and a deleted node (nowhere to post). There the red run is the only
+signal, and re-running it is the recovery.

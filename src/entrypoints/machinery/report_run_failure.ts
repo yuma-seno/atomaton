@@ -60,6 +60,7 @@ import { gh } from "../../adapters/github/gh.ts";
 import { redact } from "../../shared/redaction.ts";
 import { turnHeader } from "../../adapters/github/turn-comment.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
+import { recoveryLines } from "../../domain/work/comment-command.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ReportRunFailureArgs {
@@ -134,9 +135,10 @@ export function failureNotice(
     "",
     "**The session was saved.** What this run worked out is still there.",
     "",
-    `- Continue: comment \`/${agent}\` and put what to do next on the following lines.`,
-    `- Start clean: comment \`/${agent} recover\`, which archives this session and rebuilds`,
-    "  it from the issue.",
+    // The two ways forward, worded beside the one definition of the command syntax
+    // they spell -- shared with the run watch's notice, which says them for a run
+    // that never got far enough to report anything at all.
+    ...recoveryLines(agent),
     "",
     `Workflow logs: ${runUrl}`,
   ];
