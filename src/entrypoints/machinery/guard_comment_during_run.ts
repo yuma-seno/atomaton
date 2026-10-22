@@ -11,6 +11,22 @@
  * than as its own speech. No-ops quietly (leaves the comment alone) when the ball is
  * with a person.
  *
+ * ## The second rule: one command per comment (#217)
+ *
+ * A comment carrying two commands is refused the same way, whoever's turn it is. The
+ * machinery acts on the FIRST one (`parseCommentCommand`) and reads the rest as prose,
+ * so a `/engineer` followed by a `/reviewer` silently starts one agent and loses the
+ * other -- and the person cannot see which of two requests won. Refused, the comment
+ * is deleted and the notice says which commands it carried and that each belongs in its
+ * own comment. The commands are counted with the same line reader the dispatch uses, so
+ * a directive quoted inside somebody's prose (`> /engineer`) is not a second command:
+ * it is not one the machinery would act on either.
+ *
+ * A comment whose FIRST command is `/stop` is not read here at all -- the workflow
+ * skips this step for it (`control != 'stop'`), because a stop has to reach a running
+ * agent. A `/stop` with a second command therefore takes the stop path, and the second
+ * command is ignored: the pre-existing hole, unchanged by this rule.
+ *
  * ## Why the thread rather than the label
  *
  * This used to read the `atomaton/in-progress` label, which the runner sets. Between
@@ -34,6 +50,7 @@ import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
 import { LLM_CONTEXT_TAG, QUOTES_TAG } from "../../adapters/github/tags.ts";
 import { commentWouldBeRemoved } from "../../adapters/github/thread.ts";
+import { commandsIn } from "../../domain/work/comment-command.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -89,6 +106,12 @@ function fenceFor(text: string): string {
  */
 function noticeBody(opts: {
   mention: string;
+  /** Why the comment was taken away; when both hold, the commands are the actionable one. */
+  several: boolean;
+  /** Whether the thread rule would also have removed it, so the notice can say to wait too. */
+  removed: boolean;
+  /** The commands the comment carried, as they were written, when `several`. */
+  commands: string[];
   deleted: boolean;
   couldNotRead: boolean;
   original: string;
@@ -98,11 +121,23 @@ function noticeBody(opts: {
   const what = opts.deleted
     ? "Your comment was removed because"
     : "Your comment could not be removed, and will not be acted on, because";
+  const reason = opts.several
+    ? `it carries more than one command (${opts.commands.join(", ")}). Atomaton acts on one command per ` +
+      "comment: it would have started the first and read the rest as prose, and which one won is not " +
+      "visible on the page. Comment each command on its own, with what you want done on the lines under it."
+    : "the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, " +
+      "and it has not come back to a person yet. Please wait for that to finish, then comment again.";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     ...(quote ? [QUOTES_TAG.write(Number(opts.commentId))] : []),
-    `${opts.mention}${what} the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, and it has not come back to a person yet. Please wait for that to finish, then comment again.`,
+    `${opts.mention}${what} ${reason}`,
   ];
+  if (opts.several && opts.removed) {
+    lines.push(
+      "",
+      "The ball is also with an agent on this issue/PR right now, so a comment would not reach anyone until that run comes back.",
+    );
+  }
 
   if (quote) {
     const truncated = opts.original.length > MAX_PRESERVED_CHARS;
@@ -145,7 +180,21 @@ function main(): void {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const githubOutput = process.env.GITHUB_OUTPUT;
 
-  // The rule is `shapedThread`'s, applied to the whole thread in order: a person's
+  // The body decides both rules, and decides the commands rule before the thread rule
+  // is even asked. Read once, up front: the comment still exists here, and after the
+  // DELETE its text is gone. A failed read leaves the commands unknown; the notice says
+  // so if it is removed for the other reason (below), and the thread rule still decides.
+  const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
+  const couldNotRead = readBack.code !== 0;
+  const original = couldNotRead ? "" : readBack.stdout ?? "";
+  const commands = commandsIn(original).map((c) => (c.control ? `/${c.control}` : `/${c.agent}`));
+
+  // The first rule: a comment carrying two commands starts one and loses the rest.
+  // Refused whoever's turn it is -- nothing about the turn makes the second request
+  // reachable.
+  const several = commands.length > 1;
+
+  // The second rule is `shapedThread`'s, applied to the whole thread in order: a person's
   // comment is removed when the ball was already with an agent WHEN IT ARRIVED. The
   // comment is judged at its own position in that walk, not by removing it and asking
   // whose turn the rest leaves — judged by exclusion, a `/agent` command posted
@@ -156,30 +205,23 @@ function main(): void {
   // Comments alone, not the body: a pull request body naming a reviewer is a request
   // the validation dispatch is already handling, and deleting a person's comment on
   // the strength of it would tell them to wait for a run their comment was not racing.
-  let removed: boolean;
-  try {
-    removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
-  } catch (e) {
-    // A failed read is not "the ball is with a person". This script exists to keep a
-    // comment out of a race with a running agent, so the answer it could not determine
-    // must not be the one that lets the comment through.
-    console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
-    process.exit(1);
+  let removed = false;
+  if (!several) {
+    try {
+      removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
+    } catch (e) {
+      // A failed read is not "the ball is with a person". This script exists to keep a
+      // comment out of a race with a running agent, so the answer it could not determine
+      // must not be the one that lets the comment through.
+      console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
+      process.exit(1);
+    }
   }
 
-  if (!removed) {
+  if (!removed && !several) {
     if (githubOutput) appendFileSync(githubOutput, "blocked=false\n");
     return;
   }
-
-  // Read the comment's body back BEFORE deleting it: once the DELETE lands the id is
-  // gone and the read 404s, so the content somebody spent time writing is only
-  // retrievable while the comment still exists. A failed read does not hold the
-  // deletion back -- stopping the race is the guard's job, and it outranks the
-  // preservation -- and the failure is said, never presented as success (below).
-  const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
-  const couldNotRead = readBack.code !== 0;
-  const original = couldNotRead ? "" : readBack.stdout ?? "";
 
   const { code: delCode, stdout: delOut, stderr: delErr } = gh(
     "api", "--method", "DELETE", `repos/${repo}/issues/comments/${values["comment-id"]}`,
@@ -203,6 +245,9 @@ function main(): void {
     "--body",
     noticeBody({
       mention,
+      several,
+      commands,
+      removed,
       deleted,
       couldNotRead,
       original,
@@ -211,7 +256,10 @@ function main(): void {
   );
 
   if (githubOutput) appendFileSync(githubOutput, "blocked=true\n");
-  console.error(`Deleted comment #${values["comment-id"]} on #${values.number} (in-progress guard) and notified ${values.commenter || "(unknown)"}.`);
+  console.error(
+    `Deleted comment #${values["comment-id"]} on #${values.number} ` +
+      `(${several ? "more than one command" : "in-progress guard"}) and notified ${values.commenter || "(unknown)"}.`,
+  );
 }
 
 if (import.meta.main) main();

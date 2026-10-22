@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   commandInBodyRefusal,
   commandLinesIn,
+  commandsIn,
   lineForms,
   parseCommentCommand,
   parseMangledCommand,
@@ -181,6 +182,37 @@ describe("commandLinesIn", () => {
 
   test("handles CRLF, which a body edited in the browser comes back with", () => {
     expect(commandLinesIn("prose\r\n/reviewer\r\nprose")).toEqual(["/reviewer"]);
+  });
+});
+
+describe("commandsIn", () => {
+  // The same reader the parser uses, so the count and the dispatch cannot disagree.
+  test("counts every command, in the order they appear", () => {
+    expect(commandsIn("/engineer\n\n/reviewer").map((c) => c.agent)).toEqual(["engineer", "reviewer"]);
+  });
+
+  test("counts control commands, which are commands too", () => {
+    expect(commandsIn("/engineer\n/stop").map((c) => c.control || c.agent)).toEqual(["engineer", "stop"]);
+  });
+
+  // A quoted or otherwise embedded command is not one the machinery would act on, so
+  // it is not a second request either.
+  test("a command that is prose is not counted", () => {
+    expect(commandsIn("> /engineer\n\n/reviewer").map((c) => c.agent)).toEqual(["reviewer"]);
+    expect(commandsIn("Comment /reviewer to have it reviewed.")).toEqual([]);
+  });
+
+  // The parser reports these and starts nothing, so a second command cannot lose them.
+  test("a malformed command is not counted", () => {
+    expect(commandsIn("/engineer fix the bug\n/reviewer").map((c) => c.agent)).toEqual(["reviewer"]);
+  });
+
+  test("the dispatch marker counts, because it is a request", () => {
+    expect(commandsIn("<!-- atomaton:dispatch=reviewer -->").map((c) => c.agent)).toEqual(["reviewer"]);
+  });
+
+  test("an empty body has none", () => {
+    expect(commandsIn("")).toEqual([]);
   });
 });
 

@@ -86,37 +86,68 @@ const NOTHING: ParsedCommentCommand = { agent: "", control: "", sessionMode: "co
 export function parseCommentCommand(body: string): ParsedCommentCommand {
   if (!body) return NOTHING;
   for (const rawLine of body.split("\n")) {
-    const line = rawLine.trim();
-    const commandMatch = COMMAND_RE.exec(line);
-    if (commandMatch) {
-      const name = commandMatch[1]!;
-      const modifier = commandMatch[2]?.trim() ?? "";
-
-      // Before the agent branch, so a control command never reaches it. See
-      // `domain/work/control-commands.ts`.
-      if (isControlCommand(name)) {
-        if (!modifier) return { ...NOTHING, control: name };
-        // `/resume 直して` is the one mistake worth naming, because the thing the
-        // person wanted exists and is one line away: an ordinary agent command
-        // resumes the same session AND carries the instruction, which is why
-        // `/resume` deliberately takes none.
-        return {
-          ...NOTHING,
-          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`,
-        };
-      }
-
-      if (!modifier) return { ...NOTHING, agent: name };
-      if (modifier === "recover") return { ...NOTHING, agent: name, sessionMode: "recover" };
-      return {
-        ...NOTHING,
-        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`,
-      };
-    }
-    const dispatchMatch = DISPATCH_RE.exec(line);
-    if (dispatchMatch) return { ...NOTHING, agent: dispatchMatch[1]! };
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined) return parsed;
   }
   return NOTHING;
+}
+
+/**
+ * Every command a comment asks for, in the order they appear.
+ *
+ * `parseCommentCommand` answers "what does this comment ask for" and returns the first,
+ * because the machinery acts on one request per comment. This answers "how many", so a
+ * guard can refuse a comment that asks for two: the second would be read by nobody, and
+ * which one wins is not visible on the page.
+ *
+ * Strict, like the parser it shares its line reader with — a command is a line that
+ * begins with one. A directive quoted inside somebody's prose (`> /engineer`) is not a
+ * request the machinery would act on, so it is not a second command here either.
+ */
+export function commandsIn(body: string): ParsedCommentCommand[] {
+  const found: ParsedCommentCommand[] = [];
+  if (!body) return found;
+  for (const rawLine of body.split("\n")) {
+    const parsed = parseCommandLine(rawLine);
+    // A line the parser rejects (a malformed modifier) starts nothing, so it is not a
+    // command that would be lost to a second one.
+    if (parsed !== undefined && (parsed.agent !== "" || parsed.control !== "")) found.push(parsed);
+  }
+  return found;
+}
+
+/** One line read as a command, or `undefined` when it is not one. The one scan. */
+function parseCommandLine(rawLine: string): ParsedCommentCommand | undefined {
+  const line = rawLine.trim();
+  const commandMatch = COMMAND_RE.exec(line);
+  if (commandMatch) {
+    const name = commandMatch[1]!;
+    const modifier = commandMatch[2]?.trim() ?? "";
+
+    // Before the agent branch, so a control command never reaches it. See
+    // `domain/work/control-commands.ts`.
+    if (isControlCommand(name)) {
+      if (!modifier) return { ...NOTHING, control: name };
+      // `/resume 直して` is the one mistake worth naming, because the thing the
+      // person wanted exists and is one line away: an ordinary agent command
+      // resumes the same session AND carries the instruction, which is why
+      // `/resume` deliberately takes none.
+      return {
+        ...NOTHING,
+        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`,
+      };
+    }
+
+    if (!modifier) return { ...NOTHING, agent: name };
+    if (modifier === "recover") return { ...NOTHING, agent: name, sessionMode: "recover" };
+    return {
+      ...NOTHING,
+      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`,
+    };
+  }
+  const dispatchMatch = DISPATCH_RE.exec(line);
+  if (dispatchMatch) return { ...NOTHING, agent: dispatchMatch[1]! };
+  return undefined;
 }
 
 /**
