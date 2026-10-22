@@ -140,7 +140,7 @@ your report as it arrived and treat it as the last row.
 | --- | --- | --- |
 | `checks-missing`, `checks-pending` | a required check has not run or has not finished | report which one and end — you cannot wait for it |
 | `checks-failing` | a real defect | return to the agent the body's `Opened by` line names, with the failing check and its location; never retry the merge hoping it passes |
-| `conflicting`, `behind` | the branch is not current with its base | return to the agent `Opened by` names, to call `sync_branch` |
+| `conflicting`, `behind` | the branch is not current with its base | return to the agent `Opened by` names, to call `merge_base_into_branch` (which brings the base in; `sync_branch` only fast-forwards this branch from its own remote branch) |
 | `blocked` | protection refuses for a reason no required check explains | report it and end; do not loop the engineer |
 | `not-open`, `mergeability-unknown` | nothing to fix | report and end |
 | `merge-policy`, `human-authored`, `governance-change` | the merge is a person's, by policy, by authorship, or because it changes how agents themselves run | say it is ready for them to merge; do not retry |

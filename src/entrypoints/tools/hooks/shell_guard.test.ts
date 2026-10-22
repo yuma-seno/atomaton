@@ -231,6 +231,20 @@ describe("shell_guard.ts", () => {
     });
 
     /**
+     * #264: the routed refusal said "use the github tools" for `git merge`, and no tool
+     * took a base into a branch. The run that hit it built the merge from plumbing,
+     * where no ops log could see it. Naming the tool that does it is the whole fix.
+     */
+    test("a merge names the tool that brings a base into a branch", () => {
+      const out = guard({ command: "git merge origin/main" });
+      expect(out).toContain('"allow":false');
+      expect(out).toContain("merge_base_into_branch");
+      // The one it must not name: `sync_branch` fast-forwards this branch from its own
+      // remote branch and brings no base in.
+      expect(out).not.toContain("sync_branch");
+    });
+
+    /**
      * `git branch` can delete a branch, so it sits in the mutating set -- and that put
      * `git branch --show-current`, which answers a question and changes nothing, behind a
      * refusal telling the agent to use an MCP tool for "Git mutations". Both this and
