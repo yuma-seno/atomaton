@@ -146,33 +146,51 @@ function parseCommentCommand(body) {
     return NOTHING;
   for (const rawLine of body.split(`
 `)) {
-    const line = rawLine.trim();
-    const commandMatch = COMMAND_RE.exec(line);
-    if (commandMatch) {
-      const name = commandMatch[1];
-      const modifier = commandMatch[2]?.trim() ?? "";
-      if (isControlCommand(name)) {
-        if (!modifier)
-          return { ...NOTHING, control: name };
-        return {
-          ...NOTHING,
-          error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
-        };
-      }
-      if (!modifier)
-        return { ...NOTHING, agent: name };
-      if (modifier === "recover")
-        return { ...NOTHING, agent: name, sessionMode: "recover" };
-      return {
-        ...NOTHING,
-        error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
-      };
-    }
-    const dispatchMatch = DISPATCH_RE.exec(line);
-    if (dispatchMatch)
-      return { ...NOTHING, agent: dispatchMatch[1] };
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined)
+      return parsed;
   }
   return NOTHING;
+}
+function commandsIn(body) {
+  const found = [];
+  if (!body)
+    return found;
+  for (const rawLine of body.split(`
+`)) {
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined)
+      found.push({ line: rawLine.trim(), command: parsed });
+  }
+  return found;
+}
+function parseCommandLine(rawLine) {
+  const line = rawLine.trim();
+  const commandMatch = COMMAND_RE.exec(line);
+  if (commandMatch) {
+    const name = commandMatch[1];
+    const modifier = commandMatch[2]?.trim() ?? "";
+    if (isControlCommand(name)) {
+      if (!modifier)
+        return { ...NOTHING, control: name };
+      return {
+        ...NOTHING,
+        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+      };
+    }
+    if (!modifier)
+      return { ...NOTHING, agent: name };
+    if (modifier === "recover")
+      return { ...NOTHING, agent: name, sessionMode: "recover" };
+    return {
+      ...NOTHING,
+      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+    };
+  }
+  const dispatchMatch = DISPATCH_RE.exec(line);
+  if (dispatchMatch)
+    return { ...NOTHING, agent: dispatchMatch[1] };
+  return;
 }
 function lineForms(rawLine) {
   let line = rawLine.trim();
@@ -334,11 +352,15 @@ function fenceFor(text) {
 function noticeBody(opts) {
   const quote = opts.deleted && !opts.couldNotRead && opts.original !== "";
   const what = opts.deleted ? "Your comment was removed because" : "Your comment could not be removed, and will not be acted on, because";
+  const reason = opts.several ? `it carries more than one command (${opts.commands.join(", ")}). Atomaton acts on one command per ` + "comment: it acts on the first and drops the rest, and which one won is not visible on the page. " + "Comment each command on its own, with what you want done on the lines under it." : "the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, " + "and it has not come back to a person yet. Please wait for that to finish, then comment again.";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     ...quote ? [QUOTES_TAG.write(Number(opts.commentId))] : [],
-    `${opts.mention}${what} the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, and it has not come back to a person yet. Please wait for that to finish, then comment again.`
+    `${opts.mention}${what} ${reason}`
   ];
+  if (opts.several && opts.removed) {
+    lines.push("", "The ball is also with an agent on this issue/PR right now, so a comment would not reach anyone until that run comes back.");
+  }
   if (quote) {
     const truncated = opts.original.length > MAX_PRESERVED_CHARS;
     const kept = truncated ? opts.original.slice(0, MAX_PRESERVED_CHARS) : opts.original;
@@ -366,31 +388,40 @@ function main() {
     options: {
       number: { type: "string" },
       "comment-id": { type: "string" },
-      commenter: { type: "string" }
+      commenter: { type: "string" },
+      parsed: { type: "string" },
+      state: { type: "string" }
     }
   });
   if (!values.number || !values["comment-id"]) {
-    console.error("usage: guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN");
+    console.error("usage: guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN [--parsed true] [--state open]");
     process.exit(2);
   }
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const githubOutput = process.env.GITHUB_OUTPUT;
-  let removed;
+  const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
+  const couldNotRead = readBack.code !== 0;
+  const original = couldNotRead ? "" : readBack.stdout ?? "";
+  const commands = commandsIn(original).map((c) => c.command.error !== "" ? c.line : c.command.control ? `/${c.command.control}` : `/${c.command.agent}`);
+  const parsed = values.parsed === "true";
+  const closed = values.state === "closed";
+  const several = parsed && !closed && commands.length > 1;
+  let removed = false;
   try {
     removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
   } catch (e) {
-    console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
-    process.exit(1);
+    if (!several) {
+      console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
+      process.exit(1);
+    }
+    console.error(`Could not read the thread on #${values.number} (${e}); removing the comment for its commands`);
   }
-  if (!removed) {
+  if (!removed && !several) {
     if (githubOutput)
       appendFileSync(githubOutput, `blocked=false
 `);
     return;
   }
-  const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
-  const couldNotRead = readBack.code !== 0;
-  const original = couldNotRead ? "" : readBack.stdout ?? "";
   const { code: delCode, stdout: delOut, stderr: delErr } = gh("api", "--method", "DELETE", `repos/${repo}/issues/comments/${values["comment-id"]}`);
   const deleted = delCode === 0;
   if (!deleted) {
@@ -399,6 +430,9 @@ function main() {
   const mention = mentionPrefix(values.commenter);
   gh("issue", "comment", String(values.number), "--repo", repo, "--body", noticeBody({
     mention,
+    several,
+    commands,
+    removed,
     deleted,
     couldNotRead,
     original,
@@ -407,7 +441,7 @@ function main() {
   if (githubOutput)
     appendFileSync(githubOutput, `blocked=true
 `);
-  console.error(`Deleted comment #${values["comment-id"]} on #${values.number} (in-progress guard) and notified ${values.commenter || "(unknown)"}.`);
+  console.error(`Deleted comment #${values["comment-id"]} on #${values.number} ` + `(${several ? "more than one command" : "in-progress guard"}) and notified ${values.commenter || "(unknown)"}.`);
 }
 if (import.meta.main)
   main();
