@@ -2508,6 +2508,71 @@ describe("mcp/delegate.ts", () => {
   });
 
   /**
+   * The command promise follows the shell, and the two rosters never share it.
+   *
+   * The description was one text for both rosters, so the read-only one promised
+   * "running one command" — and a caller that delegated a command spent a whole run
+   * being told the capability did not exist. The split is pinned on both sides: the
+   * writing delegate promises the command, the read-only one refuses it in so many
+   * words, and the phrasing the old shared text used appears in neither.
+   */
+  test("the command promise follows the shell, and the rosters do not share it", async () => {
+    const descriptions = async (roster: string) => {
+      const r = await sendRequest(
+        "delegate.ts",
+        { jsonrpc: "2.0", id: 5, method: "tools/list", params: {} },
+        {},
+        process.cwd(),
+        ["--roster", roster, "--delegates-dir", ROSTER_DIR],
+      );
+      return new Map(
+        (r.result.tools as { name: string; description: string }[]).map((t) => [t.name, t.description]),
+      );
+    };
+    const writing = await descriptions("delegate");
+    const readOnly = await descriptions("delegate_readonly");
+
+    for (const name of ["delegate", "delegate_large"]) {
+      const d = writing.get(name) ?? "";
+      expect(d, name).toContain("run one command to answer a question");
+      expect(d, name).not.toContain("CANNOT run commands");
+    }
+    for (const name of ["delegate_readonly", "delegate_readonly_large"]) {
+      const d = readOnly.get(name) ?? "";
+      expect(d, name).toContain("CANNOT run commands");
+      expect(d, name).toContain("no shell");
+      expect(d, name).not.toMatch(/run(ning)? one command/);
+    }
+  });
+
+  /**
+   * `task` is one text for both rosters, so it may promise only what every delegate
+   * can do. It used to say "make one change, run one command" — neither of which the
+   * read-only half could do — and what else a delegate takes now lives in the
+   * description, which is per-roster.
+   */
+  test("the shared task description promises neither a change nor a command", async () => {
+    for (const roster of ["delegate", "delegate_readonly"]) {
+      const r = await sendRequest(
+        "delegate.ts",
+        { jsonrpc: "2.0", id: 6, method: "tools/list", params: {} },
+        {},
+        process.cwd(),
+        ["--roster", roster, "--delegates-dir", ROSTER_DIR],
+      );
+      for (const tool of r.result.tools as {
+        name: string;
+        inputSchema: { properties: { task: { description: string } } };
+      }[]) {
+        const task = tool.inputSchema.properties.task.description;
+        expect(task, `${roster}/${tool.name}`).not.toContain("make one change");
+        expect(task, `${roster}/${tool.name}`).not.toContain("run one command");
+        expect(task, `${roster}/${tool.name}`).toContain("read and report");
+      }
+    }
+  });
+
+  /**
    * Which delegate is free is read from the `model:` line, not from the folder name.
    *
    * This is the whole reason the tier is in the description rather than in the
