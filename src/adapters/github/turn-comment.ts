@@ -62,12 +62,29 @@ export interface TurnCommentHeader {
   ended: TurnCommentEnding;
   /** Who reads it: the model's context, or a person. */
   audience: "model" | "person";
+  /**
+   * The ask comment id this ending answers, and the id of the run that wrote it (#285).
+   *
+   * The ending is the second half of a turn's identity — `TOOK_TAG` claimed an ask at
+   * start, and this closes it. Both come from the run's environment: the runner passes
+   * the ask it claimed in (`ATOMATON_ASK_ID`) and its own run id rides in
+   * (`GITHUB_RUN_ID`). A caller outside a run — a test, a tool that lost its
+   * environment — writes `answers=0`, which matches no real comment id: the ending is
+   * then an answer to nothing, which is the truthful record for a turn that claimed
+   * no ask. There are no other defaults: an ending that guessed at either id would be
+   * a lie a comparison would act on.
+   */
+  answers?: number;
+  run?: number;
 }
 
 /** The two header lines, in the order every comment here has them. */
 export function turnHeader(h: TurnCommentHeader): string[] {
   const context = h.audience === "model" ? "include" : "exclude";
-  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+  return [
+    LLM_CONTEXT_TAG.write(context),
+    ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 }),
+  ];
 }
 
 /**

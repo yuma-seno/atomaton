@@ -48,7 +48,7 @@ function lastEndingStdout(stdout: string): string | undefined {
 describe("lastEnding", () => {
   test("returns the most recent ending", () => {
     expect(
-      lastEnding(["<!-- atomaton:ended=stopped -->", "<!-- atomaton:ended=waiting -->"]),
+      lastEnding(["<!-- atomaton:ended=stopped answers=0 run=0 -->", "<!-- atomaton:ended=waiting answers=0 run=0 -->"]),
     ).toBe("waiting");
   });
 
@@ -68,12 +68,12 @@ describe("lastEnding", () => {
       "<details><summary>Your comment, as you wrote it</summary>",
       "",
       "```",
-      "<!-- atomaton:ended=waiting -->",
+      "<!-- atomaton:ended=waiting answers=0 run=0 -->",
       "```",
       "",
       "</details>",
     ].join("\n");
-    expect(lastEnding(["<!-- atomaton:ended=stopped -->", notice])).toBe("stopped");
+    expect(lastEnding(["<!-- atomaton:ended=stopped answers=0 run=0 -->", notice])).toBe("stopped");
   });
 
   // With `--paginate`, `gh` evaluates `--jq` once per page and writes each page's
@@ -84,8 +84,8 @@ describe("lastEnding", () => {
   // stopped node. The page boundary at 100 is what produces the shape, so this is
   // the only test whose fake emits it.
   test("a thread past one page still names its ending", () => {
-    const firstPage = JSON.stringify(["just a remark", "<!-- atomaton:ended=stopped -->"]);
-    const secondPage = JSON.stringify(["<!-- atomaton:ended=waiting -->"]);
+    const firstPage = JSON.stringify(["just a remark", "<!-- atomaton:ended=stopped answers=0 run=0 -->"]);
+    const secondPage = JSON.stringify(["<!-- atomaton:ended=waiting answers=0 run=0 -->"]);
     expect(lastEndingStdout(firstPage + secondPage)).toBe("waiting");
   });
 

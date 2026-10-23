@@ -96,7 +96,7 @@ export function dispatchPrValidation(
   repo: string,
   prNumber: number,
   branch: string,
-  options: { askedByPerson?: boolean } = {},
+  options: { askedByPerson?: boolean; /** The ask comment id the dispatched run claims (#285) — see `RunnerDispatch.ask`. */ ask?: string | number } = {},
 ): boolean {
   return dispatchWorkflow(
     `dispatchPrValidation: validating PR #${prNumber}`,
@@ -106,6 +106,11 @@ export function dispatchPrValidation(
       "-f", `number=${prNumber}`,
       "-f", `branch=${branch}`,
       "-f", `asked_by_person=${options.askedByPerson === true ? "true" : "false"}`,
+      // The ask the run the validation dispatches should claim (#285): the
+      // person's command comment, or the `waiting` ending that opened the pull
+      // request. Empty is refused downstream — an answers-request dispatch with
+      // no ask has nothing to verify its wait against.
+      "-f", `ask=${options.ask ?? ""}`,
     ],
     log,
   );

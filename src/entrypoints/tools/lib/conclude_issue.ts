@@ -9,6 +9,7 @@ import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
 import { commentIdFromUrl } from "../../../adapters/github/ending-comment.ts";
 import { turnCommentBody } from "../../../adapters/github/turn-comment.ts";
+import { endingIdentity } from "./turn-identity.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 
 export interface ConcludeIssueResult {
@@ -113,7 +114,7 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
     // half is #90's; this is the same defect here, in code written to fix #90. See
     // `turn-comment.ts`.
     const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
-    const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request }));
+    const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request, ...endingIdentity() }));
     mustSucceed(posted, `comment on issue #${issue}`);
     // stderr, where the tool's own decisions belong. Putting it in the result is
     // what put it in the agent's report.
@@ -130,7 +131,7 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   // session ends on this call. It closes the issue just below, so the thread has an
   // answer either way — but a close is not an event to `domain/work/thread.ts`, and the
   // turn's ending has to be written down rather than inferred from one.
-  const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body }));
+  const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body, ...endingIdentity() }));
   mustSucceed(posted, `comment on issue #${issue}`);
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);

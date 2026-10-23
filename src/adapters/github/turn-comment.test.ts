@@ -22,19 +22,19 @@ describe("turnCommentBody", () => {
   test("writes the audience as llm-context and the ending as atomaton:ended", () => {
     const forPerson = turnCommentBody({ ended: "done", audience: "person", body: "Ask them to close it." });
     expect(forPerson).toContain(LLM_CONTEXT_TAG.write("exclude"));
-    expect(forPerson).toContain(ENDED_TAG.write("done"));
+    expect(forPerson).toContain(ENDED_TAG.write({ verb: "done", answers: 0, run: 0 }));
     expect(forPerson.endsWith("Ask them to close it.")).toBe(true);
 
     const forModel = turnCommentBody({ ended: "waiting", audience: "model", body: "Report." });
     expect(forModel).toContain(LLM_CONTEXT_TAG.write("include"));
-    expect(forModel).toContain(ENDED_TAG.write("waiting"));
+    expect(forModel).toContain(ENDED_TAG.write({ verb: "waiting", answers: 0, run: 0 }));
   });
 
   test("the two tags lead, in the one order every comment here uses", () => {
     const body = turnCommentBody({ ended: "handoff", audience: "person", body: "line one\nline two" });
     const lines = body.split("\n");
     expect(lines[0]).toBe(LLM_CONTEXT_TAG.write("exclude"));
-    expect(lines[1]).toBe(ENDED_TAG.write("handoff"));
+    expect(lines[1]).toBe(ENDED_TAG.write({ verb: "handoff", answers: 0, run: 0 }));
     expect(lines[2]).toBe("line one");
   });
 
@@ -66,6 +66,6 @@ describe("turnCommentBody", () => {
 
   test("turnHeader is the same two lines, for a caller building a body itself", () => {
     const header = turnHeader({ ended: "limit", audience: "person" });
-    expect(header).toEqual([LLM_CONTEXT_TAG.write("exclude"), ENDED_TAG.write("limit")]);
+    expect(header).toEqual([LLM_CONTEXT_TAG.write("exclude"), ENDED_TAG.write({ verb: "limit", answers: 0, run: 0 })]);
   });
 });

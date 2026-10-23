@@ -24,6 +24,7 @@
  *
  * Usage:
  *   dispatch_pr_validation.ts --repo OWNER/REPO --number N --branch B [--asked-by-person]
+ *     [--ask ID]
  */
 import { parseArgs } from "node:util";
 import { dispatchPrValidation } from "../../adapters/actions/dispatch-targets.ts";
@@ -35,6 +36,14 @@ export interface DispatchPrValidationArgs {
   number: string | number;
   branch: string;
   "asked-by-person"?: string;
+  /**
+   * The ask comment id the run validation dispatches should claim (#285): the
+   * person's command for the manual-comment path, the `waiting` ending for
+   * `create_pr`'s, the pushing run's own claim for the re-validation after a push.
+   * The answers-request check verifies the wait against THIS id, and the runner
+   * writes its `atomaton:took` from it.
+   */
+  ask?: string;
 }
 
 export const ref = defineScript<DispatchPrValidationArgs>(import.meta.url);
@@ -47,6 +56,7 @@ function main(): void {
       number: { type: "string" },
       branch: { type: "string" },
       "asked-by-person": { type: "string" },
+      ask: { type: "string" },
     },
   });
 
@@ -65,6 +75,7 @@ function main(): void {
   // by a person's comment, and the two route a failure differently.
   const dispatched = dispatchPrValidation(repo, Number(number), branch, {
     askedByPerson: isTrue(values["asked-by-person"]),
+    ask: (values.ask ?? "").trim() || undefined,
   });
   if (!dispatched) {
     // Fatal, unlike most dispatches. The person asked for a run and nothing was

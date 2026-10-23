@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { parseMangledCommand } from "./comment-command.ts";
 import {
+  askSuperseded,
   latestAsk,
   latestRequestedAgent,
   requestOutstanding,
@@ -8,6 +9,7 @@ import {
   turnEvents,
   whoseTurn,
   type AskReaders,
+  type IdentifiedComment,
   type ThreadEntry,
   type TurnReaders,
 } from "./thread.ts";
@@ -21,6 +23,8 @@ const readers: TurnReaders = {
   // `RESULT ...` simulates a result comment: it carries an ending AND the result tag.
   // `ENDED ...` simulates a body with an ending and NO result tag -- the failure
   // notice, or a `launch_sub_agent` comment. Both are endings, which is the point.
+  // `ANSWERS <n>` on either simulates the `answers=` field (#285); without one the
+  // ending answers nothing, the way `answers=0` does.
   ending: (body) => {
     if (body.startsWith("RESULT handoff") || body.startsWith("ENDED handoff")) return "handed-off";
     if (body.startsWith("WAITING")) return "waiting";
@@ -29,6 +33,17 @@ const readers: TurnReaders = {
   },
   requestedAgent: (body) => (body.startsWith("/") ? body.slice(1).split(/\s/)[0]! : ""),
   isDispatchMarker: (body) => body.startsWith("DISPATCH"),
+  // The turn's identity stubs (#285): `CLAIM <ask> RUN <run>` simulates a took tag,
+  // `ANSWERS <n>` an ending's answer.
+  claim: (body) => {
+    const m = /^CLAIM (\d+) RUN (\d+)/.exec(body);
+    return m ? { ask: Number(m[1]), run: Number(m[2]) } : undefined;
+  },
+  answeredAsk: (body) => {
+    const m = /ANSWERS (\d+)/.exec(body);
+    return m ? Number(m[1]) : undefined;
+  },
+  endingAgent: (body) => /BY (\S+)/.exec(body)?.[1] ?? "",
 };
 
 const events = (bodies: string[]) => turnEvents(bodies, readers);
@@ -177,41 +192,81 @@ describe("requestOutstanding", () => {
 describe("shapedThread", () => {
   const bodies = (entries: ThreadEntry[]) => shapedThread(entries, readers).comments.map((entry) => entry.body);
 
-  test("a person's comment while the ball is with an agent is removed", () => {
-    expect(bodies([machine("/engineer"), human("wait, actually")])).toEqual(["/engineer"]);
+  test("a person's comment while a claim is open is removed", () => {
+    expect(bodies([machine("CLAIM 5 RUN 7 /engineer"), human("wait, actually")])).toEqual([
+      "CLAIM 5 RUN 7 /engineer",
+    ]);
   });
 
   test("a person's comment while the ball is with a person is kept", () => {
     expect(bodies([human("please look at this")])).toEqual(["please look at this"]);
   });
 
+  // #285's rewrite of the unclaimed window: a request nobody has CLAIMED is not a
+  // run holding the ball — the run that will take it has not started. A person's
+  // comment there is kept, and reaches that run's context rather than vanishing.
+  test("a person's comment after an unclaimed command is kept", () => {
+    expect(bodies([human("/engineer"), human("wait, actually")])).toEqual(["/engineer", "wait, actually"]);
+  });
+
   // The machinery's own comments are never removed, whatever they say: a dispatch
   // marker is the machinery taking up a request, and an agent's result is the turn
   // ending. Neither is a person racing a run.
   test("the machinery's comments are never removed", () => {
-    expect(bodies([machine("/engineer"), machine("RESULT done")])).toEqual(["/engineer", "RESULT done"]);
-  });
-
-  // The whole point of walking in order: the first comment is kept (it starts the
-  // turn), the second is removed (the ball is now with the agent).
-  test("only the comments that arrived mid-turn are removed", () => {
-    expect(bodies([human("/engineer"), human("one more thing")])).toEqual(["/engineer"]);
-  });
-
-  // A result gives the ball back, so a comment after it is kept again.
-  test("a comment after the ball comes back is kept", () => {
-    expect(bodies([human("/engineer"), machine("RESULT done"), human("/reviewer")])).toEqual([
-      "/engineer",
-      "RESULT done",
-      "/reviewer",
+    expect(bodies([machine("CLAIM 5 RUN 7 /engineer"), machine("RESULT done ANSWERS 5")])).toEqual([
+      "CLAIM 5 RUN 7 /engineer",
+      "RESULT done ANSWERS 5",
     ]);
+  });
+
+  // The whole point of walking in order: the comment before the claim is kept (it
+  // starts the turn), the one after is removed (the ball is now with the agent).
+  test("only the comments that arrived mid-turn are removed", () => {
+    expect(bodies([human("/engineer"), machine("CLAIM 5 RUN 7"), human("one more thing")])).toEqual([
+      "/engineer",
+      "CLAIM 5 RUN 7",
+    ]);
+  });
+
+  // An ending that answers the open claim hands the ball back, so a comment after
+  // it is kept again.
+  test("a comment after the claim is answered is kept", () => {
+    expect(
+      bodies([
+        human("/engineer"),
+        machine("CLAIM 5 RUN 7"),
+        machine("RESULT done ANSWERS 5"),
+        human("/reviewer"),
+      ]),
+    ).toEqual(["/engineer", "CLAIM 5 RUN 7", "RESULT done ANSWERS 5", "/reviewer"]);
+  });
+
+  // An ending that answers a DIFFERENT ask does not close this claim: the walk
+  // tracks the newest claim, and only its own answer moves the ball.
+  test("an ending answering another ask leaves the claim open", () => {
+    expect(
+      bodies([machine("CLAIM 5 RUN 7"), machine("CLAIM 6 RUN 8"), machine("RESULT done ANSWERS 5"), human("still mid-turn")]),
+    ).toEqual(["CLAIM 5 RUN 7", "CLAIM 6 RUN 8", "RESULT done ANSWERS 5"]);
+  });
+
+  // The holder, out of the same walk: the agent exactly while a claim is open.
+  test("the holder is the agent while a claim is open and the person after its answer", () => {
+    const open = shapedThread([machine("CLAIM 5 RUN 7")], readers);
+    expect(open.holder).toBe("agent");
+    const closed = shapedThread([machine("CLAIM 5 RUN 7"), machine("RESULT done ANSWERS 5")], readers);
+    expect(closed.holder).toBe("person");
+    const empty = shapedThread([human("/engineer")], readers);
+    expect(empty.holder).toBe("person");
   });
 
   // The events come out of the same walk, so a caller never folds them a second time.
   // They are the events of the KEPT comments, which is what makes the shaping and the
   // answer agree.
   test("the events are those of the comments that survived", () => {
-    const shaped = shapedThread([human("/engineer"), human("one more thing"), machine("RESULT done")], readers);
+    const shaped = shapedThread(
+      [human("/engineer"), machine("CLAIM 5 RUN 7"), human("one more thing"), machine("RESULT done ANSWERS 5")],
+      readers,
+    );
     expect(shaped.events).toEqual(["asked", "returned"]);
   });
 });
@@ -243,14 +298,18 @@ describe("latestRequestedAgent", () => {
   // name the next agent in the window before it disappears.
   test("a comment the guard is removing does not name the next agent", () => {
     // `/reviewer` is kept (the ball was with a person when it arrived), `never mind`
-    // is removed (the ball is now with the agent).
-    expect(latestRequestedAgent("/engineer", [human("/reviewer"), human("never mind")], readers)).toBe("reviewer");
+    // is removed (a run has claimed the turn and is holding it).
+    expect(
+      latestRequestedAgent("/engineer", [human("/reviewer"), machine("CLAIM 5 RUN 7"), human("never mind")], readers),
+    ).toBe("reviewer");
   });
 
   test("a request that arrived mid-turn is ignored", () => {
-    // `/reviewer` starts the turn; `/atomaton` arrives while the ball is with the
-    // agent, so it is removed and does not become the answer.
-    expect(latestRequestedAgent("/engineer", [human("/reviewer"), human("/atomaton")], readers)).toBe("reviewer");
+    // `/reviewer` starts the turn; a run claims it; `/atomaton` arrives while the
+    // claim is open, so it is removed and does not become the answer.
+    expect(
+      latestRequestedAgent("/engineer", [human("/reviewer"), machine("CLAIM 5 RUN 7"), human("/atomaton")], readers),
+    ).toBe("reviewer");
   });
 
   // The body is the fallback, not an event: a comment that moves nothing does not
@@ -353,6 +412,7 @@ describe("latestAsk", () => {
   test("a person's comment the guard is removing cannot become the ask", () => {
     const thread = [
       timed("08:40:00", machine("RESULT handoff BY reviewer\n/engineer")),
+      timed("08:40:10", machine("CLAIM 9 RUN 8")),
       timed("08:41:00", human("/atomaton")),
     ];
     expect(latestAsk("", thread, askReaders)).toEqual({
@@ -429,6 +489,15 @@ describe("quoted entries", () => {
       return "";
     },
     isDispatchMarker: (body) => body.startsWith("DISPATCH"),
+    claim: (body) => {
+      const m = /atomaton:took=(\d+) run=(\d+)/.exec(body);
+      return m ? { ask: Number(m[1]), run: Number(m[2]) } : undefined;
+    },
+    answeredAsk: (body) => {
+      const m = /atomaton:ended=\S+ answers=(\d+)/.exec(body);
+      return m ? Number(m[1]) : undefined;
+    },
+    endingAgent: (body) => /atomaton:agent=(\S+)/.exec(body)?.[1] ?? "",
   };
 
   // A `/agent` line inside the quoted text must not name the next agent: that would
@@ -452,5 +521,107 @@ describe("quoted entries", () => {
       "asked",
       "returned",
     ]);
+  });
+});
+
+/**
+ * The answers-request dispatch's comparison (#285): does the ask it quotes still
+ * need what it delivers? The cases are the ones the old shape-and-time check got
+ * from the thread's newest event; they are now read off the ask's own identity.
+ */
+describe("askSuperseded", () => {
+  /** The comment id rides beside the body; `id` orders the asks. */
+  const at = (id: number, entry: ThreadEntry): IdentifiedComment => ({ id, ...entry });
+
+  const A = 101; // the ask the dispatch quotes
+  const newer = 200; // any ask newer than A
+
+  test("an unanswered ask with nothing newer goes", () => {
+    expect(askSuperseded([at(A, human("/reviewer"))], readers, A, "reviewer")).toBeUndefined();
+  });
+
+  test("an ask answered by a hand-off is superseded (#283's hand-off ran the reviewer)", () => {
+    // The quoted ask here is the one the run claimed and the hand-off closed: the
+    // run's push-validation quotes the run's own ask, and by dispatch time that run
+    // has handed off — the wait it was holding is over.
+    const thread = [at(9, machine("DISPATCH engineer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine("RESULT handoff ANSWERS 9"))];
+    expect(askSuperseded(thread, readers, 9, "reviewer")).toBe("handed-off");
+  });
+
+  test("a hand-off that answered ANOTHER ask leaves the quoted one waiting unless a newer ask is open", () => {
+    // The person's command (A) is not the ask the hand-off closed — but the marker
+    // ask the hand-off dispatch created (newer) is still open, and THAT supersedes.
+    const thread = [
+      at(A, human("/reviewer")),
+      at(newer, machine("DISPATCH reviewer")),
+      at(116, machine("CLAIM 9 RUN 7")),
+      at(117, machine("RESULT handoff ANSWERS 9")),
+    ];
+    expect(askSuperseded(thread, readers, A, "reviewer")).toBe("newer-open-ask");
+  });
+
+  test("the dispatched agent's own verdict already on the thread is superseded (#282)", () => {
+    // The reviewer claimed the quoted ask and its verdict answers it — the second
+    // validation quoting the same ask would re-deliver that judgement.
+    const thread = [at(A, human("/reviewer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine(`RESULT done BY reviewer ANSWERS ${A}`))];
+    expect(askSuperseded(thread, readers, A, "reviewer", true)).toBe("own-verdict");
+  });
+
+  test("a red CI run refutes the standing verdict and the retry goes", () => {
+    const thread = [at(A, human("/reviewer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine(`RESULT done BY reviewer ANSWERS ${A}`))];
+    expect(askSuperseded(thread, readers, A, "reviewer", false)).toBeUndefined();
+  });
+
+  test("another agent's verdict on the quoted ask is the fix cycle, and goes", () => {
+    const thread = [at(A, human("/engineer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine(`RESULT done BY engineer ANSWERS ${A}`))];
+    expect(askSuperseded(thread, readers, A, "reviewer", true)).toBeUndefined();
+  });
+
+  test("a machinery answer with no agent on it reads as the dispatched agent's own", () => {
+    const thread = [at(A, human("/reviewer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine("ENDED done ANSWERS 9"))];
+    expect(askSuperseded(thread, readers, 9, "reviewer")).toBe("own-verdict");
+  });
+
+  test("a newer ask still open supersedes the quoted one", () => {
+    const thread = [at(A, human("/reviewer")), at(newer, human("/engineer"))];
+    expect(askSuperseded(thread, readers, A, "reviewer")).toBe("newer-open-ask");
+  });
+
+  test("a newer ask that has been answered does not supersede", () => {
+    const thread = [
+      at(A, human("/reviewer")),
+      at(newer, machine("DISPATCH engineer")),
+      at(114, machine("CLAIM 9 RUN 7")),
+      at(115, machine("RESULT done ANSWERS 9")),
+    ];
+    expect(askSuperseded(thread, readers, A, "reviewer")).toBe("newer-open-ask");
+  });
+
+  test("a newer ask whose own run answered it does not supersede", () => {
+    const thread = [
+      at(A, human("/reviewer")),
+      at(newer, machine("DISPATCH engineer")),
+      at(newer + 1, machine(`CLAIM ${newer} RUN 7`)),
+      at(newer + 2, machine(`RESULT done BY engineer ANSWERS ${newer}`)),
+    ];
+    // The newer ask is the marker this dispatch would be a second run FOR, and the
+    // engineer's own verdict answered it — checking against THAT ask's id is the
+    // form the green re-validation after a push arrives in: the verdict is the
+    // engineer's, the dispatch starts the reviewer, and it goes.
+    expect(askSuperseded(thread, readers, newer, "reviewer", true)).toBeUndefined();
+    // The red retry names the engineer whose verdict CI refuted, and goes.
+    expect(askSuperseded(thread, readers, newer, "engineer", false)).toBeUndefined();
+    // Unrefuted, the engineer's own verdict stands and a second engineer is refused.
+    expect(askSuperseded(thread, readers, newer, "engineer", true)).toBe("own-verdict");
+  });
+
+  test("a quotation is read as nothing", () => {
+    const notice: IdentifiedComment = {
+      id: newer,
+      body: "A comment was removed. As it was written:\n\n/engineer",
+      isHuman: false,
+      quoted: true,
+    };
+    expect(askSuperseded([at(A, human("/reviewer")), notice], readers, A, "reviewer")).toBeUndefined();
   });
 });

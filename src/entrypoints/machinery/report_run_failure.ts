@@ -53,6 +53,7 @@
  * Usage:
  *   report_run_failure.ts --number N --agent NAME [--notify LOGIN]
  *     --run-url URL [--logs-file FILE] [--atoma-failed true]
+ *     [--ask ID] [--run-id ID]
  */
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -76,6 +77,15 @@ export interface ReportRunFailureArgs {
    * notice still posts, and the run stays red. See "The exit code is the gate".
    */
   "atoma-failed"?: string;
+  /**
+   * The ask this run claimed and its own run id (#285), written onto the ending so
+   * the ask is closed by THIS notice: "the request that was taken up was answered by
+   * a failure notice", which is what stops the run watch from notifying the same
+   * open ask again. Absent reads as `0` — an answer to no ask, the honest record
+   * when the run died before it claimed one.
+   */
+  ask?: string;
+  "run-id"?: string;
 }
 
 export const ref = defineScript<ReportRunFailureArgs>(import.meta.url);
@@ -106,6 +116,7 @@ export function failureNotice(
   notify: string | undefined,
   runUrl: string,
   excerpt: string,
+  identity: { ask?: number; runId?: number } = {},
 ): string {
   const mention = mentionPrefix(notify);
   const lines = [
@@ -127,7 +138,17 @@ export function failureNotice(
     // would file a failure with the runs that reported, which is the distinction
     // `domain/work/thread.ts` keeps. `turnHeader` writes the two tags this DOES carry
     // and nothing else, which is why the note fits here rather than in the wrapper.
-    ...turnHeader({ ended: "done", audience: "person" }),
+    //
+    // The ending carries `answers`/`run` (#285): this notice IS the answer the ask
+    // gets — "the run that took this up failed" — and writing the ids here is what
+    // makes the ask closed, so the run watch posts its own notice for the same ask
+    // never.
+    ...turnHeader({
+      ended: "done",
+      audience: "person",
+      answers: identity.ask ?? 0,
+      run: identity.runId ?? 0,
+    }),
     // No "the run failed": the run's colour is decided by whether THIS comment
     // posted. A notice that landed leaves the run green, and "the run failed"
     // underneath it would contradict the run the reader can see.
@@ -158,6 +179,8 @@ function main(): void {
       "run-url": { type: "string" },
       "logs-file": { type: "string" },
       "atoma-failed": { type: "string" },
+      ask: { type: "string" },
+      "run-id": { type: "string" },
     },
   });
 
@@ -181,7 +204,10 @@ function main(): void {
     }
   }
 
-  const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt);
+  const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt, {
+    ask: Number(values.ask ?? 0) || 0,
+    runId: Number(values["run-id"] ?? 0) || 0,
+  });
   const { code, stdout, stderr } = gh("issue", "comment", String(values.number), "--body", body);
   // Green only for an agent failure whose notice landed -- see "The exit code is
   // the gate" above. The other two cases both exit non-zero: the post failed (red

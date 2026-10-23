@@ -33,7 +33,7 @@ import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { logDispatch } from "../../adapters/runner/ops-log.ts";
 import { nodeNumber } from "../runner/run-node.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
-import { checkDispatchMarker, readLastTurnEvent, type LastTurnRead, type MarkerCheck } from "../../adapters/github/thread.ts";
+import { checkDispatchMarker, isAskSuperseded, type MarkerCheck } from "../../adapters/github/thread.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-target.ts";
 
@@ -89,25 +89,47 @@ export interface RunnerDispatch {
    */
   dispatchedBy?: string;
   /**
+   * The ask comment id this dispatch's run should claim when it starts (#285).
+   *
+   * The second half of the turn's identity on the wire: the runner writes
+   * `atomaton:took=<ask> run=<run>` from this, and the ending it eventually writes
+   * names the same ask back. What it is depends on the dispatch:
+   *
+   *   - a dispatch that posts a marker: the marker's own comment id, which
+   *     `postDispatchMarker` returns — the marker IS the ask this run takes up
+   *     (the marker kept as the intent, the claim as the start, decision #285);
+   *   - an answers-request dispatch: the ask it fulfils, which the caller names —
+   *     the person's command comment for validation, the hand-off comment
+   *     `reload_environment` just wrote, the `waiting` ending that opened the pull
+   *     request. Required there: an answers-request dispatch that names no ask has
+   *     nothing to verify its wait against, and is refused rather than sent.
+   *
+   * A run started by a new issue's body has no ask comment (the body is not one),
+   * and is started by the reusable-workflow call rather than this dispatcher — its
+   * `ask` input stays empty and it writes no claim.
+   */
+  ask?: number | string;
+  /**
    * Whether this dispatch takes up a request already in the thread, rather than
    * starting a turn nobody asked for.
    *
-   * The claim is the caller's; the verification lives here (`refuseResolvedWait`
+   * The claim is the caller's; the verification lives here (`refuseSupersededAsk`
    * below). Two callers set it, and both would otherwise be refused by the
    * outstanding-request check for the same reason: the thread's last turn-changing
    * event is a request, and that request is this dispatch's own.
    *
    *   - `reload_environment`: the agent running right now is restarting itself, so
    *     the request is the command that started that very run. It posts its handoff
-   *     comment first and passes its id as `freshnessProbeId`, so the check sees the
-   *     comment the claim rests on before it judges.
+   *     comment first, passes its id as `ask` (the run claims it) and as
+   *     `freshnessProbeId` (the check sees it before it judges).
    *   - validation: the dispatch fulfils the request the pull request carries — the
    *     command a person typed, or the reviewer line `create_pr` wrote. The check is
    *     what keeps that premise honest: CI can hold the dispatch for minutes, and the
    *     thread it lands on is the one that exists at the end of the wait, not the one
-   *     the caller saw at the start. A ball that moved in the meantime — a reviewer
-   *     already dispatched and finished — is a request already answered, and handing
-   *     it to the named agent anyway reviewed the same head twice (#283).
+   *     the caller saw at the start. A ball that moved in the meantime — a hand-off
+   *     that already ran the reviewer, a verdict already on the thread, a newer ask
+   *     still open — is read off the quoted ask's own identity (#285), not guessed
+   *     from which event happens to be newest.
    *
    * Omitted everywhere else, which is the honest default: a dispatch that is not
    * taking up a request is a new turn, and a new turn must not start on a node that
@@ -416,67 +438,35 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
 }
 
 /**
- * Refuse an answers-request dispatch whose wait has already resolved.
+ * Refuse an answers-request dispatch whose ask has already been answered or
+ * superseded — the comparison that replaced the wait's shape-and-time guess (#285).
  *
  * `answersRequest` claims the thread still waits for what this dispatch delivers.
  * Like every claim this module acts on, it is verified here rather than trusted: CI
  * can hold a validation for minutes, and the thread it lands on is the one that exists
  * at the END of the wait. #283 is what skipping the verification cost: while the
- * validation polled CI, the run it was validating handed off to the reviewer, that
- * reviewer reviewed and gave the ball back to a person — and five minutes after the
- * ball had settled, the validation dispatched the same reviewer onto the same head.
- * The marker the second dispatch would have posted is skipped too, so the thread did
- * not even show who started it.
+ * validation polled CI, a hand-off ran the reviewer, that reviewer reviewed and gave
+ * the ball back to a person — and five minutes after the ball had settled, the
+ * validation dispatched the same reviewer onto the same head.
  *
  * ## The rule
  *
- * The thread's last turn event decides:
+ * The dispatch names the ask it fulfils (`ask`), and the thread is asked one
+ * question about that ask's own identity: does it still need this delivery? See
+ * `domain/work/thread.ts`'s `askSuperseded` for the three comparisons — an answering
+ * `handed-off`/`waiting` ending (the ball moved to a run that delivers the answer),
+ * the dispatched agent's own verdict already on the thread (#282, `verdictPassed`
+ * deciding whether it stands), and a newer ask still open (someone else's live
+ * request). A thread whose ask survives all three is still waiting, and the dispatch
+ * goes. The marker an answers-request dispatch never posted stays unposted: the
+ * runner's claim — `atomaton:took`, written at start — is the record that a run took
+ * the turn, and it is what separates two racing validations' runs when both arrive
+ * for one ask.
  *
- *   - `waiting` — the run that was asked for ended inside a child-starting tool, and
- *     the node waits on CI or a child. This dispatch is the answer the node is still
- *     owed. It goes.
- *   - `handed-off` — the caller just wrote its own handoff and is dispatching the
- *     agent it named (the reload). It goes.
- *   - `asked` — a request stands untaken, and who made it decides, because `asked`
- *     is two situations wearing one event:
- *
- *       - The machinery's dispatch marker — the run it starts is on its way. A second
- *         dispatch would be a second run on one node, the same answer the
- *         outstanding-request check gives a dispatch that posts a marker. Refused.
- *       - A person's command — the request this dispatch exists to answer. On a pull
- *         request that command reached validation, not a runner, so nothing else turns
- *         it into a run: refusing it is what dropped every `/reviewer` a person typed
- *         on a pull request, and the review the person asked for never started. It goes.
- *
- *     The residue is a second validation that starts while the first dispatch's run is
- *     still going: no marker was written, so the thread still shows the person's ask.
- *     `atomaton-validate-<number>` cancels overlapping validations, so the window needs
- *     a push or an edit mid-review; #285's `took` claim (written by the runner at
- *     start) is what closes it exactly.
- *   - no events at all — nothing in the thread has moved since the node was opened.
- *     There is no evidence the wait resolved, and the request this fulfils is the
- *     body's own line, which `requestOutstandingOn` does not read for exactly this
- *     reason. It goes.
- *   - `returned` — the ball came back, and WHOSE verdict it was decides, because a
- *     return is two different facts wearing one event:
- *
- *       - Another agent's verdict — the ordinary fix cycle. The reviewer asked for a
- *         fix, the engineer pushed one and ended with no directive of its own
- *         (`ended=done`), and the green validation routes that push to the reviewer
- *         whose directive it answered. The agent being dispatched has not spoken on
- *         this work; refusing here would strand the pull request green with no
- *         verdict, and strand the red retry the same way. It goes.
- *       - The dispatched agent's own verdict. The thread's newest word on the work is
- *         then exactly the judgement this dispatch would commission again — #282's
- *         reviewer, whose "no defects" was already on the thread when the validation
- *         it was racing came to dispatch the same reviewer onto the same head. What
- *         the caller judged decides whether that word still stands: a passed verdict
- *         confirms it, and the dispatch is refused; a failed one refutes it — CI
- *         called the engineer's "done" wrong — and the retry must go, so
- *         `verdictPassed: false` lets it. Unsupplied reads as unrefuted: the
- *         conservative side, and #282's answer survives a caller that forgot the
- *         fact. A verdict whose comment names no agent is treated as the dispatched
- *         agent's own, for the same reason.
+ * A dispatch that names no ask is refused: an answers-request dispatch without one
+ * has nothing to verify its wait against, and sending it would be exactly the
+ * unverified claim #283 was. The callers all name one — validation carries the
+ * command comment's id or the `waiting` ending's, the reload its own hand-off's.
  *
  * A refused dispatch posts nothing: the person already holds the judgement, and a
  * notice restating it is the confusion #283 reports rather than a cure. One log line
@@ -497,19 +487,35 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
  *
  * Returns the refusal, or `undefined` when the dispatch may proceed.
  */
-function refuseResolvedWait(d: RunnerDispatch): "superseded" | undefined {
+function refuseSupersededAsk(d: RunnerDispatch): "superseded" | undefined {
   const log = d.log ?? ((message: string) => console.error(message));
   // The repository as a `gh` path segment, the same way `postDispatchMarker` writes
   // it, for the same reason `refuseOutstandingRequest` does.
   const repoPath = d.repo ?? "{owner}/{repo}";
 
+  const askId = Number(d.ask);
+  if (!Number.isInteger(askId) || askId <= 0) {
+    log(
+      `${d.context}: the dispatch answers a request on #${d.number} but names no ask comment, ` +
+        `so ${d.agent} was not started`,
+    );
+    return "superseded";
+  }
+
   // Widening, like the marker check's: the point is to outlast a lag, not to sit out
   // an outage. A run holds a runner while this sleeps, so the total is bounded.
   const delays = [1_000, 2_000, 4_000];
-  let read: LastTurnRead | undefined;
+  let read:
+    | { superseded: ReturnType<typeof isAskSuperseded>["superseded"]; probeVisible: boolean | undefined }
+    | undefined;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
-      read = readLastTurnEvent(repoPath, d.number, d.freshnessProbeId);
+      read = isAskSuperseded(repoPath, d.number, {
+        askId,
+        agent: d.agent,
+        verdictPassed: d.verdictPassed,
+        probeId: d.freshnessProbeId,
+      });
     } catch (e) {
       log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
       return "superseded";
@@ -532,36 +538,11 @@ function refuseResolvedWait(d: RunnerDispatch): "superseded" | undefined {
     return "superseded";
   }
 
-  const last = read.last;
-  if (last === undefined || last === "waiting" || last === "handed-off") return undefined;
-  if (last === "asked") {
-    // A person's command is the request this dispatch answers; the machinery's marker
-    // means the run it announces is already coming. See the rule above.
-    if (!read.lastIsMachinery) return undefined;
-    log(
-      `${d.context}: #${d.number} already has the machinery's dispatch marker on it, ` +
-        `so ${d.agent} was not started`,
-    );
-    return "superseded";
-  }
-  if (last === "returned") {
-    // A `returned` verdict is two facts wearing one event. Another agent's return is
-    // the fix cycle this dispatch exists to answer; the dispatched agent's own return
-    // is a judgement already in the thread, which only a verdict that refutes it can
-    // send this dispatch after.
-    const own = read.lastAgent === undefined || read.lastAgent === d.agent;
-    if (!own) return undefined;
-    if (d.verdictPassed === false) return undefined;
-    log(
-      `${d.context}: the wait on #${d.number} had already resolved (the thread's newest word on the work is ` +
-        `${read.lastAgent ?? d.agent}'s own verdict${d.verdictPassed === true ? ", and the caller's confirms it" : ""}), ` +
-        `so ${d.agent} was not started`,
-    );
-    return "superseded";
-  }
+  const why = read.superseded;
+  if (why === undefined) return undefined;
   log(
-    `${d.context}: the wait on #${d.number} had already resolved (the thread's last turn event is \`${last}\`), ` +
-      `so ${d.agent} was not started`,
+    `${d.context}: the ask this dispatch answers on #${d.number} is no longer waiting ` +
+      `(${why}), so ${d.agent} was not started`,
   );
   return "superseded";
 }
@@ -595,16 +576,20 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
 
   // The marker goes out before the check, so the check has something to be ordered
   // against. A dispatch that answers a request posts no marker — the request it would
-  // find is its own, and the marker would be a second one for one turn — so instead of
-  // the ordering check its claim is verified the other way: the thread must still be
-  // waiting for it (#283).
+  // find is its own — so instead of the ordering check its claim is verified the
+  // other way: the ask it names must still be waiting (#285). Either way the run
+  // starts with an `ask` to claim: the marker's id where the marker is the ask, the
+  // caller's where the dispatch answers a request.
+  let ask: number | string | undefined;
   if (d.answersRequest) {
-    const refusal = refuseResolvedWait(d);
+    const refusal = refuseSupersededAsk(d);
     if (refusal !== undefined) return refusal;
+    ask = d.ask;
   } else {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined) return refusal;
+    ask = d.ask ?? markerId;
   }
 
   const args = [
@@ -613,6 +598,9 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
     "--field", `number=${d.number}`,
     "--field", `type=${d.type}`,
     "--field", `notify=${d.notify ?? ""}`,
+    // The ask this run claims at start (#285). Empty is the honest "no ask comment" —
+    // a body-started run — and the runner writes no claim for it.
+    "--field", `ask=${ask ?? ""}`,
     // Always sent, so the input has a value on every path rather than defaulting in
     // one place and being absent in another.
     "--field", `reload_count=${d.reloadCount ?? 0}`,

@@ -143,6 +143,12 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
         // `atomaton:origin-agent` tag naming whoever opened it -- so a dispatch
         // argument would be a second answer that goes stale the moment the pull
         // request is validated again. See `validate_pull_request.ts`.
+        ask: {
+          description: "Ask comment id the dispatched run claims (atomaton:took, #285); the answers-request check verifies the wait against it",
+          required: false,
+          type: "string",
+          default: "",
+        },
         asked_by_person: {
           description: "Whether a person asked for this run, which decides who a failed check goes back to",
           required: false,
@@ -212,6 +218,7 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           SUMMARY: validateStep.outputs.summary,
           VERDICT_PASSED: validateStep.outputs.verdict_passed,
           REPO: "${{ github.repository }}",
+          ASK: "${{ inputs.ask }}",
         },
         run: `${scriptCommandWithArgs(dispatchAgentRef, {
           agent: "\${AGENT}",
@@ -225,6 +232,9 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           // one dispatch that should happen. The claim is verified in
           // `dispatchRunner` itself (#283): a thread whose ball moved while CI ran --
           // a reviewer already dispatched and finished -- refuses quietly.
+          // The ask this run claims (#285) — carried here from the dispatch that
+          // started validation, and what the check verifies the wait against.
+          ask: "\${ASK}",
           "answers-request": "true",
           // What this run's verdict said about the work, so the check can tell a
           // verdict it would re-deliver (#282) from the fix push it exists to hand

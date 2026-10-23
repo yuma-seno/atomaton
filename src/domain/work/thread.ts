@@ -109,6 +109,34 @@ export interface TurnReaders {
    * `wasLaunched` asks.
    */
   isDispatchMarker: (body: string) => boolean;
+  /**
+   * The claim of a turn a body carries, when it is one (#285).
+   *
+   * `atomaton:took=<ask> run=<run>` is the runner saying "I took up this ask" — the
+   * fact the shaping asks of every comment it walks: a claim opens the turn's
+   * claimed-and-unanswered state, which is what makes the ball the agent's. A body
+   * with no claim moves nothing.
+   */
+  claim: (body: string) => { ask: number; run: number } | undefined;
+  /**
+   * The ask id a body's ending answers, when it answers one (#285).
+   *
+   * The close side of `claim`: an ending whose `answers` names the open claim's ask
+   * ends that claim, and the ball goes back per the ending's verb. `undefined` for a
+   * body that is not an ending and for one that answers no ask (`answers=0`, the
+   * record for a turn that claimed no comment).
+   */
+  answeredAsk: (body: string) => number | undefined;
+  /**
+   * The agent an ending's result tag names, or "" when it names none (#285).
+   *
+   * The attribution one comparison needs: an answers-request dispatch asking "has the
+   * verdict I would commission already been written" compares the answering ending's
+   * agent with the agent it would start. A machinery notice (`ended=done` with no
+   * result tag) names nobody, and the comparison treats that as the dispatched
+   * agent's own — the same reading the failure notice's closure has always had.
+   */
+  endingAgent: (body: string) => string;
 }
 
 /**
@@ -156,6 +184,20 @@ export interface ShapedThread<T extends ThreadEntry = ThreadEntry> {
   comments: T[];
   /** The turn-changing events those comments are, oldest first. */
   events: TurnEvent[];
+  /**
+   * Who holds the turn when the walk ends: the agent while a claim is open, the
+   * person otherwise (#285).
+   *
+   * A claim — `atomaton:took` — is a run saying "I took up this ask", and the
+   * ending that answers it hands the ball back. Between them, and only between
+   * them, the ball is with an agent. A request nobody has claimed yet is NOT the
+   * agent's by this answer: the run that will take it has not started, and a
+   * person's comment in that window is kept and reaches that run's context rather
+   * than being deleted on the strength of a turn nobody had taken. The questions
+   * that DO care about a request nobody has taken up ask `requestOutstanding`,
+   * which keeps the event rule — this answer is the guard's, and the guard's alone.
+   */
+  holder: TurnHolder;
 }
 
 /**
@@ -228,10 +270,17 @@ export function newestEventBody(
 }
 
 /**
- * Whose turn it is, from the events in the order they happened.
+ * Whose turn the events leave a node in — the EVENT rule, kept for the two questions
+ * that are not the guard's (#285).
  *
  * The last event decides. An empty thread is a person's: nothing has been asked for,
  * so there is nothing for an agent to be doing.
+ *
+ * The guard no longer asks this — the shaping reads the claims (`ShapedThread.holder`),
+ * because the guard's question is "was a run holding the ball", and the claim is what
+ * says so. What still asks the event rule is "is a run working OR COMING"
+ * (`runInFlight`: a request nobody has claimed yet is a run on its way, and a stop
+ * must reach it), and the label's release rule, which reads one ending's meaning.
  *
  * `waiting` is a person's turn. The node's own run is over and the ball is with a
  * child, not with this node's agent — so a comment here is a person talking to
@@ -263,6 +312,102 @@ export function whoseTurn(events: readonly TurnEvent[]): TurnHolder {
  */
 export function requestOutstanding(events: readonly TurnEvent[]): boolean {
   return events[events.length - 1] === "asked";
+}
+
+/** One comment as the ask check reads it: a body, whose it is, and its GitHub id. */
+export type IdentifiedComment = ThreadEntry & { readonly id: number };
+
+/**
+ * Whether the ask an answers-request dispatch quotes has already been answered or
+ * superseded — the comparison that replaced the wait's shape-and-time guess (#285).
+ *
+ * The dispatch names the ask it fulfils (a person's command, the hand-off a reload
+ * just wrote, the `waiting` ending that opened a pull request), and this asks one
+ * thing of the thread as it stands NOW, at the end of however long the dispatch
+ * waited: does that ask still need this delivery? Three comparisons, each on ids the
+ * thread itself carries:
+ *
+ *   - An ending answers the quoted ask with `handed-off` or `waiting` — the ball
+ *     moved to a run that delivers, or is delivering, the answer. This dispatch
+ *     would deliver it a second time (#283's reviewer, dispatched by a hand-off
+ *     while validation still polled CI). Superseded.
+ *   - An ending answers the quoted ask and it is the DISPATCHED AGENT'S OWN verdict
+ *     — the judgement this dispatch would commission is already on the thread
+ *     (#282's second review of one head). A verdict that names no agent is treated
+ *     as the dispatched agent's own, which keeps the failure notice's closure: the
+ *     ask it answered was answered with "did not finish", not with work. What the
+ *     CALLER judged decides whether that verdict still stands — `verdictPassed:
+ *     false` is CI refuting it, and the retry goes; unsupplied reads as unrefuted.
+ *     Another agent's `returned` never lands here: the fix push that answers a
+ *     reviewer's directive is the engineer's verdict on the engineer's own ask, and
+ *     the reviewer this dispatch would start has not spoken on that work at all.
+ *   - An ask NEWER than the quoted one is still open — no ending answers it. Someone
+ *     else's request is live (a marker from a dispatch that went out mid-wait, a
+ *     command posted during it), and answering the older ask now would act on a
+ *     request the thread has moved past. Superseded.
+ *
+ * Not a supersession: an ending answers the quoted ask with the engineer's own
+ * `returned` while this dispatch starts the reviewer — the fix cycle. The ask was
+ * answered by delivered WORK, and what this dispatch delivers (a verdict on it) is
+ * still owed.
+ *
+ * Read from the SHAPED comments: a comment the guard is removing is on its way out
+ * and is not the answer's basis, the same rule `readLastTurnEvent` held. Pure:
+ * comments in, one answer out.
+ */
+export function askSuperseded(
+  comments: readonly IdentifiedComment[],
+  readers: TurnReaders,
+  /** The ask comment id the dispatch quotes as the one it fulfils. */
+  askId: number,
+  /** The agent the dispatch would start — whose prior verdict would make it a re-delivery. */
+  agent: string,
+  /** What the caller's own verdict said about the work; `undefined` when it supplies none. */
+  verdictPassed?: boolean,
+): "run-coming" | "handed-off" | "waiting" | "own-verdict" | "newer-open-ask" | undefined {
+  let answeredHere: "returned" | "handed-off" | "waiting" | undefined;
+  let answeredBy = "";
+  const answeredAsks = new Set<number>();
+  const claimedAsks = new Set<number>();
+  const asks: { id: number; marker: boolean }[] = [];
+  for (const entry of comments) {
+    if (entry.quoted) continue;
+    if (readers.requestedAgent(entry.body) !== "" || readers.isDispatchMarker(entry.body)) {
+      asks.push({ id: entry.id, marker: readers.isDispatchMarker(entry.body) });
+    }
+    const claim = readers.claim(entry.body);
+    if (claim !== undefined) claimedAsks.add(claim.ask);
+    const answer = readers.answeredAsk(entry.body);
+    if (answer !== undefined && answer > 0) {
+      answeredAsks.add(answer);
+      if (answer === askId) {
+        answeredHere = readers.ending(entry.body) || undefined;
+        answeredBy = readers.endingAgent(entry.body);
+      }
+    }
+  }
+
+  // The quoted ask is the machinery's own unclaimed marker: the dispatch that posted
+  // it has a run on its way (per-node concurrency queues it, the runner claims it at
+  // start), and a second dispatch for the same ask would be a second run on one
+  // node. A CLAIMED marker does not land here — its run took the turn, and whether
+  // the dispatch is superseded is decided by the ask's answer below, which is what
+  // keeps the fix cycle (the engineer's claimed-and-answered marker) going.
+  const quoted = asks.find((ask) => ask.id === askId);
+  if (quoted?.marker === true && !claimedAsks.has(askId)) return "run-coming";
+
+  if (answeredHere === "handed-off") return "handed-off";
+  if (answeredHere === "waiting") return "waiting";
+  if (answeredHere === "returned") {
+    const own = answeredBy === "" || answeredBy === agent;
+    if (own && verdictPassed !== false) return "own-verdict";
+  }
+  for (let index = asks.length - 1; index >= 0; index -= 1) {
+    const ask = asks[index]!;
+    if (ask.id <= askId) break;
+    if (!answeredAsks.has(ask.id)) return "newer-open-ask";
+  }
+  return undefined;
 }
 
 /**
@@ -306,13 +451,32 @@ export function requestOutstanding(events: readonly TurnEvent[]): boolean {
 export function shapedThread<T extends ThreadEntry>(comments: readonly T[], readers: TurnReaders): ShapedThread<T> {
   const kept: T[] = [];
   const events: TurnEvent[] = [];
+  // The ask id of the newest claim not yet answered — the claimed-and-unanswered
+  // state. Undefined is a person's turn, whatever the events say: the claim is what
+  // makes the ball the agent's (#285), and an unclaimed ask is a run that has not
+  // started yet rather than one that is working.
+  let openClaim: number | undefined;
   for (const entry of comments) {
-    if (entry.isHuman && whoseTurn(events) === "agent") continue;
+    if (entry.isHuman && openClaim !== undefined) continue;
     kept.push(entry);
+    if (!entry.quoted) {
+      // Claims and their answers move the state in the same walk that shapes the
+      // thread, so a reader of the shaped comments and the holder can never
+      // disagree about where the ball was. A quotation carries neither: the tags in
+      // it are the removed author's words, not the thread's own (see
+      // `ThreadEntry.quoted`).
+      const claim = readers.claim(entry.body);
+      if (claim !== undefined) {
+        openClaim = claim.ask;
+      } else if (openClaim !== undefined) {
+        const answered = readers.answeredAsk(entry.body);
+        if (answered !== undefined && answered === openClaim) openClaim = undefined;
+      }
+    }
     const event = eventOf(entry, readers);
     if (event !== undefined) events.push(event);
   }
-  return { comments: kept, events };
+  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
 }
 
 /**

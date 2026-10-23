@@ -37,12 +37,13 @@
  *
  * ## Why the thread rather than the label
  *
- * This used to read the `atomaton/in-progress` label, which the runner sets. Between
- * a person's command and the runner starting, the label is absent — minutes long on a
- * pull request, where a command goes through validation and CI before any agent
- * starts — so a comment made in that window went through. The label is a cache of the
- * answer, written late; the thread is the answer, written when the turn changes. See
- * `domain/work/thread.ts`.
+ * This used to read the `atomaton/in-progress` label, which the runner sets — and
+ * before that, the thread's last event, where an unclaimed command read as the
+ * agent's. What it reads now is the claim (#285): a run says it took the turn
+ * (`atomaton:took`), and until an ending hands it back, a person's comment here
+ * would sit unseen or race the run. The claim is written at runner start, so the
+ * window it leaves open is the one before any run exists — a person's comment there
+ * is kept, and reaches the run that does start. See `domain/work/thread.ts`.
  *
  * The notice below says "the ball is with an agent", NOT "the label is active".
  * Naming the label told a person to remove it and re-comment, which does nothing:
@@ -117,8 +118,8 @@ function noticeBody(opts: {
     ? `it carries more than one command (${opts.commands.join(", ")}). Atomaton acts on one command per ` +
       "comment: it acts on the first and drops the rest, and which one won is not visible on the page. " +
       "Comment each command on its own, with what you want done on the lines under it."
-    : "the ball is with an agent on this issue/PR: the last turn on the thread was a request to an agent, " +
-      "and it has not come back to a person yet. Please wait for that to finish, then comment again.";
+    : "the ball is with an agent on this issue/PR: a run has claimed the turn and has not handed it back yet. " +
+      "Please wait for that to finish, then comment again.";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     ...(quote ? [QUOTES_TAG.write(Number(opts.commentId))] : []),
@@ -127,7 +128,7 @@ function noticeBody(opts: {
   if (opts.several && opts.removed) {
     lines.push(
       "",
-      "The ball is also with an agent on this issue/PR right now, so a comment would not reach anyone until that run comes back.",
+      "A run also holds the turn on this issue/PR right now, so a comment would not reach anyone until it comes back.",
     );
   }
 

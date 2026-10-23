@@ -35,7 +35,8 @@ import { closingKeywordRefusal, closingReferences, partOfLine } from "../../../d
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
-import { postTurnComment } from "../../../adapters/github/ending-comment.ts";
+import { endingIdentity } from "../lib/turn-identity.ts";
+import { postTurnComment, recordEndingComment } from "../../../adapters/github/ending-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
 import { capText, fitItems, TOOL_OUTPUT_BUDGET } from "../../../shared/tool-output.ts";
@@ -683,7 +684,7 @@ function closeIssue(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>): boolean {
     // `conclude_issue.ts`, which has the same bug, and `turn-comment.ts`.
     const { code, stdout, stderr } = gh(
       "issue", "comment", String(num), "--repo", REPO,
-      "--body", turnCommentBody({ ended: "done", audience: "person", body: request }),
+      "--body", turnCommentBody({ ended: "done", audience: "person", body: request, ...endingIdentity() }),
     );
     // The one failure still worth an error. Saying nothing here would leave an
     // issue that nobody has been asked to close and an agent that believes
@@ -970,42 +971,67 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   // An empty name is a legitimate answer: CI still runs, and nothing is dispatched
   // afterwards. What it did not handle is a person finding out, which is what
   // `noticeNobodyIsComing` below is for.
-  const validationDispatched = dispatchPrValidation(REPO, num, branch);
-
-  // Traceability: the reviewer dispatch above is fire-and-forget, and (since
-  // this call now ends the session immediately, see the returned
-  // meta.session_ends below) no further agent text will be posted on the
-  // CURRENT issue about this -- record it here explicitly, the same way
-  // dispatchSubAgent always confirms its own dispatch with a comment.
+  // Traceability: the reviewer dispatch is fire-and-forget, and (since this call
+  // now ends the session immediately, see the returned meta.session_ends below) no
+  // further agent text will be posted on the CURRENT issue about this -- record it
+  // here explicitly, the same way dispatchSubAgent always confirms its own
+  // dispatch with a comment.
   const node = nodeNumber();
+  // The `waiting` ending goes up BEFORE the dispatch, and its comment id is the ask
+  // the dispatched run claims (#285): the reviewer line in the body is not a
+  // comment, so the waiting comment is the only identity the thread can give the
+  // request this dispatch fulfils — the ask the run's claim names, the check
+  // verifies its wait against, and the ending eventually answers back. That is
+  // also why the wait is posted first: a dispatch that has no ask to name is
+  // refused, not sent.
+  //
+  // The `waiting` tag records that this run stopped to wait on a child (the pull
+  // request); without it the node's last turn event reverts to the `asked` that
+  // started the run, and the aggregation gate reads that as a request nobody took
+  // up. It is chosen here rather than inside the wrapper because a comment with no
+  // ending is not a turn comment: the failure path below takes this one back and
+  // posts a content-free notice instead, because a failed dispatch keeps the
+  // session open and a run that continues must not carry the tag. See
+  // `domain/work/thread.ts`.
+  let waitingCommentId: string | undefined;
   if (node !== undefined) {
-    const next = !validationDispatched
-      ? "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log."
-      : reviewer
-        ? `Running CI; \`${reviewer}\` follows if it passes.`
-        : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
-    // The `waiting` tag rides on this comment when the session ends here, so the node's
-    // thread records that its run stopped to wait on a child (the pull request). Without
-    // it the node's last turn event reverts to the `asked` that started the run, and the
-    // aggregation gate reads that as a request nobody took up. Only when "something
-    // happens next": a failed validation dispatch keeps the session open, so the run is
-    // not waiting and must not carry the tag. See `domain/work/thread.ts`.
-    //
-    // That second case is why the ending is chosen here rather than inside the wrapper:
-    // a comment with no ending is not a turn comment, and writing `done` on a run that
-    // has not ended would hand the node to a person while its agent is still going. So
-    // the open path writes the `llm-context` tag by hand, which is the decision it always
-    // was — and the one the contract test in `generated-workflows.test.ts` asks for.
+    const next = reviewer
+      ? `Running CI; \`${reviewer}\` follows if it passes.`
+      : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
     const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;
-    const body = validationDispatched
-      ? turnCommentBody({ ended: "waiting", audience: "person", body: text })
-      : `${LLM_CONTEXT_TAG.write("exclude")}\n${text}`;
-    // Posted and recorded through the one helper (`ending-comment.ts`), so the
-    // result footer lands on THIS comment — the one that ended the run's turn —
-    // instead of on a second, content-free one beside it. `validationDispatched`
-    // is also whether the session ends here: a failed dispatch keeps it open,
-    // and a run that continues must not leave a record behind.
-    postTurnComment({ number: String(node), repo: REPO, body, sessionEnds: validationDispatched });
+    // Posted but NOT recorded yet: whether the session ends is known only once the
+    // dispatch answers — the same order `reload_environment` runs in, which posts
+    // its hand-off and records it only when the dispatch succeeds.
+    waitingCommentId = postTurnComment({
+      number: String(node),
+      repo: REPO,
+      body: turnCommentBody({ ended: "waiting", audience: "person", body: text, ...endingIdentity() }),
+    });
+  }
+  const validationDispatched = dispatchPrValidation(REPO, num, branch, { ask: waitingCommentId });
+  if (node !== undefined) {
+    if (validationDispatched) {
+      // The session ends here, so the waiting comment IS this run's ending: recorded
+      // through the one helper (`ending-comment.ts`), so the result footer lands on
+      // THIS comment instead of on a second, content-free one beside it.
+      recordEndingComment(waitingCommentId, String(node));
+    } else {
+      // Take the wait back — a run that continues must not leave a comment claiming
+      // it is waiting — and say what actually happened, with no ending, the way the
+      // pre-#285 failure path wrote it.
+      if (waitingCommentId !== undefined) {
+        gh("api", `repos/${REPO}/issues/comments/${waitingCommentId}`, "--method", "DELETE");
+      }
+      const text =
+        `Atomaton: PR #${num} created (${stdout.trim()}). ` +
+        "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log.";
+      postTurnComment({
+        number: String(node),
+        repo: REPO,
+        body: `${LLM_CONTEXT_TAG.write("exclude")}\n${text}`,
+        sessionEnds: false,
+      });
+    }
   }
 
   // Nobody coming, said out loud on the pull request itself.
@@ -1164,7 +1190,29 @@ function pushBranch(branch: string): boolean {
       // person's push. It was removed: nothing starts unless someone asks. An
       // agent that pushed a fix and wants it reviewed hands off by naming the
       // reviewer as its directive, which is the path the handoff limit covers.
-      if (pr) dispatchPrValidation(REPO, pr.number, branch);
+      //
+      // The ask the re-validated run claims is a FRESH comment, posted here — the
+      // shape `create_pr` uses for its `waiting` ending (#285). Quoting the pushing
+      // run's own ask was the first cut, and it deadlocks the fix cycle: that ask
+      // carries THIS run's claim, older than anything the dispatch could write, so
+      // the run the validation starts loses the claim race every time and posts
+      // nothing — green CI with no verdict, red CI with no fix. The push comment is
+      // the record of what this dispatch is answering (the head moved), no earlier
+      // claim can hold it, and two validations for one push race on it the way two
+      // validations for one command race on the command.
+      let pushAsk: string | undefined;
+      if (pr) {
+        const sha = gitRun("rev-parse", "--short", "HEAD");
+        const head = sha.code === 0 ? sha.stdout.trim() : "";
+        const posted = gh(
+          "api", `repos/${REPO}/issues/${pr.number}/comments`, "--method", "POST",
+          "-f", `body=${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: pushed ${head} to this pull request. Running CI; the result routes what happens next.`,
+          "--jq", ".id",
+        );
+        if (posted.code === 0) pushAsk = posted.stdout.trim() || undefined;
+        else report("warning", "could not post the push comment, so the dispatched run would have no ask to claim; validation was NOT dispatched");
+      }
+      if (pr && pushAsk !== undefined) dispatchPrValidation(REPO, pr.number, branch, { ask: pushAsk });
     } catch {
       // This call's result is `{ok: true}` and validation was not started. An
       // agent that pushed and expects CI to run would be waiting for something

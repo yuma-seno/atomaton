@@ -34,10 +34,11 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead, ghPaginated, splitConcatenatedJson } from "./gh.ts";
-import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, QUOTES_TAG } from "./tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, QUOTES_TAG, TOOK_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
+  askSuperseded,
   latestAsk,
   latestRequestedAgent,
   newestEventEntry,
@@ -46,6 +47,7 @@ import {
   wasLaunched,
   whoseTurn,
   type AskReaders,
+  type IdentifiedComment,
   type LatestAsk,
   type ShapedThread,
   type ThreadEntry,
@@ -67,7 +69,7 @@ export const readers: TurnReaders = {
   // the two that leave the ball somewhere other than a person; `stopped`/`limit`/`done`
   // all give the node back, and end the turn the same way. See `TurnReaders`.
   ending: (body) => {
-    const ended = ENDED_TAG.read(body);
+    const ended = ENDED_TAG.read(body)?.verb;
     if (ended === "handoff") return "handed-off";
     if (ended === "waiting") return "waiting";
     if (ended === "stopped" || ended === "limit" || ended === "done") return "returned";
@@ -75,6 +77,16 @@ export const readers: TurnReaders = {
   },
   requestedAgent: (body) => parseCommentCommand(body).agent,
   isDispatchMarker: (body) => DISPATCH_TAG.has(body),
+  // The turn's identity (#285): the claim a took tag carries, the ask an ending
+  // answers, and the agent an ending's result tag names. `answers=0` is an ending
+  // that answers no comment — a run started by a new issue's body — and reads as
+  // undefined, which is the honest "answers nothing" rather than a matchable id.
+  claim: (body) => TOOK_TAG.read(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.read(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.read(body) ?? "",
 };
 
 /**
@@ -111,7 +123,14 @@ const askReaders: AskReaders = {
  * for one definition instead of a third copy. See `run-report.ts`, which folds on
  * exactly these two readers.
  */
-export const endingWalkReaders: EndingWalkReaders = { ending: readers.ending, quoted: isQuotation };
+export const endingWalkReaders: EndingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  // The turn's identity (#285): the claim and the ending record, read from the same
+  // tags the shaping's readers read — one wire format, one parse.
+  claim: (body) => TOOK_TAG.read(body),
+  ended: (body) => ENDED_TAG.read(body),
+};
 
 /** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
 interface Comment {
@@ -304,7 +323,7 @@ export function commentWouldBeRemoved(repo: string, number: string | number, com
     // Read-after-write lag: the comment being judged is newer than the listing. Judge
     // it as the latest arrival, which is whose turn the whole listed thread leaves.
     const entries = comments.map(entryOf);
-    return whoseTurn(shapedThread(entries, readers).events) === "agent";
+    return shapedThread(entries, readers).holder === "agent";
   }
   return !keptCommentIds(comments).has(listed.id);
 }
@@ -318,16 +337,21 @@ export function commentWouldBeRemoved(repo: string, number: string | number, com
  * thread is the answer itself, written when the turn changes -- the same argument
  * `guard_comment_during_run.ts` makes for reading the thread rather than the label.
  *
- * The ball is with an agent exactly when the last turn-changing event was a request or
- * a hand-off, which is `whoseTurn`'s rule. A request that no run has taken up yet still
- * counts: a run is coming, and a stop should reach it and a resume should not start a
- * second one.
+ * Two facts answer it, and either is enough (#285): an open claim — `atomaton:took`,
+ * a run saying it took the turn and has not answered yet — or the event rule's "a
+ * request or a hand-off is the newest word". The second is what keeps a request
+ * nobody has claimed yet counting as in flight: a run is coming (the dispatch went
+ * out, the runner is starting), and a stop should reach it and a resume should not
+ * start a second one. The guard's own question drops that second clause — an
+ * unclaimed request is not a run HOLDING the ball, and a person's comment in that
+ * window is kept — but this question is "should you expect a run", which is wider.
  *
  * Throws when the thread cannot be read. A caller deciding whether to stop or resume
  * work must not read a failed read as "nothing is running".
  */
 export function runInFlight(repo: string, number: string | number): boolean {
-  return whoseTurn(readComments(repo, number).events) === "agent";
+  const shaped = readComments(repo, number);
+  return shaped.holder === "agent" || whoseTurn(shaped.events) === "agent";
 }
 
 /**
@@ -408,7 +432,7 @@ export function checkDispatchMarker(
 }
 
 /** What an answers-request dispatch learns from one read of the thread. */
-export interface LastTurnRead {
+export interface AskStateRead {
   /**
    * Whether the comment the caller named as its freshness probe is in the listing yet,
    * or `undefined` when it named none. The same instrument the dispatch marker is for
@@ -416,65 +440,55 @@ export interface LastTurnRead {
    * caught up, and an answer judged on it is an answer about an older thread.
    */
   probeVisible: boolean | undefined;
-  /** The newest turn event in the shaped thread, or `undefined` when it carries none. */
-  last: TurnEvent | undefined;
   /**
-   * The agent the newest event belongs to, when it is a `returned` verdict whose
-   * comment names its author (`AGENT_TAG`) — the fact that separates the dispatch that
-   * would re-deliver a verdict already in the thread from the one that answers a fix
-   * another agent just pushed (#283). `undefined` for every other event, and for a
-   * verdict whose comment names nobody.
-   */
-  lastAgent: string | undefined;
-  /**
-   * Whether the newest event was written by the machinery rather than a person.
+   * The thread's shaped comments, each with its GitHub id — `askSuperseded`'s input.
    *
-   * `asked` is the event this matters for, and it is two situations wearing one name:
-   * a person's command — a request nothing has taken up yet, which on a pull request
-   * reached validation instead of a runner, so an answers-request dispatch is the only
-   * thing that turns it into a run — and a dispatch marker, which IS the machinery
-   * starting that run. Only the second means a run is already coming.
+   * Shaped like every other read, so a comment the guard is removing cannot be the
+   * answer's basis: it is on its way out, and a claim or an ask read off it would be
+   * read off a comment that no longer exists.
    */
-  lastIsMachinery: boolean;
+  comments: IdentifiedComment[];
 }
 
 /**
- * Read a node's thread once and answer what an answers-request dispatch judges on.
+ * Read a node's thread once for an answers-request dispatch to judge (#285).
  *
- * `answersRequest` claims the request this dispatch fulfils is the thread's own to
- * still be waiting for; the claim is the caller's, and this read is what makes it
- * checkable — see `adapters/actions/dispatch.ts`, which owns the judgement. The probe
- * is the caller's just-written comment, when it has one (`reload_environment`'s
- * handoff comment): until the listing shows it, the read may predate the write the
- * `handed-off` answer rests on, and judging then would judge the thread as it stood
- * before the caller spoke. Shaped like every other read, so a comment the guard is
- * removing cannot be the event the answer turns on. Throws when the read fails, like
- * every other reader here.
+ * The dispatch quotes the ask it fulfils, and the judgement — is that ask still
+ * waiting for what this dispatch delivers — is `domain/work/thread.ts`'s
+ * `askSuperseded`, over what this returns. The probe is the caller's just-written
+ * comment, when it has one (`reload_environment`'s handoff comment): until the
+ * listing shows it, the read may predate the write the answer rests on, and judging
+ * then would judge the thread as it stood before the caller spoke. Throws when the
+ * read fails, like every other reader here: a dispatch that cannot read the thread
+ * must not read that as "the ask is still waiting".
  */
-export function readLastTurnEvent(
+export function readAskState(
   repo: string,
   number: string | number,
   probeId?: string | number,
-): LastTurnRead {
+): AskStateRead {
   const comments = listComments(repo, number);
-  const entries = comments.map(entryOf);
-  const shaped = shapedThread(entries, readers);
-  const last = shaped.events[shaped.events.length - 1];
   const probe = probeId === undefined ? undefined : String(probeId);
-  // The SHAPED list, because that is the list `last` came from: a person's comment that
-  // arrived while the ball was with an agent is dropped there and is not the event the
-  // answer turns on. Reading the raw entries let a dropped `/reviewer` stand in for the
-  // machinery's marker before it -- the marker says a run is coming and was answered
-  // with "a person asked, let it go".
-  const source = newestEventEntry(shaped.comments, readers);
+  const entries: IdentifiedComment[] = comments.map((comment) => ({
+    id: comment.id,
+    ...entryOf(comment),
+  }));
   return {
     probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
-    last,
-    // Only a `returned` verdict is attributed to an agent: the other events name no
-    // agent in their body. Whether the newest event was the machinery's own write is
-    // asked of `asked` alone, but read here from the same walk.
-    lastAgent: last === "returned" ? AGENT_TAG.read(source?.body ?? "") : undefined,
-    lastIsMachinery: source !== undefined && !source.isHuman,
+    comments: shapedThread(entries, readers).comments,
+  };
+}
+
+/** Whether the ask an answers-request dispatch quotes has been answered or superseded. */
+export function isAskSuperseded(
+  repo: string,
+  number: string | number,
+  args: { askId: number; agent: string; verdictPassed?: boolean; probeId?: string | number },
+): { superseded: ReturnType<typeof askSuperseded>; probeVisible: boolean | undefined } {
+  const read = readAskState(repo, number, args.probeId);
+  return {
+    superseded: askSuperseded(read.comments, readers, args.askId, args.agent, args.verdictPassed),
+    probeVisible: read.probeVisible,
   };
 }
 

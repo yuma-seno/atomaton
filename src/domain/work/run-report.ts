@@ -59,6 +59,20 @@ export interface EndingWalkReaders extends Pick<TurnReaders, "ending"> {
    * `lastEnding`.
    */
   quoted: (body: string) => boolean;
+  /**
+   * The claim of a turn a body carries, when it is one (#285) — `TOOK_TAG.read`.
+   *
+   * The claim is the identity the watch's gates compare: "did THIS run take a turn"
+   * is "does a claim with MY run id exist", which no marker, command or timestamp
+   * can answer.
+   */
+  claim: (body: string) => { ask: number; run: number } | undefined;
+  /**
+   * The ending record a body carries, when it is one (#285) — `ENDED_TAG.read`, verb
+   * and `answers` and `run` together. The ending is the claim's close: "does THIS run
+   * have an ending" and "is THIS ask still unanswered" are both reads of it.
+   */
+  ended: (body: string) => { verb: string; answers: number; run: number } | undefined;
 }
 
 /** The node a watched run's title names, and the agent when the title carries one. */
@@ -111,122 +125,79 @@ export function lastEndingComment(
 }
 
 /**
- * Whether the thread still lacks the ending the run owed it — the watch's signal
- * to post one.
- *
- * True when the newest ending predates the run's start (or cannot be placed in
- * time, or there is no ending at all). See the time comparison above for why each
- * unreadable case lands on the notify side.
- */
-export function needsEnding(
-  comments: readonly DatedComment[],
-  runStartedAt: string | undefined,
-  readers: EndingWalkReaders,
-): boolean {
-  const last = lastEndingComment(comments, readers);
-  if (last === undefined) return true;
-  const endedAt = Date.parse(last.createdAt);
-  if (Number.isNaN(endedAt)) return true;
-  const startedAt = Date.parse(runStartedAt ?? "");
-  if (Number.isNaN(startedAt)) return true;
-  return endedAt < startedAt;
-}
-
-/**
  * A comment as the watch's questions read it: what it says, when it was written,
  * and who wrote it.
  *
- * `needsEnding` needs the first two; `tookTurn` needs all three, because the entry
- * runs it judges can complete without ever taking a turn, and only the author
- * separates a person's request from the machinery's dispatch marker.
+ * The identity gates (#285) read the tags off the bodies and need none of this, but
+ * the shaped entries stay part of the thread read — the notice reads the agent off
+ * them, and a future question about who wrote what keeps one shape to ask it of.
  */
 export interface WatchComment extends ThreadEntry {
   readonly createdAt: string;
 }
 
 /**
- * Whether the watched run took the node's turn — the gate that keeps the watch
- * silent on an entry run that completed without dispatching anything.
+ * The ask comment id a run claimed on a thread, or `undefined` when it claimed none
+ * (#285).
  *
- * An entry run is the watch's second trigger surface, and most of its runs are not
- * turns: a comment the guard removed, an ordinary remark, a route that chose no
- * agent. None of them change the thread, and a notice on one would land on a node
- * whose last event is an older turn's ending — sometimes in the middle of another
- * run's turn, which would unjam the guard while that run was still working. So the
- * caller of this gate pairs it with `requestOutstanding` — the thread must be
- * stuck at an ask — and this answers the narrower question: is THAT ask the
- * watched run's doing?
+ * The claim — `atomaton:took=<ask> run=<run>`, written by the runner at start — is
+ * the whole answer to "did this run take a turn": the thread carries which run took
+ * which ask, and reading it is a comparison, not the marker-or-command-or-time
+ * estimate this gate replaced. A run that never wrote a claim took no turn, whatever
+ * its title says; a run that wrote one is on the hook for the ending that answers
+ * the same ask.
  *
- * The newest ask that survives the shaping is the live one; an older ask under it
- * was taken up or superseded. It is the watched run's doing when either:
- *
- *   - the machinery posted a dispatch marker at or after the run started. The
- *     marker is written by the machinery about to start a run, so one inside the
- *     watched run's lifetime is that run taking the turn; or
- *   - the ask is a person's command, the run is one whose trigger consumes a
- *     command, the run did NOT end successfully, and the command was written
- *     before the run started. Four facts, because each condition closes a hole
- *     a measurement on the thread actually caught:
- *
- *       - without the trigger condition, a run a new issue started claims the
- *         command the person posted seconds after it — the ask the command's
- *         OWN run is working on;
- *       - without the conclusion condition, a run that ended `success` claims
- *         it too. A successful entry run carried its own judgment all the way
- *         through: it either dispatched — its marker is on the thread, and the
- *         branch above answers, whatever the conclusion — or it decided there
- *         was nothing to do, which is exactly the silence this gate owes. The
- *         fallback is for a run that died before posting any marker, and
- *         GitHub reports that death as anything but `success` — cancelled,
- *         failed, timed out, never started;
- *       - without the time condition, a command written during the run — the
- *         NEXT run's ask — is handed back to the run already going, so
- *         rapid-fire commands reproduce the same mix-up.
- *
- *     A flag or a time that cannot be read lands on silence, like the marker
- *     branch below. The residue is caught when the run that did take the
- *     command completes: that run's marker or its own death answers there.
- *
- * A command that raced a live run — deleted, or on its way out — cannot reach
- * this branch: it survives the shaping only when it was made on a person's
- * turn.
- *
- * A machinery marker OLDER than the run is another run's: the run still working
- * when the watch fired for a guard-only completion, whose death its own completion
- * will answer for — its watch will find the same jam with that run's marker inside
- * its own lifetime, and post then.
- *
- * Unreadable times land on silence — the opposite of `needsEnding`'s asymmetry,
- * because this gate is about noise: a false "took the turn" posts a notice onto a
- * thread where nothing is owed, while the residue of a missed one is caught when
- * the run that did take the turn completes.
+ * Newest claim wins, which only matters when a run somehow claimed twice; quotations
+ * are stepped over, the same rule `lastEndingComment` walks by.
  */
-export function tookTurn(
-  comments: readonly WatchComment[],
-  runStartedAt: string | undefined,
-  readers: TurnReaders,
-  /** Whether the watched run's trigger consumes a person's command; the caller derives it, so no event name reaches here. */
-  consumesCommands: boolean,
-  /** Whether the watched run ended other than by carrying its judgment through — anything but `success`; the caller derives it too. */
-  endedUnsuccessfully: boolean,
-): boolean {
-  const { comments: kept } = shapedThread(comments, readers);
-  for (let index = kept.length - 1; index >= 0; index -= 1) {
-    const entry = kept[index]!;
-    if (entry.quoted) continue;
-    if (readers.requestedAgent(entry.body) === "") continue;
-    if (entry.isHuman) {
-      if (!consumesCommands) return false;
-      if (!endedUnsuccessfully) return false;
-      const at = Date.parse(entry.createdAt);
-      const start = Date.parse(runStartedAt ?? "");
-      return !Number.isNaN(at) && !Number.isNaN(start) && at < start;
-    }
-    const at = Date.parse(entry.createdAt);
-    const start = Date.parse(runStartedAt ?? "");
-    return !Number.isNaN(at) && !Number.isNaN(start) && at >= start;
+export function turnClaimedBy(
+  comments: readonly { readonly body: string }[],
+  runId: number,
+  readers: EndingWalkReaders,
+): number | undefined {
+  for (let index = comments.length - 1; index >= 0; index -= 1) {
+    const comment = comments[index]!;
+    if (readers.quoted(comment.body)) continue;
+    const claim = readers.claim(comment.body);
+    if (claim !== undefined && claim.run === runId) return claim.ask;
   }
-  return false;
+  return undefined;
+}
+
+/**
+ * Whether a run wrote an ending — an `atomaton:ended` carrying its run id (#285).
+ *
+ * The watch's second gate, and the twin of `turnClaimedBy`: a run that claimed an
+ * ask owes an ending with the same run id on it, and the pair is what "this run
+ * took the turn and never reported" means now that the thread says who took what.
+ */
+export function endingLeftBy(
+  comments: readonly { readonly body: string }[],
+  runId: number,
+  readers: EndingWalkReaders,
+): boolean {
+  return comments.some(
+    (comment) => !readers.quoted(comment.body) && readers.ended(comment.body)?.run === runId,
+  );
+}
+
+/**
+ * Whether an ask is still unanswered — no ending on the thread answers it (#285).
+ *
+ * The check that makes the watch's notice a once-per-ask event: the notice itself is
+ * an ending carrying `answers=<ask>`, so the ask it healed no longer reads as
+ * unanswered, and the next watch that fires — for this run's own completion, a
+ * re-run of the watch, or any other run's — stays silent. Machinery notices carry
+ * `answers=0`, which matches no ask and answers nothing.
+ */
+export function askUnanswered(
+  comments: readonly { readonly body: string }[],
+  askId: number,
+  readers: EndingWalkReaders,
+): boolean {
+  return !comments.some(
+    (comment) => !readers.quoted(comment.body) && readers.ended(comment.body)?.answers === askId,
+  );
 }
 
 /**

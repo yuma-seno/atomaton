@@ -37,38 +37,31 @@
  *     failure notice uses — and releases the `atomaton/in-progress` label the dead
  *     run left behind.
  *
- * ## The two gates
+ * ## The gate
  *
- * Which gate decides "this run owes an ending" follows the title, because the title
- * is what says which kind of run completed:
+ * One gate for every kind of watched run now (#285): the thread itself says who took
+ * the turn and who reported. The watched run's id arrives as `--run-id` — the same
+ * value the runner wrote into its claim at start — and the question is the pair:
  *
- *   - a runner run's title carries the agent ("`agent` on `#N`"), and the question
- *     is only `needsEnding` — is there no ending at or after the run started?
- *   - an entry run's title carries the node alone ("`#N`"), and most of its runs
- *     never took a turn at all — a comment the guard removed, an ordinary remark, a
- *     route that chose no agent. A notice on one would land mid another run's turn
- *     and unjam the guard while that run was still working. So the notice waits on
- *     `requestOutstanding` (the thread is stuck at an ask) AND `tookTurn` (that ask
- *     is this run's doing — a dispatch marker posted inside the run, or a person's
- *     command, when this run is one whose trigger consumes a command, the run did
- *     not end `success`, and the command was written before the run started).
+ *   - a claim with this run's id on it (`atomaton:took`) — this run took a turn;
+ *   - an ending with this run's id on it (`atomaton:ended`) — this run reported,
+ *     its own result comment or its failure notice, and the thread already holds
+ *     the answer. The inside report, when it lands at all, always lands first — the
+ *     watch is the second line of defence for the run whose report never landed —
+ *     insurance, not a replacement. The run's colour still belongs to the inside
+ *     report alone: it is decided at completion, before any outside step could
+ *     speak.
  *
- * Two of those facts are the caller's knowledge, not the domain's, and each
- * arrives as an argument the caller derives:
+ * The notice waits for both halves: claimed and unreported. A run that never
+ * claimed — most entry runs, whose ask is the node's body and not a comment — took
+ * no turn the thread can name, and stays silent whatever happened to it. That is
+ * the estimate-erasing half of #285: the three-condition guess at "was this MY
+ * turn" is gone, because the thread now answers it by comparison.
  *
- *   - which runs consume a command comes from `--run-event`, the watched run's
- *     `workflow_run.event`, and `runConsumesCommands` below maps it. #281 pinned
- *     the distinction: an entry run started by a new issue found the command the
- *     person posted seconds later and claimed it, posting the notice while the
- *     command's own run worked.
- *   - whether the run may fall back to a command at all comes from
- *     `--conclusion`, which the workflow already passed, and
- *     `runEndedUnsuccessfully` below maps it. A second measurement on the same
- *     issue pinned this one: a run that ended `success` decided something — it
- *     dispatched, with its marker on the thread, or it decided there was nothing
- *     to do — so only a run that died before any marker may fall back to the
- *     command. The first incident's shape was `issues` × success, the second's
- *     `issue_comment` × success; the two flags between them close both.
+ * The notice itself closes what it reports: it is an ending carrying
+ * `answers=<ask> run=<this watch's id>`, so the ask the dead run claimed reads as
+ * answered after it, and no later watch — this run's own re-run, or any other —
+ * posts the same notice again. Once per ask, which is the whole of #252's residue.
  *
  * ## What it deliberately does not do
  *
@@ -109,7 +102,7 @@
  *
  * Usage:
  *   reconcile_run_ending.ts --display-title "agent on #N" | "#N"
- *     [--run-started-at ISO] [--run-url URL] [--conclusion WORD] [--run-event EVENT]
+ *     [--run-id ID] [--run-url URL] [--conclusion WORD]
  *
  * Requires GITHUB_REPOSITORY (owner/repo) in the environment.
  */
@@ -122,68 +115,32 @@ import { turnHeader } from "../../adapters/github/turn-comment.ts";
 import { recoveryLines } from "../../domain/work/comment-command.ts";
 import { requestOutstanding } from "../../domain/work/thread.ts";
 import {
+  askUnanswered,
+  endingLeftBy,
   lastEndingComment,
-  needsEnding,
   parseRunTitle,
   releasesLabel,
-  tookTurn,
+  turnClaimedBy,
 } from "../../domain/work/run-report.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ReconcileRunEndingArgs {
   /** The triggering run's display title — the runner's "`agent` on `#N`", or an entry run's "`#N`". */
   "display-title": string;
-  /** When the watched run started running; endings before it are earlier turns'. */
-  "run-started-at"?: string;
+  /**
+   * The watched run's id — `github.event.workflow_run.id` — the value the runner
+   * wrote into its claim and its ending (#285). Both gates are comparisons against
+   * it; an absent or unreadable one lands on silence, the direction every
+   * unreadable input here takes.
+   */
+  "run-id"?: string;
   /** The watched run's URL, for the notice. */
   "run-url"?: string;
   /** The watched run's conclusion; `skipped` means no run happened to reconcile. */
   conclusion?: string;
-  /** The GitHub event that started the watched run — `workflow_run.event`. */
-  "run-event"?: string;
 }
 
 export const ref = defineScript<ReconcileRunEndingArgs>(import.meta.url);
-
-/**
- * Whether the event that started the watched run is one that can consume a
- * person's command — the only kind of run a command on the thread can be the ask
- * OF.
- *
- * The event arrives as `workflow_run.event`, so the mapping is spelled here and
- * the domain stays ignorant of event names. In this repository exactly one
- * surface consumes a comment: an `issue_comment` run of `Atomaton Manual
- * Comment` on an issue. `Atomaton Entry` starts from `issues: opened` — the new
- * issue's body is its ask, and it consumes no comment — so a command sitting on
- * that thread belongs to the run the command itself started. The runner runs
- * from `workflow_dispatch`, and a manual-comment run for a comment on a PULL
- * REQUEST takes no turn either — but its title names no node, so it never
- * reaches this gate. Anything unknown lands on false: a watch that cannot say
- * what started the run stays silent, the same direction the unreadable-time
- * cases take.
- */
-export function runConsumesCommands(runEvent: string | undefined): boolean {
-  return runEvent === "issue_comment";
-}
-
-/**
- * Whether the watched run ended other than by carrying its own judgment through
- * — the only shape the person's-command fallback of `tookTurn` exists for.
- *
- * A run that ends `success` decided something: it dispatched, and its marker is
- * on the thread where `tookTurn`'s marker branch reads it whatever the
- * conclusion, or it decided there was nothing to do, which is exactly the
- * silence this gate owes the thread. The fallback is for a run that died before
- * posting any marker, and GitHub reports that death as anything but `success` —
- * `cancelled`, `failure`, `timed_out`, `startup_failure`. An absent or
- * unreadable conclusion lands on false, the silent direction every unreadable
- * input here takes: the workflow always passes one, so this only answers a
- * caller from before the field existed.
- */
-export function runEndedUnsuccessfully(conclusion: string | undefined): boolean {
-  const word = (conclusion ?? "").trim();
-  return word !== "" && word !== "success";
-}
 
 /**
  * The notice a run that never reported leaves behind, addressed to a person.
@@ -201,10 +158,19 @@ export function runEndedUnsuccessfully(conclusion: string | undefined): boolean 
  * agent's result comment, and tagging it as one would file it with the runs that
  * reported.
  */
-export function missingEndingNotice(agent: string, runUrl: string): string {
+export function missingEndingNotice(
+  agent: string,
+  runUrl: string,
+  identity: { ask: number; watchRunId: number },
+): string {
   const lines = [
-    ...turnHeader({ ended: "done", audience: "person" }),
-    `Atomaton: \`${agent}\`'s run ended without posting its result. It was cancelled, lost its runner, timed out, or finished without reporting one.`,
+    ...turnHeader({ ended: "done", audience: "person", answers: identity.ask, run: identity.watchRunId }),
+    // The subject is the ASK, not the run (#285): what the reader needs to know is
+    // that this request went unanswered — the run that took it up is the how, and
+    // the older wording ("the run ended without posting its result") put the run
+    // first and read as blame aimed at whatever completed, which the two false
+    // notices this replaced had already shown the cost of.
+    `Atomaton: this request was taken up, but no answer was posted for it. The run that claimed it was cancelled, lost its runner, timed out, or finished without writing one.`,
     "",
     "Nothing was decided by that run: whatever it reached — commits, pull requests,",
     "saved history — is whatever reached GitHub before it stopped. Its log:",
@@ -235,10 +201,9 @@ function main(): void {
     args: Bun.argv.slice(2),
     options: {
       "display-title": { type: "string" },
-      "run-started-at": { type: "string" },
+      "run-id": { type: "string" },
       "run-url": { type: "string" },
       conclusion: { type: "string" },
-      "run-event": { type: "string" },
     },
   });
 
@@ -260,6 +225,14 @@ function main(): void {
   }
 
   const { agent: titledAgent, number } = title;
+  const watchRunId = Number(values["run-id"]);
+  if (!Number.isInteger(watchRunId) || watchRunId <= 0) {
+    console.error(
+      `reconcile_run_ending: the watched run's id is not readable ("${values["run-id"] ?? ""}"), ` +
+        "so whether it took a turn cannot be compared against the thread; nothing to do",
+    );
+    return;
+  }
 
   // The thread decides, so the thread must be readable. A failed read is the one
   // thing this script refuses to guess past — "no ending" drawn from an unreadable
@@ -273,39 +246,41 @@ function main(): void {
     return;
   }
 
-  // Which kind of watched run this is decides the gate, and the title is what says.
-  // A runner run's title carries the agent, and its only question is whether an
-  // ending postdates it. An entry run's title carries the node alone, and most of
-  // its runs never took a turn at all — so the notice waits on the thread being
-  // stuck at an ask AND that ask being this run's doing (see `tookTurn`): the
-  // event that started the run decides whether a person's command can be that
-  // ask, and whether the run ended `success` decides whether it may fall back
-  // to one — the domain learns neither vocabulary.
-  const endingMissing = titledAgent !== undefined
-    ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders)
-    : requestOutstanding(thread.events) &&
-      tookTurn(
-        thread.entries,
-        values["run-started-at"],
-        readers,
-        runConsumesCommands(values["run-event"]),
-        runEndedUnsuccessfully(values["conclusion"]),
-      );
-  if (!endingMissing) {
-    console.error(`reconcile_run_ending: the run on #${number} owes no ending; nothing to do`);
+  // The gate, one rule for every watched run (#285): the thread says who took the
+  // turn and who reported, both by run id. Claimed and unreported is the whole
+  // notice; anything else is silence.
+  const claimedAsk = turnClaimedBy(thread.dated, watchRunId, endingWalkReaders);
+  if (claimedAsk === undefined) {
+    console.error(`reconcile_run_ending: run ${watchRunId} claimed no ask on #${number}; nothing to do`);
+    return;
+  }
+  if (endingLeftBy(thread.dated, watchRunId, endingWalkReaders)) {
+    console.error(`reconcile_run_ending: run ${watchRunId} left its ending on #${number}; nothing to do`);
+    return;
+  }
+  if (!askUnanswered(thread.dated, claimedAsk, endingWalkReaders)) {
+    // The claim is open on this run's side, but the ask has an answer — a watch
+    // that fired earlier, a notice that healed it while this one queued. Saying it
+    // again would be the second notice #252's residue is about; silence is the
+    // whole action.
+    console.error(
+      `reconcile_run_ending: the ask run ${watchRunId} claimed on #${number} is already answered; nothing to do`,
+    );
     return;
   }
 
-  // The agent the notice names: the title's for a runner run; off the thread for an
-  // entry run — the person's command, or the marker the machinery posted — and
-  // `atomaton` when the thread names nobody, whose command is the one path that
-  // always resumes a node.
+  // The agent the notice names for its recovery lines: the title's for a runner
+  // run; off the thread for an entry run — the person's command, or the marker the
+  // machinery posted — and `atomaton` when the thread names nobody, whose command
+  // is the one path that always resumes a node.
   const agent = titledAgent ?? (mostRecentAgentOn(repo, number) || "atomaton");
 
-  // The ending the run owed. Posted before the label work, because the comment —
-  // not the label — is what the guard reads: this is the step that unjams the
-  // thread, and the label is only the cache beside it.
-  const body = missingEndingNotice(agent, values["run-url"] ?? "");
+  // The ending the run owed. The notice IS that ending — it carries
+  // `answers=<claimed ask> run=<this watch>` — so posting it both tells a person
+  // and closes the ask, which is what keeps the notice a once-per-ask event.
+  // Posted before the label work, because the comment — not the label — is what
+  // the guard reads.
+  const body = missingEndingNotice(agent, values["run-url"] ?? "", { ask: claimedAsk, watchRunId });
   const posted = gh("issue", "comment", String(number), "--repo", repo, "--body", body);
   if (posted.code !== 0) {
     console.error(`::error::reconcile_run_ending: could not post the notice on #${number}: ${posted.stderr || posted.stdout}`);

@@ -105,6 +105,17 @@ export interface PostResultCommentArgs {
    * the machinery's own sentence reaches the person the work belongs to.
    */
   "people-file"?: string;
+  /**
+   * The ask comment id this run claimed (`TOOK_TAG`), and its own run id (#285).
+   *
+   * Together they are the second half of the turn's identity: the ending this comment
+   * carries names what it answers and who answered. The runner passes both — the ask
+   * it claimed at start, its own `github.run_id`. Absent (`0`) is the honest "claimed
+   * no ask" — the body of a new issue is not a comment — and matches nothing, so a
+   * reader comparing ids reads it as an answer to no ask rather than guessing one.
+   */
+  ask?: string | number;
+  "run-id"?: string | number;
 }
 
 export const ref = defineScript<PostResultCommentArgs>(import.meta.url);
@@ -436,6 +447,12 @@ export function buildCommentBody(args: {
    */
   reported?: boolean;
   runUrl: string;
+  /**
+   * The ask this run claimed and its own run id (#285), written onto the ending tag.
+   * Absent or `0` is "claimed no ask", which matches no real comment id.
+   */
+  ask?: string | number;
+  "run-id"?: string | number;
   /** `owner/name`, for linking to the metrics report. Absent when unknown. */
   repo?: string;
   output: string;
@@ -521,7 +538,15 @@ export function buildCommentBody(args: {
     // question and `/resume` is its only reader. A projection, taken from the ending
     // rather than re-derived from the signals beside it -- which is what it was, in
     // this same file, twelve lines from the other copy.
-    ENDED_TAG.write(endedTag(ending)),
+    //
+    // `answers` and `run` are the turn's identity closing (#285): what this comment
+    // answers, and which run answered it. The runner passes the ask it claimed and its
+    // own run id; `0` on either is "claimed nothing", which matches no real id.
+    ENDED_TAG.write({
+      verb: endedTag(ending),
+      answers: Number(args.ask ?? 0) || 0,
+      run: Number(args["run-id"] ?? 0) || 0,
+    }),
   ];
   if (args.endingInvalid === true) {
     lines.push(
@@ -727,6 +752,8 @@ function main(): void {
       "ending-comment": { type: "string" },
       "ending-invalid": { type: "string" },
       "people-file": { type: "string" },
+      ask: { type: "string" },
+      "run-id": { type: "string" },
     },
   });
 
@@ -931,6 +958,8 @@ function main(): void {
     endedBecause: values["ended-because"],
     reported: isTrue(values.reported),
     runUrl: values["run-url"],
+    ask: values.ask,
+    "run-id": values["run-id"],
     // From the environment rather than a flag: every caller is a workflow step, and
     // one more argument to thread through is one more place to forget it.
     repo: process.env.GITHUB_REPOSITORY ?? "",
