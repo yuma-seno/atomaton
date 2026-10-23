@@ -1267,6 +1267,10 @@ const postResultCommentStep = new TypedOutputsStep(
       // and was still not fixed the second time: its calls are left as text, and this
       // is what makes the comment say so and the machinery make the call itself.
       "ending-invalid": runAgentStep.outputs.ending_invalid,
+      // The people the run was told it may call, read before it started. The comment's
+      // escaping and the ending check's counting are the same set because they are the
+      // same file -- see lib/callees.ts.
+      "people-file": `${RUN_DIR}/callees.json`,
     })}\n`,
   },
   ["comment_id"] as const,

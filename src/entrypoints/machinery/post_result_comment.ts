@@ -27,7 +27,7 @@ import { renderTokenLine } from "../../domain/record/token-line.ts";
 import { toolTroubleLine } from "../../domain/record/tool-trouble.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../domain/work/mention.ts";
 import { calledHumans } from "../../domain/work/ending-calls.ts";
-import { participantAccounts } from "../../adapters/github/participants.ts";
+import { readCalleesFile } from "./lib/callees.ts";
 import { readEndingComment } from "../../adapters/github/ending-comment.ts";
 import type { Session } from "../../domain/work/session.ts";
 import { isTrue } from "./lib/flags.ts";
@@ -95,6 +95,16 @@ export interface PostResultCommentArgs {
    * one call it still can. See `domain/work/ending-calls.ts`.
    */
   "ending-invalid"?: string;
+  /**
+   * The people the run was told it may call, written by `read_callees.ts` before the
+   * run started (`lib/callees.ts`).
+   *
+   * Read here rather than asked of GitHub again: this comment's escaping and the
+   * ending check's counting have to be the same set, and they were two reads once.
+   * Absent or unreadable means nothing is confirmed, so every mention is escaped and
+   * the machinery's own sentence reaches the person the work belongs to.
+   */
+  "people-file"?: string;
 }
 
 export const ref = defineScript<PostResultCommentArgs>(import.meta.url);
@@ -716,6 +726,7 @@ function main(): void {
       "logs-file": { type: "string" },
       "ending-comment": { type: "string" },
       "ending-invalid": { type: "string" },
+      "people-file": { type: "string" },
     },
   });
 
@@ -888,30 +899,25 @@ function main(): void {
   // somebody.
   const endingInvalid = isTrue(values["ending-invalid"]);
   const notACall = endingInvalid || salvaged || cutShort(values["ended-because"]);
-  const people = notACall
-    ? []
-    : participantAccounts(process.env.GITHUB_REPOSITORY ?? "", values.number);
-
-  // Two lists, and the second is a subset of the first. `known` is everybody a
-  // comment may name without notifying a stranger -- and it includes the notify
-  // login, whether or not that login has ever appeared on the thread, because
-  // `resolveNotify` can reach the parent issue's requester or the repository owner.
-  // Leaving it out of one list and not the other is how a run that called the very
-  // person it was told to call ends up with the mention escaped and the machinery's
-  // own sentence suppressed: nobody notified, and nothing said about it.
-  const notify = (values.notify ?? "").trim();
-  const known = people.map((person) => person.login);
-  if (notify) known.push(notify);
+  // The two lists the run was given, from the same file the notice and the ending
+  // check read: one read of the thread at the start of the run, not three that have
+  // to agree. `known` may notify; `callable` may be handed the turn.
+  //
+  // Nothing in a text that was not a call is allowed to notify — a salvaged fragment,
+  // a run that was cut short, a message the one-call rule refused. Every mention in
+  // those is escaped, the owner's included: the machinery's own sentence is what
+  // reaches them, and a live mention beside it would say "your turn" while that
+  // sentence says nothing is running.
+  const callees = readCalleesFile(values["people-file"]);
+  const known = notACall ? [] : callees.participants;
+  const callable = notACall ? [] : callees.humans;
   const checked = escapeUnknownMentions(output, known);
   if (checked.escaped.length > 0) {
     console.error(`escaped ${checked.escaped.length} mention(s): ${checked.escaped.join(", ")}`);
   }
 
-  // `callable` is the same list minus the bots: a bot is a participant, but it never
-  // takes a turn, so a mention of one is not a call.
-  const callable = people.filter((person) => !person.bot).map((person) => person.login);
-  if (notify) callable.push(notify);
-  const called = notACall ? [] : calledHumans(output, callable);
+  // Read off the unescaped text, against the people the run was told it may call.
+  const called = calledHumans(output, callable);
 
   const body = buildCommentBody({
     agent: values.agent,

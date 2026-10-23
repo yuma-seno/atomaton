@@ -12,7 +12,10 @@ const SRC = join(import.meta.dir, "read_callees.ts");
  * `thread.test.ts` gives: the `gh` seam is an environment variable, and a child
  * spawned without an explicit `env` does not see one set after the runtime started.
  */
-function read(rules: unknown[], notify: string): { humans: string[]; notify: string } {
+function read(
+  rules: unknown[],
+  notify: string,
+): { humans: string[]; participants: string[]; notify: string } {
   const dir = mkdtempSync(join(tmpdir(), "atomaton-callees-"));
   try {
     const out = join(dir, "callees.json");
@@ -31,7 +34,11 @@ function read(rules: unknown[], notify: string): { humans: string[]; notify: str
       },
     });
     if (proc.exitCode !== 0) throw new Error(`child failed: ${proc.stderr.toString()}`);
-    return JSON.parse(readFileSync(out, "utf8")) as { humans: string[]; notify: string };
+    return JSON.parse(readFileSync(out, "utf8")) as {
+      humans: string[];
+      participants: string[];
+      notify: string;
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -43,7 +50,7 @@ const THREAD = [
     match: ["repos/o/r/issues/7/comments"],
     stdout: JSON.stringify([
       { user: { login: "author", type: "User" } },
-      { user: { login: "github-actions", type: "Bot" } },
+      { user: { login: "github-actions[bot]", type: "Bot" } },
     ]),
   },
   {
@@ -58,35 +65,47 @@ const THREAD = [
 
 describe("read_callees.ts", () => {
   /**
-   * The three sources, the owner first, and the bot left out: a bot is a participant,
-   * but it never takes a turn, so it is not somebody a run can hand work to.
+   * One read, two lists: everybody who may be mentioned, and the people among them
+   * who can take a turn. The bot is a participant and is not one of those.
    */
-  test("writes the thread's people, the owner first, and no bots", () => {
+  test("writes the thread's people, the owner first, and separates bots out", () => {
     expect(read(THREAD, "owner")).toEqual({
       humans: ["owner", "author", "collab"],
+      participants: ["owner", "author", "github-actions[bot]", "collab"],
       notify: "owner",
     });
   });
 
   /** `resolveNotify` can name somebody who has never appeared on the thread. */
   test("the owner is callable even when the thread has never seen them", () => {
-    expect(read([], "owner").humans).toEqual(["owner"]);
+    const people = read([], "owner");
+    expect(people.humans).toEqual(["owner"]);
+    expect(people.participants).toEqual(["owner"]);
   });
 
   /**
-   * The participant read failed and there is no owner: an empty list, not an error.
+   * The participant read failed and there is no owner: empty lists, not an error.
    * The run is told nobody can be called, and an empty list cannot refuse a message.
    */
-  test("a failed read with nobody to own the work is an empty list", () => {
-    expect(read([], "")).toEqual({ humans: [], notify: "" });
+  test("a failed read with nobody to own the work is empty", () => {
+    expect(read([], "")).toEqual({ humans: [], participants: [], notify: "" });
   });
 });
 
 describe("callablePeople", () => {
   /** GitHub logins are case-insensitive, and two spellings of one account read as two. */
   test("one account is listed once, under the owner's spelling", () => {
-    expect(callablePeople(["Alice", "bob"], "alice")).toEqual({
+    expect(
+      callablePeople(
+        [
+          { login: "Alice", bot: false },
+          { login: "bob", bot: false },
+        ],
+        "alice",
+      ),
+    ).toEqual({
       humans: ["alice", "bob"],
+      participants: ["alice", "bob"],
       notify: "alice",
     });
   });
