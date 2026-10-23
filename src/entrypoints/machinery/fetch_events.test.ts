@@ -501,6 +501,48 @@ describe("fetch_events.ts", () => {
     }
   });
 
+  // The confirmation reads the candidate's body, and a body can QUOTE the tag
+  // inside a fenced sample -- an issue explaining the wire format, or a PR pasting
+  // the marker it is discussing. A quoted example is not a link: joining that PR's
+  // events to this run would be #270 with a different trigger (#293).
+  test("a candidate that quotes the tag inside a fence is not a linked PR", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
+    try {
+      const outFile = join(dir, "events.json");
+      const outputFile = join(dir, "out");
+      writeFileSync(outputFile, "");
+      const quoted = ["The format, for reference:", "", "```html", PARENT_ISSUE_TAG.write(5), "```"].join("\n");
+      const r = runWithFakeGh(
+        scriptPath("fetch_events.ts"),
+        ["--type", "issue", "--number", "5", "--out", outFile],
+        {
+          env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: outputFile },
+          rules: [
+            { match: ["pr", "list"], stdout: JSON.stringify([{ number: 13, body: quoted }]) },
+            { match: ["issues/5/comments"], stdout: "[]" },
+            { match: ["graphql", "parent{number}"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },
+            {
+              match: ["issues/5"],
+              stdout: JSON.stringify({
+                number: 5,
+                title: "Fix the bug",
+                body: "Please fix it.",
+                labels: [],
+                user: { login: "alice" },
+                created_at: "2026-01-01T00:00:00Z",
+              }),
+            },
+          ],
+        },
+      );
+
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((argv) => argv.some((a) => a.includes("pulls/13")))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   // Two whole runs of the script, each making a dozen or so `gh` calls, and every one
   // of those spawns the fake as its own process. Bun`s default 5s is not enough for
   // that on a cold Windows spawn -- and until the fake was actually reachable this

@@ -249,7 +249,7 @@ function fetchIssueEvents(
 function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars: number): { events: GithubEvent[]; parentIssue?: number } {
   const pr = requiredJson<GhPrApi>(`pull request #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}`);
   const prBody = pr.body ?? "";
-  const parentIssue = PARENT_ISSUE_TAG.read(prBody);
+  const parentIssue = PARENT_ISSUE_TAG.read(proseOnly(prBody));
   const headSha = pr.head.sha.slice(0, 8);
   const events: GithubEvent[] = [];
 
@@ -359,7 +359,9 @@ function linkedPrNumbers(owner: string, repo: string, issueNumber: number): numb
     console.error(`::warning::Linked PR search for Issue #${issueNumber} reached GitHub's 1000-result search limit.`);
   }
   return prs
-    .filter((pr) => PARENT_ISSUE_TAG.read(pr.body ?? "") === issueNumber)
+    // A body can quote the tag inside a fenced sample, and a link is a decision:
+    // reading the prose is what keeps a quoted example from joining a run (#293).
+    .filter((pr) => PARENT_ISSUE_TAG.read(proseOnly(pr.body ?? "")) === issueNumber)
     .map((pr) => pr.number);
 }
 
