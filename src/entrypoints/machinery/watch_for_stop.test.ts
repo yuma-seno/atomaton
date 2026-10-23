@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { stopRequested, type StopComment } from "./watch_for_stop.ts";
-import { STOP_TAG } from "../../adapters/github/tags.ts";
+import { STOP_TAG, LLM_CONTEXT_TAG, QUOTES_TAG } from "../../adapters/github/tags.ts";
 
 const REQUEST = `${STOP_TAG.write("requested")}\n@someone Atomaton: stop requested.`;
 
@@ -57,5 +57,23 @@ describe("watch_for_stop.ts", () => {
       "</details>",
     ].join("\n");
     expect(stopRequested([{ body: notice, created_at: "2026-09-06T12:00:30Z" }], since)).toBe(false);
+  });
+
+  // The rule is about whose words the tag is in, not about the body quoting anybody: a
+  // stop receipt quotes the removed comment AND carries the stop tag in its own prose,
+  // and it is a stop (#297). `proseOnly` is what separates them -- preserved text is
+  // fenced, the notice's own speech is not.
+  test("a stop tag in a notice's own prose is a request, even when it quotes", () => {
+    const receipt = [
+      LLM_CONTEXT_TAG.write("exclude"),
+      QUOTES_TAG.write(77),
+      STOP_TAG.write("requested"),
+      "Atomaton: stop requested.",
+      "```",
+      "/stop",
+      "/reviewer",
+      "```",
+    ].join("\n");
+    expect(stopRequested([{ body: receipt, created_at: "2026-09-06T12:00:30Z" }], since)).toBe(true);
   });
 });

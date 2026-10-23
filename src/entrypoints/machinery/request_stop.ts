@@ -22,6 +22,20 @@
  * The notice this posts is tagged `llm-context=exclude`, so it is dropped by
  * `reconcile_github_session.ts` on the way into a session for the same reason.
  *
+ * ## The rest of the comment (#297)
+ *
+ * The in-progress guard skips a comment whose FIRST command is `/stop`, because a stop
+ * has to reach the running agent. That leaves the second command with no reader: the
+ * parser acts on the first and drops the rest, so `/stop` + `/reviewer` stopped the
+ * run and silently lost the review request. The receipt now names the commands after
+ * the stop and says they were not acted on, and the removed text is preserved under
+ * `<details>` (tagged `quotes`, so the thread readers do not take the quoted command
+ * lines for fresh requests).
+ *
+ * The comment is still deleted. Keeping it would leave `/reviewer` in the thread as a
+ * request that never ran -- the silent outcome this is meant to end, wearing a
+ * different shape.
+ *
  * ## Why it says the comment was deleted
  *
  * Because the existing in-progress guard also deletes comments, and says so. Someone
@@ -33,9 +47,11 @@
  */
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
+import { LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
+import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { descendants, nodesToStop, subtree } from "../../domain/work/work-tree.ts";
 import { readWorkTree, requestStopAcross } from "../../adapters/github/work-tree.ts";
+import { preservedCommentBlock } from "./lib/removed-comment.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface RequestStopArgs {
@@ -45,6 +61,34 @@ export interface RequestStopArgs {
 }
 
 export const ref = defineScript<RequestStopArgs>(import.meta.url);
+
+/**
+ * What the receipt says about the rest of a comment that began with `/stop`.
+ *
+ * A comment whose first command is `/stop` takes the stop path, which the in-progress
+ * guard skips. Anything else the comment asked for was therefore read by nobody, and a
+ * person cannot tell "it ran" from "it was dropped" (#297). The receipt names them and
+ * says they did not run; `commands` are the lines as the thread reader sees them.
+ */
+export interface StopNoticeExtra {
+  /** Command lines after the `/stop`, as written. */
+  commands: string[];
+  /** The removed comment's text, preserved when it said more than the stop. */
+  original: string;
+  /** Its id, for the `quotes` tag: the preserved text is a quotation, not this notice. */
+  commentId: string | number;
+}
+
+/**
+ * The command lines after the `/stop`, as the receipt names them.
+ *
+ * Pure and exported so the rule is testable without a fake GitHub: the first command
+ * is the stop (the workflow only takes this path when it is), and everything the same
+ * reader finds after it was read by nobody.
+ */
+export function commandsAfterStop(original: string): string[] {
+  return commandsIn(original).slice(1).map(commandLabel);
+}
 
 /**
  * The receipt, as the person who typed `/stop` will read it.
@@ -62,23 +106,42 @@ export const ref = defineScript<RequestStopArgs>(import.meta.url);
  * is a fact worth recording — written without the `@`, which is what would turn a
  * record into a second notification.
  */
-export function stopRequestedNotice(commenter: string, deleted: boolean, alsoReached: number[]): string {
+export function stopRequestedNotice(commenter: string, deleted: boolean, alsoReached: number[], extra?: StopNoticeExtra): string {
   const whose = commenter ? `${commenter}'s` : "The";
+  const quoted = extra !== undefined && deleted && extra.original !== "";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
+    ...(quoted ? [QUOTES_TAG.write(Number(extra.commentId))] : []),
     STOP_TAG.write("requested"),
     "Atomaton: stop requested.",
     "",
     deleted
       ? `${whose} \`/stop\` comment was removed so it does not become part of the agent's context.`
       : `${whose} \`/stop\` comment could not be removed, so it may end up in the agent's context.`,
+  ];
+  if (extra && extra.commands.length > 0) {
+    const named = extra.commands.map((line) => `\`${line}\``).join(", ");
+    lines.push(
+      "",
+      `It also carried ${named}, which was not acted on. Atomaton acts on one command per comment, and a stop ` +
+        "is the one command that has to reach a running agent, so the stop is the one that ran. Comment " +
+        `${extra.commands.length > 1 ? "each of them" : "it"} on its own once the run has reported.`,
+    );
+  }
+  lines.push(
     "",
     // The lag is real and it is the thing people will misread. A stop is picked up on
     // the next poll and taken at the next turn, so the agent can finish a tool call
     // and start another one after the request. Without this line that reads as the
     // command having done nothing.
     "The run will stop after its current step, so it may take a minute, and it will report here when it has.",
-  ];
+  );
+  if (extra && quoted) {
+    // Deleted, and there was more in it than the stop: show the text so it can be
+    // copied back. The `quotes` tag above is what keeps the command lines inside this
+    // block from being read as fresh requests by the thread readers.
+    lines.push("", ...preservedCommentBlock(extra.original));
+  }
   if (alsoReached.length > 0) {
     // Named rather than counted, so a person can see whether the stop went where they
     // meant it to. This used to be the opposite list — the work a stop could NOT
@@ -112,6 +175,17 @@ function main(): void {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const number = String(values.number);
 
+  // The comment's own text, not the page: it is deleted just below, and a comment that
+  // began with `/stop` may have asked for more. The reader is the one the dispatch and
+  // the guard use, so a command quoted in somebody's prose is not a second command here
+  // either. Absent in a direct call, which leaves the receipt exactly as it was.
+  const original = process.env.ATOMATON_COMMENT_BODY ?? "";
+  const others = commandsAfterStop(original);
+  const extra =
+    others.length > 0
+      ? { commands: others, original, commentId: values["comment-id"]! }
+      : undefined;
+
   const { code: delCode, stdout: delOut, stderr: delErr } = gh(
     "api", "--method", "DELETE", `repos/${repo}/issues/comments/${values["comment-id"]}`,
   );
@@ -133,7 +207,7 @@ function main(): void {
   const result = requestStopAcross(
     repo,
     root,
-    stopRequestedNotice(values.commenter ?? "", deleted, under),
+    stopRequestedNotice(values.commenter ?? "", deleted, under, extra),
   );
   // Fatal only when the root got nothing. That comment IS the request: without it the
   // run polls, finds nothing, and keeps going, and the person is told a stop is coming
