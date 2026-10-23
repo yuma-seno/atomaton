@@ -152,6 +152,9 @@ function parseCommentCommand(body) {
   }
   return NOTHING;
 }
+function commandLabel(command) {
+  return command.command.error !== "" ? command.line : command.command.control ? `/${command.command.control}` : `/${command.command.agent}`;
+}
 function commandsIn(body) {
   const found = [];
   if (!body)
@@ -315,6 +318,30 @@ function commentWouldBeRemoved(repo, number, commentId) {
   return !keptCommentIds(comments).has(listed.id);
 }
 
+// src/entrypoints/machinery/lib/removed-comment.ts
+var MAX_PRESERVED_CHARS = 30000;
+function fenceFor(text) {
+  let longest = 0;
+  for (const run of text.match(/`+/g) ?? [])
+    longest = Math.max(longest, run.length);
+  return "`".repeat(Math.max(3, longest + 1));
+}
+function preservedCommentBlock(original) {
+  const truncated = original.length > MAX_PRESERVED_CHARS;
+  const kept = truncated ? original.slice(0, MAX_PRESERVED_CHARS) : original;
+  const fence = fenceFor(kept);
+  return [
+    "<details><summary>Your comment, as you wrote it</summary>",
+    "",
+    fence,
+    kept,
+    fence,
+    ...truncated ? ["", `The comment was longer than ${MAX_PRESERVED_CHARS.toLocaleString("en-US")} characters; the rest is not preserved here.`] : [],
+    "",
+    "</details>"
+  ];
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -342,13 +369,6 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/guard_comment_during_run.ts
 var ref = defineScript(import.meta.url);
-var MAX_PRESERVED_CHARS = 30000;
-function fenceFor(text) {
-  let longest = 0;
-  for (const run of text.match(/`+/g) ?? [])
-    longest = Math.max(longest, run.length);
-  return "`".repeat(Math.max(3, longest + 1));
-}
 function noticeBody(opts) {
   const quote = opts.deleted && !opts.couldNotRead && opts.original !== "";
   const what = opts.deleted ? "Your comment was removed because" : "Your comment could not be removed, and will not be acted on, because";
@@ -362,20 +382,7 @@ function noticeBody(opts) {
     lines.push("", "The ball is also with an agent on this issue/PR right now, so a comment would not reach anyone until that run comes back.");
   }
   if (quote) {
-    const truncated = opts.original.length > MAX_PRESERVED_CHARS;
-    const kept = truncated ? opts.original.slice(0, MAX_PRESERVED_CHARS) : opts.original;
-    const fence = fenceFor(kept);
-    lines.push([
-      "<details><summary>Your comment, as you wrote it</summary>",
-      "",
-      fence,
-      kept,
-      fence,
-      ...truncated ? ["", `The comment was longer than ${MAX_PRESERVED_CHARS.toLocaleString("en-US")} characters; the rest is not preserved here.`] : [],
-      "",
-      "</details>"
-    ].join(`
-`));
+    lines.push("", ...preservedCommentBlock(opts.original));
   } else if (opts.deleted && opts.couldNotRead) {
     lines.push("The text of that comment could not be read back before it was removed, so it is not preserved here.");
   }
@@ -402,7 +409,7 @@ function main() {
   const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
   const couldNotRead = readBack.code !== 0;
   const original = couldNotRead ? "" : readBack.stdout ?? "";
-  const commands = commandsIn(original).map((c) => c.command.error !== "" ? c.line : c.command.control ? `/${c.command.control}` : `/${c.command.agent}`);
+  const commands = commandsIn(original).map(commandLabel);
   const parsed = values.parsed === "true";
   const closed = values.state === "closed";
   const several = parsed && !closed && commands.length > 1;

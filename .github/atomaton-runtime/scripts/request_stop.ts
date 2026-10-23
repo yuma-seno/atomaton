@@ -146,6 +146,98 @@ function isQuotation(body) {
   return QUOTES_TAG.has(body);
 }
 
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined)
+      return parsed;
+  }
+  return NOTHING;
+}
+function commandLabel(command) {
+  return command.command.error !== "" ? command.line : command.command.control ? `/${command.command.control}` : `/${command.command.agent}`;
+}
+function commandsIn(body) {
+  const found = [];
+  if (!body)
+    return found;
+  for (const rawLine of body.split(`
+`)) {
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined)
+      found.push({ line: rawLine.trim(), command: parsed });
+  }
+  return found;
+}
+function parseCommandLine(rawLine) {
+  const line = rawLine.trim();
+  const commandMatch = COMMAND_RE.exec(line);
+  if (commandMatch) {
+    const name = commandMatch[1];
+    const modifier = commandMatch[2]?.trim() ?? "";
+    if (isControlCommand(name)) {
+      if (!modifier)
+        return { ...NOTHING, control: name };
+      return {
+        ...NOTHING,
+        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+      };
+    }
+    if (!modifier)
+      return { ...NOTHING, agent: name };
+    if (modifier === "recover")
+      return { ...NOTHING, agent: name, sessionMode: "recover" };
+    return {
+      ...NOTHING,
+      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+    };
+  }
+  const dispatchMatch = DISPATCH_RE.exec(line);
+  if (dispatchMatch)
+    return { ...NOTHING, agent: dispatchMatch[1] };
+  return;
+}
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function parseMangledCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "")
+        return parsed;
+    }
+  }
+  return NOTHING;
+}
+
 // src/domain/work/work-tree.ts
 var MAX_DEPTH = 10;
 function subtree(nodes, root) {
@@ -292,83 +384,6 @@ function issueLinks(repo, number) {
     children: (issue.subIssues?.nodes ?? []).map(asChild),
     pullRequests: dedupeByNumber(declared, referenced)
   };
-}
-
-// src/domain/work/control-commands.ts
-var CONTROL_COMMAND_NAMES = ["stop", "resume"];
-function isControlCommand(name) {
-  return CONTROL_COMMAND_NAMES.includes(name);
-}
-
-// src/domain/work/comment-command.ts
-var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
-var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
-var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
-function parseCommentCommand(body) {
-  if (!body)
-    return NOTHING;
-  for (const rawLine of body.split(`
-`)) {
-    const parsed = parseCommandLine(rawLine);
-    if (parsed !== undefined)
-      return parsed;
-  }
-  return NOTHING;
-}
-function parseCommandLine(rawLine) {
-  const line = rawLine.trim();
-  const commandMatch = COMMAND_RE.exec(line);
-  if (commandMatch) {
-    const name = commandMatch[1];
-    const modifier = commandMatch[2]?.trim() ?? "";
-    if (isControlCommand(name)) {
-      if (!modifier)
-        return { ...NOTHING, control: name };
-      return {
-        ...NOTHING,
-        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
-      };
-    }
-    if (!modifier)
-      return { ...NOTHING, agent: name };
-    if (modifier === "recover")
-      return { ...NOTHING, agent: name, sessionMode: "recover" };
-    return {
-      ...NOTHING,
-      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
-    };
-  }
-  const dispatchMatch = DISPATCH_RE.exec(line);
-  if (dispatchMatch)
-    return { ...NOTHING, agent: dispatchMatch[1] };
-  return;
-}
-function lineForms(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
-function parseMangledCommand(body) {
-  if (!body)
-    return NOTHING;
-  for (const rawLine of body.split(`
-`)) {
-    for (const form of lineForms(rawLine)) {
-      const parsed = parseCommentCommand(form);
-      if (parsed.agent !== "" || parsed.control !== "")
-        return parsed;
-    }
-  }
-  return NOTHING;
 }
 
 // src/domain/work/actor.ts
@@ -615,6 +630,30 @@ function requestStopAcross(repo, root, rootBody) {
   return { stopped, rootNotified, problems };
 }
 
+// src/entrypoints/machinery/lib/removed-comment.ts
+var MAX_PRESERVED_CHARS = 30000;
+function fenceFor(text) {
+  let longest = 0;
+  for (const run of text.match(/`+/g) ?? [])
+    longest = Math.max(longest, run.length);
+  return "`".repeat(Math.max(3, longest + 1));
+}
+function preservedCommentBlock(original) {
+  const truncated = original.length > MAX_PRESERVED_CHARS;
+  const kept = truncated ? original.slice(0, MAX_PRESERVED_CHARS) : original;
+  const fence = fenceFor(kept);
+  return [
+    "<details><summary>Your comment, as you wrote it</summary>",
+    "",
+    fence,
+    kept,
+    fence,
+    ...truncated ? ["", `The comment was longer than ${MAX_PRESERVED_CHARS.toLocaleString("en-US")} characters; the rest is not preserved here.`] : [],
+    "",
+    "</details>"
+  ];
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -642,17 +681,28 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/request_stop.ts
 var ref = defineScript(import.meta.url);
-function stopRequestedNotice(commenter, deleted, alsoReached) {
+function commandsAfterStop(original) {
+  return commandsIn(original).slice(1).map(commandLabel);
+}
+function stopRequestedNotice(commenter, deleted, alsoReached, extra) {
   const whose = commenter ? `${commenter}'s` : "The";
+  const quoted = extra !== undefined && deleted && extra.original !== "";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
+    ...quoted ? [QUOTES_TAG.write(Number(extra.commentId))] : [],
     STOP_TAG.write("requested"),
     "Atomaton: stop requested.",
     "",
-    deleted ? `${whose} \`/stop\` comment was removed so it does not become part of the agent's context.` : `${whose} \`/stop\` comment could not be removed, so it may end up in the agent's context.`,
-    "",
-    "The run will stop after its current step, so it may take a minute, and it will report here when it has."
+    deleted ? `${whose} \`/stop\` comment was removed so it does not become part of the agent's context.` : `${whose} \`/stop\` comment could not be removed, so it may end up in the agent's context.`
   ];
+  if (extra && extra.commands.length > 0) {
+    const named = extra.commands.map((line) => `\`${line}\``).join(", ");
+    lines.push("", `It also carried ${named}, which was not acted on. Atomaton acts on one command per comment, and a stop ` + "is the one command that has to reach a running agent, so the stop is the one that ran. Comment " + `${extra.commands.length > 1 ? "each of them" : "it"} on its own once the run has reported.`);
+  }
+  lines.push("", "The run will stop after its current step, so it may take a minute, and it will report here when it has.");
+  if (extra && quoted) {
+    lines.push("", ...preservedCommentBlock(extra.original));
+  }
   if (alsoReached.length > 0) {
     lines.push("", `It also reached the work running on ${alsoReached.map((n) => `#${n}`).join(", ")}, ` + "which is under this issue. `/resume` here brings all of it back.");
   }
@@ -674,6 +724,9 @@ function main() {
   }
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const number = String(values.number);
+  const original = process.env.ATOMATON_COMMENT_BODY ?? "";
+  const others = commandsAfterStop(original);
+  const extra = others.length > 0 ? { commands: others, original, commentId: values["comment-id"] } : undefined;
   const { code: delCode, stdout: delOut, stderr: delErr } = gh("api", "--method", "DELETE", `repos/${repo}/issues/comments/${values["comment-id"]}`);
   const deleted = delCode === 0;
   if (!deleted) {
@@ -682,7 +735,7 @@ function main() {
   const root = Number(number);
   const { nodes } = readWorkTree(repo, root);
   const under = nodesToStop(descendants(subtree(nodes, root), root)).map((node) => node.number);
-  const result = requestStopAcross(repo, root, stopRequestedNotice(values.commenter ?? "", deleted, under));
+  const result = requestStopAcross(repo, root, stopRequestedNotice(values.commenter ?? "", deleted, under, extra));
   for (const problem of result.problems)
     console.error(`::warning::${problem}`);
   if (!result.rootNotified)
@@ -692,6 +745,7 @@ function main() {
 if (import.meta.main)
   main();
 export {
+  commandsAfterStop,
   ref,
   stopRequestedNotice
 };
