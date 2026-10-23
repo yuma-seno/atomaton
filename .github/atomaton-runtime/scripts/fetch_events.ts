@@ -189,9 +189,47 @@ function isQuotation(body) {
   return QUOTES_TAG.has(body);
 }
 function withoutTags(text) {
+  return fenceSegments(text).map((segment) => segment.code ? segment.text : stripTags(segment.text)).join("");
+}
+function stripTags(text) {
   const tags = EVERY_TAG_PATTERN.join("|");
   const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;
   return text.replace(new RegExp(String.raw`(?:^[ \t]*)?(?:${tags})[ \t]*${lineEnd}`, "gm"), "");
+}
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
+}
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
+      if (opens) {
+        if (current.text)
+          segments.push(current);
+        open = { char: fence[1][0], length: fence[1].length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+  if (current.text)
+    segments.push(current);
+  return segments;
 }
 
 // src/domain/work/control-commands.ts
@@ -431,7 +469,7 @@ ${issue.body ?? ""}`,
 function fetchPrEvents(owner, repo, number, maxDiffChars) {
   const pr = requiredJson(`pull request #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}`);
   const prBody = pr.body ?? "";
-  const parentIssue = PARENT_ISSUE_TAG.read(prBody);
+  const parentIssue = PARENT_ISSUE_TAG.read(proseOnly(prBody));
   const headSha = pr.head.sha.slice(0, 8);
   const events = [];
   const labelsLine = pr.labels.length > 0 ? `**Labels:** ${pr.labels.map((label) => label.name).join(", ")}` : "";
@@ -504,7 +542,7 @@ function linkedPrNumbers(owner, repo, issueNumber) {
   if (prs.length === 1000) {
     console.error(`::warning::Linked PR search for Issue #${issueNumber} reached GitHub's 1000-result search limit.`);
   }
-  return prs.filter((pr) => PARENT_ISSUE_TAG.read(pr.body ?? "") === issueNumber).map((pr) => pr.number);
+  return prs.filter((pr) => PARENT_ISSUE_TAG.read(proseOnly(pr.body ?? "")) === issueNumber).map((pr) => pr.number);
 }
 function tryLinkedPrNumbers(owner, repo, issueNumber) {
   try {
@@ -572,12 +610,17 @@ function main() {
   }
   const maxDiffChars = Number(values["max-diff-chars"] ?? 30000);
   const { events, sessionType, sessionNumber } = fetchEvents(values.type, Number(values.number), maxDiffChars);
-  const withoutBookkeeping = events.map((event) => ({
-    ...event,
-    llm_context: LLM_CONTEXT_TAG.read(event.content),
-    agent: AGENT_TAG.read(event.content),
-    content: withoutTags(event.content)
-  }));
+  const withoutBookkeeping = events.map((event) => {
+    if (event.event_type === "pr_diff")
+      return event;
+    const prose = proseOnly(event.content);
+    return {
+      ...event,
+      llm_context: LLM_CONTEXT_TAG.read(prose),
+      agent: AGENT_TAG.read(prose),
+      content: withoutTags(event.content)
+    };
+  });
   writeFileSync(values.out, JSON.stringify(withoutBookkeeping, null, 2));
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput)
