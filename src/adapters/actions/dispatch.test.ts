@@ -141,6 +141,12 @@ const CLAIM = (id: number, ask: number, run: number) => ({
   body: `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->`,
   user: { type: "Bot" },
 });
+/** The push comment `commit_and_push` posts as the ask the re-validated run claims (#285). */
+const PUSH_COMMENT = (id: number) => ({
+  id,
+  body: `<!-- atomaton:llm-context=exclude -->\nAtomaton: pushed abc1234 to this pull request. Running CI; the result routes what happens next.`,
+  user: { type: "Bot" },
+});
 const RESULT = (id: number, o: { agent?: string; verb: string; answers: number; run: number }) => ({
   id,
   body: [
@@ -233,16 +239,21 @@ describe("the answers-request check (#285)", () => {
     // The ordinary shape the first cut of this gate broke: the reviewer's directive
     // sent the engineer to fix, the engineer pushed and ended with no directive of
     // its own (`ended=done`), and the green validation routes that push to the
-    // reviewer whose directive it answered. The engineer's return is not the
-    // reviewer's verdict, and the reviewer has not spoken on this work at all.
+    // reviewer whose directive it answered. The ask quoted here is the push comment
+    // `commit_and_push` posted for exactly this dispatch — fresh, so no earlier
+    // claim holds it and the claim race cannot eat the cycle (quoting the
+    // engineer's own ask did exactly that, once). The check's own question: the
+    // engineer's return is not the reviewer's verdict, and the reviewer has not
+    // spoken on this work at all.
     const comments = [
       COMMAND(1, "engineer"),
       CLAIM(2, 1, 9),
       RESULT(3, { agent: "engineer", verb: "done", answers: 1, run: 9 }),
+      PUSH_COMMENT(4),
     ];
     const { outcome, ghCalls } = runAnswers({
       target: 300,
-      ask: 1,
+      ask: 4,
       thread: [threadRule(300, comments)],
       verdictPassed: true,
     });
@@ -257,10 +268,11 @@ describe("the answers-request check (#285)", () => {
       COMMAND(1, "engineer"),
       CLAIM(2, 1, 9),
       RESULT(3, { agent: "engineer", verb: "done", answers: 1, run: 9 }),
+      PUSH_COMMENT(4),
     ];
     const { outcome, ghCalls } = runAnswers({
       target: 300,
-      ask: 1,
+      ask: 4,
       agent: "engineer",
       thread: [threadRule(300, comments)],
       verdictPassed: false,

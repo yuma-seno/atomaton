@@ -683,17 +683,19 @@ echo "the agent must be finished by $(date -u -d @\${DEADLINE} +%H:%M:%SZ)"
  * race check inside cannot itself race; a run that finds an older claim on its ask
  * backs off, and every step that would take the turn is gated on that here.
  *
- * Before the branch steps, because the claim is about the THREAD, not the tree:
- * nothing the branch steps decide changes who is taking the turn, and the sooner
- * the claim is up, the smaller the window a person's comment sits unclaimed in.
- * Unconditional on `new_event_count` — a resumed run with nothing new to read is
- * still on the hook for an ending if it dies, and the watch can only say that from
- * the claim.
+ * After `buildContextStep` and gated on its `new_event_count != '0'`: a run with
+ * no new events to read takes no turn — the agent never starts and no ending is
+ * ever written — and a claim it left open would be the one thread state the watch
+ * reads as "taken up, never answered", a false notice for a run that legitimately
+ * did nothing. With the gate, the claim exists exactly when a turn does; the
+ * unclaimed window this adds (the context fetch, seconds) is the one the guard
+ * already treats as nobody's ball.
  */
 const claimTurnStep = new TypedOutputsStep(
   {
     name: "Claim the turn",
     id: "claim",
+    if: `${buildContextStep.rawOutputs.new_event_count} != '0'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
@@ -1747,7 +1749,6 @@ echo "machinery moved to ${MACHINERY_ABS}; the work tree holds only the reposito
   // (tools.yaml spawns the atoma MCP servers via `bun run ...`) --
   // GitHub-hosted runners do not ship Bun preinstalled.
   new SetupBunAction({ name: "Setup Bun" }),
-  claimTurnStep,
   // The two branch steps sit after Bun and before everything that reads the
   // working tree: they run Atomaton's own scripts, and a later checkout would swap
   // the files under steps that already inspected them.
@@ -2027,6 +2028,7 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
   // that already exists. See the comment beside those setfacl lines.
   restoreWorkspaceStep,
   buildContextStep,
+  claimTurnStep,
   readCalleesStep,
   injectCalleesStep,
   injectDispatcherStep,

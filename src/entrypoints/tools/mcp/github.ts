@@ -1190,11 +1190,29 @@ function pushBranch(branch: string): boolean {
       // person's push. It was removed: nothing starts unless someone asks. An
       // agent that pushed a fix and wants it reviewed hands off by naming the
       // reviewer as its directive, which is the path the handoff limit covers.
-      // The re-validation after a push answers the ask THIS run claimed (#285) —
-      // the same identity its claim carried, read from the environment the runner
-      // exported. The dispatched run's claim names the same ask, so its verdict
-      // closes what this run opened.
-      if (pr) dispatchPrValidation(REPO, pr.number, branch, { ask: (process.env.ATOMATON_ASK_ID ?? "").trim() || undefined });
+      //
+      // The ask the re-validated run claims is a FRESH comment, posted here — the
+      // shape `create_pr` uses for its `waiting` ending (#285). Quoting the pushing
+      // run's own ask was the first cut, and it deadlocks the fix cycle: that ask
+      // carries THIS run's claim, older than anything the dispatch could write, so
+      // the run the validation starts loses the claim race every time and posts
+      // nothing — green CI with no verdict, red CI with no fix. The push comment is
+      // the record of what this dispatch is answering (the head moved), no earlier
+      // claim can hold it, and two validations for one push race on it the way two
+      // validations for one command race on the command.
+      let pushAsk: string | undefined;
+      if (pr) {
+        const sha = gitRun("rev-parse", "--short", "HEAD");
+        const head = sha.code === 0 ? sha.stdout.trim() : "";
+        const posted = gh(
+          "api", `repos/${REPO}/issues/${pr.number}/comments`, "--method", "POST",
+          "-f", `body=${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: pushed ${head} to this pull request. Running CI; the result routes what happens next.`,
+          "--jq", ".id",
+        );
+        if (posted.code === 0) pushAsk = posted.stdout.trim() || undefined;
+        else report("warning", "could not post the push comment, so the dispatched run would have no ask to claim; validation was NOT dispatched");
+      }
+      if (pr && pushAsk !== undefined) dispatchPrValidation(REPO, pr.number, branch, { ask: pushAsk });
     } catch {
       // This call's result is `{ok: true}` and validation was not started. An
       // agent that pushed and expects CI to run would be waiting for something

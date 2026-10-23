@@ -33,6 +33,29 @@ describe("raceOutcome", () => {
     expect(raceOutcome([body(10, 55, 7), body(11, 55, 8)], { id: 10, ask: 55 })).toBe("held");
   });
 
+  test("the fix cycle: the re-validated run claims the fresh push comment, not the pushing run's ask", () => {
+    // The thread a fix push leaves: the person's command (the engineer's ask, which
+    // the engineer claimed and answered by pushing), and the push comment
+    // `commit_and_push` posts for the re-validated run to claim. The engineer's
+    // claim is OLDER but holds a DIFFERENT ask — the comparison is per-ask, so the
+    // reviewer's claim of the push comment holds and the cycle goes. (Quoting the
+    // engineer's own ask here was the first cut: the reviewer lost this race every
+    // time and the fix cycle was dead.)
+    const comments = [
+      { id: 10, body: "/engineer fix CI" },
+      body(11, 10, 7),
+      { id: 12, body: "<!-- atomaton:ended=done answers=10 run=7 -->" },
+      body(13, 13, 8), // the push comment, claimed by the run validation dispatches
+    ];
+    expect(raceOutcome(comments, { id: 13, ask: 13 })).toBe("held");
+  });
+
+  test("two runs for one push comment race on it the way they race on a command", () => {
+    const comments = [body(13, 13, 8)];
+    expect(raceOutcome(comments, { id: 14, ask: 13 })).toBe("backed-off");
+    expect(raceOutcome(comments, { id: 13, ask: 13 })).toBe("held");
+  });
+
   test("only took tags count: a remark that mentions an ask is not a claim", () => {
     const comments = [
       { id: 10, body: "about ask 55: the took tag is prose here" },
