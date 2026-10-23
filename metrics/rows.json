@@ -8491,6 +8491,42 @@
     ]
   },
   {
+    "path": "sessions/issue-308/engineer.json",
+    "agent": "engineer",
+    "messages": 38,
+    "calls": 24,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "bash": 19,
+      "delegate": 5
+    },
+    "acts": {
+      "other": 18,
+      "search": 1
+    },
+    "runs": [
+      {
+        "ended": "2026-10-23T11:50:23Z",
+        "ended_because": "completed",
+        "iterations": 10,
+        "messages": 38,
+        "seconds": 257,
+        "server_calls": {
+          "delegate": {
+            "delegate": 5
+          },
+          "shell": {
+            "bash": 19
+          }
+        },
+        "started": "2026-10-23T11:46:06Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-4/atomaton.json",
     "agent": "atomaton",
     "messages": 20,
