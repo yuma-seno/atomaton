@@ -1163,3 +1163,61 @@ describe("buildFooter", () => {
     expect(footer).not.toContain("Counted from the session");
   });
 });
+
+describe("a closing message that was not a call", () => {
+  /**
+   * The ending the runner refuses. It is posted so that the work in it is not lost,
+   * and it says why nothing in it was made -- without that sentence a reader would
+   * take the text for a hand-off that happened.
+   */
+  test("says the message called more than one thing, and makes the machinery's own call", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      runUrl: "http://example.com/run/1",
+      output: "Done.\n\n/engineer",
+      endingInvalid: true,
+      // Escaped by the caller, which is what the flag means.
+      escapedMentions: ["alice"],
+      escapedMentionsReason: "not-a-call",
+    });
+    expect(body).toContain("called more than one thing");
+    expect(body).toContain("none of its calls");
+    // The mention is the machinery's, because the agent's calls were refused.
+    expect(body).toContain("@octocat");
+    // And the notice says the notification was refused rather than unknown.
+    expect(body).toContain("this run's text was not a call");
+    expect(body).not.toContain("could not confirm");
+  });
+
+  /**
+   * The valid case that must stay quiet: the agent handed the work to a person, so
+   * the machinery's "no agent will run next" would ask a second person for a turn
+   * that is not theirs.
+   */
+  test("stays quiet when the agent called the person itself", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      runUrl: "http://example.com/run/1",
+      output: "Over to you, @alice.",
+      reported: true,
+      agentCalledHuman: true,
+    });
+    expect(body).toContain("@alice");
+    expect(body).not.toContain("@octocat");
+    expect(body).not.toContain("No agent will be automatically executed next");
+  });
+
+  /** Nobody called and nothing following: the machinery speaks, as it always has. */
+  test("speaks when the agent called nobody", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      runUrl: "http://example.com/run/1",
+      output: "Done.",
+      agentCalledHuman: false,
+    });
+    expect(body).toContain("@octocat");
+  });
+});
