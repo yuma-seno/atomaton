@@ -19,6 +19,31 @@ its metrics link — and it goes on those two comments and no others. The failur
 notice below is a turn-ending comment without one: it links the run's log itself,
 and a run that failed mid-turn has no token tally worth recording.
 
+## What the comment calls
+
+The comment is also the run's call: it says who holds the work next. A run ends by
+calling **one thing, or nobody**:
+
+- **one agent**, as a line holding nothing but `/` and the agent's name. The lines
+  after it are the request;
+- **or one person**, as a single `@login` of somebody the run was told it may call —
+  a participant in the thread, a collaborator, or whoever the work belongs to;
+- **or nobody**, and the comment then mentions the person the work belongs to, so
+  that a turn coming back to a person is not silent.
+
+People and agents are peers here: both take the turn, and one of them takes it.
+Two calls is not a hand-off with a courtesy copy — it is two people who each
+believe the work is theirs, and it is refused. The run is asked once more, in its
+own session, and a message that still calls two things is posted with its mentions
+left as text: nothing in it is started, nobody in it is notified, and the machinery
+makes the one call it still can by mentioning the person the work belongs to. The
+comment then carries a warning saying so, so the text is not read as a hand-off
+that happened.
+
+A run that was cut short never made a call either — its last message is a fragment
+of the work — so every mention in a salvaged fragment is escaped as well, and the
+machinery's mention is what reaches a person.
+
 ## A failure that gets reported is also an ending
 
 When the agent itself fails, the failure is converted into the comment it owed the

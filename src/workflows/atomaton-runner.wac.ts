@@ -37,6 +37,8 @@ import { ref as notifyLimitReachedRef } from "../entrypoints/machinery/notify_li
 import { ref as readRunEndingRef } from "../entrypoints/machinery/read_run_ending.ts";
 import { ref as injectUncommittedNoticeRef } from "../entrypoints/machinery/inject_uncommitted_notice.ts";
 import { ref as injectDispatcherNoticeRef } from "../entrypoints/machinery/inject_dispatcher_notice.ts";
+import { ref as readCalleesRef } from "../entrypoints/machinery/read_callees.ts";
+import { ref as injectCalleesNoticeRef } from "../entrypoints/machinery/inject_callees_notice.ts";
 import { ref as restoreWorkspaceRef } from "../entrypoints/machinery/restore_workspace.ts";
 import { ref as saveWorkspaceRef } from "../entrypoints/machinery/save_workspace.ts";
 import { ref as writeMetricsReportRef } from "../entrypoints/machinery/write_metrics_report.ts";
@@ -47,6 +49,8 @@ import { ref as reconcileGithubSessionRef } from "../entrypoints/machinery/recon
 import { ref as mergeToolPackagesRef } from "../entrypoints/machinery/merge_tool_packages.ts";
 import { ref as writeToolsFileRef } from "../entrypoints/machinery/write_tools_file.ts";
 import { ref as extractDirectiveRef } from "../entrypoints/machinery/extract_directive.ts";
+import { ref as checkEndingRef } from "../entrypoints/machinery/check_ending.ts";
+import { ref as injectEndingRejectionRef } from "../entrypoints/machinery/inject_ending_rejection.ts";
 import { ref as postResultCommentRef } from "../entrypoints/machinery/post_result_comment.ts";
 import { ref as recordRunMetadataRef } from "../entrypoints/machinery/record_run_metadata.ts";
 import { ref as saveAgentSessionRef } from "../entrypoints/machinery/save_agent_session.ts";
@@ -549,6 +553,42 @@ const buildContextStep = new TypedOutputsStep(
 );
 
 /**
+ * Read who this run may call, once, in a step that has a token.
+ *
+ * The step that starts atoma is credential-free on purpose — every tool server the
+ * agent starts can read that process's environment for minutes — so the participant
+ * list is read here and travels in the run directory to the two consumers that need
+ * it. See `read_callees.ts` and `lib/callees.ts`.
+ */
+const readCalleesStep = new TypedOutputsStep({
+  name: "Read who this run may call",
+  shell: "bash",
+  env: { GH_TOKEN: "${{ github.token }}", NUMBER: "${{ inputs.number }}" },
+  run: `${scriptCommandWithArgs(readCalleesRef, {
+    out: `${RUN_DIR}/callees.json`,
+    number: "\${NUMBER}",
+    notify: notifyStep.outputs.notify,
+  })}\n`,
+});
+
+/**
+ * Tell the run who it may call, so its closing message can hand the work to a person.
+ *
+ * After the context merge, before the dispatcher notice: both are the last thing in
+ * the session, and the dispatcher's "end with /<agent>" is the more specific of the
+ * two. The list itself was read by the step above, which is the only one here with a
+ * token — see `inject_callees_notice.ts` for why the list has to travel at all.
+ */
+const injectCalleesStep = new TypedOutputsStep({
+  name: "Tell the run who it may call",
+  shell: "bash",
+  run: `${scriptCommandWithArgs(injectCalleesNoticeRef, {
+    session: `${RUN_DIR}/session.json`,
+    "people-file": `${RUN_DIR}/callees.json`,
+  })}\n`,
+});
+
+/**
  * Tell the run who started it, so it reports back to that agent.
  *
  * After the context merge, so the notice is the last thing in the session and
@@ -933,6 +973,91 @@ sudo -n -u "${TOOL_USER}" env "\${AGENT_ENV[@]}" \\
 echo "=== Atoma Logs ===" >&2
 cat "${RUN_DIR}/atomaton_logs.txt" >&2
 
+# A run's last message is its report AND its call: it dispatches the next agent by a
+# bare \`/name\` line and hands the work to a person by naming them, and it may do at
+# most one of those (see domain/work/ending-calls.ts). Two is not a hand-off plus a
+# notification, it is two people who both believe they were asked.
+#
+# The check is a fact, not an error, so it never fails this step; the answer goes to
+# a file the rest of this bash reads. Only a run that ended of its own accord is
+# asked again -- a run that was stopped or ran out of time was cut off mid-sentence,
+# and asking it to finish the sentence would be asking it to ignore the person who
+# said stop.
+ENDING_INVALID=false
+if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ]; then
+  ${scriptCommandWithArgs(checkEndingRef, {
+    "output-file": `${RUN_DIR}/atomaton_output.txt`,
+    "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
+    "problem-file": `${RUN_DIR}/ending-problem.txt`,
+    "people-file": `${RUN_DIR}/callees.json`,
+  })}
+fi
+
+if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ] && [ -s "${RUN_DIR}/ending-problem.txt" ]; then
+  REASK_BUDGET=$(( ${deadlineStep.outputs.at} - $(date +%s) ))
+  if [ "$REASK_BUDGET" -lt "${MIN_AGENT_BUDGET_SECS}" ]; then
+    # No time for a second turn. The message is not a call, so nothing in it is made,
+    # and the result comment says so -- see post_result_comment.ts's --ending-invalid.
+    echo "::warning::the closing message calls more than one thing and there is no time left to ask again; nothing it calls will be started"
+    ENDING_INVALID=true
+  else
+    echo "::warning::the closing message calls more than one thing; asking for it again"
+    cp "${RUN_DIR}/session.json" "${RUN_DIR}/session_before_reask.json"
+    ${scriptCommandWithArgs(injectEndingRejectionRef, {
+      session: `${RUN_DIR}/session.json`,
+      "problem-file": `${RUN_DIR}/ending-problem.txt`,
+    })}
+    # The same invocation as above, with no prompt: the rejection is a user message in
+    # the session now, and a run with no prompt source continues from the session --
+    # the documented path, and the reason this does not use \`--prompt-file\`.
+    SECOND_EXIT=0
+    sudo -n -u "${TOOL_USER}" env "\${AGENT_ENV[@]}" \\
+      atoma run \\
+      --agent-def "${MACHINERY}/${AGENT_DEF_DIR}/\${AGENT}.md" \\
+      --in-session "${RUN_DIR}/session.json" \\
+      --out-session "${RUN_DIR}/session.json" \\
+      --template "${MACHINERY}/${PROMPT_TEMPLATE}" \\
+      --skills-dir "${MACHINERY}/${SKILLS_DIR}" \\
+      --max-runtime-secs "$REASK_BUDGET" \\
+      --stop-file "${STOP_FILE}" \\
+      --loop-retries \\
+      --credentials-file "${CREDENTIALS_FILE}" \\
+      \${TOOLS_ARG} \\
+      > "${RUN_DIR}/atomaton_output_again.txt" 2>> "${RUN_DIR}/atomaton_logs.txt" || SECOND_EXIT=$?
+
+    if [ "$SECOND_EXIT" = "0" ] && [ -s "${RUN_DIR}/atomaton_output_again.txt" ]; then
+      mv "${RUN_DIR}/atomaton_output_again.txt" "${RUN_DIR}/atomaton_output.txt"
+      ${scriptCommandWithArgs(checkEndingRef, {
+        "output-file": `${RUN_DIR}/atomaton_output.txt`,
+        "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
+        "problem-file": `${RUN_DIR}/ending-problem.txt`,
+        "people-file": `${RUN_DIR}/callees.json`,
+      })}
+      if [ -s "${RUN_DIR}/ending-problem.txt" ]; then
+        echo "::warning::the closing message still calls more than one thing; nothing it calls will be started"
+        ENDING_INVALID=true
+      fi
+    elif [ -f "${STOP_FILE}" ]; then
+      # The person stopped while the machinery was asking again. That outranks the
+      # retry: keep the second attempt's ending (a stop) and whatever it managed to
+      # write, which is often nothing.
+      EXIT_CODE=2
+      if [ -s "${RUN_DIR}/atomaton_output_again.txt" ]; then
+        mv "${RUN_DIR}/atomaton_output_again.txt" "${RUN_DIR}/atomaton_output.txt"
+      else
+        : > "${RUN_DIR}/atomaton_output.txt"
+      fi
+    else
+      # The second attempt failed or was cut off without the person asking. The first
+      # run's ending is the one this run actually had, so put the session back as it
+      # was and post that message with its calls refused, rather than reporting a
+      # failure of the machinery's own retry as the run's outcome.
+      cp "${RUN_DIR}/session_before_reask.json" "${RUN_DIR}/session.json"
+      ENDING_INVALID=true
+    fi
+  fi
+fi
+
 # The watcher has nothing left to watch for. Killed rather than left to the job,
 # because a poller that outlives the run it was polling for spends API budget on an
 # answer nobody will read.
@@ -982,7 +1107,14 @@ RESULT_EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
   echo "\${RESULT_EOF}"
 } >> "$GITHUB_OUTPUT"
 
-${scriptCommandWithArgs(extractDirectiveRef, { "output-file": `${RUN_DIR}/atomaton_output.txt`, "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}` })}
+if [ "$ENDING_INVALID" = "true" ]; then
+  # The message's calls were refused, so nothing it named is started. The comment is
+  # posted with them left as text, and the machinery makes the one call it still can.
+  echo "directive=" >> "$GITHUB_OUTPUT"
+else
+  ${scriptCommandWithArgs(extractDirectiveRef, { "output-file": `${RUN_DIR}/atomaton_output.txt`, "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}` })}
+fi
+echo "ending_invalid=\${ENDING_INVALID}" >> "$GITHUB_OUTPUT"
 
 # Detect whether a tool call already triggered an automatic follow-up
 # dispatch ON THIS NODE during this run (a hand-off to a colleague:
@@ -1042,7 +1174,7 @@ echo "changed=\${CHANGED}" >> "$GITHUB_OUTPUT"
   // failure — neither success nor the soft stop — and by nothing else, so its
   // absence is the machinery's, wherever it struck. See the comments in the run
   // above, and "Report failure" which reads it.
-  ["result", "directive", "ended_because", "reported", "chain_continues", "changed", "atoma_failed"] as const,
+  ["result", "directive", "ended_because", "reported", "chain_continues", "changed", "atoma_failed", "ending_invalid"] as const,
 );
 
 const tokenUsageStep = new TypedOutputsStep({
@@ -1131,6 +1263,14 @@ const postResultCommentStep = new TypedOutputsStep(
       // tool call -- the skip branch, which the footer is then appended onto
       // instead of being dropped. See `ending-comment.ts`.
       "ending-comment": `${RUN_DIR}/ending-comment.json`,
+      // Written by the run above when the closing message called more than one thing
+      // and was still not fixed the second time: its calls are left as text, and this
+      // is what makes the comment say so and the machinery make the call itself.
+      "ending-invalid": runAgentStep.outputs.ending_invalid,
+      // The people the run was told it may call, read before it started. The comment's
+      // escaping and the ending check's counting are the same set because they are the
+      // same file -- see lib/callees.ts.
+      "people-file": `${RUN_DIR}/callees.json`,
     })}\n`,
   },
   ["comment_id"] as const,
@@ -1816,6 +1956,8 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
   // that already exists. See the comment beside those setfacl lines.
   restoreWorkspaceStep,
   buildContextStep,
+  readCalleesStep,
+  injectCalleesStep,
   injectDispatcherStep,
   new TypedOutputsStep({
     // Added BEFORE the agent actually runs (not after) so it's visible to a

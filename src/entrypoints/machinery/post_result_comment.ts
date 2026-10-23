@@ -26,7 +26,8 @@ import { redact } from "../../shared/redaction.ts";
 import { renderTokenLine } from "../../domain/record/token-line.ts";
 import { toolTroubleLine } from "../../domain/record/tool-trouble.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../domain/work/mention.ts";
-import { knownParticipants } from "../../adapters/github/participants.ts";
+import { calledHumans } from "../../domain/work/ending-calls.ts";
+import { readCalleesFile } from "./lib/callees.ts";
 import { readEndingComment } from "../../adapters/github/ending-comment.ts";
 import type { Session } from "../../domain/work/session.ts";
 import { isTrue } from "./lib/flags.ts";
@@ -84,6 +85,26 @@ export interface PostResultCommentArgs {
    * is the skip it always was.
    */
   "ending-comment"?: string;
+  /**
+   * "true" when the run's closing message called more than one thing.
+   *
+   * The runner asks such a run to write the message again, once. This is the answer
+   * when the second attempt broke the rule too, or when there was no time left to
+   * ask: the message was never a call, so nothing in it is made — its mentions are
+   * left as text, the directive is dropped by the runner, and the machinery makes the
+   * one call it still can. See `domain/work/ending-calls.ts`.
+   */
+  "ending-invalid"?: string;
+  /**
+   * The people the run was told it may call, written by `read_callees.ts` before the
+   * run started (`lib/callees.ts`).
+   *
+   * Read here rather than asked of GitHub again: this comment's escaping and the
+   * ending check's counting have to be the same set, and they were two reads once.
+   * Absent or unreadable means nothing is confirmed, so every mention is escaped and
+   * the machinery's own sentence reaches the person the work belongs to.
+   */
+  "people-file"?: string;
 }
 
 export const ref = defineScript<PostResultCommentArgs>(import.meta.url);
@@ -425,6 +446,22 @@ export function buildCommentBody(args: {
   /** Logins the agent wrote as mentions that were escaped instead. */
   escapedMentions?: readonly string[];
   /**
+   * Why those mentions were escaped. Passed through to `escapedMentionNotice`, which
+   * says a different thing when the text was not a call than when an account could
+   * not be confirmed.
+   */
+  escapedMentionsReason?: "unknown" | "not-a-call";
+  /**
+   * Whether the closing message called more than one thing, and was posted anyway
+   * with its calls left as text. See `PostResultCommentArgs["ending-invalid"]`.
+   */
+  endingInvalid?: boolean;
+  /**
+   * Whether the closing message called a person, which is what silences the
+   * machinery's own mention: somebody has already been handed the turn.
+   */
+  agentCalledHuman?: boolean;
+  /**
    * Whether `output` is the agent's last message rather than its report.
    *
    * Said in the comment, because presenting a sentence from the middle of the work
@@ -486,7 +523,15 @@ export function buildCommentBody(args: {
     // this same file, twelve lines from the other copy.
     ENDED_TAG.write(endedTag(ending)),
   ];
-  if (args.salvaged === true) {
+  if (args.endingInvalid === true) {
+    lines.push(
+      "> [!WARNING]",
+      "> This run's closing message called more than one thing, so none of its calls",
+      "> was made: nothing it named is started or notified. It was asked to write the",
+      "> message again. Below is what it wrote.",
+      "",
+    );
+  } else if (args.salvaged === true) {
     lines.push(
       "> [!WARNING]",
       "> This run ended before it wrote a report. Below is the last thing it said,",
@@ -508,7 +553,7 @@ export function buildCommentBody(args: {
 
   // Directly under what the agent wrote, because that is what it is about, and
   // above the run footer, which nobody reads for this.
-  const escapedNotice = escapedMentionNotice(args.escapedMentions ?? []);
+  const escapedNotice = escapedMentionNotice(args.escapedMentions ?? [], args.escapedMentionsReason ?? "unknown");
   if (escapedNotice !== undefined) lines.push("", escapedNotice, "");
 
   if (
@@ -516,6 +561,7 @@ export function buildCommentBody(args: {
       ending,
       chainContinues: isTrue(args.chainContinues),
       notify: args.notify,
+      agentCalledHuman: args.agentCalledHuman === true,
       isSubIssue: args.isSubIssue ?? false,
       issueClosed: args.issueClosed ?? false,
     })
@@ -679,6 +725,8 @@ function main(): void {
       output: { type: "string" },
       "logs-file": { type: "string" },
       "ending-comment": { type: "string" },
+      "ending-invalid": { type: "string" },
+      "people-file": { type: "string" },
     },
   });
 
@@ -840,18 +888,43 @@ function main(): void {
   // The mention the RUNNER adds is not part of this. It is put in by
   // `buildCommentBody` below from a login `resolveNotify` produced, and never
   // passes through here.
-  const checked = escapeUnknownMentions(
-    output,
-    knownParticipants(process.env.GITHUB_REPOSITORY ?? "", values.number),
-  );
+  //
+  // Three texts are not a call, and every mention in them is escaped rather than
+  // confirmed: a salvaged fragment, a run that was cut short (its last message is
+  // where the stop landed, not a hand-off), and a closing message the one-call rule
+  // refused. In all three a name is a name in a sentence, not somebody being asked,
+  // and letting one through would notify a person on the strength of a sentence the
+  // machinery already knows is not the run's call. The notice under the text says
+  // which of the three it was, and the machinery's own mention is what reaches
+  // somebody.
+  const endingInvalid = isTrue(values["ending-invalid"]);
+  const notACall = endingInvalid || salvaged || cutShort(values["ended-because"]);
+  // The two lists the run was given, from the same file the notice and the ending
+  // check read: one read of the thread at the start of the run, not three that have
+  // to agree. `known` may notify; `callable` may be handed the turn.
+  //
+  // Nothing in a text that was not a call is allowed to notify — a salvaged fragment,
+  // a run that was cut short, a message the one-call rule refused. Every mention in
+  // those is escaped, the owner's included: the machinery's own sentence is what
+  // reaches them, and a live mention beside it would say "your turn" while that
+  // sentence says nothing is running.
+  const callees = readCalleesFile(values["people-file"]);
+  const known = notACall ? [] : callees.participants;
+  const callable = notACall ? [] : callees.humans;
+  const checked = escapeUnknownMentions(output, known);
   if (checked.escaped.length > 0) {
-    console.error(`escaped ${checked.escaped.length} unconfirmed mention(s): ${checked.escaped.join(", ")}`);
+    console.error(`escaped ${checked.escaped.length} mention(s): ${checked.escaped.join(", ")}`);
   }
+
+  // Read off the unescaped text, against the people the run was told it may call.
+  const called = calledHumans(output, callable);
 
   const body = buildCommentBody({
     agent: values.agent,
     salvaged,
     wroteNothing,
+    endingInvalid,
+    agentCalledHuman: called.length === 1,
     notify: values.notify,
     directive: values.directive,
     chainContinues: values["chain-continues"],
@@ -863,6 +936,7 @@ function main(): void {
     repo: process.env.GITHUB_REPOSITORY ?? "",
     output: checked.text,
     escapedMentions: checked.escaped,
+    escapedMentionsReason: notACall ? "not-a-call" : "unknown",
     changed: isTrue(values.changed),
     // The same boundary the salvage uses, for the same reason: a session accumulates
     // across runs, and a count taken from the top would put an earlier run's trouble

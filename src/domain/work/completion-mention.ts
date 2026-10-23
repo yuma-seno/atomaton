@@ -30,6 +30,23 @@ export interface CompletionSignals {
   chainContinues: boolean;
   /** The login to mention, empty when nobody is configured. */
   notify?: string;
+  /**
+   * The closing message called a person — one `@login` of somebody who can act.
+   *
+   * A call is the run naming who goes next, and one participant can be that: the
+   * message's own text already notifies them. The machinery's sentence asks a person
+   * to look at work nothing is waiting on, which is not what a hand-off to somebody
+   * else says; adding it would ask a second person to take a turn that is not theirs.
+   *
+   * Exclusive with `ending.next` by rule — a message that names both is refused and
+   * written again — so in practice the two are never both set. They are checked
+   * together because they answer the same question.
+   *
+   * Only an ordinary finish counts. A run that was stopped or spent ended in the
+   * middle of a sentence, so a name in what it had written so far is a name, not a
+   * hand-off — and the machinery's sentence is the only thing that says it stopped.
+   */
+  agentCalledHuman: boolean;
   /** This issue was created by an agent as part of a larger one's plan. */
   isSubIssue: boolean;
   /** The issue is closed as of this comment. */
@@ -89,6 +106,7 @@ export function shouldMentionOnCompletion(signals: CompletionSignals): boolean {
   if (signals.ending.ended === "no-report") return true;
   if (signals.ending.next) return false;
   if (signals.chainContinues) return false;
+  if (signals.agentCalledHuman && signals.ending.ended === "finished") return false;
   if (signals.isSubIssue && signals.issueClosed) return false;
   return true;
 }

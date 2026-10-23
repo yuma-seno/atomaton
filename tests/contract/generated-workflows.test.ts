@@ -261,6 +261,47 @@ describe("generated workflows", () => {
   });
 
   /**
+   * Who a run may call is read where there is a token, and reaches the checks as a file.
+   *
+   * This is the wiring whose absence was invisible: `check_ending` is called from "Run
+   * agent", a step that carries no credentials on purpose, so reading the participants
+   * there returned nothing, the only callable login was `--notify`, and a message that
+   * named another participant counted as one call and went through. Nothing failed —
+   * the rule simply stopped existing for everybody but the owner.
+   *
+   * Held on the generated YAML because it is a fact about which step runs where. Unit
+   * tests give the script whatever it needs and stay green either way.
+   */
+  test("who a run may call comes from its own step, and the agent step stays credential-free", () => {
+    type WorkflowStep = { name?: string; run?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const read = steps.find((candidate) => candidate.name === "Read who this run may call");
+    expect(read, "the step that reads who may be called").toBeDefined();
+    expect(read?.env?.GH_TOKEN, "it has the token the agent step must not have").toBe("${{ github.token }}");
+    expect(read?.run).toContain("read_callees.ts");
+
+    const agent = steps.find((candidate) => candidate.name === "Run agent");
+    expect(agent?.env?.GH_TOKEN, "the agent step keeps no credentials").toBeUndefined();
+
+    // Both calls of the check, in the first-turn and the second-turn branches, take
+    // the file rather than the API.
+    const checks = (agent?.run ?? "").split("\n").filter((line) => line.includes("check_ending.ts"));
+    expect(checks.length, "the ending is checked after each turn").toBe(2);
+    for (const line of checks) {
+      expect(line).toContain("--people-file");
+      expect(line).not.toContain("--notify");
+    }
+
+    const notice = steps.find((candidate) => candidate.name === "Tell the run who it may call");
+    expect(notice?.run, "the notice reads the same file").toContain("--people-file");
+    const post = steps.find((candidate) => candidate.name === "Post result comment");
+    expect(post?.run, "and so does the comment that decides what may notify").toContain("--people-file");
+  });
+
+  /**
    * A failure the run managed to report must not also turn the run red.
    *
    * `continue-on-error` leaves the failure in `steps.atoma.outcome` — every condition

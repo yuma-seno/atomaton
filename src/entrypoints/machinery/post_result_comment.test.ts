@@ -800,7 +800,7 @@ describe("post_result_comment.ts main", () => {
         { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
       );
       expect(r.status).toBe(0);
-      // The POST, not the read of the thread's participants -- both are `comments`.
+      // The POST, marked by the footer line the test looks for.
       const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
       expect(posted).toContain("1 problem a server reported about itself (`search`)");
       expect(posted).toContain("1 refused or errored tool call");
@@ -823,19 +823,23 @@ describe("post_result_comment.ts main", () => {
           cwd: dir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            { match: ["issue", "view", "5"], stdout: JSON.stringify({ state: "CLOSED" }) },
+            // The POST first: its body is prose, and a shorter pattern would match it
+            // too -- this assertion is about what the script decided, so it has to be
+            // the POST that is captured, not whichever call happened to include the
+            // word.
+            { match: ["comments", "POST"], stdout: "42" },
+            { match: ["api", "repos/owner/repo/issues/5"], stdout: JSON.stringify({ state: "closed" }) },
             // Whether it is a sub-issue comes from GitHub's own link now, not from a
             // marker in the body. See `adapters/github/parent-issue.ts`.
             {
               match: ["graphql", "parent{number}"],
               stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 4 } } } } }),
             },
-            { match: ["api", "comments"], stdout: "42" },
           ],
         },
       );
       expect(r.status).toBe(0);
-      const posted = r.ghCalls.find((c) => c.join(" ").includes("comments"))?.join(" ") ?? "";
+      const posted = r.ghCalls.find((c) => c.join(" ").includes("POST"))?.join(" ") ?? "";
       expect(posted).not.toContain("@octocat");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1161,5 +1165,157 @@ describe("buildFooter", () => {
     expect(footer).not.toContain("metrics");
     expect(footer).not.toContain("Tokens");
     expect(footer).not.toContain("Counted from the session");
+  });
+});
+
+describe("a closing message that was not a call", () => {
+  /**
+   * The ending the runner refuses. It is posted so that the work in it is not lost,
+   * and it says why nothing in it was made -- without that sentence a reader would
+   * take the text for a hand-off that happened.
+   */
+  test("says the message called more than one thing, and makes the machinery's own call", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      runUrl: "http://example.com/run/1",
+      output: "Done.\n\n/engineer",
+      endingInvalid: true,
+      // Escaped by the caller, which is what the flag means.
+      escapedMentions: ["alice"],
+      escapedMentionsReason: "not-a-call",
+    });
+    expect(body).toContain("called more than one thing");
+    expect(body).toContain("none of its calls");
+    // The mention is the machinery's, because the agent's calls were refused.
+    expect(body).toContain("@octocat");
+    // And the notice says the notification was refused rather than unknown.
+    expect(body).toContain("this run's text was not a call");
+    expect(body).not.toContain("could not confirm");
+  });
+
+  /**
+   * The valid case that must stay quiet: the agent handed the work to a person, so
+   * the machinery's "no agent will run next" would ask a second person for a turn
+   * that is not theirs.
+   */
+  test("stays quiet when the agent called the person itself", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      runUrl: "http://example.com/run/1",
+      output: "Over to you, @alice.",
+      reported: true,
+      agentCalledHuman: true,
+    });
+    expect(body).toContain("@alice");
+    expect(body).not.toContain("@octocat");
+    expect(body).not.toContain("No agent will be automatically executed next");
+  });
+
+  /** Nobody called and nothing following: the machinery speaks, as it always has. */
+  test("speaks when the agent called nobody", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      runUrl: "http://example.com/run/1",
+      output: "Done.",
+      agentCalledHuman: false,
+    });
+    expect(body).toContain("@octocat");
+  });
+});
+
+/**
+ * What the comment does with the list the run was given: who a mention may notify,
+ * and who a mention counts as calling.
+ *
+ * They were two reads of GitHub once — the escape set was the participants, the call
+ * set was the participants plus `--notify` — and the gap was the worst shape this
+ * machinery has: the owner's mention escaped, the machinery's own sentence suppressed
+ * because the run had "called somebody", and nothing left that notified anyone. Now
+ * both come out of one file, so the first time they can disagree is never.
+ */
+describe("post_result_comment.ts on a closing message", () => {
+  const rules = [{ match: ["api", "comments"], stdout: "42" }];
+
+  const PEOPLE = JSON.stringify({
+    humans: ["owner", "octocat"],
+    participants: ["owner", "octocat", "stranger"],
+    notify: "owner",
+  });
+
+  function post(dir: string, args: string[]) {
+    writeFileSync(join(dir, "callees.json"), PEOPLE);
+    const r = runWithFakeGh(
+      scriptPath("post_result_comment.ts"),
+      [
+        "--number", "9", "--type", "issue", "--agent", "engineer",
+        "--run-url", "http://example.com/run/1",
+        "--output", join(dir, "atomaton_output.txt"),
+        "--people-file", join(dir, "callees.json"),
+        ...args,
+      ],
+      { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    return r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+  }
+
+  /**
+   * `resolveNotify` can name the parent issue's requester or the repository owner, and
+   * neither has to appear on the thread. The run was told it may call that login, so
+   * calling it has to reach them — and then the machinery must not ask a second time.
+   */
+  test("the owner it was told to call is neither escaped nor asked again", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "Over to you, @owner.\n");
+      const body = post(dir, ["--notify", "owner"]);
+      expect(body, "the owner is callable even when the thread never saw them").toContain("@owner");
+      expect(body).not.toContain("`@owner`");
+      expect(body).not.toContain("No agent will be automatically executed next");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Refused calls: the text is kept, every mention in it is left as text, and the
+   * machinery makes the one call it still can. Without the warning a reader would take
+   * the `/engineer` line for a hand-off that happened.
+   */
+  test("a refused message keeps its text, makes no calls, and says so", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "Done.\n\n/engineer\n\n@stranger, your call.\n");
+      const body = post(dir, ["--notify", "owner", "--ending-invalid", "true"]);
+      expect(body).toContain("`@stranger`");
+      expect(body).toContain("called more than one thing");
+      expect(body).toContain("@owner");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The owner is in the call list, so a refused message that ends `@owner` was the one
+   * case where the escape list and the call list could disagree and let a live mention
+   * through: "none of its calls was made" would be false, and the owner would be told
+   * "your turn" by the text while the sentence under it says nothing is running.
+   */
+  test("a refused message escapes even the owner it would have been allowed to call", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "Done.\n\n/engineer\n\n@owner, your call.\n");
+      const body = post(dir, ["--notify", "owner", "--reported", "true", "--ending-invalid", "true"]);
+      expect(body).toContain("`@owner`");
+      expect(body).toContain("called more than one thing");
+      // The machinery's own sentence still reaches them: the turn comes back to a
+      // person, it is only the refused text's own call that is not made.
+      expect(body).toContain("No agent will be automatically executed next");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

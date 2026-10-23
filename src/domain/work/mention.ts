@@ -81,6 +81,32 @@ export function mentionsSomeone(text: string): boolean {
 }
 
 /**
+ * Every login the text mentions in prose, in order, without repeats.
+ *
+ * The other half of `escapeUnknownMentions`: this one asks who was named, and the
+ * caller decides what a name means. A closing message's mention is how a run calls a
+ * person -- `domain/work/ending-targets.ts` counts them -- while the same mention in
+ * a salvaged fragment is only a name that happened to be in a sentence.
+ *
+ * Code is skipped for the same reason it is skipped there: GitHub does not notify
+ * from a code span, so a name inside one is not a call either.
+ * A fenced block is replaced by a space rather than deleted, so removing it cannot
+ * join the words on either side of it into a mention that was not written.
+ */
+export function mentionsIn(text: string): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const match of text.replace(CODE, " ").matchAll(new RegExp(MENTION.source, "g"))) {
+    const login = match[2]!;
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(login);
+  }
+  return found;
+}
+
+/**
  * The `@login ` prefix a notice opens with, or `""` when there is nobody to name.
  *
  * One function, because it was written eight times and one copy trimmed while the
@@ -129,14 +155,34 @@ export function escapeUnknownMentions(text: string, known: Iterable<string>): Me
  * Addressed to the person who will read the thread, not to the agent: by the time
  * this is written the run has ended, and what matters is that somebody can see a
  * mention was intended and did not happen.
+ *
+ * `reason` names the two situations that both end in "this mention did not notify
+ * anyone", because they are not the same claim. A participant could not be
+ * confirmed (the list is sometimes unreadable), so the safe reading was that they
+ * are a stranger. Or the run's text was not a call at all — it was cut short, or it
+ * named more than one thing — so even a confirmed participant was not reached. The
+ * second says the account was known and the notification was refused on purpose;
+ * saying "could not confirm" there would send a person to check a list that was fine.
  */
-export function escapedMentionNotice(escaped: readonly string[]): string | undefined {
+export function escapedMentionNotice(
+  escaped: readonly string[],
+  reason: "unknown" | "not-a-call" = "unknown",
+): string | undefined {
   if (escaped.length === 0) return undefined;
   const names = escaped.map((login) => `\`@${login}\``).join(", ");
+  const one = escaped.length === 1;
+  if (reason === "not-a-call") {
+    return (
+      `> [!NOTE]\n` +
+      `> ${names} ${one ? "was" : "were"} written as ${one ? "a mention" : "mentions"} ` +
+      `and had the notification removed: this run's text was not a call, so nothing in it ` +
+      `was made. Nobody was notified. If ${one ? "the mention was" : "a mention was"} meant, mention them yourself.`
+    );
+  }
   return (
     `> [!NOTE]\n` +
-    `> ${names} ${escaped.length === 1 ? "was" : "were"} written as ${escaped.length === 1 ? "a mention" : "mentions"} ` +
-    `and had the notification removed: this run could not confirm ${escaped.length === 1 ? "that account" : "those accounts"} ` +
+    `> ${names} ${one ? "was" : "were"} written as ${one ? "a mention" : "mentions"} ` +
+    `and had the notification removed: this run could not confirm ${one ? "that account" : "those accounts"} ` +
     `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`
   );
 }

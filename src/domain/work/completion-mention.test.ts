@@ -18,6 +18,7 @@ const base: CompletionSignals = {
   ending: ended(),
   chainContinues: false,
   notify: "someone",
+  agentCalledHuman: false,
   isSubIssue: false,
   issueClosed: false,
 };
@@ -37,6 +38,36 @@ describe("shouldMentionOnCompletion", () => {
 
   test("says nothing when a tool call already dispatched the next run", () => {
     expect(shouldMentionOnCompletion({ ...base, chainContinues: true })).toBe(false);
+  });
+
+  /**
+   * The other way a turn is handed on: the closing message named a person, and that
+   * mention is the call. Appending "no agent will run next, please review" would ask
+   * whoever the work belongs to for a turn that is somebody else's.
+   */
+  test("says nothing when the run called a person itself", () => {
+    expect(shouldMentionOnCompletion({ ...base, agentCalledHuman: true })).toBe(false);
+  });
+
+  /**
+   * A run that was cut short made no call: its last message is where the stop landed,
+   * not a hand-off, even when a name happens to be in it. The machinery's sentence is
+   * the only thing that says the run stopped, so nothing in the fragment can silence
+   * it -- the fragment's own mentions are escaped for the same reason.
+   */
+  test("a name in a stopped run's fragment is not a call, and does not silence the notice", () => {
+    expect(
+      shouldMentionOnCompletion({
+        ...base,
+        agentCalledHuman: true,
+        ending: ended({ endedBecause: "stopped" }),
+      }),
+    ).toBe(true);
+  });
+
+  /** A run that said nothing calls nobody, whatever else it was; silence still speaks. */
+  test("naming nobody is what leaves the mention to the machinery", () => {
+    expect(shouldMentionOnCompletion({ ...base, agentCalledHuman: false })).toBe(true);
   });
 
   // The case this module exists for: closing a sub-issue is what wakes its
