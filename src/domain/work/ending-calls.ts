@@ -54,30 +54,7 @@ export interface CallableSet {
  * `lineForms` tolerance for a markdown-backticked `/name`, and the same requirement
  * that a definition exists — so a count here and a dispatch there cannot disagree
  * about what a line is.
- *
- * A mention counts only if its login is in `humans`. An unknown `@name` is not a
- * call: `domain/work/mention.ts` escapes it before the comment is posted, so nobody
- * is reached by it, and counting it would reject a message that reaches no one twice.
  */
-/**
- * The people the text calls, by login, without repeats.
- *
- * A mention is a call only when its login is one of `humans`. An unknown `@name` is
- * not a call: `domain/work/mention.ts` escapes it before the comment is posted, so
- * nobody is reached by it, and counting it would reject a message that reaches no one
- * twice.
- */
-export function calledHumans(text: string, humans: Iterable<string>): string[] {
-  const allowed = new Set([...humans].map((login) => login.trim().toLowerCase()).filter(Boolean));
-  const called: string[] = [];
-  for (const login of mentionsIn(text)) {
-    if (!allowed.has(login.toLowerCase())) continue;
-    if (called.some((seen) => seen.toLowerCase() === login.toLowerCase())) continue;
-    called.push(login);
-  }
-  return called;
-}
-
 export function endingCalls(output: string, callable: CallableSet): EndingCalls {
   const agents: string[] = [];
   for (const rawLine of output.split("\n")) {
@@ -93,14 +70,32 @@ export function endingCalls(output: string, callable: CallableSet): EndingCalls 
   return { agents, humans: calledHumans(output, callable.humans) };
 }
 
-/** How many things this message calls. */
-export function callCount(calls: EndingCalls): number {
-  return calls.agents.length + calls.humans.length;
+/**
+ * The people the text calls, by login, without repeats.
+ *
+ * A mention is a call only when its login is one of `humans`. An unknown `@name` is
+ * not a call: `domain/work/mention.ts` escapes it before the comment is posted, so
+ * nobody is reached by it, and counting it would reject a message that reaches no one
+ * twice.
+ *
+ * Exported for the result comment, which asks the same question of the text it is
+ * about to post — it has already read the participants on its own token, and it must
+ * not decide "was this a call" a second, differently-spelled way.
+ */
+export function calledHumans(text: string, humans: Iterable<string>): string[] {
+  const allowed = new Set([...humans].map((login) => login.trim().toLowerCase()).filter(Boolean));
+  const called: string[] = [];
+  for (const login of mentionsIn(text)) {
+    if (!allowed.has(login.toLowerCase())) continue;
+    if (called.some((seen) => seen.toLowerCase() === login.toLowerCase())) continue;
+    called.push(login);
+  }
+  return called;
 }
 
-/** Whether the message keeps the one-call rule. */
-export function callsAtMostOne(calls: EndingCalls): boolean {
-  return callCount(calls) <= 1;
+/** How many things this message calls. */
+function callCount(calls: EndingCalls): number {
+  return calls.agents.length + calls.humans.length;
 }
 
 /** The calls, as the reader would write them: `` `/engineer`, `@alice` ``. */
