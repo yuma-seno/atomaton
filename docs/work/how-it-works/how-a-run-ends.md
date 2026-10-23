@@ -79,39 +79,33 @@ no run arrives to heal the thread. Comments that keep vanishing with no run behi
 them are this shape.
 
 **The run watch is the outside check for exactly this.** When a run completes,
-`Atomaton Run Watch` reads the node's thread and asks whether an ending comment
-was written at or after that run started. A run that reported has one — the two
-above are steps of the run itself, which finished before the watch could ever
-look — so the watch stays silent. A run that never got to write one gets a
-notice: the turn-ending header that puts the node back with a person, the fact
-that nothing was decided, the run's link, and the two ways forward. The watch
-also removes the `atomaton/in-progress` label the dead run left, by the same
-turn rule the runner itself applies. It cannot double-post: the watched run's
-completion fires only after its own steps are done, so a report that landed at
-all landed first.
+`Atomaton Run Watch` reads the node's thread and asks one question of the turn's
+own identity: does the thread hold a claim by this run — `atomaton:took`, written
+when the run started — and no ending by this run — `atomaton:ended`, which every
+report carries? A run that reported has the ending, and the watch stays silent. A
+run that claimed and never reported gets a notice: the turn-ending header that
+closes the ask the run claimed, the fact that nothing was decided, the run's link,
+and the two ways forward. The notice is itself that ending — it carries the ask's
+id and the watch's own run id — so the ask reads as answered after it, and no
+later watch posts the same notice twice: once per ask is the whole of what the
+residue of a dead run owes. The watch also removes the `atomaton/in-progress`
+label the dead run left, by the same turn rule the runner itself applies. It
+cannot double-post against the run's own report: the watched run's completion
+fires only after its own steps are done, so a report that landed at all landed
+first.
 
-The watch triggers on three workflows: `Atomaton Runner` itself — the
-continuations a chain dispatches — and `Atomaton Entry` and `Atomaton Manual
-Comment`, because GitHub records no run for a **called** workflow: those two
-execute the runner as a reusable workflow, so the first run of every chain —
-the one a person's command or a new issue starts — exists only as its caller's
-run. Most entry runs dispatch nothing (an ordinary remark, a comment the guard
-removed), so the watch posts on one only when the thread is stuck at an ask AND
-that ask is that run's doing — a dispatch marker posted inside it, or the
-person's own command, when three things hold: the run was started by a comment
-the run could consume, the run did not end successfully, and the command was
-written before the run started. A command written while a run is already going
-belongs to the run that command itself starts; an entry run started by a new
-issue consumes no comment at all — its ask is the issue's body, so a command
-sitting on that thread is never its doing; and a run that ended successfully
-carried its own judgment all the way through — it dispatched, and its marker is
-on the thread, or it decided there was nothing to do — so only a run that died
-before posting any marker may fall back to the command. Those distinctions are
-what keep the watch silent while the command's own run works: opening an issue
-and commenting seconds later must not make the issue's entry run claim the
-command, and a run that decided not to dispatch must not post a notice beside
-the run a later command started. A run that completed without taking the turn
-leaves the thread as it was, and the watch has nothing to say.
+The claim is what makes the watch's question answerable at all. Before it
+existed, the thread said that SOMETHING was asked for but not who had taken it up,
+and the watch estimated the answer from timestamps and event shapes — and
+estimated wrong twice, both times notifying a run that was still working. Now the
+runner writes one line at start — which run took up which ask — and every
+comparison is ids: the run watch's two gates, the guard's "is a comment arriving
+mid-turn", and a dispatch that waited minutes for CI all read the same pair of
+comments. A run that claimed no ask — most entry runs, whose ask is the issue's
+body, which is not a comment — took no turn the thread can name, and the watch
+stays silent on it whatever happened: opening an issue and commenting seconds
+later cannot make the issue's entry run claim the command, because nothing the
+thread carries says it did.
 
 The watch reads which node a run worked on out of the run's title. The runner
 writes `run-name: "agent on #N"`; the two entry workflows write `#N` alone,

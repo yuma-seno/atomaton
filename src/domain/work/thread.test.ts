@@ -544,7 +544,7 @@ describe("askSuperseded", () => {
     // The quoted ask here is the one the run claimed and the hand-off closed: the
     // run's push-validation quotes the run's own ask, and by dispatch time that run
     // has handed off — the wait it was holding is over.
-    const thread = [at(9, machine("DISPATCH engineer")), machine("CLAIM 9 RUN 7"), machine("RESULT handoff ANSWERS 9")];
+    const thread = [at(9, machine("DISPATCH engineer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine("RESULT handoff ANSWERS 9"))];
     expect(askSuperseded(thread, readers, 9, "reviewer")).toBe("handed-off");
   });
 
@@ -554,8 +554,8 @@ describe("askSuperseded", () => {
     const thread = [
       at(A, human("/reviewer")),
       at(newer, machine("DISPATCH reviewer")),
-      machine("CLAIM 9 RUN 7"),
-      machine("RESULT handoff ANSWERS 9"),
+      at(116, machine("CLAIM 9 RUN 7")),
+      at(117, machine("RESULT handoff ANSWERS 9")),
     ];
     expect(askSuperseded(thread, readers, A, "reviewer")).toBe("newer-open-ask");
   });
@@ -563,22 +563,22 @@ describe("askSuperseded", () => {
   test("the dispatched agent's own verdict already on the thread is superseded (#282)", () => {
     // The reviewer claimed the quoted ask and its verdict answers it — the second
     // validation quoting the same ask would re-deliver that judgement.
-    const thread = [at(A, human("/reviewer")), machine("CLAIM 9 RUN 7"), machine(`RESULT done BY reviewer ANSWERS ${A}`)];
+    const thread = [at(A, human("/reviewer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine(`RESULT done BY reviewer ANSWERS ${A}`))];
     expect(askSuperseded(thread, readers, A, "reviewer", true)).toBe("own-verdict");
   });
 
   test("a red CI run refutes the standing verdict and the retry goes", () => {
-    const thread = [at(A, human("/reviewer")), machine("CLAIM 9 RUN 7"), machine(`RESULT done BY reviewer ANSWERS ${A}`)];
+    const thread = [at(A, human("/reviewer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine(`RESULT done BY reviewer ANSWERS ${A}`))];
     expect(askSuperseded(thread, readers, A, "reviewer", false)).toBeUndefined();
   });
 
   test("another agent's verdict on the quoted ask is the fix cycle, and goes", () => {
-    const thread = [at(A, human("/engineer")), machine("CLAIM 9 RUN 7"), machine(`RESULT done BY engineer ANSWERS ${A}`)];
+    const thread = [at(A, human("/engineer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine(`RESULT done BY engineer ANSWERS ${A}`))];
     expect(askSuperseded(thread, readers, A, "reviewer", true)).toBeUndefined();
   });
 
   test("a machinery answer with no agent on it reads as the dispatched agent's own", () => {
-    const thread = [at(A, human("/reviewer")), machine("CLAIM 9 RUN 7"), machine("ENDED done ANSWERS 9")];
+    const thread = [at(A, human("/reviewer")), at(10, machine("CLAIM 9 RUN 7")), at(11, machine("ENDED done ANSWERS 9"))];
     expect(askSuperseded(thread, readers, 9, "reviewer")).toBe("own-verdict");
   });
 
@@ -591,8 +591,8 @@ describe("askSuperseded", () => {
     const thread = [
       at(A, human("/reviewer")),
       at(newer, machine("DISPATCH engineer")),
-      machine("CLAIM 9 RUN 7"),
-      machine("RESULT done ANSWERS 9"),
+      at(114, machine("CLAIM 9 RUN 7")),
+      at(115, machine("RESULT done ANSWERS 9")),
     ];
     expect(askSuperseded(thread, readers, A, "reviewer")).toBe("newer-open-ask");
   });
@@ -601,8 +601,8 @@ describe("askSuperseded", () => {
     const thread = [
       at(A, human("/reviewer")),
       at(newer, machine("DISPATCH engineer")),
-      machine(`CLAIM ${newer} RUN 7`),
-      machine(`RESULT done BY engineer ANSWERS ${newer}`),
+      at(newer + 1, machine(`CLAIM ${newer} RUN 7`)),
+      at(newer + 2, machine(`RESULT done BY engineer ANSWERS ${newer}`)),
     ];
     // The newer ask is the marker this dispatch would be a second run FOR, and the
     // engineer's own verdict answered it — checking against THAT ask's id is the
