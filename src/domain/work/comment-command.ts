@@ -101,6 +101,21 @@ export interface CommentCommandLine {
 }
 
 /**
+ * How a notice names one command line.
+ *
+ * A malformed line is shown as it was written, because the notice's job is to tell a
+ * person what their comment asked for: `/engineer fix it` does not read as `//`, and
+ * the line is the thing they must rewrite. Everything else is named by what the
+ * machinery would have run, `/stop` or `/reviewer`.
+ *
+ * Shared by the two notices that name commands -- the in-progress/commands guard and
+ * the stop receipt -- so `/stop` + `/reviewer` reads the same in both.
+ */
+export function commandLabel(command: CommentCommandLine): string {
+  return command.command.error !== "" ? command.line : command.command.control ? `/${command.command.control}` : `/${command.command.agent}`;
+}
+
+/**
  * Every command a comment asks for, in the order they appear.
  *
  * `parseCommentCommand` answers "what does this comment ask for" and returns the first,

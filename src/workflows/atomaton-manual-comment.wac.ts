@@ -179,6 +179,9 @@ const stopStep = new TypedOutputsStep({
     NUMBER: githubEvent<IssueCommentCreatedEvent>((e) => e.issue.number),
     COMMENT_ID: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.id),
     COMMENTER: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.user.login),
+    // The comment is about to be deleted, so its text has to travel with the step: the
+    // receipt names the commands after the `/stop` and preserves the rest (#297).
+    ATOMATON_COMMENT_BODY: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.body),
   },
   run: `${scriptCommandWithArgs(requestStopRef, {
     number: "\${NUMBER}",

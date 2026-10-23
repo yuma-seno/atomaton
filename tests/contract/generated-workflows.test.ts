@@ -1647,6 +1647,27 @@ describe("generated workflows", () => {
     expect(dispatch?.env?.CLOSED ?? "", "the guard must reach the dispatch").toContain("closed-guard");
     expect(dispatch?.run ?? "").toContain('"$CLOSED" = "true"');
   });
+
+  /**
+   * #297. A comment whose first command is `/stop` skips the guard above, so the stop
+   * step is the only reader of what else that comment asked for. It removes the
+   * comment, so the text has to travel with the step: a receipt that names a second
+   * command cannot read it back from a comment that is already gone.
+   */
+  test("the stop step carries the comment's own text", () => {
+    type Step = { id?: string; if?: string; run?: string; env?: Record<string, string> };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: Step[] }> };
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-manual-comment.yml", "utf8"),
+    ) as WorkflowDocument;
+    const steps = workflow.jobs?.parse?.steps ?? [];
+
+    const stop = steps.find((s) => (s.run ?? "").includes("request_stop"));
+    expect(stop, "the stop path must exist").toBeDefined();
+    expect(stop?.env?.ATOMATON_COMMENT_BODY ?? "", "without the body, the receipt has nothing to name").toContain(
+      "github.event.comment.body",
+    );
+  });
   /**
    * A matrix job says which entry it is, and nothing else.
    *

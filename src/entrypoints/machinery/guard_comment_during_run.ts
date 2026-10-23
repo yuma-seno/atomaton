@@ -32,8 +32,8 @@
  *
  * A comment whose FIRST command is `/stop` is not read here at all -- the workflow
  * skips this step for it (`control != 'stop'`), because a stop has to reach a running
- * agent. A `/stop` with a second command therefore takes the stop path, and the second
- * command is ignored: the pre-existing hole, unchanged by this rule.
+ * agent. That comment's other commands are the stop path's to report: `request_stop.ts`
+ * names them in its receipt and says they were not acted on (#297).
  *
  * ## Why the thread rather than the label
  *
@@ -58,8 +58,9 @@ import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
 import { LLM_CONTEXT_TAG, QUOTES_TAG } from "../../adapters/github/tags.ts";
 import { commentWouldBeRemoved } from "../../adapters/github/thread.ts";
-import { commandsIn } from "../../domain/work/comment-command.ts";
+import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
+import { preservedCommentBlock } from "./lib/removed-comment.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface GuardCommentDuringRunArgs {
@@ -73,27 +74,6 @@ export interface GuardCommentDuringRunArgs {
 }
 
 export const ref = defineScript<GuardCommentDuringRunArgs>(import.meta.url);
-
-/**
- * Ceiling on the preserved text, so the notice stays well under GitHub's 65,536-character
- * limit on a comment body even when the removed comment did not.
- */
-const MAX_PRESERVED_CHARS = 30_000;
-
-/**
- * A code fence one run longer than the longest run of backticks in `text`.
- *
- * The fence is what keeps the quoted text verbatim. A comment that itself contains a
- * fence -- somebody's own code block, exactly the thing worth preserving -- closes an
- * ordinary triple fence early, and everything after it leaves the block and is read as
- * this notice's speech. One longer than the longest run in the text closes last. The
- * floor is three: the ordinary fence, for a body carrying none.
- */
-function fenceFor(text: string): string {
-  let longest = 0;
-  for (const run of text.match(/`+/g) ?? []) longest = Math.max(longest, run.length);
-  return "`".repeat(Math.max(3, longest + 1));
-}
 
 /**
  * The notice's body, tags first, with the removed comment's text where it was preserved.
@@ -152,21 +132,7 @@ function noticeBody(opts: {
   }
 
   if (quote) {
-    const truncated = opts.original.length > MAX_PRESERVED_CHARS;
-    const kept = truncated ? opts.original.slice(0, MAX_PRESERVED_CHARS) : opts.original;
-    const fence = fenceFor(kept);
-    lines.push(
-      [
-        "<details><summary>Your comment, as you wrote it</summary>",
-        "",
-        fence,
-        kept,
-        fence,
-        ...(truncated ? ["", `The comment was longer than ${MAX_PRESERVED_CHARS.toLocaleString("en-US")} characters; the rest is not preserved here.`] : []),
-        "",
-        "</details>",
-      ].join("\n"),
-    );
+    lines.push("", ...preservedCommentBlock(opts.original));
   } else if (opts.deleted && opts.couldNotRead) {
     lines.push("The text of that comment could not be read back before it was removed, so it is not preserved here.");
   }
@@ -205,9 +171,7 @@ function main(): void {
   const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
   const couldNotRead = readBack.code !== 0;
   const original = couldNotRead ? "" : readBack.stdout ?? "";
-  const commands = commandsIn(original).map((c) =>
-    c.command.error !== "" ? c.line : c.command.control ? `/${c.command.control}` : `/${c.command.agent}`,
-  );
+  const commands = commandsIn(original).map(commandLabel);
 
   // The rules only reach a comment the machinery would have read. A command from
   // somebody who is not a repository member is refused by the parse step (which does not
