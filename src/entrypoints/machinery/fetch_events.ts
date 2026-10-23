@@ -35,7 +35,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
-import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, proseOnly, withoutTags } from "../../adapters/github/tags.ts";
 import { keptCommentIds } from "../../adapters/github/thread.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -249,7 +249,7 @@ function fetchIssueEvents(
 function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars: number): { events: GithubEvent[]; parentIssue?: number } {
   const pr = requiredJson<GhPrApi>(`pull request #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}`);
   const prBody = pr.body ?? "";
-  const parentIssue = PARENT_ISSUE_TAG.read(prBody);
+  const parentIssue = PARENT_ISSUE_TAG.read(proseOnly(prBody));
   const headSha = pr.head.sha.slice(0, 8);
   const events: GithubEvent[] = [];
 
@@ -359,7 +359,9 @@ function linkedPrNumbers(owner: string, repo: string, issueNumber: number): numb
     console.error(`::warning::Linked PR search for Issue #${issueNumber} reached GitHub's 1000-result search limit.`);
   }
   return prs
-    .filter((pr) => PARENT_ISSUE_TAG.read(pr.body ?? "") === issueNumber)
+    // A body can quote the tag inside a fenced sample, and a link is a decision:
+    // reading the prose is what keeps a quoted example from joining a run (#293).
+    .filter((pr) => PARENT_ISSUE_TAG.read(proseOnly(pr.body ?? "")) === issueNumber)
     .map((pr) => pr.number);
 }
 
@@ -454,13 +456,24 @@ function main(): void {
   // `withoutTags` is about to remove them. `llm_context` decides whether the event
   // reaches the model at all, and `agent` names which agent wrote a result comment --
   // both are decisions made on the raw text, and both were silently broken while the
-  // reader looked for a tag that had already been stripped.
-  const withoutBookkeeping = events.map((event) => ({
-    ...event,
-    llm_context: LLM_CONTEXT_TAG.read(event.content),
-    agent: AGENT_TAG.read(event.content),
-    content: withoutTags(event.content),
-  }));
+  // reader looked for a tag that had already been stripped. "Raw" here means prose:
+  // both readers skip fenced code, where a tag is a sample rather than a record.
+  //
+  // A diff leaves unshaped. It is not a body about the machinery but the change
+  // under review: stripping a tag-shaped literal out of one handed a reviewer
+  // `commandsIn("")` for a committed `commandsIn("<!-- atomaton:dispatch=reviewer -->")`
+  // and it reviewed code that did not exist (#293). The event type is what knows a
+  // diff from prose, so no fence heuristics and no tag reading are involved.
+  const withoutBookkeeping = events.map((event) => {
+    if (event.event_type === "pr_diff") return event;
+    const prose = proseOnly(event.content);
+    return {
+      ...event,
+      llm_context: LLM_CONTEXT_TAG.read(prose),
+      agent: AGENT_TAG.read(prose),
+      content: withoutTags(event.content),
+    };
+  });
   writeFileSync(values.out, JSON.stringify(withoutBookkeeping, null, 2));
 
   const githubOutput = process.env.GITHUB_OUTPUT;
