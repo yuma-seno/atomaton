@@ -31,7 +31,7 @@
 import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { STOP_TAG, isQuotation } from "../../adapters/github/tags.ts";
+import { STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface WatchForStopArgs {
@@ -69,12 +69,17 @@ export interface StopComment {
  */
 export function stopRequested(comments: StopComment[], since: Date): boolean {
   return comments.some((c) => {
-    // The notice quoting a removed comment carries that comment verbatim: a stop tag
-    // inside it is the DELETED author's words, and the notice's own line says the
-    // comment will not be acted on. Acting on the quotation would do exactly that --
-    // stop a run the notice told somebody would keep going. See `isQuotation`.
-    if (isQuotation(c.body ?? "")) return false;
-    if (!STOP_TAG.has(c.body ?? "")) return false;
+    // A stop tag counts only where the machinery is speaking. The notice that preserves
+    // a removed comment carries that comment verbatim, and a stop tag inside the
+    // preserved text is the DELETED author's words on a notice whose own line says the
+    // comment will not be acted on -- acting on it would stop a run the notice told
+    // somebody would keep going. Preserved text is always fenced (`lib/removed-comment.ts`),
+    // so the prose is the machinery's own speech.
+    //
+    // Not `isQuotation`: a stop RECEIPT quotes the removed comment too, and its stop tag
+    // is in its prose. Refusing every body that quotes anybody made `/stop` + `/reviewer`
+    // delete the comment, say the run would stop, and leave the run going (#297).
+    if (!STOP_TAG.has(proseOnly(c.body ?? ""))) return false;
     const at = c.created_at ? Date.parse(c.created_at) : NaN;
     // An unparseable timestamp is not a reason to ignore a stop somebody asked for.
     // The failure it risks -- stopping one run early -- is recoverable by a comment;

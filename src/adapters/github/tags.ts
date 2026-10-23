@@ -200,11 +200,13 @@ export const CI_RETRY_TAG = numericTag("ci-retry");
  * The machinery's notice that preserves a removed person's comment, and the id of the
  * comment it quotes.
  *
- * Written by the mid-run guard (`guard_comment_during_run.ts`) on the notice that
- * replaces a deleted comment: the notice reads the removed comment's body back before
- * the delete and folds it in inside a `<details>` block, so what somebody spent time
- * writing survives on the page. The value is the deleted comment's id -- the record of
- * what the notice is quoting, though the comment it names is gone.
+ * Written by the two notices that remove a person's comment. The mid-run guard
+ * (`guard_comment_during_run.ts`) replaces a deleted comment with one that reads its body
+ * back before the delete and folds it in inside a `<details>` block, so what somebody
+ * spent time writing survives on the page. The stop receipt (`request_stop.ts`) does the
+ * same with the rest of a comment that began with `/stop`. The value is the deleted
+ * comment's id -- the record of what the notice is quoting, though the comment it names
+ * is gone.
  *
  * Read by `adapters/github/thread.ts` when it builds a thread entry: a comment carrying
  * this tag is a QUOTATION of a person's words, and the fold must not take what is
@@ -229,11 +231,17 @@ export const QUOTES_TAG = numericTag("quotes");
  * repository's own speech, handing the deleted comment back the power the guard
  * removed it to take away. They ask the tag here instead.
  *
- * The tag is written by exactly one writer -- the guard -- so on a raw body it marks a
- * quotation. A person writing the same tag in their own text is prose about the
- * machinery, and their command was already acted on when the comment was posted; a
- * reader that steps over the body falls through to the record underneath rather than
- * losing anything that has not already been spent.
+ * The tag is written only by the machinery -- the guard's notice and the stop receipt --
+ * so on a raw body it marks a quotation. A person writing the same tag in their own text
+ * is prose about the machinery, and their command was already acted on when the comment
+ * was posted; a reader that steps over the body falls through to the record underneath
+ * rather than losing anything that has not already been spent.
+ *
+ * Stepping over the WHOLE body is right for a reader asking whose words a tag is: the
+ * quoted text is the deleted author's, and these notices write no such tag in their own
+ * prose. It is wrong where the notice's own prose IS the signal -- a stop receipt quotes
+ * the removed comment and carries the stop tag in its prose -- so `watch_for_stop.ts`
+ * asks `proseOnly` instead (#297).
  */
 export function isQuotation(body: string): boolean {
   return QUOTES_TAG.has(body);

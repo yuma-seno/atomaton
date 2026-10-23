@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { commandsAfterStop, stopRequestedNotice } from "./request_stop.ts";
+import { stopRequested } from "./watch_for_stop.ts";
 import { LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
 
 describe("request_stop.ts", () => {
@@ -74,9 +75,23 @@ describe("stopRequestedNotice on a comment that also carried commands", () => {
     expect(notice).toContain("It also carried `/reviewer`");
     expect(notice).toContain("not acted on");
     expect(notice).toContain("once the run has reported");
-    // Still a stop receipt: the tag is what the running job polls for.
+    // The tag is on the receipt; whether that tag is READ is a separate question, and the
+    // one that was wrong -- see "is a stop the running job acts on" below.
     expect(STOP_TAG.has(notice)).toBe(true);
     expect(notice).toContain("was removed");
+  });
+
+  /**
+   * The regression for #297's review. Deleted-and-quoted is the one receipt shape that
+   * carries BOTH tags, and the stop poll refused every body that quoted anybody -- so
+   * `/stop` + `/reviewer` removed the comment, said the run would stop, and stopped
+   * nothing. Asserting on the reader is the point: asserting the tag exists was what
+   * let this through.
+   */
+  test("is a stop the running job acts on", () => {
+    const notice = stopRequestedNotice("octocat", true, [], extra);
+    const since = new Date("2026-09-06T12:00:00Z");
+    expect(stopRequested([{ body: notice, created_at: "2026-09-06T12:00:30Z" }], since)).toBe(true);
   });
 
   test("keeps the words, tagged as a quotation", () => {
