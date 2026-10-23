@@ -517,8 +517,8 @@ export function buildCommentBody(args: {
     lines.push(
       "> [!WARNING]",
       "> This run's closing message called more than one thing, so none of its calls",
-      "> was made: nothing was started, and nobody it named was notified. It was asked",
-      "> to write the message again. Below is what it wrote.",
+      "> was made: nothing it named is started or notified. It was asked to write the",
+      "> message again. Below is what it wrote.",
       "",
     );
   } else if (args.salvaged === true) {
@@ -891,16 +891,26 @@ function main(): void {
   const people = notACall
     ? []
     : participantAccounts(process.env.GITHUB_REPOSITORY ?? "", values.number);
-  const checked = escapeUnknownMentions(output, people.map((person) => person.login));
+
+  // Two lists, and the second is a subset of the first. `known` is everybody a
+  // comment may name without notifying a stranger -- and it includes the notify
+  // login, whether or not that login has ever appeared on the thread, because
+  // `resolveNotify` can reach the parent issue's requester or the repository owner.
+  // Leaving it out of one list and not the other is how a run that called the very
+  // person it was told to call ends up with the mention escaped and the machinery's
+  // own sentence suppressed: nobody notified, and nothing said about it.
+  const notify = (values.notify ?? "").trim();
+  const known = people.map((person) => person.login);
+  if (notify) known.push(notify);
+  const checked = escapeUnknownMentions(output, known);
   if (checked.escaped.length > 0) {
     console.error(`escaped ${checked.escaped.length} mention(s): ${checked.escaped.join(", ")}`);
   }
 
-  // Read off the unescaped text, against the people a run may call: the notify
-  // login is one even when it has never commented, which is why it is added here
-  // rather than being assumed to be a participant.
+  // `callable` is the same list minus the bots: a bot is a participant, but it never
+  // takes a turn, so a mention of one is not a call.
   const callable = people.filter((person) => !person.bot).map((person) => person.login);
-  if ((values.notify ?? "").trim()) callable.push(values.notify!.trim());
+  if (notify) callable.push(notify);
   const called = notACall ? [] : calledHumans(output, callable);
 
   const body = buildCommentBody({

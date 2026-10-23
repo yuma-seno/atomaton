@@ -1221,3 +1221,71 @@ describe("a closing message that was not a call", () => {
     expect(body).toContain("@octocat");
   });
 });
+
+/**
+ * The two readers the script itself keeps in step: who a mention may notify, and who
+ * a mention counts as calling.
+ *
+ * They were two sets once — the escape list was the participants, the call list was
+ * the participants plus `--notify` — and the gap was the worst shape this machinery
+ * has: the owner's mention escaped, the machinery's own sentence suppressed because
+ * the run had "called somebody", and nothing left that notified anyone.
+ */
+describe("post_result_comment.ts on a closing message", () => {
+  const rules = [
+    { match: ["api", "comments"], stdout: "[]" },
+    { match: ["api", "collaborators"], stdout: "[]" },
+    { match: ["api"], stdout: JSON.stringify({ user: { login: "stranger", type: "User" } }) },
+  ];
+
+  function post(dir: string, args: string[], extraRules = rules) {
+    const r = runWithFakeGh(
+      scriptPath("post_result_comment.ts"),
+      [
+        "--number", "9", "--type", "issue", "--agent", "engineer",
+        "--run-url", "http://example.com/run/1",
+        "--output", join(dir, "atomaton_output.txt"),
+        ...args,
+      ],
+      { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: extraRules },
+    );
+    expect(r.status, r.stderr).toBe(0);
+    return r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+  }
+
+  /**
+   * `resolveNotify` can name the parent issue's requester or the repository owner, and
+   * neither has to be a participant here. The run was told it may call that login, so
+   * calling it has to reach them — and then the machinery must not ask a second time.
+   */
+  test("the owner it was told to call is neither escaped nor asked again", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "Over to you, @owner.\n");
+      const body = post(dir, ["--notify", "owner"]);
+      expect(body, "the owner is callable even when the thread never saw them").toContain("@owner");
+      expect(body).not.toContain("`@owner`");
+      expect(body).not.toContain("No agent will be automatically executed next");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * Refused calls: the text is kept, every mention in it is left as text, and the
+   * machinery makes the one call it still can. Without the warning a reader would take
+   * the `/engineer` line for a hand-off that happened.
+   */
+  test("a refused message keeps its text, makes no calls, and says so", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "Done.\n\n/engineer\n\n@stranger, your call.\n");
+      const body = post(dir, ["--notify", "octocat", "--ending-invalid", "true"]);
+      expect(body).toContain("`@stranger`");
+      expect(body).toContain("called more than one thing");
+      expect(body).toContain("@octocat");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
