@@ -22,7 +22,9 @@ function issueOfPullRequest(repo: string, number: number): number | undefined {
     log(`WARN could not read pull request #${number}`);
     return undefined;
   }
-  return PARENT_ISSUE_TAG.read(stdout);
+  // Prose only, like every other read of a GitHub body (#304): a pull request body
+  // quoting the tag inside a fenced sample names no parent.
+  return PARENT_ISSUE_TAG.readProse(stdout);
 }
 
 /**

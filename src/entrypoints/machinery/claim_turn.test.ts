@@ -63,6 +63,16 @@ describe("raceOutcome", () => {
     ];
     expect(raceOutcome(comments, { id: 11, ask: 55 })).toBe("held");
   });
+
+  // The tag decides a claim, and the fence decides it is a sample (#304): a comment
+  // quoting a took tag inside a code block has claimed nothing, so this run holds.
+  test("a took tag quoted in a fenced sample does not back this run off", () => {
+    const comments = [
+      { id: 10, body: ["The claim format:", "```html", "<!-- atomaton:took=55 run=7 -->", "```"].join("\n") },
+      body(11, 55, 8),
+    ];
+    expect(raceOutcome(comments, { id: 11, ask: 55 })).toBe("held");
+  });
 });
 
 describe("claimCommentBody", () => {

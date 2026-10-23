@@ -22,7 +22,9 @@ function main(): void {
 
   // Kept as a string: it is written straight to $GITHUB_OUTPUT, and an absent
   // tag has to render as empty so the caller's `if: ... != ''` stays false.
-  const parentIssue = PARENT_ISSUE_TAG.read(body);
+  // Prose only: a pull request body quoting the tag in a fenced sample does not
+  // carry the link (#304).
+  const parentIssue = PARENT_ISSUE_TAG.readProse(body);
   const parent = parentIssue === undefined ? "" : String(parentIssue);
   if (parent) console.error(`PR #${prNumber} belongs to issue #${parent}`);
   else console.error(`PR #${prNumber} has no parent-issue metadata`);

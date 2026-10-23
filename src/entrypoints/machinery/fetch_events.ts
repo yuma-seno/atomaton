@@ -35,7 +35,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
-import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, proseOnly, withoutTags } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
 import { keptCommentIds } from "../../adapters/github/thread.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -249,7 +249,7 @@ function fetchIssueEvents(
 function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars: number): { events: GithubEvent[]; parentIssue?: number } {
   const pr = requiredJson<GhPrApi>(`pull request #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}`);
   const prBody = pr.body ?? "";
-  const parentIssue = PARENT_ISSUE_TAG.read(proseOnly(prBody));
+  const parentIssue = PARENT_ISSUE_TAG.readProse(prBody);
   const headSha = pr.head.sha.slice(0, 8);
   const events: GithubEvent[] = [];
 
@@ -360,8 +360,9 @@ function linkedPrNumbers(owner: string, repo: string, issueNumber: number): numb
   }
   return prs
     // A body can quote the tag inside a fenced sample, and a link is a decision:
-    // reading the prose is what keeps a quoted example from joining a run (#293).
-    .filter((pr) => PARENT_ISSUE_TAG.read(proseOnly(pr.body ?? "")) === issueNumber)
+    // reading the prose is what keeps a quoted example from joining a run (#293,
+    // and the shared `readProse` entry point since #304).
+    .filter((pr) => PARENT_ISSUE_TAG.readProse(pr.body ?? "") === issueNumber)
     .map((pr) => pr.number);
 }
 
@@ -466,11 +467,10 @@ function main(): void {
   // diff from prose, so no fence heuristics and no tag reading are involved.
   const withoutBookkeeping = events.map((event) => {
     if (event.event_type === "pr_diff") return event;
-    const prose = proseOnly(event.content);
     return {
       ...event,
-      llm_context: LLM_CONTEXT_TAG.read(prose),
-      agent: AGENT_TAG.read(prose),
+      llm_context: LLM_CONTEXT_TAG.readProse(event.content),
+      agent: AGENT_TAG.readProse(event.content),
       content: withoutTags(event.content),
     };
   });

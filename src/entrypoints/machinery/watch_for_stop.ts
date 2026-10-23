@@ -31,7 +31,7 @@
 import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
+import { STOP_TAG } from "../../adapters/github/tags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface WatchForStopArgs {
@@ -79,7 +79,7 @@ export function stopRequested(comments: StopComment[], since: Date): boolean {
     // Not `isQuotation`: a stop RECEIPT quotes the removed comment too, and its stop tag
     // is in its prose. Refusing every body that quotes anybody made `/stop` + `/reviewer`
     // delete the comment, say the run would stop, and leave the run going (#297).
-    if (!STOP_TAG.has(proseOnly(c.body ?? ""))) return false;
+    if (!STOP_TAG.hasProse(c.body ?? "")) return false;
     const at = c.created_at ? Date.parse(c.created_at) : NaN;
     // An unparseable timestamp is not a reason to ignore a stop somebody asked for.
     // The failure it risks -- stopping one run early -- is recoverable by a comment;

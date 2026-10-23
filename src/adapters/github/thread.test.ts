@@ -110,6 +110,17 @@ describe("latestRequestOn", () => {
     expect(request.latestAsk).toBeUndefined();
   });
 
+  // The tag decides an attribution, and the fence decides it is a sample (#304): a
+  // dispatch marker quoted in a fenced block is somebody documenting the markers, and
+  // must not move the turn to the agent it names.
+  test("a dispatch marker quoted in a fenced sample is not the standing request", () => {
+    const request = latestRequest("/reviewer", [
+      comment(1, "2026-10-19T18:00:00Z", ["The dispatch markers, for the record:", "```html", "<!-- atomaton:dispatch=engineer -->", "```"].join("\n")),
+    ]) as { newestRequestedAgent: string };
+
+    expect(request.newestRequestedAgent).toBe("reviewer");
+  });
+
   // The guard's notice preserving a removed comment carries `atomaton:quotes` and the
   // removed text verbatim. It is a QUOTATION of a person's words, not the machinery
   // speaking: the `/engineer` line inside it must not become the standing request, or

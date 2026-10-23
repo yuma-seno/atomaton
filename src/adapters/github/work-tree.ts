@@ -143,8 +143,9 @@ function readNode(repo: string, number: number): { node?: WorkNode; problem?: st
       // used to be `PARENT_TAG.read(body) ?? PARENT_ISSUE_TAG.read(body)` — two
       // spellings tried in turn, three lines after `isPr` had already settled which
       // one this is, so an issue carrying a pull request's tag was accepted without
-      // a word.
-      parent: isPr ? PARENT_ISSUE_TAG.read(raw.body ?? "") : undefined,
+      // a word. The body is GitHub's, so the tag is read out of its prose: a sample
+      // of the tag in a fenced block is not a parent (#304).
+      parent: isPr ? PARENT_ISSUE_TAG.readProse(raw.body ?? "") : undefined,
       running,
     },
   };
@@ -181,7 +182,10 @@ function readChildren(repo: string, parent: number): { nodes: WorkNode[]; proble
   const listedPrs = parseListed(prs.stdout);
   if (listedPrs === null) problems.push(`the pull request listing for #${parent} was not readable`);
   for (const found of listedPrs ?? []) {
-    if (PARENT_ISSUE_TAG.read(found.body ?? "") !== parent) continue;
+    // `proseOnly` here is also what keeps the search above honest: search matches the
+    // tag text inside a fence too, and the read is the confirmation that a listed body
+    // actually carries the link (#304).
+    if (PARENT_ISSUE_TAG.readProse(found.body ?? "") !== parent) continue;
     const { running, problem } = runningOn(repo, found.number);
     if (problem) {
       problems.push(problem);
@@ -310,7 +314,9 @@ export function lastEnding(repo: string, number: number): string | undefined {
   for (let i = bodies.length - 1; i >= 0; i -= 1) {
     const body = bodies[i] ?? "";
     if (isQuotation(body)) continue;
-    const ended = ENDED_TAG.read(body);
+    // `readProse`: a person quoting `atomaton:ended` in a fenced sample is writing
+    // about endings, not ending anything (#304).
+    const ended = ENDED_TAG.readProse(body);
     if (ended) return ended.verb;
   }
   return undefined;

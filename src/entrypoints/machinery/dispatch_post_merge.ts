@@ -53,8 +53,10 @@ function main(): void {
     if (githubOutput) appendFileSync(githubOutput, `reinvoked=${reinvoked}\n`);
   };
 
-  const parentIssue = PARENT_ISSUE_TAG.read(body);
-  const originAgent = ORIGIN_AGENT_TAG.read(body);
+  // Both read out of the prose: a pull request body quoting either tag in a fenced
+  // sample is not carrying it (#304).
+  const parentIssue = PARENT_ISSUE_TAG.readProse(body);
+  const originAgent = ORIGIN_AGENT_TAG.readProse(body);
   // Read, not assumed. A pull request body names its parent only when it was opened
   // from an issue run; a root pull request has none, and there is nobody to re-invoke.
   //

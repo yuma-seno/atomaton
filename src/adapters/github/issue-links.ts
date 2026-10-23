@@ -194,7 +194,10 @@ export function issueLinks(repo: string, number: number): IssueLinks {
     .map((node) => node.source)
     .filter(
       (source): source is GqlPr =>
-        Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number,
+        // Prose only: a pull request body quoting the tag in a fenced sample is not
+        // linked by it — the same rule `fetch_events.ts` applies to its own search
+        // results (#304).
+        Boolean(source?.number) && PARENT_ISSUE_TAG.readProse(source?.body ?? "") === number,
     )
     .map(asPr);
 

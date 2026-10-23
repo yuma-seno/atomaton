@@ -135,13 +135,13 @@ export function resolveNotify(repo: string, number: number): string {
     // its issue is `atomaton:parent-issue`, which has no native equivalent that
     // survives — measured, and written down in `adapters/github/tags.ts`. An issue's link to its
     // parent is GitHub's own, and the tag that used to answer here is gone.
-    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.readProse(body) : nativeParentOf(repo, current);
     return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
   };
 
   for (const hop of parentChain(number, read)) {
     const body = hop.data.body ?? "";
-    const tagged = NOTIFY_TAG.read(body);
+    const tagged = NOTIFY_TAG.readProse(body);
     if (tagged) return tagged;
     if (isHumanActor(hop.data.type) && hop.data.login) return hop.data.login;
   }

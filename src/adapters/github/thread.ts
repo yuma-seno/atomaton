@@ -34,7 +34,7 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead, ghPaginated, splitConcatenatedJson } from "./gh.ts";
-import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, QUOTES_TAG, TOOK_TAG } from "./tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, TOOK_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
@@ -63,30 +63,38 @@ import type { DatedComment, EndingWalkReaders, WatchComment } from "../../domain
  * `requestedAgent` is `parseCommentCommand` rather than a regex written here: a command
  * is a command wherever it is read, and the parser already accepts both the slash form
  * a person types and the dispatch marker the machinery writes.
+ *
+ * Every reader here reads a GitHub body or comment, so every one of them reads PROSE:
+ * tags through `readProse`/`hasProse`, and the commands through `proseOnly` first — the
+ * parser's dispatch-marker half is a tag, and a raw parse beside a prose-only
+ * `isDispatchMarker` would make the same comment a dispatch to one reader and not the
+ * other (#304). A command a person quoted inside a fence is documentation, not a
+ * request; the machinery writes every command and tag in prose, so nothing it wrote is
+ * lost.
  */
 export const readers: TurnReaders = {
   // The ending is the tag that means "how this run ended". `handoff` and `waiting` are
   // the two that leave the ball somewhere other than a person; `stopped`/`limit`/`done`
   // all give the node back, and end the turn the same way. See `TurnReaders`.
   ending: (body) => {
-    const ended = ENDED_TAG.read(body)?.verb;
+    const ended = ENDED_TAG.readProse(body)?.verb;
     if (ended === "handoff") return "handed-off";
     if (ended === "waiting") return "waiting";
     if (ended === "stopped" || ended === "limit" || ended === "done") return "returned";
     return "";
   },
-  requestedAgent: (body) => parseCommentCommand(body).agent,
-  isDispatchMarker: (body) => DISPATCH_TAG.has(body),
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
   // The turn's identity (#285): the claim a took tag carries, the ask an ending
   // answers, and the agent an ending's result tag names. `answers=0` is an ending
   // that answers no comment — a run started by a new issue's body — and reads as
   // undefined, which is the honest "answers nothing" rather than a matchable id.
-  claim: (body) => TOOK_TAG.read(body),
+  claim: (body) => TOOK_TAG.readProse(body),
   answeredAsk: (body) => {
-    const answers = ENDED_TAG.read(body)?.answers;
+    const answers = ENDED_TAG.readProse(body)?.answers;
     return answers !== undefined && answers > 0 ? answers : undefined;
   },
-  endingAgent: (body) => AGENT_TAG.read(body) ?? "",
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? "",
 };
 
 /**
@@ -107,8 +115,8 @@ export const readers: TurnReaders = {
  */
 const askReaders: AskReaders = {
   ...readers,
-  requestedAgent: (body) => parseMangledCommand(body).agent,
-  authoringAgent: (body) => AGENT_TAG.read(body) ?? "",
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? "",
 };
 
 /**
@@ -127,9 +135,10 @@ export const endingWalkReaders: EndingWalkReaders = {
   ending: readers.ending,
   quoted: isQuotation,
   // The turn's identity (#285): the claim and the ending record, read from the same
-  // tags the shaping's readers read — one wire format, one parse.
-  claim: (body) => TOOK_TAG.read(body),
-  ended: (body) => ENDED_TAG.read(body),
+  // tags the shaping's readers read — one wire format, one parse, and the same
+  // prose-only read (`readers`' comment).
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body),
 };
 
 /** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
