@@ -279,9 +279,86 @@ export function isQuotation(body: string): boolean {
  * discussing `<!-- atomaton:parent=N -->` -- does not match the value patterns and
  * survives, which is what keeps this from quietly editing a conversation about
  * itself.
+ *
+ * A fenced code block is left alone. A tag-shaped literal inside one is a code
+ * sample -- the text is about the machinery, not the machinery speaking -- and the
+ * same argument holds for a diff, where the literal is part of a change under
+ * review. Stripping those made a reviewer read `commandsIn("")` where the
+ * committed line was `commandsIn("<!-- atomaton:dispatch=reviewer -->")`: a diff
+ * that was not the diff (#293). The machinery only writes tags in prose, so
+ * nothing is lost by stepping over fences.
  */
 export function withoutTags(text: string): string {
+  return fenceSegments(text)
+    .map((segment) => (segment.code ? segment.text : stripTags(segment.text)))
+    .join("");
+}
+
+function stripTags(text: string): string {
   const tags = EVERY_TAG_PATTERN.join("|");
   const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;
   return text.replace(new RegExp(String.raw`(?:^[ \t]*)?(?:${tags})[ \t]*${lineEnd}`, "gm"), "");
+}
+
+/**
+ * `text` with every fenced code block blanked out, for the tag readers.
+ *
+ * `read` scans anywhere in its argument, so a fenced sample carrying
+ * `<!-- atomaton:llm-context=exclude -->` would drop the comment that quotes it
+ * from an agent's context, and one carrying `agent=engineer` would mark it as
+ * that agent's own result. The readers ask this first and see only prose.
+ */
+export function proseOnly(text: string): string {
+  return fenceSegments(text)
+    .map((segment) => (segment.code ? "\n" : segment.text))
+    .join("");
+}
+
+interface TextSegment {
+  text: string;
+  /** Inside a fenced block: code, not prose. */
+  code: boolean;
+}
+
+/**
+ * `text` in alternating runs of prose and fenced code, by CommonMark's rule:
+ * a fence opens with at least three backticks or tildes (up to three spaces of
+ * indent) and closes with the same character, at least as many of them, and
+ * nothing else on the line. A fence never closed runs to the end of the text,
+ * which is the safe direction -- the rest is evidence rather than bookkeeping.
+ *
+ * Backtick fences may not carry backticks in their info string; that rule is what
+ * keeps an inline `` `a` `` inside a sentence from opening a block.
+ */
+function fenceSegments(text: string): TextSegment[] {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments: TextSegment[] = [];
+  let open: { char: string; length: number } | null = null;
+  let current: TextSegment = { text: "", code: false };
+
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1]![0] !== "`" || !fence[2]!.includes("`"));
+      if (opens) {
+        if (current.text) segments.push(current);
+        open = { char: fence[1]![0]!, length: fence[1]!.length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+
+    current.text += line;
+    if (fence && fence[1]![0] === open.char && fence[1]!.length >= open.length && fence[2]!.trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+
+  if (current.text) segments.push(current);
+  return segments;
 }

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Session } from "../../domain/work/session.ts";
-import { PARENT_ISSUE_TAG } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG } from "../../adapters/github/tags.ts";
 import { parseGithubOutput, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 describe("fetch_events.ts", () => {
@@ -52,6 +52,88 @@ describe("fetch_events.ts", () => {
       const out = parseGithubOutput(readFileSync(outputFile, "utf8"));
       expect(out.session_type).toBe("issue");
       expect(out.session_number).toBe("5");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // #293. GitHub's diff endpoint was checked directly with `Accept:
+  // application/vnd.github.v3.diff` and returns the tag-shaped literal intact, so
+  // the loss was here: every event went through `withoutTags`. What a reviewer got
+  // was a test asserting `commandsIn("")`, and it reviewed a change that did not
+  // exist. The tag on its own line is the worse shape -- the old code also read
+  // `agent` from it and attributed the diff to an agent that never wrote it.
+  test("a diff arrives byte for byte, tags and all", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
+    try {
+      const outFile = join(dir, "events.json");
+      const outputFile = join(dir, "out");
+      writeFileSync(outputFile, "");
+      const diff = [
+        "diff --git a/comment-command.test.ts b/comment-command.test.ts",
+        "--- a/comment-command.test.ts",
+        "+++ b/comment-command.test.ts",
+        "@@ -1,2 +1,3 @@",
+        `+    expect(commandsIn(${JSON.stringify(DISPATCH_TAG.write("reviewer"))}).map((c) => c.agent)).toEqual(["reviewer"]);`,
+        `+${AGENT_TAG.write("engineer")}`,
+        "+    // and the fence below is a sample, not bookkeeping",
+      ].join("\n");
+      const sample = ["A person quoting the format:", "", "```html", LLM_CONTEXT_TAG.write("exclude"), "```", "", "This comment is conversation."].join("\n");
+      const r = runWithFakeGh(
+        scriptPath("fetch_events.ts"),
+        ["--type", "pr", "--number", "9", "--out", outFile],
+        {
+          env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: outputFile },
+          rules: [
+            { match: ["pulls/9", "application/vnd.github.v3.diff"], stdout: diff },
+            { match: ["pulls/9/reviews"], stdout: "[]" },
+            { match: ["pulls/9/comments"], stdout: "[]" },
+            {
+              match: ["issues/9/comments"],
+              stdout: JSON.stringify([
+                { id: 900, body: sample, user: { login: "alice" }, created_at: "2026-01-02T00:00:00Z" },
+                { id: 901, body: `${LLM_CONTEXT_TAG.write("exclude")}\ninternal note`, user: { login: "bob" }, created_at: "2026-01-03T00:00:00Z" },
+              ]),
+            },
+            {
+              match: ["pulls/9"],
+              stdout: JSON.stringify({
+                number: 9,
+                title: "Make the guard refuse two commands",
+                body: "Closes #8",
+                user: { login: "engineer" },
+                created_at: "2026-01-01T00:00:00Z",
+                updated_at: "2026-01-02T00:00:00Z",
+                labels: [],
+                head: { sha: "abcd1234" },
+              }),
+            },
+          ],
+        },
+      );
+
+      expect(r.status).toBe(0);
+      const events = JSON.parse(readFileSync(outFile, "utf8")) as {
+        id: string | number;
+        event_type: string;
+        content: string;
+        llm_context?: string;
+        agent?: string;
+      }[];
+      const diffEvent = events.find((e) => e.event_type === "pr_diff");
+      expect(diffEvent?.content).toContain(`commandsIn(${JSON.stringify(DISPATCH_TAG.write("reviewer"))})`);
+      expect(diffEvent?.content).toContain(AGENT_TAG.write("engineer"));
+      // A literal on its own line inside the change is not a record of who wrote it.
+      expect(diffEvent?.agent).toBeUndefined();
+      expect(diffEvent?.llm_context).toBeUndefined();
+
+      const quoted = events.find((e) => String(e.id) === "900");
+      expect(quoted?.content).toBe(sample);
+      expect(quoted?.llm_context).toBeUndefined();
+
+      const excluded = events.find((e) => String(e.id) === "901");
+      expect(excluded?.llm_context).toBe("exclude");
+      expect(excluded?.content).toBe("internal note");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

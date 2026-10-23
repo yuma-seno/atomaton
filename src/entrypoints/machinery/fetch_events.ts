@@ -35,7 +35,7 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
-import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, proseOnly, withoutTags } from "../../adapters/github/tags.ts";
 import { keptCommentIds } from "../../adapters/github/thread.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -454,13 +454,24 @@ function main(): void {
   // `withoutTags` is about to remove them. `llm_context` decides whether the event
   // reaches the model at all, and `agent` names which agent wrote a result comment --
   // both are decisions made on the raw text, and both were silently broken while the
-  // reader looked for a tag that had already been stripped.
-  const withoutBookkeeping = events.map((event) => ({
-    ...event,
-    llm_context: LLM_CONTEXT_TAG.read(event.content),
-    agent: AGENT_TAG.read(event.content),
-    content: withoutTags(event.content),
-  }));
+  // reader looked for a tag that had already been stripped. "Raw" here means prose:
+  // both readers skip fenced code, where a tag is a sample rather than a record.
+  //
+  // A diff leaves unshaped. It is not a body about the machinery but the change
+  // under review: stripping a tag-shaped literal out of one handed a reviewer
+  // `commandsIn("")` for a committed `commandsIn("<!-- atomaton:dispatch=reviewer -->")`
+  // and it reviewed code that did not exist (#293). The event type is what knows a
+  // diff from prose, so no fence heuristics and no tag reading are involved.
+  const withoutBookkeeping = events.map((event) => {
+    if (event.event_type === "pr_diff") return event;
+    const prose = proseOnly(event.content);
+    return {
+      ...event,
+      llm_context: LLM_CONTEXT_TAG.read(prose),
+      agent: AGENT_TAG.read(prose),
+      content: withoutTags(event.content),
+    };
+  });
   writeFileSync(values.out, JSON.stringify(withoutBookkeeping, null, 2));
 
   const githubOutput = process.env.GITHUB_OUTPUT;

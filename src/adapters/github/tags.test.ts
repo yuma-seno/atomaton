@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AGGREGATED_TAG, AGENT_TAG, CHANGED_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, PARENT_ISSUE_TAG, withoutTags } from "./tags.ts";
+import { AGGREGATED_TAG, AGENT_TAG, CHANGED_TAG, DISPATCH_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, PARENT_ISSUE_TAG, proseOnly, withoutTags } from "./tags.ts";
 
 /**
  * These markers carry state between workflow runs through GitHub, so they live in the
@@ -95,6 +95,66 @@ describe("withoutTags", () => {
       LLM_CONTEXT_TAG.write("include"),
     ].join("\n");
     expect(withoutTags(everyTag)).toBe("");
+  });
+});
+
+/**
+ * Code is the text being discussed, not this machinery speaking.
+ *
+ * #293 was the same loss in the diff path: `fetch_events` ran every event through
+ * `withoutTags`, so a test line asserting `commandsIn("<!-- atomaton:dispatch=reviewer -->")`
+ * reached a reviewer as `commandsIn("")`, and it reviewed a change that did not
+ * exist. The diff is fixed by event type; a fence is how the same thing is known
+ * inside a body or a comment.
+ */
+describe("withoutTags on a fenced sample", () => {
+  test("a tag inside a fence is part of the sample", () => {
+    const body = [
+      "The rule the test pins:",
+      "",
+      "```ts",
+      `expect(commandsIn(${JSON.stringify(DISPATCH_TAG.write("reviewer"))})).toEqual(["reviewer"]);`,
+      "```",
+      "",
+      "That line is the point of the change.",
+    ].join("\n");
+    expect(withoutTags(body)).toBe(body);
+  });
+
+  test("the bookkeeping around the sample still goes", () => {
+    const body = [
+      AGENT_TAG.write("engineer"),
+      "Changed nothing; the sample is the change:",
+      "```html",
+      LLM_CONTEXT_TAG.write("exclude"),
+      "```",
+      NOTIFY_TAG.write("someone"),
+    ].join("\n");
+    expect(withoutTags(body)).toBe("Changed nothing; the sample is the change:\n```html\n<!-- atomaton:llm-context=exclude -->\n```\n");
+  });
+
+  test("a fence never closed protects the rest", () => {
+    const body = ["```", DISPATCH_TAG.write("reviewer"), "and the line after it"].join("\n");
+    expect(withoutTags(body)).toBe(body);
+  });
+
+  test("tilde fences count too", () => {
+    const body = ["~~~", DISPATCH_TAG.write("reviewer"), "~~~"].join("\n");
+    expect(withoutTags(body)).toBe(body);
+  });
+
+  test("a reader sees no tag from inside a fence", () => {
+    const body = [
+      LLM_CONTEXT_TAG.write("exclude"),
+      "A person explaining the format:",
+      "```",
+      AGENT_TAG.write("engineer"),
+      "```",
+      NOTIFY_TAG.write("bob"),
+    ].join("\n");
+    expect(LLM_CONTEXT_TAG.read(proseOnly(body))).toBe("exclude");
+    expect(AGENT_TAG.read(proseOnly(body))).toBeUndefined();
+    expect(NOTIFY_TAG.read(proseOnly(body))).toBe("bob");
   });
 });
 
