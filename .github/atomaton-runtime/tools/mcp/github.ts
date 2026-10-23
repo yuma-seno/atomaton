@@ -7387,12 +7387,17 @@ function escapeUnknownMentions(text, known) {
   out += transform(text.slice(last));
   return { text: out, escaped };
 }
-function escapedMentionNotice(escaped) {
+function escapedMentionNotice(escaped, reason = "unknown") {
   if (escaped.length === 0)
     return;
   const names = escaped.map((login) => `\`@${login}\``).join(", ");
+  const one = escaped.length === 1;
+  if (reason === "not-a-call") {
+    return `> [!NOTE]
+` + `> ${names} ${one ? "was" : "were"} written as ${one ? "a mention" : "mentions"} ` + `and had the notification removed: this run's text was not a call, so nothing in it ` + `was made. Nobody was notified. If ${one ? "the mention was" : "a mention was"} meant, mention them yourself.`;
+  }
   return `> [!NOTE]
-` + `> ${names} ${escaped.length === 1 ? "was" : "were"} written as ${escaped.length === 1 ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${escaped.length === 1 ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
+` + `> ${names} ${one ? "was" : "were"} written as ${one ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${one ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
 }
 
 // src/adapters/github/tags.ts
@@ -8371,27 +8376,40 @@ function attachReportChannel(next) {
 }
 
 // src/adapters/github/participants.ts
-function knownParticipants(repo, number) {
+function participantAccounts(repo, number) {
   if (!repo || !String(number).trim())
     return [];
-  const logins = new Set;
+  const found = new Map;
   const collect = (args, read) => {
     const { code, stdout } = gh(...args);
     if (code !== 0)
       return;
     try {
-      for (const login of read(JSON.parse(stdout))) {
-        if (typeof login === "string" && login)
-          logins.add(login);
+      for (const person of read(JSON.parse(stdout))) {
+        const { login, bot } = person;
+        if (typeof login !== "string" || !login)
+          continue;
+        const seen = found.get(login);
+        found.set(login, (seen ?? true) && bot === true);
       }
     } catch {}
   };
-  collect(["api", `repos/${repo}/issues/${number}`], (json) => [
-    json.user?.login
-  ]);
-  collect(["api", `repos/${repo}/issues/${number}/comments`, "--paginate"], (json) => json.map((comment) => comment.user?.login));
-  collect(["api", `repos/${repo}/collaborators`, "--paginate"], (json) => json.map((person) => person.login));
-  return [...logins];
+  collect(["api", `repos/${repo}/issues/${number}`], (json) => {
+    const issue = json;
+    return issue.user ? [{ login: issue.user.login, bot: issue.user.type === "Bot" }] : [];
+  });
+  collect(["api", `repos/${repo}/issues/${number}/comments`, "--paginate"], (json) => json.map((comment) => ({
+    login: comment.user?.login,
+    bot: comment.user?.type === "Bot"
+  })));
+  collect(["api", `repos/${repo}/collaborators`, "--paginate"], (json) => json.map((person) => ({
+    login: person.login,
+    bot: person.type === "Bot"
+  })));
+  return [...found].map(([login, bot]) => ({ login, bot }));
+}
+function knownParticipants(repo, number) {
+  return participantAccounts(repo, number).map((person) => person.login);
 }
 
 // src/domain/work/close-request.ts

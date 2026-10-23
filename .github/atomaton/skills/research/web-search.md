@@ -59,9 +59,9 @@ When that happens, stop — and ask a person:
   past the check is a workaround, it breaks the next time the service changes, and
   it is not what the service asks of automated clients.
 - **Say so in your report**, with the query that would answer it: "a web search is
-  needed for X". The machinery mentions the person this work belongs to, so write
-  no handle. A person runs it in seconds, and the alternative is this run spending
-  its budget on a wall.
+  needed for X". End without calling anyone, and the machinery tells the person
+  this work belongs to. A person runs it in seconds, and the alternative is this
+  run spending its budget on a wall.
 
 **Do not read a refusal as "the answer does not exist".** That is the mistake this
 section exists to prevent. A page whose address you know is still one `fetch`

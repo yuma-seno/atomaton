@@ -2,7 +2,7 @@
 // @bun
 
 // src/entrypoints/machinery/post_result_comment.ts
-import { appendFileSync, existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { appendFileSync, existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
 import { parseArgs } from "util";
 
 // src/adapters/github/gh.ts
@@ -71,6 +71,19 @@ var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
 var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
 var CODE = /```[\s\S]*?```|`[^`\n]*`/g;
+function mentionsIn(text) {
+  const found = [];
+  const seen = new Set;
+  for (const match of text.replace(CODE, " ").matchAll(new RegExp(MENTION.source, "g"))) {
+    const login = match[2];
+    const key = login.toLowerCase();
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    found.push(login);
+  }
+  return found;
+}
 function escapeUnknownMentions(text, known) {
   const allowed = new Set([...known].map((login) => login.trim().toLowerCase()).filter(Boolean));
   const escaped = [];
@@ -93,12 +106,17 @@ function escapeUnknownMentions(text, known) {
   out += transform(text.slice(last));
   return { text: out, escaped };
 }
-function escapedMentionNotice(escaped) {
+function escapedMentionNotice(escaped, reason = "unknown") {
   if (escaped.length === 0)
     return;
   const names = escaped.map((login) => `\`@${login}\``).join(", ");
+  const one = escaped.length === 1;
+  if (reason === "not-a-call") {
+    return `> [!NOTE]
+` + `> ${names} ${one ? "was" : "were"} written as ${one ? "a mention" : "mentions"} ` + `and had the notification removed: this run's text was not a call, so nothing in it ` + `was made. Nobody was notified. If ${one ? "the mention was" : "a mention was"} meant, mention them yourself.`;
+  }
   return `> [!NOTE]
-` + `> ${names} ${escaped.length === 1 ? "was" : "were"} written as ${escaped.length === 1 ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${escaped.length === 1 ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
+` + `> ${names} ${one ? "was" : "were"} written as ${one ? "a mention" : "mentions"} ` + `and had the notification removed: this run could not confirm ${one ? "that account" : "those accounts"} ` + `as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.`;
 }
 
 // src/adapters/github/tags.ts
@@ -206,6 +224,8 @@ function shouldMentionOnCompletion(signals) {
   if (signals.ending.next)
     return false;
   if (signals.chainContinues)
+    return false;
+  if (signals.agentCalledHuman && signals.ending.ended === "finished")
     return false;
   if (signals.isSubIssue && signals.issueClosed)
     return false;
@@ -325,37 +345,51 @@ function toolTroubleLine(session, from) {
   return `Counted from the session: ${parts.join(", ")}.`;
 }
 
-// src/adapters/github/participants.ts
-function knownParticipants(repo, number) {
-  if (!repo || !String(number).trim())
-    return [];
-  const logins = new Set;
-  const collect = (args, read) => {
-    const { code, stdout } = gh(...args);
-    if (code !== 0)
-      return;
-    try {
-      for (const login of read(JSON.parse(stdout))) {
-        if (typeof login === "string" && login)
-          logins.add(login);
-      }
-    } catch {}
-  };
-  collect(["api", `repos/${repo}/issues/${number}`], (json) => [
-    json.user?.login
-  ]);
-  collect(["api", `repos/${repo}/issues/${number}/comments`, "--paginate"], (json) => json.map((comment) => comment.user?.login));
-  collect(["api", `repos/${repo}/collaborators`, "--paginate"], (json) => json.map((person) => person.login));
-  return [...logins];
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+
+// src/domain/work/ending-calls.ts
+var DIRECTIVE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
+function calledHumans(text, humans) {
+  const allowed = new Set([...humans].map((login) => login.trim().toLowerCase()).filter(Boolean));
+  const called = [];
+  for (const login of mentionsIn(text)) {
+    if (!allowed.has(login.toLowerCase()))
+      continue;
+    if (called.some((seen) => seen.toLowerCase() === login.toLowerCase()))
+      continue;
+    called.push(login);
+  }
+  return called;
+}
+
+// src/entrypoints/machinery/lib/callees.ts
+import { existsSync, readFileSync } from "fs";
+var NO_CALLEES = { humans: [], participants: [], notify: "" };
+function readCalleesFile(path) {
+  if (!path || !existsSync(path))
+    return NO_CALLEES;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    const logins = (value) => Array.isArray(value) ? value.filter((login) => typeof login === "string" && login !== "") : [];
+    return {
+      humans: logins(parsed.humans),
+      participants: logins(parsed.participants),
+      notify: typeof parsed.notify === "string" ? parsed.notify : ""
+    };
+  } catch {
+    return NO_CALLEES;
+  }
 }
 
 // src/adapters/github/ending-comment.ts
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync } from "fs";
 function readEndingComment(path) {
-  if (!path || !existsSync(path))
+  if (!path || !existsSync2(path))
     return;
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    const parsed = JSON.parse(readFileSync2(path, "utf8"));
     if (typeof parsed.commentId !== "string" || !parsed.commentId)
       return;
     return { commentId: parsed.commentId, node: parsed.node ?? "" };
@@ -397,9 +431,9 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/post_result_comment.ts
 var ref = defineScript(import.meta.url);
 function tokenUsageLine(logsFile) {
-  if (!existsSync2(logsFile))
+  if (!existsSync3(logsFile))
     return;
-  const usageLine = readFileSync2(logsFile, "utf8").split(`
+  const usageLine = readFileSync3(logsFile, "utf8").split(`
 `).find((l) => l.includes("ATOMA_TOKEN_USAGE:"));
   if (!usageLine)
     return;
@@ -429,10 +463,10 @@ function endedWithToolCalls(sessionPath) {
   return false;
 }
 function readSession(path) {
-  if (!path || !existsSync2(path))
+  if (!path || !existsSync3(path))
     return;
   try {
-    return JSON.parse(readFileSync2(path, "utf8"));
+    return JSON.parse(readFileSync3(path, "utf8"));
   } catch {
     return;
   }
@@ -503,19 +537,22 @@ function buildCommentBody(args) {
     CHANGED_TAG.write(args.changed === true ? "yes" : "no"),
     ENDED_TAG.write(endedTag(ending))
   ];
-  if (args.salvaged === true) {
+  if (args.endingInvalid === true) {
+    lines.push("> [!WARNING]", "> This run's closing message called more than one thing, so none of its calls", "> was made: nothing it named is started or notified. It was asked to write the", "> message again. Below is what it wrote.", "");
+  } else if (args.salvaged === true) {
     lines.push("> [!WARNING]", "> This run ended before it wrote a report. Below is the last thing it said,", "> from the middle of the work \u2014 not a conclusion, and not a summary of what it found.", "");
   } else if (args.wroteNothing === true) {
     lines.push("> [!WARNING]", "> This run ended before it said anything at all, so there is no report below \u2014", "> not even a partial one. What it had done is in its saved session.", "");
   }
   lines.push(args.output, "");
-  const escapedNotice = escapedMentionNotice(args.escapedMentions ?? []);
+  const escapedNotice = escapedMentionNotice(args.escapedMentions ?? [], args.escapedMentionsReason ?? "unknown");
   if (escapedNotice !== undefined)
     lines.push("", escapedNotice, "");
   if (shouldMentionOnCompletion({
     ending,
     chainContinues: isTrue(args.chainContinues),
     notify: args.notify,
+    agentCalledHuman: args.agentCalledHuman === true,
     isSubIssue: args.isSubIssue ?? false,
     issueClosed: args.issueClosed ?? false
   })) {
@@ -588,7 +625,9 @@ function main() {
       session: { type: "string" },
       output: { type: "string" },
       "logs-file": { type: "string" },
-      "ending-comment": { type: "string" }
+      "ending-comment": { type: "string" },
+      "ending-invalid": { type: "string" },
+      "people-file": { type: "string" }
     }
   });
   if (!values.number || !values.agent || !values["run-url"]) {
@@ -600,7 +639,7 @@ function main() {
     console.error("post_result_comment.ts: --output is required (the agent's stdout file)");
     process.exit(2);
   }
-  const redacted = redact(existsSync2(outputFile) ? readFileSync2(outputFile, "utf8") : "");
+  const redacted = redact(existsSync3(outputFile) ? readFileSync3(outputFile, "utf8") : "");
   const endedEarly = cutShort(values["ended-because"]);
   let output = redacted;
   let salvaged = false;
@@ -641,14 +680,22 @@ function main() {
       console.error("atomaton_output.txt is empty and the session shows no session-ending tool call " + "(last assistant turn made no tool calls, or the session is missing/unreadable) " + "-- posting the no-report notice rather than skipping.");
     }
   }
-  const checked = escapeUnknownMentions(output, knownParticipants(process.env.GITHUB_REPOSITORY ?? "", values.number));
+  const endingInvalid = isTrue(values["ending-invalid"]);
+  const notACall = endingInvalid || salvaged || cutShort(values["ended-because"]);
+  const callees = readCalleesFile(values["people-file"]);
+  const known = notACall ? [] : callees.participants;
+  const callable = notACall ? [] : callees.humans;
+  const checked = escapeUnknownMentions(output, known);
   if (checked.escaped.length > 0) {
-    console.error(`escaped ${checked.escaped.length} unconfirmed mention(s): ${checked.escaped.join(", ")}`);
+    console.error(`escaped ${checked.escaped.length} mention(s): ${checked.escaped.join(", ")}`);
   }
+  const called = calledHumans(output, callable);
   const body = buildCommentBody({
     agent: values.agent,
     salvaged,
     wroteNothing,
+    endingInvalid,
+    agentCalledHuman: called.length === 1,
     notify: values.notify,
     directive: values.directive,
     chainContinues: values["chain-continues"],
@@ -658,6 +705,7 @@ function main() {
     repo: process.env.GITHUB_REPOSITORY ?? "",
     output: checked.text,
     escapedMentions: checked.escaped,
+    escapedMentionsReason: notACall ? "not-a-call" : "unknown",
     changed: isTrue(values.changed),
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
     tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
