@@ -8493,18 +8493,19 @@
   {
     "path": "sessions/issue-308/engineer.json",
     "agent": "engineer",
-    "messages": 38,
-    "calls": 24,
+    "messages": 44,
+    "calls": 26,
     "failed": 0,
     "refused": 0,
     "skills": [],
     "reported": true,
     "tools": {
-      "bash": 19,
-      "delegate": 5
+      "bash": 20,
+      "delegate": 5,
+      "delegate_large": 1
     },
     "acts": {
-      "other": 18,
+      "other": 19,
       "search": 1
     },
     "runs": [
@@ -8523,6 +8524,22 @@
           }
         },
         "started": "2026-10-23T11:46:06Z"
+      },
+      {
+        "ended": "2026-10-23T11:55:54Z",
+        "ended_because": "stopped",
+        "iterations": 2,
+        "messages": 44,
+        "seconds": 77,
+        "server_calls": {
+          "delegate": {
+            "delegate_large": 1
+          },
+          "shell": {
+            "bash": 1
+          }
+        },
+        "started": "2026-10-23T11:54:37Z"
       }
     ]
   },
