@@ -92,7 +92,9 @@ export function raceOutcome(
 ): "held" | "backed-off" {
   for (const comment of comments) {
     if (comment.id >= mine.id) break; // oldest first; nothing newer can have claimed first
-    const claim = TOOK_TAG.read(comment.body);
+    // Prose only: a comment quoting a took tag in a fenced sample has not claimed
+    // anything (#304).
+    const claim = TOOK_TAG.readProse(comment.body);
     if (claim !== undefined && claim.ask === mine.ask) return "backed-off";
   }
   return "held";

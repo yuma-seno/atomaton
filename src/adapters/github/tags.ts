@@ -33,10 +33,29 @@ export interface AtomatonTag<T> {
   readonly marker: string;
   /** Render this tag's HTML-comment form, ready to prepend/embed in a body or comment. */
   write(value: T): string;
-  /** Extract this tag's value from anywhere in `text`, or undefined if absent. */
+  /**
+   * Extract this tag's value from anywhere in `text`, or undefined if absent.
+   *
+   * Raw: it sees a tag inside a fenced code block as readily as one in prose. Right
+   * for text this machinery assembled itself — a string `write` just built, a test
+   * fixture — and wrong for anything GitHub handed over, where the fence makes the
+   * tag a sample rather than a record. Those go through `readProse`.
+   */
   read(text: string): T | undefined;
+  /**
+   * Extract this tag's value from a GitHub body or comment, or undefined if absent.
+   *
+   * The ONE way a tag is read out of text GitHub wrote back: through `proseOnly`
+   * first, so a tag inside a fenced code block is not read. The machinery writes
+   * tags in prose — every `write` call site prepends one to a body or comment — so
+   * nothing it wrote is lost, and a person quoting the format in a fence (this
+   * issue tracker does it constantly) is not taken for the machinery speaking (#304).
+   */
+  readProse(text: string): T | undefined;
   /** True if `text` contains this tag at all, regardless of its value. */
   has(text: string): boolean;
+  /** True if a GitHub body or comment carries this tag at all, outside fenced code. See `readProse`. */
+  hasProse(text: string): boolean;
   /**
    * What to put in a GitHub search to find bodies carrying this tag with this value.
    *
@@ -64,14 +83,17 @@ function makeTag<T>(key: string, valuePattern: string, parse: (raw: string) => T
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  const read = (text: string): T | undefined => {
+    const m = re.exec(text);
+    return m ? parse(m[1]!) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]!) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: (value) => `${TAG_PREFIX}${key}=${render(value)}`,
   };
 }
@@ -115,14 +137,17 @@ function makeCompoundTag<T>(
   // and a wrapping capture would shift every one of them by one. `parse` reads the
   // field groups straight off the match.
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
+  const read = (text: string): T | undefined => {
+    const m = re.exec(text);
+    return m ? parse(m) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: searchValue,
   };
 }
@@ -340,6 +365,14 @@ export const QUOTES_TAG = numericTag("quotes");
  * prose. It is wrong where the notice's own prose IS the signal -- a stop receipt quotes
  * the removed comment and carries the stop tag in its prose -- so `watch_for_stop.ts`
  * asks `proseOnly` instead (#297).
+ *
+ * Read raw rather than `hasProse`, deliberately (#304's boundary). The tag is written
+ * only by the machinery, in prose, so the fence rule buys nothing on the notices -- and
+ * the failure directions are not symmetric. A quotation notice whose tag line sat inside
+ * a fence would stop being a quotation, and the deleted comment preserved inside it
+ * would speak again: the exact power the guard removed it to take away. A person quoting
+ * the tag in a fence of their own comment is skipped by these readers, which is the
+ * safer loss -- one ask to re-post, not a deleted comment back in the machinery's mouth.
  */
 export function isQuotation(body: string): boolean {
   return QUOTES_TAG.has(body);

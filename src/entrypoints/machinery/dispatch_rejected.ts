@@ -79,7 +79,7 @@ function main(): void {
   // stand-down.
   const state = issueNumber === undefined ? undefined : readTargetState(issueNumber, repo);
   const issueAlreadyClosed = state?.known === true && state.state !== "open";
-  const originAgent = ORIGIN_AGENT_TAG.read(body);
+  const originAgent = ORIGIN_AGENT_TAG.readProse(body);
 
   const handoff = decideRejectionHandoff({
     parentIssue: issueNumber,

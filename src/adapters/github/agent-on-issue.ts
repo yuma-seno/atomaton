@@ -42,7 +42,7 @@
  * defined.
  */
 import { ghPaginated } from "./gh.ts";
-import { AGENT_TAG, isQuotation } from "./tags.ts";
+import { AGENT_TAG, isQuotation, proseOnly } from "./tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 
 /**
@@ -87,12 +87,14 @@ export function mostRecentAgent(bodies: readonly string[]): string {
     // deleted the comment to prevent naming -- which the notice's own line says will
     // not be acted on. See `isQuotation`.
     if (isQuotation(body)) continue;
-    const result = AGENT_TAG.read(body);
+    const result = AGENT_TAG.readProse(body);
     if (result) return result;
     // `parseCommentCommand` reads both a person's `/agent` command and the
     // `atomaton:dispatch` marker the machinery writes -- one definition of "this body
-    // asks for an agent", shared with the thread reader and the parser.
-    const asked = parseCommentCommand(body).agent;
+    // asks for an agent", shared with the thread reader and the parser. Prose only,
+    // for the same reason the tag read above is (#304): a marker or command quoted in
+    // a fenced sample is documentation, and the machinery writes both in prose.
+    const asked = parseCommentCommand(proseOnly(body)).agent;
     if (asked) return asked;
   }
   return "";

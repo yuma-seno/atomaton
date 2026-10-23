@@ -225,8 +225,10 @@ export function countPriorRetries(repo: string, number: string): number {
     // The notice quoting a removed comment carries that comment verbatim, and a
     // `ci-retry` marker inside it is the DELETED author's words -- counting it would
     // fire the retry limit early, on a turn the notice's own line says will not be
-    // acted on. See `isQuotation`.
-    return bodies.filter((body) => !isQuotation(body ?? "") && CI_RETRY_TAG.has(body ?? "")).length;
+    // acted on. See `isQuotation`. `hasProse` for the same reason one tag over: a
+    // person quoting the marker inside a fenced sample has not asked for a retry
+    // (#304).
+    return bodies.filter((body) => !isQuotation(body ?? "") && CI_RETRY_TAG.hasProse(body ?? "")).length;
   } catch {
     return 0;
   }
@@ -534,7 +536,7 @@ function main(): void {
   const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
   const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
-  const engineerAgent = ORIGIN_AGENT_TAG.read(prBody) ?? "";
+  const engineerAgent = ORIGIN_AGENT_TAG.readProse(prBody) ?? "";
 
   const outcome = decideValidationOutcome({
     conclusion,

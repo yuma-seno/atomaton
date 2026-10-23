@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AGGREGATED_TAG, AGENT_TAG, CHANGED_TAG, DISPATCH_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, PARENT_ISSUE_TAG, proseOnly, withoutTags } from "./tags.ts";
+import { AGGREGATED_TAG, AGENT_TAG, CHANGED_TAG, DISPATCH_TAG, ENDED_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, PARENT_ISSUE_TAG, proseOnly, withoutTags } from "./tags.ts";
 
 /**
  * These markers carry state between workflow runs through GitHub, so they live in the
@@ -155,6 +155,59 @@ describe("withoutTags on a fenced sample", () => {
     expect(LLM_CONTEXT_TAG.read(proseOnly(body))).toBe("exclude");
     expect(AGENT_TAG.read(proseOnly(body))).toBeUndefined();
     expect(NOTIFY_TAG.read(proseOnly(body))).toBe("bob");
+  });
+});
+
+/**
+ * How every reader of a GitHub-written body or comment reads: through `proseOnly`.
+ *
+ * #293 fixed the agent-context half (`withoutTags`) and `fetch_events`' own reads;
+ * #304 is the rest of the machinery, which still read the raw bodies — so the same
+ * body had two answers. A person quoting the tag format in a fenced block (this issue
+ * tracker does it constantly) must not be taken for the machinery speaking: the tag
+ * decides a parent, a notify target, an ending, who wrote a comment. The machinery
+ * writes every tag in prose, so nothing it wrote is lost.
+ */
+describe("readProse and hasProse", () => {
+  test("a tag the machinery wrote — in prose, where it always writes — still reads", () => {
+    const body = [PARENT_ISSUE_TAG.write(5), "The pull request for this work."].join("\n");
+    expect(PARENT_ISSUE_TAG.readProse(body)).toBe(5);
+    expect(PARENT_ISSUE_TAG.hasProse(body)).toBe(true);
+  });
+
+  test("a tag quoted in a fenced sample is not the machinery speaking", () => {
+    const body = [
+      "この PR のリンクは外しました:",
+      "",
+      "```html",
+      PARENT_ISSUE_TAG.write(5),
+      "```",
+      "",
+      NOTIFY_TAG.write("someone-else"),
+    ].join("\n");
+    expect(PARENT_ISSUE_TAG.readProse(body)).toBeUndefined();
+    expect(PARENT_ISSUE_TAG.hasProse(body)).toBe(false);
+    // The prose around the fence still reads.
+    expect(NOTIFY_TAG.readProse(body)).toBe("someone-else");
+  });
+
+  test("a compound tag inside a fence does not end a run", () => {
+    const body = ["Someone documenting the format:", "```", ENDED_TAG.write({ verb: "stopped", answers: 3, run: 12 }), "```"].join("\n");
+    expect(ENDED_TAG.readProse(body)).toBeUndefined();
+  });
+
+  test("a fence never closed protects the rest, and a tilde fence counts", () => {
+    const unclosed = ["```", AGENT_TAG.write("engineer"), "and the line after it"].join("\n");
+    expect(AGENT_TAG.readProse(unclosed)).toBeUndefined();
+    expect(AGENT_TAG.hasProse(unclosed)).toBe(false);
+
+    const tilde = ["~~~", AGENT_TAG.write("engineer"), "~~~"].join("\n");
+    expect(AGENT_TAG.readProse(tilde)).toBeUndefined();
+  });
+
+  test("prose between two fences still reads", () => {
+    const body = ["```ts", "const x = 1;", "```", "", DISPATCH_TAG.write("engineer"), "", "```", "more sample", "```"].join("\n");
+    expect(DISPATCH_TAG.hasProse(body)).toBe(true);
   });
 });
 

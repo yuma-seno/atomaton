@@ -71,6 +71,20 @@ describe("mostRecentAgentOn", () => {
     expect(mostRecentAgentOn(JSON.stringify(["<!-- atomaton:agent=atomaton -->\nDone.", notice]))).toBe("atomaton");
   });
 
+  // The tag decides an attribution, and the fence decides it is a sample: a person
+  // quoting `atomaton:agent` in a code block is documenting the format, not reporting
+  // a run (#304). The prose underneath still answers.
+  test("a tag quoted in a fenced sample does not name the next agent", () => {
+    const quoted = [
+      "The result-comment format, for the record:",
+      "```html",
+      "<!-- atomaton:agent=engineer -->",
+      "```",
+    ].join("\n");
+    expect(mostRecentAgentOn(JSON.stringify([quoted]))).toBe("");
+    expect(mostRecentAgentOn(JSON.stringify([quoted, "<!-- atomaton:agent=atomaton -->\nDone."]))).toBe("atomaton");
+  });
+
   test("a failed read is not a name", () => {
     expect(mostRecentAgentOn("")).toBe("");
   });

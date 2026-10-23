@@ -19,7 +19,7 @@
  * reaches the first path. The `atomaton:aggregated` marker check below makes
  * whichever caller gets here first win and the other a no-op.
  */
-import { gh } from "../adapters/github/gh.ts";
+import { gh, splitConcatenatedJson } from "../adapters/github/gh.ts";
 import { countOpenSiblings } from "../adapters/github/sibling-check.ts";
 import { dispatchRunner } from "../adapters/actions/dispatch.ts";
 import { resolveNotify } from "../adapters/github/notify.ts";
@@ -257,15 +257,27 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   // page the second racer reads, so the second concludes it is first and dispatches
   // again. A missed aggregation is recoverable by the other racer; a double dispatch
   // is not, which is why this read has to see the whole thread.
+  //
+  // `[.[].body]`, not `.[].body`: the bodies come back as a list, so the marker is
+  // decided per body with `readProse` (#304) -- a comment quoting the marker inside
+  // a fenced sample has not claimed anything, and an unclosed fence in one comment
+  // cannot swallow the next comment's marker the way one `proseOnly` over the joined
+  // stdout would.
   const { code: commentsCode, stdout: commentsOut } = gh(
-    "api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body",
+    "api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", "[.[].body]",
   );
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
     return withNotice(opts, { kind: "undetermined", why });
   }
-  if (commentsOut.includes(AGGREGATED_TAG.write(opts.closedNum))) {
+  const markerAlreadyWritten = splitConcatenatedJson(commentsOut)
+    // One JSON array per page, back to back -- the same shape `mostRecentAgentOn`
+    // flattens through `ghPaginated`, flattened here by hand because this read keeps
+    // the guarded `gh` so its exit code can stay load-bearing.
+    .flatMap((page) => (Array.isArray(page) ? page : []))
+    .some((entry) => typeof entry === "string" && AGGREGATED_TAG.readProse(entry) === opts.closedNum);
+  if (markerAlreadyWritten) {
     // Another caller already handled this exact completion (see module doc
     // comment for the race this guards against).
     return { kind: "already-aggregated" };

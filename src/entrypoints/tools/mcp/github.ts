@@ -315,6 +315,10 @@ const COMMIT_AND_PUSH_SCHEMA = z.object({
  * issue-creating tools did not, and the asymmetry was load-bearing. `NOTIFY_TAG.read`
  * returns the first match, so the machine's tag wins while there is one -- and when the
  * requester is unknown there is none, which left the agent's as the only tag in the body.
+ *
+ * The `has` is raw, not `hasProse`: this is the agent's own DRAFT, not a body GitHub
+ * wrote back, and the rule it enforces is "you do not write this tag anywhere in it" --
+ * a sample of the tag in a fence still needs a person to look at why it is there (#304).
  */
 function notifyTagPrefix(body: string, what: string): string {
   if (NOTIFY_TAG.has(body)) mcpFail(`${what} body already contains a notify tag; refusing to add another`);
@@ -840,6 +844,9 @@ function injectParentIssue(body: string, reviewer: string): string {
   const reviewerLine = reviewer ? `/${reviewer}\n\n` : "";
   if (!parent) return `${reviewerLine}${body}${openedByLine()}`;
   if (PARENT_ISSUE_TAG.has(body)) {
+    // Raw `has`, not `hasProse` -- the agent's own draft, same rule as `notifyTagPrefix`:
+    // the machinery writes the parent tag, and the agent writes none of it, fence
+    // included (#304).
     mcpFail("PR body already contains a parent-issue tag; refusing to add another");
   }
   // `Part of #N`, not `Closes #N`, and written the same way for every pull request
@@ -1803,12 +1810,13 @@ async function mergePr(): Promise<string> {
 
   const d = ghJsonOrThrow<{ body?: string }>("pr", "view", String(num), "--repo", REPO, "--json", "body");
   const body = d?.body ?? "";
-  const parentIssue = PARENT_ISSUE_TAG.read(body);
+  // Prose only: a body quoting either tag in a fenced sample is not carrying it (#304).
+  const parentIssue = PARENT_ISSUE_TAG.readProse(body);
 
   const handoff = decidePostMergeHandoff({
     parentIssue,
     parentAlreadyClosed: parentIssue !== undefined && isIssueClosed(parentIssue),
-    originAgent: ORIGIN_AGENT_TAG.read(body),
+    originAgent: ORIGIN_AGENT_TAG.readProse(body),
   });
 
   switch (handoff.kind) {

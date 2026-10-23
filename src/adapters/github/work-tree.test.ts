@@ -57,6 +57,20 @@ describe("lastEnding", () => {
     expect(lastEnding(["just a remark"])).toBeUndefined();
   });
 
+  // A person quoting the ending format in a fenced sample is writing ABOUT endings,
+  // not ending anything (#304) -- the same fence rule the quotation skip applies to
+  // the guard's notice, and the reason the walk reads prose.
+  test("an ending quoted in a fenced sample is not the node's ending", () => {
+    const quoted = [
+      "Someone documenting the endings:",
+      "```html",
+      "<!-- atomaton:ended=waiting answers=0 run=0 -->",
+      "```",
+    ].join("\n");
+    expect(lastEnding([quoted])).toBeUndefined();
+    expect(lastEnding([quoted, "<!-- atomaton:ended=stopped answers=0 run=0 -->"])).toBe("stopped");
+  });
+
   // The notice's own line says the comment it replaced will not be acted on; the
   // quoted text inside it must not act either. The walk steps over the notice and
   // finds the ending underneath.
