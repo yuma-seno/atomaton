@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { escapedMentionNotice, escapeUnknownMentions } from "./mention.ts";
+import { escapedMentionNotice, escapeUnknownMentions, mentionsIn } from "./mention.ts";
 
 const KNOWN = ["hws-yuma-seno", "Some-Reviewer"];
 
@@ -108,5 +108,28 @@ describe("what the thread is told", () => {
     const notice = escapedMentionNotice(["a", "b"]) ?? "";
     expect(notice).toContain("were written as mentions");
     expect(notice).toContain("those accounts");
+  });
+});
+
+describe("reading who was named", () => {
+  test("every login in prose, in order, once each", () => {
+    expect(mentionsIn("@a then @b then @A again")).toEqual(["a", "b"]);
+  });
+
+  /** Code is where a name is quoted rather than called. */
+  test("code spans and fenced blocks are not prose", () => {
+    expect(mentionsIn("ask `@a` or see:\n```\n@b\n```\n")).toEqual([]);
+  });
+
+  test("an email address and a scoped package are not mentions", () => {
+    expect(mentionsIn("write to foo@example.com about @org/team")).toEqual([]);
+  });
+
+  /**
+   * Prose on either side of a code span is still prose: the span is skipped, not a
+   * boundary that can hide a name written next to it.
+   */
+  test("a name written against a code span still counts", () => {
+    expect(mentionsIn("see `x`@baz")).toEqual(["baz"]);
   });
 });
