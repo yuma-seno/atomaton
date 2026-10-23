@@ -37,6 +37,7 @@ import { ref as notifyLimitReachedRef } from "../entrypoints/machinery/notify_li
 import { ref as readRunEndingRef } from "../entrypoints/machinery/read_run_ending.ts";
 import { ref as injectUncommittedNoticeRef } from "../entrypoints/machinery/inject_uncommitted_notice.ts";
 import { ref as injectDispatcherNoticeRef } from "../entrypoints/machinery/inject_dispatcher_notice.ts";
+import { ref as readCalleesRef } from "../entrypoints/machinery/read_callees.ts";
 import { ref as injectCalleesNoticeRef } from "../entrypoints/machinery/inject_callees_notice.ts";
 import { ref as restoreWorkspaceRef } from "../entrypoints/machinery/restore_workspace.ts";
 import { ref as saveWorkspaceRef } from "../entrypoints/machinery/save_workspace.ts";
@@ -552,21 +553,38 @@ const buildContextStep = new TypedOutputsStep(
 );
 
 /**
+ * Read who this run may call, once, in a step that has a token.
+ *
+ * The step that starts atoma is credential-free on purpose — every tool server the
+ * agent starts can read that process's environment for minutes — so the participant
+ * list is read here and travels in the run directory to the two consumers that need
+ * it. See `read_callees.ts` and `lib/callees.ts`.
+ */
+const readCalleesStep = new TypedOutputsStep({
+  name: "Read who this run may call",
+  shell: "bash",
+  env: { GH_TOKEN: "${{ github.token }}", NUMBER: "${{ inputs.number }}" },
+  run: `${scriptCommandWithArgs(readCalleesRef, {
+    out: `${RUN_DIR}/callees.json`,
+    number: "\${NUMBER}",
+    notify: notifyStep.outputs.notify,
+  })}\n`,
+});
+
+/**
  * Tell the run who it may call, so its closing message can hand the work to a person.
  *
  * After the context merge, before the dispatcher notice: both are the last thing in
  * the session, and the dispatcher's "end with /<agent>" is the more specific of the
- * two. Needs the GitHub API (the participants), which the step before it does not --
- * see `inject_callees_notice.ts` for why the list has to travel at all.
+ * two. The list itself was read by the step above, which is the only one here with a
+ * token — see `inject_callees_notice.ts` for why the list has to travel at all.
  */
 const injectCalleesStep = new TypedOutputsStep({
   name: "Tell the run who it may call",
   shell: "bash",
-  env: { GH_TOKEN: "${{ github.token }}", NUMBER: "${{ inputs.number }}" },
   run: `${scriptCommandWithArgs(injectCalleesNoticeRef, {
     session: `${RUN_DIR}/session.json`,
-    number: "\${NUMBER}",
-    notify: notifyStep.outputs.notify,
+    "people-file": `${RUN_DIR}/callees.json`,
   })}\n`,
 });
 
@@ -971,8 +989,7 @@ if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ]; then
     "output-file": `${RUN_DIR}/atomaton_output.txt`,
     "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
     "problem-file": `${RUN_DIR}/ending-problem.txt`,
-    number: "\${NUMBER}",
-    notify: "\${NOTIFY}",
+    "people-file": `${RUN_DIR}/callees.json`,
   })}
 fi
 
@@ -1014,8 +1031,7 @@ if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ] && [ -s "${RUN_DIR}/ending-
         "output-file": `${RUN_DIR}/atomaton_output.txt`,
         "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
         "problem-file": `${RUN_DIR}/ending-problem.txt`,
-        number: "\${NUMBER}",
-        notify: "\${NOTIFY}",
+        "people-file": `${RUN_DIR}/callees.json`,
       })}
       if [ -s "${RUN_DIR}/ending-problem.txt" ]; then
         echo "::warning::the closing message still calls more than one thing; nothing it calls will be started"
@@ -1936,6 +1952,7 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
   // that already exists. See the comment beside those setfacl lines.
   restoreWorkspaceStep,
   buildContextStep,
+  readCalleesStep,
   injectCalleesStep,
   injectDispatcherStep,
   new TypedOutputsStep({

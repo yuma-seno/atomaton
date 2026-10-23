@@ -2,7 +2,7 @@
 /**
  * inject_callees_notice.ts — name the people this run may call.
  *
- * Usage: inject_callees_notice.ts --session PATH [--number N] [--notify LOGIN]
+ * Usage: inject_callees_notice.ts --session PATH --people-file FILE
  *
  * ## Why the run is told, when it used to be told it did not need to know
  *
@@ -14,41 +14,40 @@
  * opened the thread, whoever commented, and the collaborators, which is a fact about
  * GitHub that no tool call hands it in one answer.
  *
- * So the machinery names them, once, at the start of the run. It is the same list
- * `check_ending.ts` accepts and `post_result_comment.ts` counts against, read from
- * one adapter, so what the run is told and what is accepted are the same set.
+ * So the machinery names them, once, at the start of the run. It is the list written
+ * by `read_callees.ts` and accepted by `check_ending.ts` — one read, one file, so what
+ * the run is told and what is accepted are the same set.
  *
  * ## Why a user message and not a template placeholder
  *
  * For the reason `inject_dispatcher_notice.ts` gives: the placeholders are the atoma
- * core's vocabulary, and this is a fact about this delivery system. The session is
- * the delivery system's way of putting a fact in front of the model, and it is where
- * the run reads the rest of the context it was given.
+ * core's vocabulary, and this is a fact about this delivery system. The session is the
+ * delivery system's way of putting a fact in front of the model, and it is where the
+ * run reads the rest of the context it was given.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { humanParticipants } from "../../adapters/github/participants.ts";
 import type { Session } from "../../domain/work/session.ts";
+import { readCalleesFile, type Callees } from "./lib/callees.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface InjectCalleesNoticeArgs {
   session: string;
-  number?: string;
-  notify?: string;
+  "people-file": string;
 }
 
 export const ref = defineScript<InjectCalleesNoticeArgs>(import.meta.url);
 
 /** The notice, given who may be called and who the work belongs to. */
-export function calleesNotice(people: readonly string[], notify: string): string {
-  if (people.length === 0) {
+export function calleesNotice({ humans, notify }: Callees): string {
+  if (humans.length === 0) {
     return (
       "No person can be called from this run: no owner is configured for this work and no " +
       "participant could be read. End by calling an agent, or by calling nobody; the machinery " +
       "has nobody it can name."
     );
   }
-  const list = people.map((login) => `@${login}`).join(", ");
+  const list = humans.map((login) => `@${login}`).join(", ");
   const owner = notify ? ` @${notify} is the one this work belongs to.` : "";
   return (
     `The people you may call in your closing message: ${list}.${owner}\n\n` +
@@ -64,15 +63,12 @@ export function calleesNotice(people: readonly string[], notify: string): string
 function main(): void {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
-    options: {
-      session: { type: "string" },
-      number: { type: "string" },
-      notify: { type: "string" },
-    },
+    options: { session: { type: "string" }, "people-file": { type: "string" } },
   });
   const path = values.session;
-  if (!path) {
-    console.error("usage: inject_callees_notice.ts --session PATH [--number N] [--notify LOGIN]");
+  const peopleFile = values["people-file"];
+  if (!path || !peopleFile) {
+    console.error("usage: inject_callees_notice.ts --session PATH --people-file FILE");
     process.exit(2);
   }
   if (!existsSync(path)) {
@@ -82,25 +78,13 @@ function main(): void {
     return;
   }
 
-  const notify = (values.notify ?? "").trim();
-  const seen = new Set<string>();
-  const people: string[] = [];
-  for (const login of [
-    ...humanParticipants(process.env.GITHUB_REPOSITORY ?? "", values.number ?? ""),
-    ...(notify ? [notify] : []),
-  ]) {
-    const key = login.trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    people.push(login.trim());
-  }
-
+  const callees = readCalleesFile(peopleFile);
   const session = JSON.parse(readFileSync(path, "utf8")) as Session;
   const messages = session.messages ?? [];
-  messages.push({ role: "user", content: calleesNotice(people, notify) });
+  messages.push({ role: "user", content: calleesNotice(callees) });
   session.messages = messages;
   writeFileSync(path, JSON.stringify(session, null, 2));
-  console.error(`inject_callees_notice: named ${people.length} callable people in ${path}`);
+  console.error(`inject_callees_notice: named ${callees.humans.length} callable people in ${path}`);
 }
 
 if (import.meta.main) main();
