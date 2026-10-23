@@ -1,8 +1,9 @@
 {
-  "version": "v0.21.31",
+  "version": "v0.21.32",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
+    ".github/atomaton-runtime/scripts/check_ending.ts",
     ".github/atomaton-runtime/scripts/check_live_tools.ts",
     ".github/atomaton-runtime/scripts/check_sub_issue_closure.ts",
     ".github/atomaton-runtime/scripts/decide_turn_ending.ts",
@@ -17,7 +18,9 @@
     ".github/atomaton-runtime/scripts/get_config_value.ts",
     ".github/atomaton-runtime/scripts/guard_command_on_closed.ts",
     ".github/atomaton-runtime/scripts/guard_comment_during_run.ts",
+    ".github/atomaton-runtime/scripts/inject_callees_notice.ts",
     ".github/atomaton-runtime/scripts/inject_dispatcher_notice.ts",
+    ".github/atomaton-runtime/scripts/inject_ending_rejection.ts",
     ".github/atomaton-runtime/scripts/inject_uncommitted_notice.ts",
     ".github/atomaton-runtime/scripts/manage_dispatch_loop.ts",
     ".github/atomaton-runtime/scripts/manage_in_progress_label.ts",
@@ -30,6 +33,7 @@
     ".github/atomaton-runtime/scripts/plan_deploy.ts",
     ".github/atomaton-runtime/scripts/post_result_comment.ts",
     ".github/atomaton-runtime/scripts/prune_atomaton_data.ts",
+    ".github/atomaton-runtime/scripts/read_callees.ts",
     ".github/atomaton-runtime/scripts/read_run_ending.ts",
     ".github/atomaton-runtime/scripts/read_secret_names.ts",
     ".github/atomaton-runtime/scripts/reconcile_github_session.ts",

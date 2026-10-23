@@ -507,6 +507,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/reconcile_github_session.ts" --events "${RUNNER_TEMP}/atomaton-run/events.json" --agent-name "${{ inputs.agent }}" --agent-def "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions/${{ inputs.agent }}.md" --session "${RUNNER_TEMP}/atomaton-run/session.json" --out "${RUNNER_TEMP}/atomaton-run/session.json"
+      - name: Read who this run may call
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ inputs.number }}
+        run: |
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/read_callees.ts" --out "${RUNNER_TEMP}/atomaton-run/callees.json" --number "${NUMBER}" --notify "${{ steps.notify.outputs.notify }}"
+      - name: Tell the run who it may call
+        shell: bash
+        run: |
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/inject_callees_notice.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
       - name: Tell the run who started it
         shell: bash
         run: |
@@ -874,6 +885,78 @@ jobs:
           echo "=== Atoma Logs ===" >&2
           cat "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" >&2
 
+          # A run's last message is its report AND its call: it dispatches the next agent by a
+          # bare `/name` line and hands the work to a person by naming them, and it may do at
+          # most one of those (see domain/work/ending-calls.ts). Two is not a hand-off plus a
+          # notification, it is two people who both believe they were asked.
+          #
+          # The check is a fact, not an error, so it never fails this step; the answer goes to
+          # a file the rest of this bash reads. Only a run that ended of its own accord is
+          # asked again -- a run that was stopped or ran out of time was cut off mid-sentence,
+          # and asking it to finish the sentence would be asking it to ignore the person who
+          # said stop.
+          ENDING_INVALID=false
+          if [ "$EXIT_CODE" = "0" ] && [ ! -f "${RUNNER_TEMP}/atomaton-run/stop-requested" ]; then
+            bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_ending.ts" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
+          fi
+
+          if [ "$EXIT_CODE" = "0" ] && [ ! -f "${RUNNER_TEMP}/atomaton-run/stop-requested" ] && [ -s "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" ]; then
+            REASK_BUDGET=$(( ${{ steps.deadline.outputs.at }} - $(date +%s) ))
+            if [ "$REASK_BUDGET" -lt "300" ]; then
+              # No time for a second turn. The message is not a call, so nothing in it is made,
+              # and the result comment says so -- see post_result_comment.ts's --ending-invalid.
+              echo "::warning::the closing message calls more than one thing and there is no time left to ask again; nothing it calls will be started"
+              ENDING_INVALID=true
+            else
+              echo "::warning::the closing message calls more than one thing; asking for it again"
+              cp "${RUNNER_TEMP}/atomaton-run/session.json" "${RUNNER_TEMP}/atomaton-run/session_before_reask.json"
+              bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/inject_ending_rejection.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt"
+              # The same invocation as above, with no prompt: the rejection is a user message in
+              # the session now, and a run with no prompt source continues from the session --
+              # the documented path, and the reason this does not use `--prompt-file`.
+              SECOND_EXIT=0
+              sudo -n -u "atomaton-tools" env "${AGENT_ENV[@]}" \
+                atoma run \
+                --agent-def "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions/${AGENT}.md" \
+                --in-session "${RUNNER_TEMP}/atomaton-run/session.json" \
+                --out-session "${RUNNER_TEMP}/atomaton-run/session.json" \
+                --template "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/prompt-template.md" \
+                --skills-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/skills" \
+                --max-runtime-secs "$REASK_BUDGET" \
+                --stop-file "${RUNNER_TEMP}/atomaton-run/stop-requested" \
+                --loop-retries \
+                --credentials-file "$RUNNER_TEMP/atomaton-credentials/credentials.json" \
+                ${TOOLS_ARG} \
+                > "${RUNNER_TEMP}/atomaton-run/atomaton_output_again.txt" 2>> "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" || SECOND_EXIT=$?
+
+              if [ "$SECOND_EXIT" = "0" ] && [ -s "${RUNNER_TEMP}/atomaton-run/atomaton_output_again.txt" ]; then
+                mv "${RUNNER_TEMP}/atomaton-run/atomaton_output_again.txt" "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt"
+                bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_ending.ts" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
+                if [ -s "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" ]; then
+                  echo "::warning::the closing message still calls more than one thing; nothing it calls will be started"
+                  ENDING_INVALID=true
+                fi
+              elif [ -f "${RUNNER_TEMP}/atomaton-run/stop-requested" ]; then
+                # The person stopped while the machinery was asking again. That outranks the
+                # retry: keep the second attempt's ending (a stop) and whatever it managed to
+                # write, which is often nothing.
+                EXIT_CODE=2
+                if [ -s "${RUNNER_TEMP}/atomaton-run/atomaton_output_again.txt" ]; then
+                  mv "${RUNNER_TEMP}/atomaton-run/atomaton_output_again.txt" "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt"
+                else
+                  : > "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt"
+                fi
+              else
+                # The second attempt failed or was cut off without the person asking. The first
+                # run's ending is the one this run actually had, so put the session back as it
+                # was and post that message with its calls refused, rather than reporting a
+                # failure of the machinery's own retry as the run's outcome.
+                cp "${RUNNER_TEMP}/atomaton-run/session_before_reask.json" "${RUNNER_TEMP}/atomaton-run/session.json"
+                ENDING_INVALID=true
+              fi
+            fi
+          fi
+
           # The watcher has nothing left to watch for. Killed rather than left to the job,
           # because a poller that outlives the run it was polling for spends API budget on an
           # answer nobody will read.
@@ -917,7 +1000,14 @@ jobs:
             echo "${RESULT_EOF}"
           } >> "$GITHUB_OUTPUT"
 
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/extract_directive.ts" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions"
+          if [ "$ENDING_INVALID" = "true" ]; then
+            # The message's calls were refused, so nothing it named is started. The comment is
+            # posted with them left as text, and the machinery makes the one call it still can.
+            echo "directive=" >> "$GITHUB_OUTPUT"
+          else
+            bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/extract_directive.ts" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions"
+          fi
+          echo "ending_invalid=${ENDING_INVALID}" >> "$GITHUB_OUTPUT"
 
           # Detect whether a tool call already triggered an automatic follow-up
           # dispatch ON THIS NODE during this run (a hand-off to a colleague:
@@ -996,7 +1086,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/post_result_comment.ts" --number "${{ inputs.number }}" --agent "${{ inputs.agent }}" --type "${{ inputs.type }}" --notify "${{ steps.notify.outputs.notify }}" --directive "${{ steps.atoma.outputs.directive }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --reported "${{ steps.atoma.outputs.reported }}" --messages-before "${{ steps.context.outputs.messages_before }}" --changed "${{ steps.atoma.outputs.changed }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --ending-comment "${RUNNER_TEMP}/atomaton-run/ending-comment.json"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/post_result_comment.ts" --number "${{ inputs.number }}" --agent "${{ inputs.agent }}" --type "${{ inputs.type }}" --notify "${{ steps.notify.outputs.notify }}" --directive "${{ steps.atoma.outputs.directive }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --reported "${{ steps.atoma.outputs.reported }}" --messages-before "${{ steps.context.outputs.messages_before }}" --changed "${{ steps.atoma.outputs.changed }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --ending-comment "${RUNNER_TEMP}/atomaton-run/ending-comment.json" --ending-invalid "${{ steps.atoma.outputs.ending_invalid }}" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
         if: steps.atoma.outcome == 'success' && steps.context.outputs.new_event_count != '0'
       - name: Record run metadata
         shell: bash
