@@ -35,6 +35,7 @@ import { closingKeywordRefusal, closingReferences, partOfLine } from "../../../d
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
+import { endingIdentity } from "../lib/turn-identity.ts";
 import { postTurnComment } from "../../../adapters/github/ending-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -683,7 +684,7 @@ function closeIssue(a: z.infer<typeof ISSUE_NUMBER_ARG_SCHEMA>): boolean {
     // `conclude_issue.ts`, which has the same bug, and `turn-comment.ts`.
     const { code, stdout, stderr } = gh(
       "issue", "comment", String(num), "--repo", REPO,
-      "--body", turnCommentBody({ ended: "done", audience: "person", body: request }),
+      "--body", turnCommentBody({ ended: "done", audience: "person", body: request, ...endingIdentity() }),
     );
     // The one failure still worth an error. Saying nothing here would leave an
     // issue that nobody has been asked to close and an agent that believes
@@ -998,7 +999,7 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     // was — and the one the contract test in `generated-workflows.test.ts` asks for.
     const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;
     const body = validationDispatched
-      ? turnCommentBody({ ended: "waiting", audience: "person", body: text })
+      ? turnCommentBody({ ended: "waiting", audience: "person", body: text, ...endingIdentity() })
       : `${LLM_CONTEXT_TAG.write("exclude")}\n${text}`;
     // Posted and recorded through the one helper (`ending-comment.ts`), so the
     // result footer lands on THIS comment — the one that ended the run's turn —

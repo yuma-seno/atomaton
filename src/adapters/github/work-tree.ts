@@ -311,7 +311,7 @@ export function lastEnding(repo: string, number: number): string | undefined {
     const body = bodies[i] ?? "";
     if (isQuotation(body)) continue;
     const ended = ENDED_TAG.read(body);
-    if (ended) return ended;
+    if (ended) return ended.verb;
   }
   return undefined;
 }

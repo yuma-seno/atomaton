@@ -24,6 +24,7 @@ import { dispatchSubAgent } from "../lib/dispatch_sub_agent.ts";
 import { parentIssueOf } from "../../../adapters/github/parent-issue.ts";
 import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
+import { endingIdentity } from "../lib/turn-identity.ts";
 import { postTurnComment, recordEndingComment } from "../../../adapters/github/ending-comment.ts";
 import { concludeIssue, type ConcludeIssueResult } from "../lib/conclude_issue.ts";
 import { describeGateResult, needsAttention } from "../../../app/aggregation.ts";
@@ -240,7 +241,7 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     // the tag, which is why the header is built from `complete` and the tags are not
     // baked into the body below.
     const bodyLines = complete
-      ? turnHeader({ ended: "waiting", audience: "person" })
+      ? turnHeader({ ended: "waiting", audience: "person", ...endingIdentity() })
       : [LLM_CONTEXT_TAG.write("exclude")];
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));
@@ -454,6 +455,7 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
       body:
         `Atomaton: rebuilding the environment and restarting \`${agent}\` ` +
         `(reload ${next} of ${limit}). Reason: ${args.reason}`,
+      ...endingIdentity(),
     }),
   });
   const outcome = dispatchRunner({
@@ -463,10 +465,13 @@ function handleReloadEnvironment(args: z.infer<typeof RELOAD_ENVIRONMENT_SCHEMA>
     number,
     notify: (process.env.NOTIFY ?? "").trim(),
     reloadCount: next,
-    // The same turn, continued: the handoff comment above is the thread's last event,
-    // and `freshnessProbeId` is how the answers-request check sees it before judging.
-    // Without the probe, read-after-write lag would show the command that started this
-    // run and refuse the restart it is itself.
+    // The same turn, continued: the handoff comment above is both the ask the next
+    // run claims (`ask` — the thread's newest open ask, and the identity the ending
+    // closes) and the freshness probe (`freshnessProbeId`), which is how the
+    // answers-request check sees it before judging. Without the probe, read-after-write
+    // lag would show the command that started this run and refuse the restart it is
+    // itself.
+    ask: endingCommentId,
     answersRequest: true,
     freshnessProbeId: endingCommentId,
     log,

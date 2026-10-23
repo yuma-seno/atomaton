@@ -87,6 +87,44 @@ function stringTag(key: string, valuePattern: string): AtomatonTag<string> {
 }
 
 /**
+ * A tag whose value is several named fields on one line, e.g.
+ * `atomaton:ended=done answers=12 run=34`.
+ *
+ * The wire form is still one comment line and still registered in
+ * `EVERY_TAG_PATTERN`, so `withoutTags` strips it like any other tag; what the
+ * compound maker adds is that the fields are parsed and rendered as one record,
+ * because the turn-identity tags (#285) carry an ask id and a run id TOGETHER —
+ * a reader that got them from two tags could not tell which run a lone ask
+ * belonged to, which is the ambiguity this identity exists to end.
+ *
+ * `parse` receives the full match so it can re-read the value string field by
+ * field; returning `undefined` makes the comment unreadable, which for these tags
+ * is the honest answer — an ending whose ask and run are not both on it is not an
+ * ending this machinery can reason about.
+ */
+function makeCompoundTag<T>(
+  key: string,
+  valuePattern: string,
+  parse: (match: RegExpExecArray) => T | undefined,
+  render: (value: T) => string,
+  searchValue: (value: T) => string,
+): AtomatonTag<T> {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read: (text) => {
+      const m = re.exec(text);
+      return m ? parse(m) : undefined;
+    },
+    has: (text) => re.test(text),
+    search: searchValue,
+  };
+}
+
+/**
  * A human asked the run on this issue/PR to stop.
  *
  * Written by `request_stop.ts` on the comment it posts, and polled for by the running
@@ -101,7 +139,8 @@ function stringTag(key: string, valuePattern: string): AtomatonTag<string> {
 export const STOP_TAG = stringTag("stop", "requested");
 
 /**
- * How a run ended, written on its own result comment.
+ * How a run ended, written on its own result comment — with what the run was
+ * answering and which run wrote it (#285).
  *
  * Asked by `/resume` over a work tree: "which nodes under this one were stopped?" is
  * a question about the thread, and without this it could only be guessed from the
@@ -126,8 +165,64 @@ export const STOP_TAG = stringTag("stop", "requested");
  * follows -- this is how the ending reaches the thread. `thread.ts` reads it to keep
  * the node off the `asked` that started the run, which the aggregation gate would
  * otherwise read as a request nobody had taken up.
+ *
+ * ## `answers` and `run`
+ *
+ * The ending is an ANSWER: `answers` names the ask comment id it answers, and `run`
+ * names the run that wrote it. Both are comparisons' inputs, not prose — the run
+ * watch asks "does an ending with MY run id exist", and the thread fold asks "does
+ * an ending answering THIS claim's ask exist", and neither can be answered from a
+ * verb alone. `answers=0` means the run was answering no comment — the body of a
+ * new issue is the ask there, and the body is not a comment — and matches no real
+ * comment id, which is the honest encoding of "answered nothing".
+ *
+ * An ending without both fields does not parse, and a comment that does not parse as
+ * an ending is not an ending: the machinery reads its own wire format strictly, so a
+ * partially-written ending is silence rather than a half-truth.
  */
-export const ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+export const ENDED_TAG = makeCompoundTag<{ verb: string; answers: number; run: number }>(
+  "ended",
+  String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`,
+  (match) => {
+    const verb = match[1];
+    const answers = match[2];
+    const run = match[3];
+    if (verb === undefined || answers === undefined || run === undefined) return undefined;
+    return { verb, answers: Number(answers), run: Number(run) };
+  },
+  ({ verb, answers, run }) => `${verb} answers=${answers} run=${run}`,
+  ({ verb }) => `atomaton:ended=${verb}`,
+);
+
+/**
+ * The claim of a turn: which run took up which ask, written when the run STARTS (#285).
+ *
+ * This is the identity the ending (`ENDED_TAG`) answers: `ask` is the comment id of
+ * the ask the run took up — a person's command, a dispatch marker, or the ending
+ * another run left as its directive — and `run` is the run id of the taker, the same
+ * value the run watch receives as `github.event.workflow_run.id`, so "did THIS run
+ * take a turn" and "does THIS run have an ending" are both reads of the thread and
+ * never a guess from times or titles.
+ *
+ * The claim is written by the runner at start, so the window between a comment
+ * landing and a run claiming it is visible as exactly that — unclaimed — rather
+ * than being folded into "some run is working". Two runs reaching for one ask are
+ * separated by the ids themselves: the claim comment with the smaller id holds the
+ * turn, and the other run backs off. `ask=0` is never written — a run with no ask
+ * comment (a new issue's body) writes no claim at all.
+ */
+export const TOOK_TAG = makeCompoundTag<{ ask: number; run: number }>(
+  "took",
+  String.raw`(\d+) run=(\d+)`,
+  (match) => {
+    const ask = match[1];
+    const run = match[2];
+    if (ask === undefined || run === undefined) return undefined;
+    return { ask: Number(ask), run: Number(run) };
+  },
+  ({ ask, run }) => `${ask} run=${run}`,
+  ({ ask }) => `atomaton:took=${ask}`,
+);
 
 // `PARENT_TAG` (`atomaton:parent`, sub-issue -> parent issue) was here. GitHub's own
 // sub-issue link answers the same question and a person can change it, while this was

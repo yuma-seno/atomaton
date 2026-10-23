@@ -66,6 +66,15 @@ export interface DispatchAgentArgs {
    */
   "answers-request"?: string;
   /**
+   * The ask comment id this dispatch's run should claim (#285), and what the
+   * answers-request check verifies the wait against.
+   *
+   * Required with `answers-request`: the person's command comment for validation,
+   * the hand-off comment the reload just wrote, the `waiting` ending that opened the
+   * pull request. A marker dispatch omits it and the marker it posts becomes the ask.
+   */
+  ask?: string;
+  /**
    * Whether the verdict this dispatch rides on judged the work `passed` — for
    * validation, of the verdict its check runs were written from.
    *
@@ -98,6 +107,7 @@ function main(): void {
       type: { type: "string" },
       notify: { type: "string" },
       repo: { type: "string" },
+      ask: { type: "string" },
       "answers-request": { type: "string" },
       "verdict-passed": { type: "string" },
       context: { type: "string" },
@@ -137,6 +147,10 @@ function main(): void {
     number,
     notify: values.notify ?? "",
     repo: (values.repo ?? "").trim() || undefined,
+    // The ask this dispatch's run should claim (#285). An answers-request dispatch
+    // requires one — `dispatchRunner` refuses without it — and a marker dispatch is
+    // content to let the marker it just posted be the ask.
+    ask: (values.ask ?? "").trim() || undefined,
     answersRequest: isTrue(values["answers-request"]),
     verdictPassed: values["verdict-passed"] === undefined ? undefined : isTrue(values["verdict-passed"]),
   });
