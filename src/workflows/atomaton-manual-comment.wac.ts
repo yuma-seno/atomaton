@@ -327,6 +327,10 @@ const prValidationStep = new TypedOutputsStep({
     GH_TOKEN: "${{ github.token }}",
     REPO: "${{ github.repository }}",
     NUMBER: targetStep.outputs.number,
+    // The person's command IS the ask (#285): the run validation eventually
+    // dispatches claims this comment, and the answers-request check verifies the
+    // CI wait against it.
+    ASK: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.id),
   },
   run: `BRANCH=$(gh pr view "$NUMBER" --repo "$REPO" --json headRefName --jq .headRefName)
 if [ -z "$BRANCH" ]; then
@@ -338,6 +342,7 @@ ${scriptCommandWithArgs(dispatchPrValidationRef, {
   number: "\${NUMBER}",
   branch: "\${BRANCH}",
   "asked-by-person": "true",
+  ask: "\${ASK}",
 })}
 `,
 });
@@ -422,6 +427,9 @@ export const atomaManualComment = new Workflow("atomaton-manual-comment", {
         "inherit",
         parseJob.outputs.session_mode,
         JobCondition.isNot(parseJob.rawOutputs.type, "pr"),
+        // The command this run consumes IS the ask (#285): the runner claims it at
+        // start, and the ending it writes names the same comment back.
+        "${{ github.event.comment.id }}",
       ),
     )
     .jobs(),

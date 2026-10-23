@@ -364,16 +364,19 @@ export function askSuperseded(
   agent: string,
   /** What the caller's own verdict said about the work; `undefined` when it supplies none. */
   verdictPassed?: boolean,
-): "handed-off" | "waiting" | "own-verdict" | "newer-open-ask" | undefined {
+): "run-coming" | "handed-off" | "waiting" | "own-verdict" | "newer-open-ask" | undefined {
   let answeredHere: "returned" | "handed-off" | "waiting" | undefined;
   let answeredBy = "";
   const answeredAsks = new Set<number>();
-  const asks: { id: number }[] = [];
+  const claimedAsks = new Set<number>();
+  const asks: { id: number; marker: boolean }[] = [];
   for (const entry of comments) {
     if (entry.quoted) continue;
     if (readers.requestedAgent(entry.body) !== "" || readers.isDispatchMarker(entry.body)) {
-      asks.push({ id: entry.id });
+      asks.push({ id: entry.id, marker: readers.isDispatchMarker(entry.body) });
     }
+    const claim = readers.claim(entry.body);
+    if (claim !== undefined) claimedAsks.add(claim.ask);
     const answer = readers.answeredAsk(entry.body);
     if (answer !== undefined && answer > 0) {
       answeredAsks.add(answer);
@@ -383,6 +386,15 @@ export function askSuperseded(
       }
     }
   }
+
+  // The quoted ask is the machinery's own unclaimed marker: the dispatch that posted
+  // it has a run on its way (per-node concurrency queues it, the runner claims it at
+  // start), and a second dispatch for the same ask would be a second run on one
+  // node. A CLAIMED marker does not land here — its run took the turn, and whether
+  // the dispatch is superseded is decided by the ask's answer below, which is what
+  // keeps the fix cycle (the engineer's claimed-and-answered marker) going.
+  const quoted = asks.find((ask) => ask.id === askId);
+  if (quoted?.marker === true && !claimedAsks.has(askId)) return "run-coming";
 
   if (answeredHere === "handed-off") return "handed-off";
   if (answeredHere === "waiting") return "waiting";

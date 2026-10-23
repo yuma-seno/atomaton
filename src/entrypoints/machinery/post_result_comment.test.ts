@@ -177,7 +177,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
       runUrl: "http://example.com/run/1",
       output: "",
     });
-    expect(body).toContain("<!-- atomaton:ended=done -->");
+    expect(body).toContain("<!-- atomaton:ended=done answers=0 run=0 -->");
   });
 
   test("omits the mention when a directive is present", () => {
@@ -518,7 +518,7 @@ describe("post_result_comment.ts main", () => {
       const posted = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
       expect(posted, "an empty completed run still leaves its ending comment").toContain("_run by");
       expect(posted).toContain("This run ended without saying anything.");
-      expect(posted).toContain("<!-- atomaton:ended=done -->");
+      expect(posted).toContain("<!-- atomaton:ended=done answers=0 run=0 -->");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -1093,7 +1093,7 @@ describe("the no-report notice for a run whose silence is its own", () => {
     // Not tagged as one to resume: the run was not interrupted, it ended
     // believing itself done. Resuming it would restart an agent with nothing
     // left to do; what it needs is the person the mention fetches.
-    expect(body).toContain("<!-- atomaton:ended=done -->");
+    expect(body).toContain("<!-- atomaton:ended=done answers=0 run=0 -->");
     expect(body).not.toContain("/resume");
     // No cut-short warning either: nothing ran out and nothing was stopped.
     expect(body).not.toContain("⚠️");

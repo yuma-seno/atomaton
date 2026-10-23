@@ -191,6 +191,12 @@ export const AGENT_ENV_NAMES: readonly string[] = [
   // declared secret shadowing it would let a tool server rewrite who the run
   // believes is waiting on it.
   "ATOMATON_DISPATCHED_BY",
+  // The ask this run claimed, and the run's own id — the pair the session-ending
+  // tools write onto their endings (#285). Shadowing either would aim a turn's
+  // close at a comment of the project's choosing, or misname the run that closed
+  // it: both are thread states the machinery acts on.
+  "ATOMATON_ASK_ID",
+  "GITHUB_RUN_ID",
   // Caches, because $HOME is read-only to the tool user.
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
@@ -214,7 +220,6 @@ export const AGENT_ENV_NAMES: readonly string[] = [
  * the generated `AGENT_ENV` and these are deliberately not in it.
  */
 const RUN_STEP_NAMES: readonly string[] = [
-  "GITHUB_RUN_ID",
   // One per provider, all of them the same shape since atoma v0.1.13: a declared
   // secret that shadowed one would move that provider's endpoint, which is a way
   // to send a credential somewhere else.

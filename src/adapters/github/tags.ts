@@ -111,7 +111,10 @@ function makeCompoundTag<T>(
 ): AtomatonTag<T> {
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
-  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  // The whole value is NOT captured — the value pattern's own groups are the fields,
+  // and a wrapping capture would shift every one of them by one. `parse` reads the
+  // field groups straight off the match.
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,

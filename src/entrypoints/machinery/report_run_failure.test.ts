@@ -37,7 +37,7 @@ describe("report_run_failure.ts", () => {
    * back to a person.
    */
   test("records that the turn ended, so a person can comment without the guard removing it", () => {
-    expect(failureNotice("engineer", "octocat", "u", "")).toContain(ENDED_TAG.write("done"));
+    expect(failureNotice("engineer", "octocat", "u", "")).toContain(ENDED_TAG.write({ verb: "done", answers: 0, run: 0 }));
   });
 
   /**

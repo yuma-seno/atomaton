@@ -112,25 +112,20 @@ export const atomaRunWatch = new Workflow("atomaton-run-watch", {
         // process environment, which no shell parses; the argv below reads the
         // variables back, and bash does not re-execute a variable's expansion.
         DISPLAY_TITLE: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.display_title),
-        RUN_STARTED_AT: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.run_started_at),
+        // The watched run's id — the value the runner wrote into its claim and its
+        // ending (#285). Both gates are comparisons against it, which is why it is
+        // an env value like the rest: a claim read off the thread names a run id,
+        // and the comparison is ids, not timestamps.
+        RUN_ID: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.id),
         RUN_URL: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.html_url),
         CONCLUSION: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.conclusion),
-        // The watched run's own trigger and conclusion — the two facts the title
-        // cannot answer about an entry run. `reconcile_run_ending` maps the event
-        // to whether that run could have consumed a person's command, and the
-        // conclusion to whether it may fall back to one: a run that ended
-        // `success` decided something — dispatched, or nothing to do — so only a
-        // run that died before any marker may claim a command as its ask.
-        RUN_EVENT: githubEvent<WorkflowRunCompletedEvent>((e) => e.workflow_run.event),
       },
       run: `${scriptCommandWithArgs(reconcileRunEndingRef, {
         "display-title": "\${DISPLAY_TITLE}",
-        "run-started-at": "\${RUN_STARTED_AT}",
+        "run-id": "\${RUN_ID}",
         "run-url": "\${RUN_URL}",
         conclusion: "\${CONCLUSION}",
-        "run-event": "\${RUN_EVENT}",
-      })}
-`,
+      })}\n`,
     }),
   ]),
 );

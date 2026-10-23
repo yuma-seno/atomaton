@@ -58,6 +58,7 @@ import { ref as manageDispatchLoopRef } from "../entrypoints/machinery/manage_di
 import { ref as decideTurnEndingRef } from "../entrypoints/machinery/decide_turn_ending.ts";
 import { ref as dispatchAgentRef } from "../entrypoints/machinery/dispatch_agent.ts";
 import { runCredentialEnv, secretNamesStep, secretSlotEnv } from "./actions/secret-slots.ts";
+import { ref as claimTurnRef } from "../entrypoints/machinery/claim_turn.ts";
 import { ref as reportRunFailureRef } from "../entrypoints/machinery/report_run_failure.ts";
 import { ref as reportConfigFindingsRef } from "../entrypoints/machinery/report_config_findings.ts";
 import { ref as writeCredentialsFileRef } from "../entrypoints/machinery/write_credentials_file.ts";
@@ -114,6 +115,10 @@ const RELOAD_COUNT_INPUT_DESC = "How many times this work has already rebuilt it
  * the started run cannot work this out for itself.
  */
 const DISPATCHED_BY_INPUT_DESC = "Agent that started this run, for the run to report back to (empty when a person or the machinery started it)";
+// #285: the ask comment id this run claims at start. Empty for a run whose ask is
+// the node's body (a new issue) — that run writes no claim, and the watch stays
+// silent on it, because the thread names no turn it took.
+const ASK_INPUT_DESC = "Ask comment id this run claims (atomaton:took); empty when the ask is the node's body";
 // The version this installs, the description of the input that overrides it, and the
 // two steps that install it live in `actions/atoma-cli.ts` -- along with the record of
 // what each raise of the pin was coupled to, which is the part worth not losing.
@@ -435,6 +440,7 @@ const validateInputsStep = new TypedOutputsStep({
     SESSION_MODE: "${{ inputs.session_mode }}",
     ATOMA_VERSION: "${{ inputs.atoma_version }}",
     NOTIFY: "${{ inputs.notify }}",
+    ASK: "${{ inputs.ask }}",
   },
   run: `reject() {
   echo "::error::atomaton-runner received an invalid \\\`$1\\\` input: '$2'. $3"
@@ -456,6 +462,9 @@ const validateInputsStep = new TypedOutputsStep({
 # May be empty: a run with nobody to notify is normal.
 [[ "$NOTIFY" =~ ^[A-Za-z0-9-]*$ ]] ||
   reject notify "$NOTIFY" "Expected a GitHub login, or empty."
+# May be empty: a run whose ask is the node's body has no comment to claim (#285).
+[[ "$ASK" =~ ^[0-9]*$ ]] ||
+  reject ask "$ASK" "Expected the ask comment's id, or empty."
 
 echo "Inputs validated: \${TYPE} #\${NUMBER}, agent=\${AGENT}, session_mode=\${SESSION_MODE}"
 `,
@@ -665,6 +674,42 @@ echo "the agent must be finished by $(date -u -d @\${DEADLINE} +%H:%M:%SZ)"
  * thing. `tools` is the destination — a credential declared for checks or for a
  * deployment reaches those workflows and never this one.
  */
+/**
+ * Claim the turn: the one comment that names which run took up which ask (#285).
+ *
+ * `claim_turn.ts` posts `atomaton:took=<ask> run=<run>` at start — the identity the
+ * run watch compares its gates against and the guard's shaping reads as the ball
+ * being with an agent. Per-node concurrency serialises two runs on one node, so the
+ * race check inside cannot itself race; a run that finds an older claim on its ask
+ * backs off, and every step that would take the turn is gated on that here.
+ *
+ * Before the branch steps, because the claim is about the THREAD, not the tree:
+ * nothing the branch steps decide changes who is taking the turn, and the sooner
+ * the claim is up, the smaller the window a person's comment sits unclaimed in.
+ * Unconditional on `new_event_count` — a resumed run with nothing new to read is
+ * still on the hook for an ending if it dies, and the watch can only say that from
+ * the claim.
+ */
+const claimTurnStep = new TypedOutputsStep(
+  {
+    name: "Claim the turn",
+    id: "claim",
+    shell: "bash",
+    env: {
+      GH_TOKEN: "${{ github.token }}",
+      NUMBER: "${{ inputs.number }}",
+      ASK: "${{ inputs.ask }}",
+      RUN_ID: "${{ github.run_id }}",
+    },
+    run: `${scriptCommandWithArgs(claimTurnRef, {
+      number: "\${NUMBER}",
+      ask: "\${ASK}",
+      "run-id": "\${RUN_ID}",
+    })}\n`,
+  },
+  ["claimed"] as const,
+);
+
 const toolSecretsStep = secretNamesStep();
 
 const installAtomaCli = installAtomaCliStep("${{ inputs.atoma_version }}");
@@ -762,7 +807,7 @@ const runAgentStep = new TypedOutputsStep(
   {
     name: "Run agent",
     id: "atoma",
-    if: `${buildContextStep.rawOutputs.new_event_count} != '0'`,
+    if: `${buildContextStep.rawOutputs.new_event_count} != '0' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     // Not "ignore the failure". The failure stays in `steps.atoma.outcome` --
     // `conclusion` is what turns success -- and every condition below reads the
     // outcome exactly as before. What this buys is that the failure reaches the
@@ -801,6 +846,11 @@ const runAgentStep = new TypedOutputsStep(
       // `process.env` a tool server reads to appear in AGENT_ENV, because a missing
       // one reads as zero and silently buys extra reloads.
       ATOMATON_RELOAD_COUNT: "${{ inputs.reload_count }}",
+      // The ask this run claimed (#285). Session-ending tools write it back onto
+      // their endings (`answers=`), which is what closes the ask the claim opened.
+      // Empty for a body-started run: `endingIdentity()` reads the absence as 0,
+      // which matches no comment id.
+      ATOMATON_ASK_ID: "${{ inputs.ask }}",
       NOTIFY: notifyStep.outputs.notify,
       // The agent that started this run, or empty when a person or the machinery
       // did. Read by the prompt layer so the run knows who to report back to.
@@ -826,7 +876,7 @@ export AGENT
 # Exported because the invocation below passes each one explicitly to \`env\`, and a
 # step's \`env:\` block is present in the shell's environment already -- this makes
 # the dependency visible rather than implicit.
-export GITHUB_RUN_ID NUMBER NOTIFY TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY
+export GITHUB_RUN_ID NUMBER NOTIFY TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY ATOMATON_ASK_ID
 
 # The tools file is written now, from the config, rather than shipped. See
 # \`scripts/write_tools_file.ts\` for what shipping a generated file cost.
@@ -900,6 +950,10 @@ AGENT_ENV=(
   TYPE="$TYPE"
   ATOMATON_RELOAD_COUNT="$ATOMATON_RELOAD_COUNT"
   ATOMATON_DISPATCHED_BY="$ATOMATON_DISPATCHED_BY"
+  ATOMATON_ASK_ID="\${ATOMATON_ASK_ID:-}"
+  # The run's own id, beside the ask: the tools write both onto their endings
+  # (#285), and the pair is what the watch compares.
+  GITHUB_RUN_ID="$GITHUB_RUN_ID"
   ATOMATON_OPS_LOG="$ATOMATON_OPS_LOG"
   # This run's own directory, and the URL for the run itself. The tools use the
   # first to record which comment ended the run's turn (ending-comment.ts, so
@@ -1222,7 +1276,7 @@ const postResultCommentStep = new TypedOutputsStep(
     // reuse of the ambiguous `directive` emptiness.
     name: "Post result comment",
     id: "post-result",
-    if: `${runAgentStep.rawOutcome} == 'success' && ${buildContextStep.rawOutputs.new_event_count} != '0'`,
+    if: `${runAgentStep.rawOutcome} == 'success' && ${buildContextStep.rawOutputs.new_event_count} != '0' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     shell: "bash",
     env: { GH_TOKEN: "${{ github.token }}" },
     run: `${scriptCommandWithArgs(postResultCommentRef, {
@@ -1271,6 +1325,10 @@ const postResultCommentStep = new TypedOutputsStep(
       // escaping and the ending check's counting are the same set because they are the
       // same file -- see lib/callees.ts.
       "people-file": `${RUN_DIR}/callees.json`,
+      // The turn's identity closing (#285): what this comment answers and which run
+      // answered it, the same ids the claim carried at start.
+      ask: "${{ inputs.ask }}",
+      "run-id": "${{ github.run_id }}",
     })}\n`,
   },
   ["comment_id"] as const,
@@ -1400,6 +1458,11 @@ const reportFailureStep = new TypedOutputsStep({
     AGENT: "${{ inputs.agent }}",
     NOTIFY: notifyStep.outputs.notify,
     RUN_URL: "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+    // The failure notice is the answer the ask gets, and it carries the ids so the
+    // ask reads as closed (#285) — the watch must not notify what this notice
+    // already told a person.
+    ASK: "${{ inputs.ask }}",
+    RUN_ID: "${{ github.run_id }}",
   },
   run: `${scriptCommandWithArgs(reportRunFailureRef, {
     number: "\${NUMBER}",
@@ -1408,6 +1471,8 @@ const reportFailureStep = new TypedOutputsStep({
     "run-url": "\${RUN_URL}",
     "logs-file": `${RUN_DIR}/atomaton_logs.txt`,
     "atoma-failed": "\${ATOMA_FAILED}",
+    ask: "\${ASK}",
+    "run-id": "\${RUN_ID}",
   })}\n`,
 });
 
@@ -1565,6 +1630,11 @@ const dispatchNextAgentStep = new TypedOutputsStep({
     type: "\${TYPE}",
     notify: "\${NOTIFY}",
     context: "the agent on \${TYPE} #\${NUMBER} handed off to \${DIRECTIVE}",
+    // The hand-off directive IS the ask the next run claims (#285): this run's own
+    // result comment carries it, and its id is what the claim names and the ending
+    // answers back. The marker the dispatch also posts stays the ordering check's
+    // instrument; the claim names the directive.
+    ask: postResultCommentStep.outputs.comment_id,
   })}
 `,
 });
@@ -1677,6 +1747,7 @@ echo "machinery moved to ${MACHINERY_ABS}; the work tree holds only the reposito
   // (tools.yaml spawns the atoma MCP servers via `bun run ...`) --
   // GitHub-hosted runners do not ship Bun preinstalled.
   new SetupBunAction({ name: "Setup Bun" }),
+  claimTurnStep,
   // The two branch steps sit after Bun and before everything that reads the
   // working tree: they run Atomaton's own scripts, and a later checkout would swap
   // the files under steps that already inspected them.
@@ -1968,7 +2039,7 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
     // added for no-op runs that will be skipped entirely
     // (new_event_count == '0').
     name: "Add atomaton/in-progress label",
-    if: `${buildContextStep.rawOutputs.new_event_count} != '0'`,
+    if: `${buildContextStep.rawOutputs.new_event_count} != '0' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
@@ -2260,6 +2331,7 @@ export const atomaRunner = new Workflow("atomaton-runner", {
         atoma_version: { description: ATOMA_VERSION_DESC, required: false, type: "string", default: ATOMA_DEFAULT_VERSION },
         reload_count: { description: RELOAD_COUNT_INPUT_DESC, required: false, type: "string", default: "0" },
         dispatched_by: { description: DISPATCHED_BY_INPUT_DESC, required: false, type: "string", default: "" },
+        ask: { description: ASK_INPUT_DESC, required: false, type: "string", default: "" },
       },
     },
     workflow_dispatch: {
@@ -2272,6 +2344,7 @@ export const atomaRunner = new Workflow("atomaton-runner", {
         atoma_version: { description: ATOMA_VERSION_DESC, required: false, type: "string", default: ATOMA_DEFAULT_VERSION },
         reload_count: { description: RELOAD_COUNT_INPUT_DESC, required: false, type: "string", default: "0" },
         dispatched_by: { description: DISPATCHED_BY_INPUT_DESC, required: false, type: "string", default: "" },
+        ask: { description: ASK_INPUT_DESC, required: false, type: "string", default: "" },
       },
     },
   } as unknown as GWT.Workflow["on"],
@@ -2305,6 +2378,14 @@ export interface AtomaRunnerInputs {
    * `RunnerDispatch.dispatchedBy`.
    */
   dispatched_by?: string;
+  /**
+   * The ask comment id this run claims at start (#285) — `claim_turn.ts` writes
+   * `atomaton:took=<ask> run=<run>` from it, and the ending the run eventually
+   * writes names the same ask back. Empty is the honest "the ask is the node's
+   * body, which is not a comment": that run writes no claim, and the run watch
+   * stays silent on it because the thread names no turn it took.
+   */
+  ask?: string;
 }
 
 /** Type-safe `workflow_call` invocation of this workflow from other `*.wac.ts` files. */
@@ -2345,6 +2426,16 @@ export function dispatchToAtomaRunner<TOutputs extends Record<"agent" | "number"
    * same mistake is now a compile error rather than a dead workflow.
    */
   extraIf?: JobCondition,
+  /**
+   * The ask comment id the started run should claim (#285), as a raw expression.
+   *
+   * It rides as a `with:` value rather than a route-job output because it usually
+   * comes from the EVENT — a person's command is `github.event.comment.id`, which
+   * the route job never resolves. A caller that does not pass it starts a run that
+   * writes no claim, which is the shape of the body-started paths and of every
+   * caller that has not been given an ask to name.
+   */
+  ask?: string,
 ): ReturnType<typeof atomaRunnerWorkflow.call> {
   const condition = JobCondition.isNot(routeJob.rawOutputs.agent, "");
   return atomaRunnerWorkflow.call("run", {
@@ -2356,6 +2447,7 @@ export function dispatchToAtomaRunner<TOutputs extends Record<"agent" | "number"
       type: routeJob.outputs.type,
       notify: routeJob.outputs.notify,
       session_mode: sessionMode,
+      ask: ask ?? "",
     },
     secrets,
   });

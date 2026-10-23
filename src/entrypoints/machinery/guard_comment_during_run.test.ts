@@ -10,6 +10,13 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
  * reintroduced body read either answers harmlessly or is caught by the assertions; the
  * fold itself is tested in `domain/work/thread.test.ts`.
  */
+/**
+ * A thread whose ball is with an agent, in the #285 wire: a claim is open. The old
+ * fixture was a bare `/engineer` command, whose last event read `asked` — the event
+ * rule the guard no longer uses. An unclaimed command is a run that has not started,
+ * and the guard keeps a person's comment there.
+ */
+const OPEN_CLAIM = "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=55 run=7 -->";
 const thread = (body: string, comments: string[]) => [
   { match: ["api", "/issues/9", "--jq"], stdout: body },
   { match: ["api", "/issues/9/comments"], stdout: JSON.stringify(comments.map((b, i) => ({ id: 100 + i, body: b }))) },
@@ -65,7 +72,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...thread("", ["/engineer"]),
+            ...thread("", ["/engineer", OPEN_CLAIM]),
             readBack(123, "my careful note"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
@@ -119,7 +126,7 @@ describe("guard_comment_during_run.ts", () => {
         {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
-          rules: thread("", ["/engineer"]),
+          rules: thread("", ["/engineer", OPEN_CLAIM]),
         },
       );
       expect(r.status).toBe(0);
@@ -174,23 +181,24 @@ describe("guard_comment_during_run.ts", () => {
     try {
       const r = runWithFakeGh(
         scriptPath("guard_comment_during_run.ts"),
-        ["--number", "9", "--comment-id", "101", "--commenter", "octocat"],
+        ["--number", "9", "--comment-id", "102", "--commenter", "octocat"],
         {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
             ...threadAs([
               ["/engineer", true],
+              [OPEN_CLAIM, false],
               ["just a remark", true],
             ]),
-            readBack(101, "just a remark"),
+            readBack(102, "just a remark"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
           ],
         },
       );
       expect(r.status).toBe(0);
-      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/101"))).toBe(true);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/102"))).toBe(true);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
@@ -318,23 +326,24 @@ describe("guard_comment_during_run.ts", () => {
     try {
       const r = runWithFakeGh(
         scriptPath("guard_comment_during_run.ts"),
-        ["--number", "9", "--comment-id", "101", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
         {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...threadAs([["/engineer", true]]),
-            readBack(101, "/engineer\n/reviewer"),
+            ...threadAs([["/engineer", true], [OPEN_CLAIM, false]]),
+            readBack(123, "/engineer\n/reviewer"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
           ],
         },
       );
       expect(r.status).toBe(0);
-      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/101"))).toBe(true);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/123"))).toBe(true);
       const notice = noticeOf(r.ghCalls);
       expect(notice).toContain("more than one command");
-      expect(notice).toContain("The ball is also with an agent");
+      expect(notice).toContain("atomaton:quotes=123");
+      expect(notice).toContain("A run also holds the turn");
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
@@ -377,7 +386,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...thread("", ["/engineer"]),
+            ...thread("", ["/engineer", OPEN_CLAIM]),
             readBack(123, "my careful note"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
@@ -428,7 +437,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...thread("", ["/engineer"]),
+            ...thread("", ["/engineer", OPEN_CLAIM]),
             readBack(123, "my careful note"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
@@ -460,7 +469,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...thread("", ["/engineer"]),
+            ...thread("", ["/engineer", OPEN_CLAIM]),
             readBack(123, "look:\n\n```\nsome code\n```\n\ndone"),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
@@ -490,7 +499,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...thread("", ["/engineer"]),
+            ...thread("", ["/engineer", OPEN_CLAIM]),
             readBack(123, "", 1),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },
@@ -520,7 +529,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...thread("", ["/engineer"]),
+            ...thread("", ["/engineer", OPEN_CLAIM]),
             readBack(123, "my careful note"),
             { match: ["api", "DELETE"], code: 1 },
             { match: ["issue", "comment"] },
@@ -551,7 +560,7 @@ describe("guard_comment_during_run.ts", () => {
           cwd: configDir,
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
-            ...thread("", ["/engineer"]),
+            ...thread("", ["/engineer", OPEN_CLAIM]),
             readBack(123, "x".repeat(30_001)),
             { match: ["api", "DELETE"] },
             { match: ["issue", "comment"] },

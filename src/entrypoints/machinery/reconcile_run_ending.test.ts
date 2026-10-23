@@ -5,38 +5,57 @@ import { runWithFakeGh, scriptPath, makeConfigDir, removeTemp } from "./testing/
  * The run watch's reconciliation, asked of the script the workflow actually runs,
  * with the fake `gh` answering. The pure judgement lives in
  * `domain/work/run-report.test.ts`; what is pinned here is the FLOW — that the
- * gates come before the reads, that a notice carries the turn tags, and that the
- * label follows the rule the thread states.
+ * gates come before the reads, that a notice carries the turn tags AND closes the
+ * ask it reports (#285: the notice is the ending), and that the label follows the
+ * rule the thread states.
+ *
+ * #285 replaced the two time-based gates with one identity rule: the watched run's
+ * id is compared against the claims (`atomaton:took`) and the endings
+ * (`atomaton:ended`) the thread carries. A run that claimed an ask and left no
+ * ending with its own id on the thread is the notice; everything else is silence.
  */
 
 const REPO = "o/r";
-const START = "2026-10-22T10:00:00Z";
 const AGENT = "engineer";
 const NUMBER = 7;
 const RUN_URL = "https://github.com/o/r/actions/runs/123";
+/** The watched run's id — `github.event.workflow_run.id` in the workflow. */
+const RUN_ID = 424242;
+/** The ask the watched run claimed. */
+const ASK = 55;
 
 /** The arguments the workflow passes, as the step builds them. */
 function argv(overrides: Record<string, string> = {}): string[] {
   return [
     "--display-title", overrides["display-title"] ?? `${AGENT} on #${NUMBER}`,
-    "--run-started-at", overrides["run-started-at"] ?? START,
+    "--run-id", overrides["run-id"] ?? String(RUN_ID),
     "--run-url", overrides["run-url"] ?? RUN_URL,
     ...(overrides.conclusion === undefined ? [] : ["--conclusion", overrides.conclusion]),
-    ...(overrides["run-event"] === undefined ? [] : ["--run-event", overrides["run-event"]]),
   ];
 }
 
 /** A comment as the Issues API returns it. */
-function apiComment(body: string, createdAt: string, isHuman = false): Record<string, unknown> {
-  return { body, created_at: createdAt, user: { type: isHuman ? "User" : "Bot" } };
+function apiComment(body: string, id?: number): Record<string, unknown> {
+  return { id, body, user: { type: "Bot" } };
 }
 
-const BEFORE = "2026-10-20T09:00:00Z";
-const DURING = "2026-10-22T11:00:00Z";
-const AFTER = "2026-10-23T09:00:00Z";
+/** The claim the watched run's runner wrote at start (#285). */
+function claim(ask = ASK, run = RUN_ID): string {
+  return `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->`;
+}
 
-/** The dispatch marker the machinery posts when it is about to start a run. */
-const MARKER = "<!-- atomaton:dispatch=engineer -->";
+/** An ending in the #285 wire format. */
+function ending(verb: string, answers: number, run: number, agent?: string): string {
+  return [
+    ...(agent ? [`<!-- atomaton:agent=${agent} -->`] : []),
+    `<!-- atomaton:ended=${verb} answers=${answers} run=${run} -->`,
+  ].join("\n");
+}
+
+/** A person's command as the Issues API returns it. */
+function command(body: string, id?: number): Record<string, unknown> {
+  return { id, body, user: { type: "User" } };
+}
 
 function configDir(): string {
   // The label's name read from a config this test wrote, not from whichever
@@ -56,7 +75,7 @@ function rulesFor(opts: { comments?: Record<string, unknown>[]; commentsStdout?:
     // read, which asks for the bodies alone and only fires on the notice path.
     {
       match: ["api", `repos/${REPO}/issues/${NUMBER}/comments`, "--jq"],
-      stdout: JSON.stringify([MARKER, "/engineer continue here"]),
+      stdout: JSON.stringify(["<!-- atomaton:agent=engineer -->", "/engineer continue here"]),
     },
     {
       match: ["api", `repos/${REPO}/issues/${NUMBER}/comments`],
@@ -85,23 +104,26 @@ function postedNotice(result: ReturnType<typeof runWithFakeGh>): string | undefi
 
 describe("reconcile_run_ending.ts", () => {
   test("a run that posted its ending leaves the thread alone", () => {
-    const comments = [apiComment("<!-- atomaton:ended=done -->\nDone.", AFTER)];
+    const comments = [apiComment(claim()), apiComment(ending("done", ASK, RUN_ID, AGENT))];
     const r = run(argv(), rulesFor({ comments }));
     expect(r.status).toBe(0);
     expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
 
-  test("a run that left no ending gets the notice, and the label the run left comes off", () => {
-    // The thread as a jammed node has it: an earlier turn's ending (`done`, before
-    // this run started), this run's dispatch, and nothing since — the label is the
-    // dead run's leftover, and the ending predates the run, so it cannot excuse it.
-    const comments = [apiComment("<!-- atomaton:ended=done -->\nDone.", BEFORE), apiComment("just a remark", "2026-10-21T09:00:00Z")];
+  test("a run that claimed and left no ending gets the notice — and the notice IS the ending", () => {
+    // The thread as a dead run leaves it: its claim, an older turn's ending, and
+    // nothing answering the claim. The notice carries `answers=<claimed ask>
+    // run=<watch>` — it closes the ask it reports, which is what makes it a
+    // once-per-ask event (#252's residue) — and the subject is the ASK, not the
+    // run: what a reader needs is that the request went unanswered.
+    const comments = [apiComment(ending("done", 41, 9, "engineer")), apiComment(claim())];
     const r = run(argv(), rulesFor({ comments }));
     expect(r.status).toBe(0);
 
     const body = postedNotice(r);
-    expect(body).toContain("atomaton:ended=done");
+    expect(body).toContain(`atomaton:ended=done answers=${ASK} run=${RUN_ID}`);
     expect(body).toContain("atomaton:llm-context=exclude");
+    expect(body).toContain("no answer was posted for it");
     expect(body).toContain(AGENT);
     expect(body).toContain(RUN_URL);
     // The two ways forward, and none of the claim the deaths this covers cannot
@@ -113,20 +135,34 @@ describe("reconcile_run_ending.ts", () => {
     expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(true);
   });
 
+  test("the healed thread stays silent: a second watch for the same run posts nothing", () => {
+    // The notice above is on the thread now, carrying the answer to the claim's
+    // ask. The watch firing again — the run's own re-run, another watch's pass —
+    // reads the ask as answered and says nothing, which is the "exactly once" of
+    // #252's acceptance.
+    const comments = [apiComment(claim()), apiComment(ending("done", ASK, 9)) ];
+    const r = run(argv(), rulesFor({ comments }));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
+  });
+
   test("a waiting ending still releases the label; a hand-off keeps it", () => {
-    const waiting = [apiComment("<!-- atomaton:ended=waiting -->", BEFORE)];
+    // The label follows the turn the thread had BEFORE the dead run took the ball:
+    // the last ending that is not the notice's own.
+    const waiting = [apiComment(ending("waiting", 41, 9)), apiComment(claim())];
     const rWaiting = run(argv(), rulesFor({ comments: waiting }));
     expect(rWaiting.status).toBe(0);
+    expect(postedNotice(rWaiting)).toBeDefined();
     expect(rWaiting.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(true);
 
-    const handoff = [apiComment("<!-- atomaton:ended=handoff -->", BEFORE)];
+    const handoff = [apiComment(ending("handoff", 41, 9)), apiComment(claim())];
     const rHandoff = run(argv(), rulesFor({ comments: handoff }));
     expect(rHandoff.status).toBe(0);
     expect(rHandoff.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
   });
 
   test("the label is left alone when the issue carries none", () => {
-    const r = run(argv(), rulesFor({ comments: [apiComment("remark", BEFORE)], labels: LABELS_OFF }));
+    const r = run(argv(), rulesFor({ comments: [apiComment(claim())], labels: LABELS_OFF }));
     expect(r.status).toBe(0);
     expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
   });
@@ -134,9 +170,10 @@ describe("reconcile_run_ending.ts", () => {
   test("a thread past one page still names its ending", () => {
     // What `gh api --paginate` writes past one page: one array per page, back to
     // back, and the ending only on the second.
-    const stdout = JSON.stringify([apiComment("early remark", BEFORE)]) + JSON.stringify([
-      apiComment("later remark", "2026-10-24T09:00:00Z"),
-      apiComment("<!-- atomaton:ended=done -->\nDone.", AFTER),
+    const stdout = JSON.stringify([apiComment("early remark")]) + JSON.stringify([
+      apiComment("later remark"),
+      apiComment(claim()),
+      apiComment(ending("done", ASK, RUN_ID)),
     ]);
     const r = run(argv(), rulesFor({ commentsStdout: stdout }));
     expect(r.status).toBe(0);
@@ -151,138 +188,71 @@ describe("reconcile_run_ending.ts", () => {
     }
   });
 
-  test("an entry run that dispatched inside its own lifetime gets the notice, naming the thread's agent", () => {
-    // The entry path: the title carries the node alone, and the marker the
-    // machinery posted during the run is the proof it took the turn. The entry
-    // run here is one a NEW ISSUE started (`run-event: issues`) that ended
-    // `success` — which also pins that the marker branch of the gate is gated
-    // on neither flag: a successful run that dispatched is answered by its
-    // marker. The ending from the turn BEFORE is what answers the label rule —
-    // a thread with no readable ending keeps its label.
-    const comments = [
-      apiComment("<!-- atomaton:ended=done -->\nDone.", BEFORE),
-      apiComment(MARKER, AFTER),
-    ];
-    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issues", conclusion: "success" }), rulesFor({ comments }));
+  test("a run id that cannot be read stays silent — the comparison has nothing to compare", () => {
+    const r = run(argv({ "run-id": "" }), rulesFor({ comments: [apiComment(claim())] }));
     expect(r.status).toBe(0);
-    const body = postedNotice(r);
-    expect(body).toContain("atomaton:ended=done");
-    expect(body).toContain(AGENT);
-    expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(true);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
 
-  test("an entry run that died before any marker still gets the notice, off the person's command", () => {
-    // The command's own run (started by that comment, `run-event:
-    // issue_comment`), dead between the parse and the dispatch: the command —
-    // written before the run started, because it is what started it — is the
-    // thread's only record that a run was asked for. GitHub reports the death
-    // as `cancelled`; anything but `success` opens the fallback.
-    const command = apiComment("/engineer\nfix the flake please", BEFORE, true);
-    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issue_comment", conclusion: "cancelled" }), rulesFor({ comments: [command] }));
+  test("an entry run that never claimed stays silent, whatever its conclusion", () => {
+    // The body of a new issue is the ask of the run it starts, and the body is not
+    // a comment: no claim can name it, so the run took no turn the thread can
+    // name. The old gate estimated this from the run's event and conclusion
+    // (#281's two measurements both lived there); the identity rule answers it
+    // without either — a run with no claim is silent, success or cancelled.
+    for (const conclusion of ["success", "cancelled", "(absent)"]) {
+      const r = run(
+        argv({ "display-title": `#${NUMBER}`, ...(conclusion === "(absent)" ? {} : { conclusion }) }),
+        rulesFor({ comments: [command("/engineer fix the flake", 55)] }),
+      );
+      expect(r.status, conclusion).toBe(0);
+      expect(r.ghCalls.filter((call) => call.includes("comment"))).toEqual([]);
+    }
+  });
+
+  test("the command's own run — it claimed the command — gets the notice when it dies", () => {
+    // The manual-comment path: the command IS the ask, the runner claimed it at
+    // start, and a death before the report leaves the claim open. The watch fires
+    // for that run's completion and closes the ask with the notice.
+    const comments = [command("/engineer\nfix the flake please", 55), apiComment(claim())];
+    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments }));
     expect(r.status).toBe(0);
-    expect(postedNotice(r)).toContain(AGENT);
+    expect(postedNotice(r)).toContain("no answer was posted for it");
   });
 
-  test("an entry run a new issue started never claims a person's command — the command is the run it started's ask (#281, first)", () => {
-    // The incident, both directions of the same thread. The entry run
-    // (`issues: opened`) completed `success` while the command's own run was
-    // still working; before the fix it claimed the command and posted the
-    // notice beside a live run. The event that started the run is what
-    // separates the two watches below — the passing of `--run-event` is the
-    // point of the test.
-    const command = apiComment("/atomaton\nplease look", DURING, true);
-    const issueRun = run(
-      argv({ "display-title": `#${NUMBER}`, "run-event": "issues", conclusion: "success" }),
-      rulesFor({ comments: [command] }),
-    );
-    expect(issueRun.status).toBe(0);
-    expect(issueRun.ghCalls.filter((call) => call.includes("comment"))).toEqual([]);
-
-    // The same thread watched for the command's OWN run — which started after
-    // the command — still gets the notice when that run dies without one.
-    const commandRun = run(
-      argv({ "display-title": `#${NUMBER}`, "run-started-at": AFTER, "run-event": "issue_comment", conclusion: "cancelled" }),
-      rulesFor({ comments: [command] }),
-    );
-    expect(commandRun.status).toBe(0);
-    expect(postedNotice(commandRun)).toBeDefined();
-  });
-
-  test("a command-consuming run that ended success stays silent on the command it never consumed (#281, second)", () => {
-    // The second measurement, the same thread watched twice. A plan comment
-    // started run A (`issue_comment`); the person's command landed one second
-    // later and started run B. Run A decided at parse that nothing was to
-    // dispatch and ended `success` — carrying its own judgment through — yet
-    // its watch still found the command as the thread's newest ask, written
-    // before run A started, and posted the notice with run A's URL while run B
-    // was working. The conclusion is what separates the two watches: the same
-    // thread, watched for run B — started after the command, dead `cancelled`
-    // before any marker — still gets the notice.
-    const command = apiComment("/atomaton\nplease look", BEFORE, true);
-    const silent = run(
-      argv({ "display-title": `#${NUMBER}`, "run-event": "issue_comment", conclusion: "success" }),
-      rulesFor({ comments: [command] }),
-    );
-    expect(silent.status).toBe(0);
-    expect(silent.ghCalls.filter((call) => call.includes("comment"))).toEqual([]);
-
-    const notice = run(
-      argv({ "display-title": `#${NUMBER}`, "run-started-at": AFTER, "run-event": "issue_comment", conclusion: "cancelled" }),
-      rulesFor({ comments: [command] }),
-    );
-    expect(notice.status).toBe(0);
-    expect(postedNotice(notice)).toBeDefined();
-  });
-
-  test("a command written during a cancelled run is the next run's ask, not this run's", () => {
-    // The time condition at the script level: the command arrived while the run
-    // was going, so it started the run that follows, and this run's death —
-    // even a `cancelled` one, the shape the fallback exists for — must not
-    // claim it.
-    const command = apiComment("/engineer\nalso this", DURING, true);
-    const r = run(
-      argv({ "display-title": `#${NUMBER}`, "run-event": "issue_comment", conclusion: "cancelled" }),
-      rulesFor({ comments: [command] }),
-    );
+  test("a run that claimed no ask stays silent — another run's claim is not its doing", () => {
+    // The guard-only completion: a run whose own claim never went out (its ask was
+    // the body, or it backed off the claim race) completes beside ANOTHER run's
+    // open claim. The identity comparison names the claims by run id, so the
+    // notice goes only to the run that claimed — the mix-up #281 measured twice
+    // is not available to this gate.
+    const r = run(argv(), rulesFor({ comments: [apiComment(claim(ASK, 999999)) ] }));
     expect(r.status).toBe(0);
-    expect(r.ghCalls.filter((call) => call.includes("comment"))).toEqual([]);
+    expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
 
-  test("a watch run whose conclusion never arrived stays silent", () => {
-    // The workflow always passes `--conclusion`, so an absent one answers a
-    // caller from before the field existed — and an unreadable fact lands on
-    // silence, the direction every unreadable input here takes.
-    const command = apiComment("/engineer\nfix the flake please", BEFORE, true);
-    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issue_comment" }), rulesFor({ comments: [command] }));
-    expect(r.status).toBe(0);
-    expect(r.ghCalls.filter((call) => call.includes("comment"))).toEqual([]);
-  });
-
-  test("an entry run that took no turn stays silent — a notice there would unjam a LIVE run", () => {
-    // The guard-only completion: a person's remark raced a run in flight, the
-    // guard removed it, and this run completed `cancelled`. The thread's marker
-    // is an OLDER run's — posting here would hand the turn back while that run
-    // still holds it.
-    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issue_comment", conclusion: "cancelled" }), rulesFor({ comments: [apiComment(MARKER, BEFORE)] }));
+  test("a backed-off run's green completion is silence", () => {
+    // The claim race's loser: it posted a claim, found an older one, took it back,
+    // and ended having taken no turn. No claim, no ending — silence, which is what
+    // losing a race looks like.
+    const r = run(argv(), rulesFor({ comments: [] }));
     expect(r.status).toBe(0);
     expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
 
   test("a manual-comment run on a pull request keeps the workflow's name and stays silent", () => {
-    // The second reviewer finding: `issue_comment` fires for pull requests too, and
-    // a PR command dispatches validation instead of calling the runner — the run
+    // A PR command dispatches validation instead of calling the runner — the run
     // completes without ever taking the turn. Its run-name is the workflow's own
     // name (the PR case of the expression), which no title shape reads as a node,
     // so the watch does nothing — not even the read. The PR chain is watched
     // through the runner run validation eventually starts.
-    const command = apiComment("/reviewer ship it", BEFORE, true);
-    const r = run(argv({ "display-title": "Atomaton Manual Comment" }), rulesFor({ comments: [command] }));
+    const r = run(argv({ "display-title": "Atomaton Manual Comment" }), rulesFor({ comments: [command("/reviewer ship it")] }));
     expect(r.status).toBe(0);
     expect(r.ghCalls).toEqual([]);
   });
 
   test("an entry run over an untouched thread stays silent", () => {
-    const r = run(argv({ "display-title": `#${NUMBER}`, "run-event": "issues" }), rulesFor({ comments: [apiComment("just a remark", AFTER, true)] }));
+    const r = run(argv({ "display-title": `#${NUMBER}` }), rulesFor({ comments: [command("just a remark")] }));
     expect(r.status).toBe(0);
     expect(r.ghCalls.filter((argv) => argv.includes("comment"))).toEqual([]);
   });
@@ -301,13 +271,12 @@ describe("reconcile_run_ending.ts", () => {
         "<details><summary>Your comment, as you wrote it</summary>",
         "",
         "```",
-        "<!-- atomaton:ended=done -->",
+        "<!-- atomaton:ended=done answers=0 run=0 -->",
         "```",
         "</details>",
       ].join("\n"),
-      AFTER,
     );
-    const r = run(argv(), rulesFor({ comments: [quotation] }));
+    const r = run(argv(), rulesFor({ comments: [apiComment(claim()), quotation] }));
     expect(r.status).toBe(0);
     expect(postedNotice(r)).toBeDefined();
   });
@@ -324,7 +293,7 @@ describe("reconcile_run_ending.ts", () => {
   });
 
   test("a comment GitHub refuses fails the watch: the red run is the signal", () => {
-    const r = run(argv(), rulesFor({ comments: [apiComment("remark", BEFORE)], postCode: 1 }));
+    const r = run(argv(), rulesFor({ comments: [apiComment(claim())], postCode: 1 }));
     expect(r.status).toBe(1);
     expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
   });

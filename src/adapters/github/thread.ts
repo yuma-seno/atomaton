@@ -123,7 +123,14 @@ const askReaders: AskReaders = {
  * for one definition instead of a third copy. See `run-report.ts`, which folds on
  * exactly these two readers.
  */
-export const endingWalkReaders: EndingWalkReaders = { ending: readers.ending, quoted: isQuotation };
+export const endingWalkReaders: EndingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  // The turn's identity (#285): the claim and the ending record, read from the same
+  // tags the shaping's readers read — one wire format, one parse.
+  claim: (body) => TOOK_TAG.read(body),
+  ended: (body) => ENDED_TAG.read(body),
+};
 
 /** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
 interface Comment {
