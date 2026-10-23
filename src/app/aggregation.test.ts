@@ -101,11 +101,14 @@ const DISPATCH_MARKER: FakeGhRule[] = [
   { match: ["api", "issues/5/comments", "--paginate"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
 ];
 
-// The parent's own thread, read by `mostRecentAgentOn` to name the agent to re-invoke.
-// `--jq "[.[].body]"` asks for bodies as strings, so this answers with a string array
-// -- the dispatch-marker read above answers with comment objects, and the two must not
-// be confused. Matched on the exact `[.[].body]` element, which the aggregation marker
-// read's `.[].body` (no leading bracket) does not contain.
+// The parent's own thread, read by `mostRecentAgentOn` to name the agent to re-invoke --
+// and, since #304's gate change, read by the aggregation marker check through the same
+// call shape (`--jq '[.[].body]'`): two readers, one endpoint, one body list. Where a
+// test lists this rule first, it answers BOTH reads, so the list must serve both: a
+// dispatch marker for the agent read, and (absence of) the aggregated marker for the
+// gate. A test that needs the two reads answered differently puts its own rule first --
+// the marker check runs before the agent read, so an early rule only the marker read
+// can out-race is not possible; give the list what each reader must see.
 //
 // Listed FIRST, because `DISPATCH_MARKER`'s second rule matches the same path and would
 // otherwise answer this read with objects.
@@ -114,15 +117,18 @@ const PARENT_AGENT: FakeGhRule = {
   stdout: JSON.stringify(["<!-- atomaton:dispatch=atomaton -->"]),
 };
 
-// The aggregation marker read is `gh api .../comments --paginate --jq '.[].body'`, so
-// the fake answers with a JSON array of bodies rather than the `gh issue view` shape.
+// The aggregation marker read is `gh api .../comments --paginate --jq '[.[].body]'` --
+// the same read shape `mostRecentAgentOn` makes on the same endpoint, so where both
+// reads happen in one test the FIRST matching rule answers both, and the body list it
+// returns has to serve both readers: the marker read wants an `atomaton:aggregated`
+// marker in prose, the agent read wants an `atomaton:agent` or a dispatch marker.
 //
 // Matched on `--paginate` AND the jq expression, and not on the path alone. The marker
 // WRITE goes to the same path, so a rule keyed on `["api", "comments", "--jq"]` answers
 // the write too — and did: it returned the read's body as the new comment's id, which
 // made the take-back delete a comment that does not exist while the tests still passed.
 const NO_MARKER: FakeGhRule = {
-  match: ["api", "comments", "--paginate", ".[].body"],
+  match: ["api", "comments", "--paginate", "[.[].body]"],
   stdout: JSON.stringify(["some unrelated comment"]),
 };
 
@@ -199,6 +205,42 @@ describe("aggregation.ts dispatch gate", () => {
     ]);
     expect(kind).toBe("already-aggregated");
     expect(dispatched(ghCalls)).toBe(false);
+  });
+
+  /**
+   * #304, at the gate. The marker read used to test `commentsOut.includes(marker)`
+   * over the raw bodies, so a comment quoting the marker inside a fenced sample --
+   * which is exactly how this tracker documents the format -- answered
+   * `already-aggregated`: no dispatch, no notice, and nobody told. The read is
+   * per-body prose now, so a quoted sample claims nothing and the gate still runs.
+   */
+  test("a marker quoted in a fenced sample does not stop the aggregation", () => {
+    const { kind, ghCalls } = runGate([
+      ...NO_SIBLINGS,
+      { match: ["api", "comments", "--paginate", "[.[].body]"], stdout: JSON.stringify([
+        ["For the record, the marker looks like:", "```html", "<!-- atomaton:aggregated=10 -->", "```"].join("\n"),
+        "<!-- atomaton:dispatch=atomaton -->",
+      ]) },
+      ...DISPATCH_MARKER,
+      AGGREGATION_MARKER_POST,
+      DISPATCH_WORKS,
+      PARENT_IS_OPEN,
+    ]);
+    expect(kind).toBe("dispatched");
+    expect(wroteMarker(ghCalls)).toBe(true);
+  });
+
+  // The complement, in the same thread shape: a marker in PROSE is the machinery's
+  // own record and must still be honoured. If the fence rule ever grew into
+  // ignoring markers wholesale, this is the test that catches it.
+  test("a marker written in prose still makes this one a no-op", () => {
+    const { kind } = runGate([
+      ...NO_SIBLINGS,
+      { match: ["api", "comments", "--paginate", "[.[].body]"], stdout: JSON.stringify([
+        "<!-- atomaton:aggregated=10 -->\nAtomaton: All sub-tasks completed (last: #10). Re-invoking the parent's agent for aggregation.",
+      ]) },
+    ]);
+    expect(kind).toBe("already-aggregated");
   });
 
   // The defect this issue was filed for. The marker IS the idempotency claim, so
