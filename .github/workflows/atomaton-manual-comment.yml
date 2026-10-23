@@ -96,6 +96,7 @@ jobs:
           NUMBER: ${{ github.event.issue.number }}
           COMMENT_ID: ${{ github.event.comment.id }}
           COMMENTER: ${{ github.event.comment.user.login }}
+          ATOMATON_COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/request_stop.ts" --number "${NUMBER}" --comment-id "${COMMENT_ID}" --commenter "${COMMENTER}"
         if: steps.command.outputs.control == 'stop'

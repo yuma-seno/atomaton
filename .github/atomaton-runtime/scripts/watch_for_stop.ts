@@ -71,8 +71,40 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
-function isQuotation(body) {
-  return QUOTES_TAG.has(body);
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
+}
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
+      if (opens) {
+        if (current.text)
+          segments.push(current);
+        open = { char: fence[1][0], length: fence[1].length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+  if (current.text)
+    segments.push(current);
+  return segments;
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -105,9 +137,7 @@ var ref = defineScript(import.meta.url);
 var DEFAULT_INTERVAL_SECONDS = 30;
 function stopRequested(comments, since) {
   return comments.some((c) => {
-    if (isQuotation(c.body ?? ""))
-      return false;
-    if (!STOP_TAG.has(c.body ?? ""))
+    if (!STOP_TAG.has(proseOnly(c.body ?? "")))
       return false;
     const at = c.created_at ? Date.parse(c.created_at) : NaN;
     return Number.isNaN(at) || at > since.getTime();
