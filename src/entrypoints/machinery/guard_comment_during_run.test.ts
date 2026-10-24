@@ -304,6 +304,41 @@ describe("guard_comment_during_run.ts", () => {
     }
   });
 
+  // #208, 案1: a parked node holds the turn too, and the notice names the resume
+  // moment — "the agents working under it" — rather than a run the person would
+  // wait for in vain.
+  test("a comment on a parked node is removed, and the notice names the resume moment", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const body = "one more thing while the children run";
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "102", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([
+              ["<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=55 run=7 -->", false],
+              ["<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=waiting answers=55 run=7 -->", false],
+              [body, true],
+            ]),
+            readBack(102, body),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/102"))).toBe(true);
+      const notice = noticeOf(r.ghCalls);
+      expect(notice).toContain("parked the turn on the agents working under it");
+      expect(notice).toContain("once the parent has picked the work back up");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   // The parse step does not run for somebody who is not a repository member, so their
   // comment is never dispatched: deleting it and saying "it would have started the
   // first" would be a lie about a comment nobody was going to read.

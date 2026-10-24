@@ -2380,7 +2380,10 @@ describe("mcp/atomaton.ts", () => {
       const body = parentComment?.join(" ") ?? "";
       expect(body).toContain("Launched sub-agent(s)");
       expect(await readers.ending(body)).toBe("waiting");
-      expect(await whoseTurn(turnEvents(["/atomaton", body], readers))).toBe("person");
+      // The parked turn stays with the machinery (#208, 案1): a person's comment made
+      // while the children run is an interruption the guard removes, not a turn the
+      // person holds.
+      expect(await whoseTurn(turnEvents(["/atomaton", body], readers))).toBe("agent");
     } finally {
       removeTemp(dir);
     }

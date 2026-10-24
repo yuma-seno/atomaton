@@ -59,6 +59,12 @@ export interface DecideTurnEndingArgs {
    * filed as a success — which is the state this argument exists to end.
    */
   reported?: string;
+  /**
+   * Whether the run PARKED its turn on work under this node (#208), read from the
+   * ops log's `dispatch-elsewhere` entry by the step that feeds this script. Absent
+   * means not parked — the honest answer for every caller that predates the park.
+   */
+  parked?: string;
 }
 
 export const ref = defineScript<DecideTurnEndingArgs>(import.meta.url);
@@ -71,6 +77,7 @@ function main(): void {
       "ended-because": { type: "string" },
       "loop-limit-reached": { type: "string" },
       "chain-continues": { type: "string" },
+      parked: { type: "string" },
       directive: { type: "string" },
       reported: { type: "string" },
     },
@@ -84,6 +91,7 @@ function main(): void {
     endedBecause: values["ended-because"] ?? "",
     loopLimitReached: isTrue(values["loop-limit-reached"]),
     chainContinues: isTrue(values["chain-continues"]),
+    parked: isTrue(values.parked),
     directive: values.directive ?? "",
     reported: isTrue(values.reported),
   });

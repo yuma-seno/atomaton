@@ -330,6 +330,11 @@ function endedTag(ending: TurnEnding): string {
     // came back, which the three older values could not answer.
     case "handed-off":
       return "handoff";
+    // A parked run's own ending was written by the tool that parked it — this
+    // switch answers for the shape only, and the shape a park leaves on the thread
+    // is `waiting` (#208).
+    case "parked":
+      return "waiting";
     case "failed":
     case "chain-over":
     case "no-report":

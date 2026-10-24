@@ -1200,6 +1200,19 @@ if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -q '"op":"dispatch"' "${RUN_DIR}
 fi
 echo "chain_continues=\${CHAIN_CONTINUES}" >> "$GITHUB_OUTPUT"
 
+# Whether this run PARKED its turn on work under this node (#208): a child-starting
+# tool (\`launch_sub_agent\`, \`create_pr\`) dispatches onto ANOTHER node, and the ops log
+# says so with \`dispatch-elsewhere\`. The trailing quote is the same instrument the
+# chain check uses: \`"op":"dispatch-elsewhere"\` cannot be matched by the
+# \`"op":"dispatch"\` pattern above, so one run cannot read as both handing off and
+# parking. A parked run keeps the \`atomaton/in-progress\` label -- the aggregation
+# re-invocation is the collection of its turn, not a new one.
+PARKED=false
+if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -q '"op":"dispatch-elsewhere"' "${RUN_DIR}/atomaton_ops.log"; then
+  PARKED=true
+fi
+echo "parked=\${PARKED}" >> "$GITHUB_OUTPUT"
+
 # Whether this run changed anything, read from the same log and for a related
 # reason: domain/work/progress.ts stops a chain that is not getting anywhere, and the
 # most direct signal of that is a run that pushed nothing.
@@ -1230,7 +1243,7 @@ echo "changed=\${CHANGED}" >> "$GITHUB_OUTPUT"
   // failure — neither success nor the soft stop — and by nothing else, so its
   // absence is the machinery's, wherever it struck. See the comments in the run
   // above, and "Report failure" which reads it.
-  ["result", "directive", "ended_because", "reported", "chain_continues", "changed", "atoma_failed", "ending_invalid"] as const,
+  ["result", "directive", "ended_because", "reported", "chain_continues", "parked", "changed", "atoma_failed", "ending_invalid"] as const,
 );
 
 const tokenUsageStep = new TypedOutputsStep({
@@ -1574,6 +1587,7 @@ const turnEndingStep = new TypedOutputsStep(
       "ended-because": runAgentStep.outputs.ended_because,
       "loop-limit-reached": loopControlStep.outputs.loop_limit_reached,
       "chain-continues": runAgentStep.outputs.chain_continues,
+      parked: runAgentStep.outputs.parked,
       directive: runAgentStep.outputs.directive,
       reported: runAgentStep.outputs.reported,
     })}\n`,

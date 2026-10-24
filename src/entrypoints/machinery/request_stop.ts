@@ -36,6 +36,21 @@
  * request that never ran -- the silent outcome this is meant to end, wearing a
  * different shape.
  *
+ * ## Ending a park (#208)
+ *
+ * A node whose agent launched children and stopped is PARKED: its thread's newest
+ * event is a `waiting` ending, and the claim it holds open has no run left to answer
+ * it — the run that parked ended, and the aggregation re-invocation is not coming
+ * for a stopped node. The person's `/stop` is what returns the turn, so when the
+ * target's thread is parked the script posts a second comment carrying
+ * `ended=stopped answers=<the open claim's ask> run=0` — no run wrote it, the
+ * person did — and takes the `atomaton/in-progress` label down with it. The ending
+ * is its own comment rather than a line on the receipt: the receipt quotes the
+ * stopped comment when that comment carried more commands, and the thread skips a
+ * quotation whole, so an ending inside one would reach no reader. Without this the
+ * park would hold the node shut forever — the guard would keep removing everything
+ * said there.
+ *
  * ## Why it says the comment was deleted
  *
  * Because the existing in-progress guard also deletes comments, and says so. Someone
@@ -47,9 +62,11 @@
  */
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
+import { ENDED_TAG, LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
+import { getLabel } from "../../adapters/runner/config.ts";
 import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { descendants, nodesToStop, subtree } from "../../domain/work/work-tree.ts";
+import { openClaimOn } from "../../adapters/github/thread.ts";
 import { readWorkTree, requestStopAcross } from "../../adapters/github/work-tree.ts";
 import { preservedCommentBlock } from "./lib/removed-comment.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -92,6 +109,49 @@ export interface StopNoticeExtra {
  */
 export function commandsAfterStop(original: string): string[] {
   return commandsIn(proseOnly(original)).slice(1).map(commandLabel);
+}
+
+/**
+ * Whether a `/stop` on this node writes the ending that closes a park (#208), from
+ * the claim the thread leaves open.
+ *
+ * Both gates are about not writing an ending a lie would cost:
+ *
+ *   - `parked` — the newest event is a `waiting` ending. A live run's thread has an
+ *     `asked` or nothing newest, and an ending written here would release the guard
+ *     while the run is still going: the interruption window 案1 exists to close,
+ *     reopened by the stop itself.
+ *   - `!claimed` — the newest comment is not itself a claim. A re-invoked parent
+ *     claims the parked ask without writing a turn event, so `parked` stays true
+ *     while its run works; `claimed` is what says a live run holds the ball, and
+ *     its own ending will answer the claim in time.
+ *
+ * The ending's `run` is 0: no run wrote it, the person did. Everything else about
+ * the shape is an ordinary ending, because the readers are the same readers.
+ */
+export function parkExit(
+  openClaim: { ask: number; run: number; parked: boolean; claimed: boolean } | undefined,
+): { ask: number; run: number } | undefined {
+  if (openClaim === undefined || !openClaim.parked || openClaim.claimed) return undefined;
+  return { ask: openClaim.ask, run: 0 };
+}
+
+/**
+ * The comment that ends a park, as the person who stopped it reads it.
+ *
+ * Its own comment rather than a line on the receipt, because the receipt quotes the
+ * stopped comment when that comment carried more commands — and the thread reads a
+ * quotation as somebody else's words, so an ending inside one would reach no reader
+ * and the park would stay shut. No `quotes` tag here either: this is the machinery
+ * ending the turn, not preserving anybody's words.
+ */
+export function parkEndedNotice(park: { ask: number; run: number }): string {
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    ENDED_TAG.write({ verb: "stopped", answers: park.ask, run: 0 }),
+    "Atomaton: the turn this node's agent parked on its subtree came back to you — your stop ended the park. " +
+      "Nothing is running on this node. Comment again to start new work.",
+  ].join("\n");
 }
 
 /**
@@ -208,6 +268,20 @@ function main(): void {
   const { nodes } = readWorkTree(repo, root);
   const under = nodesToStop(descendants(subtree(nodes, root), root)).map((node) => node.number);
 
+  // The target's own thread, read for the park (#208): a `/stop` on a node whose
+  // turn is parked on its subtree is the ONLY thing that returns the turn — the run
+  // that parked it is long gone, and nothing else writes an ending there. Best-
+  // effort, because a failed read must not lose the receipt: the stop stands either
+  // way, and the park it might have ended is the smaller loss. `parkExit` decides
+  // whether an ending applies at all.
+  let park: { ask: number; run: number } | undefined;
+  try {
+    park = parkExit(openClaimOn(repo, number));
+  } catch (e) {
+    console.error(`::warning::could not read the thread on #${number}, so a parked turn could not be ended by this stop: ${e}`);
+    park = undefined;
+  }
+
   const result = requestStopAcross(
     repo,
     root,
@@ -219,6 +293,21 @@ function main(): void {
   // of the stop stands, and failing the step would report that none of it happened.
   for (const problem of result.problems) console.error(`::warning::${problem}`);
   if (!result.rootNotified) process.exit(1);
+
+  // The park is ended by its own comment, not by a tag on the receipt: a receipt
+  // that quotes the stopped comment carries `atomaton:quotes`, and the thread skips
+  // a quotation whole — an ending inside one would reach no reader. The label comes
+  // off with it: the node the park held is free, and the label is the cache that
+  // says otherwise. Best effort, like every label write.
+  if (park !== undefined) {
+    gh("issue", "comment", String(number), "--body", parkEndedNotice(park));
+    const label = getLabel("in_progress");
+    const { code } = gh("issue", "edit", String(number), "--remove-label", label);
+    if (code !== 0) {
+      console.error(`::warning::could not remove '${label}' from #${number}: the thread says the turn came back, but the label will disagree until it is removed by hand`);
+    }
+    console.error(`#${number} was parked; the stop ended the park and returned the turn.`);
+  }
 
   console.error(`Stop requested across #${root}: ${result.stopped.length ? result.stopped.map((n) => `#${n}`).join(", ") : "no run was holding anything"}`);
 }

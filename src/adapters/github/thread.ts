@@ -327,16 +327,62 @@ function readThread(repo: string, number: string | number, excludeCommentId?: st
  * validation dispatch is already handling, and counting it would delete a person's
  * comment on the strength of a request their comment was not racing.
  */
-export function commentWouldBeRemoved(repo: string, number: string | number, commentId: string | number): boolean {
+export interface WouldBeRemoved {
+  removed: boolean;
+  /**
+   * Whether the hold this comment hit is a PARK — the newest turn event is a
+   * `waiting` ending, so the node's agent is not running but is parked on the
+   * agents working under it (#208). The guard's notice says so: "wait for the
+   * subtree" reads differently from "a run is going right now", and the person
+   * who wrote during a park needs the resume moment, not the run, named.
+   */
+  parked: boolean;
+}
+
+export function commentWouldBeRemoved(repo: string, number: string | number, commentId: string | number): WouldBeRemoved {
   const comments = listComments(repo, number);
   const listed = comments.find((comment) => String(comment.id) === String(commentId));
+  const parkedOf = (events: readonly TurnEvent[]): boolean => events[events.length - 1] === "waiting";
   if (listed === undefined) {
     // Read-after-write lag: the comment being judged is newer than the listing. Judge
     // it as the latest arrival, which is whose turn the whole listed thread leaves.
     const entries = comments.map(entryOf);
-    return shapedThread(entries, readers).holder === "agent";
+    const shaped = shapedThread(entries, readers);
+    return { removed: shaped.holder === "agent", parked: parkedOf(shaped.events) };
   }
-  return !keptCommentIds(comments).has(listed.id);
+  const shaped = shapedThread(comments.map(entryOf), readers);
+  return { removed: !keptCommentIds(comments).has(listed.id), parked: parkedOf(shaped.events) };
+}
+
+/**
+ * The claim a node's thread leaves open, when one is, and what kind of hold it is
+ * (#208).
+ *
+ * The stop receipt reads this to end a park: a `waiting` ending holds the claim
+ * open with no run left to answer it, and the person's `/stop` is what returns the
+ * turn. Two flags decide whether a stop MAY end it:
+ *
+ *   - `parked` — the newest event is a `waiting` ending. A live run's thread has an
+ *     `asked` or nothing as its newest event, so this is false while a run works.
+ *   - `claimed` — the newest comment is itself a claim. A re-invoked parent claims
+ *     the parked ask without writing a turn event, so `parked` stays true while its
+ *     run works; `claimed` is what says a live run holds the ball.
+ *
+ * Throws when the thread cannot be read, like every other reader here: a caller
+ * deciding whether to end a park must not read a failed read as "nothing to end".
+ */
+export function openClaimOn(
+  repo: string,
+  number: string | number,
+): { ask: number; run: number; parked: boolean; claimed: boolean } | undefined {
+  const shaped = readComments(repo, number);
+  if (shaped.openClaim === undefined) return undefined;
+  const last = shaped.comments[shaped.comments.length - 1];
+  return {
+    ...shaped.openClaim,
+    parked: shaped.events[shaped.events.length - 1] === "waiting",
+    claimed: last !== undefined && readers.claim(last.body) !== undefined,
+  };
 }
 
 /**

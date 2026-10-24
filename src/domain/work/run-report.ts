@@ -205,19 +205,18 @@ export function askUnanswered(
  * returned to a person.
  *
  * The rule is the turn's, asked of the ending the thread had BEFORE the crashed
- * run took the ball: `whoseTurn` names a person for an ending that returned the
- * node or left it waiting on a child, and an agent for one that handed the node
- * to the next agent on it. #252's two sentences reach the same set from two
- * directions — "an ending that returns to a person releases" and "`shouldReleaseGuard`'s
- * rule" — and `waiting` sits where they differ. This follows the first and holds
- * only on `handoff`: a thread whose last ending is a hand-off was handed to an
- * agent, and whether that agent is the crashed run (whose recovery path is the
- * notice, which has already healed the thread) or work still in flight, the label
- * is the one cache this watch does not overwrite from outside. A stale `waiting`
- * — a child long finished, the re-dispatched parent crashed — is the stuck state
- * this module exists to end, so it releases; the residue when a child genuinely
- * still runs is a label off a few minutes early, which the child's own machinery
- * re-adds.
+ * run took the ball — and it is spelled here rather than asked of `whoseTurn`,
+ * because the two legitimately differ on `waiting` (#208). A thread whose last
+ * ending is a hand-off was handed to an agent, and whether that agent is the
+ * crashed run (whose recovery path is the notice, which has already healed the
+ * thread) or work still in flight, the label is the one cache this watch does not
+ * overwrite from outside. A stale `waiting` — a child long finished, the
+ * re-dispatched parent crashed — is the stuck state this module exists to end, so
+ * it releases; the residue when a child genuinely still runs is a label off a few
+ * minutes early, which the child's own machinery re-adds. `whoseTurn` reads the
+ * same ending as the AGENT's now that a park holds the turn (#208), which is the
+ * right answer for the guard and the wrong one for a crashed run — the crash is
+ * the exit a park does not have, and this release is part of it.
  *
  * No readable ending holds the label: a thread this rule cannot read is not a
  * thread to act on from outside.
@@ -226,6 +225,6 @@ export function releasesLabel(lastEnding: DatedComment | undefined, readers: End
   if (lastEnding === undefined) return false;
   const event = readers.ending(lastEnding.body);
   if (event === "") return false;
-  // `whoseTurn` reads the events of a thread; one ending is the whole walk here.
-  return whoseTurn([event]) === "person";
+  // One ending holds the label here, and it is not read off `whoseTurn` (see above).
+  return event !== "handed-off";
 }
