@@ -195,7 +195,7 @@ function main(): void {
   // effort, like every label write: the thread is already settled either way.
   if (refusalEnding !== undefined && (outcome === "refused-closed" || outcome === "unconfirmed" || outcome === "failed")) {
     const label = getLabel("in_progress");
-    const { code } = gh("issue", "edit", String(number), "--remove-label", label);
+    const { code } = gh("issue", "edit", String(number), "--remove-label", label, ...(values.repo ? ["--repo", values.repo] : []));
     if (code !== 0) {
       console.error(
         `::warning::could not remove '${label}' from #${number}: the thread is settled, ` +
