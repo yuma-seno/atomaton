@@ -44,9 +44,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           DISPLAY_TITLE: ${{ github.event.workflow_run.display_title }}
-          RUN_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          RUN_EVENT: ${{ github.event.workflow_run.event }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/reconcile_run_ending.ts" --display-title "${DISPLAY_TITLE}" --run-started-at "${RUN_STARTED_AT}" --run-url "${RUN_URL}" --conclusion "${CONCLUSION}" --run-event "${RUN_EVENT}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/reconcile_run_ending.ts" --display-title "${DISPLAY_TITLE}" --run-id "${RUN_ID}" --run-url "${RUN_URL}" --conclusion "${CONCLUSION}"

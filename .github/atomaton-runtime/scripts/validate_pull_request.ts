@@ -227,14 +227,17 @@ function makeTag(key, valuePattern, parse, render) {
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m[1]) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
   };
 }
@@ -244,8 +247,40 @@ function numericTag(key) {
 function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
+function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m) : undefined;
+  };
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read,
+    readProse: (text) => read(proseOnly(text)),
+    has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
+    search: searchValue
+  };
+}
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+  const verb = match[1];
+  const answers = match[2];
+  const run = match[3];
+  if (verb === undefined || answers === undefined || run === undefined)
+    return;
+  return { verb, answers: Number(answers), run: Number(run) };
+}, ({ verb, answers, run }) => `${verb} answers=${answers} run=${run}`, ({ verb }) => `atomaton:ended=${verb}`);
+var TOOK_TAG = makeCompoundTag("took", String.raw`(\d+) run=(\d+)`, (match) => {
+  const ask = match[1];
+  const run = match[2];
+  if (ask === undefined || run === undefined)
+    return;
+  return { ask: Number(ask), run: Number(run) };
+}, ({ ask, run }) => `${ask} run=${run}`, ({ ask }) => `atomaton:took=${ask}`);
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -259,6 +294,41 @@ var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
+}
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
+}
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
+      if (opens) {
+        if (current.text)
+          segments.push(current);
+        open = { char: fence[1][0], length: fence[1].length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+  if (current.text)
+    segments.push(current);
+  return segments;
 }
 
 // src/domain/work/control-commands.ts
@@ -355,22 +425,29 @@ function eventOf(entry, readers) {
     return "asked";
   return;
 }
-function whoseTurn(events) {
-  const last = events[events.length - 1];
-  return last === "asked" || last === "handed-off" ? "agent" : "person";
-}
 function shapedThread(comments, readers) {
   const kept = [];
   const events = [];
+  let openClaim;
   for (const entry of comments) {
-    if (entry.isHuman && whoseTurn(events) === "agent")
+    if (entry.isHuman && openClaim !== undefined)
       continue;
     kept.push(entry);
+    if (!entry.quoted) {
+      const claim = readers.claim(entry.body);
+      if (claim !== undefined) {
+        openClaim = claim.ask;
+      } else if (openClaim !== undefined) {
+        const answered = readers.answeredAsk(entry.body);
+        if (answered !== undefined && answered === openClaim)
+          openClaim = undefined;
+      }
+    }
     const event = eventOf(entry, readers);
     if (event !== undefined)
       events.push(event);
   }
-  return { comments: kept, events };
+  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
 }
 function latestRequestedAgent(body, comments, readers) {
   const { comments: kept } = shapedThread(comments, readers);
@@ -408,7 +485,7 @@ function latestAsk(body, comments, readers) {
 // src/adapters/github/thread.ts
 var readers = {
   ending: (body) => {
-    const ended = ENDED_TAG.read(body);
+    const ended = ENDED_TAG.readProse(body)?.verb;
     if (ended === "handoff")
       return "handed-off";
     if (ended === "waiting")
@@ -417,15 +494,26 @@ var readers = {
       return "returned";
     return "";
   },
-  requestedAgent: (body) => parseCommentCommand(body).agent,
-  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
+  claim: (body) => TOOK_TAG.readProse(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.readProse(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
 var askReaders = {
   ...readers,
-  requestedAgent: (body) => parseMangledCommand(body).agent,
-  authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
-var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
+var endingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body)
+};
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
@@ -538,7 +626,7 @@ function findExistingCiRun(runs, workflow, headSha) {
 function countPriorRetries(repo, number) {
   try {
     const bodies = ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]");
-    return bodies.filter((body) => !isQuotation(body ?? "") && CI_RETRY_TAG.has(body ?? "")).length;
+    return bodies.filter((body) => !isQuotation(body ?? "") && CI_RETRY_TAG.hasProse(body ?? "")).length;
   } catch {
     return 0;
   }
@@ -678,7 +766,7 @@ function main() {
   const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
   const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
-  const engineerAgent = ORIGIN_AGENT_TAG.read(prBody) ?? "";
+  const engineerAgent = ORIGIN_AGENT_TAG.readProse(prBody) ?? "";
   const outcome = decideValidationOutcome({
     conclusion,
     reviewerAgent: threadRequest.newestRequestedAgent,

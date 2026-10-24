@@ -55,6 +55,7 @@ jobs:
       type: ${{ needs.route.outputs.type }}
       notify: ${{ needs.route.outputs.notify }}
       session_mode: continue
+      ask: ''
     secrets: inherit
     needs:
       - route

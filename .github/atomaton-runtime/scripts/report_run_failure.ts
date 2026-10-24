@@ -67,14 +67,17 @@ function makeTag(key, valuePattern, parse, render) {
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m[1]) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
   };
 }
@@ -84,8 +87,40 @@ function numericTag(key) {
 function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
+function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m) : undefined;
+  };
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read,
+    readProse: (text) => read(proseOnly(text)),
+    has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
+    search: searchValue
+  };
+}
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+  const verb = match[1];
+  const answers = match[2];
+  const run = match[3];
+  if (verb === undefined || answers === undefined || run === undefined)
+    return;
+  return { verb, answers: Number(answers), run: Number(run) };
+}, ({ verb, answers, run }) => `${verb} answers=${answers} run=${run}`, ({ verb }) => `atomaton:ended=${verb}`);
+var TOOK_TAG = makeCompoundTag("took", String.raw`(\d+) run=(\d+)`, (match) => {
+  const ask = match[1];
+  const run = match[2];
+  if (ask === undefined || run === undefined)
+    return;
+  return { ask: Number(ask), run: Number(run) };
+}, ({ ask, run }) => `${ask} run=${run}`, ({ ask }) => `atomaton:took=${ask}`);
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -97,11 +132,49 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
+}
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
+      if (opens) {
+        if (current.text)
+          segments.push(current);
+        open = { char: fence[1][0], length: fence[1].length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+  if (current.text)
+    segments.push(current);
+  return segments;
+}
 
 // src/adapters/github/turn-comment.ts
 function turnHeader(h) {
   const context = h.audience === "model" ? "include" : "exclude";
-  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+  return [
+    LLM_CONTEXT_TAG.write(context),
+    ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 })
+  ];
 }
 
 // src/domain/work/comment-command.ts
@@ -149,10 +222,15 @@ function logExcerpt(text) {
 `).filter((line) => INTERESTING.test(line)).slice(0, EXCERPT_LINES).map((line) => redact(line)).join(`
 `).trim();
 }
-function failureNotice(agent, notify, runUrl, excerpt) {
+function failureNotice(agent, notify, runUrl, excerpt, identity = {}) {
   const mention = mentionPrefix(notify);
   const lines = [
-    ...turnHeader({ ended: "done", audience: "person" }),
+    ...turnHeader({
+      ended: "done",
+      audience: "person",
+      answers: identity.ask ?? 0,
+      run: identity.runId ?? 0
+    }),
     `${mention}Atomaton: \`${agent}\` did not finish.`,
     "",
     "**The session was saved.** What this run worked out is still there.",
@@ -176,7 +254,9 @@ function main() {
       notify: { type: "string" },
       "run-url": { type: "string" },
       "logs-file": { type: "string" },
-      "atoma-failed": { type: "string" }
+      "atoma-failed": { type: "string" },
+      ask: { type: "string" },
+      "run-id": { type: "string" }
     }
   });
   if (!values.number) {
@@ -193,7 +273,10 @@ function main() {
       excerpt = "";
     }
   }
-  const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt);
+  const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt, {
+    ask: Number(values.ask ?? 0) || 0,
+    runId: Number(values["run-id"] ?? 0) || 0
+  });
   const { code, stdout, stderr } = gh("issue", "comment", String(values.number), "--body", body);
   const atomaFailed = (values["atoma-failed"] ?? "").trim() === "true";
   if (code !== 0) {

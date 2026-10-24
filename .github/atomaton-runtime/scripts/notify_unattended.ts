@@ -81,14 +81,17 @@ function makeTag(key, valuePattern, parse, render) {
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m[1]) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
   };
 }
@@ -98,8 +101,40 @@ function numericTag(key) {
 function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
+function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m) : undefined;
+  };
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read,
+    readProse: (text) => read(proseOnly(text)),
+    has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
+    search: searchValue
+  };
+}
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+  const verb = match[1];
+  const answers = match[2];
+  const run = match[3];
+  if (verb === undefined || answers === undefined || run === undefined)
+    return;
+  return { verb, answers: Number(answers), run: Number(run) };
+}, ({ verb, answers, run }) => `${verb} answers=${answers} run=${run}`, ({ verb }) => `atomaton:ended=${verb}`);
+var TOOK_TAG = makeCompoundTag("took", String.raw`(\d+) run=(\d+)`, (match) => {
+  const ask = match[1];
+  const run = match[2];
+  if (ask === undefined || run === undefined)
+    return;
+  return { ask: Number(ask), run: Number(run) };
+}, ({ ask, run }) => `${ask} run=${run}`, ({ ask }) => `atomaton:took=${ask}`);
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -111,6 +146,41 @@ var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
 var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
+}
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
+      if (opens) {
+        if (current.text)
+          segments.push(current);
+        open = { char: fence[1][0], length: fence[1].length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+  if (current.text)
+    segments.push(current);
+  return segments;
+}
 
 // src/adapters/github/parent-issue.ts
 function log(message) {
@@ -185,12 +255,12 @@ function resolveNotify(repo, number) {
   const read = (current) => {
     const d = fetchIssueLookup(repo, current);
     const body = d.body ?? "";
-    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.readProse(body) : nativeParentOf(repo, current);
     return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
   };
   for (const hop of parentChain(number, read)) {
     const body = hop.data.body ?? "";
-    const tagged = NOTIFY_TAG.read(body);
+    const tagged = NOTIFY_TAG.readProse(body);
     if (tagged)
       return tagged;
     if (isHumanActor(hop.data.type) && hop.data.login)

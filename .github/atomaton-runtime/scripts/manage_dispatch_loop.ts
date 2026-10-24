@@ -129,6 +129,8 @@ var AGENT_ENV_NAMES = [
   "ATOMATON_RUN_DIR",
   "ATOMATON_RUN_URL",
   "ATOMATON_DISPATCHED_BY",
+  "ATOMATON_ASK_ID",
+  "GITHUB_RUN_ID",
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
@@ -140,7 +142,6 @@ var AGENT_ENV_NAMES = [
   "ATOMA_PROVIDER"
 ];
 var RUN_STEP_NAMES = [
-  "GITHUB_RUN_ID",
   "OPENROUTER_BASE_URL",
   "ORCAROUTER_BASE_URL",
   "ANTHROPIC_BASE_URL",
@@ -228,14 +229,17 @@ function makeTag(key, valuePattern, parse, render) {
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m[1]) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
   };
 }
@@ -245,8 +249,40 @@ function numericTag(key) {
 function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
+function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m) : undefined;
+  };
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read,
+    readProse: (text) => read(proseOnly(text)),
+    has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
+    search: searchValue
+  };
+}
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+  const verb = match[1];
+  const answers = match[2];
+  const run = match[3];
+  if (verb === undefined || answers === undefined || run === undefined)
+    return;
+  return { verb, answers: Number(answers), run: Number(run) };
+}, ({ verb, answers, run }) => `${verb} answers=${answers} run=${run}`, ({ verb }) => `atomaton:ended=${verb}`);
+var TOOK_TAG = makeCompoundTag("took", String.raw`(\d+) run=(\d+)`, (match) => {
+  const ask = match[1];
+  const run = match[2];
+  if (ask === undefined || run === undefined)
+    return;
+  return { ask: Number(ask), run: Number(run) };
+}, ({ ask, run }) => `${ask} run=${run}`, ({ ask }) => `atomaton:took=${ask}`);
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -260,6 +296,41 @@ var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
+}
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
+}
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
+      if (opens) {
+        if (current.text)
+          segments.push(current);
+        open = { char: fence[1][0], length: fence[1].length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+  if (current.text)
+    segments.push(current);
+  return segments;
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -307,8 +378,8 @@ function main() {
   const { comments, read } = readComments(repo, number);
   if (!read)
     console.error(`WARN could not read comments on ${repo}#${number}; treating the chain as fresh`);
-  const handoffs = handoffsSincePerson(comments, (body) => !isQuotation(body) && AGENT_TAG.has(body));
-  const stalled = runsWithoutChange(comments, (body) => !isQuotation(body) && AGENT_TAG.has(body) && CHANGED_TAG.read(body) === "no");
+  const handoffs = handoffsSincePerson(comments, (body) => !isQuotation(body) && AGENT_TAG.hasProse(body));
+  const stalled = runsWithoutChange(comments, (body) => !isQuotation(body) && AGENT_TAG.hasProse(body) && CHANGED_TAG.readProse(body) === "no");
   const decision = stopReason({
     handoffs,
     handoffLimit: limit,

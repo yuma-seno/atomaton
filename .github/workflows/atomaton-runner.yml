@@ -52,6 +52,11 @@ run-name: '${{ inputs.agent }} on #${{ inputs.number }}'
         required: false
         type: string
         default: ''
+      ask:
+        description: Ask comment id this run claims (atomaton:took); empty when the ask is the node's body
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       agent:
@@ -97,6 +102,11 @@ run-name: '${{ inputs.agent }} on #${{ inputs.number }}'
         required: false
         type: string
         default: ''
+      ask:
+        description: Ask comment id this run claims (atomaton:took); empty when the ask is the node's body
+        required: false
+        type: string
+        default: ''
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -120,6 +130,7 @@ jobs:
           SESSION_MODE: ${{ inputs.session_mode }}
           ATOMA_VERSION: ${{ inputs.atoma_version }}
           NOTIFY: ${{ inputs.notify }}
+          ASK: ${{ inputs.ask }}
         run: |
           reject() {
             echo "::error::atomaton-runner received an invalid \`$1\` input: '$2'. $3"
@@ -141,6 +152,9 @@ jobs:
           # May be empty: a run with nobody to notify is normal.
           [[ "$NOTIFY" =~ ^[A-Za-z0-9-]*$ ]] ||
             reject notify "$NOTIFY" "Expected a GitHub login, or empty."
+          # May be empty: a run whose ask is the node's body has no comment to claim (#285).
+          [[ "$ASK" =~ ^[0-9]*$ ]] ||
+            reject ask "$ASK" "Expected the ask comment's id, or empty."
 
           echo "Inputs validated: ${TYPE} #${NUMBER}, agent=${AGENT}, session_mode=${SESSION_MODE}"
       - name: Record when the agent must be finished
@@ -507,6 +521,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/reconcile_github_session.ts" --events "${RUNNER_TEMP}/atomaton-run/events.json" --agent-name "${{ inputs.agent }}" --agent-def "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions/${{ inputs.agent }}.md" --session "${RUNNER_TEMP}/atomaton-run/session.json" --out "${RUNNER_TEMP}/atomaton-run/session.json"
+      - name: Claim the turn
+        id: claim
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ inputs.number }}
+          ASK: ${{ inputs.ask }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/claim_turn.ts" --number "${NUMBER}" --ask "${ASK}" --run-id "${RUN_ID}"
+        if: steps.context.outputs.new_event_count != '0'
       - name: Read who this run may call
         shell: bash
         env:
@@ -529,7 +554,7 @@ jobs:
           NUMBER: ${{ inputs.number }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_in_progress_label.ts" --action "add" --number "${NUMBER}"
-        if: steps.context.outputs.new_event_count != '0'
+        if: steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
       - name: Put the tool servers on a user without sudo
         shell: bash
         run: |
@@ -727,6 +752,7 @@ jobs:
           NUMBER: ${{ inputs.number }}
           TYPE: ${{ inputs.type }}
           ATOMATON_RELOAD_COUNT: ${{ inputs.reload_count }}
+          ATOMATON_ASK_ID: ${{ inputs.ask }}
           NOTIFY: ${{ steps.notify.outputs.notify }}
           ATOMATON_DISPATCHED_BY: ${{ inputs.dispatched_by }}
           ATOMATON_OPS_LOG: ${{ runner.temp }}/atomaton-run/atomaton_ops.log
@@ -743,7 +769,7 @@ jobs:
           # Exported because the invocation below passes each one explicitly to `env`, and a
           # step's `env:` block is present in the shell's environment already -- this makes
           # the dependency visible rather than implicit.
-          export GITHUB_RUN_ID NUMBER NOTIFY TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY
+          export GITHUB_RUN_ID NUMBER NOTIFY TYPE ATOMATON_OPS_LOG ATOMATON_DISPATCHED_BY ATOMATON_ASK_ID
 
           # The tools file is written now, from the config, rather than shipped. See
           # `scripts/write_tools_file.ts` for what shipping a generated file cost.
@@ -812,6 +838,10 @@ jobs:
             TYPE="$TYPE"
             ATOMATON_RELOAD_COUNT="$ATOMATON_RELOAD_COUNT"
             ATOMATON_DISPATCHED_BY="$ATOMATON_DISPATCHED_BY"
+            ATOMATON_ASK_ID="${ATOMATON_ASK_ID:-}"
+            # The run's own id, beside the ask: the tools write both onto their endings
+            # (#285), and the pair is what the watch compares.
+            GITHUB_RUN_ID="$GITHUB_RUN_ID"
             ATOMATON_OPS_LOG="$ATOMATON_OPS_LOG"
             # This run's own directory, and the URL for the run itself. The tools use the
             # first to record which comment ended the run's turn (ending-comment.ts, so
@@ -1058,7 +1088,7 @@ jobs:
             CHANGED=true
           fi
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"
-        if: steps.context.outputs.new_event_count != '0'
+        if: steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
       - name: Write token usage summary
         shell: bash
         run: |
@@ -1086,8 +1116,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/post_result_comment.ts" --number "${{ inputs.number }}" --agent "${{ inputs.agent }}" --type "${{ inputs.type }}" --notify "${{ steps.notify.outputs.notify }}" --directive "${{ steps.atoma.outputs.directive }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --reported "${{ steps.atoma.outputs.reported }}" --messages-before "${{ steps.context.outputs.messages_before }}" --changed "${{ steps.atoma.outputs.changed }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --ending-comment "${RUNNER_TEMP}/atomaton-run/ending-comment.json" --ending-invalid "${{ steps.atoma.outputs.ending_invalid }}" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
-        if: steps.atoma.outcome == 'success' && steps.context.outputs.new_event_count != '0'
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/post_result_comment.ts" --number "${{ inputs.number }}" --agent "${{ inputs.agent }}" --type "${{ inputs.type }}" --notify "${{ steps.notify.outputs.notify }}" --directive "${{ steps.atoma.outputs.directive }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --reported "${{ steps.atoma.outputs.reported }}" --messages-before "${{ steps.context.outputs.messages_before }}" --changed "${{ steps.atoma.outputs.changed }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --ending-comment "${RUNNER_TEMP}/atomaton-run/ending-comment.json" --ending-invalid "${{ steps.atoma.outputs.ending_invalid }}" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json" --ask "${{ inputs.ask }}" --run-id "${{ github.run_id }}"
+        if: steps.atoma.outcome == 'success' && steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
       - name: Record run metadata
         shell: bash
         run: |
@@ -1120,8 +1150,10 @@ jobs:
           AGENT: ${{ inputs.agent }}
           NOTIFY: ${{ steps.notify.outputs.notify }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ASK: ${{ inputs.ask }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/report_run_failure.ts" --number "${NUMBER}" --agent "${AGENT}" --notify "${NOTIFY}" --run-url "${RUN_URL}" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --atoma-failed "${ATOMA_FAILED}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/report_run_failure.ts" --number "${NUMBER}" --agent "${AGENT}" --notify "${NOTIFY}" --run-url "${RUN_URL}" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --atoma-failed "${ATOMA_FAILED}" --ask "${ASK}" --run-id "${RUN_ID}"
         if: always() && steps.atoma.outcome == 'failure' && steps.post-result.outputs.comment_id == ''
       - name: Check for uncommitted changes
         id: dirty
@@ -1187,7 +1219,7 @@ jobs:
           TYPE: ${{ inputs.type }}
           NOTIFY: ${{ steps.notify.outputs.notify }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${DIRECTIVE}" --number "${NUMBER}" --type "${TYPE}" --notify "${NOTIFY}" --context "the agent on ${TYPE} #${NUMBER} handed off to ${DIRECTIVE}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${DIRECTIVE}" --number "${NUMBER}" --type "${TYPE}" --notify "${NOTIFY}" --context "the agent on ${TYPE} #${NUMBER} handed off to ${DIRECTIVE}" --ask "${{ steps.post-result.outputs.comment_id }}"
         if: steps.turn-ending.outputs.dispatch_to != ''
       - name: Comment on loop limit reached
         shell: bash

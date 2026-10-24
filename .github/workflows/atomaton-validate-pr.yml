@@ -22,6 +22,11 @@ name: Atomaton Validate PR
         description: Head branch of the pull request
         required: true
         type: string
+      ask:
+        description: 'Ask comment id the dispatched run claims (atomaton:took, #285); the answers-request check verifies the wait against it'
+        required: false
+        type: string
+        default: ''
       asked_by_person:
         description: Whether a person asked for this run, which decides who a failed check goes back to
         required: false
@@ -108,8 +113,9 @@ jobs:
           SUMMARY: ${{ steps.validate.outputs.summary }}
           VERDICT_PASSED: ${{ steps.validate.outputs.verdict_passed }}
           REPO: ${{ github.repository }}
+          ASK: ${{ inputs.ask }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${AGENT}" --number "${NUMBER}" --type "pr" --repo "${REPO}" --answers-request "true" --verdict-passed "${VERDICT_PASSED}" --context "validation of #${NUMBER} finished: ${SUMMARY}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${AGENT}" --number "${NUMBER}" --type "pr" --repo "${REPO}" --ask "${ASK}" --answers-request "true" --verdict-passed "${VERDICT_PASSED}" --context "validation of #${NUMBER} finished: ${SUMMARY}"
         if: steps.validate.outputs.next_agent != ''
       - name: Tell a person nobody was dispatched
         shell: bash
