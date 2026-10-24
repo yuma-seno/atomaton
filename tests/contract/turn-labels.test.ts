@@ -8,7 +8,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
-type Step = { name?: string; run?: string };
+type Step = { name?: string; run?: string; if?: string };
 type WorkflowDocument = { jobs?: Record<string, { steps?: Step[] }> };
 
 describe("the turn labels move together (#223)", () => {
