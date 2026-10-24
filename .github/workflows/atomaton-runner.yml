@@ -548,13 +548,13 @@ jobs:
         shell: bash
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/inject_dispatcher_notice.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --dispatched-by "${{ inputs.dispatched_by }}"
-      - name: Add atomaton/in-progress label
+      - name: Add atomaton/in-progress label (the turn is with a run)
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           NUMBER: ${{ inputs.number }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_in_progress_label.ts" --action "add" --number "${NUMBER}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_turn_labels.ts" --phase "running" --number "${NUMBER}"
         if: steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
       - name: Put the tool servers on a user without sudo
         shell: bash
@@ -1215,14 +1215,13 @@ jobs:
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/decide_turn_ending.ts" --outcome "${{ steps.atoma.outcome }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --loop-limit-reached "${{ steps.loop-control.outputs.loop_limit_reached }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --parked "${{ steps.atoma.outputs.parked }}" --directive "${{ steps.atoma.outputs.directive }}" --reported "${{ steps.atoma.outputs.reported }}"
         if: always()
-      - name: Remove atomaton/in-progress label on completion
+      - name: 'Move the turn labels: the work hands back to a person'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           NUMBER: ${{ inputs.number }}
-        run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_in_progress_label.ts" --action "remove" --number "${NUMBER}"
-        if: always() && steps.turn-ending.outputs.should_release == 'true'
+        run: bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_turn_labels.ts" --phase "with-person" --number "${NUMBER}"
+        if: always() && steps.turn-ending.outputs.should_release == 'true' && steps.claim.outputs.claimed == 'true'
       - name: Dispatch next agent
         shell: bash
         env:

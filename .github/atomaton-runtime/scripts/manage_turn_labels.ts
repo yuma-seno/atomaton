@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // @bun
 
-// src/entrypoints/machinery/manage_in_progress_label.ts
+// src/entrypoints/machinery/manage_turn_labels.ts
 import { parseArgs } from "util";
 
 // src/adapters/github/gh.ts
@@ -141,10 +141,36 @@ function loadConfig() {
 var DEFAULT_LABELS = {
   sub_issue: "atomaton/sub-issue",
   launched: "atomaton/launched",
-  in_progress: "atomaton/in-progress"
+  in_progress: "atomaton/in-progress",
+  waiting_for_person: "atomaton/waiting-for-person"
 };
 function getLabel(key) {
   return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
+}
+
+// src/entrypoints/machinery/lib/turn-labels.ts
+function applyTurnLabels(phase, repo, number) {
+  const inProgress = getLabel("in_progress");
+  const waitingForPerson = getLabel("waiting_for_person");
+  const edit = (action, label) => gh("issue", "edit", number, action, label, ...repo ? ["--repo", repo] : []);
+  const create = (label, color, description) => gh("label", "create", label, "--force", "-c", color, "-d", description, ...repo ? ["--repo", repo] : []);
+  if (phase === "running") {
+    create(inProgress, "0366d6", "Issue is being worked on by an Atomaton agent");
+    const added = edit("--add-label", inProgress);
+    if (added.code !== 0)
+      console.error(`::warning::could not add '${inProgress}' to #${number}`);
+    const removed = edit("--remove-label", waitingForPerson);
+    if (removed.code !== 0)
+      console.error(`::warning::could not remove '${waitingForPerson}' from #${number}`);
+    return;
+  }
+  create(waitingForPerson, "fbca04", "The turn is with a person on this issue or pull request");
+  const removed = edit("--remove-label", inProgress);
+  if (removed.code !== 0)
+    console.error(`::warning::could not remove '${inProgress}' from #${number}`);
+  const added = edit("--add-label", waitingForPerson);
+  if (added.code !== 0)
+    console.error(`::warning::could not add '${waitingForPerson}' to #${number}`);
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -154,35 +180,26 @@ function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }
 
-// src/entrypoints/machinery/manage_in_progress_label.ts
+// src/entrypoints/machinery/manage_turn_labels.ts
 var ref = defineScript(import.meta.url);
 function main() {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
     options: {
-      action: { type: "string" },
-      number: { type: "string" }
+      phase: { type: "string" },
+      number: { type: "string" },
+      repo: { type: "string" }
     }
   });
-  if (values.action !== "add" && values.action !== "remove") {
-    console.error("usage: manage_in_progress_label.ts --action add|remove --number N");
+  if (values.phase !== "running" && values.phase !== "with-person") {
+    console.error("usage: manage_turn_labels.ts --phase running|with-person --number N [--repo OWNER/REPO]");
     process.exit(2);
   }
   if (!values.number) {
-    console.error("usage: manage_in_progress_label.ts --action add|remove --number N");
+    console.error("usage: manage_turn_labels.ts --phase running|with-person --number N [--repo OWNER/REPO]");
     process.exit(2);
   }
-  const label = getLabel("in_progress");
-  if (values.action === "add") {
-    gh("label", "create", label, "--force", "-c", "0366d6", "-d", "Issue is being worked on by an Atomaton agent");
-    const { code } = gh("issue", "edit", values.number, "--add-label", label);
-    if (code !== 0)
-      console.error(`Warning: failed to add '${label}' label to #${values.number}`);
-  } else {
-    const { code } = gh("issue", "edit", values.number, "--remove-label", label);
-    if (code !== 0)
-      console.error(`Warning: failed to remove '${label}' label from #${values.number}`);
-  }
+  applyTurnLabels(values.phase, values.repo ?? "", String(values.number));
 }
 if (import.meta.main)
   main();

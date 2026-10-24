@@ -245,7 +245,8 @@ function loadConfig() {
 var DEFAULT_LABELS = {
   sub_issue: "atomaton/sub-issue",
   launched: "atomaton/launched",
-  in_progress: "atomaton/in-progress"
+  in_progress: "atomaton/in-progress",
+  waiting_for_person: "atomaton/waiting-for-person"
 };
 function getLabel(key) {
   return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
