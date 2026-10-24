@@ -281,7 +281,7 @@ function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
   };
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting|refused) answers=(\d+) run=(\d+)`, (match) => {
   const verb = match[1];
   const answers = match[2];
   const run = match[3];
@@ -525,7 +525,7 @@ var readers = {
       return "handed-off";
     if (ended === "waiting")
       return "waiting";
-    if (ended === "stopped" || ended === "limit" || ended === "done")
+    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
       return "returned";
     return "";
   },
@@ -640,6 +640,17 @@ function dispatchRefusedNotice(refused) {
   ].join(`
 `);
 }
+function dispatchFailedNotice(failed) {
+  const { agent, number, context, notify } = failed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because GitHub rejected the dispatch call.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "Nothing will retry this. Start it by hand: comment `/" + agent + "` on this issue."
+  ].join(`
+`);
+}
 function dispatchUnconfirmedNotice(unconfirmed) {
   const { agent, number, context, notify } = unconfirmed;
   return [
@@ -658,15 +669,27 @@ function dispatchUnconfirmedNotice(unconfirmed) {
 function runnerWorkflow() {
   return process.env.ATOMATON_DISPATCH_WORKFLOW || "atomaton-runner.yml";
 }
+function refusalEndingLines(d) {
+  if (d.refusalEnding === undefined)
+    return [];
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    ENDED_TAG.write({ verb: "refused", answers: d.refusalEnding.answers, run: d.refusalEnding.run })
+  ];
+}
 function refuseClosedTarget(d, state) {
   const log = d.log ?? ((message) => console.error(message));
-  const body = dispatchRefusedNotice({
-    agent: d.agent,
-    number: Number(d.number),
-    context: d.context,
-    state,
-    notify: d.notify ?? ""
-  });
+  const body = [
+    ...refusalEndingLines(d),
+    dispatchRefusedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      state,
+      notify: d.notify ?? ""
+    })
+  ].join(`
+`);
   const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
   if (code !== 0) {
     log(`${d.context}: refused to dispatch onto #${d.number} (not open), and could not post the notice: ${stderr || stdout}`);
@@ -729,12 +752,17 @@ function refuseOutstandingRequest(d, markerId) {
       gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
-    const body = dispatchUnconfirmedNotice({
-      agent: d.agent,
-      number: Number(d.number),
-      context: d.context,
-      notify: d.notify ?? ""
-    });
+    removeMarker();
+    const body = [
+      ...refusalEndingLines(d),
+      dispatchUnconfirmedNotice({
+        agent: d.agent,
+        number: Number(d.number),
+        context: d.context,
+        notify: d.notify ?? ""
+      })
+    ].join(`
+`);
     const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
     if (code !== 0) {
       log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
@@ -797,13 +825,14 @@ function dispatchRunner(d) {
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
   let ask;
+  let markerId;
   if (d.answersRequest) {
     const refusal = refuseSupersededAsk(d);
     if (refusal !== undefined)
       return refusal;
     ask = d.ask;
   } else {
-    const markerId = postDispatchMarker(d);
+    markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined)
       return refusal;
@@ -826,8 +855,25 @@ function dispatchRunner(d) {
     "--field",
     `dispatched_by=${d.dispatchedBy ?? ""}`
   ];
-  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
+  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) {
+    if (d.refusalEnding !== undefined) {
+      if (markerId !== undefined) {
+        gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+      }
+      const body = [
+        ...refusalEndingLines(d),
+        dispatchFailedNotice({
+          agent: d.agent,
+          number: Number(d.number),
+          context: d.context,
+          notify: d.notify ?? ""
+        })
+      ].join(`
+`);
+      gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
+    }
     return "failed";
+  }
   const here = nodeNumber();
   const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });

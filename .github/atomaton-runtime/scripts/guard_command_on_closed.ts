@@ -97,7 +97,7 @@ function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
   };
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting|refused) answers=(\d+) run=(\d+)`, (match) => {
   const verb = match[1];
   const answers = match[2];
   const run = match[3];

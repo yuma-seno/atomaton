@@ -4,18 +4,6 @@
 // src/entrypoints/machinery/dispatch_agent.ts
 import { parseArgs } from "util";
 
-// src/domain/work/agent-name.ts
-var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
-var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
-function isAgentName(value) {
-  return AGENT_NAME_RE.test(value);
-}
-
-// src/domain/work/node-type.ts
-function isNodeType(value) {
-  return value === "issue" || value === "pr";
-}
-
 // src/adapters/github/gh.ts
 function run(cmd) {
   const proc = Bun.spawnSync({
@@ -96,6 +84,140 @@ function dispatchWorkflow(context, workflow, args = [], log = (m) => console.err
   }
   log(`${context}: dispatched ${workflow}`);
   return true;
+}
+
+// src/adapters/runner/config.ts
+import { readFileSync } from "fs";
+
+// src/domain/delivery/merge-readiness.ts
+var CI_WOULD_BE_WASTED = new Set([
+  "not-open",
+  "draft",
+  "conflicting",
+  "behind",
+  "mergeability-unknown",
+  "checks-pending",
+  "checks-failing"
+]);
+var PASSING = new Set(["success", "neutral", "skipped"]);
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${USER_ROOT}/delegates`;
+var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
+
+// src/domain/delivery/declared-secrets.ts
+var RUN_CREDENTIALS = [
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "ORCAROUTER_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "ATOMA_COPILOT_TOKEN",
+  "GH_TOKEN"
+];
+var AGENT_ENV_NAMES = [
+  "HOME",
+  "PATH",
+  "AGENT",
+  MACHINERY_ROOT_VAR,
+  "GITHUB_REPOSITORY",
+  "BRANCH",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
+  "ATOMATON_RELOAD_COUNT",
+  "ATOMATON_OPS_LOG",
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
+  "ATOMATON_DISPATCHED_BY",
+  "ATOMATON_ASK_ID",
+  "GITHUB_RUN_ID",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "BUN_INSTALL_CACHE_DIR",
+  "npm_config_cache",
+  "PIP_CACHE_DIR",
+  "CARGO_HOME",
+  "OPENAI_BASE_URL",
+  "ATOMA_PROVIDER"
+];
+var RUN_STEP_NAMES = [
+  "OPENROUTER_BASE_URL",
+  "ORCAROUTER_BASE_URL",
+  "ANTHROPIC_BASE_URL",
+  "COPILOT_BASE_URL",
+  "ATOMA_PROVIDER_IN",
+  "OPENAI_BASE_URL_IN"
+];
+var TOOL_SECRETS = {
+  field: "tools.secrets",
+  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
+};
+var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
+
+// src/domain/delivery/check-jobs.ts
+var CHECKS_FROM_PULL_REQUEST = {
+  where: "checks.from_pull_request",
+  secrets: {
+    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
+  }
+};
+var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
+
+// src/adapters/runner/machinery.ts
+function machineryRoot() {
+  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
+}
+function machineryPath(relative) {
+  const root = machineryRoot();
+  return root ? `${root}/${relative}` : relative;
+}
+
+// src/adapters/runner/config.ts
+function configPath() {
+  return machineryPath(CONFIG_FILE);
+}
+var cached;
+function loadConfig() {
+  if (!cached) {
+    cached = Bun.YAML.parse(readFileSync(configPath(), "utf8"));
+  }
+  return cached;
+}
+var DEFAULT_LABELS = {
+  sub_issue: "atomaton/sub-issue",
+  launched: "atomaton/launched",
+  in_progress: "atomaton/in-progress"
+};
+function getLabel(key) {
+  return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
+}
+
+// src/domain/work/agent-name.ts
+var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
+var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
+function isAgentName(value) {
+  return AGENT_NAME_RE.test(value);
+}
+
+// src/domain/work/node-type.ts
+function isNodeType(value) {
+  return value === "issue" || value === "pr";
 }
 
 // src/adapters/runner/ops-log.ts
@@ -208,7 +330,7 @@ function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
   };
 }
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting|refused) answers=(\d+) run=(\d+)`, (match) => {
   const verb = match[1];
   const answers = match[2];
   const run = match[3];
@@ -448,7 +570,7 @@ var readers = {
       return "handed-off";
     if (ended === "waiting")
       return "waiting";
-    if (ended === "stopped" || ended === "limit" || ended === "done")
+    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
       return "returned";
     return "";
   },
@@ -554,6 +676,17 @@ function dispatchRefusedNotice(refused) {
   ].join(`
 `);
 }
+function dispatchFailedNotice(failed) {
+  const { agent, number, context, notify } = failed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because GitHub rejected the dispatch call.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "Nothing will retry this. Start it by hand: comment `/" + agent + "` on this issue."
+  ].join(`
+`);
+}
 function dispatchUnconfirmedNotice(unconfirmed) {
   const { agent, number, context, notify } = unconfirmed;
   return [
@@ -572,15 +705,27 @@ function dispatchUnconfirmedNotice(unconfirmed) {
 function runnerWorkflow() {
   return process.env.ATOMATON_DISPATCH_WORKFLOW || "atomaton-runner.yml";
 }
+function refusalEndingLines(d) {
+  if (d.refusalEnding === undefined)
+    return [];
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    ENDED_TAG.write({ verb: "refused", answers: d.refusalEnding.answers, run: d.refusalEnding.run })
+  ];
+}
 function refuseClosedTarget(d, state) {
   const log = d.log ?? ((message) => console.error(message));
-  const body = dispatchRefusedNotice({
-    agent: d.agent,
-    number: Number(d.number),
-    context: d.context,
-    state,
-    notify: d.notify ?? ""
-  });
+  const body = [
+    ...refusalEndingLines(d),
+    dispatchRefusedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      state,
+      notify: d.notify ?? ""
+    })
+  ].join(`
+`);
   const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
   if (code !== 0) {
     log(`${d.context}: refused to dispatch onto #${d.number} (not open), and could not post the notice: ${stderr || stdout}`);
@@ -643,12 +788,17 @@ function refuseOutstandingRequest(d, markerId) {
       gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
-    const body = dispatchUnconfirmedNotice({
-      agent: d.agent,
-      number: Number(d.number),
-      context: d.context,
-      notify: d.notify ?? ""
-    });
+    removeMarker();
+    const body = [
+      ...refusalEndingLines(d),
+      dispatchUnconfirmedNotice({
+        agent: d.agent,
+        number: Number(d.number),
+        context: d.context,
+        notify: d.notify ?? ""
+      })
+    ].join(`
+`);
     const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
     if (code !== 0) {
       log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
@@ -711,13 +861,14 @@ function dispatchRunner(d) {
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
   let ask;
+  let markerId;
   if (d.answersRequest) {
     const refusal = refuseSupersededAsk(d);
     if (refusal !== undefined)
       return refusal;
     ask = d.ask;
   } else {
-    const markerId = postDispatchMarker(d);
+    markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined)
       return refusal;
@@ -740,8 +891,25 @@ function dispatchRunner(d) {
     "--field",
     `dispatched_by=${d.dispatchedBy ?? ""}`
   ];
-  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log))
+  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) {
+    if (d.refusalEnding !== undefined) {
+      if (markerId !== undefined) {
+        gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+      }
+      const body = [
+        ...refusalEndingLines(d),
+        dispatchFailedNotice({
+          agent: d.agent,
+          number: Number(d.number),
+          context: d.context,
+          notify: d.notify ?? ""
+        })
+      ].join(`
+`);
+      gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
+    }
     return "failed";
+  }
   const here = nodeNumber();
   const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
@@ -756,24 +924,6 @@ function isTrue(value) {
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
-
-// src/domain/machinery/machinery-layout.ts
-var USER_ROOT = ".github/atomaton";
-var RUNTIME_ROOT = ".github/atomaton-runtime";
-var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
-var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
-var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
-var SKILLS_DIR = `${USER_ROOT}/skills`;
-var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
-var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${USER_ROOT}/delegates`;
-var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
-var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
-var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
-var RULESETS_DIR = `${USER_ROOT}/rulesets`;
-var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
-
-// src/entrypoints/machinery/lib/script-ref.ts
 function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }
@@ -790,6 +940,7 @@ function main() {
       notify: { type: "string" },
       repo: { type: "string" },
       ask: { type: "string" },
+      "run-id": { type: "string" },
       "answers-request": { type: "string" },
       "verdict-passed": { type: "string" },
       context: { type: "string" }
@@ -815,6 +966,9 @@ function main() {
     console.error("::error::dispatch_agent: --context is required; it is what a person reads if this is refused.");
     process.exit(1);
   }
+  const runId = Number(values["run-id"]);
+  const askId = Number(values.ask);
+  const refusalEnding = Number.isInteger(runId) && runId > 0 && Number.isInteger(askId) && askId > 0 ? { answers: askId, run: runId } : undefined;
   const outcome = dispatchRunner({
     context,
     agent,
@@ -824,8 +978,16 @@ function main() {
     repo: (values.repo ?? "").trim() || undefined,
     ask: (values.ask ?? "").trim() || undefined,
     answersRequest: isTrue(values["answers-request"]),
-    verdictPassed: values["verdict-passed"] === undefined ? undefined : isTrue(values["verdict-passed"])
+    verdictPassed: values["verdict-passed"] === undefined ? undefined : isTrue(values["verdict-passed"]),
+    refusalEnding
   });
+  if (refusalEnding !== undefined && (outcome === "refused-closed" || outcome === "unconfirmed" || outcome === "failed")) {
+    const label = getLabel("in_progress");
+    const { code } = gh("issue", "edit", String(number), "--remove-label", label, ...values.repo ? ["--repo", values.repo] : []);
+    if (code !== 0) {
+      console.error(`::warning::could not remove '${label}' from #${number}: the thread is settled, ` + "but the label will say an agent holds the ball until it is removed by hand");
+    }
+  }
   if (outcome === "failed") {
     console.error(`::error::Could not dispatch ${agent} on ${type} #${number}.`);
     process.exit(1);
