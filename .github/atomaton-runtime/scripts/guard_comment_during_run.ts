@@ -497,7 +497,7 @@ function main() {
   const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
   const couldNotRead = readBack.code !== 0;
   const original = couldNotRead ? "" : readBack.stdout ?? "";
-  const commands = commandsIn(original).map(commandLabel);
+  const commands = commandsIn(proseOnly(original)).map(commandLabel);
   const parsed = values.parsed === "true";
   const closed = values.state === "closed";
   const several = parsed && !closed && commands.length > 1;
