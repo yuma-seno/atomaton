@@ -775,7 +775,7 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/request_stop.ts
 var ref = defineScript(import.meta.url);
 function commandsAfterStop(original) {
-  return commandsIn(original).slice(1).map(commandLabel);
+  return commandsIn(proseOnly(original)).slice(1).map(commandLabel);
 }
 function stopRequestedNotice(commenter, deleted, alsoReached, extra) {
   const whose = commenter ? `${commenter}'s` : "The";
