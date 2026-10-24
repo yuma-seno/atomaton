@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.40",
+  "version": "v0.21.41",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -24,7 +24,7 @@
     ".github/atomaton-runtime/scripts/inject_ending_rejection.ts",
     ".github/atomaton-runtime/scripts/inject_uncommitted_notice.ts",
     ".github/atomaton-runtime/scripts/manage_dispatch_loop.ts",
-    ".github/atomaton-runtime/scripts/manage_in_progress_label.ts",
+    ".github/atomaton-runtime/scripts/manage_turn_labels.ts",
     ".github/atomaton-runtime/scripts/merge_tool_packages.ts",
     ".github/atomaton-runtime/scripts/notify_limit_reached.ts",
     ".github/atomaton-runtime/scripts/notify_unattended.ts",
