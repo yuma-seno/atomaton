@@ -1597,7 +1597,12 @@ const turnEndingStep = new TypedOutputsStep(
 
 const removeLabelStep = new TypedOutputsStep({
   name: "Move the turn labels: the work hands back to a person",
-  if: `always() && ${turnEndingStep.rawOutputs.should_release} == 'true'`,
+  // `claimed`, because only a run that TOOK the turn may move the labels: the
+  // release condition's `should_release` is true for every failed ending too, and
+  // a run that lost the claim race or did nothing (agent step skipped) would
+  // otherwise strip the in-progress label another run — a parked parent included
+  // — is still holding, and stamp waiting-for-person over it (#223's review).
+  if: `always() && ${turnEndingStep.rawOutputs.should_release} == 'true' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",

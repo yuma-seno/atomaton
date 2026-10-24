@@ -125,7 +125,7 @@ describe("dispatch_agent.ts", () => {
   test("a refused hand-off writes the refused ending and releases the node", () => {
     const r = run(
       [...HANDOFF, "--ask", "900", "--run-id", "42"],
-      [closed, { match: ["issue", "comment"] }, { match: ["issue", "edit"] }, { match: ["workflow", "run"] }],
+      [closed, { match: ["issue", "comment"] }, { match: ["issue", "edit"] }, { match: ["label"] }, { match: ["workflow", "run"] }],
     );
 
     expect(r.status).toBe(0);
@@ -133,9 +133,11 @@ describe("dispatch_agent.ts", () => {
     expect(notice.join(" ")).toContain("<!-- atomaton:ended=refused answers=900 run=42 -->");
     expect(notice.join(" ")).toContain("llm-context=exclude");
     expect(notice.join(" ")).toContain("was not started");
-    const label = r.ghCalls.find((call) => call[0] === "issue" && call[1] === "edit") ?? [];
-    expect(label.join(" ")).toContain("--remove-label");
-    expect(label.join(" ")).toContain("atomaton/in-progress");
+    // The turn came back to a person, so the labels move together (#223): the
+    // in-progress guard comes off and the waiting-for-person label goes on.
+    const labelEdits = r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "edit");
+    expect(labelEdits.some((c) => c.join(" ").includes("--remove-label") && c.join(" ").includes("atomaton/in-progress"))).toBe(true);
+    expect(labelEdits.some((c) => c.join(" ").includes("--add-label") && c.join(" ").includes("atomaton/waiting-for-person"))).toBe(true);
   });
 
   /** Nothing is running and nothing will retry, which is what a failing step is for. */
@@ -154,6 +156,7 @@ describe("dispatch_agent.ts", () => {
   test("a rejected dispatch takes its marker back and writes the ending", () => {
     const r = run([...HANDOFF, "--ask", "900", "--run-id", "42"], [
       ...openTarget,
+      { match: ["label"] },
       { match: ["workflow", "run"], code: 1, stdout: "boom" },
     ]);
 

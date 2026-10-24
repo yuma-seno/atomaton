@@ -26,9 +26,15 @@ export function applyTurnLabels(phase: TurnLabelPhase, repo: string, number: str
   const edit = (action: "--add-label" | "--remove-label", label: string) =>
     gh("issue", "edit", number, action, label, ...(repo ? ["--repo", repo] : []));
 
+  // Created if missing, so a renamed label or a fresh config still lands. `--repo`
+  // travels with every call: a caller working in one checkout may be applying the
+  // labels to another repository, and a label created in the wrong one makes the
+  // `issue edit` fail as "label not found" (the #223 review's third point).
+  const create = (label: string, color: string, description: string) =>
+    gh("label", "create", label, "--force", "-c", color, "-d", description, ...(repo ? ["--repo", repo] : []));
+
   if (phase === "running") {
-    // Created if missing, so a renamed label or a fresh config still lands.
-    gh("label", "create", inProgress, "--force", "-c", "0366d6", "-d", "Issue is being worked on by an Atomaton agent");
+    create(inProgress, "0366d6", "Issue is being worked on by an Atomaton agent");
     const added = edit("--add-label", inProgress);
     if (added.code !== 0) console.error(`::warning::could not add '${inProgress}' to #${number}`);
     const removed = edit("--remove-label", waitingForPerson);
@@ -36,7 +42,7 @@ export function applyTurnLabels(phase: TurnLabelPhase, repo: string, number: str
     return;
   }
 
-  gh("label", "create", waitingForPerson, "--force", "-c", "fbca04", "-d", "The turn is with a person on this issue or pull request");
+  create(waitingForPerson, "fbca04", "The turn is with a person on this issue or pull request");
   const removed = edit("--remove-label", inProgress);
   if (removed.code !== 0) console.error(`::warning::could not remove '${inProgress}' from #${number}`);
   const added = edit("--add-label", waitingForPerson);
