@@ -314,6 +314,8 @@ function endingOf(signals) {
     return { ended: "stopped" };
   if (signals.endedBecause === "iterations" || signals.endedBecause === "runtime")
     return { ended: "spent" };
+  if (signals.parked)
+    return { ended: "parked" };
   if (signals.loopLimitReached)
     return { ended: "chain-over", ...next ? { next } : {} };
   if (next || signals.chainContinues)
@@ -564,6 +566,8 @@ function endedTag(ending) {
       return "limit";
     case "handed-off":
       return "handoff";
+    case "parked":
+      return "waiting";
     case "failed":
     case "chain-over":
     case "no-report":
