@@ -2643,6 +2643,23 @@ describe("mcp/delegate.ts", () => {
     // And the shared-limit consequence, which is what makes a refusal readable
     // rather than a failure: the caller is told to try it and read the answer.
     expect(byName.get("delegate")).toContain("shared with every other agent");
+    // #238: the exhaustion case is named, and names no other delegate — the paid
+    // delegates are files a project renames or deletes, so the description points
+    // at "the other delegates you were offered", never at a spelled name.
+    expect(byName.get("delegate")).toContain("no task fits");
+    // `delegate_readonly` lives on the other roster; this test reads the `delegate`
+    // roster's tools alone.
+    const ro = await sendRequest(
+      "delegate.ts",
+      { jsonrpc: "2.0", id: 5, method: "tools/list", params: {} },
+      {},
+      process.cwd(),
+      ["--roster", "delegate_readonly", "--delegates-dir", ROSTER_DIR],
+    );
+    const readOnly = new Map(
+      (ro.result.tools as { name: string; description: string }[]).map((t) => [t.name, t.description]),
+    );
+    expect(readOnly.get("delegate_readonly")).toContain("no task fits");
   });
 
   test("refuses to start when the roster names no folders for this server", async () => {
