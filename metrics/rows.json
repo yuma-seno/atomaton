@@ -895,6 +895,60 @@
     ]
   },
   {
+    "path": "sessions/issue-12/reviewer.json",
+    "agent": "reviewer",
+    "messages": 93,
+    "calls": 44,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "get_pr": 1,
+      "get_pr_diff": 1,
+      "atoma_builtin__load_skill": 1,
+      "grep": 18,
+      "list": 1,
+      "read": 11,
+      "glob": 2,
+      "fetch": 6,
+      "get_issue_comments": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-24T21:52:08Z",
+        "ended_because": "completed",
+        "iterations": 24,
+        "messages": 93,
+        "seconds": 214,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 18,
+            "list": 1,
+            "read": 11
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          },
+          "web": {
+            "fetch": 6
+          }
+        },
+        "started": "2026-10-24T21:48:34Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-152/atomaton.json",
     "agent": "atomaton",
     "messages": 111,
