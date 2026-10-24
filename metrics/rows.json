@@ -9696,8 +9696,8 @@
   {
     "path": "sessions/pr-335/reviewer.json",
     "agent": "reviewer",
-    "messages": 70,
-    "calls": 41,
+    "messages": 83,
+    "calls": 48,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -9708,14 +9708,16 @@
       "atoma_builtin__load_skill": 1,
       "grep": 18,
       "list": 2,
-      "read": 6,
+      "read": 8,
       "glob": 2,
-      "get_pr": 3,
-      "get_issue_comments": 4,
-      "get_check_runs": 1,
+      "get_pr": 4,
+      "get_issue_comments": 5,
+      "get_check_runs": 2,
       "get_issue": 1,
       "list_prs": 2,
-      "search_issues": 1
+      "search_issues": 1,
+      "get_pr_diff": 1,
+      "check_merge_readiness": 1
     },
     "acts": {},
     "runs": [
@@ -9744,6 +9746,26 @@
           }
         },
         "started": "2026-10-24T19:18:55Z"
+      },
+      {
+        "ended": "2026-10-24T19:31:31Z",
+        "ended_because": "completed",
+        "iterations": 4,
+        "messages": 83,
+        "seconds": 41,
+        "server_calls": {
+          "files_readonly": {
+            "read": 2
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          }
+        },
+        "started": "2026-10-24T19:30:50Z"
       }
     ]
   }
