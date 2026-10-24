@@ -9296,6 +9296,45 @@
     ]
   },
   {
+    "path": "sessions/issue-332/engineer.json",
+    "agent": "engineer",
+    "messages": 19,
+    "calls": 8,
+    "failed": 1,
+    "refused": 1,
+    "skills": [
+      "engineering/secrets-in-a-check"
+    ],
+    "reported": true,
+    "tools": {
+      "bash": 5,
+      "atoma_builtin__load_skill": 1,
+      "fetch": 2
+    },
+    "acts": {
+      "edit": 1,
+      "other": 4
+    },
+    "runs": [
+      {
+        "ended": "2026-10-24T18:21:12Z",
+        "ended_because": "completed",
+        "iterations": 6,
+        "messages": 19,
+        "seconds": 41,
+        "server_calls": {
+          "shell": {
+            "bash": 5
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-10-24T18:20:31Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-4/atomaton.json",
     "agent": "atomaton",
     "messages": 20,
