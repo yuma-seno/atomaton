@@ -50,10 +50,12 @@ into the ignored `dist/`, so it cannot dirty your commit.
 Adopters receive the deliverable from a release, not from a merge, so nothing you
 merge needs to carry it.
 
-**Do not touch `version` in `package.json` unless releasing is the task.** The release job
-derives the release tag from it, so bumping it is what publishes to adopters —
-merging that change cuts a release rather than merely recording an intent to. A
-version left alone is a merge that publishes nothing, which is the normal case.
+**Never touch `version` in `package.json`.** The version is the release declaration:
+merging an edit to it publishes to adopters, and that decision belongs to a person,
+made on the pull request the **Atomaton Release** workflow opens — never inside a
+work pull request. A version left alone is a merge that publishes nothing, which is
+the normal case. A work pull request that arrives with a version change in it is a
+merge-blocking defect: flag it, and have the edit taken back out before merge.
 
 `.github/**` is a different matter — see below. It is tracked, and every file in it
 comes from either the release or `self/`.
