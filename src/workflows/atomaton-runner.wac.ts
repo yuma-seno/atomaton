@@ -32,7 +32,7 @@ import { DEFAULT_RERANKER } from "../adapters/runner/config.ts";
 import { MODEL_CACHE_DIR } from "../domain/machinery/model-cache.ts";
 import { ref as resolveIssueBranchRef } from "../entrypoints/machinery/resolve_issue_branch.ts";
 import { ref as resolvePrBranchRef } from "../entrypoints/machinery/resolve_pr_branch.ts";
-import { ref as manageInProgressLabelRef } from "../entrypoints/machinery/manage_in_progress_label.ts";
+import { ref as manageTurnLabelsRef } from "../entrypoints/machinery/manage_turn_labels.ts";
 import { ref as notifyLimitReachedRef } from "../entrypoints/machinery/notify_limit_reached.ts";
 import { ref as readRunEndingRef } from "../entrypoints/machinery/read_run_ending.ts";
 import { ref as injectUncommittedNoticeRef } from "../entrypoints/machinery/inject_uncommitted_notice.ts";
@@ -1596,15 +1596,24 @@ const turnEndingStep = new TypedOutputsStep(
 );
 
 const removeLabelStep = new TypedOutputsStep({
-  name: "Remove atomaton/in-progress label on completion",
-  if: `always() && ${turnEndingStep.rawOutputs.should_release} == 'true'`,
+  name: "Move the turn labels: the work hands back to a person",
+  // `claimed`, because only a run that TOOK the turn may move the labels: the
+  // release condition's `should_release` is true for every failed ending too, and
+  // a run that lost the claim race or did nothing (agent step skipped) would
+  // otherwise strip the in-progress label another run — a parked parent included
+  // — is still holding, and stamp waiting-for-person over it (#223's review).
+  if: `always() && ${turnEndingStep.rawOutputs.should_release} == 'true' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",
     NUMBER: "${{ inputs.number }}",
   },
-  run: `${scriptCommandWithArgs(manageInProgressLabelRef, { action: "remove", number: "\${NUMBER}" })}
-`,
+  // One call moves both labels, because they are complements: the in-progress guard
+  // comes off and the waiting-for-person label goes on (#223). The exceptions that
+  // also release — a failure, a run that said nothing — end with a person being
+  // mentioned, so the person-ball label is true in every case this step runs for.
+  run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: "with-person", number: "\${NUMBER}" })
+}`,
 });
 
 /**
@@ -2072,14 +2081,17 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
     // hood. Gated on the same condition as "Run agent" so the label isn't
     // added for no-op runs that will be skipped entirely
     // (new_event_count == '0').
-    name: "Add atomaton/in-progress label",
+    name: "Add atomaton/in-progress label (the turn is with a run)",
     if: `${buildContextStep.rawOutputs.new_event_count} != '0' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
       NUMBER: "${{ inputs.number }}",
     },
-    run: `${scriptCommandWithArgs(manageInProgressLabelRef, { action: "add", number: "\${NUMBER}" })}
+    // One call moves both labels, because they are complements: the
+    // waiting-for-person label comes off (the person's turn ended) and the
+    // in-progress guard goes on (#223).
+    run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: "running", number: "\${NUMBER}" })}
 `,
   }),
   // Put every tool server on one OS user that cannot become root.

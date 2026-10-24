@@ -121,6 +121,7 @@ chain:
     in_progress: atomaton/in-progress
     sub_issue: atomaton/sub-issue
     launched: atomaton/launched
+    waiting_for_person: atomaton/waiting-for-person
 
 
 # The agents a workflow starts when no issue or pull request can name one.

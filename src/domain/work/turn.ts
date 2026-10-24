@@ -223,7 +223,7 @@ export function endingOf(signals: TurnSignals): TurnEnding {
  * or to nobody — and a node nothing is working on must not stay locked.
  *
  * The mechanism that enacts this is the `atomaton/in-progress` label, in
- * `entrypoints/machinery/manage_in_progress_label.ts`. It is deliberately not named
+ * `entrypoints/machinery/manage_turn_labels.ts`. It is deliberately not named
  * here: the rule is about turns and the label is one way to persist it.
  */
 export function shouldReleaseGuard(ending: TurnEnding): boolean {

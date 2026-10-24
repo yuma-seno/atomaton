@@ -34,11 +34,10 @@
  *     --context "CI passed on #12, so reviewer was to review it"
  */
 import { parseArgs } from "node:util";
-import { gh } from "../../adapters/github/gh.ts";
-import { getLabel } from "../../adapters/runner/config.ts";
 import { isAgentName } from "../../domain/work/agent-name.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { dispatchRunner } from "../../adapters/actions/dispatch.ts";
+import { applyTurnLabels } from "./lib/turn-labels.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -190,20 +189,13 @@ function main(): void {
     refusalEnding,
   });
 
-  // A refused hand-off ends the chain, and the ending on the thread says the turn came
-  // back. The label this run kept for the hand-off is the cache of the state that
-  // ending just replaced — and nothing else removes it: the run's own release step ran
-  // before the dispatch and held the label because the turn said `handoff`. Best
-  // effort, like every label write: the thread is already settled either way.
+  // The chain is over: the ending on the thread says the turn came back, and the
+  // labels move with it — the in-progress guard comes off and the
+  // waiting-for-person label goes on (#223). Nothing else removes them: the run's
+  // own release step ran before the dispatch and held the label because the turn
+  // said `handoff`.
   if (refusalEnding !== undefined && (outcome === "refused-closed" || outcome === "unconfirmed" || outcome === "failed")) {
-    const label = getLabel("in_progress");
-    const { code } = gh("issue", "edit", String(number), "--remove-label", label, ...(values.repo ? ["--repo", values.repo] : []));
-    if (code !== 0) {
-      console.error(
-        `::warning::could not remove '${label}' from #${number}: the thread is settled, ` +
-          "but the label will say an agent holds the ball until it is removed by hand",
-      );
-    }
+    applyTurnLabels("with-person", values.repo ?? "", String(number));
   }
 
   if (outcome === "failed") {

@@ -83,6 +83,7 @@ function rulesFor(opts: { comments?: Record<string, unknown>[]; commentsStdout?:
     },
     { match: [`repos/${REPO}/issues/${NUMBER}`, "--jq"], stdout: opts.labels ?? LABELS_ON },
     { match: ["issue", "comment"], ...(opts.postCode === undefined ? {} : { code: opts.postCode }) },
+    { match: ["label"] },
     { match: ["issue", "edit"] },
   ];
 }
@@ -161,10 +162,18 @@ describe("reconcile_run_ending.ts", () => {
     expect(rHandoff.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
   });
 
-  test("the label is left alone when the issue carries none", () => {
-    const r = run(argv(), rulesFor({ comments: [apiComment(claim())], labels: LABELS_OFF }));
+  // #223's review removed the hasLabel early return: a run that fell over BEFORE
+  // its labels were applied still ends with a person waiting, and the waiting side
+  // is what that node is missing. The turn handed back, so both labels move — the
+  // stale in-progress comes off (a warning when it was not there) and the
+  // waiting-for-person goes on.
+  test("a node that carried no label still gets the waiting-for-person one", () => {
+    const comments = [apiComment(ending("done", 41, 9, "engineer")), apiComment(claim())];
+    const r = run(argv(), rulesFor({ comments, labels: LABELS_OFF }));
     expect(r.status).toBe(0);
-    expect(r.ghCalls.some((argv) => argv.includes("--remove-label"))).toBe(false);
+    const edits = r.ghCalls.filter((argv) => argv[0] === "issue" && argv[1] === "edit").map((a) => a.join(" "));
+    expect(edits.some((c) => c.includes("--remove-label") && c.includes("atomaton/in-progress"))).toBe(true);
+    expect(edits.some((c) => c.includes("--add-label") && c.includes("atomaton/waiting-for-person"))).toBe(true);
   });
 
   test("a thread past one page still names its ending", () => {

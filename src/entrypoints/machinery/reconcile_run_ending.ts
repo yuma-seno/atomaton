@@ -107,13 +107,13 @@
  * Requires GITHUB_REPOSITORY (owner/repo) in the environment.
  */
 import { parseArgs } from "node:util";
-import { gh, ghRead } from "../../adapters/github/gh.ts";
+import { gh } from "../../adapters/github/gh.ts";
 import { mostRecentAgentOn } from "../../adapters/github/agent-on-issue.ts";
-import { getLabel } from "../../adapters/runner/config.ts";
 import { endingWalkReaders, readRunWatchThread, readers, type RunWatchThread } from "../../adapters/github/thread.ts";
 import { turnHeader } from "../../adapters/github/turn-comment.ts";
 import { recoveryLines } from "../../domain/work/comment-command.ts";
 import { requestOutstanding } from "../../domain/work/thread.ts";
+import { applyTurnLabels } from "./lib/turn-labels.ts";
 import {
   askUnanswered,
   endingLeftBy,
@@ -179,21 +179,6 @@ export function missingEndingNotice(
     ...recoveryLines(agent),
   ];
   return lines.join("\n");
-}
-
-/** Whether the issue currently carries a label, said either way when the read fails. */
-function hasLabel(repo: string, number: number, label: string): boolean {
-  const read = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", "[.labels[].name]");
-  if (read.code !== 0) {
-    console.error(`Warning: could not read #${number}'s labels, so the stale label is not touched: ${read.stderr || read.stdout}`);
-    return false;
-  }
-  try {
-    return (JSON.parse(read.stdout || "[]") as string[]).includes(label);
-  } catch {
-    console.error(`Warning: #${number}'s labels were not readable as a list, so the stale label is not touched`);
-    return false;
-  }
 }
 
 function main(): void {
@@ -289,20 +274,22 @@ function main(): void {
   }
   console.error(`reconcile_run_ending: posted the missing-ending notice on #${number}`);
 
-  // The label the dead run left, judged by the turn the thread had BEFORE it took
+  // The labels the dead run left, judged by the turn the thread had BEFORE it took
   // the ball — `thread` predates the notice above, so the notice's own ending
-  // cannot answer here. Best-effort: a warning, never a failed step, because the
-  // thread is healed and the label is a cache of an answer the thread now gives.
-  const label = getLabel("in_progress");
-  if (!hasLabel(repo, number, label)) return;
+  // cannot answer here. The notice gave the node back to a person, so the labels
+  // move to `with-person`: the in-progress guard comes off AND the
+  // waiting-for-person label goes on (#223) — the crash is the third way a turn
+  // reaches a person, and the node must be findable in the filter of work stopped
+  // here. The `hasLabel` early return is deliberately gone: a run that fell over
+  // before its labels were applied still ends with a person waiting, and the
+  // waiting side is what that node is missing. Best-effort: a warning, never a
+  // failed step, because the thread is healed and the labels are a cache of an
+  // answer the thread now gives.
   if (!releasesLabel(lastEndingComment(thread.dated, endingWalkReaders), endingWalkReaders)) {
-    console.error(`reconcile_run_ending: '${label}' stays on #${number}; the thread's last ending keeps the turn with an agent`);
+    console.error(`reconcile_run_ending: the labels stay on #${number}; the thread's last ending keeps the turn with an agent`);
     return;
   }
-  const removed = gh("issue", "edit", String(number), "--repo", repo, "--remove-label", label);
-  if (removed.code !== 0) {
-    console.error(`Warning: could not remove '${label}' from #${number}: ${removed.stderr || removed.stdout}`);
-  }
+  applyTurnLabels("with-person", repo, String(number));
 }
 
 if (import.meta.main) main();
