@@ -484,12 +484,12 @@ describe("generated workflows", () => {
     // Fed by the resolution, not by git -- and unset means stay detached.
     expect(checkout?.env?.BRANCH_NAME).toContain("steps.pr-branch.outputs.branch");
     expect(checkout?.run).toContain("refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}");
-    // The re-labelling: HEAD, never GITHUB_SHA. The run is dispatched with no
+    // The re-labelling: the tip this step just fetched, never GITHUB_SHA. The run is dispatched with no
     // `--ref`, so GITHUB_SHA is the default branch's tip while the checkout is the
     // pull request's head -- and a shallow checkout of a pull request need not
     // even contain that commit. Comments are stripped first, because the step's own
     // comment explains exactly this and would otherwise trip the check.
-    expect(checkout?.run).toContain('git checkout -B "${BRANCH_NAME}" HEAD');
+    expect(checkout?.run).toContain('git checkout -B "${BRANCH_NAME}" "refs/remotes/origin/${BRANCH_NAME}"');
     const checkoutCommands = (checkout?.run ?? "")
       .split("\n")
       .filter((line) => !line.trim().startsWith("#"))
