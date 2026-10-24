@@ -154,12 +154,13 @@ function main(): void {
     process.exit(1);
   }
 
-  // The chain identity this dispatch carries (#194): `--ask` names the hand-off the
-  // successor was to claim, and `--run-id` names the run that made the promise. Both
-  // must be known for a refusal to write an honest `ended=refused`; a caller that
-  // names neither — validation, which fulfils a request rather than continuing a
-  // chain — gets the plain refusal notice, the right shape for a thread this dispatch
-  // does not hold open.
+  // The chain identity this dispatch carries (#194): `--ask` names the ask the
+  // successor was to claim, and `--run-id` names the run that made the promise —
+  // the runner's hand-off names its result comment, validation names the request
+  // the pull request carries. Both must be known for a refusal to write an honest
+  // `ended=refused`; a caller that names neither — the aggregation, whose
+  // re-invocation of a parent holds no promise open — gets the plain refusal
+  // notice, the right shape for a thread this dispatch does not hold open.
   const runId = Number(values["run-id"]);
   const askId = Number(values.ask);
   const refusalEnding =
@@ -183,8 +184,9 @@ function main(): void {
     // The chain identity a hand-off carries (#194): the refusal that ends the chain
     // writes `ended=refused` answering the ask the successor was to claim, with this
     // run's id on it. Both ids must be known for the ending to be honest; a caller
-    // that names neither (aggregation, validation) gets the plain refusal notice,
-    // which is the right shape for a thread that is not held open by this promise.
+    // that names neither (the aggregation, which holds no promise open) gets the
+    // plain refusal notice, which is the right shape for a thread that is not held
+    // open by this promise.
     refusalEnding,
   });
 

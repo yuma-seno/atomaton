@@ -210,13 +210,14 @@ export interface RunnerDispatch {
    * hand-off comes off with it.
    *
    * `answers` is the `ask` this dispatch names — for the runner's hand-off that is the
-   * result comment the successor was to claim. The tag is written only when BOTH ids
-   * are known; a refusal that cannot name them stays a plain notice, which is the old
-   * shape and still the right one for callers whose thread is not mid-chain (the
-   * aggregation's re-invocation of a parent, validation's reload): those threads are
-   * not held open by the promise this would withdraw.
+   * result comment the successor was to claim, and for validation the request the
+   * pull request carries. The tag is written only when BOTH ids are known; a refusal
+   * that cannot name them stays a plain notice, which is the right shape for callers
+   * whose thread is not held open by a promise — the aggregation's re-invocation of
+   * a parent is the one that remains.
    *
-   * Set by the runner's `Dispatch next agent` step; nowhere else.
+   * Set by the runner's `Dispatch next agent` step and by validation's dispatch;
+   * nowhere else.
    */
   refusalEnding?: RefusalEnding;
   log?: (message: string) => void;
