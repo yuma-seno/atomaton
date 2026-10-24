@@ -150,8 +150,8 @@ function mergedWatch(configured: Record<string, unknown> | undefined, defaults: 
   return out;
 }
 
-/** The two hook keys that name a script. The rest of a `hooks` block is tool patterns. */
-const HOOK_SCRIPT_KEYS = ["before_tool", "after_tool"];
+/** The three hook keys that name a script. The rest of a `hooks` block is tool patterns. */
+const HOOK_SCRIPT_KEYS = ["before_tool", "after_tool", "before_compaction"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -160,9 +160,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * A hooks block with its script paths resolved against `base`.
  *
- * Only `before_tool` and `after_tool` are touched: `tool_allowlist` and
- * `tool_denylist` hold tool-name globs, and rewriting those as paths would turn a
- * pattern into a filename the core then refuses to find.
+ * `before_compaction` is resolved like the other two, but its SCRIPTS live in the
+ * runner's machinery tree -- the hook runs inside the agent step, where
+ * `ATOMATON_MACHINERY_ROOT` is the machinery checkout -- so the caller passes the
+ * base the script paths are relative to. `tool_allowlist` and `tool_denylist` hold
+ * tool-name globs, and rewriting those as paths would turn a pattern into a
+ * filename the core then refuses to find.
  *
  * Either spelling, because the file-wide block is a list (the machinery's hooks plus
  * whatever the project appended) while a server's own is usually one script. Both

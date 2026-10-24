@@ -333,7 +333,7 @@ describe("the generated tools file says nothing the core has not declared", () =
     // `server__` prefix, so `files` arrives as `read`, `grep`, `glob`.
     "unprefixed",
   ]);
-  const CORE_HOOK_KEYS = new Set(["before_tool", "after_tool", "tool_allowlist", "tool_denylist"]);
+  const CORE_HOOK_KEYS = new Set(["before_tool", "after_tool", "before_compaction", "tool_allowlist", "tool_denylist"]);
 
   test("every key it emits is one atoma reads", () => {
     const generated = parse(DEPLOYED);

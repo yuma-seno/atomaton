@@ -94,8 +94,10 @@ describe("capText", () => {
 
   test("the budget is one number, shared", () => {
     // Named rather than asserted at a value: the point is that one module owns it.
-    // 50,000 is ~12.5k tokens, a tenth of the smallest window worth designing for.
-    expect(TOOL_OUTPUT_BUDGET).toBe(50_000);
+    // 8,000 is ~2k tokens, atoma's own default from v0.4.3 (atoma#12) — a prompt
+    // token is resent every turn, and one call taking a seventh of the window was
+    // the largest line item in the measured sessions.
+    expect(TOOL_OUTPUT_BUDGET).toBe(8_000);
   });
 });
 

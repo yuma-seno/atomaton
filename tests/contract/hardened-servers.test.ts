@@ -96,7 +96,13 @@ function shippedServers(): { script: string; names: string[]; hardens: boolean }
 function listedServers(page: string): string[] {
   const start = page.indexOf(MARKER);
   if (start < 0) return [];
-  const end = page.indexOf("\n\n", start);
+  // Either line ending: the pages are written by whichever checkout produced them
+  // (git's autocrlf makes the working copy CRLF on Windows), and `\n\n` finds
+  // nothing in a CRLF file -- the "paragraph" then ran to the end of the page and
+  // swept in every backticked word below it.
+  const end = page.indexOf("\n\n", start) === -1
+    ? page.indexOf("\r\n\r\n", start)
+    : page.indexOf("\n\n", start);
   const paragraph = page.slice(start, end < 0 ? undefined : end);
   return [...paragraph.matchAll(/`([a-z_]+)`/g)].map(([, name]) => name!);
 }

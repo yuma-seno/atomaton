@@ -42,12 +42,16 @@
  * fraction of the length it promises — this repository's issues are part
  * Japanese, where a byte budget delivers a third of its nominal size.
  *
- * 50,000 was already the value two tools used, and it is about 12.5k tokens: a
- * tenth of the smallest context window worth designing for (128k). A tool call
- * that wants more than a tenth of the window is a tool call that should have
- * returned less.
+ * 8,000, about 2k tokens, is atoma's own default from v0.4.3 (yuma-seno/atoma#12):
+ * the two numbers used to be 50,000 here and 50,000 there — a coincidence this
+ * comment once documented as one — and the number moved for the reason the cap
+ * exists at all. A prompt token is resent every turn, so a result's size is paid
+ * on every later turn, and one call taking a seventh of the window was the
+ * largest line item in the measured sessions. atoma's cap is the one cap now;
+ * this constant remains the budget the TOOLS here project down to before their
+ * result ever reaches it.
  */
-export const TOOL_OUTPUT_BUDGET = 50_000;
+export const TOOL_OUTPUT_BUDGET = 8_000;
 
 /**
  * The cap the core is ASKED to apply to the servers this repository writes.
