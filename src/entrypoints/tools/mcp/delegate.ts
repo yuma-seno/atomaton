@@ -669,24 +669,6 @@ function delegateDescription(def: ResolvedDelegate, shared: string): string {
  * which tool that is, and this is where it finds out. Nothing else about the
  * difference is here: that a paid model also costs more is something a caller does
  * not spend, so it is not something the caller is asked to weigh.
- */
-/**
- * The tier this definition runs on, said in the words a caller chooses by.
- *
- * Read from the definition's frontmatter rather than written here, because the
- * frontmatter is what a project edits: a folder that has been pointed at a paid
- * model must stop being offered as the free one, and that is a change to the file
- * that says `model:`, not to this program.
- *
- * `orcarouter/free` is the one value that means the shared tier. It is a literal
- * rather than a classifier of the model name because the tier is not a property of
- * a name — it is what this particular deployment serves without charge and with a
- * request cap shared by every agent using it.
- *
- * A caller told "try the free one and read a refusal as an answer" needs to know
- * which tool that is, and this is where it finds out. Nothing else about the
- * difference is here: that a paid model also costs more is something a caller does
- * not spend, so it is not something the caller is asked to weigh.
  *
  * The free tier's refusal is described by its OBSERVED shape, never by the paid
  * delegates' names (#238): those are files a project renames and deletes, and a

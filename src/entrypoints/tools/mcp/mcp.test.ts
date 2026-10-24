@@ -2643,6 +2643,11 @@ describe("mcp/delegate.ts", () => {
     // And the shared-limit consequence, which is what makes a refusal readable
     // rather than a failure: the caller is told to try it and read the answer.
     expect(byName.get("delegate")).toContain("shared with every other agent");
+    // #238: the exhaustion case is named, and names no other delegate — the paid
+    // delegates are files a project renames or deletes, so the description points
+    // at "the other delegates you were offered", never at a spelled name.
+    expect(byName.get("delegate")).toContain("no task fits");
+    expect(byName.get("delegate_readonly")).toContain("no task fits");
   });
 
   test("refuses to start when the roster names no folders for this server", async () => {
