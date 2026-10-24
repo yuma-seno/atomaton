@@ -8864,6 +8864,50 @@
     ]
   },
   {
+    "path": "sessions/issue-311/reviewer.json",
+    "agent": "reviewer",
+    "messages": 78,
+    "calls": 42,
+    "failed": 2,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "atoma_builtin__load_skill": 1,
+      "grep": 21,
+      "read": 16,
+      "glob": 1,
+      "list": 1,
+      "get_pr": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-24T06:57:42Z",
+        "ended_because": "completed",
+        "iterations": 29,
+        "messages": 78,
+        "seconds": 215,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 21,
+            "list": 1,
+            "read": 16
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_pr": 1
+          }
+        },
+        "started": "2026-10-24T06:54:07Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-314/engineer.json",
     "agent": "engineer",
     "messages": 7,
