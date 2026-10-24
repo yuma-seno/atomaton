@@ -74,10 +74,12 @@ branch object" while the tool returns three fields sends the model looking for
 something that is not there. Say what you return, say that it can be truncated,
 and say what to do about it.
 
-Atomaton's own tools share one budget, `TOOL_OUTPUT_BUDGET`: 50,000 characters, about
-12.5k tokens, a tenth of the smallest context window worth designing for. It was
-four numbers in three units before — 1,000,000 **bytes** in the shell, 60,000
-characters in `fetch`, 50,000 in two GitHub tools, and nothing anywhere else.
+Atomaton's own tools share one budget, `TOOL_OUTPUT_BUDGET`: 8,000 characters, about
+2k tokens — atoma's own default since v0.4.3, matched on purpose, because a prompt
+token is resent every turn and one call should not set the size every later turn
+pays. It was four numbers in three units before that — 1,000,000 **bytes** in the
+shell, 60,000 characters in `fetch`, 50,000 in two GitHub tools, and nothing
+anywhere else.
 
 That number is compiled into the servers you receive. There is no file in your tree
 holding it and nothing to override, so for a server of your own it is a number to
