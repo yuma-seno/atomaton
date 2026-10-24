@@ -63,11 +63,11 @@
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
 import { ENDED_TAG, LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
-import { getLabel } from "../../adapters/runner/config.ts";
 import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { descendants, nodesToStop, subtree } from "../../domain/work/work-tree.ts";
 import { openClaimOn } from "../../adapters/github/thread.ts";
 import { readWorkTree, requestStopAcross } from "../../adapters/github/work-tree.ts";
+import { applyTurnLabels } from "./lib/turn-labels.ts";
 import { preservedCommentBlock } from "./lib/removed-comment.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -296,16 +296,13 @@ function main(): void {
 
   // The park is ended by its own comment, not by a tag on the receipt: a receipt
   // that quotes the stopped comment carries `atomaton:quotes`, and the thread skips
-  // a quotation whole — an ending inside one would reach no reader. The label comes
-  // off with it: the node the park held is free, and the label is the cache that
-  // says otherwise. Best effort, like every label write.
+  // a quotation whole — an ending inside one would reach no reader. The labels move
+  // with it (#223): the in-progress guard comes off, the waiting-for-person label
+  // goes on — the node the park held is now the person's. Best effort, like every
+  // label write.
   if (park !== undefined) {
     gh("issue", "comment", String(number), "--body", parkEndedNotice(park));
-    const label = getLabel("in_progress");
-    const { code } = gh("issue", "edit", String(number), "--remove-label", label);
-    if (code !== 0) {
-      console.error(`::warning::could not remove '${label}' from #${number}: the thread says the turn came back, but the label will disagree until it is removed by hand`);
-    }
+    applyTurnLabels("with-person", repo, String(number));
     console.error(`#${number} was parked; the stop ended the park and returned the turn.`);
   }
 

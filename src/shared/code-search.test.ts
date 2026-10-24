@@ -71,14 +71,14 @@ describe("passagesOf", () => {
 
   /**
    * File names in this repository are written to be read. A question about the
-   * in-progress label should find `manage_in_progress_label.ts` by its name even when
+   * in-progress label should find `manage_turn_labels.ts` by its name even when
    * no passage inside it says so.
    */
   test("the path is indexed as words", () => {
-    const passages = passagesOf("src/entrypoints/machinery/manage_in_progress_label.ts", "x");
+    const passages = passagesOf("src/entrypoints/machinery/manage_turn_labels.ts", "x");
     const pathPassage = passages.at(-1)!;
     expect(pathPassage.text).toContain("manage in progress label");
-    expect(pathPassage.text).toContain("src/entrypoints/machinery/manage_in_progress_label.ts");
+    expect(pathPassage.text).toContain("src/entrypoints/machinery/manage_turn_labels.ts");
   });
 
   test("an empty file contributes only its name", () => {

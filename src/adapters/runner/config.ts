@@ -58,6 +58,8 @@ export const DEFAULT_LABELS = {
   sub_issue: "atomaton/sub-issue",
   launched: "atomaton/launched",
   in_progress: "atomaton/in-progress",
+  /** The complement of `in_progress`: the turn came back and a person holds it (#223). */
+  waiting_for_person: "atomaton/waiting-for-person",
 } as const;
 
 /** A label key that has a default. */
