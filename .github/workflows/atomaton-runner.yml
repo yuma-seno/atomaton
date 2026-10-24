@@ -1219,7 +1219,7 @@ jobs:
           TYPE: ${{ inputs.type }}
           NOTIFY: ${{ steps.notify.outputs.notify }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${DIRECTIVE}" --number "${NUMBER}" --type "${TYPE}" --notify "${NOTIFY}" --context "the agent on ${TYPE} #${NUMBER} handed off to ${DIRECTIVE}" --ask "${{ steps.post-result.outputs.comment_id }}"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts" --agent "${DIRECTIVE}" --number "${NUMBER}" --type "${TYPE}" --notify "${NOTIFY}" --context "the agent on ${TYPE} #${NUMBER} handed off to ${DIRECTIVE}" --ask "${{ steps.post-result.outputs.comment_id }}" --run-id "${{ github.run_id }}"
         if: steps.turn-ending.outputs.dispatch_to != ''
       - name: Comment on loop limit reached
         shell: bash
@@ -1230,6 +1230,8 @@ jobs:
           NOTIFY: ${{ steps.notify.outputs.notify }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REASON: ${{ steps.loop-control.outputs.stop_reason }}
+          ASK_COMMENT: ${{ steps.post-result.outputs.comment_id }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           if [ -n "$NUMBER" ]; then
             MENTION=""
@@ -1241,6 +1243,14 @@ jobs:
             # person and tells them how to resume.
             printf '%s
           ' "<!-- atomaton:llm-context=exclude -->" > "$BD"
+            # The chain-over IS a refused hand-off (#194): this run's result comment said
+            # "handed off" before the limit was known, and without this line the thread's
+            # newest word would stay "a hand-off" -- read by every later reader as a run
+            # working or coming, on a successor the limit just refused. The tag is spelled
+            # from ENDED_TAG's marker with the verb inline, the workflow-side escape hatch
+            # documented on the tag: the ids are runtime values no baked write() could carry.
+            printf '<!-- atomaton:ended=refused answers=%s run=%s -->
+          ' "${ASK_COMMENT}" "${RUN_ID}" >> "$BD"
             echo "${MENTION}${REASON}" >> "$BD"
             echo "The next agent would have been ${DIRECTIVE}." >> "$BD"
             echo "Please review the progress so far. To resume, post a manual comment on the Issue/PR (e.g. /${DIRECTIVE}) to trigger the next agent at any time." >> "$BD"
