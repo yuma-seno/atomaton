@@ -27,5 +27,9 @@ describe("the turn labels move together (#223)", () => {
     const release = steps.find((s) => s.name === "Move the turn labels: the work hands back to a person");
     expect(release, "the end-of-turn label step must exist").toBeDefined();
     expect(release?.run ?? "").toContain('--phase "with-person"');
+    // Only a run that TOOK the turn may move the labels (#223's review): a run
+    // that lost the claim race or did nothing must not strip the in-progress
+    // label another run — a parked parent included — is still holding.
+    expect(release?.if ?? "").toContain("claimed");
   });
 });
