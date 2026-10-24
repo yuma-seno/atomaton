@@ -110,6 +110,32 @@ describe("dispatch_agent.ts", () => {
     expect(r.status).toBe(0);
     const notice = r.ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
     expect(notice.join(" ")).toContain("was not started");
+    // No chain identity, no ending: this caller's thread is not held open by the
+    // promise the refusal withdraws, so the notice stays the plain escalation.
+    expect(notice.join(" ")).not.toContain("atomaton:ended=");
+  });
+
+  /**
+   * #194: a hand-off is a PROMISE, and the refusal breaks it. The thread's newest word
+   * would stay "a hand-off" — read by `runInFlight` as a run working or coming, forever
+   * — so the refusal writes the ending itself, answering the ask the successor was to
+   * claim with this run's id on it, and takes the label down with it: the run's own
+   * release step already ran and held the label because the turn said `handoff`.
+   */
+  test("a refused hand-off writes the refused ending and releases the node", () => {
+    const r = run(
+      [...HANDOFF, "--ask", "900", "--run-id", "42"],
+      [closed, { match: ["issue", "comment"] }, { match: ["issue", "edit"] }, { match: ["workflow", "run"] }],
+    );
+
+    expect(r.status).toBe(0);
+    const notice = r.ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
+    expect(notice.join(" ")).toContain("<!-- atomaton:ended=refused answers=900 run=42 -->");
+    expect(notice.join(" ")).toContain("llm-context=exclude");
+    expect(notice.join(" ")).toContain("was not started");
+    const label = r.ghCalls.find((call) => call[0] === "issue" && call[1] === "edit") ?? [];
+    expect(label.join(" ")).toContain("--remove-label");
+    expect(label.join(" ")).toContain("atomaton/in-progress");
   });
 
   /** Nothing is running and nothing will retry, which is what a failing step is for. */
@@ -117,6 +143,26 @@ describe("dispatch_agent.ts", () => {
     const r = run(HANDOFF, [...openTarget, { match: ["workflow", "run"], code: 1, stdout: "refused" }]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("::error::");
+  });
+
+  /**
+   * #194: GitHub rejecting the call is the third way the hand-off's promise breaks,
+   * and the one that also leaves a phantom — the marker it posted, an ask nothing will
+   * ever claim. The chain-over treatment takes the marker back down, writes the ending,
+   * and releases the node; the step still fails, because the fault is real.
+   */
+  test("a rejected dispatch takes its marker back and writes the ending", () => {
+    const r = run([...HANDOFF, "--ask", "900", "--run-id", "42"], [
+      ...openTarget,
+      { match: ["workflow", "run"], code: 1, stdout: "boom" },
+    ]);
+
+    expect(r.status).toBe(1);
+    expect(r.ghCalls.some((call) => call.includes("DELETE") && call.join(" ").includes("comments/555"))).toBe(true);
+    const notice = r.ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
+    expect(notice.join(" ")).toContain("<!-- atomaton:ended=refused answers=900 run=42 -->");
+    expect(notice.join(" ")).toContain("GitHub rejected the dispatch call");
+    expect(r.ghCalls.some((call) => call[0] === "issue" && call[1] === "edit")).toBe(true);
   });
 
   /**

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   canBeReopened,
   commandOnClosedNotice,
+  dispatchFailedNotice,
   dispatchRefusedNotice,
   mayStartWorkOn,
   recoveryAdvice,
@@ -195,5 +196,30 @@ describe("dispatchRefusedNotice", () => {
     expect(unknown).not.toContain("is closed");
     // Nobody to mention is normal, and must not produce a stray "@".
     expect(unknown).not.toContain("@");
+  });
+});
+
+describe("dispatchFailedNotice", () => {
+  const notice = dispatchFailedNotice({
+    agent: "reviewer",
+    number: 12,
+    context: "the engineer handed off",
+    notify: "alice",
+  });
+
+  // The third way a hand-off's promise breaks, and the one where the target is fine:
+  // the state was checked open moments before GitHub rejected the call. What the
+  // person needs is that nothing is coming and what to do about it.
+  test("says GitHub rejected the call, and what was about to happen", () => {
+    expect(notice).toContain("@alice");
+    expect(notice).toContain("GitHub rejected the dispatch call");
+    expect(notice).toContain("the engineer handed off");
+  });
+
+  test("says nothing will retry, and names the command that starts it again", () => {
+    expect(notice).toContain("Nothing will retry");
+    expect(notice).toContain("/reviewer");
+    // The target was open when it was checked, so there is no reopen step.
+    expect(notice).not.toContain("Reopen");
   });
 });

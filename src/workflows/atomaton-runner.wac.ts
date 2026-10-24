@@ -1637,6 +1637,11 @@ const dispatchNextAgentStep = new TypedOutputsStep({
     // answers back. The marker the dispatch also posts stays the ordering check's
     // instrument; the claim names the directive.
     ask: postResultCommentStep.outputs.comment_id,
+    // This run's id, so a REFUSED hand-off can end the chain honestly (#194): the
+    // refusal writes `ended=refused answers=<this ask> run=<this run>` and releases
+    // the label, instead of leaving the thread's newest word at "a hand-off" with no
+    // run coming.
+    "run-id": "${{ github.run_id }}",
   })}
 `,
 });

@@ -35,6 +35,14 @@ notice says what was about to happen, that nothing will retry it, and how to run
 by hand. It mentions whoever asked for the run in the first place, which is the
 login the chain has been carrying all along.
 
+A refused **handoff** — the next agent this run's own ending named — goes one
+step further: the refusal writes the turn-ending tag onto the notice
+(`ended=refused`) and takes the `atomaton/in-progress` label down with it. The
+handoff had left the thread saying a run was coming; the refusal is what makes the
+thread tell the truth, and without it the node would look busy to every later
+reader — including the close-of-parent flow, which would keep sending stop
+requests to a node where nothing has run for days.
+
 A target whose state cannot be read is treated as closed rather than as open. Work
 that should not have started is harder to undo than work that has to be started
 again.

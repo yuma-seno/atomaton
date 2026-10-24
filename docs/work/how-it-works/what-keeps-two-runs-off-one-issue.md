@@ -14,6 +14,15 @@ compares against: the run watch's "did this run report", the guard's "is a comme
 arriving mid-turn", and a dispatch that waited minutes for CI all read the same
 ids instead of estimating who took the turn from timestamps and event shapes.
 
+A hand-off is a promise, and the thread holds it open: after
+`ended=handoff answers=<ask> run=<run>` every reader treats the node as "a run
+working or coming". When the dispatch of that successor is refused — the target
+closed, the marker unconfirmable, GitHub rejecting the call — the refusal writes
+the ending itself (`ended=refused`, answering the ask the successor was to claim,
+carrying the promising run's id) and the label comes off with it. Without that
+write the node would look busy to every later reader, forever, on work that was
+never started.
+
 The label comes off when the work hands back to a person. Which endings count as
 handing back is a rule of the machinery rather than a condition written into a
 workflow, so every path out of a run releases the guard the same way.
