@@ -6954,6 +6954,8 @@ var AGENT_ENV_NAMES = [
   "ATOMATON_RUN_DIR",
   "ATOMATON_RUN_URL",
   "ATOMATON_DISPATCHED_BY",
+  "ATOMATON_ASK_ID",
+  "GITHUB_RUN_ID",
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
@@ -6965,7 +6967,6 @@ var AGENT_ENV_NAMES = [
   "ATOMA_PROVIDER"
 ];
 var RUN_STEP_NAMES = [
-  "GITHUB_RUN_ID",
   "OPENROUTER_BASE_URL",
   "ORCAROUTER_BASE_URL",
   "ANTHROPIC_BASE_URL",
@@ -7407,14 +7408,17 @@ function makeTag(key, valuePattern, parse, render) {
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m[1]) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
   };
 }
@@ -7424,8 +7428,40 @@ function numericTag(key) {
 function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
+function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m) : undefined;
+  };
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read,
+    readProse: (text) => read(proseOnly(text)),
+    has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
+    search: searchValue
+  };
+}
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+  const verb = match[1];
+  const answers = match[2];
+  const run = match[3];
+  if (verb === undefined || answers === undefined || run === undefined)
+    return;
+  return { verb, answers: Number(answers), run: Number(run) };
+}, ({ verb, answers, run }) => `${verb} answers=${answers} run=${run}`, ({ verb }) => `atomaton:ended=${verb}`);
+var TOOK_TAG = makeCompoundTag("took", String.raw`(\d+) run=(\d+)`, (match) => {
+  const ask = match[1];
+  const run = match[2];
+  if (ask === undefined || run === undefined)
+    return;
+  return { ask: Number(ask), run: Number(run) };
+}, ({ ask, run }) => `${ask} run=${run}`, ({ ask }) => `atomaton:took=${ask}`);
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -7447,6 +7483,10 @@ function stripTags(text) {
   const tags = EVERY_TAG_PATTERN.join("|");
   const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;
   return text.replace(new RegExp(String.raw`(?:^[ \t]*)?(?:${tags})[ \t]*${lineEnd}`, "gm"), "");
+}
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
 }
 function fenceSegments(text) {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
@@ -7556,12 +7596,12 @@ function resolveNotify(repo, number) {
   const read = (current) => {
     const d = fetchIssueLookup(repo, current);
     const body = d.body ?? "";
-    const parent = d.is_pr ? PARENT_ISSUE_TAG.read(body) : nativeParentOf(repo, current);
+    const parent = d.is_pr ? PARENT_ISSUE_TAG.readProse(body) : nativeParentOf(repo, current);
     return { data: d, parent: parent === undefined ? { known: false, why: "no parent" } : { known: true, parent } };
   };
   for (const hop of parentChain(number, read)) {
     const body = hop.data.body ?? "";
-    const tagged = NOTIFY_TAG.read(body);
+    const tagged = NOTIFY_TAG.readProse(body);
     if (tagged)
       return tagged;
     if (isHumanActor(hop.data.type) && hop.data.login)
@@ -7695,7 +7735,7 @@ function issueLinks(repo, number) {
     };
   }
   const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
-  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.read(source?.body ?? "") === number).map(asPr);
+  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.readProse(source?.body ?? "") === number).map(asPr);
   return {
     kind: "issue",
     parent: issue.parent ? normalise(issue.parent) : undefined,
@@ -7811,35 +7851,77 @@ function eventOf(entry, readers) {
     return "asked";
   return;
 }
-function newestEventEntry(entries, readers) {
-  for (let i = entries.length - 1;i >= 0; i--) {
-    const entry = entries[i];
-    if (entry === undefined)
-      break;
-    if (eventOf(entry, readers) !== undefined)
-      return entry;
-  }
-  return;
-}
-function whoseTurn(events) {
-  const last = events[events.length - 1];
-  return last === "asked" || last === "handed-off" ? "agent" : "person";
-}
 function requestOutstanding(events) {
   return events[events.length - 1] === "asked";
+}
+function askSuperseded(comments, readers, askId, agent, verdictPassed) {
+  let answeredHere;
+  let answeredBy = "";
+  const answeredAsks = new Set;
+  const claimedAsks = new Set;
+  const asks = [];
+  for (const entry of comments) {
+    if (entry.quoted)
+      continue;
+    if (readers.requestedAgent(entry.body) !== "" || readers.isDispatchMarker(entry.body)) {
+      asks.push({ id: entry.id, marker: readers.isDispatchMarker(entry.body) });
+    }
+    const claim = readers.claim(entry.body);
+    if (claim !== undefined)
+      claimedAsks.add(claim.ask);
+    const answer = readers.answeredAsk(entry.body);
+    if (answer !== undefined && answer > 0) {
+      answeredAsks.add(answer);
+      if (answer === askId) {
+        answeredHere = readers.ending(entry.body) || undefined;
+        answeredBy = readers.endingAgent(entry.body);
+      }
+    }
+  }
+  const quoted = asks.find((ask) => ask.id === askId);
+  if (quoted?.marker === true && !claimedAsks.has(askId))
+    return "run-coming";
+  if (answeredHere === "handed-off")
+    return "handed-off";
+  if (answeredHere === "waiting")
+    return "waiting";
+  if (answeredHere === "returned") {
+    const own = answeredBy === "" || answeredBy === agent;
+    if (own && verdictPassed !== false)
+      return "own-verdict";
+  }
+  for (let index = asks.length - 1;index >= 0; index -= 1) {
+    const ask = asks[index];
+    if (ask.id <= askId)
+      break;
+    if (!answeredAsks.has(ask.id))
+      return "newer-open-ask";
+  }
+  return;
 }
 function shapedThread(comments, readers) {
   const kept = [];
   const events = [];
+  let openClaim;
   for (const entry of comments) {
-    if (entry.isHuman && whoseTurn(events) === "agent")
+    if (entry.isHuman && openClaim !== undefined)
       continue;
     kept.push(entry);
+    if (!entry.quoted) {
+      const claim = readers.claim(entry.body);
+      if (claim !== undefined) {
+        openClaim = claim.ask;
+      } else if (openClaim !== undefined) {
+        const answered = readers.answeredAsk(entry.body);
+        if (answered !== undefined && answered === openClaim)
+          openClaim = undefined;
+      }
+    }
     const event = eventOf(entry, readers);
     if (event !== undefined)
       events.push(event);
   }
-  return { comments: kept, events };
+  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
 }
 function wasLaunched(comments, readers) {
   return comments.some((entry) => readers.isDispatchMarker(entry.body));
@@ -7848,7 +7930,7 @@ function wasLaunched(comments, readers) {
 // src/adapters/github/thread.ts
 var readers = {
   ending: (body) => {
-    const ended = ENDED_TAG.read(body);
+    const ended = ENDED_TAG.readProse(body)?.verb;
     if (ended === "handoff")
       return "handed-off";
     if (ended === "waiting")
@@ -7857,15 +7939,26 @@ var readers = {
       return "returned";
     return "";
   },
-  requestedAgent: (body) => parseCommentCommand(body).agent,
-  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
+  claim: (body) => TOOK_TAG.readProse(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.readProse(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
 var askReaders = {
   ...readers,
-  requestedAgent: (body) => parseMangledCommand(body).agent,
-  authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
-var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
+var endingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body)
+};
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
@@ -7906,18 +7999,23 @@ function checkDispatchMarker(repo, number, markerId) {
   const entries = comments.filter((comment) => String(comment.id) !== marker).map(entryOf);
   return { markerVisible, outstanding: requestOutstanding(shapedThread(entries, readers).events) };
 }
-function readLastTurnEvent(repo, number, probeId) {
+function readAskState(repo, number, probeId) {
   const comments = listComments(repo, number);
-  const entries = comments.map(entryOf);
-  const shaped = shapedThread(entries, readers);
-  const last = shaped.events[shaped.events.length - 1];
   const probe = probeId === undefined ? undefined : String(probeId);
-  const source = newestEventEntry(shaped.comments, readers);
+  const entries = comments.map((comment) => ({
+    id: comment.id,
+    ...entryOf(comment)
+  }));
   return {
     probeVisible: probe === undefined ? undefined : comments.some((comment) => String(comment.id) === probe),
-    last,
-    lastAgent: last === "returned" ? AGENT_TAG.read(source?.body ?? "") : undefined,
-    lastIsMachinery: source !== undefined && !source.isHuman
+    comments: shapedThread(entries, readers).comments
+  };
+}
+function isAskSuperseded(repo, number, args) {
+  const read = readAskState(repo, number, args.probeId);
+  return {
+    superseded: askSuperseded(read.comments, readers, args.askId, args.agent, args.verdictPassed),
+    probeVisible: read.probeVisible
   };
 }
 
@@ -8132,14 +8230,24 @@ function refuseOutstandingRequest(d, markerId) {
   log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
   return "refused-outstanding";
 }
-function refuseResolvedWait(d) {
+function refuseSupersededAsk(d) {
   const log = d.log ?? ((message) => console.error(message));
   const repoPath = d.repo ?? "{owner}/{repo}";
+  const askId = Number(d.ask);
+  if (!Number.isInteger(askId) || askId <= 0) {
+    log(`${d.context}: the dispatch answers a request on #${d.number} but names no ask comment, ` + `so ${d.agent} was not started`);
+    return "superseded";
+  }
   const delays = [1000, 2000, 4000];
   let read;
   for (let attempt = 0;attempt <= delays.length; attempt++) {
     try {
-      read = readLastTurnEvent(repoPath, d.number, d.freshnessProbeId);
+      read = isAskSuperseded(repoPath, d.number, {
+        askId,
+        agent: d.agent,
+        verdictPassed: d.verdictPassed,
+        probeId: d.freshnessProbeId
+      });
     } catch (e) {
       log(`${d.context}: could not read the thread on #${d.number}, so ${d.agent} was not started: ${e}`);
       return "superseded";
@@ -8156,25 +8264,10 @@ function refuseResolvedWait(d) {
     log(`${d.context}: whether #${d.number} still waits for ${d.agent} could not be established ` + "(the thread would not confirm it had caught up), so nothing was started");
     return "superseded";
   }
-  const last = read.last;
-  if (last === undefined || last === "waiting" || last === "handed-off")
+  const why = read.superseded;
+  if (why === undefined)
     return;
-  if (last === "asked") {
-    if (!read.lastIsMachinery)
-      return;
-    log(`${d.context}: #${d.number} already has the machinery's dispatch marker on it, ` + `so ${d.agent} was not started`);
-    return "superseded";
-  }
-  if (last === "returned") {
-    const own = read.lastAgent === undefined || read.lastAgent === d.agent;
-    if (!own)
-      return;
-    if (d.verdictPassed === false)
-      return;
-    log(`${d.context}: the wait on #${d.number} had already resolved (the thread's newest word on the work is ` + `${read.lastAgent ?? d.agent}'s own verdict${d.verdictPassed === true ? ", and the caller's confirms it" : ""}), ` + `so ${d.agent} was not started`);
-    return "superseded";
-  }
-  log(`${d.context}: the wait on #${d.number} had already resolved (the thread's last turn event is \`${last}\`), ` + `so ${d.agent} was not started`);
+  log(`${d.context}: the ask this dispatch answers on #${d.number} is no longer waiting ` + `(${why}), so ${d.agent} was not started`);
   return "superseded";
 }
 function dispatchRunner(d) {
@@ -8186,15 +8279,18 @@ function dispatchRunner(d) {
   const state = readTargetState(d.number, d.repo);
   if (!mayStartWorkOn(state))
     return refuseClosedTarget(d, state);
+  let ask;
   if (d.answersRequest) {
-    const refusal = refuseResolvedWait(d);
+    const refusal = refuseSupersededAsk(d);
     if (refusal !== undefined)
       return refusal;
+    ask = d.ask;
   } else {
     const markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined)
       return refusal;
+    ask = d.ask ?? markerId;
   }
   const args = [
     ...d.repo ? ["--repo", d.repo] : [],
@@ -8206,6 +8302,8 @@ function dispatchRunner(d) {
     `type=${d.type}`,
     "--field",
     `notify=${d.notify ?? ""}`,
+    "--field",
+    `ask=${ask ?? ""}`,
     "--field",
     `reload_count=${d.reloadCount ?? 0}`,
     "--field",
@@ -8225,10 +8323,10 @@ function mostRecentAgent(bodies) {
     const body = bodies[i] ?? "";
     if (isQuotation(body))
       continue;
-    const result = AGENT_TAG.read(body);
+    const result = AGENT_TAG.readProse(body);
     if (result)
       return result;
-    const asked = parseCommentCommand(body).agent;
+    const asked = parseCommentCommand(proseOnly(body)).agent;
     if (asked)
       return asked;
   }
@@ -8306,13 +8404,14 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", ".[].body");
+  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", "[.[].body]");
   if (commentsCode !== 0) {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
     return withNotice(opts, { kind: "undetermined", why });
   }
-  if (commentsOut.includes(AGGREGATED_TAG.write(opts.closedNum))) {
+  const markerAlreadyWritten = splitConcatenatedJson(commentsOut).flatMap((page) => Array.isArray(page) ? page : []).some((entry) => typeof entry === "string" && AGGREGATED_TAG.readProse(entry) === opts.closedNum);
+  if (markerAlreadyWritten) {
     return { kind: "already-aggregated" };
   }
   if (opts.beforeDispatch)
@@ -8460,11 +8559,24 @@ ${body}` : head;
 // src/adapters/github/turn-comment.ts
 function turnHeader(h) {
   const context = h.audience === "model" ? "include" : "exclude";
-  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+  return [
+    LLM_CONTEXT_TAG.write(context),
+    ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 })
+  ];
 }
 function turnCommentBody(h) {
   return [...turnHeader(h), h.body].join(`
 `);
+}
+
+// src/entrypoints/tools/lib/turn-identity.ts
+function endingIdentity() {
+  const ask = Number(process.env.ATOMATON_ASK_ID ?? "");
+  const run = Number(process.env.GITHUB_RUN_ID ?? "");
+  return {
+    ...Number.isFinite(ask) && ask > 0 ? { answers: ask } : {},
+    ...Number.isFinite(run) && run > 0 ? { run } : {}
+  };
 }
 
 // src/adapters/github/ending-comment.ts
@@ -19838,7 +19950,9 @@ function dispatchPrValidation(repo, prNumber, branch, options = {}) {
     "-f",
     `branch=${branch}`,
     "-f",
-    `asked_by_person=${options.askedByPerson === true ? "true" : "false"}`
+    `asked_by_person=${options.askedByPerson === true ? "true" : "false"}`,
+    "-f",
+    `ask=${options.ask ?? ""}`
   ], log5);
 }
 function dispatchPostMergeAgent(repo, subIssueNum, agent) {
@@ -20379,7 +20493,7 @@ function closeIssue(a) {
       notify: resolveNotify(REPO, num),
       body: "Atomaton: an agent finished the work on this issue and asked for it to be closed."
     });
-    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", turnCommentBody({ ended: "done", audience: "person", body: request }));
+    const { code, stdout, stderr } = gh("issue", "comment", String(num), "--repo", REPO, "--body", turnCommentBody({ ended: "done", audience: "person", body: request, ...endingIdentity() }));
     if (code)
       mcpFail(`Could not ask for issue #${num} to be closed: ${stderr || stdout}`);
     logOp("close_issue", { number: num, closed: false });
@@ -20513,14 +20627,34 @@ function createPr(a) {
   if (!Number.isFinite(num))
     mcpFail(`gh pr create: unexpected output: ${stdout.slice(0, 300)}`);
   logOp("create_pr", { number: num, title });
-  const validationDispatched = dispatchPrValidation(REPO, num, branch);
   const node = nodeNumber();
+  let waitingCommentId;
   if (node !== undefined) {
-    const next = !validationDispatched ? "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log." : reviewer ? `Running CI; \`${reviewer}\` follows if it passes.` : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
+    const next = reviewer ? `Running CI; \`${reviewer}\` follows if it passes.` : "Running CI. No reviewer was named, so nothing is scheduled afterwards.";
     const text = `Atomaton: PR #${num} created (${stdout.trim()}). ${next}`;
-    const body = validationDispatched ? turnCommentBody({ ended: "waiting", audience: "person", body: text }) : `${LLM_CONTEXT_TAG.write("exclude")}
-${text}`;
-    postTurnComment({ number: String(node), repo: REPO, body, sessionEnds: validationDispatched });
+    waitingCommentId = postTurnComment({
+      number: String(node),
+      repo: REPO,
+      body: turnCommentBody({ ended: "waiting", audience: "person", body: text, ...endingIdentity() })
+    });
+  }
+  const validationDispatched = dispatchPrValidation(REPO, num, branch, { ask: waitingCommentId });
+  if (node !== undefined) {
+    if (validationDispatched) {
+      recordEndingComment(waitingCommentId, String(node));
+    } else {
+      if (waitingCommentId !== undefined) {
+        gh("api", `repos/${REPO}/issues/comments/${waitingCommentId}`, "--method", "DELETE");
+      }
+      const text = `Atomaton: PR #${num} created (${stdout.trim()}). ` + "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log.";
+      postTurnComment({
+        number: String(node),
+        repo: REPO,
+        body: `${LLM_CONTEXT_TAG.write("exclude")}
+${text}`,
+        sessionEnds: false
+      });
+    }
   }
   if (!isAttended({ ...reviewer ? { next: { agent: reviewer } } : {}, body: body ?? "" })) {
     const openedBy = (process.env.AGENT ?? "").trim() || "an agent";
@@ -20580,8 +20714,19 @@ function pushBranch(branch) {
   if (!open.code) {
     try {
       const [pr] = JSON.parse(open.stdout || "[]");
-      if (pr)
-        dispatchPrValidation(REPO, pr.number, branch);
+      let pushAsk;
+      if (pr) {
+        const sha = gitRun("rev-parse", "--short", "HEAD");
+        const head = sha.code === 0 ? sha.stdout.trim() : "";
+        const posted = gh("api", `repos/${REPO}/issues/${pr.number}/comments`, "--method", "POST", "-f", `body=${LLM_CONTEXT_TAG.write("exclude")}
+Atomaton: pushed ${head} to this pull request. Running CI; the result routes what happens next.`, "--jq", ".id");
+        if (posted.code === 0)
+          pushAsk = posted.stdout.trim() || undefined;
+        else
+          report("warning", "could not post the push comment, so the dispatched run would have no ask to claim; validation was NOT dispatched");
+      }
+      if (pr && pushAsk !== undefined)
+        dispatchPrValidation(REPO, pr.number, branch, { ask: pushAsk });
     } catch {
       report("warning", "could not read the open pull request list, so CI validation was NOT dispatched for this push");
     }
@@ -20908,11 +21053,11 @@ ${formatBlockers(readiness.blockers)}`
   dispatchCd(baseRefName);
   const d = ghJsonOrThrow("pr", "view", String(num), "--repo", REPO, "--json", "body");
   const body = d?.body ?? "";
-  const parentIssue = PARENT_ISSUE_TAG.read(body);
+  const parentIssue = PARENT_ISSUE_TAG.readProse(body);
   const handoff = decidePostMergeHandoff({
     parentIssue,
     parentAlreadyClosed: parentIssue !== undefined && isIssueClosed(parentIssue),
-    originAgent: ORIGIN_AGENT_TAG.read(body)
+    originAgent: ORIGIN_AGENT_TAG.readProse(body)
   });
   switch (handoff.kind) {
     case "no-parent":

@@ -151,13 +151,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           NUMBER: ${{ steps.target.outputs.number }}
+          ASK: ${{ github.event.comment.id }}
         run: |
           BRANCH=$(gh pr view "$NUMBER" --repo "$REPO" --json headRefName --jq .headRefName)
           if [ -z "$BRANCH" ]; then
             echo "::error::could not read the head branch of PR #$NUMBER; nothing was dispatched"
             exit 1
           fi
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_pr_validation.ts" --repo "${REPO}" --number "${NUMBER}" --branch "${BRANCH}" --asked-by-person "true"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_pr_validation.ts" --repo "${REPO}" --number "${NUMBER}" --branch "${BRANCH}" --asked-by-person "true" --ask "${ASK}"
         if: steps.dispatch.outputs.agent != '' && steps.target.outputs.type == 'pr' && steps.guard.outputs.blocked != 'true' && steps.closed-guard.outputs.blocked != 'true'
   run:
     if: (needs.parse.outputs.agent != '') && (needs.parse.outputs.type != 'pr')
@@ -168,6 +169,7 @@ jobs:
       type: ${{ needs.parse.outputs.type }}
       notify: ${{ needs.parse.outputs.notify }}
       session_mode: ${{ needs.parse.outputs.session_mode }}
+      ask: ${{ github.event.comment.id }}
     secrets: inherit
     needs:
       - parse

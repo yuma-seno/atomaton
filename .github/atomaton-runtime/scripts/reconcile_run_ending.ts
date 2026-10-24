@@ -106,14 +106,17 @@ function makeTag(key, valuePattern, parse, render) {
   const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
   EVERY_TAG_PATTERN.push(pattern);
   const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m[1]) : undefined;
+  };
   return {
     marker: `${TAG_PREFIX}${key}`,
     write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
-    read: (text) => {
-      const m = re.exec(text);
-      return m ? parse(m[1]) : undefined;
-    },
+    read,
+    readProse: (text) => read(proseOnly(text)),
     has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
     search: (value) => `${TAG_PREFIX}${key}=${render(value)}`
   };
 }
@@ -123,8 +126,40 @@ function numericTag(key) {
 function stringTag(key, valuePattern) {
   return makeTag(key, valuePattern, (raw) => raw, (value) => value);
 }
+function makeCompoundTag(key, valuePattern, parse, render, searchValue) {
+  const pattern = `<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`;
+  EVERY_TAG_PATTERN.push(pattern);
+  const re = new RegExp(`<!--\\s*${TAG_PREFIX}${key}=(?:${valuePattern})\\s*-->`);
+  const read = (text) => {
+    const m = re.exec(text);
+    return m ? parse(m) : undefined;
+  };
+  return {
+    marker: `${TAG_PREFIX}${key}`,
+    write: (value) => `<!-- ${TAG_PREFIX}${key}=${render(value)} -->`,
+    read,
+    readProse: (text) => read(proseOnly(text)),
+    has: (text) => re.test(text),
+    hasProse: (text) => re.test(proseOnly(text)),
+    search: searchValue
+  };
+}
 var STOP_TAG = stringTag("stop", "requested");
-var ENDED_TAG = stringTag("ended", "stopped|limit|done|handoff|waiting");
+var ENDED_TAG = makeCompoundTag("ended", String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`, (match) => {
+  const verb = match[1];
+  const answers = match[2];
+  const run = match[3];
+  if (verb === undefined || answers === undefined || run === undefined)
+    return;
+  return { verb, answers: Number(answers), run: Number(run) };
+}, ({ verb, answers, run }) => `${verb} answers=${answers} run=${run}`, ({ verb }) => `atomaton:ended=${verb}`);
+var TOOK_TAG = makeCompoundTag("took", String.raw`(\d+) run=(\d+)`, (match) => {
+  const ask = match[1];
+  const run = match[2];
+  if (ask === undefined || run === undefined)
+    return;
+  return { ask: Number(ask), run: Number(run) };
+}, ({ ask, run }) => `${ask} run=${run}`, ({ ask }) => `atomaton:took=${ask}`);
 var PARENT_ISSUE_TAG = numericTag("parent-issue");
 var NOTIFY_TAG = stringTag("notify", LOGIN_PATTERN);
 var ORIGIN_AGENT_TAG = stringTag("origin-agent", AGENT_NAME_PATTERN);
@@ -138,6 +173,41 @@ var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
+}
+function proseOnly(text) {
+  return fenceSegments(text).map((segment) => segment.code ? `
+` : segment.text).join("");
+}
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    if (open === null) {
+      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
+      if (opens) {
+        if (current.text)
+          segments.push(current);
+        open = { char: fence[1][0], length: fence[1].length };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      segments.push(current);
+      current = { text: "", code: false };
+      open = null;
+    }
+  }
+  if (current.text)
+    segments.push(current);
+  return segments;
 }
 
 // src/domain/work/control-commands.ts
@@ -230,10 +300,10 @@ function mostRecentAgent(bodies) {
     const body = bodies[i] ?? "";
     if (isQuotation(body))
       continue;
-    const result = AGENT_TAG.read(body);
+    const result = AGENT_TAG.readProse(body);
     if (result)
       return result;
-    const asked = parseCommentCommand(body).agent;
+    const asked = parseCommentCommand(proseOnly(body)).agent;
     if (asked)
       return asked;
   }
@@ -303,6 +373,8 @@ var AGENT_ENV_NAMES = [
   "ATOMATON_RUN_DIR",
   "ATOMATON_RUN_URL",
   "ATOMATON_DISPATCHED_BY",
+  "ATOMATON_ASK_ID",
+  "GITHUB_RUN_ID",
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
@@ -314,7 +386,6 @@ var AGENT_ENV_NAMES = [
   "ATOMA_PROVIDER"
 ];
 var RUN_STEP_NAMES = [
-  "GITHUB_RUN_ID",
   "OPENROUTER_BASE_URL",
   "ORCAROUTER_BASE_URL",
   "ANTHROPIC_BASE_URL",
@@ -389,27 +460,35 @@ function whoseTurn(events) {
   const last = events[events.length - 1];
   return last === "asked" || last === "handed-off" ? "agent" : "person";
 }
-function requestOutstanding(events) {
-  return events[events.length - 1] === "asked";
-}
 function shapedThread(comments, readers) {
   const kept = [];
   const events = [];
+  let openClaim;
   for (const entry of comments) {
-    if (entry.isHuman && whoseTurn(events) === "agent")
+    if (entry.isHuman && openClaim !== undefined)
       continue;
     kept.push(entry);
+    if (!entry.quoted) {
+      const claim = readers.claim(entry.body);
+      if (claim !== undefined) {
+        openClaim = claim.ask;
+      } else if (openClaim !== undefined) {
+        const answered = readers.answeredAsk(entry.body);
+        if (answered !== undefined && answered === openClaim)
+          openClaim = undefined;
+      }
+    }
     const event = eventOf(entry, readers);
     if (event !== undefined)
       events.push(event);
   }
-  return { comments: kept, events };
+  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
 }
 
 // src/adapters/github/thread.ts
 var readers = {
   ending: (body) => {
-    const ended = ENDED_TAG.read(body);
+    const ended = ENDED_TAG.readProse(body)?.verb;
     if (ended === "handoff")
       return "handed-off";
     if (ended === "waiting")
@@ -418,15 +497,26 @@ var readers = {
       return "returned";
     return "";
   },
-  requestedAgent: (body) => parseCommentCommand(body).agent,
-  isDispatchMarker: (body) => DISPATCH_TAG.has(body)
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
+  claim: (body) => TOOK_TAG.readProse(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.readProse(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
 var askReaders = {
   ...readers,
-  requestedAgent: (body) => parseMangledCommand(body).agent,
-  authoringAgent: (body) => AGENT_TAG.read(body) ?? ""
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
-var endingWalkReaders = { ending: readers.ending, quoted: isQuotation };
+var endingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body)
+};
 function isHumanComment(comment) {
   return isHumanActor(comment.user?.type);
 }
@@ -456,7 +546,10 @@ function readRunWatchThread(repo, number) {
 // src/adapters/github/turn-comment.ts
 function turnHeader(h) {
   const context = h.audience === "model" ? "include" : "exclude";
-  return [LLM_CONTEXT_TAG.write(context), ENDED_TAG.write(h.ended)];
+  return [
+    LLM_CONTEXT_TAG.write(context),
+    ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 })
+  ];
 }
 
 // src/domain/work/run-report.ts
@@ -479,40 +572,22 @@ function lastEndingComment(comments, readers) {
   }
   return;
 }
-function needsEnding(comments, runStartedAt, readers) {
-  const last = lastEndingComment(comments, readers);
-  if (last === undefined)
-    return true;
-  const endedAt = Date.parse(last.createdAt);
-  if (Number.isNaN(endedAt))
-    return true;
-  const startedAt = Date.parse(runStartedAt ?? "");
-  if (Number.isNaN(startedAt))
-    return true;
-  return endedAt < startedAt;
-}
-function tookTurn(comments, runStartedAt, readers, consumesCommands, endedUnsuccessfully) {
-  const { comments: kept } = shapedThread(comments, readers);
-  for (let index = kept.length - 1;index >= 0; index -= 1) {
-    const entry = kept[index];
-    if (entry.quoted)
+function turnClaimedBy(comments, runId, readers) {
+  for (let index = comments.length - 1;index >= 0; index -= 1) {
+    const comment = comments[index];
+    if (readers.quoted(comment.body))
       continue;
-    if (readers.requestedAgent(entry.body) === "")
-      continue;
-    if (entry.isHuman) {
-      if (!consumesCommands)
-        return false;
-      if (!endedUnsuccessfully)
-        return false;
-      const at = Date.parse(entry.createdAt);
-      const start = Date.parse(runStartedAt ?? "");
-      return !Number.isNaN(at) && !Number.isNaN(start) && at < start;
-    }
-    const at = Date.parse(entry.createdAt);
-    const start = Date.parse(runStartedAt ?? "");
-    return !Number.isNaN(at) && !Number.isNaN(start) && at >= start;
+    const claim = readers.claim(comment.body);
+    if (claim !== undefined && claim.run === runId)
+      return claim.ask;
   }
-  return false;
+  return;
+}
+function endingLeftBy(comments, runId, readers) {
+  return comments.some((comment) => !readers.quoted(comment.body) && readers.ended(comment.body)?.run === runId);
+}
+function askUnanswered(comments, askId, readers) {
+  return !comments.some((comment) => !readers.quoted(comment.body) && readers.ended(comment.body)?.answers === askId);
 }
 function releasesLabel(lastEnding, readers) {
   if (lastEnding === undefined)
@@ -532,17 +607,10 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/reconcile_run_ending.ts
 var ref = defineScript(import.meta.url);
-function runConsumesCommands(runEvent) {
-  return runEvent === "issue_comment";
-}
-function runEndedUnsuccessfully(conclusion) {
-  const word = (conclusion ?? "").trim();
-  return word !== "" && word !== "success";
-}
-function missingEndingNotice(agent, runUrl) {
+function missingEndingNotice(agent, runUrl, identity) {
   const lines = [
-    ...turnHeader({ ended: "done", audience: "person" }),
-    `Atomaton: \`${agent}\`'s run ended without posting its result. It was cancelled, lost its runner, timed out, or finished without reporting one.`,
+    ...turnHeader({ ended: "done", audience: "person", answers: identity.ask, run: identity.watchRunId }),
+    `Atomaton: this request was taken up, but no answer was posted for it. The run that claimed it was cancelled, lost its runner, timed out, or finished without writing one.`,
     "",
     "Nothing was decided by that run: whatever it reached \u2014 commits, pull requests,",
     "saved history \u2014 is whatever reached GitHub before it stopped. Its log:",
@@ -571,10 +639,9 @@ function main() {
     args: Bun.argv.slice(2),
     options: {
       "display-title": { type: "string" },
-      "run-started-at": { type: "string" },
+      "run-id": { type: "string" },
       "run-url": { type: "string" },
-      conclusion: { type: "string" },
-      "run-event": { type: "string" }
+      conclusion: { type: "string" }
     }
   });
   const repo = process.env.GITHUB_REPOSITORY ?? "";
@@ -588,6 +655,11 @@ function main() {
     return;
   }
   const { agent: titledAgent, number } = title;
+  const watchRunId = Number(values["run-id"]);
+  if (!Number.isInteger(watchRunId) || watchRunId <= 0) {
+    console.error(`reconcile_run_ending: the watched run's id is not readable ("${values["run-id"] ?? ""}"), ` + "so whether it took a turn cannot be compared against the thread; nothing to do");
+    return;
+  }
   let thread;
   try {
     thread = readRunWatchThread(repo, number);
@@ -596,13 +668,21 @@ function main() {
     process.exitCode = 1;
     return;
   }
-  const endingMissing = titledAgent !== undefined ? needsEnding(thread.dated, values["run-started-at"], endingWalkReaders) : requestOutstanding(thread.events) && tookTurn(thread.entries, values["run-started-at"], readers, runConsumesCommands(values["run-event"]), runEndedUnsuccessfully(values["conclusion"]));
-  if (!endingMissing) {
-    console.error(`reconcile_run_ending: the run on #${number} owes no ending; nothing to do`);
+  const claimedAsk = turnClaimedBy(thread.dated, watchRunId, endingWalkReaders);
+  if (claimedAsk === undefined) {
+    console.error(`reconcile_run_ending: run ${watchRunId} claimed no ask on #${number}; nothing to do`);
+    return;
+  }
+  if (endingLeftBy(thread.dated, watchRunId, endingWalkReaders)) {
+    console.error(`reconcile_run_ending: run ${watchRunId} left its ending on #${number}; nothing to do`);
+    return;
+  }
+  if (!askUnanswered(thread.dated, claimedAsk, endingWalkReaders)) {
+    console.error(`reconcile_run_ending: the ask run ${watchRunId} claimed on #${number} is already answered; nothing to do`);
     return;
   }
   const agent = titledAgent ?? (mostRecentAgentOn(repo, number) || "atomaton");
-  const body = missingEndingNotice(agent, values["run-url"] ?? "");
+  const body = missingEndingNotice(agent, values["run-url"] ?? "", { ask: claimedAsk, watchRunId });
   const posted = gh("issue", "comment", String(number), "--repo", repo, "--body", body);
   if (posted.code !== 0) {
     console.error(`::error::reconcile_run_ending: could not post the notice on #${number}: ${posted.stderr || posted.stdout}`);
@@ -626,7 +706,5 @@ if (import.meta.main)
   main();
 export {
   missingEndingNotice,
-  ref,
-  runConsumesCommands,
-  runEndedUnsuccessfully
+  ref
 };
