@@ -217,6 +217,35 @@ export function dispatchRefusedNotice(refused: RefusedDispatch): string {
 }
 
 /**
+ * The notice posted when GitHub itself rejects the dispatch call (#194).
+ *
+ * The third way a hand-off's promise breaks, after a closed target and an
+ * unconfirmable marker: the call to start the run failed — a bad token, a renamed
+ * workflow, a rate limit. Nothing is running and, without this notice, nothing on the
+ * thread would say so: the last word there would stay "a hand-off", read by every
+ * later reader as a run working or coming.
+ *
+ * The advice names the command, because the state was checked open moments before the
+ * call failed — there is no reopen step to describe, and the one thing a person can do
+ * is start the run again by hand once the cause is gone.
+ */
+export function dispatchFailedNotice(failed: {
+  agent: string;
+  number: number;
+  context: string;
+  notify: string;
+}): string {
+  const { agent, number, context, notify } = failed;
+  return [
+    `${mentionList(notify ? [notify] : [])}Atomaton: \`${agent}\` was not started on #${number}, because GitHub rejected the dispatch call.`,
+    "",
+    `What was about to happen: ${context}.`,
+    "",
+    "Nothing will retry this. Start it by hand: comment `/" + agent + "` on this issue.",
+  ].join("\n");
+}
+
+/**
  * The notice posted when a dispatch marker never became visible in the thread.
  *
  * A different failure from a closed target, and it says so: nothing is wrong with the

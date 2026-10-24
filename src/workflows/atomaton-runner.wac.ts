@@ -66,7 +66,7 @@ import { ref as watchForStopRef } from "../entrypoints/machinery/watch_for_stop.
 import { AGENT_NAME_PATTERN } from "../domain/work/agent-name.ts";
 import { NODE_TYPES } from "../domain/work/node-type.ts";
 import { SESSION_MODES } from "../domain/work/comment-command.ts";
-import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
+import { ENDED_TAG, LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // The shared reusable workflow every entry-point workflow (atomaton-entry,
 // atoma-auto-trigger, atomaton-manual-comment, atoma-pr-review) hands off to via
@@ -1637,6 +1637,11 @@ const dispatchNextAgentStep = new TypedOutputsStep({
     // answers back. The marker the dispatch also posts stays the ordering check's
     // instrument; the claim names the directive.
     ask: postResultCommentStep.outputs.comment_id,
+    // This run's id, so a REFUSED hand-off can end the chain honestly (#194): the
+    // refusal writes `ended=refused answers=<this ask> run=<this run>` and releases
+    // the label, instead of leaving the thread's newest word at "a hand-off" with no
+    // run coming.
+    "run-id": "${{ github.run_id }}",
   })}
 `,
 });
@@ -1659,6 +1664,11 @@ const loopLimitCommentStep = new TypedOutputsStep({
     // last two runs changed nothing would have been told it had made too many
     // handoffs, which is a different thing to go and look at.
     REASON: loopControlStep.outputs.stop_reason,
+    // The refusal's identity (#194): the hand-off the limit refused is the ask the
+    // successor would have claimed -- this run's own result comment -- and this run
+    // is the one withdrawing the promise.
+    ASK_COMMENT: postResultCommentStep.outputs.comment_id,
+    RUN_ID: "${{ github.run_id }}",
   },
   run: `if [ -n "$NUMBER" ]; then
   MENTION=""
@@ -1669,6 +1679,13 @@ const loopLimitCommentStep = new TypedOutputsStep({
   # Out of the model's context, like the other operational notices: it names a
   # person and tells them how to resume.
   printf '%s\n' "${LLM_CONTEXT_TAG.write("exclude")}" > "$BD"
+  # The chain-over IS a refused hand-off (#194): this run's result comment said
+  # "handed off" before the limit was known, and without this line the thread's
+  # newest word would stay "a hand-off" -- read by every later reader as a run
+  # working or coming, on a successor the limit just refused. The tag is spelled
+  # from ENDED_TAG's marker with the verb inline, the workflow-side escape hatch
+  # documented on the tag: the ids are runtime values no baked write() could carry.
+  printf '<!-- ${ENDED_TAG.marker}=refused answers=%s run=%s -->\n' "\${ASK_COMMENT}" "\${RUN_ID}" >> "$BD"
   echo "\${MENTION}\${REASON}" >> "$BD"
   echo "The next agent would have been \${DIRECTIVE}." >> "$BD"
   echo "Please review the progress so far. To resume, post a manual comment on the Issue/PR (e.g. /\${DIRECTIVE}) to trigger the next agent at any time." >> "$BD"

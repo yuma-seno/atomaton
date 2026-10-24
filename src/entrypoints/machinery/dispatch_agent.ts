@@ -34,6 +34,8 @@
  *     --context "CI passed on #12, so reviewer was to review it"
  */
 import { parseArgs } from "node:util";
+import { gh } from "../../adapters/github/gh.ts";
+import { getLabel } from "../../adapters/runner/config.ts";
 import { isAgentName } from "../../domain/work/agent-name.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { dispatchRunner } from "../../adapters/actions/dispatch.ts";
@@ -65,6 +67,17 @@ export interface DispatchAgentArgs {
    * request, it is making one.
    */
   "answers-request"?: string;
+  /**
+   * This run's own id, when the dispatch continues its chain (#194).
+   *
+   * The runner's hand-off step passes `github.run_id`. With it, a refusal that ends
+   * the chain — closed target, unconfirmable marker, GitHub rejecting the call —
+   * writes `ended=refused answers=<ask> run=<this run>` on the refusal notice and
+   * releases the node: the thread's newest word stops being "a hand-off", which
+   * `runInFlight` reads as a run working or coming, forever. Without it, the refusal
+   * stays a plain notice and the thread keeps whatever state it had.
+   */
+  "run-id"?: string;
   /**
    * The ask comment id this dispatch's run should claim (#285), and what the
    * answers-request check verifies the wait against.
@@ -108,6 +121,7 @@ function main(): void {
       notify: { type: "string" },
       repo: { type: "string" },
       ask: { type: "string" },
+      "run-id": { type: "string" },
       "answers-request": { type: "string" },
       "verdict-passed": { type: "string" },
       context: { type: "string" },
@@ -140,6 +154,20 @@ function main(): void {
     process.exit(1);
   }
 
+  // The chain identity this dispatch carries (#194): `--ask` names the ask the
+  // successor was to claim, and `--run-id` names the run that made the promise —
+  // the runner's hand-off names its result comment, validation names the request
+  // the pull request carries. Both must be known for a refusal to write an honest
+  // `ended=refused`; a caller that names neither — the aggregation, whose
+  // re-invocation of a parent holds no promise open — gets the plain refusal
+  // notice, the right shape for a thread this dispatch does not hold open.
+  const runId = Number(values["run-id"]);
+  const askId = Number(values.ask);
+  const refusalEnding =
+    Number.isInteger(runId) && runId > 0 && Number.isInteger(askId) && askId > 0
+      ? { answers: askId, run: runId }
+      : undefined;
+
   const outcome = dispatchRunner({
     context,
     agent,
@@ -153,7 +181,30 @@ function main(): void {
     ask: (values.ask ?? "").trim() || undefined,
     answersRequest: isTrue(values["answers-request"]),
     verdictPassed: values["verdict-passed"] === undefined ? undefined : isTrue(values["verdict-passed"]),
+    // The chain identity a hand-off carries (#194): the refusal that ends the chain
+    // writes `ended=refused` answering the ask the successor was to claim, with this
+    // run's id on it. Both ids must be known for the ending to be honest; a caller
+    // that names neither (the aggregation, which holds no promise open) gets the
+    // plain refusal notice, which is the right shape for a thread that is not held
+    // open by this promise.
+    refusalEnding,
   });
+
+  // A refused hand-off ends the chain, and the ending on the thread says the turn came
+  // back. The label this run kept for the hand-off is the cache of the state that
+  // ending just replaced — and nothing else removes it: the run's own release step ran
+  // before the dispatch and held the label because the turn said `handoff`. Best
+  // effort, like every label write: the thread is already settled either way.
+  if (refusalEnding !== undefined && (outcome === "refused-closed" || outcome === "unconfirmed" || outcome === "failed")) {
+    const label = getLabel("in_progress");
+    const { code } = gh("issue", "edit", String(number), "--remove-label", label, ...(values.repo ? ["--repo", values.repo] : []));
+    if (code !== 0) {
+      console.error(
+        `::warning::could not remove '${label}' from #${number}: the thread is settled, ` +
+          "but the label will say an agent holds the ball until it is removed by hand",
+      );
+    }
+  }
 
   if (outcome === "failed") {
     console.error(`::error::Could not dispatch ${agent} on ${type} #${number}.`);

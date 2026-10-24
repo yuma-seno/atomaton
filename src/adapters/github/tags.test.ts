@@ -209,6 +209,13 @@ describe("readProse and hasProse", () => {
     const body = ["```ts", "const x = 1;", "```", "", DISPATCH_TAG.write("engineer"), "", "```", "more sample", "```"].join("\n");
     expect(DISPATCH_TAG.hasProse(body)).toBe(true);
   });
+
+  test("the refused ending round-trips with its identity (#194)", () => {
+    const body = ENDED_TAG.write({ verb: "refused", answers: 900, run: 42 });
+    expect(body).toBe("<!-- atomaton:ended=refused answers=900 run=42 -->");
+    expect(ENDED_TAG.read(body)).toEqual({ verb: "refused", answers: 900, run: 42 });
+    expect(ENDED_TAG.readProse(body)).toEqual({ verb: "refused", answers: 900, run: 42 });
+  });
 });
 
 /**

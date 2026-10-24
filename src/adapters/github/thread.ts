@@ -75,12 +75,14 @@ import type { DatedComment, EndingWalkReaders, WatchComment } from "../../domain
 export const readers: TurnReaders = {
   // The ending is the tag that means "how this run ended". `handoff` and `waiting` are
   // the two that leave the ball somewhere other than a person; `stopped`/`limit`/`done`
-  // all give the node back, and end the turn the same way. See `TurnReaders`.
+  // all give the node back, and end the turn the same way. `refused` gives it back too
+  // (#194): the hand-off a run promised was refused, so the promise is withdrawn and
+  // the node is nobody's agent's. See `TurnReaders`.
   ending: (body) => {
     const ended = ENDED_TAG.readProse(body)?.verb;
     if (ended === "handoff") return "handed-off";
     if (ended === "waiting") return "waiting";
-    if (ended === "stopped" || ended === "limit" || ended === "done") return "returned";
+    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused") return "returned";
     return "";
   },
   requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,

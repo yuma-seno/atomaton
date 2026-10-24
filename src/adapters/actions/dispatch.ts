@@ -34,8 +34,8 @@ import { logDispatch } from "../../adapters/runner/ops-log.ts";
 import { nodeNumber } from "../runner/run-node.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
 import { checkDispatchMarker, isAskSuperseded, type MarkerCheck } from "../../adapters/github/thread.ts";
-import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
-import { dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-target.ts";
+import { DISPATCH_TAG, ENDED_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { dispatchFailedNotice, dispatchRefusedNotice, dispatchUnconfirmedNotice, mayStartWorkOn, type TargetState } from "../../domain/work/closed-target.ts";
 
 /** The reusable workflow every agent run enters through. */
 function runnerWorkflow(): string {
@@ -195,7 +195,62 @@ export interface RunnerDispatch {
    * nowhere else.
    */
   continuesChain?: boolean;
+  /**
+   * The chain identity a hand-off dispatch carries, for the refusal that ends it (#194).
+   *
+   * A hand-off is a PROMISE: the run ended `ended=handoff answers=<ask> run=<run>`, and
+   * the dispatch of the successor is what makes the promise true. When that dispatch is
+   * refused — the target is closed, the marker cannot be confirmed, GitHub rejects the
+   * call — the promise breaks, and the thread's newest word would stay "a hand-off":
+   * `runInFlight` reads it as a run working or coming, forever, and `stop_on_close`
+   * stops that phantom on every close. So the refusal writes the ending itself:
+   * `ended=refused` answering the ask the successor would have claimed, `run` naming
+   * the run that made the promise (the dispatch runs in its job). The tag goes on the
+   * refusal notice the refusal already posts, and the label the run kept for the
+   * hand-off comes off with it.
+   *
+   * `answers` is the `ask` this dispatch names — for the runner's hand-off that is the
+   * result comment the successor was to claim, and for validation the request the
+   * pull request carries. The tag is written only when BOTH ids are known; a refusal
+   * that cannot name them stays a plain notice, which is the right shape for callers
+   * whose thread is not held open by a promise — the aggregation's re-invocation of
+   * a parent is the one that remains.
+   *
+   * Set by the runner's `Dispatch next agent` step and by validation's dispatch;
+   * nowhere else.
+   */
+  refusalEnding?: RefusalEnding;
   log?: (message: string) => void;
+}
+
+/**
+ * The chain identity a refused hand-off writes its ending with (#194).
+ *
+ * `answers` names the ask the refused successor would have claimed; `run` names the
+ * run whose hand-off it was — the job the refusing dispatch runs inside, not a run
+ * that exists on GitHub for the successor. The pair is the same shape every ending
+ * carries, because the readers are the same readers: nothing about `refused` is a
+ * special case except the verb.
+ */
+export interface RefusalEnding {
+  answers: number;
+  run: number;
+}
+
+/**
+ * The tags that turn a refusal notice into the ending it is (#194).
+ *
+ * Empty when the caller named no chain identity: the notice then stays the plain
+ * person-facing escalation it has always been, and the thread keeps whatever state it
+ * had. `llm-context=exclude` because the notice is machinery bookkeeping addressed to
+ * a person — the same envelope the stop receipt and the dispatch marker travel in.
+ */
+function refusalEndingLines(d: RunnerDispatch): string[] {
+  if (d.refusalEnding === undefined) return [];
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    ENDED_TAG.write({ verb: "refused", answers: d.refusalEnding.answers, run: d.refusalEnding.run }),
+  ];
 }
 
 /**
@@ -256,13 +311,16 @@ export type DispatchOutcome =
  */
 function refuseClosedTarget(d: RunnerDispatch, state: TargetState): "refused-closed" {
   const log = d.log ?? ((message: string) => console.error(message));
-  const body = dispatchRefusedNotice({
-    agent: d.agent,
-    number: Number(d.number),
-    context: d.context,
-    state,
-    notify: d.notify ?? "",
-  });
+  const body = [
+    ...refusalEndingLines(d),
+    dispatchRefusedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      state,
+      notify: d.notify ?? "",
+    }),
+  ].join("\n");
   const { code, stdout, stderr } = gh(
     "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
   );
@@ -412,12 +470,20 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
       `${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` +
         `and ${d.agent} was not started`,
     );
-    const body = dispatchUnconfirmedNotice({
-      agent: d.agent,
-      number: Number(d.number),
-      context: d.context,
-      notify: d.notify ?? "",
-    });
+    // The marker this dispatch posted is taken back even though it never showed: a
+    // comment that appears after the refusal would sit in the thread as a request
+    // nobody claimed -- the exact residue this module's refusals exist not to leave
+    // (#194). The repost was already deleted above.
+    removeMarker();
+    const body = [
+      ...refusalEndingLines(d),
+      dispatchUnconfirmedNotice({
+        agent: d.agent,
+        number: Number(d.number),
+        context: d.context,
+        notify: d.notify ?? "",
+      }),
+    ].join("\n");
     const { code, stdout, stderr } = gh(
       "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
     );
@@ -581,12 +647,13 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
   // starts with an `ask` to claim: the marker's id where the marker is the ask, the
   // caller's where the dispatch answers a request.
   let ask: number | string | undefined;
+  let markerId: string | undefined;
   if (d.answersRequest) {
     const refusal = refuseSupersededAsk(d);
     if (refusal !== undefined) return refusal;
     ask = d.ask;
   } else {
-    const markerId = postDispatchMarker(d);
+    markerId = postDispatchMarker(d);
     const refusal = refuseOutstandingRequest(d, markerId);
     if (refusal !== undefined) return refusal;
     ask = d.ask ?? markerId;
@@ -607,7 +674,29 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
     // Empty when a person or the machinery started the run -- see `dispatchedBy`.
     "--field", `dispatched_by=${d.dispatchedBy ?? ""}`,
   ];
-  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) return "failed";
+  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) {
+    // GitHub rejected the dispatch itself. For a hand-off this is the promise breaking
+    // like any other refusal (#194): the marker this dispatch posted is a phantom ask
+    // that nothing will ever claim, so it comes back down, and the ending goes up —
+    // otherwise the thread's newest word stays "a hand-off", read by every later
+    // reader as a run working or coming.
+    if (d.refusalEnding !== undefined) {
+      if (markerId !== undefined) {
+        gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+      }
+      const body = [
+        ...refusalEndingLines(d),
+        dispatchFailedNotice({
+          agent: d.agent,
+          number: Number(d.number),
+          context: d.context,
+          notify: d.notify ?? "",
+        }),
+      ].join("\n");
+      gh("issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body);
+    }
+    return "failed";
+  }
   // The default classification compares the target with this run's own node
   // (`run-node.ts`): onto it moves the turn on, under it starts work and leaves this
   // node waiting. `continuesChain` overrides it for the dispatch that is the run's

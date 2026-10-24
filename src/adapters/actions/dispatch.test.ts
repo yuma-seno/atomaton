@@ -426,3 +426,103 @@ describe("the answers-request check (#285)", () => {
     15_000,
   );
 });
+
+/**
+ * The refused hand-off (#194): a hand-off is a promise the dispatch either keeps or
+ * withdraws. With `refusalEnding` the withdrawal is written on the thread —
+ * `ended=refused answers=<the ask the successor was to claim> run=<the promising
+ * run>` — so the thread's newest word stops being "a hand-off", which `runInFlight`
+ * reads as a run working or coming, forever. Without it the notices stay the plain
+ * escalations they always were.
+ */
+describe("the refused hand-off (#194)", () => {
+  function runHandoff(opts: {
+    target: number;
+    /** The target's state; `closed` is refused before the marker goes out. */
+    state: "open" | "closed";
+    /** The dispatch call itself fails after the marker is up. */
+    workflowFails?: boolean;
+    /** The listing never shows the marker, so the ordering check stands down. */
+    markerNeverVisible?: boolean;
+    withIdentity?: boolean;
+  }): { outcome: string; stderr: string; ghCalls: string[][] } {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-dispatch-refusal-"));
+    const opsLog = join(dir, "ops.log");
+    const shim = join(dir, "shim.ts");
+    writeFileSync(
+      shim,
+      `import { dispatchRunner } from "${importable(join(LIB_DIR, "dispatch.ts"))}";
+const outcome = dispatchRunner({
+  context: "the engineer handed off",
+  agent: "reviewer",
+  type: "issue",
+  number: ${opts.target},
+  repo: "owner/repo",
+  ${opts.withIdentity ? 'refusalEnding: { answers: 900, run: 42 },' : ""}
+});
+console.log(outcome);
+`,
+    );
+    const rules: FakeGhRule[] = [
+      // The marker POST, then the listing, then the state — first match wins, and the
+      // state path is a substring of the comments paths.
+      { match: ["api", `repos/owner/repo/issues/${opts.target}/comments`, "POST"], stdout: "555" },
+      threadRule(opts.target, opts.markerNeverVisible ? [] : [{ id: 555, body: "<!-- atomaton:dispatch=reviewer -->", user: { type: "Bot" } }]),
+      { match: ["api", `repos/owner/repo/issues/${opts.target}`], stdout: JSON.stringify({ state: opts.state }) },
+      {
+        match: ["workflow", "run", "atomaton-runner.yml"],
+        ...(opts.workflowFails ? { code: 1, stdout: "boom" } : { stdout: "" }),
+      } as FakeGhRule,
+    ];
+    try {
+      const r = runWithFakeGh(shim, [], { rules, env: { TYPE: "issue", NUMBER: String(opts.target), ATOMATON_OPS_LOG: join(dir, "ops.log") } });
+      return { outcome: r.stdout.trim(), stderr: r.stderr, ghCalls: r.ghCalls };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("a closed target's refusal carries the ending when the chain is named", () => {
+    const { outcome, ghCalls } = runHandoff({ target: 400, state: "closed", withIdentity: true });
+    expect(outcome).toBe("refused-closed");
+    const notice = ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
+    expect(notice.join(" ")).toContain("<!-- atomaton:ended=refused answers=900 run=42 -->");
+    expect(notice.join(" ")).toContain("llm-context=exclude");
+    expect(notice.join(" ")).toContain("was not started");
+    // No dispatch, and the marker was never posted: there is nothing to take back.
+    expect(ghCalls.some((call) => call[0] === "workflow")).toBe(false);
+    expect(ghCalls.some((call) => call.includes("DELETE"))).toBe(false);
+  });
+
+  test("without the chain identity the refusal stays a plain notice", () => {
+    const { outcome, ghCalls } = runHandoff({ target: 400, state: "closed" });
+    expect(outcome).toBe("refused-closed");
+    const notice = ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
+    expect(notice.join(" ")).toContain("was not started");
+    expect(notice.join(" ")).not.toContain("atomaton:ended=");
+  });
+
+  test("a rejected dispatch takes its phantom marker back and writes the ending", () => {
+    const { outcome, ghCalls } = runHandoff({ target: 400, state: "open", workflowFails: true, withIdentity: true });
+    expect(outcome).toBe("failed");
+    expect(ghCalls.some((call) => call.includes("DELETE") && call.join(" ").includes("comments/555"))).toBe(true);
+    const notice = ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
+    expect(notice.join(" ")).toContain("<!-- atomaton:ended=refused answers=900 run=42 -->");
+    expect(notice.join(" ")).toContain("GitHub rejected the dispatch call");
+  });
+
+  test(
+    "an unconfirmable marker is taken back, and its refusal carries the ending",
+    () => {
+      const { outcome, ghCalls } = runHandoff({ target: 400, state: "open", markerNeverVisible: true, withIdentity: true });
+      expect(outcome).toBe("unconfirmed");
+      // Both the original marker and the repost come down: either appearing later
+      // would sit in the thread as a request nobody claimed.
+      expect(ghCalls.filter((call) => call.includes("DELETE") && call.join(" ").includes("comments/")).length).toBe(2);
+      const notice = ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
+      expect(notice.join(" ")).toContain("<!-- atomaton:ended=refused answers=900 run=42 -->");
+      expect(notice.join(" ")).toContain("could not be confirmed");
+    },
+    15_000,
+  );
+});

@@ -190,9 +190,17 @@ export const STOP_TAG = stringTag("stop", "requested");
  * `waiting` is the same fact for the OTHER way a run leaves work behind: not the next
  * agent on this node (`handoff`), but a child started under it (`launch_sub_agent`,
  * `create_pr`). The run ends inside that call, so no result comment of the usual kind
- * follows -- this is how the ending reaches the thread. `thread.ts` reads it to keep
+ * follows -- this is how that ending reaches the thread. `thread.ts` reads it to keep
  * the node off the `asked` that started the run, which the aggregation gate would
  * otherwise read as a request nobody had taken up.
+ *
+ * `refused` is the ending a REFUSED dispatch writes (#194): a run ended `handoff`,
+ * promising a successor, and the dispatch of that successor did not happen. The
+ * promise is the only thing keeping the thread's newest word "a hand-off" -- the state
+ * every reader after that treats as "a run is working or coming" -- so the refusal
+ * writes the ending itself and gives the node back. Written by the dispatch step of
+ * the run that made the promise, never by the run's own report: the report said
+ * "handed off" and was true when it was written.
  *
  * ## `answers` and `run`
  *
@@ -210,7 +218,7 @@ export const STOP_TAG = stringTag("stop", "requested");
  */
 export const ENDED_TAG = makeCompoundTag<{ verb: string; answers: number; run: number }>(
   "ended",
-  String.raw`(stopped|limit|done|handoff|waiting) answers=(\d+) run=(\d+)`,
+  String.raw`(stopped|limit|done|handoff|waiting|refused) answers=(\d+) run=(\d+)`,
   (match) => {
     const verb = match[1];
     const answers = match[2];

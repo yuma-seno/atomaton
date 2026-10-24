@@ -235,6 +235,11 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           // The ask this run claims (#285) — carried here from the dispatch that
           // started validation, and what the check verifies the wait against.
           ask: "\${ASK}",
+          // This workflow run's id (#194): a refusal here — the pull request closed
+          // while CI ran — ends the wait it was fulfilling, and the refused ending
+          // written on the notice is what tells the thread so. Without it the ask
+          // would stay an open promise nothing answers.
+          "run-id": "${{ github.run_id }}",
           "answers-request": "true",
           // What this run's verdict said about the work, so the check can tell a
           // verdict it would re-deliver (#282) from the fix push it exists to hand

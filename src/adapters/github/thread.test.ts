@@ -62,6 +62,61 @@ function comment(id: number, createdAt: string, body: string, type = "Bot"): unk
   return { id, created_at: createdAt, body, user: { type } };
 }
 
+/** Whether `runInFlight` says a run is working or coming on #7, read through the adapter. */
+function inFlight(comments: unknown[]): boolean {
+  const script = `
+    const { runInFlight } = await import(${JSON.stringify(SRC)});
+    process.stdout.write(JSON.stringify(runInFlight("o/r", 7)));
+  `;
+  const proc = Bun.spawnSync({
+    cmd: [process.execPath, "-e", script],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      ATOMATON_FAKE_GH: FAKE_GH_IMPL,
+      FAKE_GH_RESPONSES: JSON.stringify([{ match: ["repos/o/r/issues/7/comments"], stdout: JSON.stringify(comments) }]),
+      GH_TOKEN: "fake-gh-must-be-used",
+      GITHUB_TOKEN: "fake-gh-must-be-used",
+    },
+  });
+  const out = proc.stdout.toString();
+  if (proc.exitCode !== 0) throw new Error(`child failed: ${proc.stderr.toString() || out}`);
+  return JSON.parse(out);
+}
+
+/**
+ * The chain a hand-off leaves behind, and what a refusal must change (#194).
+ *
+ * Ask, claim, hand-off: to every reader that walks the thread, the newest word is "a
+ * hand-off" — `runInFlight` reads it as a run working or coming, and it stays that way
+ * while the thread goes untouched, which is exactly what a refused successor leaves
+ * behind. The refusal's own ending is what ends the flight: same readers, one verb.
+ */
+describe("runInFlight", () => {
+  const handoff = [
+    comment(10, "2026-10-24T09:00:00Z", "/engineer", "User"),
+    comment(11, "2026-10-24T09:00:10Z", "<!-- atomaton:took=10 run=5 -->"),
+    comment(12, "2026-10-24T09:14:00Z", "<!-- atomaton:agent=engineer -->\n<!-- atomaton:ended=handoff answers=10 run=5 -->\nHanding off."),
+  ];
+
+  test("an unanswered hand-off is a run in flight", () => {
+    expect(inFlight(handoff)).toBe(true);
+  });
+
+  test("the refusal's own ending ends the flight", () => {
+    const refused = [
+      ...handoff,
+      comment(
+        13,
+        "2026-10-24T09:14:05Z",
+        "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=refused answers=12 run=5 -->\nAtomaton: `reviewer` was not started on #7, because #7 is closed.",
+      ),
+    ];
+    expect(inFlight(refused)).toBe(false);
+  });
+});
+
 describe("latestRequestOn", () => {
   // #219's shape on the mangled variant: the reviewer's result comment ends with
   // `- /engineer`, the machinery takes it up, and the engineer publishes its fix. The
