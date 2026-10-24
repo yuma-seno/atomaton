@@ -3,6 +3,11 @@ name: engineer
 description: Implements one engineer-ready leaf task, validates it, and opens a pull request.
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
+# The model's context window, in tokens (atoma#12). When a run's prompt crosses it,
+# atoma compacts the session in place -- the machinery's `before_compaction` hook
+# archives the previous session first, then the run continues from a summary plus
+# the most recent turns. 200k: the flash model's window with headroom.
+context_limit: 200000
 vision: true
 # Keeps consecutive requests on one deployment, so the provider's prompt cache still
 # holds the conversation from one inference to the next. Measured on `reviewer`, which

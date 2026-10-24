@@ -3,6 +3,10 @@ name: reviewer
 description: Reviews one pull request for concrete merge-blocking defects and applies the configured merge policy.
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
+# The model's context window, in tokens (atoma#12). A review reads a large diff plus
+# the conversation; crossing it compacts in place rather than dying on the
+# provider's 400. 200k: the flash model's window with headroom.
+context_limit: 200000
 # The agent meant to look at screens: a tool that returns a screenshot reaches
 # this one as a picture. No longer a dedicated vision-language model -- the one
 # that was, qwen3-vl-235b, speaks no Responses at all, and Responses is the only

@@ -11,8 +11,6 @@ import { writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { archiveSession, restoreSession, sessionTargetPath } from "./lib/atomaton-data.ts";
 import { defineScript } from "./lib/script-ref.ts";
-import { shrinkIfNeeded, shrinkLogLine, stillTooBigLine } from "../../domain/work/session-size.ts";
-import type { Session } from "../../domain/work/session.ts";
 
 export interface RestoreAgentSessionArgs {
   type: string;
@@ -71,44 +69,17 @@ function main(): void {
     return;
   }
   if (content !== undefined) {
-    writeFileSync(values.out, sized(content, target));
+    // Written through unchanged. The restore-side shrink this used to run
+    // (`shrinkIfNeeded`, replacing old tool results past an estimated 100k tokens)
+    // is gone: atoma caps each result where it arrives (8,000 characters, from
+    // v0.4.3 / atoma#12), so a stored session's parts are already small, and a
+    // session over its model's WINDOW is the compaction's case -- atoma's own,
+    // measured from the provider's count, not this script's estimate.
+    writeFileSync(values.out, content);
     console.error(`Restored session: ${target}`);
   } else {
     console.error(`No existing session at ${target}, starting fresh.`);
   }
-}
-
-/**
- * The restored session, shrunk if it has grown past what a model will accept.
- *
- * Here rather than in the core, because it needs no core change and because this
- * is the moment the history becomes this run's problem. See
- * `domain/work/session-size.ts` for what is replaced, and for why the calls that produced
- * it are kept.
- *
- * Unreadable JSON is written back untouched rather than refused: whatever it is,
- * this script's job is to put the previous session in front of the run, and atoma
- * will report a malformed one better than a size check can.
- */
-function sized(content: string, target: string): string {
-  let session: Session;
-  try {
-    session = JSON.parse(content) as Session;
-  } catch {
-    console.error(`Could not read ${target} as JSON; restoring it unchanged.`);
-    return content;
-  }
-
-  const result = shrinkIfNeeded(session);
-  const shrank = shrinkLogLine(result, "tool results replaced with a note");
-  if (shrank !== undefined) console.error(shrank);
-  // Said after the shrink, because it is only knowable then: a session that is
-  // still too big has nothing left but conversation.
-  const stuck = stillTooBigLine(result);
-  if (stuck !== undefined) console.error(stuck);
-
-  if (shrank === undefined) return content;
-  return JSON.stringify(result.session, null, 2);
 }
 
 if (import.meta.main) main();

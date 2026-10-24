@@ -35,6 +35,10 @@ description: The same work as `delegate`, on a model with no per-request cap. St
 # is why the caller is told to try this one first and read the refusal for what it is.
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
+# The same context budget the main agents declare (atoma#12): a large task is the
+# one that grows past a small window, so this sub-run compacts in place rather
+# than dying on the provider's 400.
+context_limit: 200000
 vision: false
 # Keeps consecutive requests on one deployment, so the provider's prompt cache still
 # holds the conversation. See `delegate/agent.md` — and as there, this name belongs to

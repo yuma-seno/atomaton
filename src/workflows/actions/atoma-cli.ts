@@ -140,11 +140,21 @@ import { TypedOutputsStep } from "./base.ts";
  * silent shape on older runners, and the metrics report's `CompletionTally` reads the
  * silence off the text either way -- so the older binary degrades nothing here. A
  * reader added before the raise would find no field to read.
+ *
+ * **Session compaction, and the smaller tool-output cap.** Written by the core from
+ * v0.4.3 (yuma-seno/atoma#12): an agent definition may declare `context_limit`, and a
+ * run whose prompt crosses it compacts in place -- the tools file's `before_compaction`
+ * hooks (the embedder's one chance to archive the session), one summarizing inference,
+ * and the session replaced by summary-plus-recent-turns at the same path. The
+ * tool-output cap came down with it, 50,000 -> 8,000 characters, which is the ONE cap:
+ * nothing in this tree caps a tool result anymore. An older binary ignores
+ * `context_limit` and runs with the larger cap -- the shape this tree's own session
+ * shrink used to cover, and why this raise rides with the removal of that shrink.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.2";
+export const ATOMA_DEFAULT_VERSION = "v0.4.3";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.4.2). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.4.3). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead
