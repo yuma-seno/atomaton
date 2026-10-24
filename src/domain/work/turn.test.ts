@@ -47,6 +47,21 @@ describe("endingOf", () => {
     expect(endingFor({ endedBecause: "runtime" }).ended).toBe("spent");
   });
 
+  /**
+   * #208: a run that ended inside a child-starting tool call PARKED the turn — the
+   * children are running under this node, and the aggregation re-invocation collects
+   * the turn. Named apart from `handed-off` (the next agent takes THIS node) and
+   * from `no-report` (the same silence, without the park), because the label rule
+   * reads the difference: a park holds the guard, a quiet run does not.
+   */
+  test("a run that parked its turn on children is its own ending", () => {
+    expect(endingFor({ parked: true, reported: false }).ended).toBe("parked");
+    // A park beats the chain limits and a hand-off: the children are already
+    // running, and the limits catch the re-invoked parent instead.
+    expect(endingFor({ parked: true, loopLimitReached: true }).ended).toBe("parked");
+    expect(endingFor({ parked: true, directive: "reviewer" }).ended).toBe("parked");
+  });
+
   /** Two different ceilings. A person goes and looks at different things. */
   test("the chain's ceiling is a different ending from this run's", () => {
     expect(endingFor({ loopLimitReached: true }).ended).toBe("chain-over");
@@ -139,6 +154,10 @@ describe("shouldReleaseGuard", () => {
     expect(shouldReleaseGuard(endingFor({ chainContinues: true }))).toBe(false);
     expect(shouldReleaseGuard(endingFor({ directive: "reviewer" }))).toBe(false);
     expect(shouldReleaseGuard(endingFor({ chainContinues: true, directive: "reviewer" }))).toBe(false);
+    // A park is the second holder (#208): the children it started are running under
+    // this node, and the aggregation re-invocation is the collection of the turn,
+    // not a new one.
+    expect(shouldReleaseGuard(endingFor({ parked: true }))).toBe(false);
   });
 
   /** A ceiling reached mid-chain ends the turn even though something was in flight. */

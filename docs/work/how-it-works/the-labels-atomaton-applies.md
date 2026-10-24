@@ -5,7 +5,7 @@ issue.
 
 | label | what it means |
 | --- | --- |
-| `atomaton/in-progress` | a run is executing on this issue or pull request. Applied before the agent starts, removed when the work hands back to a person |
+| `atomaton/in-progress` | work is in flight under this issue or pull request: a run is executing on it, or its agent parked the turn on agents working under it (#208). Applied before the agent starts, removed only when the turn comes back to a person |
 | `atomaton/sub-issue` | this issue is a child delivery task Atomaton created. Which issue it is under is GitHub's own sub-issue link, not a marker in the body |
 | `atomaton/launched` | an agent has actually been dispatched on this sub-issue. A child that exists but has not been started yet does not carry it |
 

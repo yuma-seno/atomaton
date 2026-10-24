@@ -49,11 +49,13 @@ export type TurnEvent =
    * ending reaches the thread.
    *
    * Distinct from `handed-off`, which is the next agent taking THIS node. Here the
-   * next work is on a child, and the node itself is only waiting — so a person may
-   * still comment on it (it is not mid-turn), and `whoseTurn` gives it back to them.
-   * Without this event the node fell back to the `asked` that started the run, and
-   * the aggregation gate read that as "a request nobody has taken up" and refused to
-   * re-invoke the parent.
+   * next work is on a child, and the node's own turn is PARKED, not over (#208):
+   * the ball stays with the machinery until the aggregation re-invokes the node,
+   * which is why `whoseTurn` reads it as the agent's and the guard removes a
+   * person's comment made during the wait. What keeps it off `requestOutstanding`
+   * is the other half: the aggregation re-invocation is the collection of a parked
+   * turn, not the start of a new one, so reading it as an unclaimed request would
+   * refuse the parent it exists to wake.
    */
   | "waiting"
   /** An agent finished and gave the node back to a person. */
@@ -188,16 +190,28 @@ export interface ShapedThread<T extends ThreadEntry = ThreadEntry> {
    * Who holds the turn when the walk ends: the agent while a claim is open, the
    * person otherwise (#285).
    *
-   * A claim — `atomaton:took` — is a run saying "I took up this ask", and the
-   * ending that answers it hands the ball back. Between them, and only between
-   * them, the ball is with an agent. A request nobody has claimed yet is NOT the
-   * agent's by this answer: the run that will take it has not started, and a
-   * person's comment in that window is kept and reaches that run's context rather
-   * than being deleted on the strength of a turn nobody had taken. The questions
-   * that DO care about a request nobody has taken up ask `requestOutstanding`,
-   * which keeps the event rule — this answer is the guard's, and the guard's alone.
+   * A claim — `atomaton:took` — is a run saying "I took up this ask", and the ending
+   * that answers it hands the ball back. Between them, and only between them, the
+   * ball is with an agent. A request nobody has claimed yet is NOT the agent's by
+   * this answer: the run that will take it has not started, and a person's comment
+   * in that window is kept and reaches that run's context rather than being deleted
+   * on the strength of a turn nobody had taken. The questions that DO care about a
+   * request nobody has taken up ask `requestOutstanding`, which keeps the event
+   * rule — this answer is the guard's, and the guard's alone.
+   *
+   * One ending does not hand the ball back while answering: `waiting` PARKS the
+   * turn on the agents working under this node (#208), so the claim it answers
+   * stays open across the park and the holder stays the agent until the
+   * aggregation re-invokes the node or a `/stop` ends the park.
    */
   holder: TurnHolder;
+  /**
+   * The claim the walk leaves open, when one is — its ask and the run that took
+   * it (#208). The stop receipt reads this to end a PARK: the claim a `waiting`
+   * ending holds open has no run left to answer it, and the person's stop is what
+   * returns the turn. Undefined on a person's turn.
+   */
+  openClaim?: { ask: number; run: number };
 }
 
 /**
@@ -282,13 +296,15 @@ export function newestEventBody(
  * (`runInFlight`: a request nobody has claimed yet is a run on its way, and a stop
  * must reach it), and the label's release rule, which reads one ending's meaning.
  *
- * `waiting` is a person's turn. The node's own run is over and the ball is with a
- * child, not with this node's agent — so a comment here is a person talking to
- * nobody's turn, which the guard keeps rather than deletes. See `TurnEvent`.
+ * `waiting` is the agent's turn (#208): a parked turn is not a returned one. The
+ * node's own run ended inside a child-starting call, and the ball sits with the
+ * machinery until the aggregation re-invokes the node — so a person's comment made
+ * during the wait is an interruption the guard removes, with a notice saying when to
+ * come back, rather than a turn the person holds.
  */
 export function whoseTurn(events: readonly TurnEvent[]): TurnHolder {
   const last = events[events.length - 1];
-  return last === "asked" || last === "handed-off" ? "agent" : "person";
+  return last === "asked" || last === "handed-off" || last === "waiting" ? "agent" : "person";
 }
 
 /**
@@ -456,6 +472,7 @@ export function shapedThread<T extends ThreadEntry>(comments: readonly T[], read
   // makes the ball the agent's (#285), and an unclaimed ask is a run that has not
   // started yet rather than one that is working.
   let openClaim: number | undefined;
+  let openClaimRun: number | undefined;
   for (const entry of comments) {
     if (entry.isHuman && openClaim !== undefined) continue;
     kept.push(entry);
@@ -465,18 +482,31 @@ export function shapedThread<T extends ThreadEntry>(comments: readonly T[], read
       // disagree about where the ball was. A quotation carries neither: the tags in
       // it are the removed author's words, not the thread's own (see
       // `ThreadEntry.quoted`).
+      const event = eventOf(entry, readers);
       const claim = readers.claim(entry.body);
       if (claim !== undefined) {
         openClaim = claim.ask;
+        openClaimRun = claim.run;
       } else if (openClaim !== undefined) {
         const answered = readers.answeredAsk(entry.body);
-        if (answered !== undefined && answered === openClaim) openClaim = undefined;
+        // A `waiting` ending does not close the claim it answers (#208): it PARKS
+        // the turn on the agents working under this node, and the ball does not
+        // come back until the aggregation re-invokes the parent. Keeping the claim
+        // open across the park is what makes a person's comment during the wait an
+        // interruption the shaping excludes -- and the guard removes -- instead of
+        // a turn the person holds. The claim closes when the re-invoked run claims
+        // the parked ask and answers it, or when a `/stop` ends the park.
+        if (answered !== undefined && answered === openClaim && event !== "waiting") openClaim = undefined;
       }
+      if (event !== undefined) events.push(event);
     }
-    const event = eventOf(entry, readers);
-    if (event !== undefined) events.push(event);
   }
-  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
+  return {
+    comments: kept,
+    events,
+    holder: openClaim !== undefined ? "agent" : "person",
+    ...(openClaim !== undefined ? { openClaim: { ask: openClaim, run: openClaimRun ?? 0 } } : {}),
+  };
 }
 
 /**

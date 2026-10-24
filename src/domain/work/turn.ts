@@ -78,6 +78,17 @@ export type Ending =
   /** Work continues: it named the next agent, or a tool call already started one. */
   | "handed-off"
   /**
+   * The run ended inside a child-starting tool call: `launch_sub_agent` or
+   * `create_pr` started work UNDER this node, and the session stopped there.
+   *
+   * Named apart from `handed-off` because the two hold the node differently: a
+   * hand-off moves this node to the next agent, while a park leaves it held by
+   * this run's own machinery until the children finish — the label stays on
+   * (`shouldReleaseGuard`), and the aggregation re-invocation is the collection
+   * of the parked turn, not a new one. See `domain/work/thread.ts`'s `waiting`.
+   */
+  | "parked"
+  /**
    * It ran to an ordinary end and left no report: a last turn of tool calls and no
    * words.
    *
@@ -128,6 +139,17 @@ export interface TurnSignals {
   loopLimitReached: boolean;
   /** A tool call already started a follow-up run during this turn. */
   chainContinues: boolean;
+  /**
+   * The run stopped inside a child-starting tool call (#208): the work it started
+   * runs UNDER this node, so the turn is parked rather than over. Read from the ops
+   * log's `dispatch-elsewhere` entry, which is exactly the dispatch a park makes —
+   * a hand-off to the next agent on THIS node logs `dispatch`, and a re-invocation
+   * that continues a chain says so with `continuesChain` and logs `dispatch` too.
+   *
+   * Optional, and absent means not parked: every caller that predates the park
+   * concept is a run that demonstrably did not park, which is the same answer.
+   */
+  parked?: boolean;
   /** The agent's closing line naming who goes next, or empty. */
   directive: string;
   /**
@@ -180,6 +202,11 @@ export function endingOf(signals: TurnSignals): TurnEnding {
   if (signals.endedBecause === "loop") return { ended: "looped" };
   if (signals.endedBecause === "stopped") return { ended: "stopped" };
   if (signals.endedBecause === "iterations" || signals.endedBecause === "runtime") return { ended: "spent" };
+  // A park beats the chain limits and every ordinary ending: the children it
+  // started are already running, so the node is held no matter what the counters
+  // say about the chain that launched them. The limits catch the re-invoked
+  // parent instead.
+  if (signals.parked) return { ended: "parked" };
   if (signals.loopLimitReached) return { ended: "chain-over", ...(next ? { next } : {}) };
   if (next || signals.chainContinues) return { ended: "handed-off", ...(next ? { next } : {}) };
   if (!signals.reported) return { ended: "no-report" };
@@ -189,16 +216,18 @@ export function endingOf(signals: TurnSignals): TurnEnding {
 /**
  * Whether the at-most-one-turn-per-node guard should be released.
  *
- * One ending holds it: work is still actively going, possibly on a different node
- * entirely, under this one. Every other ending has handed back — to a person, or to
- * nobody — and a node nothing is working on must not stay locked.
+ * Two endings hold it. `handed-off` is work actively going on THIS node, possibly
+ * after the run that held it stopped. `parked` is work going on UNDER this node —
+ * the run stopped inside a child-starting call, and the aggregation re-invocation
+ * is what continues it (#208). Every other ending has handed back — to a person,
+ * or to nobody — and a node nothing is working on must not stay locked.
  *
  * The mechanism that enacts this is the `atomaton/in-progress` label, in
  * `entrypoints/machinery/manage_in_progress_label.ts`. It is deliberately not named
  * here: the rule is about turns and the label is one way to persist it.
  */
 export function shouldReleaseGuard(ending: TurnEnding): boolean {
-  return ending.ended !== "handed-off";
+  return ending.ended !== "handed-off" && ending.ended !== "parked";
 }
 
 /** Who to start now, when this turn handed off to somebody and the chain may continue. */

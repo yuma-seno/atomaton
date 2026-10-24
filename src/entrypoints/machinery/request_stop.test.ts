@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { commandsAfterStop, stopRequestedNotice } from "./request_stop.ts";
 import { stopRequested } from "./watch_for_stop.ts";
-import { LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
+import { ENDED_TAG, LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
 
 describe("request_stop.ts", () => {
   // The notice IS the request: the running job polls for this tag. A notice that
@@ -143,6 +143,22 @@ describe("commandsAfterStop", () => {
 
   test("does not count a command quoted inside prose", () => {
     expect(commandsAfterStop("/stop\n> /reviewer")).toEqual([]);
+  });
+
+  // #208, 判断4's exit: a `/stop` on a node whose turn is parked on its subtree is
+  // the only thing that returns the turn — the run that parked is long gone, and
+  // nothing else writes an ending there. The receipt carries it, with `run=0`
+  // because no run wrote it: the person did.
+  test("a stop on a parked node carries the ending that closes the park", () => {
+    const receipt = stopRequestedNotice("octocat", true, [], undefined, { ask: 5, run: 7 });
+    expect(receipt).toContain(ENDED_TAG.write({ verb: "stopped", answers: 5, run: 0 }));
+    // Still a stop receipt first: the tag is what a live run polls for, and the
+    // subtree copies need it too.
+    expect(STOP_TAG.has(receipt)).toBe(true);
+  });
+
+  test("a stop on a node with a live run carries no park ending", () => {
+    expect(stopRequestedNotice("octocat", true, [])).not.toContain("atomaton:ended=");
   });
 
   // #311: a fenced sample is not a request anywhere -- the entry and the thread do not

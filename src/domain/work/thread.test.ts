@@ -125,10 +125,11 @@ describe("whoseTurn", () => {
     expect(whoseTurn(["asked", "returned"])).toBe("person");
   });
 
-  // The node's own run is over and the ball is with a child, not with this node's
-  // agent -- so a comment here is a person's, and the guard keeps it.
-  test("waiting on a child gives the node back to a person", () => {
-    expect(whoseTurn(["asked", "waiting"])).toBe("person");
+  // The node's own run is over and the ball is parked on the children (#208): the
+  // turn stays with the machinery until the aggregation re-invokes the node, which
+  // is why a person's comment during the wait is an interruption the guard removes.
+  test("waiting on a child parks the turn with the machinery", () => {
+    expect(whoseTurn(["asked", "waiting"])).toBe("agent");
   });
 
   // The whole point of reading the last event rather than any of them.
@@ -257,6 +258,45 @@ describe("shapedThread", () => {
     expect(closed.holder).toBe("person");
     const empty = shapedThread([human("/engineer")], readers);
     expect(empty.holder).toBe("person");
+  });
+
+  // #208, 案1: a `waiting` ending PARKS the turn — the claim it answers stays open
+  // across the park, so a person's comment during the wait is an interruption the
+  // shaping excludes (the guard deletes it), not a turn the person holds.
+  test("a waiting ending parks the turn: the claim stays open through the wait", () => {
+    const parked = shapedThread([machine("CLAIM 5 RUN 7"), machine("WAITING ANSWERS 5")], readers);
+    expect(parked.holder).toBe("agent");
+    expect(parked.openClaim).toEqual({ ask: 5, run: 7 });
+    expect(
+      bodies([machine("CLAIM 5 RUN 7"), machine("WAITING ANSWERS 5"), human("one more thing while you wait")]),
+    ).toEqual(["CLAIM 5 RUN 7", "WAITING ANSWERS 5"]);
+  });
+
+  test("the re-invoked run's claim takes the park over, and its answer closes it", () => {
+    const resumed = shapedThread(
+      [
+        machine("CLAIM 5 RUN 7"),
+        machine("WAITING ANSWERS 5"),
+        // The aggregation re-invokes the parent, and the new run claims the PARKED
+        // ask -- the waiting ending's own comment id (#285's wiring).
+        machine("CLAIM 12 RUN 9"),
+        machine("RESULT done ANSWERS 12"),
+      ],
+      readers,
+    );
+    expect(resumed.holder).toBe("person");
+    expect(resumed.openClaim).toBeUndefined();
+  });
+
+  // 判断4's exit: nothing else ends a park whose subtree died without aggregating,
+  // so the person's stop receipt -- an ending with no run behind it -- is what
+  // returns the turn.
+  test("a stop receipt with no run behind it ends the park", () => {
+    const stopped = shapedThread(
+      [machine("CLAIM 5 RUN 7"), machine("WAITING ANSWERS 5"), machine("ENDED stopped ANSWERS 5")],
+      readers,
+    );
+    expect(stopped.holder).toBe("person");
   });
 
   // The events come out of the same walk, so a caller never folds them a second time.

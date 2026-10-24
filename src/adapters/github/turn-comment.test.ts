@@ -54,9 +54,12 @@ describe("turnCommentBody", () => {
     expect(whoseTurn(turnEvents(["/engineer", withoutEnding], readers))).toBe("agent");
   });
 
-  test("waiting is a handback to a person too, so a comment on it survives", () => {
+  // #208, 案1: a `waiting` comment PARKS the turn with the machinery, so a person's
+  // comment made during the wait is an interruption the guard removes — with a
+  // notice naming the resume moment — rather than a turn the person holds.
+  test("waiting parks the turn with the machinery, so a comment on it does not survive", () => {
     const awaitingChildren = turnCommentBody({ ended: "waiting", audience: "person", body: "Launched: #7, #8" });
-    expect(whoseTurn(turnEvents(["/atomaton", awaitingChildren], readers))).toBe("person");
+    expect(whoseTurn(turnEvents(["/atomaton", awaitingChildren], readers))).toBe("agent");
   });
 
   test("handoff keeps the node with the agent, because the next one is on this node", () => {

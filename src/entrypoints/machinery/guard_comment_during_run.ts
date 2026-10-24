@@ -103,6 +103,8 @@ function noticeBody(opts: {
   several: boolean;
   /** Whether the thread rule would also have removed it, so the notice can say to wait too. */
   removed: boolean;
+  /** Whether the hold is a PARK — a `waiting` ending, a subtree in flight (#208). */
+  parked: boolean;
   /** The commands the comment carried, as they were written, when `several`. */
   commands: string[];
   deleted: boolean;
@@ -118,8 +120,12 @@ function noticeBody(opts: {
     ? `it carries more than one command (${opts.commands.join(", ")}). Atomaton acts on one command per ` +
       "comment: it acts on the first and drops the rest, and which one won is not visible on the page. " +
       "Comment each command on its own, with what you want done on the lines under it."
-    : "the ball is with an agent on this issue/PR: a run has claimed the turn and has not handed it back yet. " +
-      "Please wait for that to finish, then comment again.";
+    : opts.parked
+      ? "this node's agent parked the turn on the agents working under it, and the ball comes back when " +
+        "they finish and the parent resumes. Nothing here reaches anyone before then, so please comment " +
+        "again once the parent has picked the work back up."
+      : "the ball is with an agent on this issue/PR: a run has claimed the turn and has not handed it back yet. " +
+        "Please wait for that to finish, then comment again.";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     ...(quote ? [QUOTES_TAG.write(Number(opts.commentId))] : []),
@@ -209,9 +215,9 @@ function main(): void {
   // the comment in two needs to know the ball is with an agent as well — otherwise they
   // post the first half, it is refused by this same guard, and they are told the other
   // reason a comment later.
-  let removed = false;
+  let hold: { removed: boolean; parked: boolean } = { removed: false, parked: false };
   try {
-    removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
+    hold = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
   } catch (e) {
     // A failed read is not "the ball is with a person" when this is the only rule in
     // play. This script exists to keep a comment out of a race with a running agent, so
@@ -224,6 +230,11 @@ function main(): void {
     }
     console.error(`Could not read the thread on #${values.number} (${e}); removing the comment for its commands`);
   }
+  const removed = hold.removed;
+  // A parked hold reads differently from a running one, and the person who wrote
+  // during a park needs the resume moment named rather than a run they would wait
+  // for in vain (#208).
+  const parked = hold.parked;
 
   if (!removed && !several) {
     if (githubOutput) appendFileSync(githubOutput, "blocked=false\n");
@@ -255,6 +266,7 @@ function main(): void {
       several,
       commands,
       removed,
+      parked,
       deleted,
       couldNotRead,
       original,

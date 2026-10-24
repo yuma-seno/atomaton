@@ -36,6 +36,16 @@
  * request that never ran -- the silent outcome this is meant to end, wearing a
  * different shape.
  *
+ * ## Ending a park (#208)
+ *
+ * A node whose agent launched children and stopped is PARKED: its thread's newest
+ * event is a `waiting` ending, and the claim it holds open has no run left to answer
+ * it — the run that parked ended, and the aggregation re-invocation is not coming
+ * for a stopped node. The person's `/stop` is what returns the turn, so when the
+ * target's thread is parked the receipt carries `ended=stopped answers=<the open
+ * claim's ask> run=0`: no run wrote it, the person did. Without this the park would
+ * hold the node shut forever — the guard would keep removing everything said there.
+ *
  * ## Why it says the comment was deleted
  *
  * Because the existing in-progress guard also deletes comments, and says so. Someone
@@ -47,9 +57,10 @@
  */
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
+import { ENDED_TAG, LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
 import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { descendants, nodesToStop, subtree } from "../../domain/work/work-tree.ts";
+import { openClaimOn } from "../../adapters/github/thread.ts";
 import { readWorkTree, requestStopAcross } from "../../adapters/github/work-tree.ts";
 import { preservedCommentBlock } from "./lib/removed-comment.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -110,13 +121,26 @@ export function commandsAfterStop(original: string): string[] {
  * is a fact worth recording — written without the `@`, which is what would turn a
  * record into a second notification.
  */
-export function stopRequestedNotice(commenter: string, deleted: boolean, alsoReached: number[], extra?: StopNoticeExtra): string {
+export function stopRequestedNotice(
+  commenter: string,
+  deleted: boolean,
+  alsoReached: number[],
+  extra?: StopNoticeExtra,
+  park?: { ask: number; run: number },
+): string {
   const whose = commenter ? `${commenter}'s` : "The";
   const quoted = extra !== undefined && deleted && extra.original !== "";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     ...(quoted ? [QUOTES_TAG.write(Number(extra.commentId))] : []),
     STOP_TAG.write("requested"),
+    // A stop on a PARKED node is what returns the turn (#208): the park holds a
+    // claim no run will ever answer, so the receipt carries the ending itself.
+    // `run=0` says no run wrote it — the person did — and `answers` names the ask
+    // the parked claim holds open. The guard reads it, releases the node, and the
+    // person can comment again; without it the park would hold the node shut
+    // forever, because nothing else was ever going to write an ending there.
+    ...(park ? [ENDED_TAG.write({ verb: "stopped", answers: park.ask, run: 0 })] : []),
     "Atomaton: stop requested.",
     "",
     deleted
@@ -208,10 +232,17 @@ function main(): void {
   const { nodes } = readWorkTree(repo, root);
   const under = nodesToStop(descendants(subtree(nodes, root), root)).map((node) => node.number);
 
+  // The target's own thread, read for the park (#208): a `/stop` on a node whose
+  // turn is parked on its subtree is the ONLY thing that returns the turn — the run
+  // that parked it is long gone, and nothing else writes an ending there. Undefined
+  // unless a claim is open; the ending rides the receipt only when the hold is a
+  // park (newest event `waiting`), never on a node with a live run.
+  const park = openClaimOn(repo, number);
+
   const result = requestStopAcross(
     repo,
     root,
-    stopRequestedNotice(values.commenter ?? "", deleted, under, extra),
+    stopRequestedNotice(values.commenter ?? "", deleted, under, extra, park),
   );
   // Fatal only when the root got nothing. That comment IS the request: without it the
   // run polls, finds nothing, and keeps going, and the person is told a stop is coming
