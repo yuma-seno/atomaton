@@ -4427,20 +4427,21 @@
   {
     "path": "sessions/issue-208/reviewer.json",
     "agent": "reviewer",
-    "messages": 121,
-    "calls": 61,
+    "messages": 141,
+    "calls": 70,
     "failed": 2,
     "refused": 0,
     "skills": [],
     "reported": true,
     "tools": {
       "get_pr": 1,
-      "get_check_runs": 2,
-      "get_pr_diff": 1,
-      "grep": 34,
-      "read": 21,
+      "get_check_runs": 3,
+      "get_pr_diff": 2,
+      "grep": 37,
+      "read": 24,
       "glob": 1,
-      "get_issue_comments": 1
+      "get_issue_comments": 1,
+      "check_merge_readiness": 1
     },
     "acts": {},
     "runs": [
@@ -4464,6 +4465,25 @@
           }
         },
         "started": "2026-10-24T15:35:35Z"
+      },
+      {
+        "ended": "2026-10-24T15:58:49Z",
+        "ended_because": "completed",
+        "iterations": 7,
+        "messages": 141,
+        "seconds": 118,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 3,
+            "read": 3
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_pr_diff": 1
+          }
+        },
+        "started": "2026-10-24T15:56:51Z"
       }
     ]
   },
