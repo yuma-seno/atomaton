@@ -355,13 +355,18 @@ export function commentWouldBeRemoved(repo: string, number: string | number, com
 }
 
 /**
- * The claim a node's thread leaves open, when one is, and whether the hold is a
- * park (#208).
+ * The claim a node's thread leaves open, when one is, and what kind of hold it is
+ * (#208).
  *
  * The stop receipt reads this to end a park: a `waiting` ending holds the claim
  * open with no run left to answer it, and the person's `/stop` is what returns the
- * turn. `parked` is the newest event being `waiting` — the same question the
- * guard's notice asks.
+ * turn. Two flags decide whether a stop MAY end it:
+ *
+ *   - `parked` — the newest event is a `waiting` ending. A live run's thread has an
+ *     `asked` or nothing as its newest event, so this is false while a run works.
+ *   - `claimed` — the newest comment is itself a claim. A re-invoked parent claims
+ *     the parked ask without writing a turn event, so `parked` stays true while its
+ *     run works; `claimed` is what says a live run holds the ball.
  *
  * Throws when the thread cannot be read, like every other reader here: a caller
  * deciding whether to end a park must not read a failed read as "nothing to end".
@@ -369,10 +374,15 @@ export function commentWouldBeRemoved(repo: string, number: string | number, com
 export function openClaimOn(
   repo: string,
   number: string | number,
-): { ask: number; run: number; parked: boolean } | undefined {
+): { ask: number; run: number; parked: boolean; claimed: boolean } | undefined {
   const shaped = readComments(repo, number);
   if (shaped.openClaim === undefined) return undefined;
-  return { ...shaped.openClaim, parked: shaped.events[shaped.events.length - 1] === "waiting" };
+  const last = shaped.comments[shaped.comments.length - 1];
+  return {
+    ...shaped.openClaim,
+    parked: shaped.events[shaped.events.length - 1] === "waiting",
+    claimed: last !== undefined && readers.claim(last.body) !== undefined,
+  };
 }
 
 /**
