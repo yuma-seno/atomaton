@@ -77,7 +77,7 @@ describe("passagesOf", () => {
   test("the path is indexed as words", () => {
     const passages = passagesOf("src/entrypoints/machinery/manage_turn_labels.ts", "x");
     const pathPassage = passages.at(-1)!;
-    expect(pathPassage.text).toContain("manage in progress label");
+    expect(pathPassage.text).toContain("manage turn labels");
     expect(pathPassage.text).toContain("src/entrypoints/machinery/manage_turn_labels.ts");
   });
 
