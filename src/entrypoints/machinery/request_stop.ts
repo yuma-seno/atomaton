@@ -270,10 +270,10 @@ function main(): void {
 
   // The target's own thread, read for the park (#208): a `/stop` on a node whose
   // turn is parked on its subtree is the ONLY thing that returns the turn — the run
-  // that parked it is long gone, and nothing else writes an ending there. Read
-  // BEFORE the comment is deleted and best-effort, because a failed read must not
-  // lose the receipt: the stop stands either way, and the park it might have ended
-  // is the smaller loss. `parkExit` decides whether an ending applies at all.
+  // that parked it is long gone, and nothing else writes an ending there. Best-
+  // effort, because a failed read must not lose the receipt: the stop stands either
+  // way, and the park it might have ended is the smaller loss. `parkExit` decides
+  // whether an ending applies at all.
   let park: { ask: number; run: number } | undefined;
   try {
     park = parkExit(openClaimOn(repo, number));
