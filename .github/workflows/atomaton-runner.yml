@@ -236,17 +236,18 @@ jobs:
             exit 0
           fi
 
-          # `HEAD`, and deliberately not `$GITHUB_SHA`. `actions/checkout` checked
-          # `refs/pull/N/head` out detached, so HEAD is the pull request's own head
-          # commit -- that much is certain. `$GITHUB_SHA` is the dispatch ref's tip
-          # instead, and this run is dispatched by `gh workflow run` with no `--ref`, so
-          # that is the DEFAULT branch: naming it here would check the run out onto the
-          # default branch and commit its tree on top of the pull request -- measured, the
-          # working tree came back as the base commit with the pull request's own change
-          # gone. In a checkout that holds only the pull request it is not even present,
-          # and the checkout fails outright. Re-labelling HEAD is the whole operation: the
-          # same commit, now with the branch name the pull request is already from.
-          if ! git checkout -B "${BRANCH_NAME}" HEAD; then
+          # `HEAD`, and deliberately not `$GITHUB_SHA`, used to be the re-label target
+          # here -- and that was the defect #301 records: `actions/checkout` snapshot
+          # `refs/pull/N/head` at job start, and a push landing between that moment and
+          # this step left this checkout re-labelling the STALE pull head while the
+          # freshly fetched remote ref sat one commit ahead. The diff `fetch_events`
+          # builds moments later comes from the API's CURRENT head, so the worktree and
+          # the diff -- the reviewer's two halves of one evidence base -- disagreed within
+          # one run. The tip fetched HERE is what the diff will be fetched against, so
+          # re-labelling THAT is what makes the two agree by construction; the issue
+          # path's checkout above has always worked this way. `$GITHUB_SHA` stays
+          # avoided for the reason below.
+          if ! git checkout -B "${BRANCH_NAME}" "refs/remotes/origin/${BRANCH_NAME}"; then
             echo "::warning::could not check out ${BRANCH_NAME}; this run stays on the detached checkout"
             exit 0
           fi
