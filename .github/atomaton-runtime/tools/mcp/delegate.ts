@@ -18223,7 +18223,7 @@ function delegateDescription(def, shared) {
 }
 function tierText(frontmatter) {
   const free = (frontmatter.get("model") ?? "").endsWith("/free");
-  return free ? " This one is FREE, and its request limit is shared with every other agent using that tier " + "\u2014 so the way to find out whether a task fits is to try it. A refusal before you get an " + "answer means the task was too large for the tier, not that the task was wrong: use the " + "other delegate, or ask for less." : " This one is PAID, so reach for the free delegate first and come here when it has said the " + "task is too large \u2014 or when the task is obviously big enough that the refusal is certain.";
+  return free ? " This one is FREE, and its request limit is shared with every other agent using that tier " + "\u2014 so the way to find out whether a task fits is to try it. A refusal before you get an " + "answer means the task was too large for the tier, not that the task was wrong: ask for " + "less, or do the work here instead. When the shared allowance itself is used up, the " + "refusal says so (a 402 that names the exhausted free allowance) and no task fits: read " + "the report, and use one of the other delegates you were offered, or do the work here." : " This one is PAID, so reach for the free delegate first and come here when it has said the " + "task is too large \u2014 or when the task is obviously big enough that the refusal is certain.";
 }
 function distinguishingText(role) {
   const firstParagraph = role.split(/\n\s*\n/)[0]?.trim() ?? "";
