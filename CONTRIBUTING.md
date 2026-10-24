@@ -89,13 +89,14 @@ keeping the two together is a discipline rather than something enforced.
 
 ## Cutting a release
 
-Bump `version` in `package.json` and merge it. That is the whole procedure.
+Merging an ordinary change publishes nothing. The release is declared **separately,
+on purpose**: deciding that a set of work is ready to ship is a judgement about the
+whole of `main`, not about the pull request that happened to merge last, and no work
+pull request carries that judgement in it. `version` in `package.json` is the single
+declaration, and `self/atomaton/scripts/tag-release.sh` derives the tag from it — so
+there is no tag to push and nothing that can disagree.
 
-The version is the single declaration, and `self/atomaton/scripts/tag-release.sh` derives the
-tag from it, so there is no tag to push and nothing that can disagree. Releasing is
-an ordinary reviewed change rather than a separate act of remembering.
-
-To make that one edit without a checkout, dispatch **Atomaton Release**:
+To declare one, dispatch **Atomaton Release**:
 
 ```bash
 gh workflow run atomaton-release.yml --ref main -f version=0.2.0
@@ -112,6 +113,13 @@ Or press **Run workflow** on **Atomaton Release** in the Actions tab. It writes 
 version into `package.json` and opens a pull request; it merges nothing.
 `package.json` is in `merge.governed_paths`, so a person reviews it — a version is a
 claim about what is being shipped, and deciding that is not an agent's to make.
+
+The mirror of that rule is for every other pull request: **do not edit `version` in
+one.** A work change merged without a version edit publishes nothing, and that is the
+normal case — the release follows when a person declares it. A pull request that
+arrives with a version change in it is a defect to flag before merge, not a favour to
+the next release: the edit would silently publish whatever the branch carried at the
+moment of its merge.
 
 It refuses two things, and only two:
 
