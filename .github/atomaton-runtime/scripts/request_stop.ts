@@ -216,6 +216,128 @@ function fenceSegments(text) {
   return segments;
 }
 
+// src/adapters/runner/config.ts
+import { readFileSync } from "fs";
+
+// src/domain/delivery/merge-readiness.ts
+var CI_WOULD_BE_WASTED = new Set([
+  "not-open",
+  "draft",
+  "conflicting",
+  "behind",
+  "mergeability-unknown",
+  "checks-pending",
+  "checks-failing"
+]);
+var PASSING = new Set(["success", "neutral", "skipped"]);
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${USER_ROOT}/delegates`;
+var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
+
+// src/domain/delivery/declared-secrets.ts
+var RUN_CREDENTIALS = [
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "ORCAROUTER_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "ATOMA_COPILOT_TOKEN",
+  "GH_TOKEN"
+];
+var AGENT_ENV_NAMES = [
+  "HOME",
+  "PATH",
+  "AGENT",
+  MACHINERY_ROOT_VAR,
+  "GITHUB_REPOSITORY",
+  "BRANCH",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
+  "ATOMATON_RELOAD_COUNT",
+  "ATOMATON_OPS_LOG",
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
+  "ATOMATON_DISPATCHED_BY",
+  "ATOMATON_ASK_ID",
+  "GITHUB_RUN_ID",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "BUN_INSTALL_CACHE_DIR",
+  "npm_config_cache",
+  "PIP_CACHE_DIR",
+  "CARGO_HOME",
+  "OPENAI_BASE_URL",
+  "ATOMA_PROVIDER"
+];
+var RUN_STEP_NAMES = [
+  "OPENROUTER_BASE_URL",
+  "ORCAROUTER_BASE_URL",
+  "ANTHROPIC_BASE_URL",
+  "COPILOT_BASE_URL",
+  "ATOMA_PROVIDER_IN",
+  "OPENAI_BASE_URL_IN"
+];
+var TOOL_SECRETS = {
+  field: "tools.secrets",
+  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
+};
+var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
+
+// src/domain/delivery/check-jobs.ts
+var CHECKS_FROM_PULL_REQUEST = {
+  where: "checks.from_pull_request",
+  secrets: {
+    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
+  }
+};
+var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
+
+// src/adapters/runner/machinery.ts
+function machineryRoot() {
+  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
+}
+function machineryPath(relative) {
+  const root = machineryRoot();
+  return root ? `${root}/${relative}` : relative;
+}
+
+// src/adapters/runner/config.ts
+function configPath() {
+  return machineryPath(CONFIG_FILE);
+}
+var cached;
+function loadConfig() {
+  if (!cached) {
+    cached = Bun.YAML.parse(readFileSync(configPath(), "utf8"));
+  }
+  return cached;
+}
+var DEFAULT_LABELS = {
+  sub_issue: "atomaton/sub-issue",
+  launched: "atomaton/launched",
+  in_progress: "atomaton/in-progress"
+};
+function getLabel(key) {
+  return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
+}
+
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
 function isControlCommand(name) {
@@ -359,6 +481,137 @@ function stopReachedNotice(root) {
 `);
 }
 
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
+// src/domain/work/thread.ts
+function eventOf(entry, readers) {
+  if (entry.quoted)
+    return;
+  const ending = readers.ending(entry.body);
+  if (ending !== "")
+    return ending;
+  if (readers.requestedAgent(entry.body) !== "")
+    return "asked";
+  return;
+}
+function whoseTurn(events) {
+  const last = events[events.length - 1];
+  return last === "asked" || last === "handed-off" || last === "waiting" ? "agent" : "person";
+}
+function shapedThread(comments, readers) {
+  const kept = [];
+  const events = [];
+  let openClaim;
+  let openClaimRun;
+  for (const entry of comments) {
+    if (entry.isHuman && openClaim !== undefined)
+      continue;
+    kept.push(entry);
+    if (!entry.quoted) {
+      const event = eventOf(entry, readers);
+      const claim = readers.claim(entry.body);
+      if (claim !== undefined) {
+        openClaim = claim.ask;
+        openClaimRun = claim.run;
+      } else if (openClaim !== undefined) {
+        const answered = readers.answeredAsk(entry.body);
+        if (answered !== undefined && answered === openClaim && event !== "waiting")
+          openClaim = undefined;
+      }
+      if (event !== undefined)
+        events.push(event);
+    }
+  }
+  return {
+    comments: kept,
+    events,
+    holder: openClaim !== undefined ? "agent" : "person",
+    ...openClaim !== undefined ? { openClaim: { ask: openClaim, run: openClaimRun ?? 0 } } : {}
+  };
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  ending: (body) => {
+    const ended = ENDED_TAG.readProse(body)?.verb;
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
+      return "returned";
+    return "";
+  },
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
+  claim: (body) => TOOK_TAG.readProse(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.readProse(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var askReaders = {
+  ...readers,
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var endingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body)
+};
+function isHumanComment(comment) {
+  return isHumanActor(comment.user?.type);
+}
+function entryOf(comment) {
+  const isHuman = isHumanComment(comment);
+  const body = comment.body ?? "";
+  return {
+    body,
+    isHuman,
+    quoted: !isHuman && QUOTES_TAG.has(body),
+    at: comment.created_at
+  };
+}
+function listComments(repo, number) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const pages = splitConcatenatedJson(listed.stdout);
+  const flat = [];
+  for (const page of pages) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
+function readComments(repo, number, excludeCommentId) {
+  const excluded = String(excludeCommentId ?? "").trim();
+  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
+  return shapedThread(comments, readers);
+}
+function openClaimOn(repo, number) {
+  const shaped = readComments(repo, number);
+  if (shaped.openClaim === undefined)
+    return;
+  const last = shaped.comments[shaped.comments.length - 1];
+  return {
+    ...shaped.openClaim,
+    parked: shaped.events[shaped.events.length - 1] === "waiting",
+    claimed: last !== undefined && readers.claim(last.body) !== undefined
+  };
+}
+function runInFlight(repo, number) {
+  const shaped = readComments(repo, number);
+  return shaped.holder === "agent" || whoseTurn(shaped.events) === "agent";
+}
+
 // src/adapters/github/outcome.ts
 function issueOutcome(reason) {
   const said = (reason ?? "").toLowerCase();
@@ -454,119 +707,6 @@ function issueLinks(repo, number) {
     children: (issue.subIssues?.nodes ?? []).map(asChild),
     pullRequests: dedupeByNumber(declared, referenced)
   };
-}
-
-// src/domain/work/actor.ts
-var BOT_TYPE = "Bot";
-function isHumanActor(type) {
-  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
-}
-
-// src/domain/work/thread.ts
-function eventOf(entry, readers) {
-  if (entry.quoted)
-    return;
-  const ending = readers.ending(entry.body);
-  if (ending !== "")
-    return ending;
-  if (readers.requestedAgent(entry.body) !== "")
-    return "asked";
-  return;
-}
-function whoseTurn(events) {
-  const last = events[events.length - 1];
-  return last === "asked" || last === "handed-off" ? "agent" : "person";
-}
-function shapedThread(comments, readers) {
-  const kept = [];
-  const events = [];
-  let openClaim;
-  for (const entry of comments) {
-    if (entry.isHuman && openClaim !== undefined)
-      continue;
-    kept.push(entry);
-    if (!entry.quoted) {
-      const claim = readers.claim(entry.body);
-      if (claim !== undefined) {
-        openClaim = claim.ask;
-      } else if (openClaim !== undefined) {
-        const answered = readers.answeredAsk(entry.body);
-        if (answered !== undefined && answered === openClaim)
-          openClaim = undefined;
-      }
-    }
-    const event = eventOf(entry, readers);
-    if (event !== undefined)
-      events.push(event);
-  }
-  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
-}
-
-// src/adapters/github/thread.ts
-var readers = {
-  ending: (body) => {
-    const ended = ENDED_TAG.readProse(body)?.verb;
-    if (ended === "handoff")
-      return "handed-off";
-    if (ended === "waiting")
-      return "waiting";
-    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
-      return "returned";
-    return "";
-  },
-  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
-  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
-  claim: (body) => TOOK_TAG.readProse(body),
-  answeredAsk: (body) => {
-    const answers = ENDED_TAG.readProse(body)?.answers;
-    return answers !== undefined && answers > 0 ? answers : undefined;
-  },
-  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
-};
-var askReaders = {
-  ...readers,
-  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
-  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
-};
-var endingWalkReaders = {
-  ending: readers.ending,
-  quoted: isQuotation,
-  claim: (body) => TOOK_TAG.readProse(body),
-  ended: (body) => ENDED_TAG.readProse(body)
-};
-function isHumanComment(comment) {
-  return isHumanActor(comment.user?.type);
-}
-function entryOf(comment) {
-  const isHuman = isHumanComment(comment);
-  const body = comment.body ?? "";
-  return {
-    body,
-    isHuman,
-    quoted: !isHuman && QUOTES_TAG.has(body),
-    at: comment.created_at
-  };
-}
-function listComments(repo, number) {
-  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
-  if (listed.code !== 0)
-    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
-  const pages = splitConcatenatedJson(listed.stdout);
-  const flat = [];
-  for (const page of pages) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
-}
-function readComments(repo, number, excludeCommentId) {
-  const excluded = String(excludeCommentId ?? "").trim();
-  const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
-  return shapedThread(comments, readers);
-}
-function runInFlight(repo, number) {
-  const shaped = readComments(repo, number);
-  return shaped.holder === "agent" || whoseTurn(shaped.events) === "agent";
 }
 
 // src/adapters/github/work-tree.ts
@@ -750,24 +890,6 @@ function preservedCommentBlock(original) {
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
-
-// src/domain/machinery/machinery-layout.ts
-var USER_ROOT = ".github/atomaton";
-var RUNTIME_ROOT = ".github/atomaton-runtime";
-var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
-var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
-var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
-var SKILLS_DIR = `${USER_ROOT}/skills`;
-var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
-var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${USER_ROOT}/delegates`;
-var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
-var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
-var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
-var RULESETS_DIR = `${USER_ROOT}/rulesets`;
-var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
-
-// src/entrypoints/machinery/lib/script-ref.ts
 function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }
@@ -776,6 +898,19 @@ function defineScript(importMetaUrl) {
 var ref = defineScript(import.meta.url);
 function commandsAfterStop(original) {
   return commandsIn(proseOnly(original)).slice(1).map(commandLabel);
+}
+function parkExit(openClaim) {
+  if (openClaim === undefined || !openClaim.parked || openClaim.claimed)
+    return;
+  return { ask: openClaim.ask, run: 0 };
+}
+function parkEndedNotice(park) {
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    ENDED_TAG.write({ verb: "stopped", answers: park.ask, run: 0 }),
+    "Atomaton: the turn this node's agent parked on its subtree came back to you \u2014 your stop ended the park. " + "Nothing is running on this node. Comment again to start new work."
+  ].join(`
+`);
 }
 function stopRequestedNotice(commenter, deleted, alsoReached, extra) {
   const whose = commenter ? `${commenter}'s` : "The";
@@ -828,17 +963,35 @@ function main() {
   const root = Number(number);
   const { nodes } = readWorkTree(repo, root);
   const under = nodesToStop(descendants(subtree(nodes, root), root)).map((node) => node.number);
+  let park;
+  try {
+    park = parkExit(openClaimOn(repo, number));
+  } catch (e) {
+    console.error(`::warning::could not read the thread on #${number}, so a parked turn could not be ended by this stop: ${e}`);
+    park = undefined;
+  }
   const result = requestStopAcross(repo, root, stopRequestedNotice(values.commenter ?? "", deleted, under, extra));
   for (const problem of result.problems)
     console.error(`::warning::${problem}`);
   if (!result.rootNotified)
     process.exit(1);
+  if (park !== undefined) {
+    gh("issue", "comment", String(number), "--body", parkEndedNotice(park));
+    const label = getLabel("in_progress");
+    const { code } = gh("issue", "edit", String(number), "--remove-label", label);
+    if (code !== 0) {
+      console.error(`::warning::could not remove '${label}' from #${number}: the thread says the turn came back, but the label will disagree until it is removed by hand`);
+    }
+    console.error(`#${number} was parked; the stop ended the park and returned the turn.`);
+  }
   console.error(`Stop requested across #${root}: ${result.stopped.length ? result.stopped.map((n) => `#${n}`).join(", ") : "no run was holding anything"}`);
 }
 if (import.meta.main)
   main();
 export {
   commandsAfterStop,
+  parkEndedNotice,
+  parkExit,
   ref,
   stopRequestedNotice
 };

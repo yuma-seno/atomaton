@@ -456,33 +456,36 @@ function eventOf(entry, readers) {
     return "asked";
   return;
 }
-function whoseTurn(events) {
-  const last = events[events.length - 1];
-  return last === "asked" || last === "handed-off" ? "agent" : "person";
-}
 function shapedThread(comments, readers) {
   const kept = [];
   const events = [];
   let openClaim;
+  let openClaimRun;
   for (const entry of comments) {
     if (entry.isHuman && openClaim !== undefined)
       continue;
     kept.push(entry);
     if (!entry.quoted) {
+      const event = eventOf(entry, readers);
       const claim = readers.claim(entry.body);
       if (claim !== undefined) {
         openClaim = claim.ask;
+        openClaimRun = claim.run;
       } else if (openClaim !== undefined) {
         const answered = readers.answeredAsk(entry.body);
-        if (answered !== undefined && answered === openClaim)
+        if (answered !== undefined && answered === openClaim && event !== "waiting")
           openClaim = undefined;
       }
+      if (event !== undefined)
+        events.push(event);
     }
-    const event = eventOf(entry, readers);
-    if (event !== undefined)
-      events.push(event);
   }
-  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
+  return {
+    comments: kept,
+    events,
+    holder: openClaim !== undefined ? "agent" : "person",
+    ...openClaim !== undefined ? { openClaim: { ask: openClaim, run: openClaimRun ?? 0 } } : {}
+  };
 }
 
 // src/adapters/github/thread.ts
@@ -595,7 +598,7 @@ function releasesLabel(lastEnding, readers) {
   const event = readers.ending(lastEnding.body);
   if (event === "")
     return false;
-  return whoseTurn([event]) === "person";
+  return event !== "handed-off";
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts

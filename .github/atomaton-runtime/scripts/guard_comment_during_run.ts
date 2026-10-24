@@ -314,25 +314,32 @@ function shapedThread(comments, readers) {
   const kept = [];
   const events = [];
   let openClaim;
+  let openClaimRun;
   for (const entry of comments) {
     if (entry.isHuman && openClaim !== undefined)
       continue;
     kept.push(entry);
     if (!entry.quoted) {
+      const event = eventOf(entry, readers);
       const claim = readers.claim(entry.body);
       if (claim !== undefined) {
         openClaim = claim.ask;
+        openClaimRun = claim.run;
       } else if (openClaim !== undefined) {
         const answered = readers.answeredAsk(entry.body);
-        if (answered !== undefined && answered === openClaim)
+        if (answered !== undefined && answered === openClaim && event !== "waiting")
           openClaim = undefined;
       }
+      if (event !== undefined)
+        events.push(event);
     }
-    const event = eventOf(entry, readers);
-    if (event !== undefined)
-      events.push(event);
   }
-  return { comments: kept, events, holder: openClaim !== undefined ? "agent" : "person" };
+  return {
+    comments: kept,
+    events,
+    holder: openClaim !== undefined ? "agent" : "person",
+    ...openClaim !== undefined ? { openClaim: { ask: openClaim, run: openClaimRun ?? 0 } } : {}
+  };
 }
 
 // src/adapters/github/thread.ts
@@ -399,11 +406,14 @@ function listComments(repo, number) {
 function commentWouldBeRemoved(repo, number, commentId) {
   const comments = listComments(repo, number);
   const listed = comments.find((comment) => String(comment.id) === String(commentId));
+  const parkedOf = (events) => events[events.length - 1] === "waiting";
   if (listed === undefined) {
     const entries = comments.map(entryOf);
-    return shapedThread(entries, readers).holder === "agent";
+    const shaped = shapedThread(entries, readers);
+    return { removed: shaped.holder === "agent", parked: parkedOf(shaped.events) };
   }
-  return !keptCommentIds(comments).has(listed.id);
+  const shaped = shapedThread(comments.map(entryOf), readers);
+  return { removed: !keptCommentIds(comments).has(listed.id), parked: parkedOf(shaped.events) };
 }
 
 // src/entrypoints/machinery/lib/removed-comment.ts
@@ -460,7 +470,7 @@ var ref = defineScript(import.meta.url);
 function noticeBody(opts) {
   const quote = opts.deleted && !opts.couldNotRead && opts.original !== "";
   const what = opts.deleted ? "Your comment was removed because" : "Your comment could not be removed, and will not be acted on, because";
-  const reason = opts.several ? `it carries more than one command (${opts.commands.join(", ")}). Atomaton acts on one command per ` + "comment: it acts on the first and drops the rest, and which one won is not visible on the page. " + "Comment each command on its own, with what you want done on the lines under it." : "the ball is with an agent on this issue/PR: a run has claimed the turn and has not handed it back yet. " + "Please wait for that to finish, then comment again.";
+  const reason = opts.several ? `it carries more than one command (${opts.commands.join(", ")}). Atomaton acts on one command per ` + "comment: it acts on the first and drops the rest, and which one won is not visible on the page. " + "Comment each command on its own, with what you want done on the lines under it." : opts.parked ? "this node's agent parked the turn on the agents working under it, and the ball comes back when " + "they finish and the parent resumes. Nothing here reaches anyone before then, so please comment " + "again once the parent has picked the work back up." : "the ball is with an agent on this issue/PR: a run has claimed the turn and has not handed it back yet. " + "Please wait for that to finish, then comment again.";
   const lines = [
     LLM_CONTEXT_TAG.write("exclude"),
     ...quote ? [QUOTES_TAG.write(Number(opts.commentId))] : [],
@@ -501,9 +511,9 @@ function main() {
   const parsed = values.parsed === "true";
   const closed = values.state === "closed";
   const several = parsed && !closed && commands.length > 1;
-  let removed = false;
+  let hold = { removed: false, parked: false };
   try {
-    removed = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
+    hold = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
   } catch (e) {
     if (!several) {
       console.error(`Could not read the thread on #${values.number}, so this cannot tell whose turn it is: ${e}`);
@@ -511,6 +521,8 @@ function main() {
     }
     console.error(`Could not read the thread on #${values.number} (${e}); removing the comment for its commands`);
   }
+  const removed = hold.removed;
+  const parked = hold.parked;
   if (!removed && !several) {
     if (githubOutput)
       appendFileSync(githubOutput, `blocked=false
@@ -528,6 +540,7 @@ function main() {
     several,
     commands,
     removed,
+    parked,
     deleted,
     couldNotRead,
     original,
