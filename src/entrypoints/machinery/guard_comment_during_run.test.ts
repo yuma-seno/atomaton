@@ -266,6 +266,44 @@ describe("guard_comment_during_run.ts", () => {
     }
   });
 
+  // #311, same answer for a fenced sample: a `/reviewer` inside a code block is part
+  // of a quotation about the format. The entry parses prose-only and the thread reads
+  // prose-only, so nothing would ever act on it, and refusing the comment for it would
+  // be the commands rule punishing a quotation.
+  test("a fenced command is not a second command", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const body = [
+        "/engineer",
+        "直してほしい",
+        "",
+        "The dispatch format, for reference:",
+        "",
+        "```html",
+        "/reviewer",
+        "```",
+      ].join("\n");
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "101", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([["<!-- atomaton:ended=done -->\nDone.", false]]),
+            readBack(101, body),
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   // The parse step does not run for somebody who is not a repository member, so their
   // comment is never dispatched: deleting it and saying "it would have started the
   // first" would be a lie about a comment nobody was going to read.

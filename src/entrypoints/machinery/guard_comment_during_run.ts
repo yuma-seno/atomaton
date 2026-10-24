@@ -57,7 +57,7 @@
 import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG, QUOTES_TAG } from "../../adapters/github/tags.ts";
+import { LLM_CONTEXT_TAG, QUOTES_TAG, proseOnly } from "../../adapters/github/tags.ts";
 import { commentWouldBeRemoved } from "../../adapters/github/thread.ts";
 import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
@@ -172,7 +172,11 @@ function main(): void {
   const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
   const couldNotRead = readBack.code !== 0;
   const original = couldNotRead ? "" : readBack.stdout ?? "";
-  const commands = commandsIn(original).map(commandLabel);
+  // Counted as prose (#311), the same way the entry parses and the thread reads: a
+  // command inside a fenced sample would be acted on by nothing, so refusing the
+  // comment for it would punish a quotation. The rule refuses what would be dropped;
+  // a fenced line is not dropped, because it was never picked up.
+  const commands = commandsIn(proseOnly(original)).map(commandLabel);
 
   // The rules only reach a comment the machinery would have read. A command from
   // somebody who is not a repository member is refused by the parse step (which does not

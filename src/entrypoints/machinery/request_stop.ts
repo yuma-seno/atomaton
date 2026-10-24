@@ -47,7 +47,7 @@
  */
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
+import { LLM_CONTEXT_TAG, QUOTES_TAG, STOP_TAG, proseOnly } from "../../adapters/github/tags.ts";
 import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { descendants, nodesToStop, subtree } from "../../domain/work/work-tree.ts";
 import { readWorkTree, requestStopAcross } from "../../adapters/github/work-tree.ts";
@@ -85,9 +85,13 @@ export interface StopNoticeExtra {
  * Pure and exported so the rule is testable without a fake GitHub: the first command
  * is the stop (the workflow only takes this path when it is), and everything the same
  * reader finds after it was read by nobody.
+ *
+ * Read as prose (#311), like every other reader of a person's comment: a command
+ * inside a fenced sample was never picked up, so the receipt must not name it as
+ * something that was "not acted on" -- nothing was ever going to act on it.
  */
 export function commandsAfterStop(original: string): string[] {
-  return commandsIn(original).slice(1).map(commandLabel);
+  return commandsIn(proseOnly(original)).slice(1).map(commandLabel);
 }
 
 /**
