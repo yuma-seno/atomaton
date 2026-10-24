@@ -11,6 +11,7 @@
  */
 import { readFileSync, appendFileSync } from "node:fs";
 import { isAgentName } from "../../domain/work/agent-name.ts";
+import { proseOnly } from "../../adapters/github/tags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export const ref = defineScript(import.meta.url);
@@ -29,9 +30,15 @@ interface GithubIssueOpenedEvent {
  * `atomaton:notify` tag `create_sub_issue` prefixes a body with is one — and an issue
  * that carried one silently started nothing.
  *
- * Nothing else is skipped. A command below a paragraph of prose is not a command
+ * Nothing else is skipped in PROSE. A command below a paragraph of prose is not a command
  * at the top, and reading further would turn any mention of `/engineer` in a
  * discussion into a dispatch.
+ *
+ * Fenced code is skipped too (#311), for the opposite reason: it is perfectly visible.
+ * A `/engineer` inside a code block is somebody quoting the format, not making a
+ * request, and the thread readers do not take it for one. `proseOnly` blanks the
+ * fences, so the line this returns is the body's first line of prose, and the entry
+ * and the thread answer "is this a command" the same way about the same body.
  */
 function commandLine(body: string): string {
   for (const raw of body.split("\n")) {
@@ -55,7 +62,7 @@ function main(): void {
   }
 
   const event = JSON.parse(readFileSync(eventPath, "utf8")) as GithubIssueOpenedEvent;
-  const body = event.issue?.body ?? "";
+  const body = proseOnly(event.issue?.body ?? "");
 
   if (!commandLine(body).startsWith("/")) return;
   const agent = commandLine(body).slice(1).trim();

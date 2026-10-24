@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseCommentCommand } from "../../domain/work/comment-command.ts";
+import { proseOnly } from "../../adapters/github/tags.ts";
 import { SCRIPTS_DIR, hermeticEnv, parseGithubOutput } from "./testing/harness.ts";
 
 /**
@@ -52,5 +54,26 @@ describe("parse_comment_command.ts", () => {
     const out = runOutputs("/engineer fix the bug\n/reviewer");
     expect(out.parsed).toBe("true");
     expect(out.error).not.toBe("");
+  });
+
+  // #311: a command inside a fenced block is somebody quoting the format. The thread
+  // readers do not take it for a request, so the entry must not either -- otherwise a
+  // run starts on an ask the thread cannot see, and `latestRequest` loses it.
+  test("does not start a run on a command quoted inside a fence", () => {
+    const out = runOutputs("The format, for reference:\n\n```html\n/engineer\n```\n\nThat is how a dispatch is written.");
+    expect(out.parsed).toBe("true");
+    expect(out.matched).toBe("false");
+    expect(out.agent).toBe("");
+  });
+
+  // A fence is not a wall for the whole body: the first command in PROSE is read, and
+  // it is the same line the thread reader would take from the same body.
+  test("reads the first command in prose, and agrees with the thread reader", () => {
+    const body = "```\n/engineer\n```\n\n/reviewer\n\nlook at the diff, please";
+    const out = runOutputs(body);
+    expect(out.matched).toBe("true");
+    expect(out.agent).toBe("reviewer");
+    // The thread's own reader, on the same body.
+    expect(parseCommentCommand(proseOnly(body)).agent).toBe("reviewer");
   });
 });

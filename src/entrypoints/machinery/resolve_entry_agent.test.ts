@@ -84,6 +84,46 @@ describe("resolve_entry_agent.ts", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  // #311: the first line of PROSE is the entry. A `/engineer` inside a fenced block
+  // opens a code sample -- visible on the rendered issue, but a quotation, and the
+  // thread readers do not take it for a request. Starting a run on it would be the
+  // one place the two readers disagreed.
+  test("emits nothing when the only command is inside a fence", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
+    const eventFile = join(dir, "event.json");
+    const outputFile = join(dir, "out");
+    writeFileSync(
+      eventFile,
+      JSON.stringify({ issue: { body: "How to dispatch, for the record:\n\n```html\n/engineer\n```\n" } }),
+    );
+    writeFileSync(outputFile, "");
+    spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {
+      encoding: "utf8",
+      env: { ...hermeticEnv(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
+    });
+    expect((await Bun.file(outputFile).text()).trim()).toBe("");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // A fence is not a wall for the whole body: the first command in prose after it is
+  // the entry, the same line the thread reader takes.
+  test("reads the first command in prose, past a fenced sample", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-test-"));
+    const eventFile = join(dir, "event.json");
+    const outputFile = join(dir, "out");
+    writeFileSync(
+      eventFile,
+      JSON.stringify({ issue: { body: "```\n/engineer\n```\n\n/reviewer\n\nlook at the diff" } }),
+    );
+    writeFileSync(outputFile, "");
+    spawnSync("bun", ["run", `${SCRIPTS_DIR}/resolve_entry_agent.ts`], {
+      encoding: "utf8",
+      env: { ...hermeticEnv(), GITHUB_EVENT_PATH: eventFile, GITHUB_OUTPUT: outputFile, NUMBER: "1", SENDER: "x" },
+    });
+    expect(parseGithubOutput(await Bun.file(outputFile).text()).agent).toBe("reviewer");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   // This is the regression test for a shell injection, not a tidiness check.
   // Whatever this script emits as `agent` is interpolated into shell text by
   // atomaton-runner (`AGENT="${{ inputs.agent }}"`) in a job holding the provider

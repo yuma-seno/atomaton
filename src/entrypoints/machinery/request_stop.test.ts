@@ -144,4 +144,11 @@ describe("commandsAfterStop", () => {
   test("does not count a command quoted inside prose", () => {
     expect(commandsAfterStop("/stop\n> /reviewer")).toEqual([]);
   });
+
+  // #311: a fenced sample is not a request anywhere -- the entry and the thread do not
+  // take it -- so the receipt must not name it as something "not acted on".
+  test("does not name a command quoted inside a fence", () => {
+    const body = ["/stop", "", "The format:", "", "```html", "/reviewer", "```"].join("\n");
+    expect(commandsAfterStop(body)).toEqual([]);
+  });
 });

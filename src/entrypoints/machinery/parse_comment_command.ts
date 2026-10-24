@@ -18,13 +18,18 @@
  * `matched=false`, so the guard cannot tell those apart without it.
  */
 import { appendFileSync } from "node:fs";
+import { proseOnly } from "../../adapters/github/tags.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export const ref = defineScript(import.meta.url);
 
 function main(): void {
-  const body = process.env.ATOMATON_COMMENT_BODY ?? "";
+  // Read as prose (#311): a `/engineer` inside a fenced code block is somebody
+  // quoting the command format, and the thread readers do not take it for a request
+  // either. The entry and the thread must answer "is this a command" the same way,
+  // or a run starts on an ask the thread cannot see.
+  const body = proseOnly(process.env.ATOMATON_COMMENT_BODY ?? "");
   const { agent, control, sessionMode, error } = parseCommentCommand(body);
   const matched = agent ? "true" : "false";
 
