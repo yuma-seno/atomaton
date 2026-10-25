@@ -40,10 +40,11 @@ A search is a GET, and this endpoint wants it that way.
 
 ## When the search is refused
 
-DuckDuckGo answers an automated client with a bot check instead of results, and it
-does so **intermittently** — the same call that returned results a minute ago comes
-back with the check. This is a property of the service, not of your query, and
-nothing you write in a query changes it.
+**A successful call is not an answer.** DuckDuckGo answers an automated client
+with a bot check instead of results, and it does so **intermittently** — the same
+call that returned results a minute ago comes back with the check. This is a
+property of the service, not of your query, and nothing you write in a query
+changes it.
 
 **The refusal is not an error.** The page arrives with a `200` and a normal
 `content-type`; what it contains is a challenge ("Select all squares containing a

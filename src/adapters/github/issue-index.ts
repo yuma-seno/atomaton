@@ -15,6 +15,7 @@
  * does nothing.
  */
 import { ghPaginated } from "./gh.ts";
+import { commentBodies } from "./thread.ts";
 import { buildIndex, splitBody, type Bm25Index, type Chunk } from "../../shared/bm25.ts";
 
 /**
@@ -187,10 +188,18 @@ function allComments(repo: string): Map<number, string[]> {
 
 /** One issue's whole conversation, in GitHub's order, for a refresh. */
 function commentsOf(repo: string, issue: number): string[] {
-  return ghJsonPaged<ApiComment>(`repos/${repo}/issues/${issue}/comments?per_page=100`)
-    .filter((comment) => comment.body)
-    .slice(0, MAX_COMMENTS_PER_ISSUE)
-    .map((comment) => (comment.body ?? "").slice(0, MAX_COMMENT));
+  // A tenth independent read of the same question, found while the nine were being
+  // unified: the shared reader, with this module's own failure policy (log it and
+  // index nothing, rather than stopping the run) kept at the call.
+  try {
+    return commentBodies(repo, issue)
+      .filter((body) => body)
+      .slice(0, MAX_COMMENTS_PER_ISSUE)
+      .map((body) => body.slice(0, MAX_COMMENT));
+  } catch (error) {
+    log(`WARN could not read #${issue}'s comments: ${(error as Error).message}`);
+    return [];
+  }
 }
 
 /**

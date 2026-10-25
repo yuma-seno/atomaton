@@ -4,8 +4,8 @@
  * (persisted on the orphan `atomaton-data` branch, restored/saved via
  * `restore_agent_session.ts`/`save_agent_session.ts`, and read/mutated
  * in-place by `reconcile_github_session.ts`, `record_run_metadata.ts`,
- * `manage_dispatch_loop.ts`, `inject_uncommitted_notice.ts`, and
- * `adapters/atoma/inject-sub-results.ts`). The one canonical definition, replacing 5
+ * `manage_dispatch_loop.ts`, and `inject_uncommitted_notice.ts`). The one canonical
+ * definition, replacing 5
  * independently-hand-rolled (near-identical, slightly-narrowed-per-use)
  * local interfaces.
  *

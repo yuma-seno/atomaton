@@ -314,8 +314,13 @@ Atomaton command error: \${ERROR}"
  * `notifyCiWaiting`, posted only when CI actually runs and only for a person's
  * command.
  *
- * The branch is read here rather than passed in, because the comment carries only
- * the number and the validation needs the head branch to run CI against.
+ * The branch is not read here. This step used to run
+ * `gh pr view --json headRefName` and hand the answer straight on, which for a pull
+ * request from a fork is a branch of the fork — or, worse, a same-named branch of this
+ * repository — and validation runs CI with `--ref` against this repository (#344). It
+ * now arrives inside `dispatch_pr_validation.ts`, resolved through the same three gates
+ * a `pr` run's checkout uses, and a refusal is posted on the pull request addressed to
+ * the person rather than left as a branch name that does not exist.
  */
 const prValidationStep = new TypedOutputsStep({
   name: "Hand the pull request to validation, which waits for CI",
@@ -327,23 +332,22 @@ const prValidationStep = new TypedOutputsStep({
     GH_TOKEN: "${{ github.token }}",
     REPO: "${{ github.repository }}",
     NUMBER: targetStep.outputs.number,
+    // Who a refusal is addressed to. The comment is the only thing the person who
+    // asked for this run will read; the job's red mark is for whoever looks at the
+    // Actions tab.
+    COMMENTER: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.user.login),
     // The person's command IS the ask (#285): the run validation eventually
     // dispatches claims this comment, and the answers-request check verifies the
     // CI wait against it.
     ASK: githubEvent<IssueCommentCreatedEvent>((e) => e.comment.id),
   },
-  run: `BRANCH=$(gh pr view "$NUMBER" --repo "$REPO" --json headRefName --jq .headRefName)
-if [ -z "$BRANCH" ]; then
-  echo "::error::could not read the head branch of PR #$NUMBER; nothing was dispatched"
-  exit 1
-fi
-${scriptCommandWithArgs(dispatchPrValidationRef, {
-  repo: "\${REPO}",
-  number: "\${NUMBER}",
-  branch: "\${BRANCH}",
-  "asked-by-person": "true",
-  ask: "\${ASK}",
-})}
+  run: `${scriptCommandWithArgs(dispatchPrValidationRef, {
+    repo: "\${REPO}",
+    number: "\${NUMBER}",
+    commenter: "\${COMMENTER}",
+    "asked-by-person": "true",
+    ask: "\${ASK}",
+  })}
 `,
 });
 

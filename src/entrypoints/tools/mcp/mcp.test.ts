@@ -11,8 +11,9 @@ const SCRIPTS_DIR = join(process.cwd(), "src/entrypoints/tools/mcp");
 import { FAKE_GH_IMPL } from "../../../entrypoints/machinery/testing/fake-gh-env.ts";
 import { removeTemp } from "../../../entrypoints/machinery/testing/harness.ts";
 import { readers } from "../../../adapters/github/thread.ts";
-import { mostRecentAgent } from "../../../adapters/github/agent-on-issue.ts";
 import { turnEvents, whoseTurn } from "../../../domain/work/thread.ts";
+import { parseCommentCommand } from "../../../domain/work/comment-command.ts";
+import { proseOnly } from "../../../adapters/github/tags.ts";
 
 /**
  * Point this server's `gh` at the fake, and leave the real one unusable.
@@ -422,61 +423,6 @@ describe("mcp/github.ts", () => {
       expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
       const recorded = JSON.parse(readFileSync(join(dir, "ending-comment.json"), "utf8"));
       expect(recorded).toEqual({ commentId: "777", node: "1" });
-    } finally {
-      removeTemp(root);
-      removeTemp(dir);
-    }
-  }, 60_000);
-
-  /**
-   * The same footprint rule as `launch_sub_agent` (#354): a run that parks on a pull
-   * request ends inside `create_pr` and posts no result comment, so this comment is the
-   * only place the node's thread says which agent was here. Asserted through
-   * `mostRecentAgent`, the reader the aggregation gate and `/resume` use — the tag
-   * being present is not the claim; being found by that reader is.
-   */
-  test("create_pr's waiting comment names the agent that parked", async () => {
-    const { root, seed, work } = makeRemoteBranchFixture();
-    const dir = mkdtempSync(join(tmpdir(), "atomaton-parked-agent-"));
-    const log = join(dir, "gh.log");
-    try {
-      git(seed, "branch", "atomaton/issue-12");
-      git(seed, "push", "origin", "atomaton/issue-12");
-      git(work, "fetch", "origin");
-
-      const response = await sendRequest(
-        "github.ts",
-        {
-          jsonrpc: "2.0", id: 23, method: "tools/call",
-          params: { name: "create_pr", arguments: { title: "Test PR", reviewer: "reviewer" } },
-        },
-        {
-          BRANCH: "atomaton/issue-1",
-          TYPE: "issue",
-          NUMBER: "1",
-          AGENT: "engineer",
-          ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/42",
-          ...fakeGhSeam(),
-          FAKE_GH_LOG: log,
-          FAKE_GH_RESPONSES: JSON.stringify([
-            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
-            { match: ["pr", "list"], stdout: "[]" },
-            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
-            { match: ["workflow", "run"], stdout: "" },
-            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
-            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/1#issuecomment-777" },
-            { match: ["pr", "comment"], stdout: "" },
-          ]),
-        },
-        work,
-      );
-      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
-      const commented = readFileSync(log, "utf8").trim().split("\n")
-        .map((line) => JSON.parse(line) as string[])
-        .find((argv) => argv[0] === "issue" && argv[1] === "comment");
-      const body = commented?.[commented.indexOf("--body") + 1] ?? "";
-      expect(await readers.ending(body)).toBe("waiting");
-      expect(mostRecentAgent([body])).toBe("engineer");
     } finally {
       removeTemp(root);
       removeTemp(dir);
@@ -1527,13 +1473,19 @@ describe("mcp/github.ts", () => {
    * returns nothing.
    */
   describe("projections", () => {
-    const call = (name: string, args: Record<string, unknown>, responses: unknown[]) =>
+    const call = (
+      name: string,
+      args: Record<string, unknown>,
+      responses: unknown[],
+      extraEnv: Record<string, string> = {},
+    ) =>
       sendRequest(
         "github.ts",
         { jsonrpc: "2.0", id: 40, method: "tools/call", params: { name, arguments: args } },
         {
           ...fakeGhSeam(),
           FAKE_GH_RESPONSES: JSON.stringify(responses),
+          ...extraEnv,
         },
       );
 
@@ -1800,6 +1752,104 @@ describe("mcp/github.ts", () => {
     }, 30_000);
 
     /**
+     * `merge_pr`'s close-directly fallback closes the delivered issue itself when no
+     * origin agent is tagged on the pull request — and it is one of the two IN-PROCESS
+     * closes that used to reach the aggregation gate with nothing to hand the parent
+     * (#149). No run wrote a summary on this path, so the report carries what GitHub
+     * links to the issue, above all the pull request that delivered it.
+     *
+     * The gate's own fixture stops here — that is not what this test is about — so the
+     * tool answers `undetermined`, which the shape below does not depend on.
+     */
+    test("merge_pr's close-directly leaves a report on the delivered issue's parent", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-close-directly-"));
+      const ghLog = join(dir, "gh.log");
+      const configDir = makeConfigDir({ merge: { policy: "auto" } });
+      try {
+        const r = await sendRequest(
+          "github.ts",
+          { jsonrpc: "2.0", id: 48, method: "tools/call", params: { name: "merge_pr", arguments: {} } },
+          {
+            ...fakeGhSeam(),
+            GITHUB_REPOSITORY: "owner/repo",
+            TYPE: "pr",
+            NUMBER: "802",
+            ATOMATON_MACHINERY_ROOT: configDir,
+            FAKE_GH_LOG: ghLog,
+            FAKE_GH_RESPONSES: JSON.stringify([
+              // First: the fake takes the first matching rule, and a GraphQL query's own text
+              // carries "issue" and "close", so a later `gh issue close` rule swallows it.
+              // #300 is a sub-issue: it is under #250, and #802 is what delivered it.
+              {
+                match: ["graphql"],
+                stdout: JSON.stringify({
+                  data: {
+                    repository: {
+                      issueOrPullRequest: {
+                        __typename: "Issue",
+                        parent: { number: 250, title: "the parent", state: "OPEN" },
+                        subIssues: { nodes: [] },
+                        closedByPullRequestsReferences: {
+                          nodes: [{ number: 802, title: "Deliver #300", state: "MERGED", merged: true, body: "" }],
+                        },
+                        timelineItems: { nodes: [] },
+                      },
+                    },
+                  },
+                }),
+              },
+              {
+                match: ["pr", "view", "802", "isDraft,author"],
+                stdout: JSON.stringify({
+                  isDraft: false,
+                  author: { is_bot: true, login: "engineer" },
+                  state: "OPEN",
+                  headRefOid: "abc123",
+                  headRefName: "atomaton/issue-300",
+                  baseRefName: "atomaton/issue-300",
+                  title: "Deliver #300",
+                  labels: [],
+                }),
+              },
+              { match: ["pr", "view", "802", "mergeStateStatus"], stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }) },
+              {
+                match: ["commits/abc123/check-runs"],
+                stdout: JSON.stringify({ check_runs: [{ name: "validate", status: "completed", conclusion: "success" }] }),
+              },
+              { match: ["rules/branches/atomaton/issue-300"], stdout: "[]" },
+              { match: ["pulls/802/files"], stdout: "" },
+              { match: ["pr", "merge", "802"], stdout: "" },
+              { match: ["git/refs/heads/atomaton/issue-300"], stdout: "" },
+              // The pull request delivers #300 and tags NO origin agent: nothing
+              // re-invokes anything, so the merge closes the issue itself.
+              { match: ["pr", "view", "802", "body"], stdout: JSON.stringify({ body: "<!-- atomaton:parent-issue=300 -->\n" }) },
+              { match: ["api", "repos/owner/repo/issues/300"], stdout: JSON.stringify({ state: "open", body: "" }) },
+              { match: ["issue", "view", "300"], stdout: JSON.stringify({ author: { is_bot: true, login: "atomaton[bot]" } }) },
+              { match: ["issue", "close", "300"], stdout: "" },
+            ]),
+          },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        const parsed = JSON.parse(r.result.content[0].text) as { merged: boolean; parent_outcome: string };
+        expect(parsed).toMatchObject({ merged: true, parent_outcome: "closed" });
+
+        const calls = readFileSync(ghLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]);
+        const report = calls.find((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "250");
+        expect(report, "a report on #300's parent #250").toBeDefined();
+        const body = report?.[report.indexOf("--body") + 1] ?? "";
+        expect(body).toContain("<details><summary>Report</summary>");
+        expect(body).toContain("Sub-issue #300");
+        // No run wrote a summary on this path, and the report says so rather than
+        // leaving an empty fold — and the pull request that delivered the work is there.
+        expect(body).toContain("Its closing run wrote no summary.");
+        expect(body).toContain("#802 Deliver #300 (done)");
+      } finally {
+        removeTemp(dir);
+        rmSync(configDir, { recursive: true, force: true });
+      }
+    }, 30_000);
+
+    /**
      * GitHub allows ten code searches a minute, and a 429 names its own wait. Thirty
      * recorded failures were that, each one costing an iteration to learn something the
      * error had already said. The property is that the answer arrives, not how many
@@ -1884,6 +1934,53 @@ describe("mcp/github.ts", () => {
         omitted: 0,
         comments: [{ author: "reviewer", path: "src/x.ts", line: 42, in_reply_to: 99, body: "rename this" }],
       });
+    });
+
+    /**
+     * The paginated half of the same read.
+     *
+     * `gh api` stops at one page unless it is told to follow them, and this tool read
+     * without `--paginate`: every review comment past the first page was missing, and
+     * `omitted` stayed 0, so the tool's own contract ("a non-zero `omitted` is the
+     * reason to believe something was left out") said the list was complete. On a pull
+     * request long enough to be reviewed twice, the older review is the one that is
+     * not there.
+     *
+     * Both halves are asserted: that the request asks for every page, and that pages
+     * arriving back to back are all read. With `--paginate`, `gh` writes one array per
+     * page in sequence, so the second page only appears if the split is real.
+     */
+    test("list_pr_review_comments reads every page, not just the first", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-review-pages-"));
+      const log = join(dir, "gh.log");
+      const first = [{ id: 1, user: { login: "reviewer" }, path: "src/x.ts", line: 4, body: "rename this" }];
+      const second = [{ id: 2, user: { login: "engineer" }, path: "src/y.ts", line: 9, body: "done" }];
+      try {
+        const r = await call(
+          "list_pr_review_comments",
+          { pull_number: 1 },
+          [{ match: ["pulls/1/comments"], stdout: `${JSON.stringify(first)}\n${JSON.stringify(second)}` }],
+          { FAKE_GH_LOG: log },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        const parsed = JSON.parse(r.result.content[0].text) as {
+          total: number;
+          omitted: number;
+          comments: { author: string; body: string }[];
+        };
+        expect(parsed.total).toBe(2);
+        expect(parsed.omitted).toBe(0);
+        expect(parsed.comments.map((c) => `${c.author}: ${c.body}`)).toEqual([
+          "reviewer: rename this",
+          "engineer: done",
+        ]);
+
+        const argv = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+        expect(argv).toHaveLength(1);
+        expect(argv[0]).toContain("--paginate");
+      } finally {
+        removeTemp(dir);
+      }
     });
 
     // A count limit is not a volume limit: the range bounds how MANY comments come
@@ -2517,14 +2614,8 @@ describe("mcp/atomaton.ts", () => {
    * Checked through the same reader the guard uses, not by string-matching the tag: a
    * comment could carry a tag nobody read, which is the gap that made #90 survive its
    * own fix.
-   *
-   * The comment also names the agent (#354). That is the half the aggregation needs: the
-   * run parks inside this call and posts no result comment, so if the run was started by
-   * a manual `workflow_dispatch` — a route that writes no dispatch marker — this comment
-   * is the only place the parent's thread says who was working there. Without it the
-   * aggregation that collects the park dispatches "(no agent)" and the parent stalls.
    */
-  test("launch_sub_agent's dispatch comment ends the turn as `waiting` and names its agent", async () => {
+  test("launch_sub_agent's dispatch comment ends the turn as `waiting`", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-ending-"));
     const log = join(dir, "gh.log");
     try {
@@ -2543,10 +2634,6 @@ describe("mcp/atomaton.ts", () => {
           // THERE, not on the child, so an unset number skips the very comment this test
           // is about.
           NUMBER: "3",
-          // Declared rather than inherited: the name on the comment IS what this asserts,
-          // and `hermeticEnv` does not strip `AGENT` — so without this the answer would be
-          // whichever agent happened to run the suite.
-          AGENT: "atomaton",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 3 } } } } }) },
@@ -2571,11 +2658,6 @@ describe("mcp/atomaton.ts", () => {
       // while the children run is an interruption the guard removes, not a turn the
       // person holds.
       expect(await whoseTurn(turnEvents(["/atomaton", body], readers))).toBe("agent");
-      // The recovery the missing name broke (#354): "who was on this node", asked of the
-      // thread exactly as the aggregation gate and `/resume` ask it. A run started by a
-      // manual workflow_dispatch leaves no dispatch marker, so this comment is the
-      // answer — and the reader is the real one, not a string match on the tag.
-      expect(mostRecentAgent([body])).toBe("atomaton");
     } finally {
       removeTemp(dir);
     }
@@ -2659,6 +2741,93 @@ describe("mcp/atomaton.ts", () => {
         existsSync(join(dir, "ending-comment.json")),
         "a comment recorded as the ending while the run continues would take the footer off the real one",
       ).toBe(false);
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
+  /**
+   * The child's result reaches the parent, and the parent's thread is the only place
+   * it can reach it from (#149).
+   *
+   * `request_close_issue`'s `summary` is written for the aggregation that reads it, and
+   * it used to be posted on the CHILD's thread — the one thread the parent never opens.
+   * The two workflow-side paths never carried anything either, so a parent woken by an
+   * agent's own close was re-invoked knowing nothing its children had done.
+   */
+  test("request_close_issue puts the child's report on its parent's thread", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-sub-issue-report-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "atomaton.ts",
+        {
+          jsonrpc: "2.0", id: 42, method: "tools/call",
+          params: {
+            name: "request_close_issue",
+            arguments: {
+              reason: "the work is delivered",
+              // A directive line, because that is how an agent's report ordinarily ends
+              // and it must not reach the parent as a request for an agent — see the
+              // assertion below.
+              summary: "It landed in #123.\n\n/atomaton",
+            },
+          },
+        },
+        {
+          ...fakeGhSeam(),
+          NUMBER: "5",
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            // First, because the fake takes the first rule whose needles all appear
+            // somewhere in the argv — and a GraphQL query's own text carries "issue"
+            // and "close", so a later rule for `gh issue close` would swallow it.
+            //
+            // #5 is under #7, and #123 is the pull request that delivered it.
+            {
+              match: ["graphql"],
+              stdout: JSON.stringify({
+                data: {
+                  repository: {
+                    issueOrPullRequest: {
+                      __typename: "Issue",
+                      parent: { number: 7, title: "the parent", state: "OPEN" },
+                      subIssues: { nodes: [] },
+                      closedByPullRequestsReferences: {
+                        nodes: [{ number: 123, title: "the fix", state: "MERGED", merged: true, body: "" }],
+                      },
+                      timelineItems: { nodes: [] },
+                    },
+                  },
+                },
+              }),
+            },
+            { match: ["issue", "view"], stdout: JSON.stringify({ author: { is_bot: true, login: "atomaton[bot]" } }) },
+            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/5#issuecomment-4242" },
+            { match: ["issue", "close"], stdout: "" },
+          ]),
+        },
+      );
+      // The gate is not what this covers, and this fixture does not answer its parent
+      // read, so it answers `undetermined` — a shape that keeps the session open and
+      // says so in the result rather than failing.
+      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+
+      const calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]);
+      const report = calls.find((c) => c[0] === "issue" && c[1] === "comment" && c[2] === "7");
+      expect(report, "a report on the PARENT issue #7, not on the child").toBeDefined();
+      const body = report?.[report.indexOf("--body") + 1] ?? "";
+      expect(body).toContain("<!-- atomaton:llm-context=include -->");
+      expect(body).toContain("<details><summary>Report</summary>");
+      expect(body).toContain("Sub-issue #5");
+      expect(body).toContain("the work is delivered");
+      expect(body).toContain("It landed in #123.");
+      // The pull request that delivered it, read from GitHub's own link rather than
+      // searched for in a body.
+      expect(body).toContain("#123 the fix (done)");
+      // And the child's directive did not become a request to the parent: an ask nobody
+      // claimed is what makes the gate refuse to re-invoke it.
+      expect(parseCommentCommand(proseOnly(body)).agent).toBe("");
     } finally {
       removeTemp(dir);
     }

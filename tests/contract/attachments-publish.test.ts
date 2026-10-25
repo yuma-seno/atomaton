@@ -6,10 +6,10 @@ import { join } from "node:path";
 import { hermeticEnv, makeConfigDir } from "../../src/entrypoints/machinery/testing/harness.ts";
 import {
   blobUrlFor,
-  defaultBranchFrom,
   indexInfoFor,
   resolveDraftFiles,
 } from "../../src/entrypoints/tools/mcp/attachments.ts";
+import { defaultBranchFrom } from "../../src/adapters/github/branch-reads.ts";
 import { DEFAULT_DOCS_BRANCH } from "../../src/adapters/runner/config.ts";
 
 /**

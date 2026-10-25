@@ -4,7 +4,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseGithubOutput, hermeticEnv, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
-import { isBranchName, prHead } from "./resolve_pr_branch.ts";
 
 /**
  * The branch a `pr` run may push to.
@@ -27,7 +26,7 @@ describe("resolve_pr_branch.ts", () => {
   }
 
   /**
-   * A real remote, because `existsOnOrigin` asks git and not a fake: the whole
+   * A real remote, because the `origin` read asks git and not a fake: the whole
    * question is whether `origin` has the branch, and a stubbed git would only
    * assert this file's idea of that.
    */
@@ -137,7 +136,30 @@ describe("resolve_pr_branch.ts", () => {
       const r = run([headRule("atomaton/issue-404")], undefined, work);
       expect(r.status).toBe(0);
       expect(r.branch).toBe("");
-      expect(r.stderr).toContain("does not exist on origin");
+      expect(r.stderr).toContain("is not a branch of this repository");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The other half of "this repository does not have it": an `origin` that could not be
+   * read at all. Both leave the run with no branch, and only the first is a fact about
+   * the pull request — so a network failure is never reported as a branch nobody
+   * observed missing (#346).
+   */
+  test("an unreadable origin is not reported as a branch this repository lacks", () => {
+    const root = mkdtempSync(join(tmpdir(), "atomaton-pr-branch-unreadable-"));
+    const repo = join(root, "repo");
+    git(root, "init", "--initial-branch=main", repo);
+    git(repo, "remote", "add", "origin", join(root, "there-is-no-remote-here.git"));
+    try {
+      const r = run([headRule("atomaton/issue-9")], undefined, repo);
+      expect(r.status).toBe(0);
+      expect(r.branch).toBe("");
+      expect(r.stderr).toContain("could not be checked against this repository");
+      expect(r.stderr).toContain("could not read 'atomaton/issue-9' from origin");
+      expect(r.stderr).not.toContain("is not a branch of this repository");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -147,14 +169,19 @@ describe("resolve_pr_branch.ts", () => {
     const r = run([{ match: ["pr", "view"], code: 1, stdout: "gh: not found" }]);
     expect(r.status).toBe(0);
     expect(r.branch).toBe("");
-    expect(r.stderr).toContain("could not read pull request #9");
+    expect(r.stderr).toContain("pull request #9 could not be read");
   });
 
+  // An answer that cannot be parsed is a pull request that could not be READ, not one
+  // that "names no head branch": before `pull-request.ts` owned the parse, this arrived
+  // as a successful read of `{}` and sent the person to the wrong sentence. The outcome
+  // is the same -- no branch, exit 0 -- and that is what this pins.
   test("output that is not the JSON asked for is no branch either", () => {
     const r = run([{ match: ["pr", "view"], stdout: "not json" }]);
     expect(r.status).toBe(0);
     expect(r.branch).toBe("");
-    expect(r.stderr).toContain("names no head branch");
+    expect(r.stderr).toContain("pull request #9 could not be read");
+    expect(r.stderr).toContain("the answer was not JSON");
   });
 
   /** Without the number there is no pull request to ask about, and no branch to name. */
@@ -163,28 +190,5 @@ describe("resolve_pr_branch.ts", () => {
     expect(r.status).toBe(0);
     expect(r.branch).toBe("");
     expect(r.stderr).toContain("missing --repo or --number");
-  });
-
-  test("prHead reads the head branch and the fork flag", () => {
-    expect(prHead('{"headRefName":"atomaton/issue-9","isCrossRepository":false}')).toEqual({
-      branch: "atomaton/issue-9",
-      crossRepository: false,
-    });
-    expect(prHead('{"headRefName":" main ","isCrossRepository":true}')).toEqual({
-      branch: "main",
-      crossRepository: true,
-    });
-    // Absent, null and malformed all mean the same thing here: nothing to name.
-    expect(prHead("{}").branch).toBe("");
-    expect(prHead('{"headRefName":null}').branch).toBe("");
-    expect(prHead("[").branch).toBe("");
-  });
-
-  test("isBranchName is git's rule, not a pattern of our own", () => {
-    expect(isBranchName("atomaton/issue-9")).toBe(true);
-    expect(isBranchName("feature/x-1.2")).toBe(true);
-    for (const bad of ["", "HEAD", "has space", "a..b", "x.lock", "-x", "a:b", "x~y", "x^y"]) {
-      expect(isBranchName(bad), `${bad} must not be usable as a branch`).toBe(false);
-    }
   });
 });

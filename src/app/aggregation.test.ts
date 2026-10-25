@@ -82,55 +82,50 @@ const subIssues = (...numbers: number[]): FakeGhRule[] => [
 
 const NO_SIBLINGS: FakeGhRule[] = subIssues();
 
-// The dispatch marker, posted by `dispatchRunner` before its ordering check, and the
-// thread read that follows. The read must SHOW the marker (id 555): that is the
-// freshness probe, and a read that omits it is retried and then refused as
-// `unconfirmed`.
-//
-// Both markers are written through `gh api --method POST`, so the two POST rules are told
-// apart by what the BODY says -- `atomaton:dispatch` here, `atomaton:aggregated` for the
-// aggregation marker below. A rule matching only the path and the method answers whichever
-// write runs first, and did: it gave the aggregation marker the dispatch marker's id 555,
-// so the take-back tests deleted the wrong comment.
-//
-// The read rule carries `--paginate` for the same reason: `checkDispatchMarker` lists the
-// thread with it, and the write does not. Without that, this rule answers the POST too and
-// hands back a comment OBJECT where an id belongs.
+/**
+ * A thread fixture in the shape the API returns and `listComments` reads: whole
+ * comment objects, ids in order.
+ *
+ * Three readers ask the PARENT's thread a question — the dispatch freshness probe
+ * (`checkDispatchMarker`), the aggregation marker check, and `mostRecentAgentOn` — and
+ * since the comment read was unified they are one call: `gh api
+ * .../issues/5/comments --paginate`. Rules are first-match, so the first comment-read
+ * rule a test lists answers all three, and its bodies have to serve all three.
+ *
+ * `firstId` starts at the id the fake gives the dispatch marker's own write (555):
+ * the freshness probe looks for THAT id, and a thread that must let a dispatch through
+ * has to show it.
+ *
+ * The `match` carries `--paginate`, never the path alone: the marker WRITE goes to the
+ * same path without it, and a rule that answered the POST handed back a comment object
+ * where an id belongs — the take-back then deleted a comment that does not exist while
+ * the tests still passed.
+ */
+function thread(bodies: string[], firstId = 555): FakeGhRule {
+  return {
+    match: ["api", "issues/5/comments", "--paginate"],
+    stdout: JSON.stringify(bodies.map((body, i) => ({ id: firstId + i, body }))),
+  };
+}
+
+// The marker POST, and nothing else: the read that has to SHOW the marker is
+// `PARENT_AGENT` (or a test's own thread fixture), because the dispatch marker is what
+// both the freshness probe and the agent read are looking for.
 const DISPATCH_MARKER: FakeGhRule[] = [
   { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:dispatch"], stdout: "555" },
-  { match: ["api", "issues/5/comments", "--paginate"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
 ];
 
-// The parent's own thread, read by `mostRecentAgentOn` to name the agent to re-invoke --
-// and, since #304's gate change, read by the aggregation marker check through the same
-// call shape (`--jq '[.[].body]'`): two readers, one endpoint, one body list. Where a
-// test lists this rule first, it answers BOTH reads, so the list must serve both: a
-// dispatch marker for the agent read, and (absence of) the aggregated marker for the
-// gate. A test that needs the two reads answered differently puts its own rule first --
-// the marker check runs before the agent read, so an early rule only the marker read
-// can out-race is not possible; give the list what each reader must see.
-//
-// Listed FIRST, because `DISPATCH_MARKER`'s second rule matches the same path and would
-// otherwise answer this read with objects.
-const PARENT_AGENT: FakeGhRule = {
-  match: ["api", "issues/5/comments", "[.[].body]"],
-  stdout: JSON.stringify(["<!-- atomaton:dispatch=atomaton -->"]),
-};
+// The parent's own thread: the dispatch marker names the agent to re-invoke, and its
+// id is the freshness probe's comment. No aggregation marker, so the gate runs.
+const PARENT_AGENT: FakeGhRule = thread(["<!-- atomaton:dispatch=atomaton -->"]);
 
-// The aggregation marker read is `gh api .../comments --paginate --jq '[.[].body]'` --
-// the same read shape `mostRecentAgentOn` makes on the same endpoint, so where both
-// reads happen in one test the FIRST matching rule answers both, and the body list it
-// returns has to serve both readers: the marker read wants an `atomaton:aggregated`
-// marker in prose, the agent read wants an `atomaton:agent` or a dispatch marker.
-//
-// Matched on `--paginate` AND the jq expression, and not on the path alone. The marker
-// WRITE goes to the same path, so a rule keyed on `["api", "comments", "--jq"]` answers
-// the write too — and did: it returned the read's body as the new comment's id, which
-// made the take-back delete a comment that does not exist while the tests still passed.
-const NO_MARKER: FakeGhRule = {
-  match: ["api", "comments", "--paginate", "[.[].body]"],
-  stdout: JSON.stringify(["some unrelated comment"]),
-};
+// The same read, answered with a thread that names nobody: `dispatchRunner` refuses an
+// empty agent, which is what `dispatch-failed` means.
+const NAMES_NOBODY: FakeGhRule = thread(["a comment that names nobody"]);
+
+// The aggregation marker read when the thread carries no marker — the ordinary gate
+// answer, in tests where a dispatch has to go through.
+const NO_MARKER: FakeGhRule = thread(["some unrelated comment"]);
 
 /**
  * The fake `gh` exits 1 for any call no rule matches, which is the right
@@ -201,7 +196,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("another caller's marker makes this one a no-op", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
-      { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["<!-- atomaton:aggregated=10 -->"]) },
+      thread(["<!-- atomaton:aggregated=10 -->"]),
     ]);
     expect(kind).toBe("already-aggregated");
     expect(dispatched(ghCalls)).toBe(false);
@@ -217,10 +212,14 @@ describe("aggregation.ts dispatch gate", () => {
   test("a marker quoted in a fenced sample does not stop the aggregation", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
-      { match: ["api", "comments", "--paginate", "[.[].body]"], stdout: JSON.stringify([
-        ["For the record, the marker looks like:", "```html", "<!-- atomaton:aggregated=10 -->", "```"].join("\n"),
+      // Serves all three reads: the quoted sample claims nothing, and the dispatch
+      // marker names the agent and carries the freshness probe's id 555 — so it is
+      // first, or the probe would exclude the sample and see its OWN marker as an
+      // outstanding request the dispatch would refuse over.
+      thread([
         "<!-- atomaton:dispatch=atomaton -->",
-      ]) },
+        ["For the record, the marker looks like:", "```html", "<!-- atomaton:aggregated=10 -->", "```"].join("\n"),
+      ]),
       ...DISPATCH_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
@@ -236,9 +235,9 @@ describe("aggregation.ts dispatch gate", () => {
   test("a marker written in prose still makes this one a no-op", () => {
     const { kind } = runGate([
       ...NO_SIBLINGS,
-      { match: ["api", "comments", "--paginate", "[.[].body]"], stdout: JSON.stringify([
+      thread([
         "<!-- atomaton:aggregated=10 -->\nAtomaton: All sub-tasks completed (last: #10). Re-invoking the parent's agent for aggregation.",
-      ]) },
+      ]),
     ]);
     expect(kind).toBe("already-aggregated");
   });
@@ -294,7 +293,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("a parent that names no agent is not dispatched onto with an empty name", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
-      { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
+      NAMES_NOBODY,
       ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
@@ -317,7 +316,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("a failed dispatch takes the aggregation marker back, so a later close retries", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
-      { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
+      NAMES_NOBODY,
       ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
@@ -352,7 +351,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("an unreadable comment list stops the dispatch too", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
-      { match: ["api", "comments", "--jq"], code: 1, stdout: "not found" },
+      { match: ["api", "issues/5/comments", "--paginate"], code: 1, stdout: "not found" },
     ]);
     expect(kind).toBe("undetermined");
     expect(wroteMarker(ghCalls)).toBe(false);
@@ -408,7 +407,7 @@ describe("aggregation.ts dispatch gate", () => {
   test("an outcome that already speaks does not also post a notice", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
-      { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["a comment that names nobody"]) },
+      NAMES_NOBODY,
       ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,

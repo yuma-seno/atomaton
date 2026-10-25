@@ -7,6 +7,7 @@
  * decided on. What is done with the answer is `domain/work/mention.ts`.
  */
 import { gh } from "./gh.ts";
+import { listComments } from "./thread.ts";
 
 export interface Participant {
   login: string;
@@ -46,16 +47,21 @@ export function participantAccounts(repo: string, number: string | number): Part
   if (!repo || !String(number).trim()) return [];
   const found = new Map<string, boolean>();
 
+  const record = (login: string | undefined, bot: boolean): void => {
+    if (typeof login !== "string" || !login) return;
+    const seen = found.get(login);
+    // Bot only while every source that named it says bot -- see above.
+    found.set(login, (seen ?? true) && bot);
+  };
+
   const collect = (args: string[], read: (json: unknown) => unknown[]) => {
     const { code, stdout } = gh(...args);
     if (code !== 0) return;
     try {
       for (const person of read(JSON.parse(stdout))) {
         const { login, bot } = person as { login?: unknown; bot?: unknown };
-        if (typeof login !== "string" || !login) continue;
-        const seen = found.get(login);
-        // Bot only while every source that named it says bot -- see above.
-        found.set(login, (seen ?? true) && bot === true);      }
+        record(typeof login === "string" ? login : undefined, bot === true);
+      }
     } catch {
       // A body that will not parse tells us nothing about who may be mentioned.
     }
@@ -65,12 +71,18 @@ export function participantAccounts(repo: string, number: string | number): Part
     const issue = json as { user?: { login?: string; type?: string } };
     return issue.user ? [{ login: issue.user.login, bot: issue.user.type === "Bot" }] : [];
   });
-  collect(["api", `repos/${repo}/issues/${number}/comments`, "--paginate"], (json) =>
-    (json as { user?: { login?: string; type?: string } }[]).map((comment) => ({
-      login: comment.user?.login,
-      bot: comment.user?.type === "Bot",
-    })),
-  );
+  // The thread, through the shared `listComments` -- one read for every comment list
+  // in the repository. This used to run `--paginate` and then `JSON.parse` the whole
+  // stdout, which throws from the second page on: a node past 100 comments answered
+  // with none of its commenters, silently. A failed read is still "nobody learned",
+  // which is this module's fail-closed answer.
+  try {
+    for (const comment of listComments(repo, number)) {
+      record(comment.user?.login, comment.user?.type === "Bot");
+    }
+  } catch {
+    // Same as a failed read above: nothing confirmed, so nothing exempt.
+  }
   collect(["api", `repos/${repo}/collaborators`, "--paginate"], (json) =>
     (json as { login?: string; type?: string }[]).map((person) => ({
       login: person.login,

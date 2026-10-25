@@ -46,13 +46,13 @@ function writeEntry(call: string): string {
  * `logDispatch` writes one op name or the other, and the runner's grep must see exactly
  * one of them.
  *
- * The two name two different facts about a dispatch, and the runner reads them apart:
- * `launch_sub_agent` and `create_pr` start work UNDER the node that called them, which
- * is a PARK (#208) — the node's `atomaton/in-progress` guard is held until the turn is
- * collected — while a hand-off puts the next agent ON this node. One name for both left
- * the reader unable to say which it had. The two names differ by a suffix and the reader
- * is a `grep`, so the trailing quote is what makes them disjoint; this test is what keeps
- * it that way.
+ * The failure this pins: `launch_sub_agent` and `create_pr` dispatch onto a CHILD node,
+ * so the run that called them is finished and its `atomaton/in-progress` guard must come
+ * off (#28). Writing the same `"op":"dispatch"` for them made `chain_continues` true,
+ * which held the guard — the node looked busy while nothing ran on it, `/resume` and
+ * `/stop` skipped it, and `manage_dispatch_loop` counted a chain that was not there
+ * (#73). The two names differ by a suffix and the reader is a `grep`, so the trailing
+ * quote is what makes them disjoint; this test is what keeps it that way.
  */
 describe("ops-log dispatch entries", () => {
   test("a hand-off on this node is the entry the runner greps for", () => {
@@ -61,11 +61,11 @@ describe("ops-log dispatch entries", () => {
     expect(text).not.toContain('"op":"dispatch-elsewhere"');
   });
 
-  test("a dispatch onto another node is invisible to that grep, so the run reads as parked", () => {
+  test("a dispatch onto another node is invisible to that grep, so the node releases", () => {
     const text = writeEntry(`logDispatch("issue", "engineer", { number: 7, elsewhere: true });`);
     expect(text).toContain('"op":"dispatch-elsewhere"');
-    // The point of the whole thing: the chain-continues grep must not match this entry,
-    // or one run reads as both parking its turn and handing it on.
+    // The point of the whole thing: the runner's grep must not match this entry, or
+    // the node stays locked after launching the work it was waiting on.
     expect(text).not.toContain(RUNNER_GREP);
   });
 

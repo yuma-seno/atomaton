@@ -23,10 +23,12 @@
  *
  * Three of its four modes send requests the endpoint cannot fulfil into an
  * asset: `routing` omits `repository_id`, `endpoint` empties `name`, and
- * `oversize` sends past the size ceiling. Each answer still settles one design
- * question — that the route exists, that the credential is accepted, that the
- * ceiling is enforced. `upload` is the one mode that stores, because a 201 is
- * only obtainable by storing, and it is opt-in by name.
+ * `oversize` sends past the size ceiling. Each answer is an observation to
+ * record — the status, the body, and whether anything was stored — and none of
+ * them is proof the route exists: a `400` naming a parameter says something
+ * parsed the request, a `404` says something did not route it, and a layer in
+ * front of a different route answers both. `upload` is the one mode that stores,
+ * because a `201` is only obtainable by storing, and it is opt-in by name.
  *
  * A stored user-attachment asset has no documented deletion API. The URL is
  * the artifact and it is permanent; that is part of why storing is not the
@@ -54,6 +56,11 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z } from "../../../adapters/mcp/mcp-tool.ts";
 import { getDocsBranch } from "../../../adapters/runner/config.ts";
 import { gh, gitRun, gitRunWith } from "../../../adapters/github/gh.ts";
+import {
+  checkedOutBranch,
+  readOriginBranch,
+  readRemoteDefaultBranch,
+} from "../../../adapters/github/branch-reads.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 
 /** The environment that puts one `git` command in this call's index rather than the run's. */
@@ -177,19 +184,6 @@ export function indexInfoFor(entries: { blob: string; target: string }[]): strin
   return entries.map((entry) => `${DRAFT_FILE_MODE} blob ${entry.blob}\t${entry.target}\0`).join("");
 }
 
-/**
- * The default branch of `origin`, read from `ls-remote --symref origin HEAD`.
- *
- * `origin/HEAD` is not set in a run's checkout — measured, it is not a symbolic ref
- * there — so the name has to be asked of the remote. It is asked because publishing
- * onto it is refused: the whole point of an orphan branch is that a document does not
- * reach the branch people review, and a publish that could land there would be a way
- * around every review rule with none of the machinery that makes a pull request one.
- */
-export function defaultBranchFrom(lsRemoteSymref: string): string | undefined {
-  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
-}
-
 /** What one published draft resolves to before anything is pushed. */
 export interface DraftFile {
   /** Absolute path of the local original, checked for readability. */
@@ -311,7 +305,7 @@ const PROBE_SCHEMA = z.object({
     .optional()
     .default("endpoint")
     .describe(
-      "What to measure. `endpoint` (default): POST with repository_id and an empty name — a request that cannot store, whose 400 proves the endpoint is real and the credential was accepted. " +
+      "What to measure. `endpoint` (default): POST with repository_id and an empty name — a request that cannot store, measured to answer 400 with the `name` parameter named in the body. That answer says something parsed the request; it is not proof the route exists. " +
         "`routing`: the same without repository_id — the 404 shape gh's source predicts. " +
         "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " +
         "`upload`: the only mode that stores — one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent.",
@@ -459,7 +453,7 @@ export function interpret(mode: ProbeMode, status: number, body: string, locatio
 
   if (mode === "routing") {
     if (status === 404) {
-      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists — endpoint mode's 400 is that proof.";
+      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists, and endpoint mode's 400 is no proof either — it says something parsed the request.";
     }
     if (status === 400 && body.includes("Invalid name for request")) {
       return (
@@ -475,9 +469,11 @@ export function interpret(mode: ProbeMode, status: number, body: string, locatio
     if (status === 400) {
       const exact = body.includes("Invalid name for request") ? " — the body matches the message measured by hand" : "";
       return (
-        "matches the measured expectation: the endpoint is real and the credential was accepted. " +
-        "A rejected credential would be 401, and a token without write access would be 404 (gh's source says READ and TRIAGE get 404, not 403). " +
-        `Nothing was stored: name was empty${exact}.`
+        `the request was read and rejected for its name, and nothing was stored: name was empty${exact}. ` +
+        "This is the observation, not proof the route exists: a validation error says something parsed the parameters, " +
+        "and a proxy or an authentication layer in front of a different route answers one too. " +
+        "A rejected credential would be 401, and gh's source says a token without write access gets 404 rather than 403 — " +
+        "record this status and body with the next call instead of settling the route on this one."
       );
     }
     if (status === 401) {
@@ -651,14 +647,17 @@ async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
 
 /** The branch's current tip on the remote, or `undefined` when it does not exist yet. */
 function remoteTip(branch: string): string | undefined {
-  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
-  if (code !== 0) {
+  // `branch-reads.ts`'s read, so "origin has no such branch" and "origin could not be
+  // reached" stay different answers: only the first means this publish creates the
+  // branch, and the second is refused rather than turned into a root commit.
+  const read = readOriginBranch(branch);
+  if (!read.known) {
     throw new Error(
       `could not read '${branch}' from origin, so it is unknown whether publishing would create it or append to ` +
-        `it: ${stderr || stdout || `git ls-remote exited ${code}`}`,
+        `it: ${read.why}`,
     );
   }
-  return stdout ? stdout.split(/\s+/)[0] : undefined;
+  return read.present ? read.sha : undefined;
 }
 
 /** The commit that a leaf tree names, so its contents can be carried onto the new one. */
@@ -712,12 +711,11 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
     throw new Error(`'${branch}' is not a branch name git accepts: ${format.stderr || format.stdout}`);
   }
 
-  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
-  if (symref.code !== 0) {
-    throw new Error(`could not read origin, so the default branch could not be checked: ${symref.stderr || symref.stdout}`);
+  const defaultBranch = readRemoteDefaultBranch();
+  if (!defaultBranch.known) {
+    throw new Error(`could not read origin, so the default branch could not be checked: ${defaultBranch.why}`);
   }
-  const defaultBranch = defaultBranchFrom(symref.stdout);
-  if (defaultBranch && branch === defaultBranch) {
+  if (branch === defaultBranch.branch) {
     throw new Error(
       `'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` +
         `review, which is the one thing an orphan branch exists to avoid — and nothing here opens a pull request. ` +
@@ -727,9 +725,9 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
 
   // And the branch this run is checked out on, for the same reason one step closer: a
   // document pushed onto the work branch is a document in the pull request being
-  // reviewed, which is the outcome an orphan branch was chosen to avoid. `refs/remotes/`
-  // and a detached HEAD answer nothing here, which is right — neither is a work branch.
-  const current = gitRun("branch", "--show-current").stdout.trim();
+  // reviewed, which is the outcome an orphan branch was chosen to avoid. A detached
+  // HEAD answers nothing here, which is right — it is not a work branch.
+  const current = checkedOutBranch();
   if (current && current === branch) {
     throw new Error(
       `'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` +
@@ -851,7 +849,7 @@ const { tools, dispatch } = buildMcpTools([
     name: "probe",
     description:
       "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " +
-      "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted — without saving a file. " +
+      "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it reports what came back for the request and the credential — without saving a file. A status is an observation, not proof that the route exists; the body is what says which parameter or layer answered. " +
       "Mode `routing` omits repository_id — an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL — though measured, the Actions token this run carries is refused at the body stage (404, nothing stored), so delivering a file is `publish_draft`'s job and this tool's job is to measure. " +
       "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
     schema: PROBE_SCHEMA,

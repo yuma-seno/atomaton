@@ -44,8 +44,9 @@
  * Writes `claimed=true|false` to $GITHUB_OUTPUT.
  */
 import { parseArgs } from "node:util";
-import { gh, ghRead, splitConcatenatedJson } from "../../adapters/github/gh.ts";
+import { gh } from "../../adapters/github/gh.ts";
 import { LLM_CONTEXT_TAG, TOOK_TAG } from "../../adapters/github/tags.ts";
+import { listComments } from "../../adapters/github/thread.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ClaimTurnArgs {
@@ -61,18 +62,15 @@ export const ref = defineScript<ClaimTurnArgs>(import.meta.url);
 /** Delays between reads while waiting for the listing to show the claim. */
 const READ_DELAYS_MS = [1_000, 2_000, 4_000];
 
-/** Every comment on the node, oldest first, as the race check reads them. */
+/**
+ * Every comment on the node, oldest first, as the race check reads them.
+ *
+ * The read is the shared `listComments`; the projection to ids and bodies is this
+ * caller's, and a failed read THROWS here: the claim is the turn's identity, and a
+ * run that could not see the older claims must not decide it holds the turn.
+ */
 function listBodies(repo: string, number: number): { id: number; body: string }[] {
-  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", ".");
-  if (listed.code !== 0) throw new Error(`could not read #${number}'s comments: ${listed.stderr || listed.stdout}`);
-  const comments: { id: number; body: string }[] = [];
-  for (const page of splitConcatenatedJson(listed.stdout || "[]")) {
-    if (!Array.isArray(page)) continue;
-    for (const entry of page as { id?: number; body?: string }[]) {
-      if (typeof entry.id === "number") comments.push({ id: entry.id, body: entry.body ?? "" });
-    }
-  }
-  return comments;
+  return listComments(repo, number).map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
 }
 
 /**

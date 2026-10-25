@@ -6,13 +6,18 @@ import { FAKE_GH_IMPL } from "../../entrypoints/machinery/testing/fake-gh-env.ts
  * `mostRecentAgentOn`, as `/resume` and the aggregation gate ask it of the real
  * adapter with a fake `gh` answering. The walk in `mostRecentAgent` is a pure
  * function with its own tests; what this pins is the READ, and specifically the
- * shape `gh` emits past one page: with `--paginate`, `gh` evaluates `--jq` once
- * per page and writes each page's result to the same stream, so the stdout is
- * back-to-back arrays rather than one document. A whole-output `JSON.parse`
- * throws there, `mostRecentAgentOn` answers "" -- and "" is "nobody to start",
- * the answer that silently skips a node whose last run named an agent.
+ * shape `gh` emits past one page: with `--paginate`, `gh` writes one response body
+ * per page back to back, so the stdout is concatenated arrays rather than one
+ * document. A whole-output `JSON.parse` throws there, `mostRecentAgentOn` answers
+ * "" -- and "" is "nobody to start", the answer that silently skips a node whose
+ * last run named an agent. `listComments` splits the pages, and this test holds that.
  */
 const SRC = join(import.meta.dir, "agent-on-issue.ts");
+
+/** A page of comments in the shape the API returns: whole objects, bodies inside. */
+function asComments(bodies: string[]): { id: number; body: string }[] {
+  return bodies.map((body, i) => ({ id: i + 1, body }));
+}
 
 /** Who was last working on #9, through the real adapter with the fake `gh` answering. */
 function mostRecentAgentOn(stdout: string): string {
@@ -42,12 +47,12 @@ function mostRecentAgentOn(stdout: string): string {
 
 describe("mostRecentAgentOn", () => {
   test("answers from one page", () => {
-    expect(mostRecentAgentOn(JSON.stringify(["<!-- atomaton:agent=engineer -->\nDone."]))).toBe("engineer");
+    expect(mostRecentAgentOn(JSON.stringify(asComments(["<!-- atomaton:agent=engineer -->\nDone."])))).toBe("engineer");
   });
 
   test("answers past one page", () => {
-    const firstPage = JSON.stringify(["just a remark"]);
-    const secondPage = JSON.stringify(["<!-- atomaton:agent=reviewer -->\nDone."]);
+    const firstPage = JSON.stringify(asComments(["just a remark"]));
+    const secondPage = JSON.stringify(asComments(["<!-- atomaton:agent=reviewer -->\nDone."]));
     expect(mostRecentAgentOn(firstPage + secondPage)).toBe("reviewer");
   });
 
@@ -68,7 +73,7 @@ describe("mostRecentAgentOn", () => {
       "",
       "</details>",
     ].join("\n");
-    expect(mostRecentAgentOn(JSON.stringify(["<!-- atomaton:agent=atomaton -->\nDone.", notice]))).toBe("atomaton");
+    expect(mostRecentAgentOn(JSON.stringify(asComments(["<!-- atomaton:agent=atomaton -->\nDone.", notice])))).toBe("atomaton");
   });
 
   // The tag decides an attribution, and the fence decides it is a sample: a person
@@ -81,8 +86,8 @@ describe("mostRecentAgentOn", () => {
       "<!-- atomaton:agent=engineer -->",
       "```",
     ].join("\n");
-    expect(mostRecentAgentOn(JSON.stringify([quoted]))).toBe("");
-    expect(mostRecentAgentOn(JSON.stringify([quoted, "<!-- atomaton:agent=atomaton -->\nDone."]))).toBe("atomaton");
+    expect(mostRecentAgentOn(JSON.stringify(asComments([quoted])))).toBe("");
+    expect(mostRecentAgentOn(JSON.stringify(asComments([quoted, "<!-- atomaton:agent=atomaton -->\nDone."])))).toBe("atomaton");
   });
 
   test("a failed read is not a name", () => {

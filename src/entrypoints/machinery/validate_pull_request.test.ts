@@ -147,7 +147,9 @@ function retries(bodies: string[]): number {
       ...process.env,
       ATOMATON_FAKE_GH: FAKE_GH_IMPL,
       FAKE_GH_RESPONSES: JSON.stringify([
-        { match: ["repos/o/r/issues/7/comments"], stdout: JSON.stringify(bodies) },
+        // The shared `listComments` returns whole comment objects, so the fixture is
+        // the API's shape and the bodies sit inside it.
+        { match: ["repos/o/r/issues/7/comments"], stdout: JSON.stringify(bodies.map((body, i) => ({ id: i + 1, body }))) },
       ]),
       // Nothing here may reach the real CLI; see `fake-gh-env.ts`.
       GH_TOKEN: "fake-gh-must-be-used",
@@ -159,7 +161,47 @@ function retries(bodies: string[]): number {
   return Number(out.trim());
 }
 
+/**
+ * The same run with the comment read failing, reporting the child's exit code and
+ * stderr instead of a count.
+ */
+function failingRetries(): { code: number; stderr: string } {
+  const script = `
+    const { countPriorRetries } = await import(${JSON.stringify(VALIDATE_SRC)});
+    process.stdout.write(String(countPriorRetries("o/r", "7")));
+  `;
+  const proc = Bun.spawnSync({
+    cmd: [process.execPath, "-e", script],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: {
+      ...process.env,
+      ATOMATON_FAKE_GH: FAKE_GH_IMPL,
+      // A 404 is an answer, not a blip: `ghRead` does not retry it, so this fails at once.
+      FAKE_GH_RESPONSES: JSON.stringify([
+        { match: ["repos/o/r/issues/7/comments"], code: 1, stdout: "gh: Not Found (HTTP 404)" },
+      ]),
+      // Nothing here may reach the real CLI; see `fake-gh-env.ts`.
+      GH_TOKEN: "fake-gh-must-be-used",
+      GITHUB_TOKEN: "fake-gh-must-be-used",
+    },
+  });
+  return { code: proc.exitCode ?? 0, stderr: proc.stderr.toString() };
+}
+
 describe("countPriorRetries", () => {
+  /**
+   * The count is the retry BOUND, so a read that failed must not answer a number: 0
+   * means "this pull request has not been sent back yet", which lets the engineer/CI
+   * loop run past its limit at one model run per turn. The function used to
+   * `catch { return 0; }` exactly here, while the comment above it said why not.
+   */
+  test("a failed read is not zero retries", () => {
+    const { code, stderr } = failingRetries();
+    expect(code, "a count it could not determine must stop the script, not become 0").not.toBe(0);
+    expect(stderr).toContain("could not read comments on #7");
+  });
+
   test("counts this script's own markers", () => {
     expect(retries(["<!-- atomaton:ci-retry=1 -->\nCI failed.", "<!-- atomaton:ci-retry=2 -->\nCI failed."])).toBe(2);
   });
@@ -246,7 +288,13 @@ describe("notifyCiWaiting, through the whole script", () => {
       { ...runsRule, stdout: runs([ciActionRun("completed", "success")]), attempt: 3 },
       { match: ["repos/o/r/issues/7/comments"], stdout: "[]" },
       { match: ["repos/o/r/issues/7"], stdout: "just a body" },
-      { match: ["repos/o/r/pulls/7"], stdout: JSON.stringify({ head: { sha: HEAD }, base: { ref: "main" } }) },
+      // Two projections of one pull request, so two rules: the commit and base branch
+      // this validation works against, and the body the origin agent is read out of.
+      {
+        match: ["pr", "view", "7", "headRefOid"],
+        stdout: JSON.stringify({ headRefOid: HEAD, baseRefName: "main" }),
+      },
+      { match: ["pr", "view", "7", "body"], stdout: JSON.stringify({ body: "" }) },
       { match: ["repos/o/r/rules/branches/main"], stdout: "[]" },
       { match: ["repos/o/r/commits/"], stdout: "2099-01-01T00:00:00Z" },
       // The dispatch itself. `--ref` is what keeps this rule off the runs-list call,

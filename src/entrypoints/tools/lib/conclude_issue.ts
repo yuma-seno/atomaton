@@ -9,6 +9,7 @@ import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { isHumanAuthor } from "../../../domain/work/actor.ts";
 import { commentIdFromUrl } from "../../../adapters/github/ending-comment.ts";
 import { turnCommentBody } from "../../../adapters/github/turn-comment.ts";
+import { reportSubIssueToParent } from "../../../adapters/github/sub-issue-report.ts";
 import { endingIdentity } from "./turn-identity.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 
@@ -135,6 +136,12 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   mustSucceed(posted, `comment on issue #${issue}`);
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);
+  // The parent's thread, not this one, is where the agent about to be re-invoked reads
+  // what happened here. Posted before the gate, so it is there whether the gate
+  // dispatches the parent or stands down with an outcome a person has to resolve.
+  // `reason` as well as `summary`: the reason is the one sentence saying what kind of
+  // completion this is, and it is already written for the same reader.
+  reportSubIssueToParent(repo, issue, [reason, summary].filter(Boolean).join("\n\n"));
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
   console.error(describeGateResult(aggregation, issue));
   return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };

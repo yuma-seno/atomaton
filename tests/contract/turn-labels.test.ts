@@ -1,11 +1,9 @@
 /**
- * Pins the turn labels' wiring in the generated runner (#223, #352).
+ * Pins the turn labels' wiring in the generated runner (#223).
  *
  * The two labels are complements and move together — `running` when a run claims
- * the turn, `with-person` when it hands back — and a third step strips them from a
- * node that closed (#352), unconditionally on the ending: the hand-off and park
- * endings skip the release by design, and a run that closed its own node inside
- * one of them would otherwise leave its label on work that is over.
+ * the turn, `with-person` when it hands back. If either step loses its phase, a
+ * node ends up wearing both labels or neither, and neither state is readable.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -33,14 +31,5 @@ describe("the turn labels move together (#223)", () => {
     // that lost the claim race or did nothing must not strip the in-progress
     // label another run — a parked parent included — is still holding.
     expect(release?.if ?? "").toContain("claimed");
-  });
-
-  test("every run end strips a closed node's labels, whoever ended it (#352)", () => {
-    const strip = steps.find((s) => (s.run ?? "").includes('--phase "closed"'));
-    expect(strip, "the closed-node strip step must exist").toBeDefined();
-    // Unconditional on the ending, and on the claim: whether the node is closed is
-    // the script's read, not this step's guess, and a run that lost the claim race
-    // on a node that then closed must still leave it clean.
-    expect(strip?.if ?? "").toBe("always()");
   });
 });

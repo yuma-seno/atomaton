@@ -34,9 +34,10 @@
 import { appendFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
-import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
+import { ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
+import { readPullRequestDiff, readPullRequestObject } from "../../adapters/github/pull-request.ts";
 import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
-import { keptCommentIds } from "../../adapters/github/thread.ts";
+import { keptCommentIds, listComments, type Comment } from "../../adapters/github/thread.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -89,13 +90,6 @@ interface GhIssueApi {
   title: string;
   body: string | null;
   labels: { name: string }[];
-  user: { login: string; type?: string };
-  created_at: string;
-}
-
-interface GhCommentApi {
-  id: number;
-  body: string;
   user: { login: string; type?: string };
   created_at: string;
 }
@@ -156,12 +150,32 @@ function repoParts(): [string, string] {
  * that only enrich degrade to empty and say so, and only what the run cannot
  * have a subject without — the issue or the pull request itself — still fails.
  *
- * The diff already worked this way (`diffResult.code === 0 ? ... : ""`); this
- * applies the same judgement to the rest.
+ * The diff already worked this way — `readPullRequestDiff` answers `known: false` and
+ * this carries on with no diff — and this applies the same judgement to the rest.
  */
 function contextList<T>(what: string, ...args: string[]): T[] {
   try {
     return ghPaginated<T>(...args);
+  } catch (error) {
+    console.error(
+      `::warning::Could not fetch ${what}: ${(error as Error).message}. Continuing without it — the run has less context than usual.`,
+    );
+    return [];
+  }
+}
+
+/**
+ * The node's whole thread, through `listComments` — the one reader of "every comment
+ * on this node", so the pages past the first are split there instead of by whichever
+ * caller remembered.
+ *
+ * A failed read is a warning and an empty list, the policy `contextList` had for the
+ * same reads: this is enrichment, and a run whose thread could not be read still
+ * works, with less context than usual.
+ */
+function threadComments(what: string, repo: string, number: number): Comment[] {
+  try {
+    return listComments(repo, number);
   } catch (error) {
     console.error(
       `::warning::Could not fetch ${what}: ${(error as Error).message}. Continuing without it — the run has less context than usual.`,
@@ -221,11 +235,7 @@ function fetchIssueEvents(
     created_at: issue.created_at,
   };
 
-  const comments = contextList<GhCommentApi>(
-    `comments on #${issueNum}`,
-    "api",
-    `repos/${owner}/${repo}/issues/${issueNum}/comments`,
-  );
+  const comments = threadComments(`comments on #${issueNum}`, `${owner}/${repo}`, issueNum);
   // The guard deletes a person's comment made while an agent is working, and the
   // deletion is not instant. The model's context is built from this list, so it has
   // to see the thread the guard is producing -- otherwise the agent reads a comment
@@ -237,17 +247,25 @@ function fetchIssueEvents(
     .map((c) => ({
       id: c.id,
       event_type: commentType,
-      content: c.body,
-      author: c.user.login,
-      author_type: c.user.type,
-      created_at: c.created_at,
+      content: c.body ?? "",
+      author: c.user?.login ?? "",
+      author_type: c.user?.type,
+      created_at: c.created_at ?? "",
     }));
 
   return [openedEvent, ...commentEvents];
 }
 
 function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars: number): { events: GithubEvent[]; parentIssue?: number } {
-  const pr = requiredJson<GhPrApi>(`pull request #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}`);
+  // The whole REST object rather than a `--json` projection: this is the model's
+  // context for the pull request, so it wants every field the object carries --
+  // including ones nothing here reads yet. `readPullRequestObject` exists for exactly
+  // that answer; see its comment for why "everything" has no enumerated projection.
+  const read = readPullRequestObject<GhPrApi>(`${owner}/${repo}`, number);
+  if (!read.known) {
+    throw new Error(`Could not fetch pull request #${number}, which a run cannot proceed without: ${read.why}`);
+  }
+  const pr = read.value;
   const prBody = pr.body ?? "";
   const parentIssue = PARENT_ISSUE_TAG.readProse(prBody);
   const headSha = pr.head.sha.slice(0, 8);
@@ -266,8 +284,8 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     created_at: pr.created_at,
   });
 
-  const diffResult = gh("api", `repos/${owner}/${repo}/pulls/${number}`, "-H", "Accept: application/vnd.github.v3.diff");
-  const diff = diffResult.code === 0 ? diffResult.stdout : "";
+  const diffRead = readPullRequestDiff(`${owner}/${repo}`, number);
+  const diff = diffRead.known ? diffRead.diff : "";
   if (diff) {
     const truncated = diff.slice(0, maxDiffChars);
     let diffContent = "```diff\n" + truncated + "\n```";
@@ -282,11 +300,7 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     });
   }
 
-  const prComments = contextList<GhCommentApi>(
-    `comments on #${number}`,
-    "api",
-    `repos/${owner}/${repo}/issues/${number}/comments`,
-  );
+  const prComments = threadComments(`comments on #${number}`, `${owner}/${repo}`, number);
   // Same shaping as the issue path: the model must not read a comment the guard is
   // removing. See `keptCommentIds`.
   const keptPrComments = keptCommentIds(prComments);
@@ -295,13 +309,20 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     .map((comment) => ({
       id: comment.id,
       event_type: "pr_comment",
-      content: comment.body,
-      author: comment.user.login,
-      author_type: comment.user.type,
-      created_at: comment.created_at,
+      content: comment.body ?? "",
+      author: comment.user?.login ?? "",
+      author_type: comment.user?.type,
+      created_at: comment.created_at ?? "",
     })));
 
   // The endpoint that failed on 2026-08-17. See `contextList`.
+  //
+  // Both reads below are lists of review objects under the pull request's endpoint, not
+  // the pull request, so neither is `pull-request.ts`'s: a review carries a state, a
+  // body and a submitter, an inline comment a path and a line, and the model's context
+  // needs the objects themselves. They also degrade where the pull request's own read
+  // throws — `contextList` logs and answers an empty list — because a run with the pull
+  // request and no reviews is still a run.
   const reviews = contextList<GhReviewApi>(
     `reviews on #${number}`,
     "api",
@@ -316,6 +337,10 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     created_at: review.submitted_at!,
   })));
 
+  // Same question as `list_pr_review_comments` in `mcp/github.ts` — the review comments a
+  // pull request carries — read here for the model rather than for a reviewer. Two
+  // projections of one list, each exercised by a different caller; see that tool's
+  // comment for why it is not a second read of the pull request either.
   const inlineComments = contextList<GhReviewCommentApi>(
     `inline review comments on #${number}`,
     "api",

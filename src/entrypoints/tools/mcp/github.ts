@@ -16,7 +16,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { gh, ghGraphql, gitRun, nothingToCommit } from "../../../adapters/github/gh.ts";
+import { gh, ghGraphql, gitRun, nothingToCommit, splitConcatenatedJson } from "../../../adapters/github/gh.ts";
 import { getBaseBranch, getLabel } from "../../../adapters/runner/config.ts";
 import { resolveNotify } from "../../../adapters/github/notify.ts";
 import {
@@ -35,7 +35,7 @@ import { closingKeywordRefusal, closingReferences, partOfLine } from "../../../d
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
-import { endingIdentity, runAgent } from "../lib/turn-identity.ts";
+import { endingIdentity } from "../lib/turn-identity.ts";
 import { postTurnComment, recordEndingComment } from "../../../adapters/github/ending-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -43,9 +43,12 @@ import { capText, fitItems, TOOL_OUTPUT_BUDGET } from "../../../shared/tool-outp
 import { decidePostMergeHandoff } from "../../../domain/work/handoff.ts";
 import { isAttended, unattendedNotice } from "../../../domain/work/unattended-pull-request.ts";
 import { branchForCommit, resolveBranch, stackedPrBase } from "../../../adapters/github/branch-placement.ts";
+import { baseBranch, checkedOutBranch, readOriginBranch } from "../../../adapters/github/branch-reads.ts";
+import { readPullRequestDiff, readPullRequestOrThrow } from "../../../adapters/github/pull-request.ts";
 import { isIssueRun, isPrRun, nodeNumber, refusePrRun } from "../../../adapters/runner/run-node.ts";
 import { dispatchCd, dispatchCi, dispatchPostMergeAgent, dispatchPrValidation } from "../../../adapters/actions/dispatch-targets.ts";
 import { issueLinks } from "../../../adapters/github/issue-links.ts";
+import { reportSubIssueToParent } from "../../../adapters/github/sub-issue-report.ts";
 import type { LinkedChild, LinkedIssue } from "../../../domain/work/issue-links.ts";
 import { decideMergeReadiness, formatBlockers } from "../../../domain/delivery/merge-readiness.ts";
 import { gatherMergeSignals } from "../../../adapters/github/merge-signals.ts";
@@ -91,6 +94,33 @@ function ghJsonOrThrow<T>(...args: string[]): T {
   const { code, stdout, stderr } = gh(...args);
   if (code) mcpFail(stderr || stdout);
   return stdout ? (JSON.parse(stdout) as T) : (null as T);
+}
+
+/**
+ * A `gh api` LIST read with every page of it, or a tool error.
+ *
+ * `ghJsonOrThrow` cannot read a paginated listing: with `--paginate`, `gh` writes each
+ * page's array back to back, so from the second page on the stream is not one JSON
+ * document and `JSON.parse` throws on it. The tempting way out — leave `--paginate` off
+ * and parse the page that comes — is what `list_pr_review_comments` did, and it hid
+ * every review comment past the first page while still reporting `omitted: 0`. This
+ * tool's contract says a non-zero `omitted` is the reason to believe something was left
+ * out, so the loss was indistinguishable from a short thread.
+ *
+ * `splitConcatenatedJson` is the repository's splitter for exactly this shape; the
+ * flattening below is `ghPaginated`'s. This reads with plain `gh` rather than
+ * `ghPaginated` only to keep this file's failure policy, which is one: a failed read is
+ * a tool error here, never an empty list — an empty review comment list is the answer
+ * that means "nobody commented on this code".
+ */
+function ghJsonPagesOrThrow<T>(...args: string[]): T[] {
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code) mcpFail(stderr || stdout);
+  const flat: T[] = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+    if (Array.isArray(page)) flat.push(...(page as T[]));
+  }
+  return flat;
 }
 
 async function resolveIssueId(number: number): Promise<string> {
@@ -737,6 +767,14 @@ async function closeIssueAndDispatch(
     });
   }
 
+  // The parent's thread is where the agent about to be re-invoked reads what happened
+  // here, and this path has no summary to carry: `merge_pr` closed the issue itself
+  // because no origin agent was tagged on the pull request, so no run wrote one down.
+  // What the report carries instead is what GitHub links to the issue -- above all the
+  // pull request that delivered it -- read through `issueLinks` rather than searched
+  // for.
+  reportSubIssueToParent(REPO, num, "");
+
   // The aggregation outcome is part of what happened, so it goes in the result.
   // This used to be awaited and discarded, and `{ok: true}` was returned whether
   // the parent's atomaton had been re-invoked, had been left waiting, or had
@@ -938,13 +976,12 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   }
   const head = gitRun("rev-parse", "HEAD");
   if (head.code) mcpFail(`Cannot resolve local HEAD: ${head.stderr || head.stdout}`);
-  const remote = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
-  if (remote.code) mcpFail(`Cannot inspect remote branch '${branch}': ${remote.stderr || remote.stdout}`);
-  const remoteHead = remote.stdout.trim().split(/\s+/, 1)[0] ?? "";
-  if (!remoteHead) {
+  const remote = readOriginBranch(branch);
+  if (!remote.known) mcpFail(`Cannot inspect remote branch '${branch}': ${remote.why}`);
+  if (!remote.present) {
     mcpFail(`Remote branch '${branch}' does not exist. Call commit_and_push before creating the PR.`);
   }
-  if (remoteHead !== head.stdout.trim()) {
+  if (remote.sha !== head.stdout.trim()) {
     mcpFail(
       `Remote branch '${branch}' is not at local HEAD. Call sync_branch and inspect its status; ` +
       `if it reports 'ahead', call commit_and_push before creating the PR.`,
@@ -1012,11 +1049,7 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     waitingCommentId = postTurnComment({
       number: String(node),
       repo: REPO,
-      // The agent goes on with the ending (#354), for the same reason `launch_sub_agent`
-      // does it: this is the footprint a run that parks on a pull request leaves, and it
-      // is where "who was on this node" has to stay answerable if no run started here
-      // wrote a dispatch marker.
-      body: turnCommentBody({ ended: "waiting", audience: "person", agent: runAgent(), body: text, ...endingIdentity() }),
+      body: turnCommentBody({ ended: "waiting", audience: "person", body: text, ...endingIdentity() }),
     });
   }
   const validationDispatched = dispatchPrValidation(REPO, num, branch, { ask: waitingCommentId });
@@ -1326,10 +1359,9 @@ function syncBranch(a: z.infer<typeof SYNC_BRANCH_SCHEMA>): string {
   const branch = a.branch?.trim() || resolveBranch();
   const valid = gitRun("check-ref-format", "--branch", branch);
   if (valid.code) mcpFail(`Invalid branch name '${branch}': ${valid.stderr || valid.stdout}`);
-  const current = gitRun("branch", "--show-current");
-  if (current.code) mcpFail(current.stderr || current.stdout);
-  if (current.stdout.trim() !== branch) {
-    mcpFail(`Cannot synchronize '${branch}' while '${current.stdout.trim() || "detached HEAD"}' is checked out.`);
+  const current = checkedOutBranch();
+  if (current !== branch) {
+    mcpFail(`Cannot synchronize '${branch}' while '${current || "detached HEAD"}' is checked out.`);
   }
 
   const worktree = gitRun("status", "--porcelain");
@@ -1378,34 +1410,31 @@ function syncBranch(a: z.infer<typeof SYNC_BRANCH_SCHEMA>): string {
  * makes a stacked pull request bring in its parent's branch and not the release branch
  * underneath it.
  *
- * `getBaseBranch()` answers "" for "the repository's default branch", which `gh pr
- * create` resolves on its own and a merge has to name: there is nothing to fetch from
- * an empty name.
+ * `base_branch` is unset for "the repository's default branch", which `gh pr create`
+ * resolves on its own and a merge has to name: there is nothing to fetch from an
+ * empty name. `baseBranch` is where that empty answer becomes the remote's default
+ * branch, once for every caller.
  */
 function baseBranchForMerge(): string {
   const number = nodeNumber();
   if (isPrRun() && number !== undefined) {
-    const pr = ghJsonOrThrow<{ baseRefName?: string }>(
-      "pr", "view", String(number), "--repo", REPO, "--json", "baseRefName",
-    );
-    const fromPullRequest = (pr?.baseRefName ?? "").trim();
+    const pr = readPullRequestOrThrow<{ baseRefName?: string }>(REPO, number, "baseRefName");
+    const fromPullRequest = (pr.baseRefName ?? "").trim();
     if (fromPullRequest) return fromPullRequest;
   }
 
-  const fromTree = stackedPrBase(REPO) ?? getBaseBranch();
+  // The tree's answer first (a sub-issue takes in its parent's branch), then the
+  // project's base: `base_branch`, or origin's default branch when nothing is set.
+  const fromTree = stackedPrBase(REPO);
   if (fromTree) return fromTree;
 
-  const repository = ghJsonOrThrow<{ defaultBranchRef?: { name?: string } }>(
-    "repo", "view", REPO, "--json", "defaultBranchRef",
-  );
-  const defaultBranch = (repository?.defaultBranchRef?.name ?? "").trim();
-  if (!defaultBranch) {
+  const base = baseBranch();
+  if (!base.known) {
     mcpFail(
-      `Cannot tell which branch this work is based on: no base branch is configured, and the repository's ` +
-        `default branch could not be read from GitHub.`,
+      `Cannot tell which branch this work is based on: no base branch is configured, and ${base.why}.`,
     );
   }
-  return defaultBranch;
+  return base.branch;
 }
 
 /**
@@ -1550,22 +1579,27 @@ function pick<K extends string>(source: unknown, keys: readonly K[]): Partial<Re
 }
 
 function getPr(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const pr = ghJsonOrThrow<{ body?: unknown }>(
-    "pr", "view", String(prContextNumber(a)), "--repo", REPO,
-    "--json", "number,title,body,state,baseRefName,headRefName,createdAt",
-  );
-  const { body, ...rest } = pr ?? {};
+  const pr = readPullRequestOrThrow<{ body?: unknown }>(REPO, prContextNumber(a), [
+    "number",
+    "title",
+    "body",
+    "state",
+    "baseRefName",
+    "headRefName",
+    "createdAt",
+  ]);
+  const { body, ...rest } = pr;
   // Same as `get_issue`: the description is the one unbounded field here.
   return JSON.stringify({ ...rest, body: typeof body === "string" ? capText(body).text : body });
 }
 
 function getPrDiff(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const { code, stdout, stderr } = gh("pr", "diff", String(prContextNumber(a)), "--repo", REPO);
-  if (code) mcpFail(stderr || stdout);
+  const read = readPullRequestDiff(REPO, prContextNumber(a));
+  if (!read.known) mcpFail(read.why);
   // `head`: a diff's first files are the subject of the change. And the cut is now
   // announced in the text rather than being a silent `slice` -- a truncated read
   // that looks complete is how a reviewer concludes a file was not touched.
-  return capText(stdout).text;
+  return capText(read.diff).text;
 }
 
 function listPrs(a: z.infer<typeof LIST_PRS_SCHEMA>): string {
@@ -1668,9 +1702,7 @@ function getCheckRuns(a: z.infer<typeof GET_CHECK_RUNS_SCHEMA>): string {
 }
 
 function getPrReviews(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const d = ghJsonOrThrow<{ reviews?: unknown[] }>(
-    "pr", "view", String(prContextNumber(a)), "--repo", REPO, "--json", "reviews",
-  );
+  const d = readPullRequestOrThrow<{ reviews?: unknown[] }>(REPO, prContextNumber(a), "reviews");
   // `reactionGroups`, `includesCreatedEdit` and `authorAssociation` are dropped:
   // nothing an agent does with a review depends on them. Each body is capped on its
   // own, because a count of reviews says nothing about the size of one.
@@ -1686,9 +1718,21 @@ function getPrReviews(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
   return JSON.stringify({ total: reviews.length, omitted, reviews: kept });
 }
 
+/**
+ * The inline comments a pull request's review carries.
+ *
+ * Not `pull-request.ts`'s read, and not a second spelling of it: this is a paginated
+ * sub-resource (`pulls/<n>/comments`) — a list of review objects, projected down to
+ * where each comment is and what it says. The pull request's own object does not carry
+ * them, and its projection is what a caller names fields of rather than a list.
+ */
 function listPrReviewComments(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const comments =
-    ghJsonOrThrow<unknown[]>(`api`, `repos/${REPO}/pulls/${prContextNumber(a)}/comments`) ?? [];
+  // Every page, and `?per_page=100` so that "every page" is one or two requests: the
+  // cost of this read is the number of requests, not of comments, and the default 30
+  // turns a 200-comment pull request into seven of them.
+  const comments = ghJsonPagesOrThrow<unknown>(
+    "api", `repos/${REPO}/pulls/${prContextNumber(a)}/comments?per_page=100`,
+  );
   // The raw REST review comment carries about thirty fields, including a `user`
   // object of roughly a kilobyte to convey one login and a `diff_hunk` repeating
   // code the caller can read from the diff. What acting on a review comment needs
@@ -1835,8 +1879,8 @@ async function mergePr(): Promise<string> {
   // no workflow run for events GITHUB_TOKEN triggers.
   dispatchCd(baseRefName);
 
-  const d = ghJsonOrThrow<{ body?: string }>("pr", "view", String(num), "--repo", REPO, "--json", "body");
-  const body = d?.body ?? "";
+  const d = readPullRequestOrThrow<{ body?: string }>(REPO, num, "body");
+  const body = d.body ?? "";
   // Prose only: a body quoting either tag in a fenced sample is not carrying it (#304).
   const parentIssue = PARENT_ISSUE_TAG.readProse(body);
 
