@@ -120,82 +120,6 @@ function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }
 
-// src/shared/tool-output.ts
-var TOOL_OUTPUT_BUDGET = 50000;
-var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
-
-// src/domain/work/session-size.ts
-var KEEP_RECENT_RESULTS = 10;
-var SESSION_TOKEN_LIMIT = 1e5;
-var CHARS_PER_TOKEN = 4;
-function estimateTokens(session) {
-  const messages = session.messages ?? [];
-  if (messages.length === 0)
-    return 0;
-  return Math.round(JSON.stringify(messages).length / CHARS_PER_TOKEN);
-}
-function contentText(content) {
-  if (typeof content === "string")
-    return content;
-  return;
-}
-function removedResultNotice(originalLength) {
-  return `[atomaton] This result (${originalLength} characters) was removed so the session fits in the ` + "model's context window. The call that produced it is still above \u2014 call it again if you need it.";
-}
-function replaceOldToolResults(session, keepRecent = KEEP_RECENT_RESULTS) {
-  const messages = session.messages ?? [];
-  const tokensBefore = estimateTokens(session);
-  const resultIndexes = messages.map((m, i) => m.role === "tool" ? i : -1).filter((i) => i >= 0);
-  const replaceBefore = resultIndexes[resultIndexes.length - keepRecent] ?? Infinity;
-  let changed = 0;
-  const kept = messages.map((message, i) => {
-    if (message.role !== "tool" || i >= replaceBefore)
-      return message;
-    const text = contentText(message.content);
-    if (text === undefined || text.length <= 200)
-      return message;
-    changed += 1;
-    return { ...message, content: removedResultNotice(text.length) };
-  });
-  if (changed === 0) {
-    return { session, shrunk: false, tokensBefore, tokensAfter: tokensBefore, changed: 0 };
-  }
-  const out = { ...session, messages: [...kept, shrinkNotice(changed)] };
-  return { session: out, shrunk: true, tokensBefore, tokensAfter: estimateTokens(out), changed };
-}
-function shrinkNotice(changed) {
-  return {
-    role: "user",
-    content: [
-      `[atomaton] The contents of ${changed} earlier tool results were removed from this session so it`,
-      "fits in the model's context window.",
-      "",
-      "The calls themselves are still here, so you can see what you already looked at. What is gone is",
-      "what came back: file contents, command output, search results. Call again for the ones you still",
-      "need \u2014 do not answer from memory of something you can no longer see."
-    ].join(`
-`),
-    atoma_metadata: { source: "atomaton", layer: "session-shrink", changed }
-  };
-}
-function shrinkIfNeeded(session, limit = SESSION_TOKEN_LIMIT) {
-  const tokensBefore = estimateTokens(session);
-  if (tokensBefore <= limit) {
-    return { session, shrunk: false, tokensBefore, tokensAfter: tokensBefore, changed: 0 };
-  }
-  return replaceOldToolResults(session);
-}
-function shrinkLogLine(outcome, what = "tool results replaced") {
-  if (!outcome.shrunk)
-    return;
-  return `session shrunk: ${outcome.changed} ${what}, ` + `~${Math.round(outcome.tokensBefore / 1000)}k -> ~${Math.round(outcome.tokensAfter / 1000)}k estimated tokens`;
-}
-function stillTooBigLine(outcome, limit = SESSION_TOKEN_LIMIT) {
-  if (outcome.tokensAfter <= limit)
-    return;
-  return `session is still ~${Math.round(outcome.tokensAfter / 1000)}k estimated tokens after shrinking, ` + `over the ~${Math.round(limit / 1000)}k this run allows. What is left is the conversation itself, ` + "which nothing here can shorten. This run will likely be refused by the provider; start the agent " + "again with a recover run (for example `/engineer recover`), which archives the session and begins fresh.";
-}
-
 // src/entrypoints/machinery/restore_agent_session.ts
 var ref = defineScript(import.meta.url);
 function findAgentSession(type, number, agent, load = restoreSession) {
@@ -230,30 +154,11 @@ function main() {
     return;
   }
   if (content !== undefined) {
-    writeFileSync2(values.out, sized(content, target));
+    writeFileSync2(values.out, content);
     console.error(`Restored session: ${target}`);
   } else {
     console.error(`No existing session at ${target}, starting fresh.`);
   }
-}
-function sized(content, target) {
-  let session;
-  try {
-    session = JSON.parse(content);
-  } catch {
-    console.error(`Could not read ${target} as JSON; restoring it unchanged.`);
-    return content;
-  }
-  const result = shrinkIfNeeded(session);
-  const shrank = shrinkLogLine(result, "tool results replaced with a note");
-  if (shrank !== undefined)
-    console.error(shrank);
-  const stuck = stillTooBigLine(result);
-  if (stuck !== undefined)
-    console.error(stuck);
-  if (shrank === undefined)
-    return content;
-  return JSON.stringify(result.session, null, 2);
 }
 if (import.meta.main)
   main();

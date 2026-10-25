@@ -17716,7 +17716,7 @@ function redact(text, literals = []) {
 }
 
 // src/shared/tool-output.ts
-var TOOL_OUTPUT_BUDGET = 50000;
+var TOOL_OUTPUT_BUDGET = 8000;
 var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
 function capText(text, budget = TOOL_OUTPUT_BUDGET, keep = "head") {
   if (text.length <= budget)
