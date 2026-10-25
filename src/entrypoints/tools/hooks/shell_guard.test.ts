@@ -193,6 +193,69 @@ describe("shell_guard.ts", () => {
         expect(guard({ command }), command).toContain('"allow":false');
       }
     });
+    /**
+     * #389: one run, one agent, one loop, four allows and then a refusal. The difference
+     * between the spellings was where the `;` fell -- `for n in 1; do curl ...` put `do`
+     * where the guard read the program, and the fifth call happened to have a `;` between
+     * `do` and the `curl`. A network rule that fires on the fifth invocation of the same
+     * pattern is a rule nobody can reason about, so every construct that runs a command
+     * has to answer the same way.
+     */
+    test("a routed program is refused whatever shell construct invokes it", () => {
+      for (const command of [
+        "cd /tmp && for n in 363; do curl -s https://example.com -o ev.json; done",
+        "cd /tmp && for n in 348 371; do sha=$(jq -r .head.sha pr.json); curl -s https://example.com/$sha; done",
+        "for n in 1; do echo hi; curl -s https://example.com; done",
+        "until false; do curl -s https://example.com; done",
+        "if true; then curl -s https://example.com; fi",
+        "if false; then :; else curl -s https://example.com; fi",
+        "{ curl -s https://example.com; }",
+        "( curl -s https://example.com )",
+        "sleep 1 & curl -s https://example.com",
+        "cd /tmp\ncurl -s https://example.com",
+        "echo start && sudo env A=1 curl -s https://example.com",
+        // A substitution is run for its output, so running it is running it.
+        "x=$(curl -s https://example.com)",
+        "sha=$(curl -s https://example.com | jq -r .sha)",
+      ]) {
+        expect(guard({ command }), command).toContain('"allow":false');
+      }
+    }, 60_000);
+
+    /**
+     * The other half: a name is not an invocation. Skipping the shell's own words is the
+     * fix above, and it must not turn the word after one -- or an argument anywhere -- into
+     * a program, which is the trap the position rules were written for in the first place.
+     */
+    test("a routed name in a loop header or an argument is still just a name", () => {
+      for (const command of [
+        "for f in curl wget; do echo $f; done",
+        "grep -rn 'curl -s' src/",
+        "echo 'use fetch, not curl'",
+        "printf '%s\\n' gh curl",
+        "ls in do then done",
+      ]) {
+        expect(guard({ command }), command).toContain('"allow":true');
+      }
+    }, 60_000);
+
+    /**
+     * A heredoc body is data; a command after one is a command. Both halves are one
+     * reading of the same text, and the body matters here because newlines now separate
+     * commands: without it, writing a document whose line begins `curl` was refused.
+     */
+    test("a heredoc body is data, and a command after it is still a command", () => {
+      expect(guard({ command: "cat > notes.md <<'EOF'\ncurl is disabled\nEOF" })).toContain(
+        '"allow":true',
+      );
+      expect(guard({ command: "cat > notes.md <<'EOF'\ngit push origin main\nEOF" })).toContain(
+        '"allow":true',
+      );
+      expect(
+        guard({ command: "cat > notes.md <<'EOF'\ncurl is disabled\nEOF\ncurl -s https://example.com" }),
+      ).toContain('"allow":false');
+    }, 60_000);
+
     test("allows safe commands", () => {
       expect(guard({ command: "ls -la" })).toContain('"allow":true');
     });
