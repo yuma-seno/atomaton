@@ -86,6 +86,31 @@ export interface MergeSignals {
    * tells them apart.
    */
   requiredChecksEnforceable: boolean;
+  /**
+   * Whether this pull request merges into a work branch rather than the branch the
+   * work is delivered to — a sub-issue's merge into its parent issue's branch, which
+   * is the normal shape of a tree's delivery.
+   *
+   * Everything from `mergePolicy` down describes ONE merge: the one that carries the
+   * work to the base branch, where a change ships, becomes what every later run
+   * obeys, and becomes what a person is asked to read before it does. A stacked
+   * merge has reached none of that, and the pull request that carries the parent's
+   * branch to the base branch is judged on the whole aggregate instead. So on a
+   * stacked merge none of them is applied. What stands in their place is what covers
+   * every pull request anyway: the required check, the reviewer, and the delivery
+   * merge itself.
+   *
+   * Read from the base branch's NAME, which is why the adapter answers it and this
+   * file does not: an Atomaton work branch is `atomaton/issue-<n>`. Comparing the
+   * base against the configured one instead would be wrong three ways — a base that
+   * could not be read arrives as `""`, and `""` is not the configured base, so the
+   * exemption would fire exactly when nobody knows the target, while a name test
+   * leaves the checks on; resolving the configured base is a network read inside the
+   * merge path; and a release branch or a person's branch is not the base branch
+   * either, while a merge into one of THOSE deploys, so it is the merge these checks
+   * least want to skip.
+   */
+  stackedMerge: boolean;
   /** `merge.policy` from config.yaml. Atomaton's own gate, not GitHub's. */
   mergePolicy: string;
   /**
@@ -368,90 +393,103 @@ export function decideMergeReadiness(signals: MergeSignals): MergeReadiness {
     });
   }
 
-  if (signals.mergePolicy !== "auto") {
-    blockers.push({
-      kind: "merge-policy",
-      detail: `merge.policy is '${signals.mergePolicy}', not 'auto'; a human performs the merge`,
-    });
-  }
-
-  // Every other gate here is something an agent may satisfy and then merge. This
-  // one it may not, because the change would alter the gates themselves.
+  // Everything below describes one merge: the one that carries the work to the
+  // base branch. A stacked merge is a checkpoint in the tree, not a delivery --
+  // nothing ships, no run obeys it yet, and the parent's own pull request carries
+  // the whole aggregate through every check below. Applying them here would judge
+  // the same change twice, the first time on something that is not in effect, and
+  // under the default `merge.policy: manual` it would put every child of a
+  // decomposition in front of a person before the parent could be judged at all.
   //
-  // Workflows, agent definitions, tool configuration and rulesets are where an
-  // agent's limits live — which credentials reach a run, which commands a hook
-  // refuses, what a ruleset requires before a merge. An agent that can merge a
-  // change to those can widen its own reach, and no later check catches it: the
-  // next run already obeys the new file.
-  //
-  // Not a suspicion that an agent means to. A prompt injection carried in an
-  // issue body, or a plain mistake, reaches just as far, and both stop at a
-  // person reading the diff.
-  // Same fail-closed outcome as the gate below, with a true sentence. The
-  // changed files are what decides whether this touches governance, so not
-  // having them means the question is open, and an open question about the
-  // machinery agents run on is a person's to close.
-  if (signals.governanceUnknown) {
-    blockers.push({
-      kind: "governance-unknown",
-      detail:
-        "whether this pull request changes how agents themselves run could not be determined " +
-        `(${signals.governanceUnknown}), so the merge falls to a person`,
-    });
-  }
+  // The exemption is the pull request's BASE, not its diff: the change itself is
+  // read at both levels by the reviewer, and the delivery merge is where all of
+  // this is decided for real.
+  if (!signals.stackedMerge) {
+    if (signals.mergePolicy !== "auto") {
+      blockers.push({
+        kind: "merge-policy",
+        detail: `merge.policy is '${signals.mergePolicy}', not 'auto'; a human performs the merge`,
+      });
+    }
 
-  if (signals.governancePaths.length > 0) {
-    const shown = signals.governancePaths.slice(0, 5).join(", ");
-    const rest = signals.governancePaths.length - 5;
-    blockers.push({
-      kind: "governance-change",
-      detail:
-        `this pull request changes how agents themselves run (${shown}${rest > 0 ? `, +${rest} more` : ""}); ` +
-        "review it and report, but leave the merge to a person" +
-        // Said here because this is the moment someone is looking. The commonest
-        // reason to touch a generated workflow is to change what CI or a
-        // deployment does, and under Atomaton that is not where those live -- so
-        // name the place it does live rather than only refusing the merge.
-        (signals.governancePaths.some(isGeneratedWorkflow)
-          ? ". If the intent was to change what CI or deployment does, that belongs in " +
-            "`.github/atomaton/config.yaml` (`checks.from_pull_request`, `deploy.on_merge`) rather than in a " +
-            "workflow file — an agent can write config and cannot write a workflow. If this is an " +
-            "upgrade of the generated deliverable, it is exactly what a person should be merging"
-          : ""),
-    });
-  }
+    // Every other gate here is something an agent may satisfy and then merge. This
+    // one it may not, because the change would alter the gates themselves.
+    //
+    // Workflows, agent definitions, tool configuration and rulesets are where an
+    // agent's limits live — which credentials reach a run, which commands a hook
+    // refuses, what a ruleset requires before a merge. An agent that can merge a
+    // change to those can widen its own reach, and no later check catches it: the
+    // next run already obeys the new file.
+    //
+    // Not a suspicion that an agent means to. A prompt injection carried in an
+    // issue body, or a plain mistake, reaches just as far, and both stop at a
+    // person reading the diff.
+    // Same fail-closed outcome as the gate below, with a true sentence. The
+    // changed files are what decides whether this touches governance, so not
+    // having them means the question is open, and an open question about the
+    // machinery agents run on is a person's to close.
+    if (signals.governanceUnknown) {
+      blockers.push({
+        kind: "governance-unknown",
+        detail:
+          "whether this pull request changes how agents themselves run could not be determined " +
+          `(${signals.governanceUnknown}), so the merge falls to a person`,
+      });
+    }
 
-  // The project's own version of the gate above. Same shape, same outcome — the
-  // agent reviews and reports, a person merges — but the condition comes from
-  // `merge.gates` in config.yaml rather than from this file, because what must
-  // not be merged unread is a property of the project and not of Atomaton. A
-  // migration, a change to a pricing table, a release note: nothing here could
-  // have guessed them.
-  //
-  // The reason is relayed verbatim, in whatever language it was written in. It is
-  // addressed to the person who will merge, and they wrote it.
-  for (const match of signals.gateMatches) {
-    const shown = match.evidence.slice(0, 5).join(", ");
-    const rest = match.evidence.length - 5;
-    const because = shown ? ` (matched ${shown}${rest > 0 ? `, +${rest} more` : ""})` : "";
-    blockers.push({
-      kind: "merge-gate",
-      detail:
-        `a merge gate declared by this project applies${because}: ${match.reason}` +
-        " — review it and report, but leave the merge to a person",
-    });
-  }
+    if (signals.governancePaths.length > 0) {
+      const shown = signals.governancePaths.slice(0, 5).join(", ");
+      const rest = signals.governancePaths.length - 5;
+      blockers.push({
+        kind: "governance-change",
+        detail:
+          `this pull request changes how agents themselves run (${shown}${rest > 0 ? `, +${rest} more` : ""}); ` +
+          "review it and report, but leave the merge to a person" +
+          // Said here because this is the moment someone is looking. The commonest
+          // reason to touch a generated workflow is to change what CI or a
+          // deployment does, and under Atomaton that is not where those live -- so
+          // name the place it does live rather than only refusing the merge.
+          (signals.governancePaths.some(isGeneratedWorkflow)
+            ? ". If the intent was to change what CI or deployment does, that belongs in " +
+              "`.github/atomaton/config.yaml` (`checks.from_pull_request`, `deploy.on_merge`) rather than in a " +
+              "workflow file — an agent can write config and cannot write a workflow. If this is an " +
+              "upgrade of the generated deliverable, it is exactly what a person should be merging"
+            : ""),
+      });
+    }
 
-  // Fail closed. An unreadable gate is the case this whole mechanism exists for:
-  // if a broken declaration merely disappeared, the way to merge past a gate
-  // would be to break it, and the diff that breaks it would be merged by the
-  // agent the gate was meant to stop.
-  for (const problem of signals.gateProblems) {
-    blockers.push({
-      kind: "gate-config-invalid",
-      detail:
-        `a declared merge gate could not be evaluated, so this merge falls to a person: ${problem}`,
-    });
+    // The project's own version of the gate above. Same shape, same outcome — the
+    // agent reviews and reports, a person merges — but the condition comes from
+    // `merge.gates` in config.yaml rather than from this file, because what must
+    // not be merged unread is a property of the project and not of Atomaton. A
+    // migration, a change to a pricing table, a release note: nothing here could
+    // have guessed them.
+    //
+    // The reason is relayed verbatim, in whatever language it was written in. It is
+    // addressed to the person who will merge, and they wrote it.
+    for (const match of signals.gateMatches) {
+      const shown = match.evidence.slice(0, 5).join(", ");
+      const rest = match.evidence.length - 5;
+      const because = shown ? ` (matched ${shown}${rest > 0 ? `, +${rest} more` : ""})` : "";
+      blockers.push({
+        kind: "merge-gate",
+        detail:
+          `a merge gate declared by this project applies${because}: ${match.reason}` +
+          " — review it and report, but leave the merge to a person",
+      });
+    }
+
+    // Fail closed. An unreadable gate is the case this whole mechanism exists for:
+    // if a broken declaration merely disappeared, the way to merge past a gate
+    // would be to break it, and the diff that breaks it would be merged by the
+    // agent the gate was meant to stop.
+    for (const problem of signals.gateProblems) {
+      blockers.push({
+        kind: "gate-config-invalid",
+        detail:
+          `a declared merge gate could not be evaluated, so this merge falls to a person: ${problem}`,
+      });
+    }
   }
 
   const needsCiDispatch =

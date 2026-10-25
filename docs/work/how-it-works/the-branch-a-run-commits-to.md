@@ -15,7 +15,10 @@
   exist — and reaches the base branch as one pull request once every child is
   done. Deployment is not dispatched for a merge into a parent branch: that work
   is still in progress, and only the final pull request into the base branch
-  carries it to release.
+  carries it to release. `merge.policy`, `merge.governed_paths` and `merge.gates`
+  are not applied to that merge either, for the same reason: they describe the
+  merge into the base branch, and the parent's own pull request is judged against
+  all three on the whole aggregate.
 - The run is checked out on the base branch, so it learns where its work goes only
   at the first commit — by which time the parent's branch may have moved in the
   same files. The work is carried across as a three-way merge: the changes are

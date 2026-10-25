@@ -49,6 +49,7 @@ interface Answer {
   refs?: { headRefName: string; baseRefName: string };
   mergeStateStatus?: string;
   governanceUnknown?: string;
+  stackedMerge?: boolean;
 }
 
 function gather(rules: unknown[], env: Record<string, string>): Answer {
@@ -156,6 +157,78 @@ describe("how gatherMergeSignals reads one pull request", () => {
       // The one read whose absence is representable: `UNKNOWN` blocks the merge and
       // says mergeability could not be determined.
       expect(answer.mergeStateStatus).toBe("UNKNOWN");
+    } finally {
+      cleanUp();
+    }
+  }, 30_000);
+
+  /**
+   * Which merge the three merge-time checks describe, decided by the base branch's
+   * name — the same predicate `dispatchCd` asks before deploying a merge, because it
+   * is the same question. Read here rather than in the domain so the work-branch
+   * convention is spelled once.
+   */
+  test("a pull request into the base branch is a delivery merge", () => {
+    const { configDir, log, cleanUp } = fixture();
+    try {
+      const answer = gather(
+        [{ match: ["pr", "view", "7", "isDraft,author"], stdout: JSON.stringify(PR_VIEW) }, ...REST_OF_THE_READS],
+        { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+      );
+      expect(answer.stackedMerge).toBe(false);
+    } finally {
+      cleanUp();
+    }
+  }, 30_000);
+
+  test("a pull request into a parent issue's branch is a stacked merge", () => {
+    const { configDir, log, cleanUp } = fixture();
+    try {
+      const answer = gather(
+        [
+          {
+            match: ["pr", "view", "7", "isDraft,author"],
+            stdout: JSON.stringify({ ...PR_VIEW, baseRefName: "atomaton/issue-12" }),
+          },
+          {
+            match: ["pr", "view", "7", "mergeStateStatus"],
+            stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }),
+          },
+          { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+          { match: ["rules/branches/atomaton/issue-12"], stdout: "[]" },
+          { match: ["pulls/7/files"], stdout: "" },
+        ],
+        { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+      );
+      expect(answer.stackedMerge).toBe(true);
+    } finally {
+      cleanUp();
+    }
+  }, 30_000);
+
+  // The direction that decides what a failure costs: a base nobody could read must
+  // leave the three checks ON. Under `base !== configuredBase` an empty base is not
+  // the configured base, so it would have exempted exactly the merge whose target is
+  // unknown.
+  test("a base branch that could not be read is not a stacked merge", () => {
+    const { configDir, log, cleanUp } = fixture();
+    try {
+      const answer = gather(
+        [
+          {
+            match: ["pr", "view", "7", "isDraft,author"],
+            stdout: JSON.stringify({ ...PR_VIEW, baseRefName: "" }),
+          },
+          {
+            match: ["pr", "view", "7", "mergeStateStatus"],
+            stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }),
+          },
+          { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+          { match: ["pulls/7/files"], stdout: "" },
+        ],
+        { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+      );
+      expect(answer.stackedMerge).toBe(false);
     } finally {
       cleanUp();
     }

@@ -50,8 +50,8 @@ import { dispatchCd, dispatchCi, dispatchPostMergeAgent, dispatchPrValidation } 
 import { issueLinks } from "../../../adapters/github/issue-links.ts";
 import { reportSubIssueToParent } from "../../../adapters/github/sub-issue-report.ts";
 import type { LinkedChild, LinkedIssue } from "../../../domain/work/issue-links.ts";
-import { decideMergeReadiness, formatBlockers } from "../../../domain/delivery/merge-readiness.ts";
-import { gatherMergeSignals } from "../../../adapters/github/merge-signals.ts";
+import { decideMergeReadiness, formatBlockers, type MergeSignals } from "../../../domain/delivery/merge-readiness.ts";
+import { gatherMergeSignals, type PullRequestRefs } from "../../../adapters/github/merge-signals.ts";
 import { readTargetState } from "../../../adapters/github/target-state.ts";
 import { selectCommentRange } from "../../../domain/work/comment-range.ts";
 import { readCommentBody } from "../../../domain/work/comment-body.ts";
@@ -1990,6 +1990,7 @@ function checkMergeReadiness(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): s
     number: num,
     ready: readiness.ready,
     blockers: readiness.blockers,
+    ...stackedMergeFields(signals, refs),
     // The branch protection this verdict came from, so a refusal is auditable
     // rather than an assertion: `merge_state_status` is GitHub's own evaluation
     // and `required_checks` is what the ruleset currently demands.
@@ -2002,6 +2003,32 @@ function checkMergeReadiness(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): s
       : `Not mergeable:\n${formatBlockers(readiness.blockers)}` +
         (dispatched ? "\n\nCI has been dispatched for the head commit; re-check shortly." : ""),
   });
+}
+
+/**
+ * What a merge into a work branch did NOT check, said in the answer rather than
+ * left to be inferred.
+ *
+ * `merge.policy`, `merge.governed_paths` and `merge.gates` describe the merge that
+ * carries the work to the base branch, so a stacked merge skips all three. An
+ * answer that only said `ready: true` would be indistinguishable from one where the
+ * three were consulted and found nothing — and that difference is the whole reason
+ * a stacked pull request can merge without a person. A run that later asks "why did
+ * nothing stop this?" has this field to read.
+ */
+function stackedMergeFields(
+  signals: MergeSignals,
+  refs: PullRequestRefs,
+): { stacked_merge: boolean; stacked_merge_note?: string } {
+  if (!signals.stackedMerge) return { stacked_merge: false };
+  return {
+    stacked_merge: true,
+    stacked_merge_note:
+      `this pull request merges into ${refs.baseRefName}, a work branch rather than the branch the work ` +
+      "is delivered to. `merge.policy`, `merge.governed_paths` and `merge.gates` describe the delivery " +
+      "merge and were not applied: the pull request that carries " +
+      `${refs.baseRefName} to the base branch is judged on that aggregate instead.`,
+  };
 }
 
 /**
@@ -2063,12 +2090,17 @@ async function mergePr(): Promise<string> {
   const { signals, refs } = gatherMergeSignals(REPO, num, mcpFail);
   const { headRefName, baseRefName } = refs;
   const readiness = decideMergeReadiness(signals);
+  // On every answer, refusal and merge alike: a stacked merge skipped the three
+  // checks that ask whether an agent may merge at all, and an answer that says
+  // "merged" in one word is the one nobody can audit afterwards.
+  const stackedMerge = stackedMergeFields(signals, refs);
   if (!readiness.ready) {
     log(`mergePr: refusing PR #${num} — ${readiness.blockers.map((b) => b.kind).join(", ")}`);
     const dispatched = readiness.needsCiDispatch && headRefName ? dispatchCi(headRefName) : false;
     return JSON.stringify({
       merged: false,
       blockers: readiness.blockers,
+      ...stackedMerge,
       ci_dispatched: dispatched,
       reason: `Not mergeable:\n${formatBlockers(readiness.blockers)}`,
     });
@@ -2113,7 +2145,7 @@ async function mergePr(): Promise<string> {
       // Only one of those leaves an issue open that should not be, and it was
       // the one the agent could not see -- the failure went to this server's
       // stderr. `parent_outcome` names which happened.
-      return JSON.stringify({ merged: true, closed_issue: null, parent_outcome: "no-parent" });
+      return JSON.stringify({ merged: true, closed_issue: null, parent_outcome: "no-parent", ...stackedMerge });
     case "already-closed":
       log(`mergePr: parent issue #${handoff.parentIssue} already closed -- skipping post-merge re-invocation`);
       return JSON.stringify({
@@ -2121,6 +2153,7 @@ async function mergePr(): Promise<string> {
         closed_issue: null,
         parent_issue: handoff.parentIssue,
         parent_outcome: "already-closed",
+        ...stackedMerge,
         note: "GitHub closed the parent itself, from a \"Closes #N\" line. Nothing further was needed.",
       });
     case "reinvoke-origin-agent":
@@ -2131,19 +2164,24 @@ async function mergePr(): Promise<string> {
           parent_issue: handoff.parentIssue,
           parent_outcome: "reinvoked",
           reinvoked_agent: handoff.agent,
+          ...stackedMerge,
         });
       }
       // The preferred handoff (re-invoking the origin agent) failed to
       // dispatch -- fall back to closing the parent directly ourselves,
       // same as the "close-directly" case below.
-      return await closeParentAndReport(handoff.parentIssue);
+      return await closeParentAndReport(handoff.parentIssue, stackedMerge);
     case "close-directly":
-      return await closeParentAndReport(handoff.parentIssue);
+      return await closeParentAndReport(handoff.parentIssue, stackedMerge);
   }
 }
 
 /** closeIssueAndDispatch also triggers phase-gating/aggregation itself. Shared by mergePr()'s "close-directly" case and its "reinvoke failed" fallback. */
-async function closeParentAndReport(parentIssue: number): Promise<string> {
+async function closeParentAndReport(
+  parentIssue: number,
+  /** `stackedMergeFields`' answer, carried through to the merge's own output. */
+  extra: Record<string, unknown> = {},
+): Promise<string> {
   try {
     // Read, not discarded. `closeIssueAndDispatch` stopped throwing when the author
     // is a person: it asks them on the thread and reports success. A caller that
@@ -2166,6 +2204,7 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
         closed_issue: null,
         parent_issue: parentIssue,
         parent_outcome: "close-requested",
+        ...extra,
         note: `The pull request merged. Issue #${parentIssue} was opened by a person, so it was not closed -- they have been asked on the thread to close it. Nothing further is needed from you.`,
       });
     }
@@ -2174,6 +2213,7 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
       closed_issue: parentIssue,
       parent_issue: parentIssue,
       parent_outcome: "closed",
+      ...extra,
     });
   } catch (e) {
     const why = (e as Error).message ?? String(e);
@@ -2186,6 +2226,7 @@ async function closeParentAndReport(parentIssue: number): Promise<string> {
       closed_issue: null,
       parent_issue: parentIssue,
       parent_outcome: "close-failed",
+      ...extra,
       note: `The pull request merged, but issue #${parentIssue} could not be closed: ${why}. It is still open and nothing will retry. Close it with request_close_issue, or report it.`,
     });
   }

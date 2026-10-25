@@ -15,6 +15,7 @@
 import { ghRead } from "./gh.ts";
 import { readPullRequest } from "./pull-request.ts";
 import { readBranchRules } from "./branch-rules.ts";
+import { isIssueBranch } from "./branch-names.ts";
 import { getGovernedPaths, getMergeGates, getMergePolicy } from "../../adapters/runner/config.ts";
 import { governedPathsIn, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
 import { isHumanAuthor } from "../../domain/work/actor.ts";
@@ -310,6 +311,16 @@ export function gatherMergeSignals(
       // and "none required" lead to the same place, and it says so rather than
       // relying on a shared empty list to mean both.
       requiredChecks: required.known ? required.contexts : [],
+      // The same predicate `dispatchCd` asks before deploying a merge, because it is
+      // the same question: is this merge a delivery, or a checkpoint inside the tree?
+      // (A merge into an issue branch deploys nothing — `actions/dispatch-targets.ts`
+      // skips it — and it does not reach the base branch either.) One spelling of the
+      // convention, so `merge-readiness.ts` needs no second one.
+      //
+      // Read from the name, and `isIssueBranch("")` is false: a base that could not
+      // be read leaves these checks ON rather than exempting a merge nobody knows
+      // the target of.
+      stackedMerge: isIssueBranch(baseRefName),
       mergePolicy: getMergePolicy(),
       // Still fail-closed, and now truthfully. This used to put the literal
       // string "(could not read the changed files)" into `governancePaths`,
