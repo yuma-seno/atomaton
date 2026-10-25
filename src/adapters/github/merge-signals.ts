@@ -17,7 +17,7 @@ import { readPullRequest } from "./pull-request.ts";
 import { readBranchRules } from "./branch-rules.ts";
 import { isIssueBranch } from "./branch-names.ts";
 import { getGovernedPaths, getMergeGates, getMergePolicy } from "../../adapters/runner/config.ts";
-import { governedPathsIn, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
+import { governedPathsIn, type ActiveRun, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
 import { isHumanAuthor } from "../../domain/work/actor.ts";
 import { pathPatternProblem } from "../../domain/delivery/path-patterns.ts";
 import {
@@ -47,6 +47,10 @@ interface PullRequestView {
 
 interface CheckRunsResponse {
   check_runs?: { name: string; status: string; conclusion: string | null; details_url?: string }[];
+}
+
+interface WorkflowRunsResponse {
+  workflow_runs?: { name?: string; status?: string }[];
 }
 
 function log(message: string): void {
@@ -187,6 +191,42 @@ function readChangedFiles(repo: string, num: number): ChangedFilesRead {
 }
 
 /**
+ * The workflow runs for a commit that have not finished.
+ *
+ * A second read of the same commit, and not a second spelling of the check-run one.
+ * GitHub creates a status context when the job producing it starts, so between a run
+ * starting and its first job registering there is a run and no context of that name.
+ * `check-runs` cannot answer that question — the absence it reports is the very thing
+ * being questioned.
+ *
+ * Degrades to an empty list rather than failing the call. Empty reads as "no run is
+ * known to be going", which is what this module answered before the read existed: a
+ * `checks-missing` blocker and one dispatch attempt. So a failure costs a duplicate run
+ * at worst, where throwing would refuse a merge over a read that only refines a blocker.
+ */
+function readActiveRuns(repo: string, sha: string): ActiveRun[] {
+  const { code, stdout, stderr } = ghRead("api", `repos/${repo}/actions/runs?head_sha=${sha}`);
+  if (code) {
+    log(`WARN could not list the workflow runs for ${sha}: ${stderr || stdout}`);
+    return [];
+  }
+  let answer: WorkflowRunsResponse;
+  try {
+    answer = stdout ? (JSON.parse(stdout) as WorkflowRunsResponse) : {};
+  } catch {
+    log(`WARN could not parse the workflow runs for ${sha}`);
+    return [];
+  }
+  // Anything not `completed` may still register a context: GitHub reports `queued`,
+  // `in_progress` and, on some paths, `requested`, `waiting` or `pending`. Naming the
+  // one value that is finished is what keeps a status this file has not seen from
+  // reading as "there is nothing running here".
+  return (answer?.workflow_runs ?? [])
+    .filter((run) => (run.status ?? "completed") !== "completed")
+    .map((run) => ({ name: run.name ?? "(unnamed workflow)", status: run.status ?? "unknown" }));
+}
+
+/**
  * GitHub's view of one pull request, plus the check runs on its head commit.
  *
  * `throwOnFailure` is injected rather than imported so the caller keeps ownership
@@ -263,6 +303,12 @@ export function gatherMergeSignals(
   // makes the reviewer's pre-merge CI dispatch visible to this gate at all.
   const sha = view.headRefOid ?? "";
   const runs = sha ? json<CheckRunsResponse>("api", `repos/${repo}/commits/${sha}/check-runs`) : null;
+  // Read every time, not only when a required context is absent: the question it
+  // answers — is anything still running on this commit — is the one that turns an
+  // absence into `checks-pending`, and a conditional read would put the condition in
+  // two places. `signals.checks` is what the caller reads; this is what decides
+  // whether an absence there is a missing run or a run that has not registered.
+  const activeRuns = sha ? readActiveRuns(repo, sha) : [];
 
   const baseRefName = view.baseRefName ?? "";
 
@@ -305,6 +351,7 @@ export function gatherMergeSignals(
         conclusion: run.conclusion,
         ...(run.details_url ? { detailsUrl: run.details_url } : {}),
       })),
+      activeRuns,
       // An unreadable rule list only costs specificity here: `mergeStateStatus`
       // is still GitHub's verdict, and `decideMergeReadiness` falls back to its
       // generic `blocked` blocker. So this is the one caller for which "unknown"
