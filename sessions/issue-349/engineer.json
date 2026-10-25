@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #349: ターン主張コメント（atomaton:took）が人には空コメントに見える\n\n/engineer\n\n# ターン主張コメントが、人には本文ゼロのコメントに見える\n\n## 現象\n\nrun の開始時に投稿されるターン主張コメント（`Claim the turn` step、`src/entrypoints/machinery/claim_turn.ts`）は、本文が HTML コメント 2行だけです:\n\n```\n<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=<ask> run=<run> -->\n```\n\nGitHub の UI は HTML コメントを描画しないため、**人には「本文が空のコメントが追加された」不具合に見える**。#149 の実走（2026-10-25、run 40162751716 の後の engineer dispatch）で実際にそう報告されました。\n\n## なぜこのコメントは消せないか\n\n- `atomaton:took` は「どの run がどの ask を主張したか」の記録。二重起動の仲立ち（`claim_turn.ts` の `raceOutcome`）と、ループ制御・run watch の鍵になる\n- `llm-context=exclude` は維持する。エージェントの文脈に入れる必要は無い\n\n## 直し方\n\nタグは保持したまま、人が読める 1行を足す。投稿元の綴りの作法に合わせる — dispatch 報告が \"Atomaton: `engineer` starting on this issue.\" という形なので、同型で:\n\n```\n<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=<ask> run=<run> -->\nAtomaton: claimed this turn.\n```\n\n## 影響範囲と確認してほしいこと\n\n- `claimCommentBody`（`src/entrypoints/machinery/claim_turn.ts:77-79`）が本体\n- `src/domain/work/run-report.test.ts` が主張コメントの完全一致を期待しているので更新が必要。`thread.ts` / `run-report.ts` など took を読む側は行指向の正規表現のはずだが、**可視行が入っても読みが壊れないことをテストで確認**する（`raceOutcome` の prose-only 読み #304 も同様）\n- 投稿後の read-after-write 確認（`READ_DELAYS_MS`）は本文に依存しないので影響しないはず。触れない\n- 追加の API 呼び出しはしない（既存の1コメントの中で完結させる）",
+      "content": "Issue #349: ターン主張コメント（atomaton:took）が人には空コメントに見える\n**Labels:** atomaton/waiting-for-person\n\n/engineer\n\n# ターン主張コメントが、人には本文ゼロのコメントに見える\n\n## 現象\n\nrun の開始時に投稿されるターン主張コメント（`Claim the turn` step、`src/entrypoints/machinery/claim_turn.ts`）は、本文が HTML コメント 2行だけです:\n\n```\n<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=<ask> run=<run> -->\n```\n\nGitHub の UI は HTML コメントを描画しないため、**人には「本文が空のコメントが追加された」不具合に見える**。#149 の実走（2026-10-25、run 40162751716 の後の engineer dispatch）で実際にそう報告されました。\n\n## なぜこのコメントは消せないか\n\n- `atomaton:took` は「どの run がどの ask を主張したか」の記録。二重起動の仲立ち（`claim_turn.ts` の `raceOutcome`）と、ループ制御・run watch の鍵になる\n- `llm-context=exclude` は維持する。エージェントの文脈に入れる必要は無い\n\n## 直し方\n\nタグは保持したまま、人が読める 1行を足す。投稿元の綴りの作法に合わせる — dispatch 報告が \"Atomaton: `engineer` starting on this issue.\" という形なので、同型で:\n\n```\n<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=<ask> run=<run> -->\nAtomaton: claimed this turn.\n```\n\n## 影響範囲と確認してほしいこと\n\n- `claimCommentBody`（`src/entrypoints/machinery/claim_turn.ts:77-79`）が本体\n- `src/domain/work/run-report.test.ts` が主張コメントの完全一致を期待しているので更新が必要。`thread.ts` / `run-report.ts` など took を読む側は行指向の正規表現のはずだが、**可視行が入っても読みが壊れないことをテストで確認**する（`raceOutcome` の prose-only 読み #304 も同様）\n- 投稿後の read-after-write 確認（`READ_DELAYS_MS`）は本文に依存しないので影響しないはず。触れない\n- 追加の API 呼び出しはしない（既存の1コメントの中で完結させる）",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-10-25T05:29:33Z",
@@ -1353,13 +1353,175 @@
       "role": "tool",
       "content": "{\"number\":350,\"url\":\"https://github.com/yuma-seno/atomaton/pull/350\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_00_yv6yats2hj6wha07j88m55id"
+    },
+    {
+      "role": "user",
+      "content": "PR #350: Give the turn claim's comment a line a person can read (#349)\n**Labels:** atomaton/in-progress\n**Linked Issue:** #349\n\n/reviewer\n\nPart of #349\n## What changes\n\nA run's claim comment (`src/entrypoints/machinery/claim_turn.ts`, `claimCommentBody`) was two HTML comments and nothing else:\n\n```\n<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=<ask> run=<run> -->\n```\n\nGitHub renders neither tag, so a person looking at the thread saw a comment with an empty body — during #149's live run that was reported as a bug. The tags stay exactly as they were (`atomaton:took` is the turn's identity the race check, the loop control and the run watch compare by run id; `llm-context=exclude` keeps the comment out of an agent's context), and one visible line joins them, in the shape the dispatch marker already uses:\n\n```\n<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=<ask> run=<run> -->\nAtomaton: claimed this turn.\n```\n\nNo extra API call, no change to the read-after-write retry loop (`READ_DELAYS_MS` compares comment ids, not bodies).\n\n## Why the readers did not need a code change — and were still tested\n\nEverything that reads a claim goes through `TOOK_TAG.readProse` (`src/adapters/github/thread.ts:94`, `:142`), a pattern match, so the visible line cannot shift it. That is an assumption the change makes load-bearing, so every fixture that models \"the claim as the runner writes it\" now carries the visible line, with the readers that run in that path unchanged:\n\n- `src/domain/work/run-report.test.ts` — the run watch's `turnClaimedBy` / `endingLeftBy` / `askUnanswered` (the `endingWalkReaders` are the real ones), plus a test that the claim still reads as claimed-and-unanswered whatever prose it carries.\n- `src/entrypoints/machinery/claim_turn.test.ts` — the race check's `raceOutcome`, and the exact body.\n- `src/entrypoints/machinery/reconcile_run_ending.test.ts`, `src/adapters/actions/dispatch.test.ts`, `src/entrypoints/machinery/guard_comment_during_run.test.ts` — the same claim fixture in the reconcile, dispatch-ordering and guard paths.\n\nThe one trap the new prose could have set is covered explicitly: `claim_turn.test.ts` asserts the posted body reads as a claim and as *nothing else* — `requestedAgent` empty, `ending` empty, `isDispatchMarker` false — because a visible line that looked like a `/agent` request or an ending would make the claim a turn-changing event of its own.\n\n## Verification\n\n- `bun run src/entrypoints/machinery/scan_secrets.ts` — exit 0\n- `bun run typecheck` — exit 0\n- `bun run synth` — exit 0\n- `bun run test` — 2037 pass, 0 fail, 5889 expect() calls, 158 files\n\nNo `dist/` artifact, no `version` change, no edit to the generated `.github/atomaton-runtime/**`.\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40165724540)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T05:34:02Z",
+        "event_type": "pr_opened",
+        "id": "pr-350",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T05:38:32Z",
+        "event_type": "issue_comment",
+        "id": 6393998977,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/adapters/actions/dispatch.test.ts b/src/adapters/actions/dispatch.test.ts\nindex 9420316..6877036 100644\n--- a/src/adapters/actions/dispatch.test.ts\n+++ b/src/adapters/actions/dispatch.test.ts\n@@ -138,7 +138,8 @@ const HANDOFF = { id: 7, body: \"<!-- atomaton:ended=handoff answers=0 run=0 -->\"\n const COMMAND = (id: number, agent: string) => ({ id, body: `/${agent}`, user: { type: \"User\" } });\n const CLAIM = (id: number, ask: number, run: number) => ({\n   id,\n-  body: `<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=${ask} run=${run} -->`,\n+  // As the runner writes it: the tags, then the line a person reads (#349).\n+  body: `<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=${ask} run=${run} -->\\nAtomaton: claimed this turn.`,\n   user: { type: \"Bot\" },\n });\n /** The push comment `commit_and_push` posts as the ask the re-validated run claims (#285). */\ndiff --git a/src/domain/work/run-report.test.ts b/src/domain/work/run-report.test.ts\nindex 3792e1a..f03a1a6 100644\n--- a/src/domain/work/run-report.test.ts\n+++ b/src/domain/work/run-report.test.ts\n@@ -78,7 +78,12 @@ describe(\"turnClaimedBy / endingLeftBy\", () => {\n   const RUN = 424242;\n   const OTHER = 999999;\n   const ASK = 55;\n-  const claim = (ask = ASK, run = RUN) => `<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=${ask} run=${run} -->`;\n+  // The claim as the runner writes it: the tags the walk compares by run id, and the\n+  // line a person reads under them (#349). The visible line is part of the fixture so\n+  // that a reader which starts at the body's first line, or takes the whole body for\n+  // the tag, is caught here.\n+  const claim = (ask = ASK, run = RUN) =>\n+    `<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=${ask} run=${run} -->\\nAtomaton: claimed this turn.`;\n   const ended = (verb: string, answers: number, run: number, agent?: string) =>\n     [...(agent ? [`<!-- atomaton:agent=${agent} -->`] : []), `<!-- atomaton:ended=${verb} answers=${answers} run=${run} -->`].join(\"\\n\");\n \n@@ -88,6 +93,13 @@ describe(\"turnClaimedBy / endingLeftBy\", () => {\n     expect(turnClaimedBy(commentsWith(\"just a remark\"), RUN, endingWalkReaders)).toBeUndefined();\n   });\n \n+  test(\"the claim's human-readable line is not read as an ending\", () => {\n+    // The claim is claimed-and-unanswered, whatever prose it carries: a walk that\n+    // mistook the visible line for an ending would silence the watch on a dead run.\n+    expect(endingLeftBy(commentsWith(claim()), RUN, endingWalkReaders)).toBe(false);\n+    expect(askUnanswered(commentsWith(claim()), ASK, endingWalkReaders)).toBe(true);\n+  });\n+\n   test(\"the ending is the run's own, by run id\", () => {\n     expect(endingLeftBy(commentsWith(ended(\"done\", ASK, RUN)), RUN, endingWalkReaders)).toBe(true);\n     expect(endingLeftBy(commentsWith(ended(\"done\", ASK, OTHER)), RUN, endingWalkReaders)).toBe(false);\ndiff --git a/src/entrypoints/machinery/claim_turn.test.ts b/src/entrypoints/machinery/claim_turn.test.ts\nindex d913f18..fd970c9 100644\n--- a/src/entrypoints/machinery/claim_turn.test.ts\n+++ b/src/entrypoints/machinery/claim_turn.test.ts\n@@ -1,5 +1,6 @@\n import { describe, expect, test } from \"bun:test\";\n import { claimCommentBody, raceOutcome } from \"./claim_turn.ts\";\n+import { readers } from \"../../adapters/github/thread.ts\";\n \n /**\n  * The claim's race check (#285): two runs reaching for one ask are separated by\n@@ -81,4 +82,26 @@ describe(\"claimCommentBody\", () => {\n     expect(body).toContain(\"atomaton:llm-context=exclude\");\n     expect(body).toContain(\"<!-- atomaton:took=55 run=7 -->\");\n   });\n+\n+  test(\"the claim also carries a line a person can read, under the tags (#349)\", () => {\n+    // GitHub renders neither tag, so tags alone reached the page as a comment with\n+    // an empty body — the record has to stay and something visible has to join it.\n+    expect(claimCommentBody({ ask: 55, run: 7 })).toBe(\n+      [\n+        \"<!-- atomaton:llm-context=exclude -->\",\n+        \"<!-- atomaton:took=55 run=7 -->\",\n+        \"Atomaton: claimed this turn.\",\n+      ].join(\"\\n\"),\n+    );\n+  });\n+\n+  test(\"the visible line is prose only: it claims the turn and moves nothing else\", () => {\n+    // The trap the line could have set: prose that reads as a request for an agent\n+    // or as an ending would make the claim itself a turn-changing event.\n+    const body = claimCommentBody({ ask: 55, run: 7 });\n+    expect(readers.claim(body)).toEqual({ ask: 55, run: 7 });\n+    expect(readers.requestedAgent(body)).toBe(\"\");\n+    expect(readers.ending(body)).toBe(\"\");\n+    expect(readers.isDispatchMarker(body)).toBe(false);\n+  });\n });\ndiff --git a/src/entrypoints/machinery/claim_turn.ts b/src/entrypoints/machinery/claim_turn.ts\nindex 1440c5b..feee86d 100644\n--- a/src/entrypoints/machinery/claim_turn.ts\n+++ b/src/entrypoints/machinery/claim_turn.ts\n@@ -6,6 +6,7 @@\n  *\n  *     <!-- atomaton:llm-context=exclude -->\n  *     <!-- atomaton:took=<ask comment id> run=<run id> -->\n+ *     Atomaton: claimed this turn.\n  *\n  * — and that comment is the turn's identity from the taking side. The run watch\n  * compares it against the endings by run id (\"did THIS run take a turn\", \"did THIS\n@@ -74,8 +75,20 @@ function listBodies(repo: string, number: number): { id: number; body: string }[\n   return comments;\n }\n \n+/**\n+ * The line a person reads under the two tags.\n+ *\n+ * GitHub renders neither tag, so a body of tags alone reaches the page as an empty\n+ * comment — a run announcing itself looked like a comment somebody had posted and\n+ * left blank (#349). The tags are the record and must stay; this is the part a\n+ * person sees, written in the shape the dispatch marker uses for the same reason.\n+ * It carries no tag and no `/agent` command: prose that read as either would move\n+ * the turn this comment exists to name.\n+ */\n+const CLAIM_NOTICE = \"Atomaton: claimed this turn.\";\n+\n export function claimCommentBody(args: { ask: number; run: number }): string {\n-  return [LLM_CONTEXT_TAG.write(\"exclude\"), TOOK_TAG.write(args)].join(\"\\n\");\n+  return [LLM_CONTEXT_TAG.write(\"exclude\"), TOOK_TAG.write(args), CLAIM_NOTICE].join(\"\\n\");\n }\n \n /**\ndiff --git a/src/entrypoints/machinery/guard_comment_during_run.test.ts b/src/entrypoints/machinery/guard_comment_during_run.test.ts\nindex 182ada2..bfe3eb8 100644\n--- a/src/entrypoints/machinery/guard_comment_during_run.test.ts\n+++ b/src/entrypoints/machinery/guard_comment_during_run.test.ts\n@@ -14,9 +14,10 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from \"./testing/harness.ts\";\n  * A thread whose ball is with an agent, in the #285 wire: a claim is open. The old\n  * fixture was a bare `/engineer` command, whose last event read `asked` — the event\n  * rule the guard no longer uses. An unclaimed command is a run that has not started,\n- * and the guard keeps a person's comment there.\n+ * and the guard keeps a person's comment there. It carries the tags and the line a\n+ * person reads under them (#349), as the runner posts it.\n  */\n-const OPEN_CLAIM = \"<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=55 run=7 -->\";\n+const OPEN_CLAIM = \"<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=55 run=7 -->\\nAtomaton: claimed this turn.\";\n const thread = (body: string, comments: string[]) => [\n   { match: [\"api\", \"/issues/9\", \"--jq\"], stdout: body },\n   { match: [\"api\", \"/issues/9/comments\"], stdout: JSON.stringify(comments.map((b, i) => ({ id: 100 + i, body: b }))) },\n@@ -319,7 +320,7 @@ describe(\"guard_comment_during_run.ts\", () => {\n           env: { GITHUB_REPOSITORY: \"owner/repo\" },\n           rules: [\n             ...threadAs([\n-              [\"<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=55 run=7 -->\", false],\n+              [\"<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=55 run=7 -->\\nAtomaton: claimed this turn.\", false],\n               [\"<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:ended=waiting answers=55 run=7 -->\", false],\n               [body, true],\n             ]),\ndiff --git a/src/entrypoints/machinery/reconcile_run_ending.test.ts b/src/entrypoints/machinery/reconcile_run_ending.test.ts\nindex 110b9e1..1405eae 100644\n--- a/src/entrypoints/machinery/reconcile_run_ending.test.ts\n+++ b/src/entrypoints/machinery/reconcile_run_ending.test.ts\n@@ -39,9 +39,9 @@ function apiComment(body: string, id?: number): Record<string, unknown> {\n   return { id, body, user: { type: \"Bot\" } };\n }\n \n-/** The claim the watched run's runner wrote at start (#285). */\n+/** The claim the watched run's runner wrote at start (#285), including the line a person reads (#349). */\n function claim(ask = ASK, run = RUN_ID): string {\n-  return `<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=${ask} run=${run} -->`;\n+  return `<!-- atomaton:llm-context=exclude -->\\n<!-- atomaton:took=${ask} run=${run} -->\\nAtomaton: claimed this turn.`;\n }\n \n /** An ending in the #285 wire format. */\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-25T05:38:40Z",
+        "event_type": "pr_diff",
+        "id": "pr-350-diff",
+        "layer": "github-context",
+        "sha": "5ed50158",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Merged as reported: `{\"merged\":true,\"closed_issue\":null,\"parent_issue\":349,\"parent_outcome\":\"reinvoked\",\"reinvoked_agent\":\"engineer\"}`.\n\nThe fix is on the branch the pull request targeted; #349 stays open because the merge reinvoked `engineer` on it for the post-merge confirmation. No further review work is outstanding here — the remaining user-visible effect (this repository's own runs still posting the two-tag claim from `.github/atomaton-runtime/scripts/claim_turn.ts:240`) clears only when a release is followed by Atomaton Self Deploy.\n\n\n---\n_Tokens: 914780 total (900516 prompt + 14264 completion, 844800 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/40166136010) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T05:38:40Z",
+        "event_type": "pr_comment",
+        "id": 6393999989,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_nilyg4zkydb42zgiohy6tokx",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -5 && echo === && git status --short && echo === && git branch --show-current\"}"
+          }
+        },
+        {
+          "id": "call_01_dq1tqh8bmq3zfmnw2rur4vcs",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"CLAIM_NOTICE\\\\|claimed this turn\\\" src/entrypoints/machinery/claim_turn.ts .github/atomaton-runtime/scripts/claim_turn.ts 2>/dev/null | head\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179290674988600000000000000000000ffffc0a85422aa0790",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The pull request merged. Now I'm re-invoked on issue #349 to judge whether what merged satisfies the issue. Let me read the issue's acceptance criteria against what is now on the branch.\n\nThe issue asked:\n1. Keep tags, add a human-readable one line: `Atomaton: claimed this turn.` — done in `claimCommentBody`.\n2. Update `src/domain/work/run-report.test.ts` — done.\n3. Confirm readers (thread.ts / run-report.ts, raceOutcome prose-only read) don't break with the visible line — done via fixtures + tests.\n4. Read-after-write confirmation unaffected — untouched.\n5. No extra API call — none.\n\nSo criteria met. I should verify the merged branch content. The branch the PR merged into: for a sub-issue it'd be the parent's branch — but #349 is a root issue (no parent), so it merged into the default branch (main). Let me verify by reading the file on the current checkout (which after merge would be... the checkout I have is the work branch from the previous run? Actually this is a new run on the issue; the workspace is /home/runner/work/atomaton/atomaton — likely checked out at the branch or main). Let me check git log/status and read claim_turn.ts to confirm the visible line is on the merged head.\n\nAlso the reviewer noted: this repo's own runs still post the two-tag claim from `.github/atomaton-runtime/scripts/claim_turn.ts:240` until a release + self-deploy. That's not part of the issue's acceptance criteria — the issue is about the source deliverable. Worth noting in report.\n\nLet me verify the merged head.\n\nAlso consider: should the deployed `.github/atomaton-runtime/scripts/claim_turn.ts` be edited? Conventions say it's generated and replaced wholesale on upgrade; read, don't change. So no.\n\nLet me check what the current checkout state is and confirm the merged content on main.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"0ea6035 Merge pull request #350 from yuma-seno/atomaton/issue-349\\n===\\n===\\nmain\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":322}",
+      "tool_call_id": "call_00_nilyg4zkydb42zgiohy6tokx"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/claim_turn.ts:9: *     Atomaton: claimed this turn.\\nsrc/entrypoints/machinery/claim_turn.ts:88:const CLAIM_NOTICE = \\\"Atomaton: claimed this turn.\\\";\\nsrc/entrypoints/machinery/claim_turn.ts:91:  return [LLM_CONTEXT_TAG.write(\\\"exclude\\\"), TOOK_TAG.write(args), CLAIM_NOTICE].join(\\\"\\\\n\\\");\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":97}",
+      "tool_call_id": "call_01_dq1tqh8bmq3zfmnw2rur4vcs"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_79hg6i1u3eicyeoobe9zc0lc",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"took=.*run=\\\\|llm-context\\\" .github/atomaton-runtime/scripts/claim_turn.ts | head -5 && echo === && bun test src/entrypoints/machinery/claim_turn.test.ts src/domain/work/run-report.test.ts 2>&1 | tail -6\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179290675430100000000000000000000ffffc0a8a577d99d9c",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The merged head (main) carries the change in `src/`. The deployed `.github/atomaton-runtime/scripts/claim_turn.ts` does not have it (correct — it arrives by release + self-deploy).\n\nNow verify the merged state passes tests? The merge commit is on main; tests already passed pre-merge on that exact content. I could re-run the focused tests on main to confirm the merged tree is sound. Cheap: run the 6 test files. Let's do it to be honest about \"what merged satisfies\".\n\nAlso check the deployed runtime copy quickly to state the lag precisely.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"156:var LLM_CONTEXT_TAG = stringTag(\\\"llm-context\\\", \\\"include|exclude\\\");\\n===\\n(pass) claimCommentBody > the visible line is prose only: it claims the turn and moves nothing else [0.23ms]\\n\\n 26 pass\\n 0 fail\\n 58 expect() calls\\nRan 26 tests across 2 files. [14.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":111}",
+      "tool_call_id": "call_00_79hg6i1u3eicyeoobe9zc0lc"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_cwyi848pgd8dgxk4kohxplr2",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"reason\": \"The merged change adds the human-readable line to the claim comment while keeping both tags, and every reader that compares claims by run id is covered by tests that now carry the visible line.\", \"summary\": \"The turn claim now reads as `Atomaton: claimed this turn.` under its two tags, so a run's start no longer reaches a person as an empty comment; the tags are byte-identical to before, so nothing that compares turns by run id changed.\\n\\n**How I know** — the issue's own criteria, against the merged head (`main` at `0ea6035`):\\n\\n- `src/entrypoints/machinery/claim_turn.ts:88` defines `CLAIM_NOTICE = \\\"Atomaton: claimed this turn.\\\"`, and `:91` returns the two tag lines followed by it — the tags are written by the same `LLM_CONTEXT_TAG.write` / `TOOK_TAG.write` calls as before, in the same order.\\n- `src/entrypoints/machinery/claim_turn.test.ts` pins the exact three-line body and, separately, that the body reads as a claim and as nothing else: `readers.claim(body)` is `{ask: 55, run: 7}`, `readers.requestedAgent`/`readers.ending` are `\\\"\\\"`, `readers.isDispatchMarker` is `false` — the prose cannot become a turn-changing event of its own.\\n- Every reader in the path was tested against the real shape rather than the old two-line body: `src/domain/work/run-report.test.ts` (`turnClaimedBy`, `endingLeftBy`, `askUnanswered` through the real `endingWalkReaders`), `claim_turn.test.ts` (`raceOutcome`, which builds its claims from `claimCommentBody` itself, so the #304 prose-only read is exercised with the visible line present), plus `reconcile_run_ending.test.ts`, `dispatch.test.ts` and `guard_comment_during_run.test.ts`.\\n- The read-after-write loop is untouched: `READ_DELAYS_MS` and the visibility check at `claim_turn.ts:149-158` compare comment ids only, and no call was added — the body is still one `POST` to the same endpoint.\\n- The repository's checks on the merged tree: `scan_secrets.ts`, `typecheck` and `synth` exit 0, and `bun run test` reported `2037 pass, 0 fail` across 158 files.\\n\\n**What I could not establish** — that the rendered page looks right on a live run. The comment this repository's own runs post comes from the deployed bundle `.github/atomaton-runtime/scripts/claim_turn.ts`, which still carries the two-tag body; that copy is generated and replaced wholesale, so the visible line reaches live runs only after a release and Atomaton Self Deploy, and I could not observe a claim posted with it. I also did not re-run the full suite on `main` after the merge — only the two directly affected test files (`26 pass, 0 fail`); the full run was on the identical content before the merge.\\n\\n**What happens next** — nothing is needed on #349. The user-visible effect in this repository waits on the normal release path: a release, then Atomaton Self Deploy, brings the new `claim_turn.ts` into `.github/atomaton-runtime/`.\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179290675696700000000000000000000ffffc0a85430e0c65d",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The deployed copy doesn't carry the change (expected — release path).\n\nNow: the issue's acceptance criteria. Let me re-read the issue body from the conversation:\n\n- 直し方: タグ保持 + `Atomaton: claimed this turn.` を足す → done.\n- claimCommentBody が本体 → done.\n- run-report.test.ts 更新 + 可視行が入っても読みが壊れないことをテストで確認（raceOutcome の prose-only 読み #304 も） → done; raceOutcome tests use claimCommentBody-built bodies (so with visible line); fence test uses raw tag.\n- READ_DELAYS_MS は触れない → untouched.\n- 追加の API 呼び出しはしない → none.\n\nAll met. So `request_close_issue`.\n\nOne nuance worth reporting: the guard fixture / dispatch etc. updated. And note that the visible line goes under the tags.\n\nAlso worth verifying: does the issue's claim about \"#149 の実走で報告\" matter — no.\n\nShould I check that `atomaton:took` race check prose-only read with visible line — yes, `raceOutcome` uses readProse over a body that now contains prose. Verified by tests passing (the `body()` helper uses claimCommentBody).\n\nOne more thing to consider: is `dist/` regenerated in this work? No.\n\nLet me write the report and call request_close_issue with reason + summary.\n\nReport format requirements: conclusion first, then How you know (≤5 anchored items), What you could not establish, What happens next. No opening/closing fluff.\n\nWhat I could not establish: whether the rendered GitHub page shows the line — I could not observe a live run posting the new claim, since the runtime copy in `.github/atomaton-runtime/scripts/claim_turn.ts` is still the old bundle and only updates on release + self-deploy. That's honest.\n\nAlso: I did not verify against GitHub's rendering (can't) — the line is plain prose so it renders.\n\nLet me call request_close_issue with reason and summary. The summary is the report body.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #349 is concluded: your reason and summary are on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "call_00_cwyi848pgd8dgxk4kohxplr2"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 1,
-      "snapshot_hash": "4a4403f541089b944619be57c744e7467c1f74318f2d3bb8e5344ac952b80d70",
+      "event_count": 5,
+      "snapshot_hash": "be56d80920f7cbaf23ac63f5db7f58842e6bd472f59e09592ea5970f32313640",
       "version": 1
     }
   },
@@ -1386,6 +1548,23 @@
         }
       },
       "started": "2026-10-25T05:30:13Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T05:39:26Z",
+      "ended_because": "completed",
+      "iterations": 3,
+      "messages": 111,
+      "seconds": 19,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "shell": {
+          "bash": 3
+        }
+      },
+      "started": "2026-10-25T05:39:07Z"
     }
   ]
 }
