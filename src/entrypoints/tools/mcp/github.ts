@@ -16,7 +16,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { gh, ghGraphql, gitRun, nothingToCommit } from "../../../adapters/github/gh.ts";
+import { gh, ghGraphql, gitRun, nothingToCommit, splitConcatenatedJson } from "../../../adapters/github/gh.ts";
 import { getBaseBranch, getLabel } from "../../../adapters/runner/config.ts";
 import { resolveNotify } from "../../../adapters/github/notify.ts";
 import {
@@ -92,6 +92,33 @@ function ghJsonOrThrow<T>(...args: string[]): T {
   const { code, stdout, stderr } = gh(...args);
   if (code) mcpFail(stderr || stdout);
   return stdout ? (JSON.parse(stdout) as T) : (null as T);
+}
+
+/**
+ * A `gh api` LIST read with every page of it, or a tool error.
+ *
+ * `ghJsonOrThrow` cannot read a paginated listing: with `--paginate`, `gh` writes each
+ * page's array back to back, so from the second page on the stream is not one JSON
+ * document and `JSON.parse` throws on it. The tempting way out — leave `--paginate` off
+ * and parse the page that comes — is what `list_pr_review_comments` did, and it hid
+ * every review comment past the first page while still reporting `omitted: 0`. This
+ * tool's contract says a non-zero `omitted` is the reason to believe something was left
+ * out, so the loss was indistinguishable from a short thread.
+ *
+ * `splitConcatenatedJson` is the repository's splitter for exactly this shape; the
+ * flattening below is `ghPaginated`'s. This reads with plain `gh` rather than
+ * `ghPaginated` only to keep this file's failure policy, which is one: a failed read is
+ * a tool error here, never an empty list — an empty review comment list is the answer
+ * that means "nobody commented on this code".
+ */
+function ghJsonPagesOrThrow<T>(...args: string[]): T[] {
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code) mcpFail(stderr || stdout);
+  const flat: T[] = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+    if (Array.isArray(page)) flat.push(...(page as T[]));
+  }
+  return flat;
 }
 
 async function resolveIssueId(number: number): Promise<string> {
@@ -1669,8 +1696,12 @@ function getPrReviews(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
 }
 
 function listPrReviewComments(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const comments =
-    ghJsonOrThrow<unknown[]>(`api`, `repos/${REPO}/pulls/${prContextNumber(a)}/comments`) ?? [];
+  // Every page, and `?per_page=100` so that "every page" is one or two requests: the
+  // cost of this read is the number of requests, not of comments, and the default 30
+  // turns a 200-comment pull request into seven of them.
+  const comments = ghJsonPagesOrThrow<unknown>(
+    "api", `repos/${REPO}/pulls/${prContextNumber(a)}/comments?per_page=100`,
+  );
   // The raw REST review comment carries about thirty fields, including a `user`
   // object of roughly a kilobyte to convey one login and a `diff_hunk` repeating
   // code the caller can read from the diff. What acting on a review comment needs
