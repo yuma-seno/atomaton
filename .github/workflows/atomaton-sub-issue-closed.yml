@@ -86,6 +86,22 @@ jobs:
           CLOSER_TYPE: ${{ github.event.sender.type }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/stop_on_close.ts" --number "${NUMBER}" --closer "${CLOSER}" --closer-type "${CLOSER_TYPE}"
+  strip-turn-labels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Bun
+        with:
+          bun-version: latest
+        uses: oven-sh/setup-bun@v2
+      - name: Take the turn labels off the closed issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_turn_labels.ts" --phase "closed" --number "${NUMBER}"
   prune:
     runs-on: ubuntu-latest
     timeout-minutes: 5
