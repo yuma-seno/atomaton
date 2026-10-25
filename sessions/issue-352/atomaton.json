@@ -1,0 +1,226 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "[session compacted: the 240 earliest messages were replaced by the summary below; the 11 most recent messages after it are verbatim.]\n\n---\n\n## 状態の要約 — issue #352 の実装が完了、コミットと PR 作成が残\n\n**作業内容。** Issue #352: クローズされた PR は `atomaton/waiting-for-person` を保持したままになる（#348 で観測）。エージェントがクローズした場合と人間がクローズした場合の両方でラベルを外す必要がある。issue も同様に確認し、同様であれば修正すること。検証の結果、issue も同様であることが判明した（クローズされた issue #342 はラベルを保持している。#223 の設計判断により、クローズされたノード上では意図的にラベルが維持されていた）。これをエンジニア_ready のリーフとして実装した。修正は完了し、ローカルで検証済み。**未コミット**。残りの作業：ブランチにコミットし、`create_pr` を実行して、レポートを作成すること。\n\n**根本原因（検証済み、推測ではない）。** `applyTurnLabels` を介したすべてのターンラベル書き込みは `src/entrypoints/machinery/lib/turn-labels.ts` に集約されている。クローズイベントのワークフロー（`atomaton-pr-closed.yml`、`atomaton-sub-issue-closed.yml`）は、ラベルには一切反応しない。ランナーのリリースステップは `should_release == 'true' && claimed == 'true'` でゲート制御されており、その終了条件が `handed-off` または `parked` であるためにスキップされる。つまり、自身の PR をマージする（または issue をクローズする）run は、自身のノード上のラベルを剥がすステップに到達しない。これが、マージ後に PR #348 が `atomaton/in-progress` を保持していた原因であり、人がマージした PR #335 / #338 およびクローズされた issue #342 が `waiting-for-person` を保持している原因である（いずれもライブの GitHub 検索で確認済み）。\n\n**デプロイされたもの（15ファイル、すべて `src/`、`docs/`、`tests/` 配下）。**\n- `lib/turn-labels.ts`: `applyTurnLabels` に新しいフェーズ `\"closed\"` が追加された。すべての呼び出しに対して `readTargetState` から一度状態を読み取るようになった（ラベル名を含む 1 回の `gh api` 呼び出し）。ノードがクローズされている場合、他のフェーズは `closed` に変更される（古いフェーズが適用されることはない）。削除処理は、読み取った結果存在が確認されたラベルのみに限定される。状態が読み取れない場合、呼び出し元のフェーズをそのまま維持する（以前の挙動）。これがライトポイントのガードとなり、すべてのインプロセスのクローズパス（`request_close_issue`、`merge_pr` のクローズフォールバック、拒否されたハンドオフ、クラッシュの修正）を、新しい呼び出し側を追加することなくカバーする。\n- `TargetState` (`src/domain/work/closed-target.ts`) にオプションの `labels?: string[]` を追加。`readTargetState` (`src/adapters/github/target-state.ts`) が `parsed.labels[].name` からそれを入力するようになった。\n- `manage_turn_labels.ts` が `--phase closed` を受け入れるようになった。\n- 3つの剥がし（strip）の配線: ランナーの `stripClosedLabelsStep`（`always()`、エンド条件のゲートなし、`src/workflows/atomaton-runner.wac.ts` のリリースステップの後）; `atomaton-pr-closed.wac.ts` の新しい `strip-turn-labels` ジョブ（マージおよび拒否された両方の結果を対象、`if`/`needs` なし）; `atomaton-sub-issue-closed.wac.ts` の `strip-turn-labels` ジョブ。生成された YAML は検証済み: `--phase \"closed\"` が 3つの dist ワークフローすべてに現れている。\n- コメントの更新は、`dispatch_agent.ts`、`reconcile_run_ending.ts`、`request_stop.ts`（既存の `applyTurnLabels` 呼び出し側）に加えられた。`docs/work/how-it-works/the-labels-atomaton-applies.md` の表は、ラベルがクローズ時に消えることを示すように更新された — **ドキュメントには issue 番号への参照を含めないこと**（`tests/contract/adopter-terms.test.ts` で `docs/` 内の `#\\d` を禁止している。ここで1回失敗し、#refs を削除して修正済み）。\n- テスト: `manage_turn_labels.test.ts` は8つのテストで書き直された（`closed` フェーズ、開いているノード上でのフェーズの bending、存在を認識した削除、読み取り不可フォールバック、間違ったフェーズの拒否）。`dispatch_agent.test.ts` の拒否されたハンドオフのテストは、クローズされたターゲット上で `waiting-for-person` の追加が行われないことを検証するようになった。`reconcile_run_ending.test.ts` の `rulesFor` に `state`/`wearing` オプションが追加され、クローズされたノードと空のノードの2つの新しいテストが追加された。`tests/contract/turn-labels.test.ts` に、ランナーの `--phase \"closed\"` ステップが `always()` と一致することを pin する3つ目のテストが追加された。\n\n**検証（測定済み）。** `bun run typecheck` クリーン; `bun run test` **2045 pass / 0 fail** (158ファイル、`synth` を pretest として含む); `git status` は、15の意図的な変更以外はクリーン。\n\n**継続する run がやり直したり、忘れたりしてはならないこと:**\n- `package.json` の `version` は変更しないこと（リリース宣言）。変更していない。\n- `.github/workflows/*` を直接編集しないこと（自動生成される）。すべての変更は `src/workflows/*.wac.ts` にあり、`synth` が生成する。\n- テスト内の fake-gh のラベルフィクスチャは、API シェイプである `[{name: \"...\"}]` オブジェクトでなければならない。プレーンな文字列は黙って何もマッチしない（これでテストが6つ失敗した）。\n- `dist/` は gitignored であるため、dist の再生成のためにコミットするものはない。\n- 現在のブランチを確認していない (`git branch --show-current` は最初のステップであるべき。issue の run は通常 `atomaton/issue-352` 上にいる)。`github` MCP ツール (`create_pr`) を介して PR を開くこと。生の `gh pr create` ではない。\n- 既にクローズされているノード（#335、#338、#342、そして #348 の in-progress）の古いラベルは、この変更によって遡って削除されることはない。PR の本文でそれを認め、ワンオフのクリーンアップは人間次第であると述べること（あるいは、害はないのでそのまま放置する）。\n\n**残りのステップ:** (1) 15のファイルをコミットして push する、(2) 課題（根本原因、#223 からの意図的な反転、ライトポイントのガード + 3つの剥がし、検証結果、古いラベルに関する注意点）を説明する本文とともに `create_pr` を呼び出す、(3) 4部構成の最終レポートを書き、PR がマージ後の判定 run を駆動するので、誰も呼び出さずに終了する。"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_8cvm5li4hbw3vwu3cuzicvtd",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"ls examples/workflows/ 2>/dev/null; grep -rn \\\"strip-turn-labels\\\\|manage_turn_labels\\\" examples/ 2>/dev/null | head -5\"}"
+          }
+        },
+        {
+          "id": "call_0f2hedojdlx9bufwi0qipbsz",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"sed -n '1215,1240p' dist/.github/workflows/atomaton-runner.yml\"}"
+          }
+        }
+      ],
+      "reasoning_content": "All three generated workflows carry the strip. The full suite is green (2045 pass).\n\nNow — a few remaining review items before committing:\n\n1. **The runner strip step's placement in the generated yml** — verify its `if: always()` landed correctly and it sits after the release step. Let me view the generated runner around line 1230.\n\n2. **The `dispatch_pr_validation` / validate path** — hmm, is there any run on PRs whose release uses `type: pr`... the release step passes NUMBER — for a PR run, NUMBER is the PR number ✓.\n\n3. **`merge_tool_packages.ts`** — irrelevant.\n\n4. Double-check `applyTurnLabels`'s with-person flow once more for the ORDER of operations with presence-awareness — there's one subtle behavior change I should sanity-check against `reconcile_run_ending`'s original semantics: previously, with-person ALWAYS attempted remove(inProgress) — warning when absent. Now: skipped when the read says absent, with the read available. The reconcile test \"a node that carried no label still gets the waiting-for-person one\" passes (degrade path: no state rule → unconditional removals preserved ✓ — intentional: when the state can't be read, the removal is still attempted because absent-ness is unknown).\n\n5. One more important review: **the `closed` fixture in dispatch_agent.test.ts now affects the \"a closed target is refused\" test (line 104)** — the state read there answers `{state:\"closed\", labels:[...]}` → refused-closed → no applyTurnLabels (no run-id/ask) → ✓ passes (it did).\n\n6. **`post_result_comment.ts:190`** reads state → issueClosed — unaffected ✓.\n\n7. **examples/** — `examples/workflows/` — do adopter examples include pr-closed/sub-issue-closed copies that should gain the job? The examples are adopter documentation of workflows... let me check if examples pin these workflows (the adopter-terms test checks examples? `examples.test.ts` contract exists). The examples are plain YAML today (\"the adopter examples (kept as plain YAML today, which is a choice someone could revisit)\"). Do the examples carry atomaton-pr-closed.yml? If they mirror the generated workflows, they'd lag until... hmm, the examples are hand-maintained docs. Let me check.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"scheduled-issue.yml\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":108}",
+      "tool_call_id": "call_8cvm5li4hbw3vwu3cuzicvtd"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"        run: |\\n          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/decide_turn_ending.ts\\\" --outcome \\\"${{ steps.atoma.outcome }}\\\" --ended-because \\\"${{ steps.atoma.outputs.ended_because }}\\\" --loop-limit-reached \\\"${{ steps.loop-control.outputs.loop_limit_reached }}\\\" --chain-continues \\\"${{ steps.atoma.outputs.chain_continues }}\\\" --parked \\\"${{ steps.atoma.outputs.parked }}\\\" --directive \\\"${{ steps.atoma.outputs.directive }}\\\" --reported \\\"${{ steps.atoma.outputs.reported }}\\\"\\n        if: always()\\n      - name: 'Move the turn labels: the work hands back to a person'\\n        shell: bash\\n        env:\\n          GH_TOKEN: ${{ github.token }}\\n          NUMBER: ${{ inputs.number }}\\n        run: bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_turn_labels.ts\\\" --phase \\\"with-person\\\" --number \\\"${NUMBER}\\\"\\n        if: always() && steps.turn-ending.outputs.should_release == 'true' && steps.claim.outputs.claimed == 'true'\\n      - name: Take the turn labels off the node if it closed (#352)\\n        shell: bash\\n        env:\\n          GH_TOKEN: ${{ github.token }}\\n          NUMBER: ${{ inputs.number }}\\n        run: bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_turn_labels.ts\\\" --phase \\\"closed\\\" --number \\\"${NUMBER}\\\"\\n        if: always()\\n      - name: Dispatch next agent\\n        shell: bash\\n        env:\\n          GH_TOKEN: ${{ github.token }}\\n          ATOMATON_OPS_LOG: ${{ runner.temp }}/atomaton-run/atomaton_ops.log\\n          DIRECTIVE: ${{ steps.turn-ending.outputs.dispatch_to }}\\n          NUMBER: ${{ inputs.number }}\\n          TYPE: ${{ inputs.type }}\\n          NOTIFY: ${{ steps.notify.outputs.notify }}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":103}",
+      "tool_call_id": "call_0f2hedojdlx9bufwi0qipbsz"
+    },
+    {
+      "role": "assistant",
+      "content": "The wiring landed correctly. Let me review the final state of the core function and the workflow diffs:",
+      "tool_calls": [
+        {
+          "id": "call_mwku8e1fcs6oxtxp7klqxsbt",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"src/entrypoints/machinery/lib/turn-labels.ts\"}"
+          }
+        }
+      ],
+      "reasoning_content": "The generated runner has the strip step in the right position, `if: always()`, after the release step. Examples don't pin these workflows.\n\nOne more consideration — the runner's strip step for the \"closed\" phase calls manage_turn_labels which calls applyTurnLabels — which READS state (placeholder path ✓, GITHUB_REPOSITORY in env ✓ — the step's env has GH_TOKEN + NUMBER; GITHUB_REPOSITORY is ambient in Actions ✓).\n\nNow, let me re-review my full diff once for quality before committing. Let me read the final turn-labels.ts and the wac diffs.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/lib/turn-labels.ts lines 1-106 of 106\n\n1\t/**\n2\t * turn-labels.ts — the two labels that say whose ball a node's turn is, moved together.\n3\t *\n4\t * `atomaton/in-progress` says work is in flight under the node: a run executing, or\n5\t * a turn parked on agents working under it (#208). `atomaton/waiting-for-person`\n6\t * says the turn came back and the machinery is waiting for a person (#223). The two\n7\t * are complementary by construction, which is why one function moves both: a caller\n8\t * that remembered to add one and forgot the other would leave a node wearing both\n9\t * or neither, and neither state is readable.\n10\t *\n11\t * A closed node — an issue closed, a pull request merged or dropped — carries\n12\t * NEITHER (#352). The turn is over, and a label naming who holds it names nobody:\n13\t * a closed issue cannot be replied to through the machinery, so the waiting side\n14\t * reads as a request nobody can act on, and the running side outlives the work it\n15\t * describes. This takes back half of #223's rule — that label deliberately stayed\n16\t * on a closed node as the filter of work that stopped there — because the filter\n17\t * caught the person's eye as a live question on work that was over (#348, #335,\n18\t * #338 on the pull-request side, #342 on the issue side); the thread tells that\n19\t * story instead.\n20\t *\n21\t * The close is enforced here, at the one function every label writer calls, rather\n22\t * than at each caller: a run that merges its own pull request and ends, a hand-off\n23\t * refused because the target closed, the watch healing a run that died after its\n24\t * node closed — all of them arrive here carrying a phase the node has already left.\n25\t * The state is read, not assumed; the writers that run AFTER a close are exactly\n26\t * the ones whose phase knowledge is stale. The readers that name `closed` directly\n27\t * (the close-event strips and the runner's end-of-run strip) make the same read,\n28\t * for a different half: the state names nothing new to them, but it names what the\n29\t * node is wearing, and the removals take only what is on — so a strip that fires\n30\t * on a node with neither label makes no write at all, and the repository's\n31\t * unlabeled closes stay silent.\n32\t *\n33\t * Best effort throughout, like every label write: the thread is the turn's record\n34\t * and the labels are its cache. Every failure is a warning naming what was lost.\n35\t */\n36\timport { gh, ghRead } from \"../../../adapters/github/gh.ts\";\n37\timport { getLabel } from \"../../../adapters/runner/config.ts\";\n38\timport { readTargetState } from \"../../../adapters/github/target-state.ts\";\n39\t\n40\texport type TurnLabelPhase =\n41\t  /** A run took the turn: `in-progress` on, `waiting-for-person` off. */\n42\t  | \"running\"\n43\t  /** The turn came back to a person: `in-progress` off, `waiting-for-person` on. */\n44\t  | \"with-person\"\n45\t  /** The node is closed (#352): both come off, neither goes on. */\n46\t  | \"closed\";\n47\t\n48\texport function applyTurnLabels(phase: TurnLabelPhase, repo: string, number: string): void {\n49\t  const inProgress = getLabel(\"in_progress\");\n50\t  const waitingForPerson = getLabel(\"waiting_for_person\");\n51\t  const edit = (action: \"--add-label\" | \"--remove-label\", label: string) =>\n52\t    gh(\"issue\", \"edit\", number, action, label, ...(repo ? [\"--repo\", repo] : []));\n53\t\n54\t  // Created if missing, so a renamed label or a fresh config still lands. `--repo`\n55\t  // travels with every call: a caller working in one checkout may be applying the\n56\t  // labels to another repository, and a label created in the wrong one makes the\n57\t  // `issue edit` fail as \"label not found\" (the #223 review's third point).\n58\t  const create = (label: string, color: string, description: string) =>\n59\t    gh(\"label\", \"create\", label, \"--force\", \"-c\", color, \"-d\", description, ...(repo ? [\"--repo\", repo] : []));\n60\t\n61\t  // What the node is wearing, from the same read that answers whether it is still\n62\t  // open. A caller that could not read it removes unconditionally, the way every\n63\t  // caller did before #352: a failed read is not an answer, and the release still\n64\t  // has to take its guard down. The window between this read and the removal is\n65\t  // the same best-effort window every label write here has always had.\n66\t  const state = readTargetState(number, repo);\n67\t  const present = state.known ? new Set(state.labels ?? []) : undefined;\n68\t  const remove = (label: string) => {\n69\t    if (present !== undefined && !present.has(label)) return;\n70\t    const removed = edit(\"--remove-label\", label);\n71\t    if (removed.code !== 0) console.error(`::warning::could not remove '${label}' from #${number}`);\n72\t  };\n73\t\n74\t  // A caller that arrived here after the node closed — a release following its own\n75\t  // merge, a refusal aimed at a closed target — has its phase bent to `closed`\n76\t  // (#352). A caller that could not read the state is not told the node is open:\n77\t  // it keeps the phase it brought, the pre-#352 behavior, rather than guessing.\n78\t  let effective = phase;\n79\t  if (phase !== \"closed\") {\n80\t    if (!state.known) {\n81\t      console.error(`::warning::could not read #${number}'s state (${state.why}); applying '${phase}' labels without the closed guard`);\n82\t    } else if (state.state !== \"open\") {\n83\t      console.error(`#${number} is closed; the turn labels come off and neither goes on (#352)`);\n84\t      effective = \"closed\";\n85\t    }\n86\t  }\n87\t\n88\t  if (effective === \"closed\") {\n89\t    remove(waitingForPerson);\n90\t    remove(inProgress);\n91\t    return;\n92\t  }\n93\t\n94\t  if (effective === \"running\") {\n95\t    create(inProgress, \"0366d6\", \"Issue is being worked on by an Atomaton agent\");\n96\t    const added = edit(\"--add-label\", inProgress);\n97\t    if (added.code !== 0) console.error(`::warning::could not add '${inProgress}' to #${number}`);\n98\t    remove(waitingForPerson);\n99\t    return;\n100\t  }\n101\t\n102\t  create(waitingForPerson, \"fbca04\", \"The turn is with a person on this issue or pull request\");\n103\t  remove(inProgress);\n104\t  const added = edit(\"--add-label\", waitingForPerson);\n105\t  if (added.code !== 0) console.error(`::warning::could not add '${waitingForPerson}' to #${number}`);\n106\t}",
+      "tool_call_id": "call_mwku8e1fcs6oxtxp7klqxsbt"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_qv2852a9kvsoqx42ufxnpev3",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"import { gh } from \\\"../../../adapters/github/gh.ts\\\";\\nimport { getLabel } from \\\"../../../adapters/runner/config.ts\\\";\\nimport { readTargetState } from \\\"../../../adapters/github/target-state.ts\\\";\", \"old_string\": \"import { gh, ghRead } from \\\"../../../adapters/github/gh.ts\\\";\\nimport { getLabel } from \\\"../../../adapters/runner/config.ts\\\";\\nimport { readTargetState } from \\\"../../../adapters/github/target-state.ts\\\";\", \"path\": \"src/entrypoints/machinery/lib/turn-labels.ts\"}"
+          }
+        }
+      ],
+      "reasoning_content": "The file looks good. One thing: the header says \"a closed issue cannot be replied to through the machinery\" — hmm, that's about why waiting-for-person on a closed node is wrong. Fine.\n\nAlso `ghRead` import — used ✓ (line 66 via readTargetState — wait, no: I import ghRead but only use readTargetState... line 36: `import { gh, ghRead } from ...` — is ghRead used? Line 66 calls readTargetState, not ghRead directly. ghRead is UNUSED → typecheck passed? tsc doesn't flag unused imports by default (noUnusedLocals off?). Let me check tsconfig... it passed, but cleanliness: remove the unused import. Let me check:",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/lib/turn-labels.ts.",
+      "tool_call_id": "call_qv2852a9kvsoqx42ufxnpev3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_68vbxygbqbuzfzy701ghk6d4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git diff src/workflows/atomaton-pr-closed.wac.ts src/workflows/atomaton-sub-issue-closed.wac.ts | head -150\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"diff --git a/src/workflows/atomaton-pr-closed.wac.ts b/src/workflows/atomaton-pr-closed.wac.ts\\nindex d5a8707..10faa3e 100644\\n--- a/src/workflows/atomaton-pr-closed.wac.ts\\n+++ b/src/workflows/atomaton-pr-closed.wac.ts\\n@@ -11,6 +11,7 @@ import { ref as aggregateSubIssuesRef } from \\\"../entrypoints/machinery/aggregate\\n import { ref as parsePrMetadataRef } from \\\"../entrypoints/machinery/parse_pr_metadata.ts\\\";\\n import { ref as dispatchPostMergeRef } from \\\"../entrypoints/machinery/dispatch_post_merge.ts\\\";\\n import { ref as dispatchRejectedRef } from \\\"../entrypoints/machinery/dispatch_rejected.ts\\\";\\n+import { ref as manageTurnLabelsRef } from \\\"../entrypoints/machinery/manage_turn_labels.ts\\\";\\n import { LLM_CONTEXT_TAG } from \\\"../adapters/github/tags.ts\\\";\\n \\n // Detect what became of a pull request and act on the two things a close can\\n@@ -70,6 +71,8 @@ import { LLM_CONTEXT_TAG } from \\\"../adapters/github/tags.ts\\\";\\n //   dispatch-rejected (NOT merged, and the pull request's head branch is this\\n //          repository's -- the membership gate that keeps a fork's forged body\\n //          from starting anything)\\n+//   strip-turn-labels (BOTH outcomes; no `needs` -- a closed pull request carries\\n+//          neither turn label, whoever closed it, #352)\\n \\n const parseMetadataStep = new TypedOutputsStep(\\n   {\\n@@ -293,6 +296,43 @@ const dispatchRejectedJob = new DefinedJob(\\n   [new ActionsCheckoutV4({}), new SetupBunAction({ name: \\\"Setup Bun\\\" }), rejectedStep],\\n );\\n \\n+/**\\n+ * A clo\\n\\n[745 characters dropped from the middle; 6000 shown]\\n\\nputsStep(\\n+  {\\n+    name: \\\"Take the turn labels off the closed pull request\\\",\\n+    shell: \\\"bash\\\",\\n+    env: {\\n+      GH_TOKEN: \\\"${{ github.token }}\\\",\\n+      PR_NUMBER: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.number),\\n+    },\\n+    run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: \\\"closed\\\", number: \\\"\\\\${PR_NUMBER}\\\" })}\\n+`,\\n+  },\\n+  [] as const,\\n+);\\n+\\n+const stripTurnLabelsJob = new DefinedJob(\\n+  \\\"strip-turn-labels\\\",\\n+  {\\n+    \\\"runs-on\\\": \\\"ubuntu-latest\\\",\\n+    \\\"timeout-minutes\\\": SCRIPT_JOB_TIMEOUT_MINUTES,\\n+    // No `if`, and no `needs`: both outcomes of `closed` carry the labels off,\\n+    // whoever closed it, and the job reads nothing the jobs above produce.\\n+  },\\n+  [new ActionsCheckoutV4({}), new SetupBunAction({ name: \\\"Setup Bun\\\" }), stripTurnLabelsStep],\\n+);\\n+\\n export const atomaPrClosed = new Workflow(\\\"atomaton-pr-closed\\\", {\\n   name: \\\"Atomaton PR Closed\\\",\\n   on: {\\n@@ -387,4 +427,5 @@ PR #\\\\${PR_NUMBER} merged: \\\\${PR_TITLE} (\\\\${PR_URL})\\\"\\n     ],\\n   ),\\n   dispatchRejectedJob,\\n+  stripTurnLabelsJob,\\n ]);\\ndiff --git a/src/workflows/atomaton-sub-issue-closed.wac.ts b/src/workflows/atomaton-sub-issue-closed.wac.ts\\nindex 7732667..97238ce 100644\\n--- a/src/workflows/atomaton-sub-issue-closed.wac.ts\\n+++ b/src/workflows/atomaton-sub-issue-closed.wac.ts\\n@@ -10,6 +10,7 @@ import { ref as dispatchIfSiblingsDoneRef } from \\\"../entrypoints/machinery/dispa\\n import { ref as checkSubIssueClosureRef } from \\\"../entrypoints/machinery/check_sub_issue_closure.ts\\\";\\n import { ref as pruneAtomaDataRef } from \\\"../entrypoints/machinery/prune_atomaton_data.ts\\\";\\n import { ref as stopOnCloseRef } from \\\"../entrypoints/machinery/stop_on_close.ts\\\";\\n+import { ref as manageTurnLabelsRef } from \\\"../entrypoints/machinery/manage_turn_labels.ts\\\";\\n \\n // FALLBACK for manually closed sub-issues.\\n // Primary aggregation happens in atomaton-pr-closed.wac.ts (pull_request_target).\\n@@ -19,6 +20,8 @@ import { ref as stopOnCloseRef } from \\\"../entrypoints/machinery/stop_on_close.ts\\n //   check --> aggregate\\n //   prune            (independent; every closed issue, not only sub-issues)\\n //   stop-run         (independent; a person closing an issue an agent is working on)\\n+//   strip-turn-labels (independent; every closed issue -- a closed node carries\\n+//                     neither turn label, #352)\\n //\\n // `stop-run` rides on this event for the same reason `prune` does: closing is the\\n // moment the question becomes askable, so the trigger and the condition are one thing.\\n@@ -91,6 +94,31 @@ const checkStep = new TypedOutputsStep(\\n   [\\\"is_sub_issue\\\", \\\"parent_number\\\"] as const,\\n );\\n \\n+/**\\n+ * A closed issue carries neither turn label (#352).\\n+ *\\n+ * Independent of `check`, and riding this event for the same reason `prune` does:\\n+ * closing is the moment the question becomes askable. Only a person's close\\n+ * reaches this workflow — GITHUB_TOKEN's own actions raise no event cascade, so an\\n+ * agent closing the issue it is finishing is the runner's end-of-run strip and the\\n+ * write-point guard in `lib/turn-labels.ts` instead — and the label a turn left on\\n+ * it, the `waiting-for-person` of a turn the person held when they decided to\\n+ * close, comes off here rather than riding on the close.\\n+ */\\n+const stripTurnLabelsStep = new TypedOutputsStep(\\n+  {\\n+    name: \\\"Take the turn labels off the closed issue\\\",\\n+    shell: \\\"bash\\\",\\n+    env: {\\n+      GH_TOKEN: \\\"${{ github.token }}\\\",\\n+      NUMBER: githubEvent<IssuesClosedEvent>((e) => e.issue.number),\\n+    },\\n+    run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: \\\"closed\\\", number: \\\"\\\\${NUMBER}\\\" })}\\n+`,\\n+  },\\n+  [] as const,\\n+);\\n+\\n export const atomaSubIssueClosed = new Workflow(\\\"atomaton-sub-issue-closed\\\", {\\n   name: \\\"Atomaton Sub-Issue Closed\\\",\\n   on: {\\n@@ -162,6 +190,14 @@ export const atomaSubIssueClosed = new Workflow(\\\"atomaton-sub-issue-closed\\\", {\\n         },\\n         [new ActionsCheckoutV4({}), new SetupBunAction({ name: \\\"Setup Bun\\\" }), stopOnCloseStep],\\n       ),\\n+      new DefinedJob(\\n+        \\\"strip-turn-labels\\\",\\n+        {\\n+          \\\"runs-on\\\": \\\"ubuntu-latest\\\",\\n+          \\\"timeout-minutes\\\": SCRIPT_JOB_TIMEOUT_MINUTES,\\n+        },\\n+        [new ActionsCheckoutV4({}), new SetupBunAction({ name: \\\"Setup Bun\\\" }), stripTurnLabelsStep],\\n+      ),\\n       new DefinedJob(\\\"prune\\\", { \\\"runs-on\\\": \\\"ubuntu-latest\\\", \\\"timeout-minutes\\\": SCRIPT_JOB_TIMEOUT_MINUTES }, [\\n         new ActionsCheckoutV4({}),\\n         new SetupBunAction({ name: \\\"Setup Bun\\\" }),\\n\",\"stderr\":\"\",\"output_truncated\":true,\"execution_time_ms\":105}",
+      "tool_call_id": "call_68vbxygbqbuzfzy701ghk6d4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_9d0b1nbs3180dt8ds86rg3aq",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun run typecheck 2>&1 | tail -3 && bun run test 2>&1 | tail -4\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "reasoning_content": "The diffs look right. Final verification round: typecheck + full test again (the last full run was before the doc-number fix and the unused-import removal), then commit.\n\nAlso — I should double-check the `.github/workflows` tracked copies: my change does NOT touch them (they update via release + self-deploy — the convention). Confirm git status shows no .github changes ✓ (the earlier git status showed only src/, docs/, tests/ changes ✓).\n\nOne more scope question to close out: the EXISTING stale labels (#335, #338 PRs; #342, #332 issues; #348's in-progress). I cannot strip them from this run (no label-write tool; gh refused in the shell; get_issue is read-only). The PR will name them with the exact cleanup command (`gh issue edit 335 --remove-label atomaton/waiting-for-person`, etc.) for whoever merges — actually, better: the merged fix's close-event jobs cover future closes; the five stale nodes need a one-time manual strip. I'll list them in the PR body.\n\nWait — actually, hmm: could I write a tiny script into the repo for the cleanup? No — one-off cleanup doesn't belong in the deliverable. The person can run five gh commands; I'll put them in the PR.\n\nAlso — the #351 relationship: my write-point guard does NOT fix #351 (create_pr not parking → the OPEN issue gets waiting-for-person while its PR runs — that's a different defect about an open node). The PR will say that #351 remains open and untouched.\n\nLet me run the final full check: typecheck + test.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n 2045 pass\\n 0 fail\\n 5928 expect() calls\\nRan 2045 tests across 158 files. [70.49s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":74401}",
+      "tool_call_id": "call_9d0b1nbs3180dt8ds86rg3aq"
+    },
+    {
+      "role": "assistant",
+      "content": "クリーン：2045個のテストがパス、typecheckもエラーなし。コミットしてPRを作成します：",
+      "tool_calls": [
+        {
+          "id": "call_662d102b05be4ab198e61bae",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git branch --show-current && git add -A && git commit -m \\\"A closed node carries neither turn label\\n\\nThe turn labels — atomaton/in-progress and atomaton/waiting-for-person —\\nsaid whose ball a node's turn was. On a closed node they say it about a\\nturn that is over: a closed pull request merged by its own run kept\\natomaton/in-progress because the runner's release was gated behind\\nhanded-off/parked, and a node a person closed kept waiting-for-person —\\nhalf of #223's rule, read as a live question on finished work.\\n\\nThe close is now enforced at the write point: applyTurnLabels reads the\\ntarget's state (one gh api call, labels included) and bends every other\\nphase to closed on a closed node, so every in-process close path — the\\nrelease after its own merge, a hand-off refused to a closed target, the\\nwatch healing a run that died after its node closed — strips without a\\nnew caller. Strips take only labels the read saw, so closes of nodes\\nwearing neither label stay silent. A read that cannot be answered keeps\\nthe pre-existing unconditional behavior.\\n\\nTwo close-event strips join it — atomaton-pr-closed (both outcomes) and\\natomaton-sub-issue-closed — for the closes no run is present for, and\\nthe runner gains an end-of-run strip with no ending-condition gate.\\nThe labels-atomaton-applies doc names the new shape.\\\"\"}"
+          }
+        }
+      ],
+      "reasoning_content": "2045 pass, 0 fail, typecheck clean. Now commit and push, then create the PR.\n\nCommit message: describe the change. Then create_pr with a thorough body.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool blocked by hook '/home/runner/work/_temp/atomaton-machinery/.github/atomaton-runtime/tools/hooks/shell_guard.ts': Command blocked by shell guard: Raw 'git add' is disabled. Use the github tools for Git mutations and branch synchronization. (attempted: git branch --show-current && git add -A && git commit -m \"A closed node carries neither turn label\n\nThe turn labels — at)",
+      "tool_call_id": "call_662d102b05be4ab198e61bae"
+    },
+    {
+      "role": "assistant",
+      "content": "The shell guard blocks raw git mutations — using the dedicated tool:",
+      "tool_calls": [
+        {
+          "id": "call_60c0f4b8e93d4898a020b5e7",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\":\"A closed node carries neither turn label\\n\\nThe turn labels — atomaton/in-progress and atomaton/waiting-for-person —\\nsaid whose ball a node's turn was. On a closed node they say it about a\\nturn that is over: a closed pull request merged by its own run kept\\natomaton/in-progress because the runner's release was gated behind\\nhanded-off/parked, and a node a person closed kept waiting-for-person —\\nhalf of #223's rule, read as a live question on finished work.\\n\\nThe close is now enforced at the write point: applyTurnLabels reads the\\ntarget's state (one gh api call, labels included) and bends every other\\nphase to closed on a closed node, so every in-process close path — the\\nrelease after its own merge, a hand-off refused to a closed target, the\\nwatch healing a run that died after its node closed — strips without a\\nnew caller. Strips take only labels the read saw, so closes of nodes\\nwearing neither label stay silent. A read that cannot be answered keeps\\nthe pre-existing unconditional behavior.\\n\\nTwo close-event strips join it — atomaton-pr-closed (both outcomes) and\\natomaton-sub-issue-closed — for the closes no run is present for, and\\nthe runner gains an end-of-run strip with no ending-condition gate.\\nThe labels-atomaton-applies doc names the new shape.\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Right — `git add`/`git commit` are blocked by the shell guard; use the `commit_and_push` tool.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "call_60c0f4b8e93d4898a020b5e7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_8816cc575fc54a8f957bdeb0",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"reviewer\":\"reviewer\",\"title\":\"A closed node carries neither turn label\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":358,\"url\":\"https://github.com/yuma-seno/atomaton/pull/358\",\"base\":\"\",\"validation_dispatched\":true}",
+      "tool_call_id": "call_8816cc575fc54a8f957bdeb0"
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "agent": "atomaton",
+      "event_count": 2,
+      "snapshot_hash": "6d63b041eab40d4e7eb68750003691f2fd1649ec87c3801b594522d61b6743e9",
+      "version": 1
+    }
+  },
+  "atoma_runs": [
+    {
+      "compactions": 1,
+      "ended": "2026-10-25T06:09:39Z",
+      "ended_because": "completed",
+      "iterations": 112,
+      "messages": 18,
+      "seconds": 1631,
+      "server_calls": {
+        "files": {
+          "edit": 30,
+          "grep": 24,
+          "list": 3,
+          "read": 38,
+          "write": 4
+        },
+        "github": {
+          "commit_and_push": 1,
+          "create_pr": 1,
+          "get_issue": 3,
+          "get_issue_comments": 3
+        },
+        "search": {
+          "search_code": 2,
+          "search_issues": 1
+        },
+        "shell": {
+          "bash": 24
+        },
+        "web": {
+          "fetch": 6
+        }
+      },
+      "started": "2026-10-25T05:42:28Z"
+    }
+  ]
+}
