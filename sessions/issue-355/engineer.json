@@ -893,7 +893,7 @@
     },
     {
       "role": "user",
-      "content": "PR #378: hermeticEnv: drop AGENT and GITHUB_RUN_ID so body assertions stop depending on who ran the suite\n**Labels:** atomaton/in-progress\n**Linked Issue:** #355\n\n/reviewer\n\nPart of #355\n## What changed\n\n`hermeticEnv()` in `src/entrypoints/machinery/testing/harness.ts` now drops `AGENT` and `GITHUB_RUN_ID` alongside `TYPE`/`NUMBER`/`NOTIFY`. Both are the identity of the run executing the suite, and a spawned MCP server that inherits them stamps them onto every comment body it posts (`atomaton:agent=`, `run=`), so an assertion about a body depends on which agent ran the suite. A test that wants either declares it; the caller's env is still spread after `hermeticEnv()`, so an explicit value wins.\n\n`tests/contract/test-hermetic-env.test.ts` gains two tests:\n\n- **the ratchet** — decoys are put in the test's own `process.env` (so the answer does not depend on whether CI or an agent is running it), and the env `hermeticEnv()` returns must carry neither. Confirmed red against the old exclusion list: it returned `AGENT: \"zzdecoyagent\"` and `GITHUB_RUN_ID: \"999999999\"`. It also pins the other half — `{ ...hermeticEnv(), AGENT: \"engineer\" }` keeps `engineer`.\n- **the behavioural guard the issue asked for** — `src/entrypoints/tools/mcp/mcp.test.ts` (where the leak was measured) is run in a child process with the run's identity faked (`AGENT=zzdecoyagent GITHUB_RUN_ID=999999999`) and must stay green.\n\n## Verification\n\nThe sweep the issue asked for first: the whole suite with the run's identity faked, before the code change.\n\n| environment | result |\n| --- | --- |\n| `AGENT=zzdecoyagent GITHUB_RUN_ID=999999999 bun run test`, old `hermeticEnv` | 2103 pass, 0 fail |\n| `AGENT=engineer bun run test` (an agent's run), new | 2105 pass, 0 fail |\n| `env -u AGENT -u GITHUB_RUN_ID bun run test` (CI's shape), new | 2105 pass, 0 fail |\n\nSo no existing test was relying on the inherited value — the exposure was that a body assertion *could* read it, which is what the ratchet now prevents. `bun run lint` (`tsc --noEmit` + synth) exits 0; `dist/**` is generated and untracked, and the diff is the two files above.\n\n<details><summary>Why the suite-level decoy test is a guard and not the ratchet</summary>\n\nMeasured against the old `hermeticEnv()`: `bun test src/entrypoints/tools/mcp/mcp.test.ts` with `AGENT=zzdecoyagent GITHUB_RUN_ID=999999999` passes (12.5s). Every existing body assertion in that file is tolerant of extra tags — it uses `toContain` and the thread readers — so the decoy alone cannot fail on the defect. The unit assertion is the half that does, and it is kept first for that reason.\n\n</details>\n\n## Not in this change\n\n`GITHUB_RUN_ID` also existing in CI is why it looked like context rather than a discrepancy. It is not: its value differs per CI run, so it was never the fixed value a fixture needs, and stripping it makes both environments agree on \"absent unless declared\".\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40184337183)_\n",
+      "content": "PR #378: hermeticEnv: drop AGENT and GITHUB_RUN_ID so body assertions stop depending on who ran the suite\n**Linked Issue:** #355\n\n/reviewer\n\nPart of #355\n## What changed\n\n`hermeticEnv()` in `src/entrypoints/machinery/testing/harness.ts` now drops `AGENT` and `GITHUB_RUN_ID` alongside `TYPE`/`NUMBER`/`NOTIFY`. Both are the identity of the run executing the suite, and a spawned MCP server that inherits them stamps them onto every comment body it posts (`atomaton:agent=`, `run=`), so an assertion about a body depends on which agent ran the suite. A test that wants either declares it; the caller's env is still spread after `hermeticEnv()`, so an explicit value wins.\n\n`tests/contract/test-hermetic-env.test.ts` gains two tests:\n\n- **the ratchet** — decoys are put in the test's own `process.env` (so the answer does not depend on whether CI or an agent is running it), and the env `hermeticEnv()` returns must carry neither. Confirmed red against the old exclusion list: it returned `AGENT: \"zzdecoyagent\"` and `GITHUB_RUN_ID: \"999999999\"`. It also pins the other half — `{ ...hermeticEnv(), AGENT: \"engineer\" }` keeps `engineer`.\n- **the behavioural guard the issue asked for** — `src/entrypoints/tools/mcp/mcp.test.ts` (where the leak was measured) is run in a child process with the run's identity faked (`AGENT=zzdecoyagent GITHUB_RUN_ID=999999999`) and must stay green.\n\n## Verification\n\nThe sweep the issue asked for first: the whole suite with the run's identity faked, before the code change.\n\n| environment | result |\n| --- | --- |\n| `AGENT=zzdecoyagent GITHUB_RUN_ID=999999999 bun run test`, old `hermeticEnv` | 2103 pass, 0 fail |\n| `AGENT=engineer bun run test` (an agent's run), new | 2105 pass, 0 fail |\n| `env -u AGENT -u GITHUB_RUN_ID bun run test` (CI's shape), new | 2105 pass, 0 fail |\n\nSo no existing test was relying on the inherited value — the exposure was that a body assertion *could* read it, which is what the ratchet now prevents. `bun run lint` (`tsc --noEmit` + synth) exits 0; `dist/**` is generated and untracked, and the diff is the two files above.\n\n<details><summary>Why the suite-level decoy test is a guard and not the ratchet</summary>\n\nMeasured against the old `hermeticEnv()`: `bun test src/entrypoints/tools/mcp/mcp.test.ts` with `AGENT=zzdecoyagent GITHUB_RUN_ID=999999999` passes (12.5s). Every existing body assertion in that file is tolerant of extra tags — it uses `toContain` and the thread readers — so the decoy alone cannot fail on the defect. The unit assertion is the half that does, and it is kept first for that reason.\n\n</details>\n\n## Not in this change\n\n`GITHUB_RUN_ID` also existing in CI is why it looked like context rather than a discrepancy. It is not: its value differs per CI run, so it was never the fixed value a fixture needs, and stripping it makes both environments agree on \"absent unless declared\".\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40184337183)_\n",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-10-25T10:28:05Z",
@@ -920,7 +920,7 @@
       "content": "```diff\ndiff --git a/src/entrypoints/machinery/testing/harness.ts b/src/entrypoints/machinery/testing/harness.ts\nindex d4c00e63..dcd2c9ea 100644\n--- a/src/entrypoints/machinery/testing/harness.ts\n+++ b/src/entrypoints/machinery/testing/harness.ts\n@@ -59,11 +59,21 @@ export interface RunWithFakeGhResult {\n  * its own. The run that found this spent its remaining iterations hunting one of the\n  * phantom failures and never finished the task.\n  *\n+ * `AGENT` and `GITHUB_RUN_ID` are the same gap seen from the other side: they are the\n+ * identity of the run that is executing the suite. The runner exports `AGENT` and\n+ * Actions supplies `GITHUB_RUN_ID`, so a test that spawns a server without declaring\n+ * them posts comment bodies carrying `atomaton:agent=<whoever ran the suite>` and\n+ * `run=<that run's id>` -- a body assertion that passes in one agent's run and fails\n+ * in another, which is a suite whose result depends on who ran it. CI has a\n+ * `GITHUB_RUN_ID` of its own, but a different one every run, so \"what CI has always\n+ * tested\" is not the fixed value a fixture needs: both are removed and a test that\n+ * wants either declares it. #355 measured the leak.\n+ *\n  * Only those variables are removed, and deliberately not `GITHUB_REPOSITORY` or the\n- * tokens: those exist in CI too, so they are not the discrepancy, and taking them\n- * away would change what CI has been testing all along. A test that wants any of\n- * these declares it, and an explicit value still wins -- callers spread their own\n- * `env` after this.\n+ * tokens: those are the same value in CI and in a run, so they are not the\n+ * discrepancy, and taking them away would change what CI has been testing all along.\n+ * A test that wants any of these declares it, and an explicit value still wins --\n+ * callers spread their own `env` after this.\n  *\n  * Every call site is the thing that decays -- eleven files that spawn a script were\n  * still spreading `process.env` when this was written -- so\n@@ -74,7 +84,7 @@ export interface RunWithFakeGhResult {\n export function hermeticEnv(): NodeJS.ProcessEnv {\n   const out: NodeJS.ProcessEnv = {};\n   for (const [key, value] of Object.entries(process.env)) {\n-    if (key.startsWith(\"ATOMA_\") || key.startsWith(\"ATOMATON_\") || key === \"NUMBER\" || key === \"TYPE\" || key === \"NOTIFY\" || key.startsWith(\"FAKE_GH_\")) continue;\n+    if (key.startsWith(\"ATOMA_\") || key.startsWith(\"ATOMATON_\") || key === \"NUMBER\" || key === \"TYPE\" || key === \"NOTIFY\" || key === \"AGENT\" || key === \"GITHUB_RUN_ID\" || key.startsWith(\"FAKE_GH_\")) continue;\n     // `git` finds its repository through these, and they OVERRIDE `cwd`: a child started\n     // with `cwd: tempDir` and `GIT_DIR` set runs every `git` command against `GIT_DIR`,\n     // not the temp dir. A test that reconstructs another branch's tree and runs the\ndiff --git a/tests/contract/test-hermetic-env.test.ts b/tests/contract/test-hermetic-env.test.ts\nindex eff46837..99b86cde 100644\n--- a/tests/contract/test-hermetic-env.test.ts\n+++ b/tests/contract/test-hermetic-env.test.ts\n@@ -23,6 +23,17 @@\n  * machinery-root test beside this one exists for a variable spelled by hand in a\n  * second place -- so this is the ratchet rather than the repair.\n  *\n+ * ## The run's identity, which #355 added\n+ *\n+ * The variables above change *where a child writes*; `AGENT` and `GITHUB_RUN_ID`\n+ * change *what it writes*. Both are the identity of the run executing the suite: a\n+ * spawned server inherits them, stamps them onto the comment bodies it posts as\n+ * `atomaton:agent=` and `run=`, and a body assertion then holds or fails depending on\n+ * which agent happened to run the suite. `AGENT` does not exist in CI at all, so the\n+ * suite there is green either way and the difference only ever shows up in a run --\n+ * which is the same \"red for a reason the change did not cause\" as above, one layer\n+ * further in.\n+ *\n  * ## What this can see, and what it cannot\n  *\n  * A `.test.ts` file that names `bun` as a spawn target must call `hermeticEnv()`\n@@ -138,3 +149,71 @@ describe(\"a test that spawns a script\", () => {\n     }\n   }, 90_000);\n });\n+\n+describe(\"a test that spawns a server\", () => {\n+  /**\n+   * The ratchet for #355, and the half that fails on the code as it was.\n+   *\n+   * The decoys are set here rather than inherited, so this test gives the same answer\n+   * in CI (where neither variable exists) and in an agent's run (where both do): the\n+   * environment the parent has is faked, not read. Before `hermeticEnv()` dropped\n+   * these two, `AGENT` came back as `zzdecoyagent` and the run id as `999999999`,\n+   * which is what a spawned server would then have stamped onto every comment body.\n+   *\n+   * The explicit-value-wins half is asserted beside it because it is the other side of\n+   * the same contract: `create_pr`'s tests declare `AGENT` on purpose, and a fix that\n+   * made a declaration impossible would be a different bug.\n+   */\n+  test(\"does not hand it the run's own AGENT or GITHUB_RUN_ID\", () => {\n+    const saved = { AGENT: process.env.AGENT, GITHUB_RUN_ID: process.env.GITHUB_RUN_ID };\n+    process.env.AGENT = \"zzdecoyagent\";\n+    process.env.GITHUB_RUN_ID = \"999999999\";\n+    try {\n+      const env = hermeticEnv();\n+      expect(\n+        { AGENT: env.AGENT, GITHUB_RUN_ID: env.GITHUB_RUN_ID },\n+        \"a spawned server that inherits these stamps the run's agent and run id onto every comment it \" +\n+          \"posts, so a body assertion depends on which agent ran the suite\",\n+      ).toEqual({ AGENT: undefined, GITHUB_RUN_ID: undefined });\n+      expect(\n+        { ...env, AGENT: \"engineer\", GITHUB_RUN_ID: \"42\" },\n+        \"a test that wants either declares it; the caller's env is spread after this one and must win\",\n+      ).toMatchObject({ AGENT: \"engineer\", GITHUB_RUN_ID: \"42\" });\n+    } finally {\n+      for (const [key, value] of Object.entries(saved)) {\n+        if (value === undefined) delete process.env[key];\n+        else process.env[key] = value;\n+      }\n+    }\n+  });\n+\n+  /**\n+   * The behavioural half: the suite whose assertions are about comment bodies gives\n+   * the same answer when the run's identity is faked.\n+   *\n+   * `mcp.test.ts` is where #355 measured the leak -- a `launch_sub_agent` test\n+   * declaring only `NUMBER` still posted `agent=engineer` and the run's own\n+   * `run=40166802492` -- so it is the file that has to stay green under a decoy rather\n+   * than an abstract probe. The decoy differs from every value the file declares, so a\n+   * test that reads the run's identity instead of its own fixture shows up here.\n+   *\n+   * Why this file and not the whole suite: `bun run test` is minutes, and every file\n+   * that spawns a server goes through the same `hermeticEnv()` call the ratchet above\n+   * pins. What this can see is that no assertion in this file depends on the identity\n+   * being whatever the parent had; what it cannot see is a body assertion written in a\n+   * file that does not spawn `bun` at all.\n+   */\n+  test(\"the suite that asserts comment bodies stays green with the run's AGENT faked\", () => {\n+    const r = spawnSync(\"bun\", [\"test\", join(process.cwd(), \"src/entrypoints/tools/mcp/mcp.test.ts\")], {\n+      encoding: \"utf8\",\n+      env: { ...hermeticEnv(), AGENT: \"zzdecoyagent\", GITHUB_RUN_ID: \"999999999\" },\n+      timeout: 120_000,\n+    });\n+    expect(\n+      r.status,\n+      `mcp.test.ts is red when the suite is run by an agent whose name is not the one a fixture names, ` +\n+        `so its assertions are reading the environment rather than their own env:\\n${r.stdout}\\n${r.stderr}`,\n+    ).toBe(0);\n+  }, 180_000);\n+});\n+\n```",
       "atoma_metadata": {
         "author": "github",
-        "created_at": "2026-10-25T10:33:41Z",
+        "created_at": "2026-10-25T10:33:55Z",
         "event_type": "pr_diff",
         "id": "pr-378-diff",
         "layer": "github-context",
@@ -1519,13 +1519,207 @@
       "role": "tool",
       "content": "{\"number\":379,\"url\":\"https://github.com/yuma-seno/atomaton/pull/379\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_00_exlfz7fxr194nj9kb4thzrxk"
+    },
+    {
+      "role": "user",
+      "content": "PR #379: Make the #355 hermetic-env guard runnable from a fresh checkout, and assert absence of AGENT/GITHUB_RUN_ID\n**Labels:** atomaton/in-progress\n**Linked Issue:** #355\n\n/reviewer\n\nPart of #355\nFollow-up to the merged #355 work: the guard it added was red when the file was run on its own, and the ratchet's assertion was weaker than what it meant.\n\n## What changed\n\nBoth edits are in `tests/contract/test-hermetic-env.test.ts`; no source change.\n\n1. **The behavioural guard runs from a fresh checkout.** It spawned all of `src/entrypoints/tools/mcp/mcp.test.ts`, whose delegate tests read `dist/.github/atomaton/delegates/delegates.yaml` — a file only `bun run synth` (the suite's `pretest`) writes. Under `bun run test` that file exists; on a fresh checkout running the contract file directly, it does not, and the delegate sub-run exits 2:\n\n   ```\n   error: delegate exited 2: [atomaton-delegate] ... dist/.github/atomaton/delegates/delegates.yaml is not a valid YAML: ENOENT: no such file or directory\n   ```\n\n   That is a red for a reason the change did not cause — the exact failure class this file exists to prevent. The child is now narrowed with `-t 'launch_sub_agent|create_pr'`: the two tools that post a comment body, which is the surface #355 measured. Nothing about the identity check is given up; the dependency and the cost are.\n\n2. **The unit ratchet asserts absence, not `undefined`.** It compared `{ AGENT: env.AGENT }` against `{ AGENT: undefined }`, which cannot tell a missing key from one set to `undefined`. It now filters `Object.keys(env)`, so the key must be absent. The reviewer of #378 noted this; the comment records the measurement that made it safe but not visible — Bun drops an `undefined` env value, so a child would not have seen the leak either way, which is precisely why the assertion should not lean on the runtime.\n\n## Verification\n\n| command | before this change | after |\n| --- | --- | --- |\n| `bun test tests/contract/test-hermetic-env.test.ts`, fresh checkout (no `dist/`) | 4 pass, 1 fail — delegate.yaml ENOENT, 12.9s | 5 pass, 0 fail, 2.7s |\n| `bun run test` | 2108 pass, 0 fail | 2108 pass, 0 fail |\n| `bun run lint` (`tsc --noEmit` + synth) | 0 | 0 |\n\nThe ratchet is still red on the pre-#355 exclusion list: reverting the two exclusions from `src/entrypoints/machinery/testing/harness.ts` makes it fail with `[\"AGENT\", \"GITHUB_RUN_ID\"]` received against `[]` expected, at `tests/contract/test-hermetic-env.test.ts:183`.\n\nThe decoy environment is unchanged (`AGENT=zzdecoyagent GITHUB_RUN_ID=999999999`), and `--test-name-pattern` filtering still loads the file's top level, so the server spawns and their `hermeticEnv()` call sites are exercised as before.\n\n<details><summary>The judgement on what #378 merged</summary>\n\n`hermeticEnv()` now drops `AGENT` and `GITHUB_RUN_ID` (`src/entrypoints/machinery/testing/harness.ts:87`) and every spawn helper in `harness.ts` goes through it — that half of #355 is complete and correct. What was not met is the second acceptance line as a *stable* guard: \"run の AGENT を偽装した suite が緑のまま\" held only under `bun run test`, and was red under a direct run. Two files, one test each; no source change.\n\n</details>\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40185273047)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T10:38:16Z",
+        "event_type": "pr_opened",
+        "id": "pr-379",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T10:42:46Z",
+        "event_type": "issue_comment",
+        "id": 6396637771,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/tests/contract/test-hermetic-env.test.ts b/tests/contract/test-hermetic-env.test.ts\nindex 99b86cd..09ecb3e 100644\n--- a/tests/contract/test-hermetic-env.test.ts\n+++ b/tests/contract/test-hermetic-env.test.ts\n@@ -170,11 +170,17 @@ describe(\"a test that spawns a server\", () => {\n     process.env.GITHUB_RUN_ID = \"999999999\";\n     try {\n       const env = hermeticEnv();\n+      // The key has to be ABSENT, not present-and-undefined: an `undefined` value reads as equal to\n+      // an absent one, so `{ AGENT: env.AGENT }` compared against `{ AGENT: undefined }` would pass\n+      // a version of this that assigned `undefined` instead of skipping the key, while reading as if\n+      // the run's identity were still being handed over. What a child does with an `undefined` env\n+      // value is the runtime's business -- measured on this one: Bun drops the key -- which is\n+      // exactly why this assertion should not depend on it either way.\n       expect(\n-        { AGENT: env.AGENT, GITHUB_RUN_ID: env.GITHUB_RUN_ID },\n+        Object.keys(env).filter((key) => key === \"AGENT\" || key === \"GITHUB_RUN_ID\"),\n         \"a spawned server that inherits these stamps the run's agent and run id onto every comment it \" +\n           \"posts, so a body assertion depends on which agent ran the suite\",\n-      ).toEqual({ AGENT: undefined, GITHUB_RUN_ID: undefined });\n+      ).toEqual([]);\n       expect(\n         { ...env, AGENT: \"engineer\", GITHUB_RUN_ID: \"42\" },\n         \"a test that wants either declares it; the caller's env is spread after this one and must win\",\n@@ -188,8 +194,8 @@ describe(\"a test that spawns a server\", () => {\n   });\n \n   /**\n-   * The behavioural half: the suite whose assertions are about comment bodies gives\n-   * the same answer when the run's identity is faked.\n+   * The behavioural half: the tests whose assertions are about comment bodies give the\n+   * same answer when the run's identity is faked.\n    *\n    * `mcp.test.ts` is where #355 measured the leak -- a `launch_sub_agent` test\n    * declaring only `NUMBER` still posted `agent=engineer` and the run's own\n@@ -197,23 +203,30 @@ describe(\"a test that spawns a server\", () => {\n    * than an abstract probe. The decoy differs from every value the file declares, so a\n    * test that reads the run's identity instead of its own fixture shows up here.\n    *\n-   * Why this file and not the whole suite: `bun run test` is minutes, and every file\n-   * that spawns a server goes through the same `hermeticEnv()` call the ratchet above\n-   * pins. What this can see is that no assertion in this file depends on the identity\n-   * being whatever the parent had; what it cannot see is a body assertion written in a\n-   * file that does not spawn `bun` at all.\n+   * Narrowed to the two tools that post a comment body: `launch_sub_agent` and\n+   * `create_pr`. The whole file does not run on a fresh checkout -- its delegate tests\n+   * read `dist/.github/atomaton/delegates/delegates.yaml`, which only `bun run synth`\n+   * (the suite's `pretest`) writes -- so running all of it here would make this file\n+   * red for a reason that has nothing to do with the run's identity, and cost 12.6s\n+   * instead of 2.6s. What this can see is a body assertion in either of those two\n+   * tools; what it cannot see is a body assertion in a file that spawns no server.\n    */\n-  test(\"the suite that asserts comment bodies stays green with the run's AGENT faked\", () => {\n-    const r = spawnSync(\"bun\", [\"test\", join(process.cwd(), \"src/entrypoints/tools/mcp/mcp.test.ts\")], {\n-      encoding: \"utf8\",\n-      env: { ...hermeticEnv(), AGENT: \"zzdecoyagent\", GITHUB_RUN_ID: \"999999999\" },\n-      timeout: 120_000,\n-    });\n+  test(\"the tests that post comment bodies stay green with the run's AGENT faked\", () => {\n+    const r = spawnSync(\n+      \"bun\",\n+      [\"test\", join(process.cwd(), \"src/entrypoints/tools/mcp/mcp.test.ts\"), \"-t\", \"launch_sub_agent|create_pr\"],\n+      {\n+        encoding: \"utf8\",\n+        env: { ...hermeticEnv(), AGENT: \"zzdecoyagent\", GITHUB_RUN_ID: \"999999999\" },\n+        timeout: 60_000,\n+      },\n+    );\n     expect(\n       r.status,\n-      `mcp.test.ts is red when the suite is run by an agent whose name is not the one a fixture names, ` +\n-        `so its assertions are reading the environment rather than their own env:\\n${r.stdout}\\n${r.stderr}`,\n+      `the launch_sub_agent and create_pr tests are red when the suite is run by an agent whose name is ` +\n+        `not the one a fixture names, so their assertions are reading the environment rather than their ` +\n+        `own env:\\n${r.stdout}\\n${r.stderr}`,\n     ).toBe(0);\n-  }, 180_000);\n+  }, 90_000);\n });\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-25T10:43:02Z",
+        "event_type": "pr_diff",
+        "id": "pr-379-diff",
+        "layer": "github-context",
+        "sha": "a16aa5cf",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "#379 merged into `main`. Both edits hold: the guard now runs from a fresh checkout, and the ratchet asserts the key is absent rather than merely `undefined`. Against #355's acceptance lines, all are met — with the sweep criterion resting on the author's measurements rather than my own, since this run has no shell.\n\n**How I know**\n\n- The narrowing is not a silent hole: `tests/contract/test-hermetic-env.test.ts:217` filters the child to `launch_sub_agent|create_pr`, and those names really exist in the file — `src/entrypoints/tools/mcp/mcp.test.ts:2762` is `launch_sub_agent's dispatch comment ends the turn as \\`waiting\\``, the very test whose body #355 measured (it declares only `NUMBER: \"3\"` at `:2780`), and the `create_pr …` tests start at `:275`. Bun matches the pattern against the concatenated describe + test name (`node_modules/bun-types/docs/test/discovery.mdx:62`), so a describe-scoped name is covered too.\n- The absence assertion is genuine: `Object.keys(env).filter((key) => key === \"AGENT\" || key === \"GITHUB_RUN_ID\")` must equal `[]` (`tests/contract/test-hermetic-env.test.ts:179`–`:183`), which fails on a key present with any value, including the decoys it sets at `:169`.\n- Criterion \"hermeticEnv drops both\" was already delivered by #378 and is untouched here (`src/entrypoints/machinery/testing/harness.ts:87`); \"declared values win\" still holds because every helper spreads the caller's env after it (`harness.ts:122`, `harness.ts:219`, `mcp.test.ts:51`), and the create_pr body test declares `AGENT: \"engineer\"` at `mcp.test.ts:349`.\n- The suite this change lives in ran on this head: required check `atomaton-check` is `success`, and the check job's `bun run test` (`.github/atomaton/config.yaml:48`) includes `./tests/contract` (`package.json:13`), so the edited file executed in CI.\n- Nothing else was touched: the diff is one test file, so no generated output, no version change, no agent definition or workflow.\n\n<details><summary>What I could not establish, and one judgement I made</summary>\n\n- **The fresh-checkout row is quoted, not reproduced.** I read the author's error text (`delegates.yaml … ENOENT`) and confirmed the dependency is real — `src/domain/machinery/machinery-layout.ts:149` puts the roster at `delegates.yaml` under the deployed user root, which `bun run synth` writes — but I cannot run `bun test tests/contract/test-hermetic-env.test.ts` here, so \"5 pass, 0 fail, 2.7s on a checkout without `dist/`\" is their measurement, not mine.\n- **Same for the sweep criterion.** \"No existing test depended on the inherited value\" rests on the author's 2108-pass rows plus my read of every consumer of `AGENT`/`GITHUB_RUN_ID` under `src/` (all of them default safely: `turn-identity.ts:18`, `dispatch_sub_agent.ts:36`, `claim_turn.ts:127`).\n- **Breadth judgement.** Narrowing the guard from the whole of `mcp.test.ts` to two tool families does drop `request_close_issue`/`merge_pr`/`reload_environment` body assertions from its reach — a real reduction from what #378 merged. I accepted it: the test's own comment states the limit, the ratchet is the half that fails on the defect, and the alternative (synthesising inside the child) buys breadth with runtime and a `dist/` side effect. That is a call, not a measurement.\n- The `{ ...env, AGENT: \"engineer\" }` half at `:184` still only proves object spreading, not that every call site spreads in that order; I checked the three call sites by hand and they do.\n\n</details>\n\n**What happens next**\n\nNothing further on this pull request. #355's handoff reinvoked `engineer` on the parent issue, and that run now has both halves merged — the exclusion at `harness.ts:87` and the stable guard — so the issue can be concluded there. One thing left open, worth only a sentence: `src/entrypoints/tools/mcp/mcp.test.ts` still cannot run without `bun run synth` first, which this pull request worked around rather than fixed.\n\n\n---\n_Tokens: 876606 total (865156 prompt + 11450 completion, 842624 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/40185754439) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T10:43:02Z",
+        "event_type": "pr_comment",
+        "id": 6396640111,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_zty7ssphc9rern46lkrnsyjx",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -2 && git status --porcelain && sed -n 87p src/entrypoints/machinery/testing/harness.ts && grep -n \\\"does not hand it the run.s own AGENT or GITHUB_RUN_ID\\\\|the tests that post comment bodies stay green\\\\|\\\\\\\"-t\\\\\\\", \\\\\\\"launch_sub_agent|create_pr\\\\\\\"\\\" tests/contract/test-hermetic-env.test.ts && sed -n 179,183p tests/contract/test-hermetic-env.test.ts\"}"
+          }
+        },
+        {
+          "id": "call_01_yjtaw67lnq2x6p7s9hiwo8ms",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && ls dist 2>&1 | head -2; bun test tests/contract/test-hermetic-env.test.ts 2>&1 | tail -10\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179292501351400000000000000000000ffffc0a87eacf882c5",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "#379 merged. Now judge whether #355 is satisfied and conclude with request_close_issue.\n\nAcceptance criteria from #355:\n1. `hermeticEnv()` drops `AGENT` and `GITHUB_RUN_ID` — merged at harness.ts:87.\n2. Tests that need them declare them (existing convention) — untouched, explicit-wins preserved.\n3. `tests/contract/test-hermetic-env.test.ts` pins \"run's AGENT faked → suite green\" — merged and now runnable standalone.\n4. The sweep first (whole suite with AGENT/GITHUB_RUN_ID dropped) — done in my run, reported.\n\nLet me verify the merged head state quickly: git log, grep harness.ts:87, the test file lines. Let me confirm on the current checkout (should be main after merge).\n\nThen call request_close_issue with reason and summary. The summary is the report body; the reason is one sentence.\n\nLet me verify state.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"7cc6e34 Merge pull request #379 from yuma-seno/atomaton/issue-355\\n    if (key.startsWith(\\\"ATOMA_\\\") || key.startsWith(\\\"ATOMATON_\\\") || key === \\\"NUMBER\\\" || key === \\\"TYPE\\\" || key === \\\"NOTIFY\\\" || key === \\\"AGENT\\\" || key === \\\"GITHUB_RUN_ID\\\" || key.startsWith(\\\"FAKE_GH_\\\")) continue;\\n167:  test(\\\"does not hand it the run's own AGENT or GITHUB_RUN_ID\\\", () => {\\n214:  test(\\\"the tests that post comment bodies stay green with the run's AGENT faked\\\", () => {\\n217:      [\\\"test\\\", join(process.cwd(), \\\"src/entrypoints/tools/mcp/mcp.test.ts\\\"), \\\"-t\\\", \\\"launch_sub_agent|create_pr\\\"],\\n      expect(\\n        Object.keys(env).filter((key) => key === \\\"AGENT\\\" || key === \\\"GITHUB_RUN_ID\\\"),\\n        \\\"a spawned server that inherits these stamps the run's agent and run id onto every comment it \\\" +\\n          \\\"posts, so a body assertion depends on which agent ran the suite\\\",\\n      ).toEqual([]);\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":268}",
+      "tool_call_id": "call_00_zty7ssphc9rern46lkrnsyjx"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"ls: cannot access 'dist': No such file or directory\\n(pass) a test that spawns a script > does not hand it the run's own environment [6.30ms]\\n(pass) a test that spawns a script > does not hand a spawned git the run's own GIT_DIR or GIT_WORK_TREE [5.66ms]\\n(pass) a test that spawns a script > the suite that was red stays green with a decoy machinery root [49.73ms]\\n(pass) a test that spawns a server > does not hand it the run's own AGENT or GITHUB_RUN_ID [0.23ms]\\n(pass) a test that spawns a server > the tests that post comment bodies stay green with the run's AGENT faked [3338.56ms]\\n\\n 5 pass\\n 0 fail\\n 6 expect() calls\\nRan 5 tests across 1 file. [3.41s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":3534}",
+      "tool_call_id": "call_01_yjtaw67lnq2x6p7s9hiwo8ms"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_rk1o4ba02hxhdhmccc4twobo",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && env -u AGENT -u GITHUB_RUN_ID timeout 3000 bun run test > /tmp/atomaton-workspace/suite-merged-ci-shape.log 2>&1; echo \\\"exit=$?\\\"; grep -E '^ *[0-9]+ (pass|fail)|^Ran |\\\\(fail\\\\)' /tmp/atomaton-workspace/suite-merged-ci-shape.log | tail -10\", \"timeout_seconds\": 3200}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179292502077500000000000000000000ffffc0a84220186e1e",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Verified on merged main, fresh checkout with no `dist/`: 5 pass, 0 fail, 3.4s.\n\nAlso confirm the sweep claim on the merged head — run the full suite in agent env and with CI shape? I already ran the full suite post-fix (2108 pass) on the state equivalent to merged head (only test file differs and I ran it). Actually the last full suite run (2108 pass) was with my uncommitted test changes — which is what merged. So merged head == that state. Good.\n\nLet me also do one final confirmation on merged head: `env -u AGENT -u GITHUB_RUN_ID bun run test`? I ran 2105 pass in CI shape before the follow-up; the follow-up only changed the contract test. A quick run of the whole suite in CI shape on merged head would be another 90s but strengthens the claim. Worth it? The conclusion rests on: (a) merged content present, (b) contract file green standalone, (c) full suite green. I have (c) from pre-merge-identical tree. Let me run once on the merged head in the CI shape to be safe and to report a measured number for the merged tree. 90s is fine.\n\nActually I should also verify the whole-suite run in an agent env on merged head. The previous 2108 run was in agent env on the identical tree (same content), so that's fine. Run CI shape on merged head now, as the strongest evidence that the suite's result no longer depends on the identity.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"exit=0\\n 2118 pass\\n 0 fail\\nRan 2118 tests across 169 files. [88.37s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":88924}",
+      "tool_call_id": "call_00_rk1o4ba02hxhdhmccc4twobo"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_jq4udsxcm53ww73tl7s1eko7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && echo \\\"AGENT=$AGENT GITHUB_RUN_ID=$GITHUB_RUN_ID\\\" && timeout 3000 bun run test > /tmp/atomaton-workspace/suite-merged-agent-shape.log 2>&1; echo \\\"exit=$?\\\"; grep -E '^ *[0-9]+ (pass|fail)|^Ran |\\\\(fail\\\\)' /tmp/atomaton-workspace/suite-merged-agent-shape.log | tail -10\", \"timeout_seconds\": 3200}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179292511387800000000000000000000ffffc0a8628df245ca",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "On merged head, with AGENT/GITHUB_RUN_ID absent (CI's shape): 2118 pass, 0 fail, 169 files. (Main has advanced a bit — 169 files vs 168, so another PR landed; anyway green.)\n\nInteresting: 2118 vs my earlier 2108 — main advanced via another merge (39eff33 merged #377). Fine.\n\nLet me also run the agent shape quickly? I ran 2108 in agent shape on the near-identical tree. To make a clean paired claim on merged head, run `AGENT=engineer GITHUB_RUN_ID=<this run id> bun run test`. That's another 88s. Worth it for the paired claim \"same result in both shapes on merged head\". Let's do it — it's the acceptance claim.\n\nActually GITHUB_RUN_ID is set in this run's env already, so plain `bun run test` in agent env includes AGENT=engineer and this run's real GITHUB_RUN_ID. Do that.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"AGENT=engineer GITHUB_RUN_ID=40185900108\\nexit=0\\n 2118 pass\\n 0 fail\\nRan 2118 tests across 169 files. [87.97s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":88520}",
+      "tool_call_id": "call_00_jq4udsxcm53ww73tl7s1eko7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_1sn0a3ofm01db351qomc4s7t",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"reason\": \"hermeticEnv() が AGENT と GITHUB_RUN_ID を落とし、suite が run の identity の有無で同じ結果（2118 pass / 0 fail、両方）を返すことをマージ済み main で実測したので、issue の受入条件はすべて満たされた。\", \"summary\": \"#355 は満たされた。`hermeticEnv()` は `AGENT` と `GITHUB_RUN_ID` を落とし、suite の結果はどの agent が回したかにもう依存しない — マージ済み main で両方の環境を実測して同じ 2118 pass / 0 fail が出た。この issue に残る作業はない。\\n\\n**根拠**\\n\\n- 除外は `src/entrypoints/machinery/testing/harness.ts:87` に入り、`harness.ts` の spawn ヘルパー（`:122`、`:219`）と `src/entrypoints/tools/mcp/mcp.test.ts:51` はすべてこれを通り、呼び出し側の `env` は後から spread されるので明示値が勝つ（`mcp.test.ts:349` の `AGENT: \\\"engineer\\\"` がそのまま効く）。\\n- ラチェットは `tests/contract/test-hermetic-env.test.ts:167`。キーの**不在**を assert しており、`hermeticEnv()` から 2 つの除外を戻すと `[\\\"AGENT\\\",\\\"GITHUB_RUN_ID\\\"]` を受けて落ちるのを実測した（`:179`–`:183`）。\\n- 挙動側は `tests/contract/test-hermetic-env.test.ts:214`。`-t 'launch_sub_agent|create_pr'` を `AGENT=zzdecoyagent GITHUB_RUN_ID=999999999` で spawn して緑。\\n- この run、fresh checkout（`dist/` 無し）で `bun test tests/contract/test-hermetic-env.test.ts` → **5 pass / 0 fail / 3.4s**。修正前は 12.9s で 1 fail（delegate が `dist/.github/atomaton/delegates/delegates.yaml` の ENOENT で exit 2）— suite の外で回すと赤い、というのが #379 で直した点。\\n- issue が先に求めた洗い出しも実施済み: 変更前の code で `AGENT=zzdecoyagent GITHUB_RUN_ID=999999999 bun run test` → 2103 pass / 0 fail。値を継承していたテストは無く、露出は「body を assert するテストが読み得る」ことだった。\\n\\n<details><summary>マージ済み head での実測ログ（この run が実行）</summary>\\n\\n```\\n$ AGENT=engineer GITHUB_RUN_ID=40185900108 bun run test\\n 2118 pass\\n 0 fail\\nRan 2118 tests across 169 files. [87.97s]\\n\\n$ env -u AGENT -u GITHUB_RUN_ID bun run test\\n 2118 pass\\n 0 fail\\nRan 2118 tests across 169 files. [88.37s]\\n```\\n\\n`AGENT`/`GITHUB_RUN_ID` がある run と無い CI で同じ数字が出たこと自体が、issue の「どの agent が回したか」依存が消えたことの測定。\\n\\n</details>\\n\\n**確かめられなかったこと**\\n\\n- `request_close_issue` / `merge_pr` / `reload_environment` の body を assert するテストは、いま守りの範囲外（子を `launch_sub_agent|create_pr` に絞ったため）。絞らないと fresh checkout で上記 ENOENT により赤になるためこの範囲を選んだ — 判断であって測定ではない。\\n- `src/entrypoints/tools/mcp/mcp.test.ts` は依然 `bun run synth` 無しでは通らない（delegate テストが `dist/` を読む）。既存の性質で、#379 は迂回しただけで直していない。\\n- `GITHUB_RUN_ID` の値が CI と run で違うことの再現は手元の 1 run 分のみ。CI 側の run id で suite を回した測定はしていない（CI の `check` が緑なのが間接的な証拠）。\\n\\n**次に何が起きるか**\\n\\nなし — この issue はこれで完了。`mcp.test.ts` の synth 依存だけは、直すとすれば別 issue の話。\\n\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179292520575300000000000000000000ffffc0a8731ac01d8a",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Both shapes on merged head: 2118 pass, 0 fail. The suite's result no longer depends on the identity — that's the issue's goal, measured.\n\nNow conclude with request_close_issue.\n\nReason: one sentence. Summary: the report (conclusion, how I know, what I could not establish, what happens next). The tool's summary gets posted as a comment.\n\nContent:\n\nConclusion: #355 is satisfied on main (7cc6e34 + the advance): hermeticEnv() drops AGENT and GITHUB_RUN_ID, and the suite gives the same result whichever agent runs it — 2118 pass / 0 fail both with the run's identity present and absent.\n\nHow I know:\n- harness.ts:87 exclusion; contract test anchors :167, :214; measured runs.\n- The sweep requested by the issue found no existing test depending on the inherited value.\n\nWhat I could not establish:\n- Nothing? There is one thing: the reviewer noted mcp.test.ts still cannot run without synth (pre-existing). And I didn't verify the guard against future body assertions in request_close_issue/merge_pr (breadth narrowed). Also I didn't measure what a child sees with `env {X: undefined}` beyond Bun (measured Bun drops it) — no need.\n- Also: the acceptance criterion \"hermeticEnv drops them\" verified; the paired run is my own measurement.\n\nWhat happens next: nothing; issue concluded. One sentence tangent: mcp.test.ts needs synth (pre-existing, documented in the test's comment) — no dispatch.\n\nNote the fold: include evidence in a details block? The report should be readable. Keep how-I-know ≤5 items with anchors, then a fold with the measurements table maybe. Folds don't nest; conclusion and next step never folded.\n\nLet me write it, and call request_close_issue with summary and reason. This session ends on that call, so the report goes in the summary argument.\n\nCareful: no \"Closes #\" text needed.\n\nLet me write:\n\n---\n\n**結論**: #355 は満たされた。`hermeticEnv()` は `AGENT` と `GITHUB_RUN_ID` を落とし、suite の結果はどの agent が回したかにもう依存しない — この run で両方の環境を実測して 2118 pass / 0 fail が一致した。\n\nThen How I know (Japanese? The issue is in Japanese; the repo's code comments are English. My previous PR bodies were English. The report is read by the issue author (Japanese) and by the next agent. I'll write in Japanese since the issue is Japanese? Hmm — the machine's instruction: \"Write it in the language this repository's issues are written in\"? That instruction was for search queries. For reports, no explicit language rule. The issue body is Japanese; the author writes Japanese. I'll write the report in Japanese with code identifiers/English anchors. Mixed is fine and prior agent reports on this issue? The reviewer wrote English. Hmm, consistency with the thread: PR #378/#379 reviewer reports were English. But the issue itself Japanese, opened by yuma-seno in Japanese.\n\nI'll write in Japanese, briefly, since the person this belongs to wrote Japanese. That seems most useful. Keep anchors exact (paths, numbers, commands).\n\nDraft:\n\n#355 は満たされている。`hermeticEnv()` は `AGENT` と `GITHUB_RUN_ID` を落とし、suite はどちらの環境でも同じ結果になった（2118 pass / 0 fail、両方）。この issue に残る作業はない。\n\n**根拠**\n- 除外は `src/entrypoints/machinery/testing/harness.ts:87` に入っている（マージ済み main `7cc6e34`）。\n- ラチェットは `tests/contract/test-hermetic-env.test.ts:167`（キーが存在しないことを assert。`AGENT`/`GITHUB_RUN_ID` を戻すと `[\"AGENT\",\"GITHUB_RUN_ID\"]` を受けて落ちるのを実測）と `:214`（`launch_sub_agent|create_pr` を偽装 AGENT で spawn して緑）。\n- 実測（この run、fresh checkout で `dist/` 無し）: `bun test tests/contract/test-hermetic-env.test.ts` → 5 pass / 0 fail / 3.4s。以前は 12.9s で delegate.yaml の ENOENT で 1 fail していた。\n- suite 全体: `AGENT=engineer GITHUB_RUN_ID=40185900108 bun run test` → 2118 pass / 0 fail（169 files）と `env -u AGENT -u GITHUB_RUN_ID bun run test` → 2118 pass / 0 fail（169 files）。同じ数字が両方で出たこと自体が、issue の「どの agent が回したか」依存が消えたことの測定。\n- issue が先に求めた洗い出し: 変更前の code で `AGENT=zzdecoyagent GITHUB_RUN_ID=999999999 bun run test` を回し、その値を継承していたテストは無かった（2103 pass / 0 fail）— 露出は「body を assert するテストが読み得る」ことであって、既存テストが読んでいたことではなかった。\n\n**確かめられなかったこと**\n- `request_close_issue` / `merge_pr` / `reload_environment` の body を assert するテストは、いま守りの範囲外（`-t` を `launch_sub_agent|create_pr` に絞ったため）。絞らないと fresh checkout で `dist/...delegates.yaml` の ENOENT により赤になるため、この範囲を選んだ。判断であって測定ではない。\n- `src/entrypoints/tools/mcp/mcp.test.ts` は依然 `bun run synth` 無しでは通らない（delegate テストが dist を読む）。これは既存の性質で、今回の PR は迂回しただけで直��ていない。\n- `GITHUB_RUN_ID=40185900108` の行はこの run の実際の値だが、CI 側は CI の run id なので「値が違う」ことの再現は手元の 1 run のみ。\n\n**次に何が起きるか**\nなし — この issue はこれで完了。`mcp.test.ts` の synth 依存だけは、直すなら別 issue。\n\nHmm, should I dispatch anything? No — conclude.\n\nWait: \"What could not establish\" — the reviewer's \"breadth reduction\" is a judgement. Good to include.\n\nShould I create a root issue for the mcp.test.ts synth dependency? It's a pre-existing property (pretest exists precisely because of it) — not a defect. Just a sentence. Don't dispatch.\n\nKeep report tight. Include the fold for measurements? The items are already ≤5. Maybe fold the \"洗い出し\" details. I'll fold the measurement table into a details since it verifies rather than acts. Actually conclusions + next step must be unfurled; evidence may be folded. I'll fold the measurement detail under \"<details><summary>実測のログ</summary>…</details>\" — but then how I know still cites numbers inline. Keep it simple: 5 bullets inline is fine. The instruction says fold what verifies; the numbers are what a reader checks. I'll fold the two full-suite command lines + the pre-change sweep, and keep the file anchors inline.\n\nLet me write final.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #355 is concluded: your reason and summary are on the issue. #355 is not a tracked sub-issue; nothing to aggregate. Nothing else is yours to do here.",
+      "tool_call_id": "call_00_1sn0a3ofm01db351qomc4s7t"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 6,
-      "snapshot_hash": "814e65f8d3bcd5627de16553b9399434ff4b825166589c7a296f2f86b41c3506",
+      "event_count": 10,
+      "snapshot_hash": "11ae16bd2d1e8c172f6123c4ecc03f3a8bb75bf527aeb287afad33fc02038d34",
       "version": 1
     }
   },
@@ -1575,6 +1769,23 @@
         }
       },
       "started": "2026-10-25T10:34:06Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T10:47:05Z",
+      "ended_because": "completed",
+      "iterations": 4,
+      "messages": 121,
+      "seconds": 215,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "shell": {
+          "bash": 4
+        }
+      },
+      "started": "2026-10-25T10:43:30Z"
     }
   ]
 }
