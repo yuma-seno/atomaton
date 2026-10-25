@@ -11,6 +11,111 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * An opinion asked for is answered, and nothing is started for it.
+   *
+   * The shared template already says a question is an outcome (`What was asked is a
+   * question`), and it was not enough. #220 reports the crossing on #204: a comment
+   * asking what it thought came back as sub-issues and dispatched work. #209 is the
+   * same boundary at the end of a run — asked to investigate, the orchestrator had no
+   * row for a report and reached for the close, which #209's own investigation traced
+   * to this table as well as to the tool's "only correct way"; that report is on the
+   * thread, and this change is the table half. The table is the last thing a run in
+   * this role reads before choosing how to end, so the boundary is stated beside it
+   * rather than only in the shared exit three sections up.
+   *
+   * The close rule is the same boundary seen from the end of the run: an issue whose
+   * deliverable is the answer is not the issue `request_close_issue` was written for,
+   * and the issue stays open for the person who asked.
+   *
+   * Pinned as single-line fragments, because these files are wrapped prose and a phrase
+   * spanning a line break also picks up whatever indentation wraps it.
+   */
+  test("an opinion asked of the orchestrator is answered rather than acted on", () => {
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    expect(atomaton, "the boundary needs a section of its own").toContain(
+      "## What the person asked for",
+    );
+    expect(atomaton, "an ask for an opinion is answered by the answer").toContain(
+      "is answered by the answer",
+    );
+    expect(atomaton, "and nothing is created or dispatched for it").toContain(
+      "no sub-issue, dispatch nobody, and start none of the work",
+    );
+    expect(atomaton, "an investigation is reported, and the issue is left open").toContain(
+      "leave the issue open",
+    );
+    expect(
+      atomaton,
+      "but a sub-issue's answer goes back to the parent that asked, so it closes",
+    ).toContain("the close is how the answer travels back");
+    expect(
+      atomaton,
+      "the general rule has to include that close, or the row above it reads as forbidden",
+    ).toContain("a child issue's report on its way back");
+    expect(atomaton, "a person's question stays open until they decide").toContain(
+      "It is not for a question a person asked",
+    );
+  });
+
+  /**
+   * The orchestrator's first move is a hand-off, and its own hands are for the
+   * mechanical parts.
+   *
+   * #212: it split the work and then wrote the larger changes itself instead of
+   * handing them to `engineer`. The definition was not silent — it said "you may do
+   * it yourself" and put "do it yourself" in the outcome table — so the permission was
+   * the instruction. The role statement, the section that carried it and the row that
+   * chose it now point one way.
+   */
+  test("the orchestrator hands implementation to the engineer and keeps the mechanical edits", () => {
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    expect(atomaton, "the role statement says whose code it is").toContain(
+      "Code that changes behaviour is not yours to write",
+    );
+    expect(atomaton, "an engineer-ready leaf is handed over, not done here").toContain(
+      "do it yourself only when the change is small and mechanical",
+    );
+    expect(atomaton, "including the leaf that is already one child's worth").toContain(
+      "hand it to `engineer` when it is one",
+    );
+  });
+
+  /**
+   * The one-line role summary says the same thing as the contract under it.
+   *
+   * That line is not a summary nobody reads: it is the briefing the other agents get
+   * when they are told who they can hand work to, which is the list a handoff line is
+   * written from (`docs/agents/reference.md:118`). It said "does the work when it is
+   * one leaf" while the body had just been changed to hand the leaf to `engineer` --
+   * the same permission-outranks-the-rule shape #212 was opened for, in the one place
+   * the restoring agent does not read.
+   *
+   * Both copies, because there are two: the frontmatter YAML the core parses, and the
+   * table row `src/content/README.md` shows a reader. They drift silently, so what is
+   * pinned is the sentence they share rather than either file's punctuation around it.
+   */
+  test("the role summary matches the contract it summarises", () => {
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    const frontmatter = atomaton.split(/^---$/m)[1] ?? "";
+    const description = /^description:\s*(.+)$/m.exec(frontmatter)?.[1]?.trim() ?? "";
+    const summary =
+      "decomposes work into sub-issues, hands implementation to `engineer`, and aggregates what its children deliver";
+    expect(description, "the frontmatter the core reads").toContain(summary);
+    expect(
+      readFileSync("src/content/README.md", "utf8"),
+      "and the table row a reader sees, carrying the same sentence",
+    ).toContain(summary);
+    for (const [what, text] of [
+      ["the frontmatter", description],
+      ["the README row", readFileSync("src/content/README.md", "utf8")],
+    ] as const) {
+      expect(text, `${what} must not restore the default #212 measured`).not.toContain(
+        "does the work when it is one leaf",
+      );
+    }
+  });
+
+  /**
    * The outcome that did not exist, and the run that measured its absence.
    *
    * The engineer's `Outcome` table was five rows, all of them "implement and open a
@@ -687,6 +792,12 @@ describe("agent prompt contracts", () => {
     );
     expect(atomaton, "the purpose is explicitly not the thing to hand up").toContain(
       "Do not hand up what the work is *for*",
+    );
+    expect(atomaton, "the outcome row is the architect's own bar, not 'being unsure'").toContain(
+      "one decision would move several parts at once",
+    );
+    expect(atomaton, "and an implementation without such a choice goes to the engineer").toContain(
+      "An implementation that holds no such choice goes to `/engineer` instead",
     );
   });
 
