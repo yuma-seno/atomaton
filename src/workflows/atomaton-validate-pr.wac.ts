@@ -50,9 +50,14 @@ import { ref as notifyUnattendedRef } from "../entrypoints/machinery/notify_unat
  * this job holds `checks: write` and could otherwise be made to write its own
  * passing check.
  *
- * The head branch is always in this repository: this workflow is dispatched for
- * pull requests agents open on `atomaton/issue-N` branches. A fork's head would not
- * resolve here, and does not arrive here.
+ * The head branch this runs against is always one of this repository's own, and each
+ * entrance is what makes that true. A person's `/<agent>` comment on a pull request
+ * goes through `dispatch_pr_validation.ts`, which resolves the head branch with the
+ * same three gates a `pr` run uses (`entrypoints/machinery/lib/pr-head-branch.ts`) and
+ * refuses a fork's head with a comment instead of dispatching it; `create_pr` and the
+ * push re-validation pass a branch the agent itself pushed here. A fork's head
+ * therefore does not arrive here — and a name that did would fail `--ref` to resolve
+ * rather than validate anything of this repository's.
  */
 const PR_HEAD_DIR = "pr-head";
 
