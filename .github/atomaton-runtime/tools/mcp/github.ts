@@ -19897,6 +19897,48 @@ function stackedBaseFor(repo, issue) {
   log5(`commitAndPush: created parent branch ${parentBranch} for #${found.parent}`);
   return parentBranch;
 }
+function createStackedBranch(name, from) {
+  const worktree = gitRun("status", "--porcelain");
+  if (worktree.code) {
+    throw new Error(`Could not read the worktree before creating branch '${name}': ${worktree.stderr || worktree.stdout}`);
+  }
+  if (!worktree.stdout.trim()) {
+    const created = gitRun("checkout", "-b", name, `origin/${from}`);
+    if (created.code)
+      throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+    return;
+  }
+  const staged = gitRun("add", "-A");
+  if (staged.code) {
+    throw new Error(`Could not stage this run's work before creating branch '${name}': ${staged.stderr || staged.stdout}`);
+  }
+  const stashed = gitRun("stash", "push", "--message", `atomaton: this run's work, carried onto ${from}`);
+  if (stashed.code) {
+    throw new Error(`Could not set this run's work aside to create branch '${name}' from '${from}': ${stashed.stderr || stashed.stdout}`);
+  }
+  const created = gitRun("checkout", "-b", name, `origin/${from}`);
+  if (created.code) {
+    gitRun("stash", "pop");
+    throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+  }
+  const applied = gitRun("stash", "pop");
+  if (!applied.code) {
+    log5(`commitAndPush: carried this run's work from the base branch onto ${from}`);
+    return;
+  }
+  const conflicts = unmergedPaths();
+  if (conflicts.length > 0) {
+    throw new Error(`Branch '${name}' was created from '${from}', but ${conflicts.length} file(s) this run changed also ` + `changed on that branch: ${conflicts.join(", ")}. Both sides are in those files with git's conflict markers. ` + "Resolve them, then call commit_and_push again to commit the result.");
+  }
+  throw new Error(`Branch '${name}' was created from '${from}', but this run's work could not be re-applied to it: ` + `${applied.stderr || applied.stdout}. The work is in 'git stash list', not in the worktree.`);
+}
+function unmergedPaths() {
+  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+  if (unmerged.code)
+    return [];
+  return unmerged.stdout.split(`
+`).map((line) => line.trim()).filter(Boolean);
+}
 function branchForCommit(repo) {
   const onBranch = checkedOutBranch();
   if (onBranch && isIssueBranch(onBranch))
@@ -19910,9 +19952,13 @@ function branchForCommit(repo) {
     throw new Error(`${listed.why}, so a new branch for #${issue} cannot be named without risking one that already exists.`);
   }
   const name = branchNameFor(issue, nextOrdinal(listed.branches));
-  const created = from ? gitRun("checkout", "-b", name, `origin/${from}`) : gitRun("checkout", "-b", name);
-  if (created.code)
-    throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+  if (from) {
+    createStackedBranch(name, from);
+  } else {
+    const created = gitRun("checkout", "-b", name);
+    if (created.code)
+      throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+  }
   log5(`commitAndPush: created branch ${name}${from ? ` from ${from}` : ""}`);
   return name;
 }
@@ -20366,6 +20412,28 @@ function selectCommentRange(total, from, to) {
   };
 }
 
+// src/domain/work/comment-body.ts
+function readCommentBody(body, options) {
+  const { index, budget, offset = 0 } = options;
+  const start = offset;
+  const remaining = body.length - start;
+  const prefix = (last) => start === 0 ? "" : `
+[continuing comment ${index} at character ${start + 1} of ${body.length}` + `${last ? "; this is the last part" : ""}]
+`;
+  if (prefix(true).length + remaining <= budget) {
+    return { text: `${prefix(true)}${body.slice(start)}` };
+  }
+  const marker = (shown) => `
+
+[${start + shown} of ${body.length} characters shown; ${remaining - shown} dropped from the end. ` + `Read the rest with from: ${index}, body_offset: ${start + shown}]`;
+  const longest = `
+
+[${body.length} of ${body.length} characters shown; ${remaining} dropped from the end. ` + `Read the rest with from: ${index}, body_offset: ${body.length}]`;
+  const room = Math.max(1, budget - prefix(false).length - longest.length);
+  const shown = Math.min(remaining, room);
+  return { text: prefix(false) + body.slice(start, start + shown) + marker(shown), next: start + shown };
+}
+
 // src/entrypoints/tools/lib/harden.ts
 import { statSync } from "fs";
 
@@ -20494,7 +20562,8 @@ var PR_CONTEXT_NUMBER_ARG_SCHEMA = objectType({
 var ISSUE_COMMENTS_SCHEMA = objectType({
   [ISSUE_NUMBER_ARG]: positiveInt("Positive GitHub issue number, without a leading '#'. Omit to use the issue this run is already operating on.").optional(),
   from: positiveInt("First comment to return, counting from 1 in the order they were posted. " + "This is the number `search_issues` reports as `comment`, so a match can be read directly.").optional(),
-  to: positiveInt("Last comment to return, inclusive. Defaults to `from`, so passing only `from` reads one comment.").optional()
+  to: positiveInt("Last comment to return, inclusive. Defaults to `from`, so passing only `from` reads one comment.").optional(),
+  body_offset: coerce.number().int().min(0).describe("Character offset into ONE comment's body, 0-based. Set it to the offset a cut body's marker named to read the rest. " + "Only valid when the range selects exactly one comment: pass `from` naming that comment, and `to` equal to it or omitted.").optional()
 });
 function issueContextNumber(args) {
   if (args[ISSUE_NUMBER_ARG] !== undefined)
@@ -20666,9 +20735,21 @@ function getIssueComments(a) {
   const issue = ghJsonOrThrow("issue", "view", String(number), "--repo", REPO, "--json", "title,state,comments");
   const all = (issue?.comments ?? []).map((comment, i) => ({ index: i + 1, ...comment }));
   const range = selectCommentRange(all.length, a.from, a.to);
+  if (a.body_offset !== undefined && range.count !== 1) {
+    mcpFail("`body_offset` continues ONE comment, so the range has to name exactly one: " + (range.count === 0 ? `${range.showing}.` : `this read selects comment(s) ${range.from}-${range.to} of ${all.length}.`) + " Pass `from` naming the comment whose cut marker gave the offset.");
+  }
+  const perCommentBudget = Math.max(MIN_COMMENT_BUDGET, Math.floor(TOOL_OUTPUT_BUDGET / Math.max(1, range.count)));
   const selected = (range.count > 0 ? all.slice(range.from - 1, range.to) : []).map((comment) => {
     const body = comment.body;
-    return typeof body === "string" ? { ...comment, body: capText(body, PER_ITEM_BUDGET).text } : comment;
+    if (typeof body !== "string")
+      return comment;
+    const index = comment.index;
+    const offset = range.count === 1 ? a.body_offset ?? 0 : 0;
+    if (offset > 0 && offset >= body.length) {
+      mcpFail(`Comment ${index} is ${body.length} characters long; \`body_offset\` ${offset} is past its end. ` + "Pass the offset its cut marker named, or omit it to read from the beginning.");
+    }
+    const segment = readCommentBody(body, { index, budget: perCommentBudget, offset });
+    return { ...comment, body: segment.text };
   });
   const links = issueLinks(REPO, number);
   return JSON.stringify({
@@ -20895,21 +20976,23 @@ function mergeMessage() {
     return "";
   }
 }
-function unfinishedMerge() {
-  const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
-  if (head.code !== 0)
-    return;
+function unresolvedConflictPaths() {
   const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
   const paths = unmerged.code === 0 ? unmerged.stdout.split(`
 `).map((line) => line.trim()).filter(Boolean) : [];
-  const unresolved = paths.filter((path) => {
+  return paths.filter((path) => {
     try {
       return /^(?:<{7} |>{7} )/m.test(readFileSync3(path, "utf8"));
     } catch {
       return false;
     }
   });
-  return { head: head.stdout.trim(), unresolved, description: mergeMessage() };
+}
+function unfinishedMerge() {
+  const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
+  if (head.code !== 0)
+    return;
+  return { head: head.stdout.trim(), description: mergeMessage() };
 }
 function pushBranch(branch) {
   const { code, stdout, stderr } = gitRun("push", "-u", "origin", branch);
@@ -20946,8 +21029,9 @@ function commitAndPush(a) {
   refuseClosingKeywords(message, "commit message");
   const branch = branchForCommit(REPO);
   const merge = unfinishedMerge();
-  if (merge && merge.unresolved.length > 0) {
-    mcpFail(`The merge in progress still has unresolved conflicts: ${merge.unresolved.join(", ")}. ` + "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge.");
+  const unresolved = unresolvedConflictPaths();
+  if (unresolved.length > 0) {
+    mcpFail(merge ? `The merge in progress still has unresolved conflicts: ${unresolved.join(", ")}. ` + "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge." : `The worktree still has unresolved conflicts: ${unresolved.join(", ")}. ` + "Resolve them (the conflict markers are in those files), then call commit_and_push again.");
   }
   {
     const { code, stdout, stderr } = gitRun("add", "-A");
@@ -21029,6 +21113,21 @@ function baseBranchForMerge() {
   }
   return base.branch;
 }
+function isShallowCheckout() {
+  return gitRun("rev-parse", "--is-shallow-repository").stdout.trim() === "true";
+}
+function mergeBaseWith(ref) {
+  const base = gitRun("merge-base", ref, "HEAD");
+  return base.code === 0 && base.stdout ? base.stdout.trim() : undefined;
+}
+function deepenToMergeBase(remoteRef) {
+  const fetch = gitRun("fetch", "--unshallow", "origin", "+refs/heads/*:refs/remotes/origin/*");
+  if (fetch.code) {
+    log8(`this checkout is shallow, and deepening it failed: ${fetch.stderr || fetch.stdout}`);
+    return false;
+  }
+  return mergeBaseWith(remoteRef) !== undefined;
+}
 function mergeBaseIntoBranch() {
   try {
     return mergeBaseIntoBranchOrThrow();
@@ -21056,13 +21155,28 @@ function mergeBaseIntoBranchOrThrow() {
   const fetch = gitRun("fetch", "origin", `refs/heads/${base}:${remoteRef}`);
   if (fetch.code)
     mcpFail(`Cannot fetch base branch '${base}': ${fetch.stderr || fetch.stdout}`);
-  const resolved = gitRun("rev-parse", remoteRef);
-  if (resolved.code)
-    mcpFail(`Cannot resolve base branch '${base}': ${resolved.stderr || resolved.stdout}`);
-  const baseSha = resolved.stdout.trim();
+  const remoteTip = () => {
+    const resolved = gitRun("rev-parse", remoteRef);
+    if (resolved.code)
+      mcpFail(`Cannot resolve base branch '${base}': ${resolved.stderr || resolved.stdout}`);
+    return resolved.stdout.trim();
+  };
+  let baseSha = remoteTip();
+  let deepened = false;
+  if (mergeBaseWith(remoteRef) === undefined) {
+    if (!isShallowCheckout()) {
+      mcpFail(`'${branch}' and '${base}' share no common ancestor in this checkout, so git would refuse the merge ` + `with "fatal: refusing to merge unrelated histories". Nothing was merged.`);
+    }
+    deepened = deepenToMergeBase(remoteRef);
+    if (!deepened) {
+      mcpFail(`Cannot find the merge base between '${branch}' and '${base}': this checkout is shallow (the workflow ` + `clones at fetch-depth 1) and deepening it did not reach one. That is what "fatal: refusing to merge ` + `unrelated histories" would have been describing \u2014 the truncated checkout, not the branches. Nothing ` + `was merged.`);
+    }
+    baseSha = remoteTip();
+  }
+  const deepening = deepened ? { deepened: true } : {};
   const ancestor = gitRun("merge-base", "--is-ancestor", remoteRef, "HEAD");
   if (ancestor.code === 0) {
-    logOp("merge_base_into_branch", { branch, base, status: "up_to_date", base_sha: baseSha });
+    logOp("merge_base_into_branch", { branch, base, status: "up_to_date", base_sha: baseSha, ...deepening });
     return JSON.stringify({ status: "up_to_date", branch, base, base_sha: baseSha });
   }
   if (ancestor.code !== 1) {
@@ -21073,7 +21187,7 @@ function mergeBaseIntoBranchOrThrow() {
   const files = unmerged.stdout.split(`
 `).map((line) => line.trim()).filter(Boolean);
   if (files.length > 0) {
-    logOp("merge_base_into_branch", { branch, base, status: "conflicts", base_sha: baseSha, files });
+    logOp("merge_base_into_branch", { branch, base, status: "conflicts", base_sha: baseSha, files, ...deepening });
     return JSON.stringify({
       status: "conflicts",
       branch,
@@ -21090,10 +21204,11 @@ function mergeBaseIntoBranchOrThrow() {
     mcpFail(`Cannot resolve HEAD after the merge: ${head.stderr || head.stdout}`);
   const commit = head.stdout.trim();
   pushBranch(branch);
-  logOp("merge_base_into_branch", { branch, base, status: "merged", base_sha: baseSha, commit });
+  logOp("merge_base_into_branch", { branch, base, status: "merged", base_sha: baseSha, commit, ...deepening });
   return JSON.stringify({ status: "merged", branch, base, base_sha: baseSha, commit });
 }
 var PER_ITEM_BUDGET = Math.floor(TOOL_OUTPUT_BUDGET / 5);
+var MIN_COMMENT_BUDGET = 400;
 function pick2(source, keys) {
   if (typeof source !== "object" || source === null)
     return {};
@@ -21344,7 +21459,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({ name: "get_issue", description: "Retrieve one issue's \u2014 or, when the number names one, pull request's \u2014 title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). The result carries `kind` (`issue` or `pull_request`) because the two share one number space, so a read pointed at the other kind still resolves. It does NOT return the comments themselves \u2014 use get_issue_comments for those, which takes a range. Returns a JSON object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),
-  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, `kind` (`issue` or `pull_request`), parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
+  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. A comment longer than the read's budget comes back as a marked segment; the marker names the `body_offset` that reads the rest, which needs `from` naming that one comment. Each result also carries the issue's title, state, `kind` (`issue` or `pull_request`), parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
   defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
@@ -21374,7 +21489,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_pr_review_comments", description: "Retrieve line-level review comments for one pull request. Use this to find file- and line-specific feedback; use get_pr_reviews for overall review decisions. Returns { total, omitted, comments } where each comment has `author`, `path`, `line`, `in_reply_to` and `body`; the surrounding code is not included, read it with the `read` tool or get_pr_diff, and a non-zero `omitted` means the rest did not fit. Does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: listPrReviewComments }),
   defineMcpTool({
     name: "commit_and_push",
-    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
+    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files and leaves git's conflict markers in them for you to resolve before calling it again. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush
   }),
