@@ -12480,6 +12480,55 @@
     ]
   },
   {
+    "path": "sessions/issue-392/reviewer.json",
+    "agent": "reviewer",
+    "messages": 63,
+    "calls": 37,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "atoma_builtin__load_skill": 1,
+      "get_pr": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "grep": 19,
+      "read": 11,
+      "get_branch": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T15:27:45Z",
+        "ended_because": "completed",
+        "iterations": 20,
+        "messages": 63,
+        "seconds": 169,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 19,
+            "read": 11
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 1,
+            "get_pr": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          }
+        },
+        "started": "2026-10-25T15:24:56Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-4/atomaton.json",
     "agent": "atomaton",
     "messages": 20,
