@@ -34,7 +34,7 @@
  */
 import { gh } from "./gh.ts";
 import { issueLinks } from "./issue-links.ts";
-import { LLM_CONTEXT_TAG } from "./tags.ts";
+import { LLM_CONTEXT_TAG, withoutTags } from "./tags.ts";
 import { commandLinesIn } from "../../domain/work/comment-command.ts";
 import type { LinkedPr } from "../../domain/work/issue-links.ts";
 
@@ -63,7 +63,12 @@ export interface SubIssueReport {
  * the one spelling the folded-report convention has.
  */
 export function subIssueReportBody(report: SubIssueReport): string {
-  const said = withoutCommands(report.report.trim());
+  // The child's words are not this machinery's speech, and they land on a node whose
+  // state readers act on: tags are stripped first (a quoted `atomaton:aggregated=N`
+  // would make the gate answer `already-aggregated` and leave the parent with no marker
+  // to take back), then command lines are defused. Our own `llm-context` line is added
+  // below, so it cannot be stripped by either.
+  const said = withoutCommands(withoutTags(report.report.trim()));
   const lines = [
     LLM_CONTEXT_TAG.write("include"),
     "<details><summary>Report</summary>",
@@ -117,25 +122,43 @@ export function reportSubIssueToParent(repo: string, child: number, report: stri
 }
 
 /**
- * The child's words, with any line a reader would take for a command escaped.
+ * The child's words, with anything a reader would take for a command defused.
  *
- * The report lands on a node that is very much alive, and the note under it is about to
- * wake that node's agent. On the parent, a `/name` alone on a line is somebody asking
- * for an agent; an ask nobody claimed is exactly what makes the aggregation gate stand
- * down with `parent-busy` and take its marker back, so the report meant to shorten the
- * parent's wait would be the thing that cancelled it. This is not hypothetical: a
- * directive line is the ordinary way an agent's report ends.
+ * The report lands on a node that is very much alive, and the gate under it is about to
+ * wake that node's agent. Two forms count, and each does its own damage: a `/name` line
+ * is somebody asking for an agent, and an ask nobody claimed is what makes the gate stand
+ * down with `parent-busy` and take its `atomaton:aggregated` marker back; a
+ * `<!-- atomaton:dispatch=name -->` line is the machinery's own marker, which
+ * `mostRecentAgentOn` reads as the agent the parent was asked for. Neither is
+ * hypothetical — a directive is the ordinary way a model's report ends.
  *
- * Escaped with a backslash rather than edited, because CommonMark renders `\/name` as
- * `/name` — the page reads unchanged while the stored text no longer begins with a
- * command. `commandLinesIn` is the definition of which lines those are, shared with the
- * guards that refuse an agent-written body for the same reason.
+ * Escaped rather than removed: a backslash in front of the character the reader starts
+ * at is rendered away by CommonMark, so the page reads unchanged while the stored text
+ * no longer begins with a command.
+ *
+ * `commandLinesIn` is the definition of which lines those are, shared with the guards
+ * that refuse an agent-written body for the same reason. It matches BOTH forms through
+ * `parseCommentCommand`, which is why the escape cannot be a search for `/`.
  */
 function withoutCommands(text: string): string {
   const commandLines = new Set(commandLinesIn(text));
   if (commandLines.size === 0) return text;
   return text
     .split("\n")
-    .map((line) => (commandLines.has(line.trim()) ? line.replace("/", "\\/") : line))
+    .map((line) => (commandLines.has(line.trim()) ? defuseCommandStart(line) : line))
     .join("\n");
+}
+
+/**
+ * A backslash in front of the character the parser starts at — `/` for a command, `<`
+ * for a dispatch marker.
+ *
+ * Found by searching for the first of either and not by position, because `lineForms`
+ * strips list bullets and quote markers before it reads: `- /engineer` is a command to
+ * the ask reader, and the backslash has to go after the bullet rather than in front of
+ * it.
+ */
+function defuseCommandStart(line: string): string {
+  const at = line.search(/[<\/]/);
+  return at < 0 ? line : `${line.slice(0, at)}\\${line.slice(at)}`;
 }
