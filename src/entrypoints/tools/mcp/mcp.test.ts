@@ -2138,9 +2138,82 @@ describe("mcp/github.ts", () => {
       const parsed = JSON.parse(r.result.content[0].text);
       expect(parsed.comments[0].body.length).toBeLessThan(body.length);
       expect(parsed.comments[0].body).toContain("characters");
+      // The cut names the call that reads the rest: a marker with a count and no
+      // way past it left the tail of a comment unreachable through the tool.
+      expect(parsed.comments[0].body).toContain("body_offset:");
       // And it still says how many there were, which is what stops "not shown"
       // being read as "not there".
       expect(parsed.showing).toBeDefined();
+    });
+
+    /**
+     * The per-comment cap was a fixed fifth of the budget, whatever the read
+     * selected — so the common shape, ONE comment reached from a search hit, was
+     * cut at 1,600 characters while 8,000 were available. On #149 that is where
+     * the decision being looked for turned out to be.
+     */
+    test("get_issue_comments gives one comment the whole budget", async () => {
+      const body = "y".repeat(6_000);
+      const payload = { title: "t", state: "OPEN", comments: [{ author: { login: "a" }, body }] };
+      const r = await call("get_issue_comments", { issue_number: 1, from: 1 }, [
+        { match: ["--json", "comments"], stdout: JSON.stringify(payload) },
+      ]);
+      const parsed = JSON.parse(r.result.content[0].text);
+      expect(parsed.comments[0].body).toBe(body);
+    });
+
+    // The half the marker exists for: the offset it names reads the rest, and the
+    // part that reaches the end says so rather than looking like another cut.
+    test("a cut comment's named body_offset reads it to the end", async () => {
+      const body = `${"a".repeat(9_000)}THE-DECISION`;
+      const payload = { title: "t", state: "OPEN", comments: [{ author: { login: "a" }, body }] };
+      const response = [{ match: ["--json", "comments"], stdout: JSON.stringify(payload) }];
+
+      const first = await call("get_issue_comments", { issue_number: 1, from: 1 }, response);
+      const firstBody = JSON.parse(first.result.content[0].text).comments[0].body as string;
+      expect(firstBody).not.toContain("THE-DECISION");
+      const named = /body_offset: (\d+)/.exec(firstBody)?.[1];
+      expect(named, firstBody.slice(-300)).toBeDefined();
+
+      const second = await call("get_issue_comments", { issue_number: 1, from: 1, body_offset: Number(named) }, response);
+      const secondBody = JSON.parse(second.result.content[0].text).comments[0].body as string;
+      expect(secondBody).toContain("THE-DECISION");
+      expect(secondBody).toContain("this is the last part");
+      // Nothing more to read, and no marker saying there is.
+      expect(secondBody).not.toContain("body_offset");
+    });
+
+    test("a multi-comment read splits the budget, and each cut names its own comment", async () => {
+      const body = "z".repeat(20_000);
+      const payload = { title: "t", state: "OPEN", comments: [{ author: { login: "a" }, body }, { author: { login: "b" }, body }] };
+      const r = await call("get_issue_comments", { issue_number: 1, from: 1, to: 2 }, [
+        { match: ["--json", "comments"], stdout: JSON.stringify(payload) },
+      ]);
+      const parsed = JSON.parse(r.result.content[0].text);
+      expect(parsed.comments[0].body).toContain("from: 1, body_offset:");
+      expect(parsed.comments[1].body).toContain("from: 2, body_offset:");
+      for (const comment of parsed.comments) expect(comment.body.length).toBeLessThanOrEqual(4_000);
+    });
+
+    // An offset has no meaning across several comments. Applying it to each would
+    // cut every one of them at a position taken from another, and say nothing.
+    test("body_offset is refused on a range that selects more than one comment", async () => {
+      const payload = { title: "t", state: "OPEN", comments: [{ body: "one" }, { body: "two" }] };
+      const r = await call("get_issue_comments", { issue_number: 1, from: 1, to: 2, body_offset: 1 }, [
+        { match: ["--json", "comments"], stdout: JSON.stringify(payload) },
+      ]);
+      expect(r.result.isError).toBe(true);
+      expect(r.result.content[0].text).toContain("`body_offset` continues ONE comment");
+      expect(r.result.content[0].text).toContain("comment(s) 1-2 of 2");
+    });
+
+    test("body_offset past a comment's end is refused with its length", async () => {
+      const payload = { title: "t", state: "OPEN", comments: [{ body: "short" }] };
+      const r = await call("get_issue_comments", { issue_number: 1, from: 1, body_offset: 99 }, [
+        { match: ["--json", "comments"], stdout: JSON.stringify(payload) },
+      ]);
+      expect(r.result.isError).toBe(true);
+      expect(r.result.content[0].text).toContain("Comment 1 is 5 characters long");
     });
 
     /**

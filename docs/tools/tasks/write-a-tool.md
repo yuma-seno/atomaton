@@ -66,6 +66,13 @@ how big one may be, so a single comment with a log pasted into it filled the
 window while the tool reported having shown three of forty. Cap each item *and*
 the whole.
 
+When an item still has to be cut, give the caller the way back to the rest: an
+offset, named in the marker, that the next call passes to continue — the shape
+`read` uses ("Read again with offset: 15"). A marker that says how much it
+dropped but not how to get it leaves the tail of a long item reachable only by
+leaving the tool for the API underneath it, which is a second question an agent
+can get wrong.
+
 **5. Say the shape in the tool's description.**
 
 The description is where a model reads a constraint — measured to work better
