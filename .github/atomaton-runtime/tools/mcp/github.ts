@@ -19928,7 +19928,7 @@ function createStackedBranch(name, from) {
   }
   const conflicts = unmergedPaths();
   if (conflicts.length > 0) {
-    throw new Error(`Branch '${name}' was created from '${from}', but ${conflicts.length} file(s) this run changed also ` + `changed on that branch: ${conflicts.join(", ")}. Both sides are in those files with git's conflict markers. ` + "Resolve them, then call commit_and_push again to commit the result.");
+    throw new Error(`Branch '${name}' was created from '${from}', but ${conflicts.length} file(s) this run changed also ` + `changed on that branch: ${conflicts.join(", ")}. Both sides of each are in git's index ` + "(`git show :2:<path>` is the version on that branch, `git show :3:<path>` this run's) \u2014 a text file " + "also holds the conflict markers in the worktree, and a binary does not. Choose each side, then call " + "commit_and_push with resolved_paths naming them.");
   }
   throw new Error(`Branch '${name}' was created from '${from}', but this run's work could not be re-applied to it: ` + `${applied.stderr || applied.stdout}. The work is in 'git stash list', not in the worktree.`);
 }
@@ -20618,7 +20618,8 @@ var SYNC_BRANCH_SCHEMA = objectType({
   branch: stringType().optional().describe("Branch to synchronize. Defaults to the current Atomaton branch.")
 });
 var COMMIT_AND_PUSH_SCHEMA = objectType({
-  message: stringType().describe("Commit message.")
+  message: stringType().describe("Commit message."),
+  resolved_paths: stringArray("Paths whose conflict you have resolved, to be staged before the commit. Required for every path git " + "still holds unmerged; a path declared while it still holds git's conflict markers is refused. " + "One path or a list.").optional()
 });
 function notifyTagPrefix(body, what) {
   if (NOTIFY_TAG.has(body))
@@ -20978,15 +20979,23 @@ function mergeMessage() {
 }
 function unresolvedConflictPaths() {
   const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
-  const paths = unmerged.code === 0 ? unmerged.stdout.split(`
-`).map((line) => line.trim()).filter(Boolean) : [];
-  return paths.filter((path) => {
-    try {
-      return /^(?:<{7} |>{7} )/m.test(readFileSync3(path, "utf8"));
-    } catch {
+  if (unmerged.code)
+    return [];
+  return unmerged.stdout.split(`
+`).map((line) => line.trim()).filter(Boolean);
+}
+function holdsConflictMarkers(path) {
+  try {
+    const bytes = readFileSync3(path);
+    if (bytes.includes(0))
       return false;
-    }
-  });
+    return /^(?:<{7} |>{7} )/m.test(bytes.toString("utf8"));
+  } catch {
+    return false;
+  }
+}
+function unresolvedConflictRefusal(paths, merge) {
+  return `${merge ? "The merge in progress" : "The worktree"} still has unresolved conflicts: ${paths.join(", ")}. ` + "Nothing was committed. Both sides of each are in git's index: `git show :2:<path>` is the version " + "already on this branch, `git show :3:<path>` the one this run brings. Write the one you want into " + "the file (a text file also holds git's conflict markers; a binary holds one side's bytes and no " + "markers, so the index is where you see the other), then call commit_and_push again with " + `resolved_paths naming each path you resolved${merge ? " to close the merge" : ""}.`;
 }
 function unfinishedMerge() {
   const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
@@ -21031,7 +21040,21 @@ function commitAndPush(a) {
   const merge = unfinishedMerge();
   const unresolved = unresolvedConflictPaths();
   if (unresolved.length > 0) {
-    mcpFail(merge ? `The merge in progress still has unresolved conflicts: ${unresolved.join(", ")}. ` + "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge." : `The worktree still has unresolved conflicts: ${unresolved.join(", ")}. ` + "Resolve them (the conflict markers are in those files), then call commit_and_push again.");
+    const declared = new Set(a.resolved_paths ?? []);
+    const undeclared = unresolved.filter((path) => !declared.has(path));
+    if (undeclared.length > 0)
+      mcpFail(unresolvedConflictRefusal(undeclared, merge !== undefined));
+    const marked = unresolved.filter(holdsConflictMarkers);
+    if (marked.length > 0) {
+      mcpFail(`${marked.join(", ")} was declared resolved, but still holds git's conflict markers. Nothing was ` + "committed. Remove them and settle on the version you want, then declare the path again.");
+    }
+    const staged = gitRun("add", "--", ...unresolved);
+    if (staged.code)
+      mcpFail(staged.stderr || staged.stdout);
+    const still = unresolvedConflictPaths();
+    if (still.length > 0) {
+      mcpFail(`${still.join(", ")} is still unmerged in git's index after staging the paths declared in resolved_paths. ` + "Nothing was committed.");
+    }
   }
   {
     const { code, stdout, stderr } = gitRun("add", "-A");
@@ -21194,7 +21217,7 @@ function mergeBaseIntoBranchOrThrow() {
       base,
       base_sha: baseSha,
       files,
-      note: "Nothing was committed. The conflicts are in the worktree with their markers; resolve them, then call " + "commit_and_push to close the merge."
+      note: "Nothing was committed. The conflicts are in the worktree: a text file with git's markers, and every " + "one of them with both sides in the index (`git show :2:<path>` for this branch, `git show :3:<path>` " + "for the base). Resolve each and declare it in resolved_paths on commit_and_push, which closes the merge."
     });
   }
   if (merge.code)
@@ -21474,7 +21497,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "merge_base_into_branch",
-    description: "Bring this run's base branch into the checked-out branch, as a merge commit, and push it. The base is resolved the way create_pr resolves it: a sub-issue's is its parent's branch, anything else the configured base branch, and a pull request run's is the base the pull request aims at. It takes no arguments and touches no branch but this one: no cascade, no writes to a child's or sibling's branch, no rebase, no force-push. Returns {status: 'up_to_date'} when the base is already an ancestor, {status: 'merged', base, base_sha, commit} after a clean merge, or {status: 'conflicts', base, base_sha, files} \u2014 in which case nothing is committed and the conflict markers are left in the worktree: resolve them and call commit_and_push to close the merge. Every outcome is recorded in the ops log.",
+    description: "Bring this run's base branch into the checked-out branch, as a merge commit, and push it. The base is resolved the way create_pr resolves it: a sub-issue's is its parent's branch, anything else the configured base branch, and a pull request run's is the base the pull request aims at. It takes no arguments and touches no branch but this one: no cascade, no writes to a child's or sibling's branch, no rebase, no force-push. Returns {status: 'up_to_date'} when the base is already an ancestor, {status: 'merged', base, base_sha, commit} after a clean merge, or {status: 'conflicts', base, base_sha, files} \u2014 in which case nothing is committed and the conflicts are left in the worktree: a text file holds git's markers, and both sides of every path stay in the index (`git show :2:<path>` this branch, `git show :3:<path>` the base), so a binary conflicted path is decided the same way. Resolve each one and call commit_and_push with resolved_paths naming it to close the merge. Every outcome is recorded in the ops log.",
     schema: objectType({}),
     handler: mergeBaseIntoBranch
   }),
@@ -21489,7 +21512,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_pr_review_comments", description: "Retrieve line-level review comments for one pull request. Use this to find file- and line-specific feedback; use get_pr_reviews for overall review decisions. Returns { total, omitted, comments } where each comment has `author`, `path`, `line`, `in_reply_to` and `body`; the surrounding code is not included, read it with the `read` tool or get_pr_diff, and a non-zero `omitted` means the rest did not fit. Does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: listPrReviewComments }),
   defineMcpTool({
     name: "commit_and_push",
-    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files and leaves git's conflict markers in them for you to resolve before calling it again. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
+    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files. A conflict is resolved by declaring it: pass resolved_paths naming each path, after writing the side you want into the file. Nothing else counts as a resolution \u2014 a text file's markers are a backstop, and a binary has none, so both sides sit in the index (`git show :2:<path>` the version already on the branch, `git show :3:<path>` the one this run brings) until you choose. While a merge is in progress it refuses until every conflicted path is declared, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush
   }),
