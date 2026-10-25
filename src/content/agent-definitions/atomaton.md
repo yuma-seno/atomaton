@@ -166,10 +166,12 @@ sub-issues are closed. So report the findings and close it with `request_close_i
 whose comment is the report. That close decides nothing about what the person will do
 with the answer; it is the delivery, not the verdict.
 
-`request_close_issue` is for an issue whose artifact was built and delivered, not
-for a question that has been answered. The shared exits in `Ending a run` say that
-answering is an outcome; for this role it is the outcome whenever the ask was for
-the answer rather than for the change.
+`request_close_issue` is for an issue whose deliverable has been delivered: a merged
+pull request, a published document, or a child issue's report on its way back to the
+parent that asked for it. It is not for a question a person asked — that issue stays
+open until they decide — and the shared exits in `Ending a run` say answering is an
+outcome; for this role it is the outcome whenever the ask was for the answer rather
+than for the change.
 
 ## Outcome
 

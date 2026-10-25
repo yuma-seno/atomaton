@@ -48,8 +48,12 @@ describe("agent prompt contracts", () => {
       atomaton,
       "but a sub-issue's answer goes back to the parent that asked, so it closes",
     ).toContain("the close is how the answer travels back");
-    expect(atomaton, "a close is for a delivered artifact, not an answered question").toContain(
-      "for a question that has been answered",
+    expect(
+      atomaton,
+      "the general rule has to include that close, or the row above it reads as forbidden",
+    ).toContain("a child issue's report on its way back");
+    expect(atomaton, "a person's question stays open until they decide").toContain(
+      "It is not for a question a person asked",
     );
   });
 
