@@ -554,6 +554,64 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * How much a change should carry -- stated once, as fixed text.
+   *
+   * #216, and the decision on it: the pull is to make a run bolder about deleting what
+   * no longer earns its place, without leaving "throw away backward compatibility" in a
+   * prompt that is read by projects whose compatibility is the point. So the stance is
+   * the general one -- unreadable code is a defect of the same kind as a bug, both being
+   * how the next change goes wrong, so the shape with less in it wins -- and
+   * compatibility, fallbacks and workarounds survive only as trade-offs taken on
+   * purpose.
+   *
+   * The price of taking one is pinned with the stance, because without it the paragraph
+   * reads as permission: kept small, explained where it lives, and reported as a cost
+   * the next reader pays.
+   *
+   * And the section must carry no placeholder. The philosophy is fixed: an adopter able
+   * to swap it could swap the half that makes the rest of the prompt cohere, and a slot
+   * invites the wording to drift into whatever each project calls clean.
+   */
+  test("the shared prompt says how much to change, as fixed text with no slot to swap it", () => {
+    const raw = readFileSync("src/content/prompt-template.md", "utf8");
+    const heading = "# How much to change";
+    const start = raw.indexOf(heading);
+    expect(start, "the section has to exist").toBeGreaterThan(-1);
+    const after = raw.slice(start + heading.length);
+    const end = after.indexOf("\n# ");
+    const sectionRaw = end === -1 ? after : after.slice(0, end);
+    // Whitespace collapsed: the section is wrapped prose, so an assertion spanning a
+    // line break would fail over where the wrap fell rather than over what it says.
+    const section = sectionRaw.replace(/\s+/g, " ");
+
+    expect(section, "the defect, as the same kind as a bug").toContain(
+      "Unreadable code is a defect of the same kind as a bug",
+    );
+    expect(section, "and why: it is what makes the next change go wrong").toContain(
+      "Both are how the next change goes wrong",
+    );
+    expect(section, "the default is the shape with less in it").toContain(
+      "Prefer the shape with less in it over the one with more",
+    );
+    expect(section, "which is not timidity about the size of the diff").toContain(
+      "the change that deletes code is worth more than the change that adds it",
+    );
+    expect(section, "compatibility and fallbacks are exceptions, not the default").toContain(
+      "are not the default",
+    );
+    expect(section, "an exception needs a reason this project actually has").toContain(
+      "for a reason this project actually has",
+    );
+    // What an exception costs, or the paragraph is permission rather than a trade-off.
+    expect(section, "kept small").toContain("keep it small");
+    expect(section, "explained where it lives").toContain("write why it is there at the place");
+    expect(section, "and reported as a cost the next reader pays").toContain(
+      "what it costs the next reader",
+    );
+    expect(sectionRaw, "the philosophy is not an adopter's setting").not.toMatch(/\{\{/);
+  });
+
+  /**
    * Who is asked, and who is not -- the split that stops a design question reaching a
    * person who cannot answer it.
    *
