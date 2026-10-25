@@ -12378,6 +12378,60 @@
     ]
   },
   {
+    "path": "sessions/issue-389/engineer.json",
+    "agent": "engineer",
+    "messages": 95,
+    "calls": 50,
+    "failed": 0,
+    "refused": 6,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "read": 10,
+      "get_issue": 1,
+      "get_issue_comments": 1,
+      "bash": 25,
+      "write": 2,
+      "atoma_builtin__load_skill": 1,
+      "edit": 8,
+      "commit_and_push": 1,
+      "create_pr": 1
+    },
+    "acts": {
+      "other": 23,
+      "edit": 2
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T15:22:39Z",
+        "ended_because": "completed",
+        "iterations": 41,
+        "messages": 95,
+        "seconds": 468,
+        "server_calls": {
+          "files": {
+            "edit": 8,
+            "read": 10,
+            "write": 2
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1,
+            "get_issue": 1,
+            "get_issue_comments": 1
+          },
+          "shell": {
+            "bash": 25
+          }
+        },
+        "started": "2026-10-25T15:14:51Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-392/engineer.json",
     "agent": "engineer",
     "messages": 158,
