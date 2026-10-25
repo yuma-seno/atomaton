@@ -25,7 +25,7 @@
  * ## What it does not decide
  *
  * Not the text, and not who posts it: a tool call and a workflow step reach `gh` the
- * same way, and who may post where is not this file's question. What it owns is the two
+ * same way, and who may post where is not this file's question. What it owns is the
  * header tags and the newline under them, which every writer used to spell out itself.
  *
  * ## Audience, not a tag
@@ -36,7 +36,7 @@
  * each one explaining which. Naming the reader rather than the tag keeps the decision,
  * instead of its encoding, at the call site; see `LLM_CONTEXT_TAG`.
  */
-import { ENDED_TAG, LLM_CONTEXT_TAG } from "./tags.ts";
+import { AGENT_TAG, ENDED_TAG, LLM_CONTEXT_TAG } from "./tags.ts";
 
 /**
  * The endings a turn comment may carry, as `ENDED_TAG` spells them.
@@ -63,6 +63,26 @@ export interface TurnCommentHeader {
   /** Who reads it: the model's context, or a person. */
   audience: "model" | "person";
   /**
+   * The agent this run was, written as `atomaton:agent` (#354).
+   *
+   * Optional because a caller outside a run has no name to give, and a guessed one
+   * would be a name `mostRecentAgentOn` acts on. A caller inside a run always has one
+   * — `runAgent()` — and passes it.
+   *
+   * It matters most for `waiting`. A run that parks on a child posts no result
+   * comment, so this ending is the only footprint it leaves, and it used to leave it
+   * without a name. A node whose run was started without a dispatch marker — a manual
+   * `workflow_dispatch`, a new issue's body — then had no name anywhere on its
+   * thread, and the aggregation that collects the parked turn could only dispatch an
+   * agent called `""`, which GitHub refused (#354). `atomaton:agent` is where the
+   * thread already names a run's agent, so the ending carries it too.
+   *
+   * A body carrying this tag reads as an agent's comment — so the readers that mean
+   * "an agent's RESULT comment" must say so, and `isResultComment` in
+   * `adapters/github/thread.ts` is where they do.
+   */
+  agent?: string;
+  /**
    * The ask comment id this ending answers, and the id of the run that wrote it (#285).
    *
    * The ending is the second half of a turn's identity — `TOOK_TAG` claimed an ask at
@@ -78,11 +98,16 @@ export interface TurnCommentHeader {
   run?: number;
 }
 
-/** The two header lines, in the order every comment here has them. */
+/** The header lines, in the order every comment here has them. */
 export function turnHeader(h: TurnCommentHeader): string[] {
   const context = h.audience === "model" ? "include" : "exclude";
+  const agent = (h.agent ?? "").trim();
   return [
     LLM_CONTEXT_TAG.write(context),
+    // Between the audience and the ending: the two tags every turn comment carries
+    // keep their places, and a caller with no agent writes exactly what it wrote
+    // before (#354).
+    ...(agent === "" ? [] : [AGENT_TAG.write(agent)]),
     ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 }),
   ];
 }

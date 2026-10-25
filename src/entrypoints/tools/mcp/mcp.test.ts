@@ -11,6 +11,7 @@ const SCRIPTS_DIR = join(process.cwd(), "src/entrypoints/tools/mcp");
 import { FAKE_GH_IMPL } from "../../../entrypoints/machinery/testing/fake-gh-env.ts";
 import { removeTemp } from "../../../entrypoints/machinery/testing/harness.ts";
 import { readers } from "../../../adapters/github/thread.ts";
+import { mostRecentAgent } from "../../../adapters/github/agent-on-issue.ts";
 import { turnEvents, whoseTurn } from "../../../domain/work/thread.ts";
 
 /**
@@ -421,6 +422,61 @@ describe("mcp/github.ts", () => {
       expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
       const recorded = JSON.parse(readFileSync(join(dir, "ending-comment.json"), "utf8"));
       expect(recorded).toEqual({ commentId: "777", node: "1" });
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * The same footprint rule as `launch_sub_agent` (#354): a run that parks on a pull
+   * request ends inside `create_pr` and posts no result comment, so this comment is the
+   * only place the node's thread says which agent was here. Asserted through
+   * `mostRecentAgent`, the reader the aggregation gate and `/resume` use — the tag
+   * being present is not the claim; being found by that reader is.
+   */
+  test("create_pr's waiting comment names the agent that parked", async () => {
+    const { root, seed, work } = makeRemoteBranchFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-parked-agent-"));
+    const log = join(dir, "gh.log");
+    try {
+      git(seed, "branch", "atomaton/issue-12");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      git(work, "fetch", "origin");
+
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 23, method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR", reviewer: "reviewer" } },
+        },
+        {
+          BRANCH: "atomaton/issue-1",
+          TYPE: "issue",
+          NUMBER: "1",
+          AGENT: "engineer",
+          ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/42",
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
+            { match: ["workflow", "run"], stdout: "" },
+            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
+            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/1#issuecomment-777" },
+            { match: ["pr", "comment"], stdout: "" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      const commented = readFileSync(log, "utf8").trim().split("\n")
+        .map((line) => JSON.parse(line) as string[])
+        .find((argv) => argv[0] === "issue" && argv[1] === "comment");
+      const body = commented?.[commented.indexOf("--body") + 1] ?? "";
+      expect(await readers.ending(body)).toBe("waiting");
+      expect(mostRecentAgent([body])).toBe("engineer");
     } finally {
       removeTemp(root);
       removeTemp(dir);
@@ -2340,8 +2396,14 @@ describe("mcp/atomaton.ts", () => {
    * Checked through the same reader the guard uses, not by string-matching the tag: a
    * comment could carry a tag nobody read, which is the gap that made #90 survive its
    * own fix.
+   *
+   * The comment also names the agent (#354). That is the half the aggregation needs: the
+   * run parks inside this call and posts no result comment, so if the run was started by
+   * a manual `workflow_dispatch` — a route that writes no dispatch marker — this comment
+   * is the only place the parent's thread says who was working there. Without it the
+   * aggregation that collects the park dispatches "(no agent)" and the parent stalls.
    */
-  test("launch_sub_agent's dispatch comment ends the turn as `waiting`", async () => {
+  test("launch_sub_agent's dispatch comment ends the turn as `waiting` and names its agent", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-launch-ending-"));
     const log = join(dir, "gh.log");
     try {
@@ -2360,6 +2422,10 @@ describe("mcp/atomaton.ts", () => {
           // THERE, not on the child, so an unset number skips the very comment this test
           // is about.
           NUMBER: "3",
+          // Declared rather than inherited: the name on the comment IS what this asserts,
+          // and `hermeticEnv` does not strip `AGENT` — so without this the answer would be
+          // whichever agent happened to run the suite.
+          AGENT: "atomaton",
           FAKE_GH_LOG: log,
           FAKE_GH_RESPONSES: JSON.stringify([
             { match: ["api", "graphql", "num=7"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 3 } } } } }) },
@@ -2384,6 +2450,11 @@ describe("mcp/atomaton.ts", () => {
       // while the children run is an interruption the guard removes, not a turn the
       // person holds.
       expect(await whoseTurn(turnEvents(["/atomaton", body], readers))).toBe("agent");
+      // The recovery the missing name broke (#354): "who was on this node", asked of the
+      // thread exactly as the aggregation gate and `/resume` ask it. A run started by a
+      // manual workflow_dispatch leaves no dispatch marker, so this comment is the
+      // answer — and the reader is the real one, not a string match on the tag.
+      expect(mostRecentAgent([body])).toBe("atomaton");
     } finally {
       removeTemp(dir);
     }

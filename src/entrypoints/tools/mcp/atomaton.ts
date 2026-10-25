@@ -24,7 +24,7 @@ import { dispatchSubAgent } from "../lib/dispatch_sub_agent.ts";
 import { parentIssueOf } from "../../../adapters/github/parent-issue.ts";
 import { LLM_CONTEXT_TAG } from "../../../adapters/github/tags.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
-import { endingIdentity } from "../lib/turn-identity.ts";
+import { endingIdentity, runAgent } from "../lib/turn-identity.ts";
 import { postTurnComment, recordEndingComment } from "../../../adapters/github/ending-comment.ts";
 import { concludeIssue, type ConcludeIssueResult } from "../lib/conclude_issue.ts";
 import { describeGateResult, needsAttention } from "../../../app/aggregation.ts";
@@ -240,8 +240,14 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     // A partial dispatch keeps the session OPEN, so it is not waiting and must not carry
     // the tag, which is why the header is built from `complete` and the tags are not
     // baked into the body below.
+    //
+    // The agent goes on with the ending (#354): this comment is the only footprint a
+    // parked run leaves, and the aggregation that collects the park reads the parent's
+    // agent off this thread. Without it, a parent whose run was started by a manual
+    // `workflow_dispatch` — a route that writes no dispatch marker — had no name to
+    // re-invoke.
     const bodyLines = complete
-      ? turnHeader({ ended: "waiting", audience: "person", ...endingIdentity() })
+      ? turnHeader({ ended: "waiting", audience: "person", agent: runAgent(), ...endingIdentity() })
       : [LLM_CONTEXT_TAG.write("exclude")];
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));

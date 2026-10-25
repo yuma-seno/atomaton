@@ -35,7 +35,7 @@ import { closingKeywordRefusal, closingReferences, partOfLine } from "../../../d
 import { commandInBodyRefusal, commandLinesIn } from "../../../domain/work/comment-command.ts";
 import { closeRequestComment } from "../../../domain/work/close-request.ts";
 import { turnCommentBody, turnHeader } from "../../../adapters/github/turn-comment.ts";
-import { endingIdentity } from "../lib/turn-identity.ts";
+import { endingIdentity, runAgent } from "../lib/turn-identity.ts";
 import { postTurnComment, recordEndingComment } from "../../../adapters/github/ending-comment.ts";
 import type { GhIssueAuthor } from "../../../adapters/github/wire-types.ts";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, stringArray, withoutBookkeeping, z, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
@@ -1012,7 +1012,11 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     waitingCommentId = postTurnComment({
       number: String(node),
       repo: REPO,
-      body: turnCommentBody({ ended: "waiting", audience: "person", body: text, ...endingIdentity() }),
+      // The agent goes on with the ending (#354), for the same reason `launch_sub_agent`
+      // does it: this is the footprint a run that parks on a pull request leaves, and it
+      // is where "who was on this node" has to stay answerable if no run started here
+      // wrote a dispatch marker.
+      body: turnCommentBody({ ended: "waiting", audience: "person", agent: runAgent(), body: text, ...endingIdentity() }),
     });
   }
   const validationDispatched = dispatchPrValidation(REPO, num, branch, { ask: waitingCommentId });

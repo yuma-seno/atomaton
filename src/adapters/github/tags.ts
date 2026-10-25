@@ -386,6 +386,34 @@ export function isQuotation(body: string): boolean {
   return QUOTES_TAG.has(body);
 }
 
+/**
+ * Whether a body is an agent's RESULT comment — the thing the handoff tally and the
+ * no-progress count walk.
+ *
+ * `atomaton:agent` says which agent wrote a body, and that is no longer the same
+ * question (#354). Since a turn comment that PARKS the node carries the tag too, the
+ * tag alone no longer distinguishes the two shapes a reader here has to tell apart:
+ *
+ *   - a RESULT comment — the run ended and reported, which `post_result_comment` writes
+ *     with `atomaton:changed` beside the tag, and which the tallies count
+ *   - a `waiting` ending — the run ended inside a child-starting tool, so the node's
+ *     turn is PARKED and its work is under it, not handed to the next agent on it
+ *     (`domain/work/thread.ts`)
+ *
+ * `handoffsSincePerson` asks "how many times have agents passed this node among
+ * themselves", to catch a chain going nowhere. A parked turn is not one of those: it
+ * is a decomposition progressing, and a long orchestration parks once per batch. Counted
+ * as handoffs, five batches reached the limit and the next automatic dispatch was
+ * withheld with a message about an agent loop that was not happening.
+ *
+ * A quotation is not a result comment either, for the reason `isQuotation` gives.
+ */
+export function isResultComment(body: string): boolean {
+  if (isQuotation(body)) return false;
+  if (!AGENT_TAG.hasProse(body)) return false;
+  return ENDED_TAG.readProse(body)?.verb !== "waiting";
+}
+
 // `readAnyParentTag` was here: `PARENT_TAG.read(text) ?? PARENT_ISSUE_TAG.read(text)`,
 // for a walk that did not know whether it held an issue or a pull request. With one
 // tag left there is nothing to choose between, and the one caller that walks upward
