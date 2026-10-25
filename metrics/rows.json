@@ -11184,6 +11184,56 @@
     ]
   },
   {
+    "path": "sessions/issue-364/reviewer.json",
+    "agent": "reviewer",
+    "messages": 65,
+    "calls": 36,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "get_pr_diff": 1,
+      "glob": 2,
+      "read": 15,
+      "grep": 11,
+      "get_check_runs": 1,
+      "get_pr": 1,
+      "get_issue_comments": 1,
+      "fetch": 3,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T08:58:47Z",
+        "ended_because": "completed",
+        "iterations": 24,
+        "messages": 65,
+        "seconds": 176,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 11,
+            "read": 15
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          },
+          "web": {
+            "fetch": 3
+          }
+        },
+        "started": "2026-10-25T08:55:51Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-4/atomaton.json",
     "agent": "atomaton",
     "messages": 20,
