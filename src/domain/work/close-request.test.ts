@@ -3,11 +3,11 @@ import { CLOSE_REQUEST_LINE, closeRequestComment } from "./close-request.ts";
 
 describe("closeRequestComment", () => {
   test("asks in the first line, above what the agent had to say", () => {
-    const comment = closeRequestComment({ notify: "alice", body: "Atomaton: work complete.\n\n**Reason:** merged" });
+    const comment = closeRequestComment({ notify: "alice", body: "Atomaton: work complete.\n\nMerged." });
     const [first] = comment.split("\n");
     expect(first).toBe(`@alice ${CLOSE_REQUEST_LINE}`);
     // The report follows it rather than burying it.
-    expect(comment.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(comment.indexOf("**Reason:**"));
+    expect(comment.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(comment.indexOf("Merged."));
   });
 
   test("still posts the request when nobody could be resolved to mention", () => {

@@ -2890,7 +2890,7 @@ describe("mcp/github.ts", () => {
           jsonrpc: "2.0", id: 26, method: "tools/call",
           params: {
             name: "request_close_issue",
-            arguments: { reason: "the work is delivered", summary: "It landed in #123." },
+            arguments: { summary: "The work is delivered. It landed in #123." },
           },
         },
         {
@@ -2917,12 +2917,11 @@ describe("mcp/github.ts", () => {
       const comment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
       const body = comment?.join(" ") ?? "";
       expect(body).toContain("please close it yourself");
-      // The reason and summary ride on the request: they are what the person reads
-      // to decide whether the work is done.
-      expect(body).toContain("**Reason:** the work is delivered");
+      // The conclusion rides on the request: it is what the person reads to decide
+      // whether the work is done.
       expect(body).toContain("It landed in #123.");
       // The ask comes before the report, because it is the sentence the reader acts on.
-      expect(body.indexOf("please close it yourself")).toBeLessThan(body.indexOf("**Reason:**"));
+      expect(body.indexOf("please close it yourself")).toBeLessThan(body.indexOf("It landed in #123."));
       expect(readers.ending(body)).toBe("returned");
       expect(whoseTurn(turnEvents(["/engineer", body], readers))).toBe("person");
     } finally {
@@ -3058,7 +3057,7 @@ describe("mcp/atomaton.ts", () => {
       "atomaton.ts",
       {
         jsonrpc: "2.0", id: 7, method: "tools/call",
-        params: { name: "request_close_issue", arguments: { reason: "done" } },
+        params: { name: "request_close_issue", arguments: { summary: "done" } },
       },
       { ...fakeGhSeam(), TYPE: "pr", NUMBER: "21" },
     );
@@ -3125,10 +3124,7 @@ describe("mcp/atomaton.ts", () => {
           jsonrpc: "2.0", id: 34, method: "tools/call",
           params: {
             name: "launch_sub_agent",
-            arguments: {
-              tasks: [{ issue: 7, agent: "engineer" }],
-              summary: "Created #230 as a root issue and started it there.",
-            },
+            arguments: { tasks: [{ issue: 7, agent: "engineer" }] },
           },
         },
         {
@@ -3327,7 +3323,7 @@ describe("mcp/atomaton.ts", () => {
           jsonrpc: "2.0", id: 9, method: "tools/call",
           params: {
             name: "launch_sub_agent",
-            arguments: { tasks: [{ issue: 7, agent: "engineer" }], summary: "Split the work." },
+            arguments: { tasks: [{ issue: 7, agent: "engineer" }] },
           },
         },
         {
@@ -3355,6 +3351,9 @@ describe("mcp/atomaton.ts", () => {
       const parentComment = calls.find((c) => c[0] === "issue" && c[1] === "comment");
       const body = parentComment?.join(" ") ?? "";
       expect(body).toContain("Launched sub-agent(s)");
+      // #15: the dispatch call carries no report, so the comment is the list and
+      // nothing else. A fold here would be a second place for the run's conclusion.
+      expect(body).not.toContain("<details>");
       expect(await readers.ending(body)).toBe("waiting");
       // The parked turn stays with the machinery (#208, 案1): a person's comment made
       // while the children run is an interruption the guard removes, not a turn the
@@ -3381,7 +3380,7 @@ describe("mcp/atomaton.ts", () => {
           jsonrpc: "2.0", id: 40, method: "tools/call",
           params: {
             name: "request_close_issue",
-            arguments: { reason: "the work is delivered", summary: "It landed in #123." },
+            arguments: { summary: "The work is delivered. It landed in #123." },
           },
         },
         {
@@ -3422,7 +3421,7 @@ describe("mcp/atomaton.ts", () => {
           jsonrpc: "2.0", id: 41, method: "tools/call",
           params: {
             name: "request_close_issue",
-            arguments: { reason: "the work is delivered", summary: "It landed in #123." },
+            arguments: { summary: "The work is delivered. It landed in #123." },
           },
         },
         {
@@ -3468,7 +3467,6 @@ describe("mcp/atomaton.ts", () => {
           params: {
             name: "request_close_issue",
             arguments: {
-              reason: "the work is delivered",
               // A directive line, because that is how an agent's report ordinarily ends
               // and it must not reach the parent as a request for an agent — see the
               // assertion below.
@@ -3522,7 +3520,6 @@ describe("mcp/atomaton.ts", () => {
       expect(body).toContain("<!-- atomaton:llm-context=include -->");
       expect(body).toContain("<details><summary>Report</summary>");
       expect(body).toContain("Sub-issue #5");
-      expect(body).toContain("the work is delivered");
       expect(body).toContain("It landed in #123.");
       // The pull request that delivered it, read from GitHub's own link rather than
       // searched for in a body.
@@ -3533,6 +3530,68 @@ describe("mcp/atomaton.ts", () => {
     } finally {
       removeTemp(dir);
     }
+  });
+
+  /**
+   * #15: a session-ending call carries its own errand and nothing else.
+   *
+   * `request_close_issue` had two arguments for one judgement — a one-sentence
+   * `reason` printed above the `summary` — and `launch_sub_agent` had a `summary`
+   * that duplicated the comment the machinery posts. Both are gone, and this pins the
+   * shape rather than the wording: the close call's only argument is the comment it
+   * posts, and a dispatch has no report argument at all.
+   */
+  test("the session-ending schemas carry no reporting-only argument", async () => {
+    const r = await sendRequest("atomaton.ts", {
+      jsonrpc: "2.0", id: 43, method: "tools/list", params: {},
+    });
+    const byName = new Map((r.result.tools as { name: string; inputSchema: any }[]).map((t) => [t.name, t]));
+
+    const close = byName.get("request_close_issue")!.inputSchema;
+    expect(Object.keys(close.properties)).toEqual(["summary"]);
+    expect(close.required).toEqual(["summary"]);
+
+    const launch = byName.get("launch_sub_agent")!.inputSchema;
+    expect(Object.keys(launch.properties)).toEqual(["tasks"]);
+  });
+
+  /**
+   * The retired arguments are refused, and the refusal says where the sentence goes.
+   *
+   * A run restored from a session written before this change holds the call it was
+   * about to make, so the first thing it does is pass an argument that no longer
+   * exists. `refuseUnknownKeys` turns that into an error; `guidance` is what makes it
+   * an instruction rather than a dead end.
+   */
+  test("request_close_issue explains the retired `reason` argument", async () => {
+    const r = await sendRequest(
+      "atomaton.ts",
+      {
+        jsonrpc: "2.0", id: 44, method: "tools/call",
+        params: { name: "request_close_issue", arguments: { reason: "done", summary: "It landed in #123." } },
+      },
+      { ...fakeGhSeam(), NUMBER: "5" },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("`reason`");
+    expect(r.result.content[0].text).toContain("`summary`");
+  });
+
+  test("launch_sub_agent explains the retired `summary` argument", async () => {
+    const r = await sendRequest(
+      "atomaton.ts",
+      {
+        jsonrpc: "2.0", id: 45, method: "tools/call",
+        params: {
+          name: "launch_sub_agent",
+          arguments: { tasks: [{ issue: 7, agent: "engineer" }], summary: "Split the work." },
+        },
+      },
+      { ...fakeGhSeam(), NUMBER: "3" },
+    );
+    expect(r.result.isError).toBe(true);
+    expect(r.result.content[0].text).toContain("`summary`");
+    expect(r.result.content[0].text).toContain("launch_sub_agent");
   });
 });
 

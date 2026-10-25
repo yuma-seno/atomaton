@@ -79,7 +79,7 @@ function mustSucceed(result: { code: number; stdout: string; stderr: string }, w
  * `domain/work/close-request.ts` for the reports that came out of answering it
  * the other way.
  */
-export async function concludeIssue(issue: number, reason: string, summary: string): Promise<ConcludeIssueResult> {
+export async function concludeIssue(issue: number, summary: string): Promise<ConcludeIssueResult> {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   // The exit code decides, not just the presence of output. An unread author is
   // not a human author: closing the issue outright and telling a person "this was
@@ -98,13 +98,13 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   // `domain/work/actor.ts`'s, shared with every other reader of the same fact.
   const isBot = !isHumanAuthor(authorInfo.author?.is_bot);
 
-  let body = `Atomaton: the agent on this issue considers its work complete.\n\n**Reason:** ${reason}`;
-  if (summary) {
-    body += `\n\n${summary}`;
-  }
+  // The conclusion is the comment. It carried a one-line `reason` above the `summary`
+  // until #15: the two said the same thing, and a reader had to decide which of them
+  // was the report.
+  const body = `Atomaton: the agent on this issue considers its work complete.\n\n${summary}`;
 
   if (!isBot) {
-    // The request goes above the reason and summary, not after them. It is the
+    // The request goes above the conclusion, not after it. It is the
     // only sentence in the comment addressed to the person reading it.
     //
     // `ended: "done"` because this IS the turn ending: the run is over, the issue stays
@@ -124,9 +124,9 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   }
 
   // The conclusion itself. `audience: "model"` because this is what the parent agent
-  // reads when it aggregates what its children found — the reason and the summary are
-  // written for that reader, and were reaching it only because an untagged comment is
-  // included by default rather than by anybody deciding.
+  // reads when it aggregates what its children found — the summary is written for that
+  // reader, and was reaching it only because an untagged comment is included by
+  // default rather than by anybody deciding.
   //
   // `ended: "done"` for the same reason as the branch above: this run is over and the
   // session ends on this call. It closes the issue just below, so the thread has an
@@ -139,9 +139,9 @@ export async function concludeIssue(issue: number, reason: string, summary: stri
   // The parent's thread, not this one, is where the agent about to be re-invoked reads
   // what happened here. Posted before the gate, so it is there whether the gate
   // dispatches the parent or stands down with an outcome a person has to resolve.
-  // `reason` as well as `summary`: the reason is the one sentence saying what kind of
-  // completion this is, and it is already written for the same reader.
-  reportSubIssueToParent(repo, issue, [reason, summary].filter(Boolean).join("\n\n"));
+  // The summary as written: it is the whole of this run's conclusion, and it is
+  // already written for the same reader.
+  reportSubIssueToParent(repo, issue, summary);
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
   console.error(describeGateResult(aggregation, issue));
   return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };
