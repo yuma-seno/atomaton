@@ -32,6 +32,24 @@ export interface CheckRun {
   detailsUrl?: string;
 }
 
+/**
+ * A workflow run on the head commit that has not finished.
+ *
+ * Deliberately not a `CheckRun`. A GitHub Actions status context — `atomaton-check` —
+ * does not exist until the job that produces it starts, so for the first minutes of a
+ * run the commit carries a workflow run and no check run of that name. Read as
+ * `checks-missing` that window is a false statement about the commit ("has not run"
+ * while it is in fact running) and it re-triggers the recovery dispatch, which starts a
+ * second run of the very job already going. The two are therefore read separately, from
+ * separate endpoints, because they answer different questions.
+ */
+export interface ActiveRun {
+  /** The workflow's name — what the run is, not the context it will register. */
+  name: string;
+  /** GitHub's `status` for a workflow run: queued | in_progress | requested | waiting | pending. */
+  status: string;
+}
+
 export interface MergeSignals {
   /**
    * GitHub's computed merge state, evaluated against the active ruleset:
@@ -65,6 +83,19 @@ export interface MergeSignals {
   authoredByAgent: boolean;
   /** Check runs on the head commit, used to name what is failing or pending. */
   checks: CheckRun[];
+  /**
+   * Workflow runs on the head commit that have not finished, of any workflow.
+   *
+   * Consulted only where a required context has no check run yet: that absence means
+   * "no run exists" only when nothing is running on the commit. See `ActiveRun`.
+   *
+   * Empty means none was found. The adapter reads this from GitHub on every call
+   * rather than only when a context is absent, so empty is never "not asked" — a
+   * read that fails degrades to empty as well, which is the pre-existing behaviour
+   * (a `checks-missing` blocker and one dispatch attempt), so the failure costs a
+   * duplicate run at worst and never a missing one.
+   */
+  activeRuns: ActiveRun[];
   /**
    * Status check contexts the ruleset requires, from
    * `GET /repos/{owner}/{repo}/rules/branches/{branch}`. Empty when the branch
@@ -216,7 +247,14 @@ const CI_WOULD_BE_WASTED: ReadonlySet<BlockerKind> = new Set([
 export interface MergeReadiness {
   ready: boolean;
   blockers: Blocker[];
-  /** True when a required check has never run on the head commit. */
+  /**
+   * True when a required check has never run on the head commit and nothing is
+   * running there either.
+   *
+   * A required context that has not registered while a workflow run for the commit is
+   * unfinished is `checks-pending`, not a reason to dispatch: the run in flight will
+   * create it.
+   */
   needsCiDispatch: boolean;
 }
 
@@ -267,6 +305,26 @@ export function governedPathsIn(files: string[], patterns: readonly string[]): s
 }
 
 /**
+ * How many of `activeRuns` to name in a blocker detail.
+ *
+ * A head commit normally carries one or two runs, so this only matters when a
+ * workflow has been re-dispatched several times against the same commit — the case
+ * where the detail would otherwise grow a line per attempt. Two names the run that is
+ * presumably the one producing the check, and the count says the rest are there.
+ */
+const RUNS_NAMED = 2;
+
+/** The unfinished runs on the commit, as one clause a blocker can carry. */
+function describeActiveRuns(activeRuns: readonly ActiveRun[]): string {
+  const named = activeRuns.slice(0, RUNS_NAMED).map((run) => `"${run.name}" (${run.status})`);
+  const rest = activeRuns.length - named.length;
+  const more = rest > 0 ? `, +${rest} more` : "";
+  // Said without a verb, so one run and several read alike: `unfinished on this
+  // commit` is the predicate, and the subject's number does not change it.
+  return `${named.length === 1 ? "workflow run" : "workflow runs"} ${named.join(", ")}${more}`;
+}
+
+/**
  * Explain a BLOCKED verdict in terms of the required checks, so a refusal names
  * the check to fix rather than restating that GitHub said no.
  */
@@ -277,10 +335,24 @@ function explainRequiredChecks(signals: MergeSignals): Blocker[] {
   for (const context of signals.requiredChecks) {
     const run = byName.get(context);
     if (!run) {
-      blockers.push({
-        kind: "checks-missing",
-        detail: `required check "${context}" has not run on the head commit`,
-      });
+      // Absent is two different situations, and the difference is whether a run for
+      // this commit is in flight. GitHub creates the context when the producing job
+      // reaches it, so a commit that is being validated right now has its workflow
+      // run and no check run of that name — reporting `checks-missing` there was
+      // false when it was reported and dispatched a second run of the same work.
+      if (signals.activeRuns.length > 0) {
+        blockers.push({
+          kind: "checks-pending",
+          detail:
+            `required check "${context}" has not registered yet; ${describeActiveRuns(signals.activeRuns)} ` +
+            "unfinished on this commit, and dispatching CI would duplicate it",
+        });
+      } else {
+        blockers.push({
+          kind: "checks-missing",
+          detail: `required check "${context}" has not run on the head commit`,
+        });
+      }
     } else if (run.status !== "completed") {
       blockers.push({
         kind: "checks-pending",

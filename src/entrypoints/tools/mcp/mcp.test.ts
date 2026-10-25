@@ -2018,6 +2018,7 @@ describe("mcp/github.ts", () => {
             },
             { match: ["pr", "view", "802", "mergeStateStatus"], stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }) },
             { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+            { match: ["actions/runs?head_sha=abc123"], stdout: JSON.stringify({ workflow_runs: [] }) },
             { match: ["rules/branches/atomaton/issue-300"], stdout: "[]" },
             { match: ["pulls/802/files"], stdout: "" },
           ],
@@ -2036,6 +2037,74 @@ describe("mcp/github.ts", () => {
         expect(answer.stacked_merge).toBe(true);
         expect(answer.stacked_merge_note).toContain("atomaton/issue-300");
       } finally {
+        removeTemp(configDir);
+      }
+    });
+
+    /**
+     * The reviewer's first readiness call on a fresh head, which is the window the
+     * required context does not cover.
+     *
+     * `atomaton-check` is registered by the job that runs it, so early in a validation
+     * run the commit carries the workflow run and no check run of that name. Answered
+     * as a missing check it dispatched a second identical run against the same head,
+     * so the review's own first call doubled the work it was waiting on. The answer is
+     * `checks-pending` and nothing is dispatched — the dispatch rule would otherwise
+     * have fired, which the `workflow run` rule below makes visible rather than
+     * letting a failed dispatch stand in for a skipped one.
+     */
+    test("a required context that has not registered yet is pending, and dispatches nothing", async () => {
+      const configDir = makeConfigDir({ merge: { policy: "auto" } });
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-readiness-inflight-"));
+      const log = join(dir, "gh.log");
+      try {
+        const r = await call(
+          "check_merge_readiness",
+          {},
+          [
+            {
+              match: ["pr", "view", "802", "isDraft,author"],
+              stdout: JSON.stringify({
+                isDraft: false,
+                author: { is_bot: true },
+                state: "OPEN",
+                headRefOid: "abc123",
+                headRefName: "atomaton/issue-300",
+                baseRefName: "main",
+                title: "Deliver #300",
+                labels: [],
+              }),
+            },
+            { match: ["pr", "view", "802", "mergeStateStatus"], stdout: JSON.stringify({ mergeStateStatus: "BLOCKED" }) },
+            { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+            {
+              match: ["actions/runs?head_sha=abc123"],
+              stdout: JSON.stringify({ workflow_runs: [{ name: "pull-request-checks", status: "in_progress" }] }),
+            },
+            {
+              match: ["rules/branches/main"],
+              stdout: JSON.stringify([
+                {
+                  type: "required_status_checks",
+                  parameters: { required_status_checks: [{ context: "atomaton-check" }] },
+                },
+              ]),
+            },
+            { match: ["pulls/802/files"], stdout: "" },
+            { match: ["workflow", "run"], stdout: "" },
+          ],
+          { TYPE: "pr", NUMBER: "802", ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+        );
+        const answer = JSON.parse(r.result.content[0].text) as {
+          blockers: { kind: string; detail: string }[];
+          ci_dispatched: boolean;
+        };
+        expect(answer.blockers.map((b) => b.kind)).toEqual(["checks-pending"]);
+        expect(answer.blockers[0]?.detail).toContain('workflow run "pull-request-checks" (in_progress)');
+        expect(answer.ci_dispatched).toBe(false);
+        expect(readFileSync(log, "utf8")).not.toContain("workflow");
+      } finally {
+        removeTemp(dir);
         removeTemp(configDir);
       }
     });
@@ -2248,6 +2317,7 @@ describe("mcp/github.ts", () => {
                 match: ["commits/abc123/check-runs"],
                 stdout: JSON.stringify({ check_runs: [{ name: "validate", status: "completed", conclusion: "success" }] }),
               },
+              { match: ["actions/runs?head_sha=abc123"], stdout: JSON.stringify({ workflow_runs: [] }) },
               { match: ["rules/branches/atomaton/issue-300"], stdout: "[]" },
               { match: ["pulls/802/files"], stdout: "" },
               // The merge, the branch deletion, and the body read for the handoff.
@@ -2374,6 +2444,7 @@ describe("mcp/github.ts", () => {
                 match: ["commits/abc123/check-runs"],
                 stdout: JSON.stringify({ check_runs: [{ name: "validate", status: "completed", conclusion: "success" }] }),
               },
+              { match: ["actions/runs?head_sha=abc123"], stdout: JSON.stringify({ workflow_runs: [] }) },
               { match: ["rules/branches/atomaton/issue-300"], stdout: "[]" },
               { match: ["pulls/802/files"], stdout: "" },
               { match: ["pr", "merge", "802"], stdout: "" },

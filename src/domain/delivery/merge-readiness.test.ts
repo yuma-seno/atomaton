@@ -16,6 +16,9 @@ function signals(overrides: Partial<MergeSignals> = {}): MergeSignals {
     authoredByAgent: true,
     state: "OPEN",
     checks: [{ name: "check", status: "completed", conclusion: "success" }],
+    // Nothing is running on the head commit unless a test says so: the ordinary case is
+    // a commit whose runs have all finished.
+    activeRuns: [],
     requiredChecks: ["check"],
     // The ordinary repository: GitHub can and does refuse a merge itself. The case
     // where it cannot is a paid feature a free private repository lacks, and it has
@@ -89,6 +92,57 @@ describe("decideMergeReadiness", () => {
     );
     expect(result.blockers.map((b) => b.kind)).toEqual(["checks-pending"]);
     expect(result.needsCiDispatch).toBe(false);
+  });
+
+  /**
+   * The window this rule exists for: a workflow run is in flight and the context it
+   * will register does not exist yet.
+   *
+   * Reported as `checks-missing`, this said the required check "has not run" about a
+   * commit that was being validated at that moment, and `needsCiDispatch` started a
+   * second run of the same workflow against the same head — two identical runs, one
+   * of which was pure waste.
+   */
+  test("a required check that has not registered while a run is in flight is pending", () => {
+    const result = decideMergeReadiness(
+      signals({
+        mergeStateStatus: "BLOCKED",
+        checks: [{ name: "plan-pull-request-checks", status: "completed", conclusion: "success" }],
+        activeRuns: [{ name: "pull-request-checks", status: "in_progress" }],
+      }),
+    );
+    expect(result.blockers.map((b) => b.kind)).toEqual(["checks-pending"]);
+    expect(result.blockers[0]?.detail).toContain('"check"');
+    expect(result.blockers[0]?.detail).toContain('workflow run "pull-request-checks" (in_progress)');
+    expect(result.needsCiDispatch).toBe(false);
+  });
+
+  test("a queued run on the head counts the same as a running one", () => {
+    const result = decideMergeReadiness(
+      signals({
+        mergeStateStatus: "BLOCKED",
+        checks: [],
+        activeRuns: [{ name: "pull-request-checks", status: "queued" }],
+      }),
+    );
+    expect(result.blockers.map((b) => b.kind)).toEqual(["checks-pending"]);
+    expect(result.needsCiDispatch).toBe(false);
+  });
+
+  test("several runs in flight are named without growing a line per run", () => {
+    const { blockers } = decideMergeReadiness(
+      signals({
+        mergeStateStatus: "BLOCKED",
+        checks: [],
+        activeRuns: [
+          { name: "pull-request-checks", status: "in_progress" },
+          { name: "atomaton-tools", status: "queued" },
+          { name: "default-branch-checks", status: "queued" },
+        ],
+      }),
+    );
+    expect(blockers[0]?.detail).toContain('"pull-request-checks" (in_progress), "atomaton-tools" (queued)');
+    expect(blockers[0]?.detail).toContain("+1 more");
   });
 
   test("BLOCKED for a reason outside the checks says so instead of guessing", () => {

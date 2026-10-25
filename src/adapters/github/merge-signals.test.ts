@@ -36,9 +36,12 @@ const PR_VIEW = {
 };
 
 /** Every read `gatherMergeSignals` makes after the pull request view, answered. */
+const RUNS_ON_HEAD = { match: ["actions/runs?head_sha=abc123"], stdout: JSON.stringify({ workflow_runs: [] }) };
+
 const REST_OF_THE_READS = [
   { match: ["pr", "view", "7", "mergeStateStatus"], stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }) },
   { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+  RUNS_ON_HEAD,
   { match: ["rules/branches/main"], stdout: "[]" },
   { match: ["pulls/7/files"], stdout: "" },
 ];
@@ -50,6 +53,7 @@ interface Answer {
   mergeStateStatus?: string;
   governanceUnknown?: string;
   stackedMerge?: boolean;
+  activeRuns?: { name: string; status: string }[];
 }
 
 function gather(rules: unknown[], env: Record<string, string>): Answer {
@@ -195,6 +199,7 @@ describe("how gatherMergeSignals reads one pull request", () => {
             stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }),
           },
           { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+          RUNS_ON_HEAD,
           { match: ["rules/branches/atomaton/issue-12"], stdout: "[]" },
           { match: ["pulls/7/files"], stdout: "" },
         ],
@@ -224,11 +229,72 @@ describe("how gatherMergeSignals reads one pull request", () => {
             stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }),
           },
           { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+          RUNS_ON_HEAD,
           { match: ["pulls/7/files"], stdout: "" },
         ],
         { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
       );
       expect(answer.stackedMerge).toBe(false);
+    } finally {
+      cleanUp();
+    }
+  }, 30_000);
+
+  /**
+   * The window a required context does not cover yet.
+   *
+   * `atomaton-check` is created when the job producing it starts, so early in a run
+   * the commit has a workflow run and no check run of that name. The decision that
+   * turns that into `checks-pending` instead of a duplicate dispatch lives in
+   * `merge-readiness.ts`; what this pins is that the fact it needs gets read —
+   * unfinished runs kept, finished ones dropped.
+   */
+  test("unfinished workflow runs on the head are carried, finished ones are not", () => {
+    const { configDir, log, cleanUp } = fixture();
+    try {
+      const answer = gather(
+        [
+          { match: ["pr", "view", "7", "isDraft,author"], stdout: JSON.stringify(PR_VIEW) },
+          ...REST_OF_THE_READS.filter((rule) => rule !== RUNS_ON_HEAD),
+          {
+            match: ["actions/runs?head_sha=abc123"],
+            stdout: JSON.stringify({
+              total_count: 2,
+              workflow_runs: [
+                { name: "atomaton-tools", status: "completed", conclusion: "success" },
+                { name: "pull-request-checks", status: "in_progress" },
+              ],
+            }),
+          },
+        ],
+        { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+      );
+      expect(answer.ok).toBe(true);
+      expect(answer.activeRuns).toEqual([{ name: "pull-request-checks", status: "in_progress" }]);
+      // The head commit's runs, not the branch's: a run on an older commit has
+      // finished registering whatever it was going to register.
+      expect(ghCalls(log).some((argv) => argv.join(" ").includes("actions/runs?head_sha=abc123"))).toBe(true);
+    } finally {
+      cleanUp();
+    }
+  }, 30_000);
+
+  // A read that only refines a blocker must not take the merge path down with it. The
+  // degraded answer is the one this module gave before the read existed — no run known
+  // to be going, so a `checks-missing` blocker and one dispatch attempt.
+  test("a failure listing the workflow runs degrades to no known runs instead of failing", () => {
+    const { configDir, log, cleanUp } = fixture();
+    try {
+      const answer = gather(
+        [
+          { match: ["pr", "view", "7", "isDraft,author"], stdout: JSON.stringify(PR_VIEW) },
+          ...REST_OF_THE_READS.filter((rule) => rule !== RUNS_ON_HEAD),
+          { match: ["actions/runs?head_sha=abc123"], code: 1, stdout: "gh: Resource not accessible by integration (HTTP 403)" },
+        ],
+        { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+      );
+      expect(answer.ok).toBe(true);
+      expect(answer.activeRuns).toEqual([]);
     } finally {
       cleanUp();
     }
