@@ -13,6 +13,7 @@
  * server's tool registry.
  */
 import { ghRead } from "./gh.ts";
+import { readPullRequest } from "./pull-request.ts";
 import { readBranchRules } from "./branch-rules.ts";
 import { getGovernedPaths, getMergeGates, getMergePolicy } from "../../adapters/runner/config.ts";
 import { governedPathsIn, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
@@ -31,7 +32,6 @@ export interface PullRequestRefs {
 }
 
 interface PullRequestView {
-  mergeStateStatus?: string;
   isDraft?: boolean;
   /** `is_bot` distinguishes an agent's pull request from a person's. */
   author?: { is_bot?: boolean };
@@ -128,10 +128,15 @@ function readChangedFiles(repo: string, num: number): ChangedFilesRead {
   // `@json` escapes them inside the string, so one file stays one line and
   // `JSON.parse` gives the exact bytes back. `previous_filename` is absent on all
   // but a rename, hence the `//` default.
-  // `ghRead`, like the two pull-request reads in `gatherMergeSignals`: a transient
-  // failure here is not an answer either. It comes back as `problem`, and a problem
-  // blocks the merge — so on plain `gh` one `HTTP 504` refused a merge that was fine,
-  // which is the same false refusal the retry on `mergeStateStatus` exists to prevent.
+  // Not `pull-request.ts`'s read, and the reason is the question: the list of files a
+  // pull request changes is a paginated sub-resource (`pulls/<n>/files`), not a field of
+  // the request, so it has its own endpoint, its own page loop, and its own failure
+  // policy — this one fails CLOSED, where every projection of the request itself degrades.
+  //
+  // `ghRead`, like the pull-request reads in `gatherMergeSignals`: a transient failure
+  // here is not an answer either. It comes back as `problem`, and a problem blocks the
+  // merge — so on plain `gh` one `HTTP 504` refused a merge that was fine, which is the
+  // same false refusal the retry on `mergeStateStatus` exists to prevent.
   const { code, stdout } = ghRead(
     "api",
     `repos/${repo}/pulls/${num}/files?per_page=100`,
@@ -192,51 +197,25 @@ export function gatherMergeSignals(
   throwOnFailure: (message: string) => never,
 ): { signals: MergeSignals; refs: PullRequestRefs } {
   /**
-   * The pull request's own read, and why both of these retry.
+   * The check runs' read — the one `gh` call left in this module that is not the pull
+   * request itself.
    *
-   * Both go through `ghRead`, so a transient failure is outlasted whichever field it
-   * hit. `json` used plain `gh`, so one `HTTP 504` on the pull request view killed
-   * `merge_pr` outright, while the identical blip on `mergeStateStatus` came back as
-   * `UNKNOWN` and merely blocked: one policy written twice and updated once, with the
-   * reason recorded only on the half that had been fixed.
-   *
-   * What still differs between them is what a FAILURE means, not whether it is retried,
-   * and that difference is real — see each function below and `readChangedFiles` above.
+   * The pull request is `pull-request.ts`'s read now, so the retry it used to share
+   * with this helper lives there. This one is a sub-resource of the head commit: a
+   * different endpoint, a different question, and the same retrying `ghRead` because a
+   * blip here must not read as "this commit has no check runs".
    */
   const json = <T>(...args: string[]): T => {
     const { code, stdout, stderr } = ghRead(...args);
     // Named, because the message GitHub sends does not name it. `Resource not
-    // accessible by integration (HTTP 403)` arrived from one of the two calls below and
-    // said nothing about which; it cost two investigations, and in between the reviewer
-    // told a pull request it had run a diagnostic it had not. An error a reader cannot
-    // act on is worth as little here as it is in a tool description.
+    // accessible by integration (HTTP 403)` says nothing about which call produced it,
+    // and an error a reader cannot act on is worth as little here as it is in a tool
+    // description.
     if (code) throwOnFailure(`gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
     return stdout ? (JSON.parse(stdout) as T) : (null as T);
   };
 
-  /**
-   * Like `json`, but a failure is an absent answer rather than the end of the call.
-   *
-   * The same retry as `json`, and the other half is the difference: `mergeStateStatus`
-   * missing reads as `UNKNOWN`, which `decideMergeReadiness` already treats as a
-   * blocker, so a degraded answer refuses the merge and says it could not determine
-   * mergeability instead of quietly becoming a yes.
-   */
-  const tryJson = <T>(...args: string[]): T | null => {
-    const { code, stdout, stderr } = ghRead(...args);
-    if (code) {
-      log(`WARN gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
-      return null;
-    }
-    try {
-      return stdout ? (JSON.parse(stdout) as T) : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const pr = json<PullRequestView>(
-    "pr", "view", String(num), "--repo", repo,
+  const pr = readPullRequest<PullRequestView>(repo, num, [
     // `mergeable` is deliberately absent: `mergeStateStatus` is the verdict, and
     // requesting it is already what makes GitHub compute mergeability, so asking
     // for both only produced a field nothing read.
@@ -248,9 +227,19 @@ export function gatherMergeSignals(
     // `title` and `labels` are here for `merge.gates` only. They ride along on a
     // call already being made, so a project that declares no gate pays nothing
     // for the ones it could have declared.
-    "--json",
-    "isDraft,author,state,headRefOid,headRefName,baseRefName,title,labels",
-  );
+    "isDraft",
+    "author",
+    "state",
+    "headRefOid",
+    "headRefName",
+    "baseRefName",
+    "title",
+    "labels",
+  ]);
+  // The one read whose failure ends the call. Naming the read is `pull-request.ts`'s
+  // now, so the message an agent sees still says which call refused it.
+  if (!pr.known) return throwOnFailure(pr.why);
+  const view = pr.value;
 
   // Asked for on its own, because it is the field GitHub is most willing to refuse and
   // the only one whose refusal used to take the whole tool down with it. The reviewer
@@ -261,18 +250,20 @@ export function gatherMergeSignals(
   // Missing reads as `UNKNOWN`, which `decideMergeReadiness` already treats as a
   // blocker. So the degraded answer refuses the merge and says it could not determine
   // mergeability, which is the honest answer and the safe one; it does not quietly
-  // become a yes.
-  const mergeState = tryJson<{ mergeStateStatus?: string }>(
-    "pr", "view", String(num), "--repo", repo, "--json", "mergeStateStatus",
-  );
+  // become a yes. That is the whole difference between this read and the one above:
+  // not whether a failure is retried — `pull-request.ts` retries both — but what it
+  // means.
+  const mergeState = readPullRequest<{ mergeStateStatus?: string }>(repo, num, "mergeStateStatus");
+  if (!mergeState.known) log(`WARN ${mergeState.why}`);
+  const mergeStateStatus = mergeState.known ? (mergeState.value.mergeStateStatus ?? "UNKNOWN") : "UNKNOWN";
 
   // Check runs hang off the commit, so a `workflow_dispatch` run against the
   // branch registers here exactly as a `pull_request` run would. That is what
   // makes the reviewer's pre-merge CI dispatch visible to this gate at all.
-  const sha = pr?.headRefOid ?? "";
+  const sha = view.headRefOid ?? "";
   const runs = sha ? json<CheckRunsResponse>("api", `repos/${repo}/commits/${sha}/check-runs`) : null;
 
-  const baseRefName = pr?.baseRefName ?? "";
+  const baseRefName = view.baseRefName ?? "";
 
   // One read, two gates. A failure to read it is a problem rather than an empty
   // list, so both gates block instead of quietly finding nothing.
@@ -289,20 +280,20 @@ export function gatherMergeSignals(
     : [
         ...matchMergeGates(gates.gates, {
           changedFiles: changed.files,
-          labels: (pr?.labels ?? []).map((label) => label.name ?? "").filter(Boolean),
-          title: pr?.title ?? "",
+          labels: (view.labels ?? []).map((label) => label.name ?? "").filter(Boolean),
+          title: view.title ?? "",
         }),
       ];
 
   return {
     signals: {
-      mergeStateStatus: mergeState?.mergeStateStatus ?? "UNKNOWN",
-      isDraft: pr?.isDraft ?? false,
+      mergeStateStatus,
+      isDraft: view.isDraft ?? false,
       // Defaults to treating the author as a person. If the field is missing the
       // safe reading is "do not merge this for someone", not "merge it". The rule
       // is `domain/work/actor.ts`'s, shared with every other reader of the fact.
-      authoredByAgent: !isHumanAuthor(pr?.author?.is_bot),
-      state: pr?.state ?? "UNKNOWN",
+      authoredByAgent: !isHumanAuthor(view.author?.is_bot),
+      state: view.state ?? "UNKNOWN",
       // Unknown reads as enforceable, which is the cautious direction: it keeps Atomaton
       // from standing in for GitHub on a repository where GitHub is in fact blocking,
       // and so from reporting one refusal twice.
@@ -336,6 +327,6 @@ export function gatherMergeSignals(
       gateMatches,
       gateProblems,
     },
-    refs: { headRefName: pr?.headRefName ?? "", baseRefName },
+    refs: { headRefName: view.headRefName ?? "", baseRefName },
   };
 }

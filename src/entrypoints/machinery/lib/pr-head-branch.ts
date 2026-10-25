@@ -19,8 +19,9 @@
  * neither is a `ref` this module may import: a bundled script gets its own
  * `import.meta.url`, so a sibling's `ref` would name the importer. See `script-ref.ts`.
  */
-import { gh, gitRun } from "../../../adapters/github/gh.ts";
+import { gitRun } from "../../../adapters/github/gh.ts";
 import { readOriginBranch } from "../../../adapters/github/branch-reads.ts";
+import { readPullRequest } from "../../../adapters/github/pull-request.ts";
 import type { PrHeadRefusal } from "../../../domain/work/pr-head-branch.ts";
 
 /** What `gh pr view` was asked for, and what an unreadable answer means. */
@@ -31,23 +32,39 @@ export interface PrHead {
 }
 
 /**
- * Read the head branch out of `gh pr view --json headRefName,isCrossRepository`.
+ * What `gh pr view --json headRefName,isCrossRepository` was asked for, as an answer.
  *
- * Pure, and forgiving on purpose: an answer that cannot be parsed is one of the ways a
+ * The two fields are the projection, and the read is `pull-request.ts`'s. Typed as
+ * `unknown` per field rather than as strings, because this reads what GitHub sent and
+ * not what it promised: a `null`, a number or a missing field is one of the ways a
+ * caller ends up with no branch, which is an answer the gate has a refusal for.
+ */
+export interface PrHeadView {
+  headRefName?: unknown;
+  isCrossRepository?: unknown;
+}
+
+/** The fields `resolvePrHeadBranch` asks of a pull request. */
+const PR_HEAD_FIELDS = "headRefName,isCrossRepository";
+
+/**
+ * Read the head branch out of the answer to `PR_HEAD_FIELDS`.
+ *
+ * Pure, and forgiving on purpose: an answer with no usable branch is one of the ways a
  * caller ends up with no branch, not an exception. The fork flag is carried separately
  * from the name because the two refusals are different facts about the pull request, and
  * whoever reads the log needs to tell them apart.
+ *
+ * An answer that could not be parsed at all does not reach here: the reader answers
+ * `known: false` for that, and `resolvePrHeadBranch` turns it into the `unreadable`
+ * refusal with what GitHub said. That keeps "GitHub refused" and "GitHub said nothing
+ * about a branch" as different sentences, which is the distinction this file exists for.
  */
-export function prHead(prJson: string): PrHead {
-  try {
-    const pr = JSON.parse(prJson) as { headRefName?: unknown; isCrossRepository?: unknown };
-    return {
-      branch: typeof pr.headRefName === "string" ? pr.headRefName.trim() : "",
-      crossRepository: pr.isCrossRepository === true,
-    };
-  } catch {
-    return { branch: "", crossRepository: false };
-  }
+export function prHead(pr: PrHeadView | null | undefined): PrHead {
+  return {
+    branch: typeof pr?.headRefName === "string" ? pr.headRefName.trim() : "",
+    crossRepository: pr?.isCrossRepository === true,
+  };
 }
 
 /**
@@ -88,15 +105,12 @@ export interface PrHeadResolution {
  * existence test last because it is the only one that needs the remote.
  */
 export function resolvePrHeadBranch(repo: string, number: number): PrHeadResolution {
-  const { code, stdout, stderr } = gh(
-    "pr", "view", String(number), "--repo", repo,
-    "--json", "headRefName,isCrossRepository",
-  );
-  if (code !== 0) {
-    return { branch: "", refusal: { kind: "unreadable", detail: stderr || stdout } };
+  const read = readPullRequest<PrHeadView>(repo, number, PR_HEAD_FIELDS);
+  if (!read.known) {
+    return { branch: "", refusal: { kind: "unreadable", detail: read.why } };
   }
 
-  const head = prHead(stdout);
+  const head = prHead(read.value);
   if (head.crossRepository) return { branch: "", refusal: { kind: "fork" } };
   if (!head.branch) return { branch: "", refusal: { kind: "no-branch" } };
   if (!isBranchName(head.branch)) {
