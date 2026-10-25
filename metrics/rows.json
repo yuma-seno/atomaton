@@ -1311,9 +1311,9 @@
     ]
   },
   {
-    "path": "sessions/issue-15/engineer.json",
+    "path": "sessions/issue-15/archive/engineer-1.json",
     "agent": "engineer",
-    "messages": 321,
+    "messages": 323,
     "calls": 177,
     "failed": 2,
     "refused": 0,
@@ -1392,6 +1392,106 @@
           }
         },
         "started": "2026-10-25T16:44:40Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/issue-15/engineer.json",
+    "agent": "engineer",
+    "messages": 327,
+    "calls": 179,
+    "failed": 3,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "bash": 125,
+      "read": 8,
+      "get_issue": 3,
+      "get_issue_comments": 2,
+      "search_issues": 4,
+      "atoma_builtin__load_skill": 1,
+      "edit": 36
+    },
+    "acts": {
+      "other": 124,
+      "edit": 1
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T16:11:31Z",
+        "ended_because": "completed",
+        "iterations": 61,
+        "messages": 163,
+        "seconds": 460,
+        "server_calls": {
+          "files": {
+            "read": 7
+          },
+          "github": {
+            "get_issue": 3,
+            "get_issue_comments": 2
+          },
+          "search": {
+            "search_issues": 4
+          },
+          "shell": {
+            "bash": 82
+          }
+        },
+        "started": "2026-10-25T16:03:51Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T16:31:34Z",
+        "ended_because": "stopped",
+        "iterations": 20,
+        "messages": 206,
+        "seconds": 94,
+        "server_calls": {
+          "files": {
+            "edit": 12,
+            "read": 1
+          },
+          "shell": {
+            "bash": 7
+          }
+        },
+        "started": "2026-10-25T16:30:00Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T16:51:10Z",
+        "ended_because": "stopped",
+        "iterations": 55,
+        "messages": 321,
+        "seconds": 390,
+        "server_calls": {
+          "files": {
+            "edit": 24
+          },
+          "shell": {
+            "bash": 34
+          }
+        },
+        "started": "2026-10-25T16:44:40Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T16:54:56Z",
+        "ended_because": "failed",
+        "iterations": 2,
+        "messages": 327,
+        "seconds": 65,
+        "server_calls": {
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-10-25T16:53:51Z"
       }
     ]
   },
