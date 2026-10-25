@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 244 | 2.5% | 198 | 9,689 | 14 | 13.9 |
-| Last 30 days | 361 | 5% | 291 | 10,246 | 17 | 19.7 |
-| Last year | 361 | 5% | 291 | 10,246 | 17 | 19.7 |
-| All time | 361 | 5% | 291 | 10,246 | 17 | 19.7 |
+| Last 7 days | 245 | 2.9% | 198 | 9,689 | 13 | 13.9 |
+| Last 30 days | 362 | 5.2% | 291 | 10,246 | 17 | 19.7 |
+| Last year | 362 | 5.2% | 291 | 10,246 | 17 | 19.7 |
+| All time | 362 | 5.2% | 291 | 10,246 | 17 | 19.7 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -23,11 +23,11 @@ What is left over is not the same as work delivered. `completed` is the core say
 | --- | ---: |
 | `completed` | 343 |
 | `failed` | 14 |
-| `stopped` | 4 |
+| `stopped` | 5 |
 
 ## Last 7 days
 
-111 sessions.
+112 sessions.
 
 **Ran to an end without a report:** 19 of 110 sessions whose last run the core recorded as `completed` — 17.3%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -38,26 +38,26 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,062,161 | 4,544,302 | 8,400,110 | 8,676,293 | 244,773,892 |
-| messages per session | 101 | 276 | 445 | 731 | 15,362 |
+| messages per session | 101 | 276 | 445 | 731 | 15,373 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 54 | 48.6% |
-| `atomaton` | 32 | 28.8% |
-| `engineer` | 25 | 22.5% |
+| `reviewer` | 54 | 48.2% |
+| `atomaton` | 33 | 29.5% |
+| `engineer` | 25 | 22.3% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `read` | 2,118 | 11 | 0 | 0.5% |
-| `bash` | 2,033 | 28 | 30 | 1.4% |
+| `bash` | 2,034 | 28 | 30 | 1.4% |
 | `grep` | 1,536 | 43 | 0 | 2.8% |
 | `edit` | 882 | 18 | 0 | 2% |
 | `fetch` | 212 | 12 | 0 | 5.7% |
-| `get_issue` | 139 | 0 | 4 | 0% |
+| `get_issue` | 141 | 0 | 4 | 0% |
 | `get_pr` | 139 | 4 | 0 | 2.9% |
-| `get_issue_comments` | 133 | 0 | 2 | 0% |
+| `get_issue_comments` | 134 | 0 | 2 | 0% |
 | `get_check_runs` | 122 | 6 | 0 | 4.9% |
 | `glob` | 116 | 0 | 0 | 0% |
 | `list` | 98 | 2 | 0 | 2% |
@@ -84,10 +84,10 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `delegate_readonly` | 8 | 0 | 0 | 0% |
 | `sync_branch` | 6 | 2 | 0 | 33.3% |
 | `delegate_readonly_large` | 5 | 0 | 1 | 0% |
+| `list_issues` | 5 | 0 | 0 | 0% |
 | `create_issue` | 4 | 0 | 0 | 0% |
 | `create_sub_issue` | 4 | 0 | 0 | 0% |
 | `github__create_issue` | 4 | 0 | 0 | 0% |
-| `list_issues` | 4 | 0 | 0 | 0% |
 | `close_issue` | 2 | 0 | 0 | 0% |
 | `delegate_large` | 2 | 0 | 0 | 0% |
 | `github__get_issue` | 2 | 0 | 0 | 0% |
@@ -102,8 +102,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 1,337 | 65.8% |
-| `search` | 241 | 11.9% |
+| `other` | 1,338 | 65.8% |
+| `search` | 241 | 11.8% |
 | `verify` | 186 | 9.1% |
 | `edit` | 177 | 8.7% |
 | `open` | 92 | 4.5% |
@@ -117,7 +117,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## Last 30 days
 
-162 sessions.
+163 sessions.
 
 **Ran to an end without a report:** 34 of 159 sessions whose last run the core recorded as `completed` — 21.4%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -128,27 +128,27 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,396,082 | 5,758,740 | 28,119,706 | 73,718,100 | 593,682,888 |
-| messages per session | 120 | 350 | 715 | 731 | 27,419 |
+| messages per session | 119 | 350 | 715 | 731 | 27,430 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 69 | 42.6% |
-| `atomaton` | 54 | 33.3% |
-| `engineer` | 39 | 24.1% |
+| `reviewer` | 69 | 42.3% |
+| `atomaton` | 55 | 33.7% |
+| `engineer` | 39 | 23.9% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `read` | 3,602 | 21 | 4 | 0.6% |
-| `bash` | 3,401 | 61 | 61 | 1.8% |
+| `bash` | 3,402 | 61 | 61 | 1.8% |
 | `grep` | 2,608 | 61 | 7 | 2.3% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
 | `edit` | 1,249 | 21 | 0 | 1.7% |
 | `fetch` | 432 | 39 | 0 | 9% |
-| `get_issue` | 249 | 13 | 4 | 5.2% |
+| `get_issue` | 251 | 13 | 4 | 5.2% |
 | `list` | 236 | 3 | 0 | 1.3% |
-| `get_issue_comments` | 220 | 0 | 10 | 0% |
+| `get_issue_comments` | 221 | 0 | 10 | 0% |
 | `get_pr` | 190 | 9 | 0 | 4.7% |
 | `get_check_runs` | 172 | 8 | 0 | 4.7% |
 | `glob` | 172 | 1 | 1 | 0.6% |
@@ -182,7 +182,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
 | `launch_sub_agent` | 13 | 2 | 0 | 15.4% |
-| `list_issues` | 12 | 0 | 0 | 0% |
+| `list_issues` | 13 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 11 | 0 | 0 | 0% |
 | `github__list_issues` | 11 | 0 | 0 | 0% |
 | `sync_branch` | 11 | 3 | 0 | 27.3% |
@@ -217,7 +217,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 2,362 | 69.5% |
+| `other` | 2,363 | 69.5% |
 | `search` | 386 | 11.3% |
 | `edit` | 279 | 8.2% |
 | `verify` | 224 | 6.6% |
@@ -234,7 +234,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## Last year
 
-162 sessions.
+163 sessions.
 
 **Ran to an end without a report:** 34 of 159 sessions whose last run the core recorded as `completed` — 21.4%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -245,27 +245,27 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,396,082 | 5,758,740 | 28,119,706 | 73,718,100 | 593,682,888 |
-| messages per session | 120 | 350 | 715 | 731 | 27,419 |
+| messages per session | 119 | 350 | 715 | 731 | 27,430 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 69 | 42.6% |
-| `atomaton` | 54 | 33.3% |
-| `engineer` | 39 | 24.1% |
+| `reviewer` | 69 | 42.3% |
+| `atomaton` | 55 | 33.7% |
+| `engineer` | 39 | 23.9% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `read` | 3,602 | 21 | 4 | 0.6% |
-| `bash` | 3,401 | 61 | 61 | 1.8% |
+| `bash` | 3,402 | 61 | 61 | 1.8% |
 | `grep` | 2,608 | 61 | 7 | 2.3% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
 | `edit` | 1,249 | 21 | 0 | 1.7% |
 | `fetch` | 432 | 39 | 0 | 9% |
-| `get_issue` | 249 | 13 | 4 | 5.2% |
+| `get_issue` | 251 | 13 | 4 | 5.2% |
 | `list` | 236 | 3 | 0 | 1.3% |
-| `get_issue_comments` | 220 | 0 | 10 | 0% |
+| `get_issue_comments` | 221 | 0 | 10 | 0% |
 | `get_pr` | 190 | 9 | 0 | 4.7% |
 | `get_check_runs` | 172 | 8 | 0 | 4.7% |
 | `glob` | 172 | 1 | 1 | 0.6% |
@@ -299,7 +299,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
 | `launch_sub_agent` | 13 | 2 | 0 | 15.4% |
-| `list_issues` | 12 | 0 | 0 | 0% |
+| `list_issues` | 13 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 11 | 0 | 0 | 0% |
 | `github__list_issues` | 11 | 0 | 0 | 0% |
 | `sync_branch` | 11 | 3 | 0 | 27.3% |
@@ -334,7 +334,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 2,362 | 69.5% |
+| `other` | 2,363 | 69.5% |
 | `search` | 386 | 11.3% |
 | `edit` | 279 | 8.2% |
 | `verify` | 224 | 6.6% |
@@ -351,7 +351,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## All time
 
-164 sessions.
+165 sessions.
 
 **Ran to an end without a report:** 34 of 159 sessions whose last run the core recorded as `completed` — 21.4%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -364,27 +364,27 @@ Neither figure covers 2 sessions with no run record at all — without one, neit
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,396,082 | 5,758,740 | 28,119,706 | 73,718,100 | 593,682,888 |
-| messages per session | 119 | 350 | 715 | 731 | 27,423 |
+| messages per session | 117 | 350 | 715 | 731 | 27,434 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 69 | 42.1% |
-| `atomaton` | 56 | 34.1% |
-| `engineer` | 39 | 23.8% |
+| `reviewer` | 69 | 41.8% |
+| `atomaton` | 57 | 34.5% |
+| `engineer` | 39 | 23.6% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `read` | 3,602 | 21 | 4 | 0.6% |
-| `bash` | 3,401 | 61 | 61 | 1.8% |
+| `bash` | 3,402 | 61 | 61 | 1.8% |
 | `grep` | 2,608 | 61 | 7 | 2.3% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
 | `edit` | 1,249 | 21 | 0 | 1.7% |
 | `fetch` | 432 | 39 | 0 | 9% |
-| `get_issue` | 249 | 13 | 4 | 5.2% |
+| `get_issue` | 251 | 13 | 4 | 5.2% |
 | `list` | 236 | 3 | 0 | 1.3% |
-| `get_issue_comments` | 220 | 0 | 10 | 0% |
+| `get_issue_comments` | 221 | 0 | 10 | 0% |
 | `get_pr` | 190 | 9 | 0 | 4.7% |
 | `get_check_runs` | 172 | 8 | 0 | 4.7% |
 | `glob` | 172 | 1 | 1 | 0.6% |
@@ -418,7 +418,7 @@ Neither figure covers 2 sessions with no run record at all — without one, neit
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
 | `launch_sub_agent` | 13 | 2 | 0 | 15.4% |
-| `list_issues` | 12 | 0 | 0 | 0% |
+| `list_issues` | 13 | 0 | 0 | 0% |
 | `github__get_pr_diff` | 11 | 0 | 0 | 0% |
 | `github__list_issues` | 11 | 0 | 0 | 0% |
 | `sync_branch` | 11 | 3 | 0 | 27.3% |
@@ -453,7 +453,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 2,362 | 69.5% |
+| `other` | 2,363 | 69.5% |
 | `search` | 386 | 11.3% |
 | `edit` | 279 | 8.2% |
 | `verify` | 224 | 6.6% |
