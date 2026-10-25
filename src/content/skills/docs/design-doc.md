@@ -151,8 +151,15 @@ publish_draft({
   onto the branch: for this run's credential it is the route that is left. The
   route's own limits stay its own — a body over 25MB is refused there, and a
   stored asset has no documented deletion API — so nothing published is weighed
-  against either. The `probe` tool remains as the instrument that measured
-  this; do not reach for it to deliver a file.
+  against either.
+- **That is one run's measurement, and nothing runs it again.** If the route has
+  to be reconsidered — a person asks for it, or the branch refuses something that
+  has to be delivered — `probe` is the instrument that settles it: `endpoint` is
+  the mode that stores nothing, and its status and body belong in your report,
+  where the next reader can see that the paragraph above has aged. Do not run
+  `upload` to find out — it stores the one thing this section says nothing removes
+  — and do not reach for `probe` to deliver a file: delivering is `publish_draft`'s
+  job.
 - If the attachments server is not among your tools, the same rule as the
   publish leg applies: record it, publish nothing, do not route around it.
 

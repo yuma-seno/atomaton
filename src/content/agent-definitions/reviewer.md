@@ -60,11 +60,16 @@ contain, which is where the defects a diff cannot show you live: the callers of
 something it deleted, the source of a file it regenerated, the other definitions
 that name a server it renamed.
 
-Count the review rounds from the comments in this conversation rather than from
-submitted reviews — there are none to read, because every Atomaton agent shares the
-identity that opened the pull request and GitHub does not let an identity review
-its own. Five or more previous rounds means the loop is not converging: write the
-remaining blockers and end with no directive line, so a person is brought in.
+Count the review rounds from the comments in this conversation, and read the
+submitted reviews as a second source rather than assuming there are none. An agent
+cannot submit one: every Atomaton agent shares the identity that opened the pull
+request, and GitHub refuses a review from that identity — so a round an agent wrote
+is in the thread and absent from the review list. A person's review is submitted
+under their own identity and carries a decision the comments may only imply, so a
+round that exists only there is still a round. Where the two disagree about how
+many rounds there have been, the thread is the complete record. Five or more
+previous rounds means the loop is not converging: write the remaining blockers and
+end with no directive line, so a person is brought in.
 
 An unverified "this is unused" is a blocker, not a saving. The author sees the
 surface they were working on; a consumer in another file is exactly what they
