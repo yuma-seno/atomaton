@@ -20,6 +20,7 @@
  * `import.meta.url`, so a sibling's `ref` would name the importer. See `script-ref.ts`.
  */
 import { gh, gitRun } from "../../../adapters/github/gh.ts";
+import { readOriginBranch } from "../../../adapters/github/branch-reads.ts";
 import type { PrHeadRefusal } from "../../../domain/work/pr-head-branch.ts";
 
 /** What `gh pr view` was asked for, and what an unreadable answer means. */
@@ -67,19 +68,6 @@ export function isBranchName(name: string): boolean {
 }
 
 /**
- * Whether the branch is one `origin` has.
- *
- * Asking first is what turns "the checkout fails" into "the caller has no branch", and
- * it is what stops a fork's branch from being taken for a branch of the same name in
- * this repository — which is the branch a push would then land on, and the branch a
- * `--ref` would then validate.
- */
-export function existsOnOrigin(name: string): boolean {
-  const { code, stdout } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${name}`);
-  return code === 0 && stdout.trim() !== "";
-}
-
-/**
  * Either a branch this repository can use, or the refusal that stopped it.
  *
  * `branch` is `""` exactly when `refusal` is set, so a caller cannot read a branch out
@@ -95,7 +83,7 @@ export interface PrHeadResolution {
  *
  * The order is the point. The fork test comes first because it is about WHICH repository
  * the name belongs to, and every later gate asks about this one: a fork whose branch is
- * called `main` passes `isBranchName` and `existsOnOrigin` and means something else
+ * called `main` passes `isBranchName` and the `origin` read and means something else
  * entirely. The name test comes next, before anything is asked of the network, and the
  * existence test last because it is the only one that needs the remote.
  */
@@ -114,7 +102,15 @@ export function resolvePrHeadBranch(repo: string, number: number): PrHeadResolut
   if (!isBranchName(head.branch)) {
     return { branch: "", refusal: { kind: "not-a-branch-name", branch: head.branch } };
   }
-  if (!existsOnOrigin(head.branch)) {
+  // `origin`'s answer, read where every other caller reads it. A failure there is NOT
+  // "this repository does not have the branch": that sentence is a fact about the pull
+  // request, and telling a person whose branch is fine to push it again is the wrong
+  // advice to give over a network blip.
+  const onOrigin = readOriginBranch(head.branch);
+  if (!onOrigin.known) {
+    return { branch: "", refusal: { kind: "origin-unreadable", detail: onOrigin.why } };
+  }
+  if (!onOrigin.present) {
     return { branch: "", refusal: { kind: "not-on-origin", branch: head.branch } };
   }
   return { branch: head.branch, refusal: null };

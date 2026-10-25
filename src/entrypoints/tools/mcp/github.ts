@@ -43,6 +43,7 @@ import { capText, fitItems, TOOL_OUTPUT_BUDGET } from "../../../shared/tool-outp
 import { decidePostMergeHandoff } from "../../../domain/work/handoff.ts";
 import { isAttended, unattendedNotice } from "../../../domain/work/unattended-pull-request.ts";
 import { branchForCommit, resolveBranch, stackedPrBase } from "../../../adapters/github/branch-placement.ts";
+import { baseBranch, checkedOutBranch, readOriginBranch } from "../../../adapters/github/branch-reads.ts";
 import { isIssueRun, isPrRun, nodeNumber, refusePrRun } from "../../../adapters/runner/run-node.ts";
 import { dispatchCd, dispatchCi, dispatchPostMergeAgent, dispatchPrValidation } from "../../../adapters/actions/dispatch-targets.ts";
 import { issueLinks } from "../../../adapters/github/issue-links.ts";
@@ -974,13 +975,12 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
   }
   const head = gitRun("rev-parse", "HEAD");
   if (head.code) mcpFail(`Cannot resolve local HEAD: ${head.stderr || head.stdout}`);
-  const remote = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
-  if (remote.code) mcpFail(`Cannot inspect remote branch '${branch}': ${remote.stderr || remote.stdout}`);
-  const remoteHead = remote.stdout.trim().split(/\s+/, 1)[0] ?? "";
-  if (!remoteHead) {
+  const remote = readOriginBranch(branch);
+  if (!remote.known) mcpFail(`Cannot inspect remote branch '${branch}': ${remote.why}`);
+  if (!remote.present) {
     mcpFail(`Remote branch '${branch}' does not exist. Call commit_and_push before creating the PR.`);
   }
-  if (remoteHead !== head.stdout.trim()) {
+  if (remote.sha !== head.stdout.trim()) {
     mcpFail(
       `Remote branch '${branch}' is not at local HEAD. Call sync_branch and inspect its status; ` +
       `if it reports 'ahead', call commit_and_push before creating the PR.`,
@@ -1335,10 +1335,9 @@ function syncBranch(a: z.infer<typeof SYNC_BRANCH_SCHEMA>): string {
   const branch = a.branch?.trim() || resolveBranch();
   const valid = gitRun("check-ref-format", "--branch", branch);
   if (valid.code) mcpFail(`Invalid branch name '${branch}': ${valid.stderr || valid.stdout}`);
-  const current = gitRun("branch", "--show-current");
-  if (current.code) mcpFail(current.stderr || current.stdout);
-  if (current.stdout.trim() !== branch) {
-    mcpFail(`Cannot synchronize '${branch}' while '${current.stdout.trim() || "detached HEAD"}' is checked out.`);
+  const current = checkedOutBranch();
+  if (current !== branch) {
+    mcpFail(`Cannot synchronize '${branch}' while '${current || "detached HEAD"}' is checked out.`);
   }
 
   const worktree = gitRun("status", "--porcelain");
@@ -1387,9 +1386,10 @@ function syncBranch(a: z.infer<typeof SYNC_BRANCH_SCHEMA>): string {
  * makes a stacked pull request bring in its parent's branch and not the release branch
  * underneath it.
  *
- * `getBaseBranch()` answers "" for "the repository's default branch", which `gh pr
- * create` resolves on its own and a merge has to name: there is nothing to fetch from
- * an empty name.
+ * `base_branch` is unset for "the repository's default branch", which `gh pr create`
+ * resolves on its own and a merge has to name: there is nothing to fetch from an
+ * empty name. `baseBranch` is where that empty answer becomes the remote's default
+ * branch, once for every caller.
  */
 function baseBranchForMerge(): string {
   const number = nodeNumber();
@@ -1401,20 +1401,18 @@ function baseBranchForMerge(): string {
     if (fromPullRequest) return fromPullRequest;
   }
 
-  const fromTree = stackedPrBase(REPO) ?? getBaseBranch();
+  // The tree's answer first (a sub-issue takes in its parent's branch), then the
+  // project's base: `base_branch`, or origin's default branch when nothing is set.
+  const fromTree = stackedPrBase(REPO);
   if (fromTree) return fromTree;
 
-  const repository = ghJsonOrThrow<{ defaultBranchRef?: { name?: string } }>(
-    "repo", "view", REPO, "--json", "defaultBranchRef",
-  );
-  const defaultBranch = (repository?.defaultBranchRef?.name ?? "").trim();
-  if (!defaultBranch) {
+  const base = baseBranch();
+  if (!base.known) {
     mcpFail(
-      `Cannot tell which branch this work is based on: no base branch is configured, and the repository's ` +
-        `default branch could not be read from GitHub.`,
+      `Cannot tell which branch this work is based on: no base branch is configured, and ${base.why}.`,
     );
   }
-  return defaultBranch;
+  return base.branch;
 }
 
 /**

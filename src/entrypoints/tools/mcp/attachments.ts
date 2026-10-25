@@ -54,6 +54,11 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z } from "../../../adapters/mcp/mcp-tool.ts";
 import { getDocsBranch } from "../../../adapters/runner/config.ts";
 import { gh, gitRun, gitRunWith } from "../../../adapters/github/gh.ts";
+import {
+  checkedOutBranch,
+  readOriginBranch,
+  readRemoteDefaultBranch,
+} from "../../../adapters/github/branch-reads.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 
 /** The environment that puts one `git` command in this call's index rather than the run's. */
@@ -175,19 +180,6 @@ export function blobUrlFor(repo: string, branch: string, target: string): string
  */
 export function indexInfoFor(entries: { blob: string; target: string }[]): string {
   return entries.map((entry) => `${DRAFT_FILE_MODE} blob ${entry.blob}\t${entry.target}\0`).join("");
-}
-
-/**
- * The default branch of `origin`, read from `ls-remote --symref origin HEAD`.
- *
- * `origin/HEAD` is not set in a run's checkout — measured, it is not a symbolic ref
- * there — so the name has to be asked of the remote. It is asked because publishing
- * onto it is refused: the whole point of an orphan branch is that a document does not
- * reach the branch people review, and a publish that could land there would be a way
- * around every review rule with none of the machinery that makes a pull request one.
- */
-export function defaultBranchFrom(lsRemoteSymref: string): string | undefined {
-  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
 }
 
 /** What one published draft resolves to before anything is pushed. */
@@ -651,14 +643,17 @@ async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
 
 /** The branch's current tip on the remote, or `undefined` when it does not exist yet. */
 function remoteTip(branch: string): string | undefined {
-  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
-  if (code !== 0) {
+  // `branch-reads.ts`'s read, so "origin has no such branch" and "origin could not be
+  // reached" stay different answers: only the first means this publish creates the
+  // branch, and the second is refused rather than turned into a root commit.
+  const read = readOriginBranch(branch);
+  if (!read.known) {
     throw new Error(
       `could not read '${branch}' from origin, so it is unknown whether publishing would create it or append to ` +
-        `it: ${stderr || stdout || `git ls-remote exited ${code}`}`,
+        `it: ${read.why}`,
     );
   }
-  return stdout ? stdout.split(/\s+/)[0] : undefined;
+  return read.present ? read.sha : undefined;
 }
 
 /** The commit that a leaf tree names, so its contents can be carried onto the new one. */
@@ -712,12 +707,11 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
     throw new Error(`'${branch}' is not a branch name git accepts: ${format.stderr || format.stdout}`);
   }
 
-  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
-  if (symref.code !== 0) {
-    throw new Error(`could not read origin, so the default branch could not be checked: ${symref.stderr || symref.stdout}`);
+  const defaultBranch = readRemoteDefaultBranch();
+  if (!defaultBranch.known) {
+    throw new Error(`could not read origin, so the default branch could not be checked: ${defaultBranch.why}`);
   }
-  const defaultBranch = defaultBranchFrom(symref.stdout);
-  if (defaultBranch && branch === defaultBranch) {
+  if (branch === defaultBranch.branch) {
     throw new Error(
       `'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` +
         `review, which is the one thing an orphan branch exists to avoid — and nothing here opens a pull request. ` +
@@ -727,9 +721,9 @@ async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<st
 
   // And the branch this run is checked out on, for the same reason one step closer: a
   // document pushed onto the work branch is a document in the pull request being
-  // reviewed, which is the outcome an orphan branch was chosen to avoid. `refs/remotes/`
-  // and a detached HEAD answer nothing here, which is right — neither is a work branch.
-  const current = gitRun("branch", "--show-current").stdout.trim();
+  // reviewed, which is the outcome an orphan branch was chosen to avoid. A detached
+  // HEAD answers nothing here, which is right — it is not a work branch.
+  const current = checkedOutBranch();
   if (current && current === branch) {
     throw new Error(
       `'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` +

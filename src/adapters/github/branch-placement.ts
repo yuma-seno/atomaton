@@ -15,6 +15,7 @@ import { parentIssueOf, type ParentIssue } from "./parent-issue.ts";
 import { isIssueRun, nodeNumber } from "../runner/run-node.ts";
 import { nextOrdinal } from "../../domain/work/issue-branch.ts";
 import { collectIssueBranches } from "./issue-branches.ts";
+import { checkedOutBranch, isLocalBranch, readOriginBranch } from "./branch-reads.ts";
 
 // Re-exported because this module's own callers ask for it by this name. The
 // definition is `parent-issue.ts`'s: it used to live here, and the same
@@ -46,23 +47,6 @@ const NO_BRANCH_MESSAGE =
   "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 
 /**
- * Whether `name` is a branch that exists locally -- `refs/heads/<name>` -- rather
- * than a name git merely printed.
- *
- * Asked rather than assumed, because every route below can hand back a string that
- * looks like a branch and is not one: `git branch --points-at HEAD` prints its own
- * pseudo-entry for a detached HEAD, and `BRANCH` is set by the runner from
- * whatever `git rev-parse --abbrev-ref HEAD` said. `git show-ref --verify` is the
- * check git itself uses for "is this a ref", so a name that is not one -- including
- * the pseudo-entry, whose parentheses are not valid in a refname -- fails here
- * rather than at the push.
- */
-function isLocalBranch(name: string): boolean {
-  if (!name || name === "HEAD" || name.startsWith("(")) return false;
-  return gitRun("show-ref", "--verify", "--quiet", `refs/heads/${name}`).code === 0;
-}
-
-/**
  * The branch this run is checked out on, however it can be determined.
  *
  * Every route answers only with a name that resolves as `refs/heads/<name>`, and
@@ -73,11 +57,12 @@ function isLocalBranch(name: string): boolean {
 export function resolveBranch(): string {
   const fromEnv = (process.env.BRANCH ?? "").trim();
   if (isLocalBranch(fromEnv)) return fromEnv;
-  {
-    const { code, stdout } = gitRun("rev-parse", "--abbrev-ref", "HEAD");
-    const name = code === 0 ? stdout.trim() : "";
-    if (isLocalBranch(name)) return name;
-  }
+
+  // What git says is checked out, read in `branch-reads.ts` because two other
+  // callers ask the same literal question.
+  const checkedOut = checkedOutBranch();
+  if (checkedOut) return checkedOut;
+
   {
     // The case this route allows: a detached HEAD at a commit that a LOCAL branch
     // points at, so there is a name the work belongs on and a branch to push.
@@ -131,8 +116,17 @@ export function stackedBaseFor(repo: string, issue: number): string {
   if (!found.known || !found.parent) return "";
 
   const parentBranch = branchOfIssue(found.parent);
-  const existing = gitRun("ls-remote", "--heads", "origin", `refs/heads/${parentBranch}`);
-  if (existing.code === 0 && existing.stdout.trim()) {
+  const existing = readOriginBranch(parentBranch);
+  if (!existing.known) {
+    // NOT "the parent has no branch yet". The creation below cuts the parent's
+    // branch at whatever this run has checked out; doing that on a failed read
+    // stacks every sibling on a base nobody chose, and the parent's own pull
+    // request then carries work it was never cut from. Cutting from the base is
+    // the pre-stacking behaviour and the cheaper wrong answer.
+    log(`WARN ${existing.why}; cutting from the base branch instead`);
+    return "";
+  }
+  if (existing.present) {
     const fetched = gitRun("fetch", "origin", `refs/heads/${parentBranch}:refs/remotes/origin/${parentBranch}`);
     if (fetched.code) {
       log(`WARN could not fetch ${parentBranch}; cutting from the base branch instead`);
@@ -172,9 +166,8 @@ export function stackedBaseFor(repo: string, issue: number): string {
  * reusing a merged branch would build on history the base already contains.
  */
 export function branchForCommit(repo: string): string {
-  const current = gitRun("rev-parse", "--abbrev-ref", "HEAD");
-  const onBranch = current.code === 0 ? current.stdout.trim() : "";
-  if (isIssueBranch(onBranch)) return onBranch;
+  const onBranch = checkedOutBranch();
+  if (onBranch && isIssueBranch(onBranch)) return onBranch;
 
   // Only an issue run may name a branch. On a pull request run `NUMBER` holds the
   // PR's number and the checkout is already the branch under review, so naming one
@@ -232,8 +225,17 @@ export function stackedPrBase(repo: string): string | undefined {
   if (!found.parent) return undefined;
 
   const parentBranch = branchOfIssue(found.parent);
-  const { code, stdout } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${parentBranch}`);
-  return code === 0 && stdout.trim() ? parentBranch : undefined;
+  const read = readOriginBranch(parentBranch);
+  if (!read.known) {
+    // The same refusal as the unreadable parent above, for the same reason: this
+    // answer decides where the pull request merges to, and "cut from the base
+    // instead" would land one child's half of a feature on the release branch.
+    throw new Error(
+      `Cannot tell whether ${parentBranch} exists on origin, so the base branch for this pull request is unknown: ` +
+        `${read.why}. Retry the call.`,
+    );
+  }
+  return read.present ? parentBranch : undefined;
 }
 
 /**

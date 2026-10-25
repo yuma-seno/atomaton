@@ -51,6 +51,21 @@ describe("pr-head-branch.ts", () => {
     );
   });
 
+  /**
+   * An `origin` that could not be read is not "this repository does not have the
+   * branch": that sentence sends a person whose branch is fine to move it again. It is
+   * a retry, and it says why (#346).
+   */
+  test("an unreadable origin is a retry, not a branch this repository lacks", () => {
+    const refusal = { kind: "origin-unreadable", detail: "could not read 'x' from origin: 502" } as const;
+    const notice = validationNotDispatchedNotice("octocat", 12, refusal);
+    expect(notice).toContain("could not be checked against this repository");
+    expect(notice).toContain("could not read 'x' from origin: 502");
+    expect(notice).toContain("Comment again once this repository's branches can be read");
+    expect(notice).not.toContain("Push the branch");
+    expect(describePrHeadRefusal(12, refusal)).not.toContain("is not a branch of this repository");
+  });
+
   /** With no comment author to name, the notice still reads as a sentence. */
   test("a notice without a commenter does not open on a stray space", () => {
     const notice = validationNotDispatchedNotice("", 12, { kind: "no-branch" });

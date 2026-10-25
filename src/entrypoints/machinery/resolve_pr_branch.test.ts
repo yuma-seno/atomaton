@@ -26,7 +26,7 @@ describe("resolve_pr_branch.ts", () => {
   }
 
   /**
-   * A real remote, because `existsOnOrigin` asks git and not a fake: the whole
+   * A real remote, because the `origin` read asks git and not a fake: the whole
    * question is whether `origin` has the branch, and a stubbed git would only
    * assert this file's idea of that.
    */
@@ -137,6 +137,29 @@ describe("resolve_pr_branch.ts", () => {
       expect(r.status).toBe(0);
       expect(r.branch).toBe("");
       expect(r.stderr).toContain("is not a branch of this repository");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The other half of "this repository does not have it": an `origin` that could not be
+   * read at all. Both leave the run with no branch, and only the first is a fact about
+   * the pull request — so a network failure is never reported as a branch nobody
+   * observed missing (#346).
+   */
+  test("an unreadable origin is not reported as a branch this repository lacks", () => {
+    const root = mkdtempSync(join(tmpdir(), "atomaton-pr-branch-unreadable-"));
+    const repo = join(root, "repo");
+    git(root, "init", "--initial-branch=main", repo);
+    git(repo, "remote", "add", "origin", join(root, "there-is-no-remote-here.git"));
+    try {
+      const r = run([headRule("atomaton/issue-9")], undefined, repo);
+      expect(r.status).toBe(0);
+      expect(r.branch).toBe("");
+      expect(r.stderr).toContain("could not be checked against this repository");
+      expect(r.stderr).toContain("could not read 'atomaton/issue-9' from origin");
+      expect(r.stderr).not.toContain("is not a branch of this repository");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -29,7 +29,7 @@
  *   scan_secrets.ts
  */
 import { gh, gitRun } from "../../adapters/github/gh.ts";
-import { getBaseBranch } from "../../adapters/runner/config.ts";
+import { baseBranch as repositoryBaseBranch } from "../../adapters/github/branch-reads.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export const ref = defineScript(import.meta.url);
@@ -41,21 +41,19 @@ function log(message: string): void {
 /**
  * The branch this work is measured against, or "" when nobody could say.
  *
- * Three answers in order, and none of them a literal: the pull request's own base
- * when GitHub named one, then `base_branch` from config.yaml, then the repository's
- * default branch asked of GitHub. `getBaseBranch()` answers "" for a project that
- * never set the key -- that is its contract, so `gh` can fall back to the default --
- * which is why the third step exists here, where a concrete name is needed to fetch.
+ * The pull request's own base when the event carried one — that is the fact this
+ * particular run is about, and it outranks any setting. Then the project's base
+ * (`baseBranch`): `base_branch` from config.yaml, or origin's default branch when
+ * nobody set one, which is the relationship read in one place for every caller.
  */
 function baseBranch(): string {
   const fromEvent = (process.env.GITHUB_BASE_REF ?? "").trim();
   if (fromEvent) return fromEvent;
 
-  const configured = getBaseBranch();
-  if (configured) return configured;
-
-  const { code, stdout } = gh("repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name");
-  return code === 0 ? stdout.trim() : "";
+  const base = repositoryBaseBranch();
+  if (base.known) return base.branch;
+  log(`${base.why}; no base branch could be determined`);
+  return "";
 }
 
 /** The commits this branch adds, as a range gitleaks can be pointed at. */
