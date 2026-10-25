@@ -25,6 +25,23 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function ghRead(...args) {
+  let result = gh(...args);
+  for (const delay of [2000, 6000]) {
+    if (result.code === 0 || !looksTransient(result))
+      return result;
+    console.error(`::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`);
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+function looksTransient(result) {
+  const text = `${result.stderr} ${result.stdout}`;
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
+    return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
 function splitConcatenatedJson(text) {
   const results = [];
   let depth = 0;
@@ -59,20 +76,6 @@ function splitConcatenatedJson(text) {
     }
   }
   return results;
-}
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
 }
 
 // src/domain/work/agent-name.ts
@@ -243,6 +246,81 @@ function parseCommandLine(rawLine) {
     return { ...NOTHING, agent: dispatchMatch[1] };
   return;
 }
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function parseMangledCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "")
+        return parsed;
+    }
+  }
+  return NOTHING;
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  ending: (body) => {
+    const ended = ENDED_TAG.readProse(body)?.verb;
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
+      return "returned";
+    return "";
+  },
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
+  claim: (body) => TOOK_TAG.readProse(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.readProse(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var askReaders = {
+  ...readers,
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var endingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body)
+};
+function listComments(repo, number) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const pages = splitConcatenatedJson(listed.stdout);
+  const flat = [];
+  for (const page of pages) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
+}
 
 // src/adapters/github/agent-on-issue.ts
 function mostRecentAgent(bodies) {
@@ -261,7 +339,7 @@ function mostRecentAgent(bodies) {
 }
 function mostRecentAgentOn(repo, number) {
   try {
-    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+    return mostRecentAgent(commentBodies(repo, number));
   } catch {
     return "";
   }
@@ -303,7 +381,7 @@ function main() {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   let agent = "";
   try {
-    agent = mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${values.number}/comments`, "--jq", "[.[].body]"));
+    agent = mostRecentAgent(commentBodies(repo, values.number));
   } catch (error) {
     console.error(`Could not read comments on #${values.number}: ${error instanceof Error ? error.message : error}`);
   }

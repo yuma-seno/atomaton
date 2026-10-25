@@ -148,6 +148,35 @@ function getBaseBranch(fallback = "") {
   }
 }
 
+// src/adapters/github/branch-reads.ts
+function log(message) {
+  console.error(`[atomaton-branch-reads] ${message}`);
+}
+function defaultBranchFrom(lsRemoteSymref) {
+  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
+}
+function readRemoteDefaultBranch() {
+  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
+  if (symref.code !== 0) {
+    const why = `could not read origin, so its default branch is unknown: ${symref.stderr || symref.stdout}`;
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+  const branch = defaultBranchFrom(symref.stdout);
+  if (!branch) {
+    const why = "origin named no default branch (its HEAD is not a symbolic ref)";
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+  return { known: true, branch };
+}
+function baseBranch() {
+  const configured = getBaseBranch().trim();
+  if (configured)
+    return { known: true, branch: configured };
+  return readRemoteDefaultBranch();
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -157,33 +186,33 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/scan_secrets.ts
 var ref = defineScript(import.meta.url);
-function log(message) {
+function log2(message) {
   console.error(`[scan-secrets] ${message}`);
 }
-function baseBranch() {
+function baseBranch2() {
   const fromEvent = (process.env.GITHUB_BASE_REF ?? "").trim();
   if (fromEvent)
     return fromEvent;
-  const configured = getBaseBranch();
-  if (configured)
-    return configured;
-  const { code, stdout } = gh("repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name");
-  return code === 0 ? stdout.trim() : "";
+  const base = baseBranch();
+  if (base.known)
+    return base.branch;
+  log2(`${base.why}; no base branch could be determined`);
+  return "";
 }
 function branchRange() {
   gitRun("fetch", "--quiet", "--unshallow", "origin");
-  const base = baseBranch();
+  const base = baseBranch2();
   if (!base) {
-    log("no base branch could be determined; scanning nothing rather than guessing at a range");
+    log2("no base branch could be determined; scanning nothing rather than guessing at a range");
     return;
   }
   if (gitRun("fetch", "--quiet", "origin", base).code !== 0) {
-    log(`could not fetch ${base}; scanning nothing rather than guessing at a range`);
+    log2(`could not fetch ${base}; scanning nothing rather than guessing at a range`);
     return;
   }
   const mergeBase = gitRun("merge-base", "FETCH_HEAD", "HEAD");
   if (mergeBase.code !== 0 || !mergeBase.stdout) {
-    log(`no merge base with ${base}; scanning nothing rather than guessing at a range`);
+    log2(`no merge base with ${base}; scanning nothing rather than guessing at a range`);
     return;
   }
   return `${mergeBase.stdout.trim()}..HEAD`;

@@ -157,20 +157,6 @@ function splitConcatenatedJson(text) {
   }
   return results;
 }
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
-}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -209,6 +195,28 @@ function readBranchRules(repo, baseRef) {
     };
   } catch {
     return { known: false, why: `the branch rules for ${baseRef} were not valid JSON` };
+  }
+}
+
+// src/adapters/github/pull-request.ts
+function viewArgs(repo, number, fields) {
+  const json = typeof fields === "string" ? fields : fields.join(",");
+  return ["pr", "view", String(number), "--repo", repo, "--json", json];
+}
+function whyNot(what, result) {
+  return `${what}: ${result.stderr || result.stdout || `gh exited ${result.code}`}`;
+}
+function readPullRequest(repo, number, fields) {
+  const what = `gh pr view ${number} --repo ${repo}`;
+  const result = ghRead(...viewArgs(repo, number, fields));
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  if (!result.stdout.trim())
+    return { known: false, why: `${what}: gh printed nothing` };
+  try {
+    return { known: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { known: false, why: `${what}: the answer was not JSON` };
   }
 }
 
@@ -546,6 +554,9 @@ function listComments(repo, number) {
   }
   return flat;
 }
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
+}
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
@@ -631,12 +642,8 @@ function findExistingCiRun(runs, workflow, headSha) {
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
 function countPriorRetries(repo, number) {
-  try {
-    const bodies = ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]");
-    return bodies.filter((body) => !isQuotation(body ?? "") && CI_RETRY_TAG.hasProse(body ?? "")).length;
-  } catch {
-    return 0;
-  }
+  const bodies = commentBodies(repo, number);
+  return bodies.filter((body) => !isQuotation(body) && CI_RETRY_TAG.hasProse(body)).length;
 }
 function reportFailure(repo, number, attempt, runUrl, summary, details = []) {
   const body = [
@@ -748,10 +755,11 @@ function main() {
       appendFileSync2(githubOutput, `${line}
 `);
   };
-  const prJson = gh("api", `repos/${repo}/pulls/${values.number}`).stdout;
-  const pr = JSON.parse(prJson || "{}");
-  const headSha = pr.head?.sha ?? "";
-  const baseRef = pr.base?.ref ?? "";
+  const prRead = readPullRequest(repo, Number(values.number), ["headRefOid", "baseRefName"]);
+  if (!prRead.known)
+    log(prRead.why);
+  const headSha = prRead.known ? prRead.value.headRefOid ?? "" : "";
+  const baseRef = prRead.known ? prRead.value.baseRefName ?? "" : "";
   if (!headSha) {
     log("could not read the pull request's head SHA");
     process.exit(1);
@@ -772,7 +780,8 @@ function main() {
   const priorRetries = countPriorRetries(repo, values.number ?? "");
   const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
-  const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
+  const bodyRead = readPullRequest(repo, Number(values.number), "body");
+  const prBody = bodyRead.known ? bodyRead.value.body ?? "" : "";
   const engineerAgent = ORIGIN_AGENT_TAG.readProse(prBody) ?? "";
   const outcome = decideValidationOutcome({
     conclusion,

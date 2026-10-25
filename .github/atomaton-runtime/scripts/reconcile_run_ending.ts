@@ -76,20 +76,6 @@ function splitConcatenatedJson(text) {
   }
   return results;
 }
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
-}
 
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
@@ -294,29 +280,6 @@ function parseMangledCommand(body) {
   return NOTHING;
 }
 
-// src/adapters/github/agent-on-issue.ts
-function mostRecentAgent(bodies) {
-  for (let i = bodies.length - 1;i >= 0; i--) {
-    const body = bodies[i] ?? "";
-    if (isQuotation(body))
-      continue;
-    const result = AGENT_TAG.readProse(body);
-    if (result)
-      return result;
-    const asked = parseCommentCommand(proseOnly(body)).agent;
-    if (asked)
-      return asked;
-  }
-  return "";
-}
-function mostRecentAgentOn(repo, number) {
-  try {
-    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
-  } catch {
-    return "";
-  }
-}
-
 // src/domain/work/actor.ts
 var BOT_TYPE = "Bot";
 function isHumanActor(type) {
@@ -412,7 +375,7 @@ function entryOf(comment) {
   };
 }
 function readRunWatchThread(repo, number) {
-  const listed = ghPaginated("api", `repos/${repo}/issues/${number}/comments`);
+  const listed = listComments(repo, number);
   const entries = listed.map((comment) => ({
     ...entryOf(comment),
     createdAt: comment.created_at ?? ""
@@ -422,6 +385,44 @@ function readRunWatchThread(repo, number) {
     entries,
     events: shapedThread(entries, readers).events
   };
+}
+function listComments(repo, number) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const pages = splitConcatenatedJson(listed.stdout);
+  const flat = [];
+  for (const page of pages) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
+}
+
+// src/adapters/github/agent-on-issue.ts
+function mostRecentAgent(bodies) {
+  for (let i = bodies.length - 1;i >= 0; i--) {
+    const body = bodies[i] ?? "";
+    if (isQuotation(body))
+      continue;
+    const result = AGENT_TAG.readProse(body);
+    if (result)
+      return result;
+    const asked = parseCommentCommand(proseOnly(body)).agent;
+    if (asked)
+      return asked;
+  }
+  return "";
+}
+function mostRecentAgentOn(repo, number) {
+  try {
+    return mostRecentAgent(commentBodies(repo, number));
+  } catch {
+    return "";
+  }
 }
 
 // src/adapters/github/turn-comment.ts

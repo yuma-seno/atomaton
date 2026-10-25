@@ -140,20 +140,6 @@ function splitConcatenatedJson(text) {
   }
   return results;
 }
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
-}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -582,6 +568,9 @@ function listComments(repo, number) {
       flat.push(...page);
   }
   return flat;
+}
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
 }
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
@@ -1106,13 +1095,11 @@ function readWorkTree(repo, root) {
   return { nodes, problems };
 }
 function lastEnding(repo, number) {
-  const { code, stdout } = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (code !== 0)
+  let bodies;
+  try {
+    bodies = commentBodies(repo, number);
+  } catch {
     return;
-  const bodies = [];
-  for (const page of splitConcatenatedJson(stdout || "[]")) {
-    if (Array.isArray(page))
-      bodies.push(...page);
   }
   for (let i = bodies.length - 1;i >= 0; i -= 1) {
     const body = bodies[i] ?? "";
@@ -1142,7 +1129,7 @@ function mostRecentAgent(bodies) {
 }
 function mostRecentAgentOn(repo, number) {
   try {
-    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+    return mostRecentAgent(commentBodies(repo, number));
   } catch {
     return "";
   }

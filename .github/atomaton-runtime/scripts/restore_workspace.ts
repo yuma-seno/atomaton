@@ -108,6 +108,28 @@ function restoreWorkspace(prefix, destDir) {
   return true;
 }
 
+// src/adapters/github/pull-request.ts
+function viewArgs(repo, number, fields) {
+  const json = typeof fields === "string" ? fields : fields.join(",");
+  return ["pr", "view", String(number), "--repo", repo, "--json", json];
+}
+function whyNot(what, result) {
+  return `${what}: ${result.stderr || result.stdout || `gh exited ${result.code}`}`;
+}
+function readPullRequest(repo, number, fields) {
+  const what = `gh pr view ${number} --repo ${repo}`;
+  const result = ghRead(...viewArgs(repo, number, fields));
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  if (!result.stdout.trim())
+    return { known: false, why: `${what}: gh printed nothing` };
+  try {
+    return { known: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { known: false, why: `${what}: the answer was not JSON` };
+  }
+}
+
 // src/adapters/github/parent-issue.ts
 function log(message) {
   console.error(`[atomaton-parent] ${message}`);
@@ -276,12 +298,12 @@ function log2(message) {
   console.error(`[atomaton-workspace] ${message}`);
 }
 function issueOfPullRequest(repo, number) {
-  const { code, stdout } = gh("pr", "view", String(number), "--repo", repo, "--json", "body", "--jq", ".body");
-  if (code) {
-    log2(`WARN could not read pull request #${number}`);
+  const read = readPullRequest(repo, number, "body");
+  if (!read.known) {
+    log2(`WARN ${read.why}`);
     return;
   }
-  return PARENT_ISSUE_TAG.readProse(stdout);
+  return PARENT_ISSUE_TAG.readProse(read.value.body ?? "");
 }
 function resolveWorkspaceScope(repo, type, number) {
   const target = Number(number);

@@ -17884,6 +17884,55 @@ function gitRunWith(options, ...args) {
   };
 }
 
+// src/adapters/github/branch-reads.ts
+function log(message) {
+  console.error(`[atomaton-branch-reads] ${message}`);
+}
+function isLocalBranch(name) {
+  if (!name || name === "HEAD" || name.startsWith("("))
+    return false;
+  return gitRun("show-ref", "--verify", "--quiet", `refs/heads/${name}`).code === 0;
+}
+function checkedOutBranch() {
+  const { code, stdout } = gitRun("rev-parse", "--abbrev-ref", "HEAD");
+  const name = code === 0 ? stdout.trim() : "";
+  return isLocalBranch(name) ? name : undefined;
+}
+function readOriginBranch(branch) {
+  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+  if (code !== 0) {
+    const why = `could not read '${branch}' from origin: ${stderr || stdout || `git ls-remote exited ${code}`}`;
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+  const wanted = `refs/heads/${branch}`;
+  for (const line of stdout.split(`
+`)) {
+    const [sha, ref] = line.trim().split(/\s+/);
+    if (ref === wanted && sha)
+      return { known: true, present: true, sha };
+  }
+  return { known: true, present: false };
+}
+function defaultBranchFrom(lsRemoteSymref) {
+  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
+}
+function readRemoteDefaultBranch() {
+  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
+  if (symref.code !== 0) {
+    const why = `could not read origin, so its default branch is unknown: ${symref.stderr || symref.stdout}`;
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+  const branch = defaultBranchFrom(symref.stdout);
+  if (!branch) {
+    const why = "origin named no default branch (its HEAD is not a symbolic ref)";
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+  return { known: true, branch };
+}
+
 // src/entrypoints/tools/lib/harden.ts
 import { statSync } from "fs";
 
@@ -17956,10 +18005,10 @@ function hardenCredentialHolder(log) {
 function indexEnv(indexPath) {
   return { env: { GIT_INDEX_FILE: indexPath } };
 }
-function log(message) {
+function log2(message) {
   console.error(`[atomaton-attachments] ${message}`);
 }
-hardenCredentialHolder(log);
+hardenCredentialHolder(log2);
 var UPLOAD_ENDPOINT = "https://uploads.github.com/user-attachments/assets";
 var UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 var MAX_READ_BYTES = 128 * 1024 * 1024;
@@ -17985,9 +18034,6 @@ function blobUrlFor(repo, branch, target) {
 }
 function indexInfoFor(entries) {
   return entries.map((entry) => `${DRAFT_FILE_MODE} blob ${entry.blob}	${entry.target}\x00`).join("");
-}
-function defaultBranchFrom(lsRemoteSymref) {
-  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
 }
 function resolveDraftFiles(files) {
   const base = resolve(process.cwd());
@@ -18055,7 +18101,7 @@ function gitInIndexStdin(indexPath, args, input) {
   return gitRunWith({ ...indexEnv(indexPath), stdin: input }, ...args);
 }
 var PROBE_SCHEMA = objectType({
-  mode: enumType(["routing", "endpoint", "oversize", "upload"]).optional().default("endpoint").describe("What to measure. `endpoint` (default): POST with repository_id and an empty name \u2014 a request that cannot store, whose 400 proves the endpoint is real and the credential was accepted. " + "`routing`: the same without repository_id \u2014 the 404 shape gh's source predicts. " + "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " + "`upload`: the only mode that stores \u2014 one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent."),
+  mode: enumType(["routing", "endpoint", "oversize", "upload"]).optional().default("endpoint").describe("What to measure. `endpoint` (default): POST with repository_id and an empty name \u2014 a request that cannot store, measured to answer 400 with the `name` parameter named in the body. That answer says something parsed the request; it is not proof the route exists. " + "`routing`: the same without repository_id \u2014 the 404 shape gh's source predicts. " + "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " + "`upload`: the only mode that stores \u2014 one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent."),
   file: stringType().optional().describe("Path to the file to send. Required for oversize and upload; ignored by the other two."),
   content_type: stringType().optional().default("application/octet-stream").describe("Content-Type declared for the body. Defaults to application/octet-stream, which is what gh sends."),
   repository_id: positiveInt("Numeric REST id of the repository to upload against. Looked up from the current repository when omitted.").optional(),
@@ -18127,7 +18173,7 @@ function interpret(mode, status, body, location) {
   }
   if (mode === "routing") {
     if (status === 404) {
-      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists \u2014 endpoint mode's 400 is that proof.";
+      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists, and endpoint mode's 400 is no proof either \u2014 it says something parsed the request.";
     }
     if (status === 400 && body.includes("Invalid name for request")) {
       return "the request was rejected for its name before it ever routed, so this measured nothing about routing. " + "Measured: an empty `name` is answered 400 this way whether or not repository_id is present. Send this mode " + "with a non-empty `name` to reach the routing question.";
@@ -18137,7 +18183,7 @@ function interpret(mode, status, body, location) {
   if (mode === "endpoint") {
     if (status === 400) {
       const exact = body.includes("Invalid name for request") ? " \u2014 the body matches the message measured by hand" : "";
-      return "matches the measured expectation: the endpoint is real and the credential was accepted. " + "A rejected credential would be 401, and a token without write access would be 404 (gh's source says READ and TRIAGE get 404, not 403). " + `Nothing was stored: name was empty${exact}.`;
+      return `the request was read and rejected for its name, and nothing was stored: name was empty${exact}. ` + "This is the observation, not proof the route exists: a validation error says something parsed the parameters, " + "and a proxy or an authentication layer in front of a different route answers one too. " + "A rejected credential would be 401, and gh's source says a token without write access gets 404 rather than 403 \u2014 " + "record this status and body with the next call instead of settling the route on this one.";
     }
     if (status === 401) {
       return "the credential was rejected by the endpoint. gh already refuses a ghs_ token client-side; an endpoint-side " + "rejection closes the direct-POST path too. The design does not reopen on this: the attachment route was " + "narrowed to the orphan branch (publish_draft), which reaches the repository with the credential the run " + "already has, and #12's attachment question is settled on that route. A different credential (a PAT in " + "tools.secrets) would be a new design question, not a reopening of this one.";
@@ -18206,7 +18252,7 @@ async function probe(a) {
   }
   const url = requestUrlFor(mode, { repositoryId, name, contentType });
   const started = Date.now();
-  log(`probe ${mode} ${body ? `${body.length}B` : "(no body)"}`);
+  log2(`probe ${mode} ${body ? `${body.length}B` : "(no body)"}`);
   const response = await fetch(url, {
     method: "POST",
     headers: {
@@ -18220,7 +18266,7 @@ async function probe(a) {
   });
   const responseText = await response.text();
   const location = response.headers.get("location") ?? undefined;
-  log(`probe ${mode} -> ${response.status} in ${Date.now() - started}ms`);
+  log2(`probe ${mode} -> ${response.status} in ${Date.now() - started}ms`);
   const interpretation = interpret(mode, response.status, responseText, location);
   return JSON.stringify({
     mode,
@@ -18234,11 +18280,11 @@ async function probe(a) {
   }, null, 2);
 }
 function remoteTip(branch) {
-  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
-  if (code !== 0) {
-    throw new Error(`could not read '${branch}' from origin, so it is unknown whether publishing would create it or append to ` + `it: ${stderr || stdout || `git ls-remote exited ${code}`}`);
+  const read = readOriginBranch(branch);
+  if (!read.known) {
+    throw new Error(`could not read '${branch}' from origin, so it is unknown whether publishing would create it or append to ` + `it: ${read.why}`);
   }
-  return stdout ? stdout.split(/\s+/)[0] : undefined;
+  return read.present ? read.sha : undefined;
 }
 function commitAt(treeish) {
   const { code, stdout, stderr } = gitRun("rev-parse", `${treeish}^{commit}`);
@@ -18253,15 +18299,14 @@ async function publishDraft(a) {
   if (format.code !== 0) {
     throw new Error(`'${branch}' is not a branch name git accepts: ${format.stderr || format.stdout}`);
   }
-  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
-  if (symref.code !== 0) {
-    throw new Error(`could not read origin, so the default branch could not be checked: ${symref.stderr || symref.stdout}`);
+  const defaultBranch = readRemoteDefaultBranch();
+  if (!defaultBranch.known) {
+    throw new Error(`could not read origin, so the default branch could not be checked: ${defaultBranch.why}`);
   }
-  const defaultBranch = defaultBranchFrom(symref.stdout);
-  if (defaultBranch && branch === defaultBranch) {
+  if (branch === defaultBranch.branch) {
     throw new Error(`'${branch}' is the default branch of origin. A draft published there would go straight into the tree people ` + `review, which is the one thing an orphan branch exists to avoid \u2014 and nothing here opens a pull request. ` + `Set \`tools.servers.attachments.settings.branch\` in this repository's config.yaml to an orphan branch, not the default branch.`);
   }
-  const current = gitRun("branch", "--show-current").stdout.trim();
+  const current = checkedOutBranch();
   if (current && current === branch) {
     throw new Error(`'${branch}' is the branch this run has checked out, so publishing there would put the drafts into the work ` + `this run is delivering. Set \`tools.servers.attachments.settings.branch\` in this repository's config.yaml to the orphan branch the documents belong on.`);
   }
@@ -18321,7 +18366,7 @@ async function publishDraft(a) {
       const raced = /non-fast-forward|fetch first|rejected/i.test(`${pushed.stderr} ${pushed.stdout}`);
       throw new Error(raced ? `something else pushed to '${branch}' between the read and the write, so this commit was refused ` + `rather than dropping theirs. Run it again; the drafts are still on disk.` : `could not push '${branch}': ${pushed.stderr || pushed.stdout}`);
     }
-    log(`publish ${branch} ${commitSha.slice(0, 12)} ${drafts.length} file(s)`);
+    log2(`publish ${branch} ${commitSha.slice(0, 12)} ${drafts.length} file(s)`);
     return JSON.stringify({
       branch,
       commit_sha: commitSha,
@@ -18336,7 +18381,7 @@ var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and rep
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "probe",
-    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it answers whether the endpoint is real and whether the run's credential is accepted \u2014 without saving a file. " + "Mode `routing` omits repository_id \u2014 an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL \u2014 though measured, the Actions token this run carries is refused at the body stage (404, nothing stored), so delivering a file is `publish_draft`'s job and this tool's job is to measure. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
+    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it reports what came back for the request and the credential \u2014 without saving a file. A status is an observation, not proof that the route exists; the body is what says which parameter or layer answered. " + "Mode `routing` omits repository_id \u2014 an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL \u2014 though measured, the Actions token this run carries is refused at the body stage (404, nothing stored), so delivering a file is `publish_draft`'s job and this tool's job is to measure. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
     schema: PROBE_SCHEMA,
     handler: probe
   }),
@@ -18348,7 +18393,7 @@ var { tools, dispatch } = buildMcpTools([
   })
 ]);
 async function main() {
-  await serveMcpServer({ name: "atomaton-attachments-mcp", version: "1.0.0", tools, dispatch, log });
+  await serveMcpServer({ name: "atomaton-attachments-mcp", version: "1.0.0", tools, dispatch, log: log2 });
 }
 if (import.meta.main)
   main();
@@ -18357,7 +18402,6 @@ export {
   REQUEST_ABORT_MS,
   UPLOAD_LIMIT_BYTES,
   blobUrlFor,
-  defaultBranchFrom,
   indexInfoFor,
   interpret,
   readFileFor,

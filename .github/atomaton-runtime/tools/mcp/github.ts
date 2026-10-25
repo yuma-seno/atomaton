@@ -6705,20 +6705,6 @@ function splitConcatenatedJson(text) {
   }
   return results;
 }
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
-}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -7992,6 +7978,9 @@ function listComments(repo, number) {
   }
   return flat;
 }
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
+}
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
@@ -8390,7 +8379,7 @@ function mostRecentAgent(bodies) {
 }
 function mostRecentAgentOn(repo, number) {
   try {
-    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+    return mostRecentAgent(commentBodies(repo, number));
   } catch {
     return "";
   }
@@ -8460,18 +8449,17 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (commentsCode !== 0) {
+  let markerAlreadyWritten;
+  try {
+    markerAlreadyWritten = commentBodies(opts.repo, opts.parent).some((body) => AGGREGATED_TAG.readProse(body) === opts.closedNum);
+  } catch {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
     return withNotice(opts, { kind: "undetermined", why });
   }
-  const markerAlreadyWritten = splitConcatenatedJson(commentsOut).flatMap((page) => Array.isArray(page) ? page : []).some((entry) => typeof entry === "string" && AGGREGATED_TAG.readProse(entry) === opts.closedNum);
   if (markerAlreadyWritten) {
     return { kind: "already-aggregated" };
   }
-  if (opts.beforeDispatch)
-    await opts.beforeDispatch();
   const markerId = commentOnWithId(opts.repo, opts.parent, `${AGGREGATED_TAG.write(opts.closedNum)}
 Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
   if (markerId === null) {
@@ -8569,6 +8557,12 @@ function participantAccounts(repo, number) {
   if (!repo || !String(number).trim())
     return [];
   const found = new Map;
+  const record = (login, bot) => {
+    if (typeof login !== "string" || !login)
+      return;
+    const seen = found.get(login);
+    found.set(login, (seen ?? true) && bot);
+  };
   const collect = (args, read) => {
     const { code, stdout } = gh(...args);
     if (code !== 0)
@@ -8576,10 +8570,7 @@ function participantAccounts(repo, number) {
     try {
       for (const person of read(JSON.parse(stdout))) {
         const { login, bot } = person;
-        if (typeof login !== "string" || !login)
-          continue;
-        const seen = found.get(login);
-        found.set(login, (seen ?? true) && bot === true);
+        record(typeof login === "string" ? login : undefined, bot === true);
       }
     } catch {}
   };
@@ -8587,10 +8578,11 @@ function participantAccounts(repo, number) {
     const issue = json;
     return issue.user ? [{ login: issue.user.login, bot: issue.user.type === "Bot" }] : [];
   });
-  collect(["api", `repos/${repo}/issues/${number}/comments`, "--paginate"], (json) => json.map((comment) => ({
-    login: comment.user?.login,
-    bot: comment.user?.type === "Bot"
-  })));
+  try {
+    for (const comment of listComments(repo, number)) {
+      record(comment.user?.login, comment.user?.type === "Bot");
+    }
+  } catch {}
   collect(["api", `repos/${repo}/collaborators`, "--paginate"], (json) => json.map((person) => ({
     login: person.login,
     bot: person.type === "Bot"
@@ -8635,9 +8627,6 @@ function endingIdentity() {
     ...Number.isFinite(ask) && ask > 0 ? { answers: ask } : {},
     ...Number.isFinite(run) && run > 0 ? { run } : {}
   };
-}
-function runAgent() {
-  return (process.env.AGENT ?? "").trim();
 }
 
 // src/adapters/github/ending-comment.ts
@@ -19796,26 +19785,73 @@ function headBranchMerged(repo, owner, branch) {
     return false;
   }
 }
-// src/adapters/github/branch-placement.ts
+
+// src/adapters/github/branch-reads.ts
 function log4(message) {
-  console.error(`[atomaton-github] ${message}`);
+  console.error(`[atomaton-branch-reads] ${message}`);
 }
-var NO_BRANCH_MESSAGE = "This run is on a detached checkout with no local branch, so there is no branch to push: " + "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 function isLocalBranch(name) {
   if (!name || name === "HEAD" || name.startsWith("("))
     return false;
   return gitRun("show-ref", "--verify", "--quiet", `refs/heads/${name}`).code === 0;
 }
+function checkedOutBranch() {
+  const { code, stdout } = gitRun("rev-parse", "--abbrev-ref", "HEAD");
+  const name = code === 0 ? stdout.trim() : "";
+  return isLocalBranch(name) ? name : undefined;
+}
+function readOriginBranch(branch) {
+  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+  if (code !== 0) {
+    const why = `could not read '${branch}' from origin: ${stderr || stdout || `git ls-remote exited ${code}`}`;
+    log4(`WARN ${why}`);
+    return { known: false, why };
+  }
+  const wanted = `refs/heads/${branch}`;
+  for (const line of stdout.split(`
+`)) {
+    const [sha, ref] = line.trim().split(/\s+/);
+    if (ref === wanted && sha)
+      return { known: true, present: true, sha };
+  }
+  return { known: true, present: false };
+}
+function defaultBranchFrom(lsRemoteSymref) {
+  return /^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/m.exec(lsRemoteSymref)?.[1];
+}
+function readRemoteDefaultBranch() {
+  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
+  if (symref.code !== 0) {
+    const why = `could not read origin, so its default branch is unknown: ${symref.stderr || symref.stdout}`;
+    log4(`WARN ${why}`);
+    return { known: false, why };
+  }
+  const branch = defaultBranchFrom(symref.stdout);
+  if (!branch) {
+    const why = "origin named no default branch (its HEAD is not a symbolic ref)";
+    log4(`WARN ${why}`);
+    return { known: false, why };
+  }
+  return { known: true, branch };
+}
+function baseBranch() {
+  const configured = getBaseBranch().trim();
+  if (configured)
+    return { known: true, branch: configured };
+  return readRemoteDefaultBranch();
+}
+// src/adapters/github/branch-placement.ts
+function log5(message) {
+  console.error(`[atomaton-github] ${message}`);
+}
+var NO_BRANCH_MESSAGE = "This run is on a detached checkout with no local branch, so there is no branch to push: " + "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 function resolveBranch() {
   const fromEnv = (process.env.BRANCH ?? "").trim();
   if (isLocalBranch(fromEnv))
     return fromEnv;
-  {
-    const { code, stdout } = gitRun("rev-parse", "--abbrev-ref", "HEAD");
-    const name = code === 0 ? stdout.trim() : "";
-    if (isLocalBranch(name))
-      return name;
-  }
+  const checkedOut = checkedOutBranch();
+  if (checkedOut)
+    return checkedOut;
   {
     const { code, stdout } = gitRun("branch", "--format=%(refname:short)", "--points-at=HEAD");
     if (code === 0) {
@@ -19834,11 +19870,15 @@ function stackedBaseFor(repo, issue) {
   if (!found.known || !found.parent)
     return "";
   const parentBranch = branchOfIssue(found.parent);
-  const existing = gitRun("ls-remote", "--heads", "origin", `refs/heads/${parentBranch}`);
-  if (existing.code === 0 && existing.stdout.trim()) {
+  const existing = readOriginBranch(parentBranch);
+  if (!existing.known) {
+    log5(`WARN ${existing.why}; cutting from the base branch instead`);
+    return "";
+  }
+  if (existing.present) {
     const fetched = gitRun("fetch", "origin", `refs/heads/${parentBranch}:refs/remotes/origin/${parentBranch}`);
     if (fetched.code) {
-      log4(`WARN could not fetch ${parentBranch}; cutting from the base branch instead`);
+      log5(`WARN could not fetch ${parentBranch}; cutting from the base branch instead`);
       return "";
     }
     return parentBranch;
@@ -19848,19 +19888,18 @@ function stackedBaseFor(repo, issue) {
     return "";
   const { code, stderr, stdout } = gh("api", `repos/${repo}/git/refs`, "-X", "POST", "-f", `ref=refs/heads/${parentBranch}`, "-f", `sha=${head.stdout.trim()}`);
   if (code) {
-    log4(`WARN could not create ${parentBranch}: ${stderr || stdout}; cutting from the base branch instead`);
+    log5(`WARN could not create ${parentBranch}: ${stderr || stdout}; cutting from the base branch instead`);
     return "";
   }
   const fetched = gitRun("fetch", "origin", `refs/heads/${parentBranch}:refs/remotes/origin/${parentBranch}`);
   if (fetched.code)
     return "";
-  log4(`commitAndPush: created parent branch ${parentBranch} for #${found.parent}`);
+  log5(`commitAndPush: created parent branch ${parentBranch} for #${found.parent}`);
   return parentBranch;
 }
 function branchForCommit(repo) {
-  const current = gitRun("rev-parse", "--abbrev-ref", "HEAD");
-  const onBranch = current.code === 0 ? current.stdout.trim() : "";
-  if (isIssueBranch(onBranch))
+  const onBranch = checkedOutBranch();
+  if (onBranch && isIssueBranch(onBranch))
     return onBranch;
   const issue = runIssueNumber();
   if (issue === undefined)
@@ -19874,7 +19913,7 @@ function branchForCommit(repo) {
   const created = from ? gitRun("checkout", "-b", name, `origin/${from}`) : gitRun("checkout", "-b", name);
   if (created.code)
     throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
-  log4(`commitAndPush: created branch ${name}${from ? ` from ${from}` : ""}`);
+  log5(`commitAndPush: created branch ${name}${from ? ` from ${from}` : ""}`);
   return name;
 }
 function stackedPrBase(repo) {
@@ -19888,13 +19927,51 @@ function stackedPrBase(repo) {
   if (!found.parent)
     return;
   const parentBranch = branchOfIssue(found.parent);
-  const { code, stdout } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${parentBranch}`);
-  return code === 0 && stdout.trim() ? parentBranch : undefined;
+  const read = readOriginBranch(parentBranch);
+  if (!read.known) {
+    throw new Error(`Cannot tell whether ${parentBranch} exists on origin, so the base branch for this pull request is unknown: ` + `${read.why}. Retry the call.`);
+  }
+  return read.present ? parentBranch : undefined;
 }
 function runIssueNumber() {
   if (!isIssueRun())
     return;
   return nodeNumber();
+}
+
+// src/adapters/github/pull-request.ts
+function viewArgs(repo, number, fields) {
+  const json = typeof fields === "string" ? fields : fields.join(",");
+  return ["pr", "view", String(number), "--repo", repo, "--json", json];
+}
+function whyNot(what, result) {
+  return `${what}: ${result.stderr || result.stdout || `gh exited ${result.code}`}`;
+}
+function readPullRequest(repo, number, fields) {
+  const what = `gh pr view ${number} --repo ${repo}`;
+  const result = ghRead(...viewArgs(repo, number, fields));
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  if (!result.stdout.trim())
+    return { known: false, why: `${what}: gh printed nothing` };
+  try {
+    return { known: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { known: false, why: `${what}: the answer was not JSON` };
+  }
+}
+function readPullRequestOrThrow(repo, number, fields) {
+  const read = readPullRequest(repo, number, fields);
+  if (!read.known)
+    throw new Error(read.why);
+  return read.value;
+}
+function readPullRequestDiff(repo, number) {
+  const what = `gh api repos/${repo}/pulls/${number} (diff)`;
+  const result = ghRead("api", `repos/${repo}/pulls/${number}`, "-H", "Accept: application/vnd.github.v3.diff");
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  return { known: true, diff: result.stdout };
 }
 
 // src/domain/delivery/deploy-jobs.ts
@@ -19999,7 +20076,7 @@ var DEFAULT_CI_WORKFLOW = "atomaton-check.yml";
 var DEFAULT_CD_WORKFLOW = "atomaton-deploy.yml";
 
 // src/adapters/actions/dispatch-targets.ts
-function log5(message) {
+function log6(message) {
   console.error(`[atomaton-github] ${message}`);
 }
 function dispatchPrValidation(repo, prNumber, branch, options = {}) {
@@ -20014,14 +20091,14 @@ function dispatchPrValidation(repo, prNumber, branch, options = {}) {
     `asked_by_person=${options.askedByPerson === true ? "true" : "false"}`,
     "-f",
     `ask=${options.ask ?? ""}`
-  ], log5);
+  ], log6);
 }
 function dispatchPostMergeAgent(repo, subIssueNum, agent) {
   const notify = resolveNotify(repo, subIssueNum);
   const { code, stdout, stderr } = gh("issue", "comment", String(subIssueNum), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("include")}
 ` + "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.");
   if (code) {
-    log5(`dispatchPostMergeAgent: could not post trigger comment on #${subIssueNum}: ${stderr || stdout}`);
+    log6(`dispatchPostMergeAgent: could not post trigger comment on #${subIssueNum}: ${stderr || stdout}`);
     return false;
   }
   return dispatchRunner({
@@ -20032,21 +20109,21 @@ function dispatchPostMergeAgent(repo, subIssueNum, agent) {
     notify,
     repo,
     continuesChain: true,
-    log: log5
+    log: log6
   }) === "dispatched";
 }
 function dispatchCi(branch) {
-  return dispatchWorkflow("dispatchCi", getWorkflowName("ci", DEFAULT_CI_WORKFLOW), ["--ref", branch], log5);
+  return dispatchWorkflow("dispatchCi", getWorkflowName("ci", DEFAULT_CI_WORKFLOW), ["--ref", branch], log6);
 }
 function dispatchCd(baseRef) {
   if (isIssueBranch(baseRef)) {
-    log5(`dispatchCd: merged into ${baseRef}, which is work in progress; not deploying`);
+    log6(`dispatchCd: merged into ${baseRef}, which is work in progress; not deploying`);
     return false;
   }
   if (!getWorkflowName("cd")) {
     const { jobs, problems } = resolveDeployJobs(getDeploySection());
     if (problems.length === 0 && !mergeMightDeploy(jobs, baseRef)) {
-      log5(`dispatchCd: nothing in deploy.on_merge covers ${baseRef || "this branch"}, and deploy.your_workflow is unset; nothing to dispatch`);
+      log6(`dispatchCd: nothing in deploy.on_merge covers ${baseRef || "this branch"}, and deploy.your_workflow is unset; nothing to dispatch`);
       return false;
     }
   }
@@ -20059,7 +20136,60 @@ function dispatchDeploy(context, trigger, ref, repo) {
     ...ref ? ["--ref", ref] : [],
     ...configured ? [] : ["-f", `trigger=${trigger}`]
   ];
-  return dispatchWorkflow(context, configured || DEFAULT_CD_WORKFLOW, args, log5);
+  return dispatchWorkflow(context, configured || DEFAULT_CD_WORKFLOW, args, log6);
+}
+
+// src/adapters/github/sub-issue-report.ts
+function subIssueReportBody(report) {
+  const said = withoutCommands(withoutTags(report.report.trim()));
+  const lines = [
+    LLM_CONTEXT_TAG.write("include"),
+    "<details><summary>Report</summary>",
+    "",
+    `**Sub-issue #${report.child}**`,
+    "",
+    ...said === "" ? ["Its closing run wrote no summary."] : [said],
+    ""
+  ];
+  if (report.pullRequests === undefined) {
+    lines.push("Its pull requests could not be read.");
+  } else if (report.pullRequests.length === 0) {
+    lines.push("No pull requests are linked to it.");
+  } else {
+    lines.push("Linked pull requests:", ...report.pullRequests.map((pr) => `- #${pr.number} ${pr.title} (${pr.state})`));
+  }
+  lines.push("", "</details>");
+  return lines.join(`
+`);
+}
+function reportSubIssueToParent(repo, child, report) {
+  const links = issueLinks(repo, child);
+  if (links.unavailable) {
+    console.error(`[atomaton-report] WARN could not read #${child}'s parent, so nothing was posted there: ${links.unavailable}`);
+    return false;
+  }
+  const parent = links.parent?.number ?? 0;
+  if (parent === 0)
+    return false;
+  const body = subIssueReportBody({ child, report, pullRequests: links.pullRequests });
+  const { code, stdout, stderr } = gh("issue", "comment", String(parent), "--repo", repo, "--body", body);
+  if (code !== 0) {
+    console.error(`[atomaton-report] WARN could not post #${child}'s report on #${parent}: ${stderr || stdout}`);
+    return false;
+  }
+  return true;
+}
+function withoutCommands(text) {
+  const commandLines = new Set(commandLinesIn(text));
+  if (commandLines.size === 0)
+    return text;
+  return text.split(`
+`).map((line) => commandLines.has(line.trim()) ? defuseCommandStart(line) : line).join(`
+`);
+}
+function defuseCommandStart(line) {
+  const at = line.search(/[<\/]/);
+  return at < 0 ? line : `${line.slice(0, at)}\\${line.slice(at)}`;
 }
 
 // src/adapters/github/branch-rules.ts
@@ -20094,7 +20224,7 @@ function readBranchRules(repo, baseRef) {
 }
 
 // src/adapters/github/merge-signals.ts
-function log6(message) {
+function log7(message) {
   console.error(`[atomaton-merge-signals] ${message}`);
 }
 function governedPathProblems() {
@@ -20110,9 +20240,9 @@ var STATUS_MAP = {
 };
 var NOT_A_CHANGE = new Set(["unchanged"]);
 function readChangedFiles(repo, num) {
-  const { code, stdout } = gh("api", `repos/${repo}/pulls/${num}/files?per_page=100`, "--paginate", "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @json');
+  const { code, stdout } = ghRead("api", `repos/${repo}/pulls/${num}/files?per_page=100`, "--paginate", "--jq", '.[] | [.status, .filename, (.previous_filename // "")] | @json');
   if (code) {
-    log6(`WARN could not read changed files for #${num}; treating the merge as a person's`);
+    log7(`WARN could not read changed files for #${num}; treating the merge as a person's`);
     return { files: [], problem: `the changed files of #${num} could not be read` };
   }
   const files = [];
@@ -20146,31 +20276,34 @@ function readChangedFiles(repo, num) {
 }
 function gatherMergeSignals(repo, num, throwOnFailure) {
   const json = (...args) => {
-    const { code, stdout, stderr } = gh(...args);
+    const { code, stdout, stderr } = ghRead(...args);
     if (code)
       throwOnFailure(`gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
     return stdout ? JSON.parse(stdout) : null;
   };
-  const tryJson = (...args) => {
-    const { code, stdout, stderr } = ghRead(...args);
-    if (code) {
-      log6(`WARN gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
-      return null;
-    }
-    try {
-      return stdout ? JSON.parse(stdout) : null;
-    } catch {
-      return null;
-    }
-  };
-  const pr = json("pr", "view", String(num), "--repo", repo, "--json", "isDraft,author,state,headRefOid,headRefName,baseRefName,title,labels");
-  const mergeState = tryJson("pr", "view", String(num), "--repo", repo, "--json", "mergeStateStatus");
-  const sha = pr?.headRefOid ?? "";
+  const pr = readPullRequest(repo, num, [
+    "isDraft",
+    "author",
+    "state",
+    "headRefOid",
+    "headRefName",
+    "baseRefName",
+    "title",
+    "labels"
+  ]);
+  if (!pr.known)
+    return throwOnFailure(pr.why);
+  const view = pr.value;
+  const mergeState = readPullRequest(repo, num, "mergeStateStatus");
+  if (!mergeState.known)
+    log7(`WARN ${mergeState.why}`);
+  const mergeStateStatus = mergeState.known ? mergeState.value.mergeStateStatus ?? "UNKNOWN" : "UNKNOWN";
+  const sha = view.headRefOid ?? "";
   const runs = sha ? json("api", `repos/${repo}/commits/${sha}/check-runs`) : null;
-  const baseRefName = pr?.baseRefName ?? "";
+  const baseRefName = view.baseRefName ?? "";
   const required = readBranchRules(repo, baseRefName);
   if (!required.known)
-    log6(`WARN ${required.why}; blockers will be less specific`);
+    log7(`WARN ${required.why}; blockers will be less specific`);
   const changed = readChangedFiles(repo, num);
   const gates = getMergeGates();
   const gateProblems = [...gates.problems, ...governedPathProblems()];
@@ -20179,16 +20312,16 @@ function gatherMergeSignals(repo, num, throwOnFailure) {
   const gateMatches = changed.problem ? [] : [
     ...matchMergeGates(gates.gates, {
       changedFiles: changed.files,
-      labels: (pr?.labels ?? []).map((label) => label.name ?? "").filter(Boolean),
-      title: pr?.title ?? ""
+      labels: (view.labels ?? []).map((label) => label.name ?? "").filter(Boolean),
+      title: view.title ?? ""
     })
   ];
   return {
     signals: {
-      mergeStateStatus: mergeState?.mergeStateStatus ?? "UNKNOWN",
-      isDraft: pr?.isDraft ?? false,
-      authoredByAgent: !isHumanAuthor(pr?.author?.is_bot),
-      state: pr?.state ?? "UNKNOWN",
+      mergeStateStatus,
+      isDraft: view.isDraft ?? false,
+      authoredByAgent: !isHumanAuthor(view.author?.is_bot),
+      state: view.state ?? "UNKNOWN",
       requiredChecksEnforceable: required.known ? required.enforceable : true,
       checks: (runs?.check_runs ?? []).map((run) => ({
         name: run.name,
@@ -20203,7 +20336,7 @@ function gatherMergeSignals(repo, num, throwOnFailure) {
       gateMatches,
       gateProblems
     },
-    refs: { headRefName: pr?.headRefName ?? "", baseRefName }
+    refs: { headRefName: view.headRefName ?? "", baseRefName }
   };
 }
 
@@ -20302,10 +20435,10 @@ function hardenCredentialHolder(log) {
 }
 
 // src/entrypoints/tools/mcp/github.ts
-function log7(msg) {
+function log8(msg) {
   console.error(`[atomaton-github] ${msg}`);
 }
-hardenCredentialHolder(log7);
+hardenCredentialHolder(log8);
 var REPO = process.env.GITHUB_REPOSITORY ?? "";
 if (!REPO) {
   try {
@@ -20330,6 +20463,17 @@ function ghJsonOrThrow(...args) {
   if (code)
     mcpFail(stderr || stdout);
   return stdout ? JSON.parse(stdout) : null;
+}
+function ghJsonPagesOrThrow(...args) {
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code)
+    mcpFail(stderr || stdout);
+  const flat = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
 }
 async function resolveIssueId(number) {
   const [owner, repo] = REPO.split("/", 2);
@@ -20450,7 +20594,7 @@ async function createSubIssue(a) {
     const pid = await resolveIssueId(parentNum);
     const sid = await resolveIssueId(num);
     ghGraphql("mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}", { parent: pid, sub: sid });
-    log7(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
+    log8(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
   } catch (e) {
     mcpFail(`Issue #${num} was created, but could not be linked under #${parentNum} as a sub-issue: ${e}. ` + `Nothing records that edge except the link, so #${num} is currently a root issue and no aggregation ` + `will pick it up. Do not create it again \u2014 add it under #${parentNum} in the web UI, or retry the link.`);
   }
@@ -20545,10 +20689,10 @@ function getIssueComments(a) {
 }
 function closeIssue(a) {
   const num = a[ISSUE_NUMBER_ARG];
-  log7(`closeIssue: #${num}`);
+  log8(`closeIssue: #${num}`);
   const d = ghJsonOrThrow("issue", "view", String(num), "--repo", REPO, "--json", "author");
   const isBot = !isHumanAuthor(d?.author?.is_bot);
-  log7(`closeIssue: author.is_bot=${isBot}`);
+  log8(`closeIssue: author.is_bot=${isBot}`);
   if (!isBot) {
     const request = closeRequestComment({
       notify: resolveNotify(REPO, num),
@@ -20576,12 +20720,13 @@ async function closeIssueAndDispatch(a, options = {}) {
       note: "The issue's author was asked on the thread to close it."
     });
   }
+  reportSubIssueToParent(REPO, num, "");
   let aggregation;
   try {
     aggregation = await dispatchOrchestratorIfSubIssueReady(REPO, num, options);
   } catch (e) {
     const why = e.message ?? String(e);
-    log7(`closeIssueAndDispatch: aggregation check failed for #${num}: ${why}`);
+    log8(`closeIssueAndDispatch: aggregation check failed for #${num}: ${why}`);
     aggregation = { kind: "undetermined", why };
   }
   return JSON.stringify({
@@ -20605,7 +20750,7 @@ function withCheckedMentions(body) {
   const checked = escapeUnknownMentions(body, knownParticipants(REPO, nodeNumber() === undefined ? "" : String(nodeNumber())));
   if (checked.escaped.length === 0)
     return body;
-  log7(`escaped ${checked.escaped.length} unconfirmed mention(s): ${checked.escaped.join(", ")}`);
+  log8(`escaped ${checked.escaped.length} unconfirmed mention(s): ${checked.escaped.join(", ")}`);
   const notice = escapedMentionNotice(checked.escaped);
   return notice === undefined ? checked.text : `${checked.text}
 
@@ -20652,9 +20797,9 @@ function createPr(a) {
   const base = stackedPrBase(REPO) ?? getBaseBranch();
   const reviewer = (a.reviewer ?? "").trim();
   body = injectParentIssue(body, reviewer);
-  log7(`createPr: title=${JSON.stringify(title)}, base=${JSON.stringify(base)}, REPO=${JSON.stringify(REPO)}`);
+  log8(`createPr: title=${JSON.stringify(title)}, base=${JSON.stringify(base)}, REPO=${JSON.stringify(REPO)}`);
   const branch = resolveBranch();
-  log7(`createPr: resolved branch=${JSON.stringify(branch)}`);
+  log8(`createPr: resolved branch=${JSON.stringify(branch)}`);
   const worktree = gitRun("status", "--porcelain");
   if (worktree.code)
     mcpFail(worktree.stderr || worktree.stdout);
@@ -20664,14 +20809,13 @@ function createPr(a) {
   const head = gitRun("rev-parse", "HEAD");
   if (head.code)
     mcpFail(`Cannot resolve local HEAD: ${head.stderr || head.stdout}`);
-  const remote = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
-  if (remote.code)
-    mcpFail(`Cannot inspect remote branch '${branch}': ${remote.stderr || remote.stdout}`);
-  const remoteHead = remote.stdout.trim().split(/\s+/, 1)[0] ?? "";
-  if (!remoteHead) {
+  const remote = readOriginBranch(branch);
+  if (!remote.known)
+    mcpFail(`Cannot inspect remote branch '${branch}': ${remote.why}`);
+  if (!remote.present) {
     mcpFail(`Remote branch '${branch}' does not exist. Call commit_and_push before creating the PR.`);
   }
-  if (remoteHead !== head.stdout.trim()) {
+  if (remote.sha !== head.stdout.trim()) {
     mcpFail(`Remote branch '${branch}' is not at local HEAD. Call sync_branch and inspect its status; ` + `if it reports 'ahead', call commit_and_push before creating the PR.`);
   }
   const cmd = ["pr", "create", "--repo", REPO, "--title", title, "--head", branch];
@@ -20679,9 +20823,9 @@ function createPr(a) {
     cmd.push("--body", body);
   if (base)
     cmd.push("--base", base);
-  log7(`createPr: running gh ${cmd.join(" ")}`);
+  log8(`createPr: running gh ${cmd.join(" ")}`);
   const { code, stdout, stderr } = gh(...cmd);
-  log7(`createPr: gh pr create rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
+  log8(`createPr: gh pr create rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
   if (code)
     mcpFail(`gh pr create failed (rc=${code}): ${stderr || stdout}`);
   const num = Number(stdout.trim().split("/").pop());
@@ -20696,7 +20840,7 @@ function createPr(a) {
     waitingCommentId = postTurnComment({
       number: String(node),
       repo: REPO,
-      body: turnCommentBody({ ended: "waiting", audience: "person", agent: runAgent(), body: text, ...endingIdentity() })
+      body: turnCommentBody({ ended: "waiting", audience: "person", body: text, ...endingIdentity() })
     });
   }
   const validationDispatched = dispatchPrValidation(REPO, num, branch, { ask: waitingCommentId });
@@ -20723,7 +20867,7 @@ ${text}`,
   if (!isAttended({ ...reviewer ? { next: { agent: reviewer } } : {}, body: body ?? "" })) {
     const openedBy = (process.env.AGENT ?? "").trim() || "an agent";
     const notify = resolveNotify(REPO, num);
-    log7(`createPr: PR #${num} has no reviewer and mentions nobody; leaving a notice for ${notify || "(nobody resolved)"}`);
+    log8(`createPr: PR #${num} has no reviewer and mentions nobody; leaving a notice for ${notify || "(nobody resolved)"}`);
     gh("pr", "comment", String(num), "--repo", REPO, "--body", unattendedNotice(notify, openedBy));
   }
   return {
@@ -20832,11 +20976,9 @@ function syncBranch(a) {
   const valid = gitRun("check-ref-format", "--branch", branch);
   if (valid.code)
     mcpFail(`Invalid branch name '${branch}': ${valid.stderr || valid.stdout}`);
-  const current = gitRun("branch", "--show-current");
-  if (current.code)
-    mcpFail(current.stderr || current.stdout);
-  if (current.stdout.trim() !== branch) {
-    mcpFail(`Cannot synchronize '${branch}' while '${current.stdout.trim() || "detached HEAD"}' is checked out.`);
+  const current = checkedOutBranch();
+  if (current !== branch) {
+    mcpFail(`Cannot synchronize '${branch}' while '${current || "detached HEAD"}' is checked out.`);
   }
   const worktree = gitRun("status", "--porcelain");
   if (worktree.code)
@@ -20873,20 +21015,19 @@ function syncBranch(a) {
 function baseBranchForMerge() {
   const number = nodeNumber();
   if (isPrRun() && number !== undefined) {
-    const pr = ghJsonOrThrow("pr", "view", String(number), "--repo", REPO, "--json", "baseRefName");
-    const fromPullRequest = (pr?.baseRefName ?? "").trim();
+    const pr = readPullRequestOrThrow(REPO, number, "baseRefName");
+    const fromPullRequest = (pr.baseRefName ?? "").trim();
     if (fromPullRequest)
       return fromPullRequest;
   }
-  const fromTree = stackedPrBase(REPO) ?? getBaseBranch();
+  const fromTree = stackedPrBase(REPO);
   if (fromTree)
     return fromTree;
-  const repository = ghJsonOrThrow("repo", "view", REPO, "--json", "defaultBranchRef");
-  const defaultBranch = (repository?.defaultBranchRef?.name ?? "").trim();
-  if (!defaultBranch) {
-    mcpFail(`Cannot tell which branch this work is based on: no base branch is configured, and the repository's ` + `default branch could not be read from GitHub.`);
+  const base = baseBranch();
+  if (!base.known) {
+    mcpFail(`Cannot tell which branch this work is based on: no base branch is configured, and ${base.why}.`);
   }
-  return defaultBranch;
+  return base.branch;
 }
 function mergeBaseIntoBranch() {
   try {
@@ -20964,15 +21105,23 @@ function pick2(source, keys) {
   return out;
 }
 function getPr(a) {
-  const pr = ghJsonOrThrow("pr", "view", String(prContextNumber(a)), "--repo", REPO, "--json", "number,title,body,state,baseRefName,headRefName,createdAt");
-  const { body, ...rest } = pr ?? {};
+  const pr = readPullRequestOrThrow(REPO, prContextNumber(a), [
+    "number",
+    "title",
+    "body",
+    "state",
+    "baseRefName",
+    "headRefName",
+    "createdAt"
+  ]);
+  const { body, ...rest } = pr;
   return JSON.stringify({ ...rest, body: typeof body === "string" ? capText(body).text : body });
 }
 function getPrDiff(a) {
-  const { code, stdout, stderr } = gh("pr", "diff", String(prContextNumber(a)), "--repo", REPO);
-  if (code)
-    mcpFail(stderr || stdout);
-  return capText(stdout).text;
+  const read = readPullRequestDiff(REPO, prContextNumber(a));
+  if (!read.known)
+    mcpFail(read.why);
+  return capText(read.diff).text;
 }
 function listPrs(a) {
   const state = a.state ?? "open";
@@ -21026,7 +21175,7 @@ function getCheckRuns(a) {
   return JSON.stringify((d?.check_runs ?? []).map((run) => pick2(run, ["name", "status", "conclusion", "html_url"])));
 }
 function getPrReviews(a) {
-  const d = ghJsonOrThrow("pr", "view", String(prContextNumber(a)), "--repo", REPO, "--json", "reviews");
+  const d = readPullRequestOrThrow(REPO, prContextNumber(a), "reviews");
   const reviews = (d?.reviews ?? []).map((review) => {
     const kept = pick2(review, ["author", "state", "submittedAt"]);
     const body = review.body;
@@ -21036,7 +21185,7 @@ function getPrReviews(a) {
   return JSON.stringify({ total: reviews.length, omitted, reviews: kept });
 }
 function listPrReviewComments(a) {
-  const comments = ghJsonOrThrow(`api`, `repos/${REPO}/pulls/${prContextNumber(a)}/comments`) ?? [];
+  const comments = ghJsonPagesOrThrow("api", `repos/${REPO}/pulls/${prContextNumber(a)}/comments?per_page=100`);
   const projected = comments.map((comment) => {
     const record = typeof comment === "object" && comment !== null ? comment : {};
     const user = record.user;
@@ -21084,7 +21233,7 @@ function deleteMergedBranch(branch) {
     report("warning", `merged, but could not delete the branch ${branch}: ${stderr || stdout}`);
     return;
   }
-  log7(`mergePr: deleted merged branch ${branch}`);
+  log8(`mergePr: deleted merged branch ${branch}`);
 }
 async function mergePr() {
   if (!isPrRun()) {
@@ -21098,7 +21247,7 @@ async function mergePr() {
   const { headRefName, baseRefName } = refs;
   const readiness = decideMergeReadiness(signals);
   if (!readiness.ready) {
-    log7(`mergePr: refusing PR #${num} \u2014 ${readiness.blockers.map((b) => b.kind).join(", ")}`);
+    log8(`mergePr: refusing PR #${num} \u2014 ${readiness.blockers.map((b) => b.kind).join(", ")}`);
     const dispatched = readiness.needsCiDispatch && headRefName ? dispatchCi(headRefName) : false;
     return JSON.stringify({
       merged: false,
@@ -21109,14 +21258,14 @@ ${formatBlockers(readiness.blockers)}`
     });
   }
   const { code, stdout, stderr } = gh("pr", "merge", String(num), "--repo", REPO, "--merge");
-  log7(`mergePr: gh pr merge rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
+  log8(`mergePr: gh pr merge rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
   if (code)
     mcpFail(`gh pr merge failed (rc=${code}): ${stderr || stdout}`);
   logOp("merge_pr", { number: num });
   deleteMergedBranch(headRefName);
   dispatchCd(baseRefName);
-  const d = ghJsonOrThrow("pr", "view", String(num), "--repo", REPO, "--json", "body");
-  const body = d?.body ?? "";
+  const d = readPullRequestOrThrow(REPO, num, "body");
+  const body = d.body ?? "";
   const parentIssue = PARENT_ISSUE_TAG.readProse(body);
   const handoff = decidePostMergeHandoff({
     parentIssue,
@@ -21127,7 +21276,7 @@ ${formatBlockers(readiness.blockers)}`
     case "no-parent":
       return JSON.stringify({ merged: true, closed_issue: null, parent_outcome: "no-parent" });
     case "already-closed":
-      log7(`mergePr: parent issue #${handoff.parentIssue} already closed -- skipping post-merge re-invocation`);
+      log8(`mergePr: parent issue #${handoff.parentIssue} already closed -- skipping post-merge re-invocation`);
       return JSON.stringify({
         merged: true,
         closed_issue: null,
@@ -21170,7 +21319,7 @@ async function closeParentAndReport(parentIssue) {
     });
   } catch (e) {
     const why = e.message ?? String(e);
-    log7(`mergePr: could not close parent issue #${parentIssue}: ${why}`);
+    log8(`mergePr: could not close parent issue #${parentIssue}: ${why}`);
     return JSON.stringify({
       merged: true,
       closed_issue: null,
@@ -21245,11 +21394,11 @@ var dispatch = withoutBookkeeping(rawDispatch, [
 ]);
 async function main() {
   if (!REPO) {
-    log7("GITHUB_REPOSITORY is unset and no GitHub remote could be read, so there is no repository to act on. " + "Set GITHUB_REPOSITORY, or run where `git remote get-url origin` resolves to a github.com URL.");
+    log8("GITHUB_REPOSITORY is unset and no GitHub remote could be read, so there is no repository to act on. " + "Set GITHUB_REPOSITORY, or run where `git remote get-url origin` resolves to a github.com URL.");
     process.exit(1);
   }
-  log7(`Starting for ${REPO}`);
-  await serveMcpServer({ name: "atomaton-github-mcp", version: "1.0.0", tools: TOOLS, dispatch, log: log7 });
+  log8(`Starting for ${REPO}`);
+  await serveMcpServer({ name: "atomaton-github-mcp", version: "1.0.0", tools: TOOLS, dispatch, log: log8 });
 }
 if (import.meta.main)
   main();
