@@ -12,7 +12,7 @@
  * Three GitHub calls that exist only to feed one pure function do not belong in a
  * server's tool registry.
  */
-import { gh, ghRead } from "./gh.ts";
+import { ghRead } from "./gh.ts";
 import { readBranchRules } from "./branch-rules.ts";
 import { getGovernedPaths, getMergeGates, getMergePolicy } from "../../adapters/runner/config.ts";
 import { governedPathsIn, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
@@ -128,7 +128,11 @@ function readChangedFiles(repo: string, num: number): ChangedFilesRead {
   // `@json` escapes them inside the string, so one file stays one line and
   // `JSON.parse` gives the exact bytes back. `previous_filename` is absent on all
   // but a rename, hence the `//` default.
-  const { code, stdout } = gh(
+  // `ghRead`, like the two pull-request reads in `gatherMergeSignals`: a transient
+  // failure here is not an answer either. It comes back as `problem`, and a problem
+  // blocks the merge — so on plain `gh` one `HTTP 504` refused a merge that was fine,
+  // which is the same false refusal the retry on `mergeStateStatus` exists to prevent.
+  const { code, stdout } = ghRead(
     "api",
     `repos/${repo}/pulls/${num}/files?per_page=100`,
     "--paginate",
@@ -187,8 +191,20 @@ export function gatherMergeSignals(
   num: number,
   throwOnFailure: (message: string) => never,
 ): { signals: MergeSignals; refs: PullRequestRefs } {
+  /**
+   * The pull request's own read, and why both of these retry.
+   *
+   * Both go through `ghRead`, so a transient failure is outlasted whichever field it
+   * hit. `json` used plain `gh`, so one `HTTP 504` on the pull request view killed
+   * `merge_pr` outright, while the identical blip on `mergeStateStatus` came back as
+   * `UNKNOWN` and merely blocked: one policy written twice and updated once, with the
+   * reason recorded only on the half that had been fixed.
+   *
+   * What still differs between them is what a FAILURE means, not whether it is retried,
+   * and that difference is real — see each function below and `readChangedFiles` above.
+   */
   const json = <T>(...args: string[]): T => {
-    const { code, stdout, stderr } = gh(...args);
+    const { code, stdout, stderr } = ghRead(...args);
     // Named, because the message GitHub sends does not name it. `Resource not
     // accessible by integration (HTTP 403)` arrived from one of the two calls below and
     // said nothing about which; it cost two investigations, and in between the reviewer
@@ -198,12 +214,15 @@ export function gatherMergeSignals(
     return stdout ? (JSON.parse(stdout) as T) : (null as T);
   };
 
-  /** Like `json`, but a failure is an absent answer rather than the end of the call. */
+  /**
+   * Like `json`, but a failure is an absent answer rather than the end of the call.
+   *
+   * The same retry as `json`, and the other half is the difference: `mergeStateStatus`
+   * missing reads as `UNKNOWN`, which `decideMergeReadiness` already treats as a
+   * blocker, so a degraded answer refuses the merge and says it could not determine
+   * mergeability instead of quietly becoming a yes.
+   */
   const tryJson = <T>(...args: string[]): T | null => {
-    // `ghRead`, not `gh`: a transient failure here used to read as "no answer", and
-    // `mergeStateStatus` missing reads as `UNKNOWN`, which blocks the merge. A blip
-    // therefore refused a merge that was fine. The retry outlasts the blip; a real
-    // failure still comes back as null and still blocks.
     const { code, stdout, stderr } = ghRead(...args);
     if (code) {
       log(`WARN gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
