@@ -168,9 +168,9 @@ export function stackedBaseFor(repo: string, issue: number): string {
  * So the work is staged, stashed, and re-applied after the switch. `git stash pop` is
  * a three-way merge between the base the work was written against, the parent's tip,
  * and the work itself: what comes out is the parent's branch with this run's change on
- * top of it. A file both sides changed is a conflict in the worktree — named, with the
- * markers in it — rather than a refusal, and no file the run did not touch keeps a
- * base-branch version over the parent's.
+ * top of it. A file both sides changed is a conflict — both versions in the index, and
+ * git's markers in the worktree only where the file is text — rather than a refusal,
+ * and no file the run did not touch keeps a base-branch version over the parent's.
  *
  * Staging first is what makes a file the run CREATED merge three ways. An untracked
  * file is not part of a stash's tracked diff: `stash pop` refuses to restore it over
@@ -224,8 +224,10 @@ function createStackedBranch(name: string, from: string): void {
   if (conflicts.length > 0) {
     throw new Error(
       `Branch '${name}' was created from '${from}', but ${conflicts.length} file(s) this run changed also ` +
-        `changed on that branch: ${conflicts.join(", ")}. Both sides are in those files with git's conflict markers. ` +
-        "Resolve them, then call commit_and_push again to commit the result.",
+        `changed on that branch: ${conflicts.join(", ")}. Both sides of each are in git's index ` +
+        "(`git show :2:<path>` is the version on that branch, `git show :3:<path>` this run's) — a text file " +
+        "also holds the conflict markers in the worktree, and a binary does not. Choose each side, then call " +
+        "commit_and_push with resolved_paths naming them.",
     );
   }
   throw new Error(
