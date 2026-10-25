@@ -101,13 +101,22 @@ describe("the endpoint POST gets to time out before atoma gives up on it", () =>
 });
 
 describe("what each status means, per mode", () => {
-  test("endpoint: 400 is the expected answer, and the measured message is named when it matches", () => {
+  /**
+   * A `400` is what a route that parsed the parameters answers — and what a proxy
+   * or an authentication layer in front of a different route answers too. The
+   * message used to call it proof that the endpoint is real; a status read as
+   * proof of a route is the inference `engineering/secrets-in-a-check` removes,
+   * and this is the tool that skill now points at for a re-measurement, so the
+   * two cannot disagree.
+   */
+  test("endpoint: 400 reports the parse rather than the route, and names the measured message when it matches", () => {
     const match = interpret("endpoint", 400, '{"message":"Invalid name for request"}');
-    expect(match).toContain("matches the measured expectation");
+    expect(match).toContain("read and rejected for its name");
+    expect(match).toContain("not proof the route exists");
     expect(match).toContain("the body matches the message measured by hand");
 
     const other = interpret("endpoint", 400, '{"message":"something else"}');
-    expect(other).toContain("matches the measured expectation");
+    expect(other).toContain("read and rejected for its name");
     expect(other).not.toContain("matches the message measured by hand");
   });
 

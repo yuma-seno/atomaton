@@ -55,11 +55,18 @@ create something, spend a quota, or leave a record.
 - **Say what you want to send, to where, and what it would create.** "One 2KB
   `.txt` to `uploads.github.com/user-attachments/assets` for `yuma-seno/atomaton`"
   is the level to aim for.
-- **Prefer a request that cannot store anything.** Many endpoints tell you
-  everything you need from a deliberately incomplete one: a missing required
-  parameter comes back as a validation error rather than a `404`, which proves the
-  route exists, and the status for a rejected credential is distinct from both.
-  A check that writes nothing needs no permission and leaves no cleanup.
+- **Prefer a request that cannot store anything.** Many endpoints answer almost
+  everything from a deliberately incomplete one, so nothing is created and there
+  is nothing to clean up afterwards. What it does not give you is the route's
+  existence. `404` is what an unknown path answers, what a wrong host answers, and
+  what a proxy in front of a real route answers when it will not forward the
+  request; a validation error proves that something read your parameters, not
+  that the thing reading them is the one you are asking about.
+  **A successful call is not an answer** here any more than a `2xx` is one for
+  `fetch` — the response has to name the thing you asked about, in the endpoint's
+  own words, or you have learned that something replied and nothing more. When it
+  does not, quote the status and the body exactly as they arrived and put the
+  question to a person; do not write the route down as proven.
 - **If something IS created, say how it is removed** before you create it, and do
   it in the same run.
 - **A person's yes is for one call**, not a standing licence to use the credential
