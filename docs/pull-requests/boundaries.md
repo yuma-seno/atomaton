@@ -8,7 +8,8 @@ same absence makes
 [a deployment refuse to start](../pipeline/boundaries.md#a-deployment-refuses-a-branch-anyone-can-push-to),
 which is the other half of the same missing protection.
 
-This gate is one of the two controls that actually hold: it and
+This gate is one of the two controls that actually hold over what reaches the base
+branch: it and
 [per-tool credential confinement](../tools/boundaries.md#which-credentials-a-tool-server-can-reach).
 The shell guard is not one of them, and
 [says so itself](../tools/boundaries.md#what-a-tool-can-and-cannot-be-protected-from).
@@ -18,8 +19,15 @@ The shell guard is not one of them, and
 `.github/**` is where an agent's limits live — which credentials reach a run, the
 scripts the runner executes to decide when a run may continue, which commands the
 shell hook refuses, what a ruleset requires before a merge. An agent that could
-merge a change to them could widen its own reach, and nothing later catches it,
-because the next run already obeys the new file.
+merge a change to them into the base branch could widen its own reach, and nothing
+later catches it, because the next run already obeys the new file.
+
+That is the merge this gate governs. A stacked merge is not it: a sub-issue's pull
+request lands on its parent issue's branch, and the agent's configuration,
+definitions and tool servers are read from the default branch, so it widens nothing
+yet. What stands in the gate's place there is what covers every pull request — the
+reviewer reads the change, its required check runs, and the parent's pull request is
+where the change meets this gate.
 
 This is not about an agent intending to. A prompt injection carried in an issue
 body reaches exactly as far, and so does an ordinary mistake. Both stop at a

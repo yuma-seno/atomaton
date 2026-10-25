@@ -13,8 +13,8 @@ has the rest.
 
 ## `merge.policy`
 
-`manual` means an agent never merges. `auto` means it may, when nothing else
-objects — the two members below are the something else.
+`manual` means an agent never merges into the base branch. `auto` means it may, when
+nothing else objects — the two members below are the something else.
 
 This is the merge into the base branch. Under `manual`, a pull request whose base
 is a parent issue's branch (`atomaton/issue-<n>`) still merges without a person:
