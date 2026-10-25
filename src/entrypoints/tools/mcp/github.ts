@@ -25,7 +25,7 @@ import {
   needsAttention,
   type DispatchGateResult,
 } from "../../../app/aggregation.ts";
-import { logOp } from "../../../adapters/runner/ops-log.ts";
+import { logDispatch, logOp } from "../../../adapters/runner/ops-log.ts";
 import { report } from "../../../adapters/mcp/mcp-report.ts";
 import { knownParticipants } from "../../../adapters/github/participants.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../../domain/work/mention.ts";
@@ -1016,6 +1016,29 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     });
   }
   const validationDispatched = dispatchPrValidation(REPO, num, branch, { ask: waitingCommentId });
+  if (validationDispatched) {
+    // The turn is PARKED: this session ends inside this call, the work it started runs
+    // on the pull request, and the node keeps its `atomaton/in-progress` label — the
+    // same treatment `launch_sub_agent`'s children get, and the reason
+    // `shouldReleaseGuard` holds for a parked turn (`domain/work/turn.ts`). The runner
+    // reads it back out of this run's own ops log by grepping for the op name
+    // `logDispatch` writes with `elsewhere`; without the entry, this run's ending was
+    // read as `finished` and the node went to `atomaton/waiting-for-person` while a
+    // reviewer was working its pull request (#351).
+    //
+    // Written HERE, not inside `dispatchPrValidation`, because that function is also
+    // the stand-in a person's `/reviewer` comment reaches
+    // (`entrypoints/machinery/dispatch_pr_validation.ts`): a request being delivered to
+    // work already on this node parks nothing. And written only when the dispatch
+    // SUCCEEDED: a failed one keeps the session open for the agent to act on, and a run
+    // that carries on is not parked — the entry would hold the guard on a node whose
+    // only live thing is the agent still typing.
+    //
+    // `reviewer` is the name the caller passed, and may be empty, because nobody is
+    // chosen yet: validation routes CI's verdict. The op NAME is all the runner reads;
+    // a name invented here would be one a later reader believes.
+    logDispatch("pr", reviewer, { number: num, elsewhere: true });
+  }
   if (node !== undefined) {
     if (validationDispatched) {
       // The session ends here, so the waiting comment IS this run's ending: recorded
