@@ -6157,8 +6157,8 @@
   {
     "path": "sessions/issue-220/engineer.json",
     "agent": "engineer",
-    "messages": 187,
-    "calls": 103,
+    "messages": 230,
+    "calls": 124,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -6167,15 +6167,15 @@
     "reported": true,
     "tools": {
       "atoma_builtin__load_skill": 1,
-      "bash": 39,
-      "read": 24,
+      "bash": 50,
+      "read": 25,
       "grep": 1,
       "get_issue": 6,
       "get_issue_comments": 6,
-      "edit": 10,
-      "commit_and_push": 1,
+      "edit": 16,
+      "commit_and_push": 2,
       "create_pr": 1,
-      "get_check_runs": 7,
+      "get_check_runs": 9,
       "fetch": 1,
       "search_issues": 1,
       "create_root_issue": 1,
@@ -6185,7 +6185,7 @@
       "merge_base_into_branch": 1
     },
     "acts": {
-      "other": 32,
+      "other": 43,
       "search": 7
     },
     "runs": [
@@ -6263,6 +6263,28 @@
           }
         },
         "started": "2026-10-25T17:58:29Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T18:21:49Z",
+        "ended_because": "completed",
+        "iterations": 20,
+        "messages": 230,
+        "seconds": 362,
+        "server_calls": {
+          "files": {
+            "edit": 6,
+            "read": 1
+          },
+          "github": {
+            "commit_and_push": 1,
+            "get_check_runs": 2
+          },
+          "shell": {
+            "bash": 11
+          }
+        },
+        "started": "2026-10-25T18:15:47Z"
       }
     ]
   },
