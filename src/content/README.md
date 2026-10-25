@@ -45,7 +45,7 @@ Nothing counts them, and nothing names them outside the files themselves.
 
 | Agent | What it is for |
 | --- | --- |
-| `atomaton` | The agent a person reaches first: answers what it is asked, decomposes work into sub-issues, does the work when it is one leaf, and aggregates what its children deliver. |
+| `atomaton` | The agent a person reaches first: answers what it is asked, decomposes work into sub-issues, hands implementation to `engineer`, and aggregates what its children deliver. |
 | `engineer` | Implements one engineer-ready leaf task, validates it, and opens a pull request. |
 | `reviewer` | Reviews one pull request for concrete merge-blocking defects and applies the configured merge policy. |
 | `architect` | Decides how to build something when it cannot be worked out from where the question was asked, and writes the decision down. Builds nothing. |

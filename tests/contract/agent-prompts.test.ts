@@ -44,6 +44,10 @@ describe("agent prompt contracts", () => {
     expect(atomaton, "an investigation is reported, and the issue is left open").toContain(
       "leave the issue open",
     );
+    expect(
+      atomaton,
+      "but a sub-issue's answer goes back to the parent that asked, so it closes",
+    ).toContain("the close is how the answer travels back");
     expect(atomaton, "a close is for a delivered artifact, not an answered question").toContain(
       "for a question that has been answered",
     );
@@ -70,6 +74,41 @@ describe("agent prompt contracts", () => {
     expect(atomaton, "including the leaf that is already one child's worth").toContain(
       "hand it to `engineer` when it is one",
     );
+  });
+
+  /**
+   * The one-line role summary says the same thing as the contract under it.
+   *
+   * That line is not a summary nobody reads: it is the briefing the other agents get
+   * when they are told who they can hand work to, which is the list a handoff line is
+   * written from (`docs/agents/reference.md:118`). It said "does the work when it is
+   * one leaf" while the body had just been changed to hand the leaf to `engineer` --
+   * the same permission-outranks-the-rule shape #212 was opened for, in the one place
+   * the restoring agent does not read.
+   *
+   * Both copies, because there are two: the frontmatter YAML the core parses, and the
+   * table row `src/content/README.md` shows a reader. They drift silently, so what is
+   * pinned is the sentence they share rather than either file's punctuation around it.
+   */
+  test("the role summary matches the contract it summarises", () => {
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    const frontmatter = atomaton.split(/^---$/m)[1] ?? "";
+    const description = /^description:\s*(.+)$/m.exec(frontmatter)?.[1]?.trim() ?? "";
+    const summary =
+      "decomposes work into sub-issues, hands implementation to `engineer`, and aggregates what its children deliver";
+    expect(description, "the frontmatter the core reads").toContain(summary);
+    expect(
+      readFileSync("src/content/README.md", "utf8"),
+      "and the table row a reader sees, carrying the same sentence",
+    ).toContain(summary);
+    for (const [what, text] of [
+      ["the frontmatter", description],
+      ["the README row", readFileSync("src/content/README.md", "utf8")],
+    ] as const) {
+      expect(text, `${what} must not restore the default #212 measured`).not.toContain(
+        "does the work when it is one leaf",
+      );
+    }
   });
 
   /**
