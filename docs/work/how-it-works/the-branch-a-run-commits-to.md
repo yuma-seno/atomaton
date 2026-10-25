@@ -23,7 +23,11 @@
   it. A file both sides changed is a conflict in the worktree, named, for the run
   to resolve before it commits; it is not a checkout that refuses because the tree
   is dirty, and no file the run did not touch keeps a base-branch version over the
-  parent's.
+  parent's. Both sides of a conflicted path are in git's index — `git show
+  :2:<path>` is the version already on the branch, `git show :3:<path>` the one
+  this run brings — and a text file holds git's markers in the worktree while a
+  binary does not, so the run writes the side it wants into the file and names the
+  path in `resolved_paths` on `commit_and_push`.
 - A node's base is exactly one branch: its parent's, or the base branch for a root
   issue. When that branch moves ahead, the node brings it into its own branch with
   `merge_base_into_branch`. The direction is always a pull — nothing writes to a
@@ -34,8 +38,9 @@
   its parent's newer commits — the one it did not have before this.
 - The base arrives as a merge commit, never as a rebase: the branch's own commits
   keep their hashes, and the merge records where it came from. A conflict stops it
-  — the markers stay in the worktree and nothing is committed — and the run
-  resolves them and calls `commit_and_push` to close the merge. Which side wins is
+  — nothing is committed, and both sides of each conflicted path stay in git's
+  index — and the run resolves them and calls `commit_and_push` with
+  `resolved_paths` naming each path to close the merge. Which side wins is
   the agent's decision; a version in `package.json` is the case that shows why no
   rule belongs there, since a machine choosing one could roll a release back
   quietly.
