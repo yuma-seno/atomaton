@@ -23,6 +23,17 @@
  * machinery-root test beside this one exists for a variable spelled by hand in a
  * second place -- so this is the ratchet rather than the repair.
  *
+ * ## The run's identity, which #355 added
+ *
+ * The variables above change *where a child writes*; `AGENT` and `GITHUB_RUN_ID`
+ * change *what it writes*. Both are the identity of the run executing the suite: a
+ * spawned server inherits them, stamps them onto the comment bodies it posts as
+ * `atomaton:agent=` and `run=`, and a body assertion then holds or fails depending on
+ * which agent happened to run the suite. `AGENT` does not exist in CI at all, so the
+ * suite there is green either way and the difference only ever shows up in a run --
+ * which is the same "red for a reason the change did not cause" as above, one layer
+ * further in.
+ *
  * ## What this can see, and what it cannot
  *
  * A `.test.ts` file that names `bun` as a spawn target must call `hermeticEnv()`
@@ -138,3 +149,71 @@ describe("a test that spawns a script", () => {
     }
   }, 90_000);
 });
+
+describe("a test that spawns a server", () => {
+  /**
+   * The ratchet for #355, and the half that fails on the code as it was.
+   *
+   * The decoys are set here rather than inherited, so this test gives the same answer
+   * in CI (where neither variable exists) and in an agent's run (where both do): the
+   * environment the parent has is faked, not read. Before `hermeticEnv()` dropped
+   * these two, `AGENT` came back as `zzdecoyagent` and the run id as `999999999`,
+   * which is what a spawned server would then have stamped onto every comment body.
+   *
+   * The explicit-value-wins half is asserted beside it because it is the other side of
+   * the same contract: `create_pr`'s tests declare `AGENT` on purpose, and a fix that
+   * made a declaration impossible would be a different bug.
+   */
+  test("does not hand it the run's own AGENT or GITHUB_RUN_ID", () => {
+    const saved = { AGENT: process.env.AGENT, GITHUB_RUN_ID: process.env.GITHUB_RUN_ID };
+    process.env.AGENT = "zzdecoyagent";
+    process.env.GITHUB_RUN_ID = "999999999";
+    try {
+      const env = hermeticEnv();
+      expect(
+        { AGENT: env.AGENT, GITHUB_RUN_ID: env.GITHUB_RUN_ID },
+        "a spawned server that inherits these stamps the run's agent and run id onto every comment it " +
+          "posts, so a body assertion depends on which agent ran the suite",
+      ).toEqual({ AGENT: undefined, GITHUB_RUN_ID: undefined });
+      expect(
+        { ...env, AGENT: "engineer", GITHUB_RUN_ID: "42" },
+        "a test that wants either declares it; the caller's env is spread after this one and must win",
+      ).toMatchObject({ AGENT: "engineer", GITHUB_RUN_ID: "42" });
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
+  /**
+   * The behavioural half: the suite whose assertions are about comment bodies gives
+   * the same answer when the run's identity is faked.
+   *
+   * `mcp.test.ts` is where #355 measured the leak -- a `launch_sub_agent` test
+   * declaring only `NUMBER` still posted `agent=engineer` and the run's own
+   * `run=40166802492` -- so it is the file that has to stay green under a decoy rather
+   * than an abstract probe. The decoy differs from every value the file declares, so a
+   * test that reads the run's identity instead of its own fixture shows up here.
+   *
+   * Why this file and not the whole suite: `bun run test` is minutes, and every file
+   * that spawns a server goes through the same `hermeticEnv()` call the ratchet above
+   * pins. What this can see is that no assertion in this file depends on the identity
+   * being whatever the parent had; what it cannot see is a body assertion written in a
+   * file that does not spawn `bun` at all.
+   */
+  test("the suite that asserts comment bodies stays green with the run's AGENT faked", () => {
+    const r = spawnSync("bun", ["test", join(process.cwd(), "src/entrypoints/tools/mcp/mcp.test.ts")], {
+      encoding: "utf8",
+      env: { ...hermeticEnv(), AGENT: "zzdecoyagent", GITHUB_RUN_ID: "999999999" },
+      timeout: 120_000,
+    });
+    expect(
+      r.status,
+      `mcp.test.ts is red when the suite is run by an agent whose name is not the one a fixture names, ` +
+        `so its assertions are reading the environment rather than their own env:\n${r.stdout}\n${r.stderr}`,
+    ).toBe(0);
+  }, 180_000);
+});
+
