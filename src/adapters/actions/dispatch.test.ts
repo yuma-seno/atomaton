@@ -138,7 +138,8 @@ const HANDOFF = { id: 7, body: "<!-- atomaton:ended=handoff answers=0 run=0 -->"
 const COMMAND = (id: number, agent: string) => ({ id, body: `/${agent}`, user: { type: "User" } });
 const CLAIM = (id: number, ask: number, run: number) => ({
   id,
-  body: `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->`,
+  // As the runner writes it: the tags, then the line a person reads (#349).
+  body: `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->\nAtomaton: claimed this turn.`,
   user: { type: "Bot" },
 });
 /** The push comment `commit_and_push` posts as the ask the re-validated run claims (#285). */

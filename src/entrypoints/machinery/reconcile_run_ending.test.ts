@@ -39,9 +39,9 @@ function apiComment(body: string, id?: number): Record<string, unknown> {
   return { id, body, user: { type: "Bot" } };
 }
 
-/** The claim the watched run's runner wrote at start (#285). */
+/** The claim the watched run's runner wrote at start (#285), including the line a person reads (#349). */
 function claim(ask = ASK, run = RUN_ID): string {
-  return `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->`;
+  return `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->\nAtomaton: claimed this turn.`;
 }
 
 /** An ending in the #285 wire format. */

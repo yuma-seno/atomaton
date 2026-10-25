@@ -14,9 +14,10 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
  * A thread whose ball is with an agent, in the #285 wire: a claim is open. The old
  * fixture was a bare `/engineer` command, whose last event read `asked` — the event
  * rule the guard no longer uses. An unclaimed command is a run that has not started,
- * and the guard keeps a person's comment there.
+ * and the guard keeps a person's comment there. It carries the tags and the line a
+ * person reads under them (#349), as the runner posts it.
  */
-const OPEN_CLAIM = "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=55 run=7 -->";
+const OPEN_CLAIM = "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=55 run=7 -->\nAtomaton: claimed this turn.";
 const thread = (body: string, comments: string[]) => [
   { match: ["api", "/issues/9", "--jq"], stdout: body },
   { match: ["api", "/issues/9/comments"], stdout: JSON.stringify(comments.map((b, i) => ({ id: 100 + i, body: b }))) },
@@ -319,7 +320,7 @@ describe("guard_comment_during_run.ts", () => {
           env: { GITHUB_REPOSITORY: "owner/repo" },
           rules: [
             ...threadAs([
-              ["<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=55 run=7 -->", false],
+              ["<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=55 run=7 -->\nAtomaton: claimed this turn.", false],
               ["<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=waiting answers=55 run=7 -->", false],
               [body, true],
             ]),

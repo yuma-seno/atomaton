@@ -78,7 +78,12 @@ describe("turnClaimedBy / endingLeftBy", () => {
   const RUN = 424242;
   const OTHER = 999999;
   const ASK = 55;
-  const claim = (ask = ASK, run = RUN) => `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->`;
+  // The claim as the runner writes it: the tags the walk compares by run id, and the
+  // line a person reads under them (#349). The visible line is part of the fixture so
+  // that a reader which starts at the body's first line, or takes the whole body for
+  // the tag, is caught here.
+  const claim = (ask = ASK, run = RUN) =>
+    `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->\nAtomaton: claimed this turn.`;
   const ended = (verb: string, answers: number, run: number, agent?: string) =>
     [...(agent ? [`<!-- atomaton:agent=${agent} -->`] : []), `<!-- atomaton:ended=${verb} answers=${answers} run=${run} -->`].join("\n");
 
@@ -86,6 +91,13 @@ describe("turnClaimedBy / endingLeftBy", () => {
     expect(turnClaimedBy(commentsWith(claim()), RUN, endingWalkReaders)).toBe(ASK);
     expect(turnClaimedBy(commentsWith(claim(ASK, OTHER)), RUN, endingWalkReaders)).toBeUndefined();
     expect(turnClaimedBy(commentsWith("just a remark"), RUN, endingWalkReaders)).toBeUndefined();
+  });
+
+  test("the claim's human-readable line is not read as an ending", () => {
+    // The claim is claimed-and-unanswered, whatever prose it carries: a walk that
+    // mistook the visible line for an ending would silence the watch on a dead run.
+    expect(endingLeftBy(commentsWith(claim()), RUN, endingWalkReaders)).toBe(false);
+    expect(askUnanswered(commentsWith(claim()), ASK, endingWalkReaders)).toBe(true);
   });
 
   test("the ending is the run's own, by run id", () => {
