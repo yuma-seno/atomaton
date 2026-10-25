@@ -7,11 +7,21 @@
  * independently with subtly different retry/exclude/idempotency behavior:
  *
  * - `dispatchOrchestratorIfSubIssueReady` below, reached from the MCP server
- *   whenever an agent closes a sub-issue (atomaton-side, post-close).
+ *   whenever an agent closes a sub-issue (atomaton-side, post-close). The close
+ *   that precedes it has just posted the child's report on this parent's thread
+ *   (`adapters/github/sub-issue-report.ts`).
  * - dispatch_if_siblings_done.ts (workflow-side, manual-close fallback).
- * - aggregate_sub_issues.ts (workflow-side, PR-merge primary path -- which
- *   additionally injects sub-issue results into the atomaton's session
- *   before dispatching, via `beforeDispatch` below).
+ * - aggregate_sub_issues.ts (workflow-side, PR-merge primary path).
+ *
+ * The gate carries nothing into the parent's session. It used to offer a
+ * `beforeDispatch` hook, and `aggregate_sub_issues.ts` was its only user: it read
+ * every child's title and linked pull requests and overwrote the parent's last tool
+ * message with them. The other two callers never passed one, which is why a parent
+ * woken by an in-process close was re-invoked knowing nothing about its children —
+ * and why the summary those closers held was posted to the child's thread, where the
+ * parent never looks. One route replaced both: the child's closing run writes the
+ * report on the parent's thread, and every path that re-invokes the parent reads the
+ * same thread.
  *
  * Idempotency: two of the three can race for the SAME completion -- a PR merge
  * triggers the event-driven aggregate_sub_issues.ts AND, asynchronously, an
@@ -85,8 +95,6 @@ export interface DispatchGateOptions {
   exclude?: boolean;
   /** Progress-comment text posted when siblings remain. Omit to post nothing in that case (matches the manual-close fallback's original silent behavior). */
   progressMessage?: (remaining: number) => string;
-  /** Run just before posting the "all done" comment + dispatching -- aggregate_sub_issues.ts uses this to inject sub-issue results into the atomaton's persisted session first. */
-  beforeDispatch?: () => Promise<void> | void;
   /**
    * The dispatch this gate is about to start is the calling run's own conclusion
    * continuing on the parent — not work started under the caller's node. Passed
@@ -282,8 +290,6 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
     // comment for the race this guards against).
     return { kind: "already-aggregated" };
   }
-
-  if (opts.beforeDispatch) await opts.beforeDispatch();
 
   // The exit code matters here too, and used to be discarded.
   //

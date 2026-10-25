@@ -28,8 +28,6 @@ import { join } from "node:path";
 import { hermeticEnv, makeConfigDir, runWithFakeGh, type FakeGhRule, importable } from "../entrypoints/machinery/testing/harness.ts";
 import { extractImageUrls, sniffMimeType } from "../adapters/github/issue-images.ts";
 import { looksTransient } from "../adapters/github/gh.ts";
-import { injectSummary } from "../adapters/atoma/inject-sub-results.ts";
-import type { Session } from "../domain/work/session.ts";
 
 // The modules these shims import all live one folder down, in `github/`. Spelled
 // from this file rather than from the working directory, because a shim is written
@@ -157,37 +155,6 @@ describe("sibling-check.ts countOpenSiblings", () => {
   });
 });
 
-// The rule these cover -- find the last tool message, replace it, append when
-// there is none -- used to be reachable only through a function that made up to
-// three `gh` calls per sub-issue, so testing it needed a fake `gh` on PATH and a
-// subprocess. It is a decision about a data structure. It is tested as one.
-describe("inject-sub-results.ts injectSummary", () => {
-  test("replaces the last tool message", () => {
-    const session: Session = {
-      messages: [
-        { role: "user", content: "go" },
-        { role: "tool", content: "launched" },
-        { role: "assistant", content: "working" },
-        { role: "tool", content: "still going" },
-      ],
-    };
-    const updated = injectSummary(session, "the summary");
-    expect(updated.messages?.map((m) => m.content)).toEqual(["go", "launched", "working", "the summary"]);
-  });
-
-  // The atomaton has to see the results somewhere. A session with no tool
-  // message is not a reason to drop them.
-  test("appends a user message when the session has no tool message", () => {
-    const session: Session = { messages: [{ role: "user", content: "go" }] };
-    const updated = injectSummary(session, "the summary");
-    expect(updated.messages?.at(-1)).toEqual({ role: "user", content: "the summary" });
-  });
-
-  test("an empty session still receives the summary", () => {
-    const updated = injectSummary({ messages: [] }, "the summary");
-    expect(updated.messages).toEqual([{ role: "user", content: "the summary" }]);
-  });
-});
 describe("agent-name.ts", () => {
   test("accepts a bare lowercase name and rejects everything a shell would reinterpret", async () => {
     const { isAgentName } = await import("../domain/work/agent-name.ts");

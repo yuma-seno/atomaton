@@ -64,11 +64,11 @@ describe("aggregate_sub_issues.ts", () => {
       expect(r.stderr).toContain("No action needed");
       const commentCall = r.ghCalls.find((c) => c.includes("comment"));
       expect(commentCall?.join(" ")).toContain("atomaton:sub-result=9");
-      // The full aggregation path (siblingCount === 0) additionally performs
-      // real `git` operations against an `atomaton-data` branch/remote
-      // (checkout --orphan, commit, push-with-retry-on-race) -- deliberately
-      // not covered here; it would need a full git remote fixture for
-      // comparatively low additional confidence over this early-return path.
+      // The full aggregation path (siblingCount === 0) is not covered here. It posts
+      // the `atomaton:aggregated` marker and starts a run, so a fixture for it has to
+      // answer the comment POST, the dispatch and its marker read -- and since this
+      // script no longer writes the parent's session (#149) there is nothing about it
+      // that this early-return path leaves untested.
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

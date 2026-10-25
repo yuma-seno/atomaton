@@ -46,6 +46,7 @@ import { branchForCommit, resolveBranch, stackedPrBase } from "../../../adapters
 import { isIssueRun, isPrRun, nodeNumber, refusePrRun } from "../../../adapters/runner/run-node.ts";
 import { dispatchCd, dispatchCi, dispatchPostMergeAgent, dispatchPrValidation } from "../../../adapters/actions/dispatch-targets.ts";
 import { issueLinks } from "../../../adapters/github/issue-links.ts";
+import { reportSubIssueToParent } from "../../../adapters/github/sub-issue-report.ts";
 import type { LinkedChild, LinkedIssue } from "../../../domain/work/issue-links.ts";
 import { decideMergeReadiness, formatBlockers } from "../../../domain/delivery/merge-readiness.ts";
 import { gatherMergeSignals } from "../../../adapters/github/merge-signals.ts";
@@ -736,6 +737,14 @@ async function closeIssueAndDispatch(
       note: "The issue's author was asked on the thread to close it.",
     });
   }
+
+  // The parent's thread is where the agent about to be re-invoked reads what happened
+  // here, and this path has no summary to carry: `merge_pr` closed the issue itself
+  // because no origin agent was tagged on the pull request, so no run wrote one down.
+  // What the report carries instead is what GitHub links to the issue -- above all the
+  // pull request that delivered it -- read through `issueLinks` rather than searched
+  // for.
+  reportSubIssueToParent(REPO, num, "");
 
   // The aggregation outcome is part of what happened, so it goes in the result.
   // This used to be awaited and discarded, and `{ok: true}` was returned whether
