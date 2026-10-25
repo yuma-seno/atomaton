@@ -1,0 +1,33 @@
+src/adapters/github/issue-branches.ts:109:  const prs = gh("api", `repos/${repo}/pulls?state=all&per_page=100&head=${owner}:${branch}`);
+src/adapters/github/tags.ts:397: * These markers exist to carry state between workflow runs through GitHub, which
+src/adapters/github/work-tree.ts:127:    raw.state === "open"
+src/adapters/github/work-tree.ts:177:    "pr", "list", "--repo", repo, "--state", "all", "--limit", "200",
+src/adapters/github/work-tree.ts:179:    "--json", "number,body,state,labels",
+src/adapters/github/work-tree.ts:198:      state: saysOpen(found.state) ? "open" : pullRequestOutcome(found.state === "MERGED"),
+src/adapters/github/outcome.ts:15: * `state === "OPEN" ? ... : state === "MERGED" ? ...` came to exist in one of them
+src/adapters/github/outcome.ts:16: * and `state === "open" ? ... : ...` in the next, agreeing only by luck.
+src/adapters/github/gh.ts:230: * The environment is ADDED to rather than replacing it. A command that had to restate
+src/adapters/github/gh.ts:232: * will eventually restate one of them wrongly.
+src/adapters/github/issue-index.ts:156:  const raw = ghJsonPaged<ApiIssue>(`repos/${repo}/issues?state=all&per_page=100${sinceParam}`);
+src/adapters/github/issue-index.ts:229:  const raw = ghJsonPaged<ApiIssue>(`repos/${repo}/issues?state=all&per_page=100`);
+src/adapters/github/sibling-check.ts:39:   * open/closed state on GitHub -- used right after a PR merges its linked
+src/adapters/github/sibling-check.ts:67:      child.state === "open" &&
+src/entrypoints/machinery/report_config_findings.ts:149:      "issue", "list", "--repo", repo, "--state", "open", "--search", marker,
+src/entrypoints/machinery/fetch_events.ts:354:    "pr", "list", "--repo", `${owner}/${repo}`, "--state", "all",
+src/entrypoints/machinery/guard_comment_during_run.ts:29: * member) and `--state` (a closed node's commands belong to the closed guard, which
+src/entrypoints/machinery/guard_comment_during_run.ts:167:    console.error("usage: guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN [--parsed true] [--state open]");
+src/entrypoints/machinery/guard_comment_during_run.ts:195:  const closed = values.state === "closed";
+src/entrypoints/machinery/prune_atomaton_data.ts:61:    const page = ghPaginated<IssueState>("api", `repos/${repo}/issues?state=${state}&per_page=100`);
+src/entrypoints/machinery/post_result_comment.ts:182: * The state is `readTargetState`'s, not a second read of `gh issue view --json state`.
+src/entrypoints/machinery/extract_directive.ts:14: * That tolerance stays even though the prompt now states the line must be bare.
+src/entrypoints/tools/hooks/archive_before_compaction.ts:16: * state to atomaton-data through `save_agent_session` — but that save happened at the
+src/entrypoints/tools/mcp/github.ts:545:    "--json", "number,title,body,state,labels,createdAt,closedAt,comments",
+src/entrypoints/tools/mcp/github.ts:575:  const cmd = ["issue", "list", "--repo", REPO, "--state", state, "--limit", String(limit), "--json", "number,title,state,labels"];
+src/entrypoints/tools/mcp/github.ts:601:  const issue = ghJsonOrThrow<{ title?: string; state?: string; comments?: unknown[] }>(
+src/entrypoints/tools/mcp/github.ts:602:    "issue", "view", String(number), "--repo", REPO, "--json", "title,state,comments",
+src/entrypoints/tools/mcp/github.ts:1186:  const open = gh("pr", "list", "--repo", REPO, "--head", branch, "--state", "open", "--json", "number");
+src/entrypoints/tools/mcp/github.ts:1528:    "--json", "number,title,body,state,baseRefName,headRefName,createdAt",
+src/entrypoints/tools/mcp/github.ts:1547:  return JSON.stringify(ghJsonOrThrow("pr", "list", "--repo", REPO, "--state", state, "--limit", String(limit), "--json", "number,title,state,headRefName,baseRefName") ?? []);
+src/entrypoints/tools/mcp/github.ts:1651:    const kept = pick(review, ["author", "state", "submittedAt"]);
+src/entrypoints/tools/mcp/github.ts:1687:  // `readTargetState`, not a second read of `gh issue view --json state`. That copy
+src/entrypoints/tools/mcp/github.ts:1947:      "Report whether a pull request can be merged right now, and every reason it cannot. Read the `blockers` array rather than assuming a fixed set: kinds include failing, pending and absent required checks, merge conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. Call this before merge_pr, and to explain a refused merge. When the only thing missing is a CI run on the head commit, this dispatches CI and says so — re-check afterwards rather than merging blind. Read-only apart from that dispatch.",

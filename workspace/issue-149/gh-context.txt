@@ -1,0 +1,878 @@
+=== src/adapters/atoma/inject-sub-results.ts:38
+      const { code, stdout } = gh("issue", "view", String(num), "--repo", repo, "--json", "title,state,closedAt");
+      if (code === 0 && stdout) {
+        const info = JSON.parse(stdout) as { title?: string; state?: string };
+        title = info.title ?? "Unknown";
+        state = info.state ?? "could not be read";
+      }
+    } catch {
+=== src/adapters/atoma/inject-sub-results.ts:55
+        const { code, stdout } = gh("pr", "list", "--repo", repo, "--state", state_, "--search", `#${num} in:body`, "--json", "number,title,url");
+        if (code === 0 && stdout) {
+          const prs = JSON.parse(stdout) as GhPrSummary[];
+          for (const pr of prs) {
+            linkedPrs.push(`- PR #${pr.number}: ${pr.title} (${pr.url})`);
+          }
+        } else {
+=== src/adapters/github/issue-images.ts:91
+  const { code, bytes } = ghBytes("api", url, "--method", "GET", "--header", "Accept: application/vnd.github.raw");
+  if (code !== 0 || bytes.length === 0) return undefined;
+
+  const mimeType = sniffMimeType(bytes);
+  if (!mimeType) return undefined;
+
+  const data = Buffer.from(bytes).toString("base64");
+=== src/adapters/github/branch-rules.ts:78
+  const { code, stdout, stderr } = gh("api", `repos/${repo}/rules/branches/${baseRef}`);
+  if (code) {
+    if (FEATURE_UNAVAILABLE.test(`${stderr} ${stdout}`)) {
+      return {
+        known: true,
+        enforceable: false,
+        contexts: [],
+=== src/adapters/github/branch-placement.ts:149
+  const { code, stderr, stdout } = gh(
+    "api", `repos/${repo}/git/refs`, "-X", "POST",
+    "-f", `ref=refs/heads/${parentBranch}`, "-f", `sha=${head.stdout.trim()}`,
+  );
+  if (code) {
+    log(`WARN could not create ${parentBranch}: ${stderr || stdout}; cutting from the base branch instead`);
+    return "";
+=== src/adapters/github/participants.ts:50
+    const { code, stdout } = gh(...args);
+    if (code !== 0) return;
+    try {
+      for (const person of read(JSON.parse(stdout))) {
+        const { login, bot } = person as { login?: unknown; bot?: unknown };
+        if (typeof login !== "string" || !login) continue;
+        const seen = found.get(login);
+=== src/adapters/github/issue-branches.ts:71
+  const refs = gh("api", matchingRefsPath(repo, issueNumber));
+  if (refs.code) {
+    const why = `could not list the branches of #${issueNumber}: ${(refs.stderr || refs.stdout).trim()}`;
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+
+=== src/adapters/github/issue-branches.ts:109
+  const prs = gh("api", `repos/${repo}/pulls?state=all&per_page=100&head=${owner}:${branch}`);
+  if (prs.code) {
+    log(`WARN could not read pull requests for ${branch}; treating it as unmerged`);
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(prs.stdout || "[]") as { merged_at?: string | null }[];
+=== src/adapters/github/notify.ts:95
+  const { code, stderr, stdout } = gh(
+    "api", `repos/${repo}/issues/${number}`,
+    // `is_pr` decides which way the walk goes up, and this endpoint answers for both
+    // kinds, which is why it is asked here rather than guessed from the number.
+    "--jq", "{body: .body, login: .user.login, type: .user.type, is_pr: (.pull_request != null)}",
+  );
+  if (code !== 0 || !stdout.trim()) {
+=== src/adapters/github/work-tree.ts:105
+  const { code, stdout, stderr } = ghRead("api", `repos/${repo}/issues/${number}`);
+  if (code !== 0) {
+    return { problem: `could not read #${number}: ${(stderr || stdout).trim().split("\n")[0] ?? ""}` };
+  }
+  let raw: {
+    state?: string;
+    state_reason?: string | null;
+=== src/adapters/github/work-tree.ts:176
+  const prs = ghRead(
+    "pr", "list", "--repo", repo, "--state", "all", "--limit", "200",
+    "--search", `${PARENT_ISSUE_TAG.search(parent)} in:body`,
+    "--json", "number,body,state,labels",
+  );
+  if (prs.code !== 0) problems.push(`could not list the pull requests for #${parent}`);
+  const listedPrs = parseListed(prs.stdout);
+=== src/adapters/github/work-tree.ts:306
+  const { code, stdout } = ghRead(
+    "api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", "[.[].body]",
+  );
+  if (code !== 0) return undefined;
+  const bodies: string[] = [];
+  for (const page of splitConcatenatedJson(stdout || "[]")) {
+    if (Array.isArray(page)) bodies.push(...(page as string[]));
+=== src/adapters/github/work-tree.ts:327
+  return gh("issue", "comment", String(number), "--repo", repo, "--body", body).code === 0;
+}
+
+/**
+ * Post one comment and return the new comment's id, or null when it did not land.
+ *
+ * Through `gh api --method POST /issues/{n}/comments`, and NOT `gh issue comment`,
+=== src/adapters/github/work-tree.ts:355
+  const { code, stdout } = gh(
+    "api",
+    `repos/${repo}/issues/${number}/comments`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+=== src/adapters/github/work-tree.ts:452
+      ? gh("pr", "close", String(node.number), "--repo", repo)
+      : gh("issue", "close", String(node.number), "--repo", repo);
+    if (closeIt.code === 0) closed.push(node.number);
+    else problems.push(`could not close #${node.number}`);
+  }
+
+  return { stopped, closed, rootNotified, problems };
+=== src/adapters/github/work-tree.ts:453
+      : gh("issue", "close", String(node.number), "--repo", repo);
+    if (closeIt.code === 0) closed.push(node.number);
+    else problems.push(`could not close #${node.number}`);
+  }
+
+  return { stopped, closed, rootNotified, problems };
+}
+=== src/adapters/github/thread.ts:253
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  // `--paginate` writes one JSON array per page back to back, so from the second page
+  // on the stream is not one JSON document and `JSON.parse` throws on it — a node with
+  // more than one page of comments read as an unreadable thread, and every reader here
+  // answers an unreadable thread by standing down. Split the pages and flatten, the
+  // way `ghPaginated` does; this read keeps `ghRead` rather than `ghPaginated` because
+=== src/adapters/github/thread.ts:300
+  const issue = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
+  if (issue.code !== 0) throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
+
+  return { body: issue.stdout ?? "", shaped: readComments(repo, number, excludeCommentId) };
+}
+
+/**
+=== src/adapters/github/workspace-scope.ts:20
+  const { code, stdout } = gh("pr", "view", String(number), "--repo", repo, "--json", "body", "--jq", ".body");
+  if (code) {
+    log(`WARN could not read pull request #${number}`);
+    return undefined;
+  }
+  // Prose only, like every other read of a GitHub body (#304): a pull request body
+  // quoting the tag inside a fenced sample names no parent.
+=== src/adapters/github/ending-comment.ts:128
+  const { code, stdout, stderr } = gh(...cmd);
+  if (code !== 0) {
+    console.error(`could not comment on issue ${args.number}: ${stderr || stdout}`);
+    return undefined;
+  }
+  const commentId = commentIdFromUrl(stdout);
+  if (args.sessionEnds) recordEndingComment(commentId, args.number);
+=== src/adapters/github/git-tags.ts:49
+  const { code, stdout } = gh(
+    "api", "--paginate", `repos/${repo}/git/matching-refs/tags`, "--jq", '.[] | "\\(.ref) \\(.object.sha)"',
+  );
+  if (code) return null;
+  return stdout
+    .split("\n")
+    .map((line) => line.trim().split(" "))
+=== src/adapters/github/git-tags.ts:73
+  const { code, stdout } = gh("api", "--paginate", `repos/${repo}/compare/${before}...${after}`, "--jq", ".commits[].sha");
+  if (code) return null;
+  return stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+/**
+ * Whether `commit` is contained in `branch` — null when the question could not be
+=== src/adapters/github/git-tags.ts:92
+  const { code, stdout } = gh("api", `repos/${repo}/compare/${branch}...${commit}`, "--jq", ".status");
+  if (code) return null;
+  const status = stdout.trim();
+  return status === "behind" || status === "identical";
+}
+
+/**
+=== src/adapters/github/gh.ts:58
+export function gh(...args: string[]): RunResult {
+  return run([...ghCommand(), ...args]);
+}
+
+/**
+ * Run a READ through `gh`, treating an upstream failure as no answer rather than as
+ * an answer of "no".
+=== src/adapters/github/gh.ts:80
+export function ghRead(...args: string[]): RunResult {
+  let result = gh(...args);
+  for (const delay of [2_000, 6_000]) {
+    if (result.code === 0 || !looksTransient(result)) return result;
+    console.error(
+      `::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`,
+    );
+=== src/adapters/github/gh.ts:81
+  let result = gh(...args);
+  for (const delay of [2_000, 6_000]) {
+    if (result.code === 0 || !looksTransient(result)) return result;
+    console.error(
+      `::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`,
+    );
+    Bun.sleepSync(delay);
+=== src/adapters/github/gh.ts:88
+    result = gh(...args);
+  }
+  return result;
+}
+
+/**
+ * Whether a failure came from the far end rather than from the request.
+=== src/adapters/github/gh.ts:115
+export function ghBytes(...args: string[]): { code: number; bytes: Uint8Array } {
+  const proc = Bun.spawnSync({ cmd: [...ghCommand(), ...args], stdout: "pipe", stderr: "pipe" });
+  return { code: proc.exitCode ?? 1, bytes: proc.stdout ?? new Uint8Array() };
+}
+
+/**
+ * Run `gh` and parse its stdout as JSON. Throws on non-zero exit.
+=== src/adapters/github/gh.ts:129
+  const { code, stdout, stderr } = gh(...args);
+  if (code !== 0) {
+    throw new Error(`gh ${args.join(" ")}: ${stderr || stdout}`);
+  }
+  return stdout ? (JSON.parse(stdout) as T) : null;
+}
+
+=== src/adapters/github/gh.ts:168
+  return graphqlResult<T>(gh(...graphqlArgs(query, variables)));
+}
+
+/**
+ * Run a GraphQL QUERY via `gh api graphql`, retrying a transient failure.
+ *
+ * The same argument `target-state.ts` makes for reading an issue's state through
+=== src/adapters/github/gh.ts:187
+  return graphqlResult<T>(ghRead(...graphqlArgs(query, variables)));
+}
+
+/**
+ * Whether a failed `git commit` failed because there was nothing to commit.
+ *
+ * Separated from the caller so it can be tested without a repository, and named
+=== src/adapters/github/gh.ts:302
+  const { code, stdout, stderr } = gh(...args, "--paginate");
+  if (code !== 0) {
+    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
+  }
+  if (!stdout.trim()) return [];
+  const flat: T[] = [];
+  for (const page of splitConcatenatedJson(stdout)) {
+=== src/adapters/github/gh.ts:331
+  const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
+  if (code) {
+    log(`${context}: WARN failed to dispatch ${workflow}: ${stderr || stdout}`);
+    return false;
+  }
+  log(`${context}: dispatched ${workflow}`);
+  return true;
+=== src/adapters/github/target-state.ts:52
+  const { code, stdout, stderr } = ghRead("api", path);
+  if (code !== 0) {
+    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split("\n")[0] ?? "" };
+  }
+
+  let parsed: IssueOrPr;
+  try {
+=== src/adapters/github/merge-signals.ts:131
+  const { code, stdout } = gh(
+    "api",
+    `repos/${repo}/pulls/${num}/files?per_page=100`,
+    "--paginate",
+    "--jq",
+    '.[] | [.status, .filename, (.previous_filename // "")] | @json',
+  );
+=== src/adapters/github/merge-signals.ts:191
+    const { code, stdout, stderr } = gh(...args);
+    // Named, because the message GitHub sends does not name it. `Resource not
+    // accessible by integration (HTTP 403)` arrived from one of the two calls below and
+    // said nothing about which; it cost two investigations, and in between the reviewer
+    // told a pull request it had run a diagnostic it had not. An error a reader cannot
+    // act on is worth as little here as it is in a tool description.
+    if (code) throwOnFailure(`gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
+=== src/adapters/github/merge-signals.ts:207
+    const { code, stdout, stderr } = ghRead(...args);
+    if (code) {
+      log(`WARN gh ${args.slice(0, 3).join(" ")}: ${stderr || stdout}`);
+      return null;
+    }
+    try {
+      return stdout ? (JSON.parse(stdout) as T) : null;
+=== src/adapters/actions/dispatch.ts:324
+  const { code, stdout, stderr } = gh(
+    "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
+  );
+  // A warning rather than a throw: the refusal stands either way, and the caller has
+  // its own way of reporting. What is lost is the person being told, which is worth a
+  // line in the log that says so rather than an exception that hides the refusal.
+  if (code !== 0) {
+=== src/adapters/actions/dispatch.ts:356
+  const { code, stdout, stderr } = gh(
+    "api",
+    `repos/${d.repo ?? "{owner}/{repo}"}/issues/${d.number}/comments`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+=== src/adapters/actions/dispatch.ts:424
+    gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${markerId}`);
+  };
+
+  // No marker means the ordering check has nothing to be ordered against, so it cannot
+  // run. The dispatch still goes out -- the marker failing to post is not fatal on its
+  // own -- but the check is skipped rather than guessed at.
+  if (markerId === undefined) return undefined;
+=== src/adapters/actions/dispatch.ts:467
+      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
+    }
+    log(
+      `${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` +
+        `and ${d.agent} was not started`,
+    );
+    // The marker this dispatch posted is taken back even though it never showed: a
+=== src/adapters/actions/dispatch.ts:487
+    const { code, stdout, stderr } = gh(
+      "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
+    );
+    if (code !== 0) {
+      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+    }
+    return "unconfirmed";
+=== src/adapters/actions/dispatch.ts:685
+        gh("api", "--method", "DELETE", `repos/${d.repo ?? "{owner}/{repo}"}/issues/comments/${markerId}`);
+      }
+      const body = [
+        ...refusalEndingLines(d),
+        dispatchFailedNotice({
+          agent: d.agent,
+          number: Number(d.number),
+=== src/adapters/actions/dispatch.ts:696
+      gh("issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body);
+    }
+    return "failed";
+  }
+  // The default classification compares the target with this run's own node
+  // (`run-node.ts`): onto it moves the turn on, under it starts work and leaves this
+  // node waiting. `continuesChain` overrides it for the dispatch that is the run's
+=== src/adapters/actions/dispatch-targets.ts:146
+  const { code, stdout, stderr } = gh(
+    "issue", "comment", String(subIssueNum), "--repo", repo,
+    "--body",
+    `${LLM_CONTEXT_TAG.write("include")}\n` +
+      "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
+      "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " +
+      "issue when they are met, and carry on with the work when they are not.",
+=== src/adapters/actions/dispatch-targets.ts:230
+  const { code, stdout, stderr } = gh(
+    "issue", "comment", String(issueNumber), "--repo", repo,
+    "--body",
+    `${LLM_CONTEXT_TAG.write("include")}\n` +
+      `Atomaton: pull request #${prNumber} for this issue was closed without merging. Nobody has decided ` +
+      "whether what this issue asked for is settled by that. Decide which acceptance criteria the closed " +
+      "pull request met; conclude the issue when closing it settled them, and carry on from where the " +
+=== src/app/aggregation.ts:241
+      gh(
+        "issue", "comment", String(opts.parent), "--repo", opts.repo,
+        "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${SUB_RESULT_TAG.write(opts.closedNum)}\n${opts.progressMessage(remaining)}`,
+      );
+    }
+    return { kind: "waiting", remaining };
+  }
+=== src/app/aggregation.ts:266
+  const { code: commentsCode, stdout: commentsOut } = gh(
+    "api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", "[.[].body]",
+  );
+  if (commentsCode !== 0) {
+    const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
+    console.error(`${why}; not dispatching`);
+    return withNotice(opts, { kind: "undetermined", why });
+=== src/app/aggregation.ts:340
+    const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);
+    if (removed.code === 0) {
+      console.error(`${why}; the aggregation marker was removed so this can be retried`);
+    } else {
+      console.error(
+        `${why}; AND the aggregation marker could not be removed (${removed.stderr.trim() || removed.stdout.trim()}), ` +
+          `so nothing will retry: aggregate #${opts.parent} by hand`,
+=== src/app/aggregation.ts:408
+    gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", body);
+  } catch {
+    // Deliberately swallowed. `gh` here does not throw, so this guards only against a
+    // future change to that, and the loud failure is already the `::warning::`-less
+    // stderr line `dispatchOrchestratorIfReady` wrote above.
+  }
+  return result;
+=== src/entrypoints/machinery/resolve_pr_branch.ts:124
+    const { code, stdout, stderr } = gh(
+      "pr", "view", String(number), "--repo", repo,
+      "--json", "headRefName,isCrossRepository",
+    );
+    if (code !== 0) {
+      log(`could not read pull request #${number}: ${stderr || stdout}`);
+    } else {
+=== src/entrypoints/machinery/report_config_findings.ts:148
+    const existing = gh(
+      "issue", "list", "--repo", repo, "--state", "open", "--search", marker,
+      "--json", "number", "--jq", ".[0].number",
+    );
+    if (existing.code === 0 && existing.stdout.trim()) {
+      log(`#${existing.stdout.trim()} already reports this finding; leaving it alone`);
+      continue;
+=== src/entrypoints/machinery/report_config_findings.ts:172
+    const created = gh(
+      "issue", "create", "--repo", repo,
+      "--title", findingTitle(fields),
+      "--body", body,
+    );
+    if (created.code !== 0) {
+      console.error(`::warning::could not open an issue for this finding: ${created.stderr.trim()}`);
+=== src/entrypoints/machinery/report_config_findings.ts:191
+    const asked = gh(
+      "issue", "comment", number, "--repo", repo,
+      "--body", `${LLM_CONTEXT_TAG.write("include")}\n/${agent}\n\nRepair the configuration defect reported above.`,
+    );
+    if (asked.code !== 0) {
+      console.error(`::warning::opened #${number} but could not start ${agent} on it: ${asked.stderr.trim()}`);
+    }
+=== src/entrypoints/machinery/resolve_resume_agent.ts:65
+    gh(
+      "issue", "comment", String(values.number), "--repo", repo,
+      "--body",
+      [
+        LLM_CONTEXT_TAG.write("exclude"),
+        "Atomaton: `/resume` found no previous run on this issue to continue. Use `/<agent>` to start one.",
+      ].join("\n"),
+=== src/entrypoints/machinery/watch_for_stop.ts:92
+  const { code, stdout } = gh(
+    "api", `repos/${repo}/issues/${number}/comments`,
+    "--method", "GET",
+    "-f", `since=${since.toISOString()}`,
+    "--jq", "[.[] | {body, created_at}]",
+  );
+  if (code !== 0) return false;
+=== src/entrypoints/machinery/claim_turn.ts:65
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", ".");
+  if (listed.code !== 0) throw new Error(`could not read #${number}'s comments: ${listed.stderr || listed.stdout}`);
+  const comments: { id: number; body: string }[] = [];
+  for (const page of splitConcatenatedJson(listed.stdout || "[]")) {
+    if (!Array.isArray(page)) continue;
+    for (const entry of page as { id?: number; body?: string }[]) {
+      if (typeof entry.id === "number") comments.push({ id: entry.id, body: entry.body ?? "" });
+=== src/entrypoints/machinery/claim_turn.ts:139
+  const posted = gh("api", `repos/${repo}/issues/${number}/comments`, "--method", "POST", "-f", `body=${claimCommentBody({ ask, run: runId })}`, "--jq", ".id");
+  if (posted.code !== 0) throw new Error(`could not post the claim on #${number}: ${posted.stderr || posted.stdout}`);
+  const claimId = Number(posted.stdout.trim());
+  if (!Number.isInteger(claimId) || claimId <= 0) throw new Error(`the claim's id came back unreadable: ${posted.stdout.trim()}`);
+
+  // GitHub does not guarantee read-after-write. Until the listing shows THIS
+  // comment, the read may still predate it, and a race judged on that read would
+=== src/entrypoints/machinery/claim_turn.ts:167
+  const removed = gh("api", `repos/${repo}/issues/comments/${claimId}`, "--method", "DELETE");
+  if (removed.code !== 0) {
+    // The claim staying up would name a run that never worked the ask — the
+    // open-claim state the watch reads as an unanswered request. A failed delete
+    // is the one back-off that cannot stay quiet: red, so it is re-run, and the
+    // re-run's own claim either holds or deletes this one by the same comparison.
+    throw new Error(`could not take back the claim on #${number}: ${removed.stderr || removed.stdout}`);
+=== src/entrypoints/machinery/guard_command_on_closed.ts:77
+  const posted = gh(
+    "issue", "comment", String(number), "--repo", repo,
+    "--body", [LLM_CONTEXT_TAG.write("exclude"), commandOnClosedNotice(values.commenter ?? "", command, state, number)].join("\n"),
+  );
+  if (posted.code !== 0) {
+    console.error(`Warning: could not post the refusal on #${number}: ${posted.stderr || posted.stdout}`);
+  }
+=== src/entrypoints/machinery/fetch_events.ts:184
+  const { code, stdout, stderr } = ghRead(...args);
+  if (code !== 0) {
+    throw new Error(`Could not fetch ${what}, which a run cannot proceed without: ${stderr || stdout}`);
+  }
+  return JSON.parse(stdout) as T;
+}
+
+=== src/entrypoints/machinery/fetch_events.ts:269
+  const diffResult = gh("api", `repos/${owner}/${repo}/pulls/${number}`, "-H", "Accept: application/vnd.github.v3.diff");
+  const diff = diffResult.code === 0 ? diffResult.stdout : "";
+  if (diff) {
+    const truncated = diff.slice(0, maxDiffChars);
+    let diffContent = "```diff\n" + truncated + "\n```";
+    if (diff.length > maxDiffChars) diffContent += `\n\n*[Diff truncated at ${maxDiffChars} characters due to size]*`;
+    events.push({
+=== src/entrypoints/machinery/guard_comment_during_run.ts:178
+  const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
+  const couldNotRead = readBack.code !== 0;
+  const original = couldNotRead ? "" : readBack.stdout ?? "";
+  // Counted as prose (#311), the same way the entry parses and the thread reads: a
+  // command inside a fenced sample would be acted on by nothing, so refusing the
+  // comment for it would punish a quotation. The rule refuses what would be dropped;
+  // a fenced line is not dropped, because it was never picked up.
+=== src/entrypoints/machinery/guard_comment_during_run.ts:244
+  const { code: delCode, stdout: delOut, stderr: delErr } = gh(
+    "api", "--method", "DELETE", `repos/${repo}/issues/comments/${values["comment-id"]}`,
+  );
+  const deleted = delCode === 0;
+  if (!deleted) {
+    console.error(`Warning: failed to delete comment #${values["comment-id"]} on #${values.number}: ${delErr || delOut}`);
+  }
+=== src/entrypoints/machinery/guard_comment_during_run.ts:261
+  gh(
+    "issue", "comment", String(values.number), "--repo", repo,
+    "--body",
+    noticeBody({
+      mention,
+      several,
+      commands,
+=== src/entrypoints/machinery/notify_limit_reached.ts:89
+  gh(
+    "issue",
+    "comment",
+    values.number,
+    "--body",
+    [`${LLM_CONTEXT_TAG.write("exclude")}`, notice, ...(spent ? ["", spent] : [])].join("\n"),
+  );
+=== src/entrypoints/machinery/lib/turn-labels.ts:27
+    gh("issue", "edit", number, action, label, ...(repo ? ["--repo", repo] : []));
+
+  // Created if missing, so a renamed label or a fresh config still lands. `--repo`
+  // travels with every call: a caller working in one checkout may be applying the
+  // labels to another repository, and a label created in the wrong one makes the
+  // `issue edit` fail as "label not found" (the #223 review's third point).
+  const create = (label: string, color: string, description: string) =>
+=== src/entrypoints/machinery/lib/turn-labels.ts:34
+    gh("label", "create", label, "--force", "-c", color, "-d", description, ...(repo ? ["--repo", repo] : []));
+
+  if (phase === "running") {
+    create(inProgress, "0366d6", "Issue is being worked on by an Atomaton agent");
+    const added = edit("--add-label", inProgress);
+    if (added.code !== 0) console.error(`::warning::could not add '${inProgress}' to #${number}`);
+    const removed = edit("--remove-label", waitingForPerson);
+=== src/entrypoints/machinery/scan_secrets.ts:57
+  const { code, stdout } = gh("repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name");
+  return code === 0 ? stdout.trim() : "";
+}
+
+/** The commits this branch adds, as a range gitleaks can be pointed at. */
+function branchRange(): string | undefined {
+  // `atomaton-check.yml` checks out shallow, and a merge base cannot be computed
+=== src/entrypoints/machinery/scan_secrets.ts:105
+  const release = gh("api", "repos/gitleaks/gitleaks/releases/latest", "--jq", ".tag_name");
+  if (release.code !== 0 || !release.stdout.trim()) {
+    // Not a failure of the branch. A rate limit or an outage at the far end
+    // must not read as "this pull request added a credential".
+    console.log(
+      "::warning::could not resolve the latest gitleaks release, so this branch was not scanned for credentials",
+    );
+=== src/entrypoints/machinery/reconcile_run_ending.ts:269
+  const posted = gh("issue", "comment", String(number), "--repo", repo, "--body", body);
+  if (posted.code !== 0) {
+    console.error(`::error::reconcile_run_ending: could not post the notice on #${number}: ${posted.stderr || posted.stdout}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.error(`reconcile_run_ending: posted the missing-ending notice on #${number}`);
+=== src/entrypoints/machinery/post_result_comment.ts:704
+  const current = gh(
+    "api",
+    `repos/${args.repo}/issues/comments/${args.commentId}`,
+    "--jq",
+    ".body",
+  );
+  if (current.code !== 0 || !current.stdout.trim()) {
+=== src/entrypoints/machinery/post_result_comment.ts:724
+  const updated = gh(
+    "api",
+    `repos/${args.repo}/issues/comments/${args.commentId}`,
+    "--method",
+    "PATCH",
+    "-f",
+    `body=${body}`,
+=== src/entrypoints/machinery/post_result_comment.ts:983
+  const { code, stdout, stderr } = gh(
+    "api",
+    `repos/${process.env.GITHUB_REPOSITORY}/issues/${values.number}/comments`,
+    "--method",
+    "POST",
+    "-f",
+    `body=${body}`,
+=== src/entrypoints/machinery/manage_dispatch_loop.ts:59
+  const { code, stdout } = gh(
+    "api",
+    `repos/${repo}/issues/${number}/comments?per_page=100`,
+    "--paginate",
+    "--jq",
+    // One JSON object per line, the same shape `readChangedFiles` uses and for the
+    // same reason: with `--paginate` the pages arrive as separate documents that
+=== src/entrypoints/machinery/notify_unattended.ts:72
+  const posted = gh("pr", "comment", String(number), "--repo", repo, "--body", body);
+  if (posted.code) {
+    console.error(`::warning::could not post the unattended notice on #${number}: ${posted.stderr.trim()}`);
+  }
+}
+
+if (import.meta.main) main();
+=== src/entrypoints/machinery/request_stop.ts:253
+  const { code: delCode, stdout: delOut, stderr: delErr } = gh(
+    "api", "--method", "DELETE", `repos/${repo}/issues/comments/${values["comment-id"]}`,
+  );
+  const deleted = delCode === 0;
+  if (!deleted) {
+    console.error(`Warning: failed to delete comment #${values["comment-id"]} on #${number}: ${delErr || delOut}`);
+  }
+=== src/entrypoints/machinery/request_stop.ts:304
+    gh("issue", "comment", String(number), "--body", parkEndedNotice(park));
+    applyTurnLabels("with-person", repo, String(number));
+    console.error(`#${number} was parked; the stop ended the park and returned the turn.`);
+  }
+
+  console.error(`Stop requested across #${root}: ${result.stopped.length ? result.stopped.map((n) => `#${n}`).join(", ") : "no run was holding anything"}`);
+}
+=== src/entrypoints/machinery/validate_pull_request.ts:266
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
+  if (posted.code) log(`WARN could not post the failure comment: ${posted.stderr}`);
+}
+
+/**
+ * Tell the person who asked for this run that CI is actually running, and where to
+ * watch it.
+=== src/entrypoints/machinery/validate_pull_request.ts:298
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
+  if (posted.code) log(`WARN could not post the CI-waiting comment: ${posted.stderr}`);
+}
+
+/**
+ * Dispatch CI and wait for it, or reuse a run that already exists, returning what
+ * it concluded.
+=== src/entrypoints/machinery/validate_pull_request.ts:342
+    const listed = gh("api", `repos/${repo}/actions/runs?event=workflow_dispatch&head_sha=${headSha}`).stdout;
+    const { workflow_runs = [] } = JSON.parse(listed || "{}") as { workflow_runs?: CiRun[] };
+    return workflow_runs;
+  };
+
+  // Reuse a CI run that already exists for this commit rather than starting a
+  // second one. A cancelled run is not a verdict -- it was superseded, not judged --
+=== src/entrypoints/machinery/validate_pull_request.ts:462
+  const prJson = gh("api", `repos/${repo}/pulls/${values.number}`).stdout;
+  const pr = JSON.parse(prJson || "{}") as { head?: { sha?: string }; base?: { ref?: string } };
+  const headSha = pr.head?.sha ?? "";
+  const baseRef = pr.base?.ref ?? "";
+  if (!headSha) {
+    log("could not read the pull request's head SHA");
+    process.exit(1);
+=== src/entrypoints/machinery/validate_pull_request.ts:537
+  const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
+  const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
+  const engineerAgent = ORIGIN_AGENT_TAG.readProse(prBody) ?? "";
+
+  const outcome = decideValidationOutcome({
+    conclusion,
+    reviewerAgent: threadRequest.newestRequestedAgent,
+=== src/entrypoints/machinery/validate_pull_request.ts:538
+  const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
+  const engineerAgent = ORIGIN_AGENT_TAG.readProse(prBody) ?? "";
+
+  const outcome = decideValidationOutcome({
+    conclusion,
+    reviewerAgent: threadRequest.newestRequestedAgent,
+    engineerAgent,
+=== src/entrypoints/machinery/validate_pull_request.ts:563
+    const created = gh(
+      "api",
+      "--method",
+      "POST",
+      `repos/${repo}/check-runs`,
+      "-f",
+      `name=${check.name}`,
+=== src/entrypoints/machinery/report_run_failure.ts:211
+  const { code, stdout, stderr } = gh("issue", "comment", String(values.number), "--body", body);
+  // Green only for an agent failure whose notice landed -- see "The exit code is
+  // the gate" above. The other two cases both exit non-zero: the post failed (red
+  // is the only signal left), or the failure is the machinery's -- wherever it
+  // struck -- and the notice, though posted, healed the thread beside a red run
+  // rather than instead of one.
+  const atomaFailed = (values["atoma-failed"] ?? "").trim() === "true";
+=== src/entrypoints/tools/lib/dispatch_sub_agent.ts:77
+  gh("label", "create", launchedLabel, "--force", "-c", "1f883d", "-d", "Atomaton has dispatched an agent for this sub-task");
+  const { code: labelCode } = gh("issue", "edit", String(issue), "--add-label", launchedLabel);
+  if (labelCode !== 0) {
+    console.error(`Warning: failed to add '${launchedLabel}' label to #${issue}`);
+  }
+
+  return { issue, agent };
+=== src/entrypoints/tools/lib/dispatch_sub_agent.ts:78
+  const { code: labelCode } = gh("issue", "edit", String(issue), "--add-label", launchedLabel);
+  if (labelCode !== 0) {
+    console.error(`Warning: failed to add '${launchedLabel}' label to #${issue}`);
+  }
+
+  return { issue, agent };
+}=== src/entrypoints/tools/lib/conclude_issue.ts:88
+  const { code, stdout } = gh("issue", "view", String(issue), "--repo", repo, "--json", "author");
+  if (code !== 0) {
+    throw new Error(
+      `Could not read the author of issue #${issue}, so this cannot tell whether closing it is yours to do.`,
+    );
+  }
+  const authorInfo = stdout ? (JSON.parse(stdout) as GhIssueAuthor) : {};
+=== src/entrypoints/tools/lib/conclude_issue.ts:117
+    const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request, ...endingIdentity() }));
+    mustSucceed(posted, `comment on issue #${issue}`);
+    // stderr, where the tool's own decisions belong. Putting it in the result is
+    // what put it in the agent's report.
+    console.error(`close requested: issue=#${issue} (opened by a person, left open for them)`);
+    return { outcome: "close-requested", commentId: commentIdFromUrl(posted.stdout) };
+  }
+=== src/entrypoints/tools/lib/conclude_issue.ts:134
+  const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "model", body, ...endingIdentity() }));
+  mustSucceed(posted, `comment on issue #${issue}`);
+  mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
+  console.error(`closed: issue=#${issue} (bot-authored)`);
+  const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
+  console.error(describeGateResult(aggregation, issue));
+  return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };
+=== src/entrypoints/tools/lib/conclude_issue.ts:136
+  mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
+  console.error(`closed: issue=#${issue} (bot-authored)`);
+  const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
+  console.error(describeGateResult(aggregation, issue));
+  return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };
+}
+=== src/entrypoints/tools/mcp/github.ts:91
+  const { code, stdout, stderr } = gh(...args);
+  if (code) mcpFail(stderr || stdout);
+  return stdout ? (JSON.parse(stdout) as T) : (null as T);
+}
+
+async function resolveIssueId(number: number): Promise<string> {
+  const [owner, repo] = REPO.split("/", 2);
+=== src/entrypoints/tools/mcp/github.ts:386
+  const ensured = gh(
+    "label", "create", subIssueLabel,
+    "--repo", REPO,
+    "--force",
+    "--color", "8250df",
+    "--description", "Child delivery task managed by Atomaton",
+  );
+=== src/entrypoints/tools/mcp/github.ts:400
+  const { code, stdout, stderr } = gh(...cmd);
+  if (code) mcpFail(stderr || stdout);
+  const num = Number(stdout.trim().split("/").pop());
+  if (!Number.isFinite(num)) mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
+
+  // The link IS the record now, and the issue exists by this point and cannot be
+  // un-created, so a failure names it: an agent that is told only
+=== src/entrypoints/tools/mcp/github.ts:423
+    ghGraphql(
+      "mutation($parent:ID!,$sub:ID!){addSubIssue(input:{issueId:$parent,subIssueId:$sub,replaceParent:true}){issue{number}}}",
+      { parent: pid, sub: sid },
+    );
+    log(`Linked sub-issue #${num} to parent #${parentNum} via official sub-issues API`);
+  } catch (e) {
+    mcpFail(
+=== src/entrypoints/tools/mcp/github.ts:500
+  const { code, stdout, stderr } = gh(...cmd);
+  if (code) mcpFail(stderr || stdout);
+  const num = Number(stdout.trim().split("/").pop());
+  if (!Number.isFinite(num)) mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
+
+  logOp("create_root_issue", { number: num, title });
+  // `root: true` and `parent: null` both say the same thing, because the reader of a
+=== src/entrypoints/tools/mcp/github.ts:689
+    const { code, stdout, stderr } = gh(
+      "issue", "comment", String(num), "--repo", REPO,
+      "--body", turnCommentBody({ ended: "done", audience: "person", body: request, ...endingIdentity() }),
+    );
+    // The one failure still worth an error. Saying nothing here would leave an
+    // issue that nobody has been asked to close and an agent that believes
+    // somebody has -- which is the defect above with the comment removed.
+=== src/entrypoints/tools/mcp/github.ts:700
+  const { code, stdout, stderr } = gh("issue", "close", String(num), "--repo", REPO);
+  if (code) mcpFail(stderr || stdout);
+  logOp("close_issue", { number: num, closed: true });
+  return true;
+}
+
+/**
+=== src/entrypoints/tools/mcp/github.ts:958
+  const { code, stdout, stderr } = gh(...cmd);
+  log(`createPr: gh pr create rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
+  if (code) mcpFail(`gh pr create failed (rc=${code}): ${stderr || stdout}`);
+
+  const num = Number(stdout.trim().split("/").pop());
+  if (!Number.isFinite(num)) mcpFail(`gh pr create: unexpected output: ${stdout.slice(0, 300)}`);
+
+=== src/entrypoints/tools/mcp/github.ts:1030
+        gh("api", `repos/${REPO}/issues/comments/${waitingCommentId}`, "--method", "DELETE");
+      }
+      const text =
+        `Atomaton: PR #${num} created (${stdout.trim()}). ` +
+        "CI could NOT be started, so no required check will appear and no agent is scheduled. See the run log.";
+      postTurnComment({
+        number: String(node),
+=== src/entrypoints/tools/mcp/github.ts:1060
+    gh("pr", "comment", String(num), "--repo", REPO, "--body", unattendedNotice(notify, openedBy));
+  }
+
+  // From the calling agent's (engineer's) perspective, create_pr should
+  // behave like launch_sub_agent: a normal-looking synchronous tool call
+  // that, once it returns, immediately ends this session. The agent is
+  // re-invoked later (see dispatchPostMergeAgent) once the PR actually
+=== src/entrypoints/tools/mcp/github.ts:1186
+  const open = gh("pr", "list", "--repo", REPO, "--head", branch, "--state", "open", "--json", "number");
+  if (!open.code) {
+    try {
+      const [pr] = JSON.parse(open.stdout || "[]") as { number: number }[];
+      // No reviewer argument. This dispatch exists to refresh the required check on
+      // the new head commit, which is about whether the pull request CAN merge -- a
+      // different question from whether anyone should look at it. The name is read
+=== src/entrypoints/tools/mcp/github.ts:1214
+        const posted = gh(
+          "api", `repos/${REPO}/issues/${pr.number}/comments`, "--method", "POST",
+          "-f", `body=${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: pushed ${head} to this pull request. Running CI; the result routes what happens next.`,
+          "--jq", ".id",
+        );
+        if (posted.code === 0) pushAsk = posted.stdout.trim() || undefined;
+        else report("warning", "could not post the push comment, so the dispatched run would have no ask to claim; validation was NOT dispatched");
+=== src/entrypoints/tools/mcp/github.ts:1536
+  const { code, stdout, stderr } = gh("pr", "diff", String(prContextNumber(a)), "--repo", REPO);
+  if (code) mcpFail(stderr || stdout);
+  // `head`: a diff's first files are the subject of the change. And the cut is now
+  // announced in the text rather than being a silent `slice` -- a truncated read
+  // that looks complete is how a reviewer concludes a file was not touched.
+  return capText(stdout).text;
+}
+=== src/entrypoints/tools/mcp/github.ts:1576
+    const { code, stdout, stderr } = gh("search", "code", a.query, "--repo", REPO, "--limit", "30");
+    if (!code) return capText(stdout).text;
+    const text = `${stderr} ${stdout}`;
+    // Both shapes GitHub uses: 429 for the per-minute limit, 403 for the installation
+    // quota. Anything else is a real failure and is reported as it always was.
+    if (!/HTTP 429|rate limit/i.test(text)) mcpFail(stderr || stdout);
+    const delay = statedWait(text) ?? backoff[Math.min(attempt, backoff.length - 1)] ?? 60_000;
+=== src/entrypoints/tools/mcp/github.ts:1611
+  const found = gh("api", `repos/${REPO}/branches/${a.branch}`);
+  if (found.code) {
+    const text = `${found.stderr} ${found.stdout}`;
+    if (/HTTP 404|Branch not found|Not Found/i.test(text)) {
+      return JSON.stringify({ branch: a.branch, exists: false });
+    }
+    mcpFail(found.stderr || found.stdout);
+=== src/entrypoints/tools/mcp/github.ts:1741
+  const { code, stderr, stdout } = gh("api", "-X", "DELETE", `repos/${REPO}/git/refs/heads/${branch}`);
+  if (code) {
+    // The merge is done and this does not undo it, but a token that cannot delete
+    // a ref is an environment fault -- and this repository accumulated 72 stray
+    // branches once already.
+    report("warning", `merged, but could not delete the branch ${branch}: ${stderr || stdout}`);
+    return;
+=== src/entrypoints/tools/mcp/github.ts:1801
+  const { code, stdout, stderr } = gh("pr", "merge", String(num), "--repo", REPO, "--merge");
+  log(`mergePr: gh pr merge rc=${code}, out=${JSON.stringify(stdout)}, err=${JSON.stringify(stderr)}`);
+  if (code) mcpFail(`gh pr merge failed (rc=${code}): ${stderr || stdout}`);
+  logOp("merge_pr", { number: num });
+  deleteMergedBranch(headRefName);
+
+  // Nothing else will: this merge produced no `push` event, because GitHub starts
+=== src/entrypoints/tools/mcp/attachments.ts:378
+  const { code, stdout, stderr } = gh("api", `repos/${repo}`, "--jq", ".id");
+  if (code !== 0) {
+    throw new Error(`could not read the repository id for ${repo}: ${stderr || stdout}`);
+  }
+  const id = Number(stdout.trim());
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new Error(`could not read the repository id for ${repo}: got ${stdout.trim().slice(0, 80)}`);

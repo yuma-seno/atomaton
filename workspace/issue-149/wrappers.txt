@@ -1,0 +1,138 @@
+src/adapters/actions/dispatch-targets.ts:101:  return dispatchWorkflow(
+src/adapters/actions/dispatch-targets.ts:262:  return dispatchWorkflow("dispatchCi", getWorkflowName("ci", DEFAULT_CI_WORKFLOW), ["--ref", branch], log);
+src/adapters/actions/dispatch-targets.ts:359:  return dispatchWorkflow(context, configured || DEFAULT_CD_WORKFLOW, args, log);
+src/adapters/actions/dispatch.ts:677:  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) {
+src/adapters/github/agent-on-issue.ts:118:    return mostRecentAgent(ghPaginated<string>("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+src/adapters/github/branch-placement.ts:134:  const existing = gitRun("ls-remote", "--heads", "origin", `refs/heads/${parentBranch}`);
+src/adapters/github/branch-placement.ts:136:    const fetched = gitRun("fetch", "origin", `refs/heads/${parentBranch}:refs/remotes/origin/${parentBranch}`);
+src/adapters/github/branch-placement.ts:147:  const head = gitRun("rev-parse", "HEAD");
+src/adapters/github/branch-placement.ts:157:  const fetched = gitRun("fetch", "origin", `refs/heads/${parentBranch}:refs/remotes/origin/${parentBranch}`);
+src/adapters/github/branch-placement.ts:175:  const current = gitRun("rev-parse", "--abbrev-ref", "HEAD");
+src/adapters/github/branch-placement.ts:197:    ? gitRun("checkout", "-b", name, `origin/${from}`)
+src/adapters/github/branch-placement.ts:198:    : gitRun("checkout", "-b", name);
+src/adapters/github/branch-placement.ts:235:  const { code, stdout } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${parentBranch}`);
+src/adapters/github/branch-placement.ts:62:  return gitRun("show-ref", "--verify", "--quiet", `refs/heads/${name}`).code === 0;
+src/adapters/github/branch-placement.ts:77:    const { code, stdout } = gitRun("rev-parse", "--abbrev-ref", "HEAD");
+src/adapters/github/branch-placement.ts:97:    const { code, stdout } = gitRun("branch", "--format=%(refname:short)", "--points-at=HEAD");
+src/adapters/github/issue-images.ts:91:  const { code, bytes } = ghBytes("api", url, "--method", "GET", "--header", "Accept: application/vnd.github.raw");
+src/adapters/github/issue-index.ts:126:function ghJsonPaged<T>(path: string): T[] {
+src/adapters/github/issue-index.ts:128:    return ghPaginated<T>("api", path);
+src/adapters/github/issue-index.ts:156:  const raw = ghJsonPaged<ApiIssue>(`repos/${repo}/issues?state=all&per_page=100${sinceParam}`);
+src/adapters/github/issue-index.ts:176:  const comments = ghJsonPaged<ApiComment>(`repos/${repo}/issues/comments?per_page=100`);
+src/adapters/github/issue-index.ts:190:  return ghJsonPaged<ApiComment>(`repos/${repo}/issues/${issue}/comments?per_page=100`)
+src/adapters/github/issue-index.ts:229:  const raw = ghJsonPaged<ApiIssue>(`repos/${repo}/issues?state=all&per_page=100`);
+src/adapters/github/issue-links.ts:157:    issue = ghGraphqlRead<GqlResponse>(QUERY, { owner, name, number, limit: LINK_LIMIT, labelLimit: LABEL_LIMIT })
+src/adapters/github/merge-signals.ts:207:    const { code, stdout, stderr } = ghRead(...args);
+src/adapters/github/parent-issue.ts:70:    const data = ghGraphqlRead<{ repository: { issue: { parent: { number: number } | null } } }>(
+src/adapters/github/target-state.ts:52:  const { code, stdout, stderr } = ghRead("api", path);
+src/adapters/github/thread.ts:215:  const listed = ghPaginated<{ id: number; body?: string; created_at?: string; user?: { type?: string } }>(
+src/adapters/github/thread.ts:253:  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+src/adapters/github/thread.ts:300:  const issue = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
+src/adapters/github/work-tree.ts:105:  const { code, stdout, stderr } = ghRead("api", `repos/${repo}/issues/${number}`);
+src/adapters/github/work-tree.ts:176:  const prs = ghRead(
+src/adapters/github/work-tree.ts:306:  const { code, stdout } = ghRead(
+src/entrypoints/machinery/claim_turn.ts:65:  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate", "--jq", ".");
+src/entrypoints/machinery/fetch_events.ts:164:    return ghPaginated<T>(...args);
+src/entrypoints/machinery/fetch_events.ts:184:  const { code, stdout, stderr } = ghRead(...args);
+src/entrypoints/machinery/fetch_events.ts:353:  const prs = ghJson<{ number: number; body: string | null }[]>(
+src/entrypoints/machinery/guard_comment_during_run.ts:178:  const readBack = ghRead("api", `repos/${repo}/issues/comments/${values["comment-id"]}`, "--jq", ".body");
+src/entrypoints/machinery/lib/atomaton-data.ts:107:  gitRun("config", "user.email", "action@github.com");
+src/entrypoints/machinery/lib/atomaton-data.ts:108:  gitRun("config", "user.name", "GitHub Actions");
+src/entrypoints/machinery/lib/atomaton-data.ts:118:  return gitRun("push", "--force", "origin", `${commit.stdout}:refs/heads/${branch}`).code === 0;
+src/entrypoints/machinery/lib/atomaton-data.ts:139:  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0) {
+src/entrypoints/machinery/lib/atomaton-data.ts:140:    gitRun("config", "user.email", "action@github.com");
+src/entrypoints/machinery/lib/atomaton-data.ts:141:    gitRun("config", "user.name", "GitHub Actions");
+src/entrypoints/machinery/lib/atomaton-data.ts:143:    const commit = gitRun("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", `init: ${DATA_BRANCH} session store`).stdout;
+src/entrypoints/machinery/lib/atomaton-data.ts:144:    gitRun("push", "origin", `${commit}:refs/heads/${DATA_BRANCH}`);
+src/entrypoints/machinery/lib/atomaton-data.ts:147:  gitRun("fetch", "origin", DATA_BRANCH);
+src/entrypoints/machinery/lib/atomaton-data.ts:149:  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
+src/entrypoints/machinery/lib/atomaton-data.ts:181:    gitRun("worktree", "remove", "--force", worktreeDir);
+src/entrypoints/machinery/lib/atomaton-data.ts:199:  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0) return undefined;
+src/entrypoints/machinery/lib/atomaton-data.ts:201:  gitRun("fetch", "origin", DATA_BRANCH);
+src/entrypoints/machinery/lib/atomaton-data.ts:203:  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
+src/entrypoints/machinery/lib/atomaton-data.ts:233:    gitRun("worktree", "remove", "--force", worktreeDir);
+src/entrypoints/machinery/lib/atomaton-data.ts:269:  if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0) return false;
+src/entrypoints/machinery/lib/atomaton-data.ts:272:  if (gitRun("cat-file", "-e", `origin/${DATA_BRANCH}:${prefix}`).code !== 0) return false;
+src/entrypoints/machinery/lib/atomaton-data.ts:312:  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0) {
+src/entrypoints/machinery/lib/atomaton-data.ts:320:  gitRun("fetch", "origin", DATA_BRANCH);
+src/entrypoints/machinery/lib/atomaton-data.ts:322:  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
+src/entrypoints/machinery/lib/atomaton-data.ts:355:    gitRun("worktree", "remove", "--force", worktreeDir);
+src/entrypoints/machinery/lib/atomaton-data.ts:48:  if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0) {
+src/entrypoints/machinery/lib/atomaton-data.ts:51:  if (gitRun("cat-file", "-e", `origin/${DATA_BRANCH}:${targetPath}`).code !== 0) {
+src/entrypoints/machinery/lib/atomaton-data.ts:54:  const shown = gitRun("show", `origin/${DATA_BRANCH}:${targetPath}`);
+src/entrypoints/machinery/lib/atomaton-data.ts:72:  if (gitRun("fetch", "origin", branch, "--depth=1").code !== 0) return undefined;
+src/entrypoints/machinery/lib/atomaton-data.ts:73:  if (gitRun("cat-file", "-e", `origin/${branch}:${targetPath}`).code !== 0) return undefined;
+src/entrypoints/machinery/lib/atomaton-data.ts:74:  const shown = gitRun("show", `origin/${branch}:${targetPath}`);
+src/entrypoints/machinery/prune_atomaton_data.ts:101:  const listed = gitRun("ls-tree", "-r", "--name-only", `origin/${BRANCH}`);
+src/entrypoints/machinery/prune_atomaton_data.ts:120:  if (gitRun("fetch", "origin", BRANCH).code !== 0) {
+src/entrypoints/machinery/prune_atomaton_data.ts:152:    gitRun("worktree", "add", worktree, `origin/${BRANCH}`);
+src/entrypoints/machinery/prune_atomaton_data.ts:202:    gitRun("worktree", "remove", "--force", worktree);
+src/entrypoints/machinery/prune_atomaton_data.ts:61:    const page = ghPaginated<IssueState>("api", `repos/${repo}/issues?state=${state}&per_page=100`);
+src/entrypoints/machinery/resolve_pr_branch.ts:104:  const { code, stdout } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${name}`);
+src/entrypoints/machinery/resolve_pr_branch.ts:91:  return gitRun("check-ref-format", "--branch", name).code === 0;
+src/entrypoints/machinery/resolve_resume_agent.ts:56:    agent = mostRecentAgent(ghPaginated<string>("api", `repos/${repo}/issues/${values.number}/comments`, "--jq", "[.[].body]"));
+src/entrypoints/machinery/scan_secrets.ts:66:  gitRun("fetch", "--quiet", "--unshallow", "origin");
+src/entrypoints/machinery/scan_secrets.ts:82:  if (gitRun("fetch", "--quiet", "origin", base).code !== 0) {
+src/entrypoints/machinery/scan_secrets.ts:86:  const mergeBase = gitRun("merge-base", "FETCH_HEAD", "HEAD");
+src/entrypoints/machinery/validate_pull_request.ts:224:    const bodies = ghPaginated<string>("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]");
+src/entrypoints/machinery/validate_pull_request.ts:379:    if (!dispatchWorkflow(`validate_pull_request: CI for ${branch}`, workflow, ["--repo", repo, "--ref", branch], log)) {
+src/entrypoints/machinery/write_metrics_report.ts:256:  const comments = ghPaginated<{ body?: string; issue_url?: string; created_at?: string }>(
+src/entrypoints/machinery/write_metrics_report.ts:357:  const log = gitRun("log", `origin/${BRANCH}`, "--name-only", "--format=%x00%aI", "--", "sessions");
+src/entrypoints/machinery/write_metrics_report.ts:379:  if (gitRun("fetch", "origin", BRANCH).code !== 0) {
+src/entrypoints/machinery/write_metrics_report.ts:383:  const listed = gitRun("ls-tree", "-r", "--name-only", `origin/${BRANCH}`, "--", "sessions");
+src/entrypoints/machinery/write_metrics_report.ts:390:    const shown = gitRun("show", `origin/${BRANCH}:${path}`);
+src/entrypoints/tools/mcp/attachments.ts:298:function gitInIndex(indexPath: string, args: string[]): ReturnType<typeof gitRunWith> {
+src/entrypoints/tools/mcp/attachments.ts:299:  return gitRunWith(indexEnv(indexPath), ...args);
+src/entrypoints/tools/mcp/attachments.ts:302:function gitInIndexStdin(indexPath: string, args: string[], input: string): ReturnType<typeof gitRunWith> {
+src/entrypoints/tools/mcp/attachments.ts:303:  return gitRunWith({ ...indexEnv(indexPath), stdin: input }, ...args);
+src/entrypoints/tools/mcp/attachments.ts:366:  const { code, stdout } = gitRun("remote", "get-url", "origin");
+src/entrypoints/tools/mcp/attachments.ts:654:  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+src/entrypoints/tools/mcp/attachments.ts:666:  const { code, stdout, stderr } = gitRun("rev-parse", `${treeish}^{commit}`);
+src/entrypoints/tools/mcp/attachments.ts:710:  const format = gitRun("check-ref-format", "--branch", branch);
+src/entrypoints/tools/mcp/attachments.ts:715:  const symref = gitRun("ls-remote", "--symref", "origin", "HEAD");
+src/entrypoints/tools/mcp/attachments.ts:732:  const current = gitRun("branch", "--show-current").stdout.trim();
+src/entrypoints/tools/mcp/attachments.ts:754:      const hashed = gitRun("hash-object", "-w", "--no-filters", "--", draft.source);
+src/entrypoints/tools/mcp/attachments.ts:764:      const fetched = gitRun("fetch", "--no-tags", "--no-write-fetch-head", "origin", `refs/heads/${branch}`);
+src/entrypoints/tools/mcp/attachments.ts:792:    const missing = drafts.filter((draft) => gitRun("cat-file", "-e", `${tree.stdout}:${draft.target}`).code !== 0);
+src/entrypoints/tools/mcp/attachments.ts:808:    const commit = gitRun(...commitArgs);
+src/entrypoints/tools/mcp/attachments.ts:812:    const pushed = gitRun("push", "origin", `${commitSha}:refs/heads/${branch}`);
+src/entrypoints/tools/mcp/github.ts:1113:  const dir = gitRun("rev-parse", "--git-dir");
+src/entrypoints/tools/mcp/github.ts:1141:  const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
+src/entrypoints/tools/mcp/github.ts:1143:  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+src/entrypoints/tools/mcp/github.ts:1181:  const { code, stdout, stderr } = gitRun("push", "-u", "origin", branch);
+src/entrypoints/tools/mcp/github.ts:1212:        const sha = gitRun("rev-parse", "--short", "HEAD");
+src/entrypoints/tools/mcp/github.ts:1257:    const { code, stdout, stderr } = gitRun("add", "-A");
+src/entrypoints/tools/mcp/github.ts:1274:    const result = gitRun("commit", "-m", commitMessage);
+src/entrypoints/tools/mcp/github.ts:1300:  const valid = gitRun("check-ref-format", "--branch", branch);
+src/entrypoints/tools/mcp/github.ts:1302:  const current = gitRun("branch", "--show-current");
+src/entrypoints/tools/mcp/github.ts:1308:  const worktree = gitRun("status", "--porcelain");
+src/entrypoints/tools/mcp/github.ts:1315:  const fetch = gitRun("fetch", "origin", `refs/heads/${branch}:${remoteRef}`);
+src/entrypoints/tools/mcp/github.ts:1323:  const counts = gitRun("rev-list", "--left-right", "--count", `HEAD...${remoteRef}`);
+src/entrypoints/tools/mcp/github.ts:1331:    const fastForward = gitRun("merge", "--ff-only", remoteRef);
+src/entrypoints/tools/mcp/github.ts:1361:    const pr = ghJsonOrThrow<{ baseRefName?: string }>(
+src/entrypoints/tools/mcp/github.ts:1371:  const repository = ghJsonOrThrow<{ defaultBranchRef?: { name?: string } }>(
+src/entrypoints/tools/mcp/github.ts:1423:  const worktree = gitRun("status", "--porcelain");
+src/entrypoints/tools/mcp/github.ts:1434:  const fetch = gitRun("fetch", "origin", `refs/heads/${base}:${remoteRef}`);
+src/entrypoints/tools/mcp/github.ts:1436:  const resolved = gitRun("rev-parse", remoteRef);
+src/entrypoints/tools/mcp/github.ts:1440:  const ancestor = gitRun("merge-base", "--is-ancestor", remoteRef, "HEAD");
+src/entrypoints/tools/mcp/github.ts:1452:  const merge = gitRun(
+src/entrypoints/tools/mcp/github.ts:1459:  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+src/entrypoints/tools/mcp/github.ts:1477:  const head = gitRun("rev-parse", "HEAD");
+src/entrypoints/tools/mcp/github.ts:1526:  const pr = ghJsonOrThrow<{ body?: unknown }>(
+src/entrypoints/tools/mcp/github.ts:1547:  return JSON.stringify(ghJsonOrThrow("pr", "list", "--repo", REPO, "--state", state, "--limit", String(limit), "--json", "number,title,state,headRefName,baseRefName") ?? []);
+src/entrypoints/tools/mcp/github.ts:1636:  const d = ghJsonOrThrow<{ check_runs?: unknown[] }>("api", `repos/${REPO}/commits/${a.ref}/check-runs`);
+src/entrypoints/tools/mcp/github.ts:1644:  const d = ghJsonOrThrow<{ reviews?: unknown[] }>(
+src/entrypoints/tools/mcp/github.ts:1664:    ghJsonOrThrow<unknown[]>(`api`, `repos/${REPO}/pulls/${prContextNumber(a)}/comments`) ?? [];
+src/entrypoints/tools/mcp/github.ts:1811:  const d = ghJsonOrThrow<{ body?: string }>("pr", "view", String(num), "--repo", REPO, "--json", "body");
+src/entrypoints/tools/mcp/github.ts:423:    ghGraphql(
+src/entrypoints/tools/mcp/github.ts:543:  const issue = ghJsonOrThrow<{ comments?: unknown[]; body?: unknown }>(
+src/entrypoints/tools/mcp/github.ts:577:  return JSON.stringify(ghJsonOrThrow(...cmd) ?? []);
+src/entrypoints/tools/mcp/github.ts:601:  const issue = ghJsonOrThrow<{ title?: string; state?: string; comments?: unknown[] }>(
+src/entrypoints/tools/mcp/github.ts:675:  const d = ghJsonOrThrow<GhIssueAuthor>("issue", "view", String(num), "--repo", REPO, "--json", "author");
+src/entrypoints/tools/mcp/github.ts:70:    const { code, stdout } = gitRun("remote", "get-url", "origin");
+src/entrypoints/tools/mcp/github.ts:90:function ghJsonOrThrow<T>(...args: string[]): T {
+src/entrypoints/tools/mcp/github.ts:934:  const worktree = gitRun("status", "--porcelain");
+src/entrypoints/tools/mcp/github.ts:939:  const head = gitRun("rev-parse", "HEAD");
+src/entrypoints/tools/mcp/github.ts:941:  const remote = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+src/entrypoints/tools/mcp/github.ts:98:  const d = ghGraphql<{ repository: { issue: { id: string } } }>(
+src/entrypoints/tools/mcp/search.ts:447:  const listed = gitRun("ls-files", "-z");
