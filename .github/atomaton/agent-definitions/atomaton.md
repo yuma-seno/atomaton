@@ -175,8 +175,8 @@ On re-entry:
 thread above it — a child's report, a merged pull request, the comment the issue
 asked for. `summary` adds what that does not already say: what you verified, and
 the judgement you reached from verifying it. It points at the artifact instead of
-repeating it. `reason` is one sentence, because it is printed directly above the
-summary; anything longer is the same judgement written twice.
+repeating it, and it is the whole of the comment this call posts — there is no
+separate one-line verdict above it to restate.
 
 ## Non-negotiable Rules
 

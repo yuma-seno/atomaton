@@ -8103,7 +8103,7 @@ function mustSucceed(result, what) {
     return;
   throw new Error(`Could not ${what}: ${result.stderr.trim() || result.stdout.trim() || `gh exited ${result.code}`}`);
 }
-async function concludeIssue(issue, reason, summary) {
+async function concludeIssue(issue, summary) {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
   const { code, stdout } = gh("issue", "view", String(issue), "--repo", repo, "--json", "author");
   if (code !== 0) {
@@ -8111,14 +8111,9 @@ async function concludeIssue(issue, reason, summary) {
   }
   const authorInfo = stdout ? JSON.parse(stdout) : {};
   const isBot = !isHumanAuthor(authorInfo.author?.is_bot);
-  let body = `Atomaton: the agent on this issue considers its work complete.
-
-**Reason:** ${reason}`;
-  if (summary) {
-    body += `
+  const body = `Atomaton: the agent on this issue considers its work complete.
 
 ${summary}`;
-  }
   if (!isBot) {
     const request = closeRequestComment({ notify: resolveNotify(repo, issue), body });
     const posted = gh("issue", "comment", String(issue), "--repo", repo, "--body", turnCommentBody({ ended: "done", audience: "person", body: request, ...endingIdentity() }));
@@ -8130,9 +8125,7 @@ ${summary}`;
   mustSucceed(posted, `comment on issue #${issue}`);
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);
-  reportSubIssueToParent(repo, issue, [reason, summary].filter(Boolean).join(`
-
-`));
+  reportSubIssueToParent(repo, issue, summary);
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
   console.error(describeGateResult(aggregation, issue));
   return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };
@@ -19237,12 +19230,10 @@ var LAUNCH_SUB_AGENT_SCHEMA = objectType({
   tasks: arrayType(objectType({
     issue: positiveInt("The sub-issue number."),
     agent: stringType().min(1).describe("The agent to dispatch (e.g., 'engineer').")
-  })).min(1, "tasks must be a non-empty list of {issue, agent} objects").describe("List of {issue, agent} pairs to dispatch."),
-  summary: stringType().optional().describe("Your report for this run. It is folded into the dispatch comment on the issue you are on, " + "behind a `<details>`, so keep it short: what you concluded and what happens next, not the " + "full four-part report. This call ends your session when every dispatch succeeds, so there " + "is no turn after it to write one in.")
+  })).min(1, "tasks must be a non-empty list of {issue, agent} objects").describe("List of {issue, agent} pairs to dispatch.")
 });
 var REQUEST_CLOSE_ISSUE_SCHEMA = objectType({
-  reason: stringType().min(1).describe("Why this issue's work is considered complete \u2014 one sentence. It is printed directly " + "above `summary`, so anything longer is the same judgement written twice."),
-  summary: stringType().optional().describe("Final summary to include in the posted comment (e.g. an aggregation report).")
+  summary: stringType().min(1).describe("The body of the comment this call posts: what you concluded, and why the issue's work is " + "complete. The parent's aggregation reads this too, so it is the one place the conclusion " + "is written.")
 });
 function mcpFail(message) {
   throw new Error(message);
@@ -19284,15 +19275,11 @@ function handleLaunchSubAgent(args) {
       errors.push(`#${issue}/${agent}: ${message}`);
     }
   }
-  const summary = (args.summary ?? "").trim();
   const complete = errors.length === 0;
   if (parentIssue && dispatched.length) {
     const bodyLines = complete ? turnHeader({ ended: "waiting", audience: "person", agent: runAgent(), ...endingIdentity() }) : [LLM_CONTEXT_TAG.write("exclude")];
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));
-    }
-    if (summary) {
-      bodyLines.push("", "<details><summary>Report</summary>", "", summary, "", "</details>");
     }
     postTurnComment({ number: String(parentIssue), body: bodyLines.join(`
 `), sessionEnds: complete });
@@ -19314,24 +19301,23 @@ async function handleRequestCloseIssue(args) {
   if (isPrRun()) {
     refusePrRun("request_close_issue", "A pull request has no issue to conclude: its outcomes are the review it posts, a fix pushed with " + "commit_and_push, and merge_pr \u2014 and the issue it delivers is concluded by a run on that issue, " + "which merge_pr's post-merge dispatch starts.");
   }
-  const reason = args.reason.trim();
-  const summary = (args.summary ?? "").trim();
-  if (!reason)
-    mcpFail("reason must be a non-empty string");
+  const summary = args.summary.trim();
+  if (!summary)
+    mcpFail("summary must be a non-empty string");
   const issueNumber = nodeNumber();
   if (issueNumber === undefined) {
     mcpFail("request_close_issue could not read this run's own issue number (the environment's NUMBER is unset or not a positive integer)");
   }
-  log3(`Concluding issue #${issueNumber}: reason=${JSON.stringify(reason)}`);
+  log3(`Concluding issue #${issueNumber}`);
   let result;
   try {
-    result = await concludeIssue(issueNumber, reason, summary);
+    result = await concludeIssue(issueNumber, summary);
   } catch (e) {
     const message = e.message ?? String(e);
     log3(`concludeIssue failed for #${issueNumber}: ${message}`);
     mcpFail(`Failed to conclude issue #${issueNumber}: ${message}`);
   }
-  const concluded = `Issue #${issueNumber} is concluded: your reason and summary are on the issue.`;
+  const concluded = `Issue #${issueNumber} is concluded: your conclusion is on the issue.`;
   if (result.outcome !== "closed") {
     recordEndingComment(result.commentId, String(issueNumber));
     return { text: `${concluded} Nothing else is yours to do here.`, meta: { session_ends: true } };
@@ -19400,15 +19386,17 @@ function handleReloadEnvironment(args) {
 var { tools: TOOLS, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "launch_sub_agent",
-    description: "Dispatch Atomaton agents onto sub-issues and immediately end the atomaton session. " + "Call this ONCE after creating all sub-issues via GitHub MCP. " + "Each sub-issue can be assigned a different agent. " + "Each sub-issue's body is the hand-off: write there how the work divides among its siblings, " + "any interface they share, and what has already been decided \u2014 the child starts from its own " + "issue's thread, not from this one's. " + "Put your report in `summary`: the atomaton session ends immediately after this call " + "returns, so there is no turn afterwards in which to write one. " + "The atomaton will be automatically re-invoked when ALL sub-issues are closed.",
+    description: "Dispatch Atomaton agents onto sub-issues and immediately end the atomaton session. " + "Call this ONCE after creating all sub-issues via GitHub MCP. " + "Each sub-issue can be assigned a different agent. " + "Each sub-issue's body is the hand-off: write there how the work divides among its siblings, " + "any interface they share, and what has already been decided \u2014 the child starts from its own " + "issue's thread, not from this one's. " + "It carries no report: the comment this call posts on the issue you are on is the record of " + "what was dispatched, and the session ends when every dispatch succeeds. " + "The atomaton will be automatically re-invoked when ALL sub-issues are closed.",
     schema: LAUNCH_SUB_AGENT_SCHEMA,
-    handler: handleLaunchSubAgent
+    handler: handleLaunchSubAgent,
+    guidance: (args) => ("summary" in args) ? "`summary` is no longer an argument of launch_sub_agent: this call carries the dispatch " + "and nothing else, and the comment it posts on this issue is the record. Call it again " + "without `summary`; put anything the next run needs in the sub-issues' bodies." : undefined
   }),
   defineMcpTool({
     name: "request_close_issue",
-    description: "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " + "correct way to finish an issue -- do NOT just stop responding without calling " + "this. Your reason and summary are posted to the issue, and phase-gating/" + "aggregation is triggered for its parent when this is a sub-issue. Whether the " + "close happens now or the issue's author is asked to make it is this tool's " + "decision and not yours -- it is the same call either way, and your session " + "ends when it returns. The call is refused on a pull request run: a pull " + "request has no issue to conclude, and its outcome is merge_pr and the " + "post-merge dispatch, not this tool.",
+    description: "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " + "correct way to finish an issue -- do NOT just stop responding without calling " + "this. Your summary is posted to the issue as the comment this call ends on, and " + "phase-gating/aggregation is triggered for its parent when this is a sub-issue. " + "Whether the " + "close happens now or the issue's author is asked to make it is this tool's " + "decision and not yours -- it is the same call either way, and your session " + "ends when it returns. The call is refused on a pull request run: a pull " + "request has no issue to conclude, and its outcome is merge_pr and the " + "post-merge dispatch, not this tool.",
     schema: REQUEST_CLOSE_ISSUE_SCHEMA,
-    handler: handleRequestCloseIssue
+    handler: handleRequestCloseIssue,
+    guidance: (args) => ("reason" in args) ? "`reason` is no longer an argument of request_close_issue. Put that sentence at the top " + "of `summary` \u2014 the comment this call posts \u2014 and call it again." : undefined
   }),
   defineMcpTool({
     name: "reload_environment",
