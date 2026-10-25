@@ -65,43 +65,17 @@ const LAUNCH_SUB_AGENT_SCHEMA = z.object({
     )
     .min(1, "tasks must be a non-empty list of {issue, agent} objects")
     .describe("List of {issue, agent} pairs to dispatch."),
-  /**
-   * Where the report goes for the one exit that had nowhere to put it.
-   *
-   * Four calls end a session. `create_pr` carries the report in `body`,
-   * `request_close_issue` in `summary`, `reload_environment` in `reason` -- and
-   * this one carried nothing, while being the atomaton's most frequent exit.
-   * The session stops the moment it returns, so there is no later turn to write
-   * in: a run that meant to report after dispatching never reports at all.
-   *
-   * Optional rather than required, and deliberately so: a partial dispatch leaves
-   * the session OPEN (see `handleLaunchSubAgent`), and on that path the closing
-   * text is still the report. Required here would make the failure path demand
-   * the report twice.
-   *
-   * Same shape as `REQUEST_CLOSE_ISSUE_SCHEMA.summary` below, because it is the
-   * same fact -- what this run concluded -- reaching the thread the same way.
-   */
-  summary: z
-    .string()
-    .optional()
-    .describe(
-      "Your report for this run. It is folded into the dispatch comment on the issue you are on, " +
-        "behind a `<details>`, so keep it short: what you concluded and what happens next, not the " +
-        "full four-part report. This call ends your session when every dispatch succeeds, so there " +
-        "is no turn after it to write one in.",
-    ),
 });
 
 const REQUEST_CLOSE_ISSUE_SCHEMA = z.object({
-  reason: z
+  summary: z
     .string()
     .min(1)
     .describe(
-      "Why this issue's work is considered complete — one sentence. It is printed directly " +
-        "above `summary`, so anything longer is the same judgement written twice.",
+      "The body of the comment this call posts: what you concluded, and why the issue's work is " +
+        "complete. The parent's aggregation reads this too, so it is the one place the conclusion " +
+        "is written.",
     ),
-  summary: z.string().optional().describe("Final summary to include in the posted comment (e.g. an aggregation report)."),
 });
 
 function mcpFail(message: string): never {
@@ -199,31 +173,24 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
     }
   }
 
-  // One comment on the PARENT issue, not two -- and only when something was dispatched.
+  // One comment on the PARENT issue, and only when something was dispatched: the
+  // machine's list of what it started.
   //
-  // The audit line and the report used to be separate comments: the machine's
-  // list of what it dispatched, and the report the run concluded. Two comments
-  // for one event read as two events, and the report -- four sections, written
-  // for the next run -- dominated the thread a person scrolls past. Folded into
-  // one comment with the report behind a `<details>`, the thread shows what was
-  // launched and the report is one click away.
+  // It used to fold the run's own report in behind a `<details>`, which is what the
+  // `summary` argument carried. That argument is gone (#15): a report belongs in the
+  // message the run ends with, and an argument of a call that starts work is not
+  // where a reader should have to look for one. The trade-off was decided and is
+  // recorded on #15 -- a run that ends on a complete dispatch leaves this list as its
+  // footprint, and the sub-issues' titles and `tasks` say what was divided.
   //
-  // The report is not lost to the next run by being folded in here. It travels
-  // twice: as this comment, and as the `summary` argument of the `launch_sub_agent`
-  // call itself, which the session keeps as a tool call. The comment is the copy a
-  // person reads; the tool call is the copy the next run is handed. So the exclude
-  // tag below -- which keeps this comment out of the next run's context -- costs
-  // the next run nothing.
-  //
-  // Posted even on a partial dispatch: the session stays open there, but a report
-  // the agent has already written is not worth discarding for that.
+  // Posted even on a partial dispatch: the session stays open there, and the agent
+  // writes its report on the next turn.
   //
   // NOT posted when nothing was dispatched (#231). The tool refuses below and the
   // session stays open, so the report still reaches the thread -- as the agent's own
   // result comment on the next turn. Posted here it landed BEFORE that comment, as a
   // summary with no dispatch line above it, and read as a conclusion the next comment
   // then contradicted.
-  const summary = (args.summary ?? "").trim();
   // The session ends only when every task was dispatched -- see below. Written here
   // because the `waiting` tag means exactly that: the run is over and a child carries
   // it. A partial dispatch keeps the session OPEN, so it is not waiting and must not
@@ -251,9 +218,6 @@ function handleLaunchSubAgent(args: z.infer<typeof LAUNCH_SUB_AGENT_SCHEMA>): Mc
       : [LLM_CONTEXT_TAG.write("exclude")];
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));
-    }
-    if (summary) {
-      bodyLines.push("", "<details><summary>Report</summary>", "", summary, "", "</details>");
     }
     // Posted and recorded through the one helper. `complete` is also whether the
     // session ends here: a partial dispatch keeps it open, and a run that goes on
@@ -308,24 +272,23 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
     );
   }
 
-  const reason = args.reason.trim();
-  const summary = (args.summary ?? "").trim();
+  const summary = args.summary.trim();
 
-  if (!reason) mcpFail("reason must be a non-empty string");
+  if (!summary) mcpFail("summary must be a non-empty string");
 
   const issueNumber = nodeNumber();
   if (issueNumber === undefined) {
     mcpFail("request_close_issue could not read this run's own issue number (the environment's NUMBER is unset or not a positive integer)");
   }
 
-  log(`Concluding issue #${issueNumber}: reason=${JSON.stringify(reason)}`);
+  log(`Concluding issue #${issueNumber}`);
 
   // The module's own type, not a copy of its shape. The copy had already fallen
   // behind: `concludeIssue` gained the aggregation outcome and this annotation
   // hid it.
   let result: ConcludeIssueResult;
   try {
-    result = await concludeIssue(issueNumber, reason, summary);
+    result = await concludeIssue(issueNumber, summary);
   } catch (e) {
     const message = (e as Error).message ?? String(e);
     log(`concludeIssue failed for #${issueNumber}: ${message}`);
@@ -338,7 +301,7 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
   // last thing it heard before ending — wrote it into its report, so a person
   // asking for work got a paragraph about which tool declined to do what (#933).
   // Who may close the issue is decided here; what the reader sees is the comment.
-  const concluded = `Issue #${issueNumber} is concluded: your reason and summary are on the issue.`;
+  const concluded = `Issue #${issueNumber} is concluded: your conclusion is on the issue.`;
 
   if (result.outcome !== "closed") {
     // The close request is the comment this run ends on: the session ends here
@@ -514,19 +477,30 @@ const { tools: TOOLS, dispatch } = buildMcpTools([
       "Each sub-issue's body is the hand-off: write there how the work divides among its siblings, " +
       "any interface they share, and what has already been decided — the child starts from its own " +
       "issue's thread, not from this one's. " +
-      "Put your report in `summary`: the atomaton session ends immediately after this call " +
-      "returns, so there is no turn afterwards in which to write one. " +
+      "It carries no report: the comment this call posts on the issue you are on is the record of " +
+      "what was dispatched, and the session ends when every dispatch succeeds. " +
       "The atomaton will be automatically re-invoked when ALL sub-issues are closed.",
     schema: LAUNCH_SUB_AGENT_SCHEMA,
     handler: handleLaunchSubAgent,
+    // `summary` was retired (#15). A run restored from an older session still holds
+    // the call it was about to make, and the strict schema turns that into an error —
+    // so the error has to say what became of the text, not merely that the key is
+    // unknown.
+    guidance: (args) =>
+      "summary" in args
+        ? "`summary` is no longer an argument of launch_sub_agent: this call carries the dispatch " +
+          "and nothing else, and the comment it posts on this issue is the record. Call it again " +
+          "without `summary`; put anything the next run needs in the sub-issues' bodies."
+        : undefined,
   }),
   defineMcpTool({
     name: "request_close_issue",
     description:
       "Conclude work on YOUR CURRENT issue and end your session. This is the ONLY " +
       "correct way to finish an issue -- do NOT just stop responding without calling " +
-      "this. Your reason and summary are posted to the issue, and phase-gating/" +
-      "aggregation is triggered for its parent when this is a sub-issue. Whether the " +
+      "this. Your summary is posted to the issue as the comment this call ends on, and " +
+      "phase-gating/aggregation is triggered for its parent when this is a sub-issue. " +
+      "Whether the " +
       "close happens now or the issue's author is asked to make it is this tool's " +
       "decision and not yours -- it is the same call either way, and your session " +
       "ends when it returns. The call is refused on a pull request run: a pull " +
@@ -534,6 +508,15 @@ const { tools: TOOLS, dispatch } = buildMcpTools([
       "post-merge dispatch, not this tool.",
     schema: REQUEST_CLOSE_ISSUE_SCHEMA,
     handler: handleRequestCloseIssue,
+    // `reason` was retired (#15): it was the same judgement `summary` carries, printed
+    // one line above it. A run restored from an older session still holds the call, so
+    // the refusal says where that sentence belongs rather than only that the key is
+    // unknown.
+    guidance: (args) =>
+      "reason" in args
+        ? "`reason` is no longer an argument of request_close_issue. Put that sentence at the top " +
+          "of `summary` — the comment this call posts — and call it again."
+        : undefined,
   }),
   defineMcpTool({
     name: "reload_environment",

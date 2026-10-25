@@ -28,7 +28,7 @@ const ATOMA_MCP_SCRIPT = join(REPO_ROOT, "dist/.github/atomaton-runtime/tools/mc
 describe.skipIf(!atomaAvailable)("E2E: real atoma binary + real mcp/atomaton.ts", () => {
   test("agent calls request_close_issue for a human-authored issue", async () => {
     const mock = startMockLlmServer([
-      { toolCalls: [{ id: "call_1", name: "request_close_issue", arguments: { reason: "All done", summary: "Shipped it." } }] },
+      { toolCalls: [{ id: "call_1", name: "request_close_issue", arguments: { summary: "All done. Shipped it." } }] },
     ]);
     const fakeGh = setupFakeGh([
       // concludeIssue: `gh issue view 99 --repo ... --json author`

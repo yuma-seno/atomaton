@@ -49,7 +49,7 @@ const CHILD = 99;
 describe.skipIf(!atomaAvailable)("E2E: the aggregation branch of request_close_issue", () => {
   test("a bot-authored close walks the aggregation gate, and writes its marker the way gh accepts", async () => {
     const mock = startMockLlmServer([
-      { toolCalls: [{ id: "call_1", name: "request_close_issue", arguments: { reason: "All done", summary: "Shipped it." } }] },
+      { toolCalls: [{ id: "call_1", name: "request_close_issue", arguments: { summary: "All done. Shipped it." } }] },
       // A second turn, with no tool call. `request_close_issue` is session-ending only
       // on the outcomes that `needsAttention` excludes, and `dispatched` is one of
       // those -- so the run is handed one more turn and then ends. A queue of one

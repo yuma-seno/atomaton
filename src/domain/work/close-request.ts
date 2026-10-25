@@ -61,8 +61,8 @@ export const CLOSE_REQUEST_LINE =
 /**
  * The comment to post when the close is the reader's to make.
  *
- * The request goes FIRST, above the agent's own reason and summary. It used to
- * be appended after them, which put the only sentence addressed to the reader
+ * The request goes FIRST, above the agent's own conclusion. It used to
+ * be appended after it, which put the only sentence addressed to the reader
  * under however many paragraphs of report the agent had written — and the reader
  * is the one being asked to act.
  *

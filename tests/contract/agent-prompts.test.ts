@@ -178,8 +178,9 @@ describe("agent prompt contracts", () => {
    * contract never decided where the artifact goes. That is what "The work itself is not
    * one of the parts" fixes.
    *
-   * The atomaton close comment, where `conclude_issue.ts` prints `reason` directly above
-   * `summary`:
+   * The atomaton close comment, back when `conclude_issue.ts` printed a one-sentence
+   * `reason` directly above `summary` (that argument is gone, #15 — the summary is the
+   * comment):
    *
    *   issue  whole  reason  conclusion  evidence  could not establish  next
    *   #2     6,301  795     700         2,524     1,608                581
@@ -187,8 +188,9 @@ describe("agent prompt contracts", () => {
    *   #4     2,947  1,320   243         857       266                  168
    *
    * On #4 `reason` was 44.8% of the comment and restated the 243-character conclusion
-   * below it -- the same judgement written twice, which is what the one-sentence `reason`
-   * and "The conclusion is written once." are for.
+   * below it -- the same judgement written twice. That is the measurement behind the
+   * one-sentence `reason`, and also behind removing it: a ceiling on the second copy
+   * was a weaker answer than not asking for one.
    *
    * Checkable-sentence share by part, #2's engineer, with a regex close to the one used
    * earlier: `What I concluded` 63/94 = 67% (17,964 chars), `How I know` 10/11 = 91%
@@ -204,10 +206,6 @@ describe("agent prompt contracts", () => {
    * compare before and after is anchored claims per report, not their ratio -- and the
    * failure condition is not a falling ratio but (a) a claim the conclusion rests on
    * having no anchor, and (b) a report saying it measured something it did not measure.
-   *
-   * Precedent, in the same direction: `src/entrypoints/tools/mcp/atomaton.ts` already asks
-   * `launch_sub_agent`'s `summary` to be short and explicitly not the full four-part
-   * report. This does the same for the arguments of the call that ends a run.
    *
    * Two alternatives were rejected and are not worth re-opening. A character ceiling in
    * the tool schema: `request_close_issue` ends the session, so an over-length argument
@@ -263,11 +261,12 @@ describe("agent prompt contracts", () => {
    * its pull request and stopped. The report is not missing from those runs, it is in a
    * tool argument, and nothing said so.
    *
-   * Every one of those calls carries a text argument now, `launch_sub_agent` included.
-   * That one had none until this change: three of the four session-ending calls carried
-   * the report and the fourth did not, which is an exception rather than a gap in the
-   * contract. Pinned by argument name, because the name is the part a run has to get
-   * right.
+   * This used to pin the argument NAMES -- `body`, `summary`, `reason` -- because a run
+   * that had to get the name right is what the measurement was about. Naming them in the
+   * prompt is what went wrong (#15): the paragraph grew an entry per tool, and each name
+   * was a second place for the same claim. So the prompt now says the call carries the
+   * report and points at the tool's description for which argument that is, and this
+   * pins the rule without re-listing them.
    */
   test("the report has a named place in every call that ends the session", () => {
     const prompt = readFileSync("src/content/prompt-template.md", "utf8");
@@ -275,8 +274,12 @@ describe("agent prompt contracts", () => {
     expect(prompt, "and before the call, because there is no after").toContain(
       "before you make the call",
     );
+    expect(
+      prompt,
+      "which argument carries it is the tool's own description's, not this paragraph's",
+    ).toContain("said by that tool's own description");
     for (const argument of ["`body`", "`summary`", "`reason`"]) {
-      expect(prompt, `the report's place must be named: ${argument}`).toContain(argument);
+      expect(prompt, `the prompt must not enumerate the argument: ${argument}`).not.toContain(argument);
     }
   });
 
