@@ -90,6 +90,17 @@ function git(cwd: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 }
 
+/**
+ * Git's answer as the bytes git wrote.
+ *
+ * `git()` decodes as UTF-8 and trims, which is exactly what must not happen to a binary
+ * file: a round trip through a string is how a test ends up asserting the mangled bytes
+ * it caused rather than the ones git held.
+ */
+function gitBytes(cwd: string, ...args: string[]): Buffer {
+  return execFileSync("git", args, { cwd });
+}
+
 function makeRemoteBranchFixture(): { root: string; seed: string; work: string } {
   const root = mkdtempSync(join(tmpdir(), "atomaton-sync-branch-"));
   const remote = join(root, "remote.git");
@@ -200,6 +211,12 @@ function makeShallowMergeBaseFixture(): { root: string; seed: string; work: stri
   return { root, seed, work };
 }
 
+/** The three byte strings `logo.bin` takes: base, the parent's, and this run's. A NUL
+ * byte in each, so git and every tool here agree the file is binary. */
+const BASE_LOGO = Buffer.from([0, 1, 2, 3]);
+const PARENT_LOGO = Buffer.from([0, 1, 2, 3, 1]);
+const RUN_LOGO = Buffer.from([0, 9, 9, 9]);
+
 /**
  * The shape of #360: a sub-issue's run is checked out on the base branch, and the
  * branch its work has to land on — its parent's — has moved since.
@@ -208,6 +225,11 @@ function makeShallowMergeBaseFixture(): { root: string; seed: string; work: stri
  * made the checkout refuse; `parent-only.ts` is the parent's work, which the run has
  * never seen and must not lose. The run's clone is depth 1, the way the runner leaves
  * it.
+ *
+ * `logo.bin` is #381: a file that cannot hold git's markers, so the run's version of it
+ * is reachable only through the index once both sides have changed it. The parent's
+ * bytes are here and `main`'s are not touched again, which leaves the run's edit and the
+ * parent's edit as the two sides of the conflict.
  */
 function makeStackedRunFixture(): { root: string; seed: string; work: string } {
   const root = mkdtempSync(join(tmpdir(), "atomaton-stacked-run-"));
@@ -220,6 +242,7 @@ function makeStackedRunFixture(): { root: string; seed: string; work: string } {
   git(seed, "config", "user.email", "atomaton@example.com");
   writeFileSync(join(seed, "diverged.ts"), "base\n");
   writeFileSync(join(seed, "touched.ts"), "one\n");
+  writeFileSync(join(seed, "logo.bin"), BASE_LOGO);
   git(seed, "add", ".");
   git(seed, "commit", "-m", "initial");
   git(seed, "remote", "add", "origin", remote);
@@ -229,11 +252,13 @@ function makeStackedRunFixture(): { root: string; seed: string; work: string } {
   git(seed, "checkout", "-b", "atomaton/issue-149");
   writeFileSync(join(seed, "diverged.ts"), "parent\n");
   writeFileSync(join(seed, "parent-only.ts"), "the parent's work\n");
+  writeFileSync(join(seed, "logo.bin"), PARENT_LOGO);
   git(seed, "add", ".");
   git(seed, "commit", "-m", "the parent's work");
   git(seed, "push", "-u", "origin", "atomaton/issue-149");
 
   // And `main` moves on in the same file, which is what makes the two bases disagree.
+  // `logo.bin` is left alone here, so the two sides of it are the parent's and the run's.
   git(seed, "checkout", "main");
   writeFileSync(join(seed, "diverged.ts"), "main\n");
   git(seed, "commit", "-am", "main moves on");
@@ -995,11 +1020,42 @@ describe("mcp/github.ts", () => {
       );
       expect(unresolved.result.isError).toBe(true);
       expect(unresolved.result.content[0].text).toContain("diverged.ts");
+      // And says how: declaring the path is the resolution, and the marker file is refused.
+      expect(unresolved.result.content[0].text).toContain("resolved_paths");
+      expect(unresolved.result.content[0].text).toContain(":3:");
+
+      // Removing the markers is not a resolution on its own, however resolved the file
+      // looks: git's index is what knows, and a hidden edit would let a binary -- which
+      // never holds markers -- through (#381).
+      writeFileSync(join(work, "diverged.ts"), "parent and the run\n");
+      const undeclared = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 42, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(undeclared.result.isError).toBe(true);
+      expect(undeclared.result.content[0].text).toContain("diverged.ts");
+
+      // A declaration that leaves the markers behind is refused, as a backstop: one
+      // `git add --` would otherwise put them in the branch.
+      writeFileSync(
+        join(work, "diverged.ts"),
+        "<<<<<<< Updated upstream\nparent\n=======\nthe run's version\n>>>>>>> Stashed changes\n",
+      );
+      const careless = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 43, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work", resolved_paths: ["diverged.ts"] } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(careless.result.isError).toBe(true);
+      expect(careless.result.content[0].text).toContain("git's conflict markers");
 
       writeFileSync(join(work, "diverged.ts"), "parent and the run\n");
       const committed = await sendRequest(
         "github.ts",
-        { jsonrpc: "2.0", id: 42, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        { jsonrpc: "2.0", id: 44, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work", resolved_paths: ["diverged.ts"] } } },
         stackedRunEnv(dir),
         work,
       );
@@ -1014,6 +1070,83 @@ describe("mcp/github.ts", () => {
       git(work, "fetch", "origin", "refs/heads/atomaton/issue-1:refs/remotes/origin/atomaton/issue-1");
       expect(git(work, "show", "origin/atomaton/issue-1:parent-only.ts")).toBe("the parent's work");
       expect(git(work, "show", "origin/atomaton/issue-1:touched.ts")).toBe("the run's work");
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * #381. The same collision in a file that cannot hold git's markers.
+   *
+   * Measured before the fix, on this fixture: `stash pop` exited 1 with "Cannot merge
+   * binary files", the worktree copy was the PARENT's bytes, and `git diff
+   * --diff-filter=U` named `logo.bin` — while the guard's marker test read "no markers
+   * anywhere" as "resolved", staged the parent's copy with `git add -A`, and committed
+   * the run's work away without a word. All three halves are asserted here: the refusal
+   * names the path, the parent's bytes are not what gets committed, and the run's own
+   * version is reachable and is what lands on the branch once the choice is declared.
+   */
+  test("a binary both sides changed is refused by name, not committed as the other side's bytes", async () => {
+    const { root, work } = makeStackedRunFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-stacked-env-"));
+    try {
+      writeFileSync(join(work, "logo.bin"), RUN_LOGO);
+      // From the remote: a depth-1 clone's refspec names `main`, so the parent's branch
+      // is not in this checkout until `commit_and_push` fetches it.
+      const parentHead =
+        git(work, "ls-remote", "--heads", "origin", "refs/heads/atomaton/issue-149").split(/\s+/)[0] ?? "";
+
+      const refused = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 50, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(refused.result.isError).toBe(true);
+      const why = refused.result.content[0].text as string;
+      expect(why).toContain("logo.bin");
+      // The half the old message got wrong: it promised markers for a path that can hold
+      // none, and named no way to reach the side the worktree is not showing.
+      expect(why).not.toContain("conflict markers are in those files");
+      expect(why).toContain(":3:");
+      expect(why).toContain("resolved_paths");
+
+      // Nothing was committed and nothing was pushed: the branch is still the parent's tip.
+      expect(git(work, "rev-parse", "HEAD")).toBe(parentHead);
+      expect(git(work, "ls-remote", "--heads", "origin", "refs/heads/atomaton/issue-1")).toBe("");
+      // The worktree holds the parent's bytes, which is the state that reads as "resolved"...
+      expect(readFileSync(join(work, "logo.bin"))).toEqual(PARENT_LOGO);
+      expect(git(work, "status", "--porcelain")).toContain("UU logo.bin");
+      // ...and this run's version is in the index, not only in a stash entry.
+      expect(gitBytes(work, "show", ":3:logo.bin")).toEqual(RUN_LOGO);
+
+      // The silent loss itself: no markers in the file, so a guard that reads the file
+      // would call this resolved and commit the parent's copy over the run's work.
+      const undeclared = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 51, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(undeclared.result.isError).toBe(true);
+      expect(undeclared.result.content[0].text).toContain("logo.bin");
+      expect(git(work, "rev-parse", "HEAD")).toBe(parentHead);
+      expect(git(work, "ls-remote", "--heads", "origin", "refs/heads/atomaton/issue-1")).toBe("");
+
+      writeFileSync(join(work, "logo.bin"), gitBytes(work, "show", ":3:logo.bin"));
+      const committed = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 52, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work", resolved_paths: ["logo.bin"] } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(committed.result.isError, committed.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(committed.result.content[0].text)).toMatchObject({ ok: true, committed: true, pushed: true });
+
+      // What landed on the parent's branch is this run's bytes, chosen by the declaration.
+      git(work, "fetch", "origin", "refs/heads/atomaton/issue-1:refs/remotes/origin/atomaton/issue-1");
+      expect(gitBytes(work, "show", "origin/atomaton/issue-1:logo.bin")).toEqual(RUN_LOGO);
     } finally {
       removeTemp(root);
       removeTemp(dir);
@@ -1340,8 +1473,8 @@ describe("mcp/github.ts", () => {
   /**
    * A conflict is the agent's to decide, not the tool's. Nothing is committed, the
    * markers are left where the agent will read them, and `commit_and_push` is what
-   * closes the merge -- refusing while a conflicted path is still unresolved, because
-   * `git add -A` would otherwise mark the markers resolved and commit them.
+   * closes the merge -- refusing until the path is declared in `resolved_paths`, because
+   * `git add -A` would otherwise mark it resolved and commit whatever is in the file.
    */
   test("a conflict is left in the worktree, committed by nobody but the agent", async () => {
     const { root, seed, work } = makeMergeBaseFixture();
@@ -1357,9 +1490,13 @@ describe("mcp/github.ts", () => {
         work,
       );
       expect(conflicted.result.isError, conflicted.result.content?.[0]?.text).toBeFalsy();
-      const result = JSON.parse(conflicted.result.content[0].text) as { status: string; files: string[]; base_sha: string };
+      const result = JSON.parse(conflicted.result.content[0].text) as { status: string; files: string[]; base_sha: string; note: string };
       expect(result).toMatchObject({ status: "conflicts", base_sha: baseSha });
       expect(result.files).toContain("shared.txt");
+      // The note says how a conflict is closed now: a declaration, and both sides in the
+      // index -- the same route a binary takes, since it can hold no markers.
+      expect(result.note).toContain("resolved_paths");
+      expect(result.note).toContain(":3:");
       // Nothing was committed, and the markers are in the file for the agent to read.
       expect(git(work, "rev-parse", "HEAD")).toBe(branchHead);
       expect(readFileSync(join(work, "shared.txt"), "utf8")).toContain("<<<<<<<");
@@ -1380,6 +1517,9 @@ describe("mcp/github.ts", () => {
       );
       expect(refused.result.isError).toBe(true);
       expect(refused.result.content[0].text).toContain("shared.txt");
+      // Both sides are named where they are, not as markers: a binary holds none.
+      expect(refused.result.content[0].text).toContain(":2:");
+      expect(refused.result.content[0].text).toContain(":3:");
       expect(git(work, "rev-parse", "HEAD")).toBe(branchHead);
 
       writeFileSync(join(work, "shared.txt"), "from the branch, and the base\n");
@@ -1387,7 +1527,10 @@ describe("mcp/github.ts", () => {
         "github.ts",
         {
           jsonrpc: "2.0", id: 24, method: "tools/call",
-          params: { name: "commit_and_push", arguments: { message: "resolve the conflict" } },
+          params: {
+            name: "commit_and_push",
+            arguments: { message: "resolve the conflict", resolved_paths: ["shared.txt"] },
+          },
         },
         mergeBaseEnv(dir),
         work,

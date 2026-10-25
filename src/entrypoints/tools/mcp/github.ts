@@ -342,6 +342,11 @@ const SYNC_BRANCH_SCHEMA = z.object({
 
 const COMMIT_AND_PUSH_SCHEMA = z.object({
   message: z.string().describe("Commit message."),
+  resolved_paths: stringArray(
+    "Paths whose conflict you have resolved, to be staged before the commit. Required for every path git " +
+      "still holds unmerged; a path declared while it still holds git's conflict markers is refused. " +
+      "One path or a list.",
+  ).optional(),
 });
 
 
@@ -1226,32 +1231,67 @@ function mergeMessage(): string {
 }
 
 /**
- * The paths that still hold git's conflict markers.
+ * The paths git still holds as unresolved in the index.
  *
- * Asked of the FILE, not of the index, and that is not a shortcut: an agent that
- * resolved a conflict by editing it has no way to stage the result -- raw `git add` is
- * a mutation the shell guard refuses -- so the index would call every conflict
- * unresolved until `commit_and_push` had already committed it. The content can answer:
- * git's markers are `<<<<<<< label` and `>>>>>>> label` at the start of a line, and they
- * are gone exactly when the conflict has been decided. A resolved path needs to be
- * bracketed by git's end of it; a path written down as a literal, in a comment or a
- * test, does not.
+ * Asked of the INDEX and nothing else. This used to narrow that answer to the paths
+ * whose FILE still held `<<<<<<<` markers, so that an agent could resolve a text
+ * conflict by editing without staging it -- raw `git add` is a mutation the shell guard
+ * refuses. The narrowing was a text-only heuristic, and it lost the other kind silently
+ * (#381): a conflicted binary never holds markers, the worktree copy is the OTHER side's
+ * bytes, so the filter read the path as resolved, `git add -A` staged that side, and the
+ * run's own version was committed away without a word.
+ *
+ * So resolution is DECLARED now, not inferred: `commit_and_push` takes `resolved_paths`,
+ * stages exactly those, and asks the index again. A declaration is the one thing the
+ * worktree cannot answer for itself -- bytes written into a binary are indistinguishable
+ * from the bytes that were never touched.
  *
  * Read BEFORE `git add -A`, which is what stages a conflicted path and so tells git the
- * conflict is resolved -- and, with the markers still in the file, commits them.
+ * conflict is resolved.
  */
 function unresolvedConflictPaths(): string[] {
   const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
-  const paths =
-    unmerged.code === 0 ? unmerged.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : [];
-  return paths.filter((path) => {
-    try {
-      return /^(?:<{7} |>{7} )/m.test(readFileSync(path, "utf8"));
-    } catch {
-      // Gone from the worktree, which is a resolution: `add -A` stages the deletion.
-      return false;
-    }
-  });
+  if (unmerged.code) return [];
+  return unmerged.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+/**
+ * Whether a file still holds git's conflict markers.
+ *
+ * The backstop on a declaration, and nothing else: staging a path is what tells git it
+ * is resolved, so a careless declaration would commit `<<<<<<<` into the branch. Binary
+ * is skipped by git's own test for it, a NUL byte -- a resolved binary holds whichever
+ * side the agent wrote there, and no byte pattern in it means anything.
+ */
+function holdsConflictMarkers(path: string): boolean {
+  try {
+    const bytes = readFileSync(path);
+    if (bytes.includes(0)) return false;
+    return /^(?:<{7} |>{7} )/m.test(bytes.toString("utf8"));
+  } catch {
+    // Gone from the worktree, which is a resolution: `add -A` stages the deletion.
+    return false;
+  }
+}
+
+/**
+ * The refusal for conflicts no declaration has claimed yet.
+ *
+ * Says where both sides actually are. `:2` is the version already on this branch and `:3`
+ * the one this run brings, and the index holds both for a binary exactly as it does for
+ * text -- which the worktree does not: there, a text file carries markers and a binary
+ * carries one side's bytes with no sign that the other exists. Promising markers for
+ * every path is what made the binary case invisible, so the wording separates the two.
+ */
+function unresolvedConflictRefusal(paths: string[], merge: boolean): string {
+  return (
+    `${merge ? "The merge in progress" : "The worktree"} still has unresolved conflicts: ${paths.join(", ")}. ` +
+    "Nothing was committed. Both sides of each are in git's index: `git show :2:<path>` is the version " +
+    "already on this branch, `git show :3:<path>` the one this run brings. Write the one you want into " +
+    "the file (a text file also holds git's conflict markers; a binary holds one side's bytes and no " +
+    "markers, so the index is where you see the other), then call commit_and_push again with " +
+    `resolved_paths naming each path you resolved${merge ? " to close the merge" : ""}.`
+  );
 }
 
 /**
@@ -1364,16 +1404,34 @@ function commitAndPush(a: z.infer<typeof COMMIT_AND_PUSH_SCHEMA>): string {
   // same applies to the conflicts that carrying a run's work onto its parent's branch
   // leaves, which is why the paths are asked for first and the merge only decides how
   // the refusal is worded.
+  //
+  // Declared paths are staged here rather than by the `add -A` below, because for a
+  // binary there is nothing in the file to distinguish a resolution from the state the
+  // conflict left behind (#381). The declaration is the resolution; the staging is what
+  // tells git so, and the index is asked again afterwards.
   const merge = unfinishedMerge();
   const unresolved = unresolvedConflictPaths();
   if (unresolved.length > 0) {
-    mcpFail(
-      merge
-        ? `The merge in progress still has unresolved conflicts: ${unresolved.join(", ")}. ` +
-            "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge."
-        : `The worktree still has unresolved conflicts: ${unresolved.join(", ")}. ` +
-            "Resolve them (the conflict markers are in those files), then call commit_and_push again.",
-    );
+    const declared = new Set(a.resolved_paths ?? []);
+    const undeclared = unresolved.filter((path) => !declared.has(path));
+    if (undeclared.length > 0) mcpFail(unresolvedConflictRefusal(undeclared, merge !== undefined));
+
+    const marked = unresolved.filter(holdsConflictMarkers);
+    if (marked.length > 0) {
+      mcpFail(
+        `${marked.join(", ")} was declared resolved, but still holds git's conflict markers. Nothing was ` +
+          "committed. Remove them and settle on the version you want, then declare the path again.",
+      );
+    }
+    const staged = gitRun("add", "--", ...unresolved);
+    if (staged.code) mcpFail(staged.stderr || staged.stdout);
+    const still = unresolvedConflictPaths();
+    if (still.length > 0) {
+      mcpFail(
+        `${still.join(", ")} is still unmerged in git's index after staging the paths declared in resolved_paths. ` +
+          "Nothing was committed.",
+      );
+    }
   }
   {
     const { code, stdout, stderr } = gitRun("add", "-A");
@@ -1666,8 +1724,9 @@ function mergeBaseIntoBranchOrThrow(): string {
       base_sha: baseSha,
       files,
       note:
-        "Nothing was committed. The conflicts are in the worktree with their markers; resolve them, then call " +
-        "commit_and_push to close the merge.",
+        "Nothing was committed. The conflicts are in the worktree: a text file with git's markers, and every " +
+        "one of them with both sides in the index (`git show :2:<path>` for this branch, `git show :3:<path>` " +
+        "for the base). Resolve each and declare it in resolved_paths on commit_and_push, which closes the merge.",
     });
   }
   if (merge.code) mcpFail(`Merging '${base}' into '${branch}' failed: ${merge.stderr || merge.stdout}`);
@@ -2163,7 +2222,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
     name: "merge_base_into_branch",
     description:
-      "Bring this run's base branch into the checked-out branch, as a merge commit, and push it. The base is resolved the way create_pr resolves it: a sub-issue's is its parent's branch, anything else the configured base branch, and a pull request run's is the base the pull request aims at. It takes no arguments and touches no branch but this one: no cascade, no writes to a child's or sibling's branch, no rebase, no force-push. Returns {status: 'up_to_date'} when the base is already an ancestor, {status: 'merged', base, base_sha, commit} after a clean merge, or {status: 'conflicts', base, base_sha, files} — in which case nothing is committed and the conflict markers are left in the worktree: resolve them and call commit_and_push to close the merge. Every outcome is recorded in the ops log.",
+      "Bring this run's base branch into the checked-out branch, as a merge commit, and push it. The base is resolved the way create_pr resolves it: a sub-issue's is its parent's branch, anything else the configured base branch, and a pull request run's is the base the pull request aims at. It takes no arguments and touches no branch but this one: no cascade, no writes to a child's or sibling's branch, no rebase, no force-push. Returns {status: 'up_to_date'} when the base is already an ancestor, {status: 'merged', base, base_sha, commit} after a clean merge, or {status: 'conflicts', base, base_sha, files} — in which case nothing is committed and the conflicts are left in the worktree: a text file holds git's markers, and both sides of every path stay in the index (`git show :2:<path>` this branch, `git show :3:<path>` the base), so a binary conflicted path is decided the same way. Resolve each one and call commit_and_push with resolved_paths naming it to close the merge. Every outcome is recorded in the ops log.",
     schema: z.object({}),
     handler: mergeBaseIntoBranch,
   }),
@@ -2179,7 +2238,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_pr_review_comments", description: "Retrieve line-level review comments for one pull request. Use this to find file- and line-specific feedback; use get_pr_reviews for overall review decisions. Returns { total, omitted, comments } where each comment has `author`, `path`, `line`, `in_reply_to` and `body`; the surrounding code is not included, read it with the `read` tool or get_pr_diff, and a non-zero `omitted` means the rest did not fit. Does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: listPrReviewComments }),
   defineMcpTool({
     name: "commit_and_push",
-    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files and leaves git's conflict markers in them for you to resolve before calling it again. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
+    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files. A conflict is resolved by declaring it: pass resolved_paths naming each path, after writing the side you want into the file. Nothing else counts as a resolution — a text file's markers are a backstop, and a binary has none, so both sides sit in the index (`git show :2:<path>` the version already on the branch, `git show :3:<path>` the one this run brings) until you choose. While a merge is in progress it refuses until every conflicted path is declared, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush,
   }),
