@@ -170,11 +170,17 @@ describe("a test that spawns a server", () => {
     process.env.GITHUB_RUN_ID = "999999999";
     try {
       const env = hermeticEnv();
+      // The key has to be ABSENT, not present-and-undefined: an `undefined` value reads as equal to
+      // an absent one, so `{ AGENT: env.AGENT }` compared against `{ AGENT: undefined }` would pass
+      // a version of this that assigned `undefined` instead of skipping the key, while reading as if
+      // the run's identity were still being handed over. What a child does with an `undefined` env
+      // value is the runtime's business -- measured on this one: Bun drops the key -- which is
+      // exactly why this assertion should not depend on it either way.
       expect(
-        { AGENT: env.AGENT, GITHUB_RUN_ID: env.GITHUB_RUN_ID },
+        Object.keys(env).filter((key) => key === "AGENT" || key === "GITHUB_RUN_ID"),
         "a spawned server that inherits these stamps the run's agent and run id onto every comment it " +
           "posts, so a body assertion depends on which agent ran the suite",
-      ).toEqual({ AGENT: undefined, GITHUB_RUN_ID: undefined });
+      ).toEqual([]);
       expect(
         { ...env, AGENT: "engineer", GITHUB_RUN_ID: "42" },
         "a test that wants either declares it; the caller's env is spread after this one and must win",
@@ -188,8 +194,8 @@ describe("a test that spawns a server", () => {
   });
 
   /**
-   * The behavioural half: the suite whose assertions are about comment bodies gives
-   * the same answer when the run's identity is faked.
+   * The behavioural half: the tests whose assertions are about comment bodies give the
+   * same answer when the run's identity is faked.
    *
    * `mcp.test.ts` is where #355 measured the leak -- a `launch_sub_agent` test
    * declaring only `NUMBER` still posted `agent=engineer` and the run's own
@@ -197,23 +203,30 @@ describe("a test that spawns a server", () => {
    * than an abstract probe. The decoy differs from every value the file declares, so a
    * test that reads the run's identity instead of its own fixture shows up here.
    *
-   * Why this file and not the whole suite: `bun run test` is minutes, and every file
-   * that spawns a server goes through the same `hermeticEnv()` call the ratchet above
-   * pins. What this can see is that no assertion in this file depends on the identity
-   * being whatever the parent had; what it cannot see is a body assertion written in a
-   * file that does not spawn `bun` at all.
+   * Narrowed to the two tools that post a comment body: `launch_sub_agent` and
+   * `create_pr`. The whole file does not run on a fresh checkout -- its delegate tests
+   * read `dist/.github/atomaton/delegates/delegates.yaml`, which only `bun run synth`
+   * (the suite's `pretest`) writes -- so running all of it here would make this file
+   * red for a reason that has nothing to do with the run's identity, and cost 12.6s
+   * instead of 2.6s. What this can see is a body assertion in either of those two
+   * tools; what it cannot see is a body assertion in a file that spawns no server.
    */
-  test("the suite that asserts comment bodies stays green with the run's AGENT faked", () => {
-    const r = spawnSync("bun", ["test", join(process.cwd(), "src/entrypoints/tools/mcp/mcp.test.ts")], {
-      encoding: "utf8",
-      env: { ...hermeticEnv(), AGENT: "zzdecoyagent", GITHUB_RUN_ID: "999999999" },
-      timeout: 120_000,
-    });
+  test("the tests that post comment bodies stay green with the run's AGENT faked", () => {
+    const r = spawnSync(
+      "bun",
+      ["test", join(process.cwd(), "src/entrypoints/tools/mcp/mcp.test.ts"), "-t", "launch_sub_agent|create_pr"],
+      {
+        encoding: "utf8",
+        env: { ...hermeticEnv(), AGENT: "zzdecoyagent", GITHUB_RUN_ID: "999999999" },
+        timeout: 60_000,
+      },
+    );
     expect(
       r.status,
-      `mcp.test.ts is red when the suite is run by an agent whose name is not the one a fixture names, ` +
-        `so its assertions are reading the environment rather than their own env:\n${r.stdout}\n${r.stderr}`,
+      `the launch_sub_agent and create_pr tests are red when the suite is run by an agent whose name is ` +
+        `not the one a fixture names, so their assertions are reading the environment rather than their ` +
+        `own env:\n${r.stdout}\n${r.stderr}`,
     ).toBe(0);
-  }, 180_000);
+  }, 90_000);
 });
 
