@@ -23,3 +23,18 @@ export function endingIdentity(): { answers?: number; run?: number } {
     ...(Number.isFinite(run) && run > 0 ? { run } : {}),
   };
 }
+
+/**
+ * The agent this run is, as the runner exported it, or `""` outside a run.
+ *
+ * Part of the same identity `endingIdentity` reads, and read the same way — from the
+ * environment, rather than threaded through a tool's schema, because "which agent am
+ * I" is not a question to put in front of a model.
+ *
+ * `""` is the honest answer for a tool called outside a run, and it is what makes the
+ * `atomaton:agent` tag absent rather than empty: a comment that guessed a name would
+ * be naming somebody `mostRecentAgentOn` then acts on.
+ */
+export function runAgent(): string {
+  return (process.env.AGENT ?? "").trim();
+}

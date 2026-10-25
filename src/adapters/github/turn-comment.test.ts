@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { turnCommentBody, turnHeader } from "./turn-comment.ts";
-import { ENDED_TAG, LLM_CONTEXT_TAG } from "./tags.ts";
+import { AGENT_TAG, ENDED_TAG, LLM_CONTEXT_TAG } from "./tags.ts";
+import { mostRecentAgent } from "./agent-on-issue.ts";
 import { readers } from "./thread.ts";
 import { whoseTurn, turnEvents } from "../../domain/work/thread.ts";
 
@@ -70,5 +71,40 @@ describe("turnCommentBody", () => {
   test("turnHeader is the same two lines, for a caller building a body itself", () => {
     const header = turnHeader({ ended: "limit", audience: "person" });
     expect(header).toEqual([LLM_CONTEXT_TAG.write("exclude"), ENDED_TAG.write({ verb: "limit", answers: 0, run: 0 })]);
+  });
+
+  /**
+   * #354, stated as the reader that failed. A run that parks on a child posts no result
+   * comment, so this ending is the only footprint it leaves — and the aggregation that
+   * collects the park names the parent's agent by asking the thread. A node whose run
+   * was started without a dispatch marker (a manual `workflow_dispatch`, a new issue's
+   * body) therefore had nobody to re-invoke, and the dispatch went out as "(no agent)".
+   */
+  test("names the agent that ended the turn, where the aggregation reads it", () => {
+    const body = turnCommentBody({
+      ended: "waiting",
+      audience: "person",
+      agent: "atomaton",
+      body: "Atomaton: Launched sub-agent(s):\n- #7→engineer",
+    });
+    const lines = body.split("\n");
+    // The two tags every turn comment carries keep their places; the agent goes between.
+    expect(lines[0]).toBe(LLM_CONTEXT_TAG.write("exclude"));
+    expect(lines[1]).toBe(AGENT_TAG.write("atomaton"));
+    expect(lines[2]).toBe(ENDED_TAG.write({ verb: "waiting", answers: 0, run: 0 }));
+    // The whole point: the same reader the aggregation gate and `/resume` use answers.
+    expect(mostRecentAgent(["/atomaton", body])).toBe("atomaton");
+  });
+
+  test("writes no agent tag at all when the caller has no name to give", () => {
+    // A tool called outside a run knows no agent. An empty tag would be a name a later
+    // reader treats as a real one, so the tag is absent rather than empty.
+    for (const agent of [undefined, "", "   "]) {
+      const header = turnHeader({ ended: "done", audience: "person", agent });
+      expect(header).toEqual([
+        LLM_CONTEXT_TAG.write("exclude"),
+        ENDED_TAG.write({ verb: "done", answers: 0, run: 0 }),
+      ]);
+    }
   });
 });
