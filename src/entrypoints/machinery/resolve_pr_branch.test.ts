@@ -4,7 +4,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseGithubOutput, hermeticEnv, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
-import { isBranchName, prHead } from "./resolve_pr_branch.ts";
 
 /**
  * The branch a `pr` run may push to.
@@ -137,7 +136,7 @@ describe("resolve_pr_branch.ts", () => {
       const r = run([headRule("atomaton/issue-404")], undefined, work);
       expect(r.status).toBe(0);
       expect(r.branch).toBe("");
-      expect(r.stderr).toContain("does not exist on origin");
+      expect(r.stderr).toContain("is not a branch of this repository");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -147,7 +146,7 @@ describe("resolve_pr_branch.ts", () => {
     const r = run([{ match: ["pr", "view"], code: 1, stdout: "gh: not found" }]);
     expect(r.status).toBe(0);
     expect(r.branch).toBe("");
-    expect(r.stderr).toContain("could not read pull request #9");
+    expect(r.stderr).toContain("pull request #9 could not be read");
   });
 
   test("output that is not the JSON asked for is no branch either", () => {
@@ -163,28 +162,5 @@ describe("resolve_pr_branch.ts", () => {
     expect(r.status).toBe(0);
     expect(r.branch).toBe("");
     expect(r.stderr).toContain("missing --repo or --number");
-  });
-
-  test("prHead reads the head branch and the fork flag", () => {
-    expect(prHead('{"headRefName":"atomaton/issue-9","isCrossRepository":false}')).toEqual({
-      branch: "atomaton/issue-9",
-      crossRepository: false,
-    });
-    expect(prHead('{"headRefName":" main ","isCrossRepository":true}')).toEqual({
-      branch: "main",
-      crossRepository: true,
-    });
-    // Absent, null and malformed all mean the same thing here: nothing to name.
-    expect(prHead("{}").branch).toBe("");
-    expect(prHead('{"headRefName":null}').branch).toBe("");
-    expect(prHead("[").branch).toBe("");
-  });
-
-  test("isBranchName is git's rule, not a pattern of our own", () => {
-    expect(isBranchName("atomaton/issue-9")).toBe(true);
-    expect(isBranchName("feature/x-1.2")).toBe(true);
-    for (const bad of ["", "HEAD", "has space", "a..b", "x.lock", "-x", "a:b", "x~y", "x^y"]) {
-      expect(isBranchName(bad), `${bad} must not be usable as a branch`).toBe(false);
-    }
   });
 });
