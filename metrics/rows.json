@@ -12250,8 +12250,8 @@
   {
     "path": "sessions/issue-385/engineer.json",
     "agent": "engineer",
-    "messages": 43,
-    "calls": 23,
+    "messages": 55,
+    "calls": 27,
     "failed": 0,
     "refused": 0,
     "skills": [
@@ -12261,14 +12261,17 @@
     "tools": {
       "atoma_builtin__load_skill": 1,
       "read": 5,
-      "bash": 11,
+      "bash": 12,
       "grep": 2,
       "edit": 2,
       "commit_and_push": 1,
-      "create_pr": 1
+      "create_pr": 1,
+      "get_pr": 1,
+      "get_issue": 1,
+      "request_close_issue": 1
     },
     "acts": {
-      "other": 11
+      "other": 12
     },
     "runs": [
       {
@@ -12293,6 +12296,27 @@
           }
         },
         "started": "2026-10-25T12:14:36Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T12:22:51Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 55,
+        "seconds": 18,
+        "server_calls": {
+          "atomaton_env": {
+            "request_close_issue": 1
+          },
+          "github": {
+            "get_issue": 1,
+            "get_pr": 1
+          },
+          "shell": {
+            "bash": 1
+          }
+        },
+        "started": "2026-10-25T12:22:33Z"
       }
     ]
   },
