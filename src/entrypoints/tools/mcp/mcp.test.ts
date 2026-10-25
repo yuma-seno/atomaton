@@ -201,6 +201,69 @@ function makeShallowMergeBaseFixture(): { root: string; seed: string; work: stri
 }
 
 /**
+ * The shape of #360: a sub-issue's run is checked out on the base branch, and the
+ * branch its work has to land on — its parent's — has moved since.
+ *
+ * `main` and `atomaton/issue-149` disagree about `diverged.ts`, which is the file that
+ * made the checkout refuse; `parent-only.ts` is the parent's work, which the run has
+ * never seen and must not lose. The run's clone is depth 1, the way the runner leaves
+ * it.
+ */
+function makeStackedRunFixture(): { root: string; seed: string; work: string } {
+  const root = mkdtempSync(join(tmpdir(), "atomaton-stacked-run-"));
+  const remote = join(root, "remote.git");
+  const seed = join(root, "seed");
+  const work = join(root, "work");
+  git(root, "init", "--bare", "--initial-branch=main", remote);
+  git(root, "init", "--initial-branch=main", seed);
+  git(seed, "config", "user.name", "Atomaton Test");
+  git(seed, "config", "user.email", "atomaton@example.com");
+  writeFileSync(join(seed, "diverged.ts"), "base\n");
+  writeFileSync(join(seed, "touched.ts"), "one\n");
+  git(seed, "add", ".");
+  git(seed, "commit", "-m", "initial");
+  git(seed, "remote", "add", "origin", remote);
+  git(seed, "push", "-u", "origin", "main");
+
+  // The parent's branch, carrying work `main` has not got.
+  git(seed, "checkout", "-b", "atomaton/issue-149");
+  writeFileSync(join(seed, "diverged.ts"), "parent\n");
+  writeFileSync(join(seed, "parent-only.ts"), "the parent's work\n");
+  git(seed, "add", ".");
+  git(seed, "commit", "-m", "the parent's work");
+  git(seed, "push", "-u", "origin", "atomaton/issue-149");
+
+  // And `main` moves on in the same file, which is what makes the two bases disagree.
+  git(seed, "checkout", "main");
+  writeFileSync(join(seed, "diverged.ts"), "main\n");
+  git(seed, "commit", "-am", "main moves on");
+  git(seed, "push", "origin", "main");
+
+  git(root, "clone", "--depth=1", "--branch", "main", `file://${remote}`, work);
+  git(work, "config", "user.name", "Atomaton Test");
+  git(work, "config", "user.email", "atomaton@example.com");
+  return { root, seed, work };
+}
+
+/** The environment those runs have: issue #1, whose parent is #149, on no branch yet. */
+function stackedRunEnv(dir: string): Record<string, string> {
+  return {
+    TYPE: "issue",
+    NUMBER: "1",
+    BRANCH: "",
+    ATOMATON_OPS_LOG: join(dir, "ops.log"),
+    FAKE_GH_LOG: join(dir, "gh.log"),
+    ...fakeGhSeam(),
+    FAKE_GH_RESPONSES: JSON.stringify([
+      { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 149 } } } } }) },
+      { match: ["matching-refs"], stdout: "[]" },
+      { match: ["pr", "list"], stdout: "[]" },
+      { match: ["workflow", "run"], stdout: "" },
+    ]),
+  };
+}
+
+/**
  * The environment a merge needs on an issue run with no `config.yaml` beside it.
  *
  * `parentIssueOf` is asked whether #1 is a sub-issue (it is not, so the base is the
@@ -869,6 +932,154 @@ describe("mcp/github.ts", () => {
         .map((line) => JSON.parse(line) as string[])
         .find((argv) => argv.includes("pr") && argv.includes("create"));
       expect(created).toContain("atomaton/issue-1");
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * #360. A sub-issue's run starts on the base branch and only learns where its work
+   * goes at the first commit, so when the parent's branch had moved in a file the run
+   * also edited, `git checkout -b` refused to switch — "Your local changes to the
+   * following files would be overwritten" — and `commit_and_push` reported "Could not
+   * create branch". The run had no way past it short of cloning the repository
+   * elsewhere to find the divergence and hand-splitting the change.
+   *
+   * Both halves of what that cost are asserted here: the refusal is gone, replaced by a
+   * named conflict in the file the two bases disagree about; and the parent's work in a
+   * file the run never touched survives the move, which is the half that would have
+   * been lost silently.
+   */
+  test("a stacked run's work is carried onto the parent's branch, and a real conflict is named", async () => {
+    const { root, work } = makeStackedRunFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-stacked-env-"));
+    try {
+      // The run's edits, written against `main`, which disagrees with the parent about
+      // `diverged.ts`.
+      writeFileSync(join(work, "diverged.ts"), "the run's version\n");
+      writeFileSync(join(work, "touched.ts"), "the run's work\n");
+
+      const refused = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 40, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(refused.result.isError).toBe(true);
+      const why = refused.result.content[0].text as string;
+      expect(why).toContain("diverged.ts");
+      expect(why).toContain("atomaton/issue-149");
+      // Not git declining to switch: that refusal was the defect, and it said nothing
+      // about which file the two bases disagreed on.
+      expect(why).not.toContain("Your local changes");
+
+      // The branch exists and is the one checked out, cut from the parent's branch...
+      expect(git(work, "branch", "--show-current")).toBe("atomaton/issue-1");
+      expect(git(work, "merge-base", "--is-ancestor", "origin/atomaton/issue-149", "HEAD")).toBe("");
+      // ...with both sides in the file they disagree about, and uncommitted.
+      const conflicted = readFileSync(join(work, "diverged.ts"), "utf8");
+      expect(conflicted).toContain("<<<<<<< ");
+      expect(conflicted).toContain("parent\n");
+      expect(conflicted).toContain("the run's version");
+      // The run's other work came with it, and the parent's work is still here.
+      expect(readFileSync(join(work, "touched.ts"), "utf8")).toBe("the run's work\n");
+      expect(readFileSync(join(work, "parent-only.ts"), "utf8")).toBe("the parent's work\n");
+
+      // A commit now would stage the markers and call them a resolution.
+      const unresolved = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 41, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(unresolved.result.isError).toBe(true);
+      expect(unresolved.result.content[0].text).toContain("diverged.ts");
+
+      writeFileSync(join(work, "diverged.ts"), "parent and the run\n");
+      const committed = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 42, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(committed.result.isError, committed.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(committed.result.content[0].text)).toMatchObject({ ok: true, committed: true, pushed: true });
+
+      // Published onto the parent's branch, with the parent's own work still in it.
+      // The remote-tracking ref is fetched rather than assumed: a depth-1 clone's
+      // refspec names one branch, so `push -u` does not leave `origin/<new>` behind.
+      const head = git(work, "rev-parse", "HEAD");
+      expect(git(work, "ls-remote", "--heads", "origin", "refs/heads/atomaton/issue-1").split(/\s+/)[0]).toBe(head);
+      git(work, "fetch", "origin", "refs/heads/atomaton/issue-1:refs/remotes/origin/atomaton/issue-1");
+      expect(git(work, "show", "origin/atomaton/issue-1:parent-only.ts")).toBe("the parent's work");
+      expect(git(work, "show", "origin/atomaton/issue-1:touched.ts")).toBe("the run's work");
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * The other way the two bases collide: a file the run created and the parent's branch
+   * already has. It is the case `git stash pop` handles worst — an untracked file it
+   * cannot restore leaves the parent's copy in the worktree and the run's in the stash,
+   * which reads as a clean tree holding the wrong content.
+   */
+  test("a file the run created that the parent's branch already has is a conflict, not a silent loss", async () => {
+    const { root, work } = makeStackedRunFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-stacked-env-"));
+    try {
+      writeFileSync(join(work, "parent-only.ts"), "the run's version\n");
+
+      const refused = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 43, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(refused.result.isError).toBe(true);
+      expect(refused.result.content[0].text).toContain("parent-only.ts");
+
+      const both = readFileSync(join(work, "parent-only.ts"), "utf8");
+      expect(both).toContain("<<<<<<< ");
+      expect(both).toContain("the parent's work");
+      expect(both).toContain("the run's version");
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * And the ordinary stacking path, where the parent's branch moved only in files this
+   * run did not touch: the work is carried, the parent's versions win in those files,
+   * and nothing is refused.
+   */
+  test("a run whose files the parent's branch did not move commits onto it unchanged", async () => {
+    const { root, work } = makeStackedRunFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-stacked-env-"));
+    try {
+      writeFileSync(join(work, "touched.ts"), "the run's work\n");
+
+      const committed = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 44, method: "tools/call", params: { name: "commit_and_push", arguments: { message: "the work" } } },
+        stackedRunEnv(dir),
+        work,
+      );
+      expect(committed.result.isError, committed.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(committed.result.content[0].text)).toMatchObject({ ok: true, committed: true, pushed: true });
+
+      // The parent's version of the file `main` disagrees about, not `main`'s.
+      const head = git(work, "rev-parse", "HEAD");
+      expect(git(work, "ls-remote", "--heads", "origin", "refs/heads/atomaton/issue-1").split(/\s+/)[0]).toBe(head);
+      git(work, "fetch", "origin", "refs/heads/atomaton/issue-1:refs/remotes/origin/atomaton/issue-1");
+      expect(git(work, "show", "origin/atomaton/issue-1:diverged.ts")).toBe("parent");
+      expect(git(work, "show", "origin/atomaton/issue-1:parent-only.ts")).toBe("the parent's work");
+      expect(git(work, "show", "origin/atomaton/issue-1:touched.ts")).toBe("the run's work");
+      // Nothing of the run's was left behind in a stash entry.
+      expect(git(work, "stash", "list")).toBe("");
     } finally {
       removeTemp(root);
       removeTemp(dir);

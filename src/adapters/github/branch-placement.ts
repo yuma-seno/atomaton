@@ -155,6 +155,96 @@ export function stackedBaseFor(repo: string, issue: number): string {
 }
 
 /**
+ * Cut `name` from the parent's branch `from`, carrying this run's uncommitted work
+ * onto it.
+ *
+ * A sub-issue's run is checked out on the base branch, so by the time this runs the
+ * worktree holds edits written against the base — and the parent's branch may have
+ * moved in the same files. `git checkout -b` cannot answer that: it refuses with
+ * "Your local changes to the following files would be overwritten by checkout" when a
+ * file it would switch is one the run edited, and there is nothing else to ask, so a
+ * stacked run whose parent had touched any of its files simply could not commit.
+ *
+ * So the work is staged, stashed, and re-applied after the switch. `git stash pop` is
+ * a three-way merge between the base the work was written against, the parent's tip,
+ * and the work itself: what comes out is the parent's branch with this run's change on
+ * top of it. A file both sides changed is a conflict in the worktree — named, with the
+ * markers in it — rather than a refusal, and no file the run did not touch keeps a
+ * base-branch version over the parent's.
+ *
+ * Staging first is what makes a file the run CREATED merge three ways. An untracked
+ * file is not part of a stash's tracked diff: `stash pop` refuses to restore it over
+ * the parent's copy of the same path and leaves the run's version in the stash entry
+ * — work that has silently vanished from the worktree. Staged, it is an add/add
+ * conflict, which the agent decides.
+ */
+function createStackedBranch(name: string, from: string): void {
+  const worktree = gitRun("status", "--porcelain");
+  if (worktree.code) {
+    throw new Error(
+      `Could not read the worktree before creating branch '${name}': ${worktree.stderr || worktree.stdout}`,
+    );
+  }
+
+  if (!worktree.stdout.trim()) {
+    // Nothing of this run's to carry: the switch is the whole job.
+    const created = gitRun("checkout", "-b", name, `origin/${from}`);
+    if (created.code) throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+    return;
+  }
+
+  const staged = gitRun("add", "-A");
+  if (staged.code) {
+    throw new Error(
+      `Could not stage this run's work before creating branch '${name}': ${staged.stderr || staged.stdout}`,
+    );
+  }
+  const stashed = gitRun("stash", "push", "--message", `atomaton: this run's work, carried onto ${from}`);
+  if (stashed.code) {
+    throw new Error(
+      `Could not set this run's work aside to create branch '${name}' from '${from}': ${stashed.stderr || stashed.stdout}`,
+    );
+  }
+
+  const created = gitRun("checkout", "-b", name, `origin/${from}`);
+  if (created.code) {
+    // The work goes back where it was before the failure is reported: a branch that
+    // was not created must not also cost the run its worktree.
+    gitRun("stash", "pop");
+    throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+  }
+
+  const applied = gitRun("stash", "pop");
+  if (!applied.code) {
+    log(`commitAndPush: carried this run's work from the base branch onto ${from}`);
+    return;
+  }
+
+  const conflicts = unmergedPaths();
+  if (conflicts.length > 0) {
+    throw new Error(
+      `Branch '${name}' was created from '${from}', but ${conflicts.length} file(s) this run changed also ` +
+        `changed on that branch: ${conflicts.join(", ")}. Both sides are in those files with git's conflict markers. ` +
+        "Resolve them, then call commit_and_push again to commit the result.",
+    );
+  }
+  throw new Error(
+    `Branch '${name}' was created from '${from}', but this run's work could not be re-applied to it: ` +
+      `${applied.stderr || applied.stdout}. The work is in 'git stash list', not in the worktree.`,
+  );
+}
+
+/**
+ * The paths git holds as unmerged in the index, which is what a merge, a stash
+ * application or a rebase leaves behind when it could not decide a file.
+ */
+function unmergedPaths(): string[] {
+  const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
+  if (unmerged.code) return [];
+  return unmerged.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+/**
  * The branch this commit belongs on, creating one if the run has none yet.
  *
  * A run starts on the base branch unless it had work to resume, because most
@@ -186,10 +276,12 @@ export function branchForCommit(repo: string): string {
     );
   }
   const name = branchNameFor(issue, nextOrdinal(listed.branches));
-  const created = from
-    ? gitRun("checkout", "-b", name, `origin/${from}`)
-    : gitRun("checkout", "-b", name);
-  if (created.code) throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+  if (from) {
+    createStackedBranch(name, from);
+  } else {
+    const created = gitRun("checkout", "-b", name);
+    if (created.code) throw new Error(`Could not create branch '${name}': ${created.stderr || created.stdout}`);
+  }
   log(`commitAndPush: created branch ${name}${from ? ` from ${from}` : ""}`);
   return name;
 }
