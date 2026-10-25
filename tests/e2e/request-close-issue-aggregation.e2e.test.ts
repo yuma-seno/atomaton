@@ -153,21 +153,14 @@ describe.skipIf(!atomaAvailable)("E2E: the aggregation branch of request_close_i
         match: ["api", `issues/${PARENT}/comments`, "--method", "POST", "atomaton:dispatch"],
         stdout: "555",
       },
-      // Three reads of PARENT's comments, sharing a path and separated by their jq
-      // expression — or by its absence. All three carry `--paginate`:
-      //
-      //   `--jq [.[].body]`  MOST SPECIFIC, so it goes first: `mostRecentAgentOn` wants
-      //       the agent name, and answers with a STRING ARRAY. `[.[].body]` CONTAINS
-      //       `.[].body`, so the rule below would otherwise answer this read too — it
-      //       did, and the dispatch was refused as `(no agent)`.
-      //   `--jq .[].body`    the idempotency read, which wants to know whether the
-      //       marker is already there. `[]` means "claim it".
-      //   no `--jq`          `checkDispatchMarker`'s freshness probe. This one has to
-      //       show the dispatch marker (id 555), because the probe is what confirms
-      //       GitHub's read-after-write caught up — and the gate is ordered against
-      //       that, so an empty listing is a refusal rather than a pass.
-      { match: ["api", `issues/${PARENT}/comments`, "--paginate", "[.[].body]"], stdout: JSON.stringify(["<!-- atomaton:dispatch=atomaton -->"]) },
-      { match: ["api", `issues/${PARENT}/comments`, "--paginate", ".[].body"], stdout: JSON.stringify([]) },
+      // The parent's comments, read THREE times — the aggregation marker check, the
+      // dispatch freshness probe, and `mostRecentAgentOn` — and since the comment read
+      // was unified those three are ONE call: `listComments`, `--paginate`, whole
+      // comment objects. So one rule answers all three and its bodies serve all three:
+      // the dispatch marker names the agent, and its id 555 is the comment the probe
+      // confirms GitHub's read-after-write caught up with — the gate is ordered against
+      // that, so an empty listing is a refusal rather than a pass. No `atomaton:aggregated`
+      // marker here, which is what makes this the "claim it" branch.
       {
         match: ["api", `issues/${PARENT}/comments`, "--paginate"],
         stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]),

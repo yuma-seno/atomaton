@@ -53,19 +53,14 @@ describe("dispatch_if_siblings_done.ts", () => {
             // `atomaton:aggregated` below. A rule matching only the path and method
             // answers whichever write runs first, and did.
             //
-            // The read rules carry `--paginate` (the thread listing, made by
-            // `checkDispatchMarker`) or `[.[].body]` (the bodies-only read made by
-            // `mostRecentAgentOn`); the writes carry neither, which is what tells the
-            // three apart on one path.
+            // The three readers of the parent's thread — the dispatch freshness probe,
+            // the aggregation marker check and `mostRecentAgentOn` — are ONE call now,
+            // the shared `listComments`: `--paginate`, whole comment objects. So there
+            // is one read rule, and its bodies serve all three: the dispatch marker
+            // names the agent, and its id 555 is the comment the probe looks for.
             { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:dispatch"], stdout: "555" },
             { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:aggregated"], stdout: "556" },
-            // `[.[].body]` BEFORE the plain `--paginate` rule, because both reads carry
-            // `--paginate` and only this one carries the jq expression. Listing the
-            // broader rule first answers the bodies read with comment OBJECTS where the
-            // code expects strings, and the agent name comes out empty.
-            { match: ["api", "issues/5/comments", "[.[].body]"], stdout: JSON.stringify(["<!-- atomaton:dispatch=atomaton -->"]) },
             { match: ["api", "issues/5/comments", "--paginate"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
-            { match: ["api", "comments", "--paginate", ".[].body"], stdout: JSON.stringify([]) },
             { match: ["workflow", "run"] },
             // The parent's state. `dispatchRunner` refuses to start an agent on
             // anything it cannot confirm is open, so the happy path has to say so.
@@ -97,7 +92,14 @@ describe("dispatch_if_siblings_done.ts", () => {
           cwd: configDir,
           rules: [
             ...subIssues(),
-            { match: ["api", "comments", "--jq"], stdout: JSON.stringify(["<!-- atomaton:aggregated=9 -->", "Atomaton: All sub-tasks completed."]) },
+            // The shared read: whole comment objects, no jq projection.
+            {
+              match: ["api", "issues/5/comments", "--paginate"],
+              stdout: JSON.stringify([
+                { id: 1, body: "<!-- atomaton:aggregated=9 -->" },
+                { id: 2, body: "Atomaton: All sub-tasks completed." },
+              ]),
+            },
           ],
         },
       );
