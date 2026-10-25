@@ -82,91 +82,6 @@ function saveSession(targetPath, content, commitMessage) {
   return saved;
 }
 
-// src/shared/tool-output.ts
-var TOOL_OUTPUT_BUDGET = 50000;
-var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
-function capText(text, budget = TOOL_OUTPUT_BUDGET, keep = "head") {
-  if (text.length <= budget)
-    return { text, dropped: 0 };
-  const note = (where, howMany) => `
-
-[${howMany} characters ${where}; ${budget} shown]
-
-`;
-  const room = budget - note("dropped from the middle", text.length).length;
-  const dropped = text.length - room;
-  if (room <= 0)
-    return { text: keep === "tail" ? text.slice(-budget) : text.slice(0, budget), dropped: text.length - budget };
-  if (keep === "tail") {
-    return { text: note("dropped from the start", dropped).trimStart() + text.slice(-room), dropped };
-  }
-  if (keep === "head") {
-    return { text: text.slice(0, room) + note("dropped from the end", dropped).trimEnd(), dropped };
-  }
-  const head = Math.floor(room / 4);
-  const tail = room - head;
-  return { text: text.slice(0, head) + note("dropped from the middle", dropped) + text.slice(-tail), dropped };
-}
-
-// src/domain/work/session-size.ts
-var TOOL_RESULT_CAP = 4000;
-var TOOL_CALL_ARGS_CAP = 20000;
-var CHARS_PER_TOKEN = 4;
-function estimateTokens(session) {
-  const messages = session.messages ?? [];
-  if (messages.length === 0)
-    return 0;
-  return Math.round(JSON.stringify(messages).length / CHARS_PER_TOKEN);
-}
-function contentText(content) {
-  if (typeof content === "string")
-    return content;
-  return;
-}
-function capText2(text, limit) {
-  return capText(text, limit, "both").text;
-}
-function capToolResults(session, limit = TOOL_RESULT_CAP) {
-  const messages = session.messages ?? [];
-  const tokensBefore = estimateTokens(session);
-  let changed = 0;
-  const kept = messages.map((message) => {
-    if (message.role === "tool") {
-      const text = contentText(message.content);
-      if (text === undefined || text.length <= limit)
-        return message;
-      changed += 1;
-      return { ...message, content: capText2(text, limit) };
-    }
-    const calls = message.tool_calls;
-    if (!Array.isArray(calls))
-      return message;
-    let touched = false;
-    const capped = calls.map((call) => {
-      const fn = call.function;
-      const args = fn?.arguments;
-      if (typeof args !== "string" || args.length <= TOOL_CALL_ARGS_CAP)
-        return call;
-      touched = true;
-      return { ...call, function: { ...fn, arguments: capText2(args, TOOL_CALL_ARGS_CAP) } };
-    });
-    if (!touched)
-      return message;
-    changed += 1;
-    return { ...message, tool_calls: capped };
-  });
-  if (changed === 0) {
-    return { session, shrunk: false, tokensBefore, tokensAfter: tokensBefore, changed: 0 };
-  }
-  const out = { ...session, messages: kept };
-  return { session: out, shrunk: true, tokensBefore, tokensAfter: estimateTokens(out), changed };
-}
-function shrinkLogLine(outcome, what = "tool results replaced") {
-  if (!outcome.shrunk)
-    return;
-  return `session shrunk: ${outcome.changed} ${what}, ` + `~${Math.round(outcome.tokensBefore / 1000)}k -> ~${Math.round(outcome.tokensAfter / 1000)}k estimated tokens`;
-}
-
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -213,7 +128,7 @@ function main() {
     return;
   }
   const target = sessionTargetPath(values.type, values.number, values.agent);
-  const content = capped(readFileSync(values.session, "utf8"));
+  const content = readFileSync(values.session, "utf8");
   const runId = process.env.GITHUB_RUN_ID ?? "";
   const saved = saveSession(target, content, `session: ${values.agent} on ${values.type} ${values.number} (run ${runId})`);
   if (!saved) {
@@ -221,20 +136,6 @@ function main() {
   } else {
     console.error(`Session saved to atomaton-data:${target}`);
   }
-}
-function capped(content) {
-  let session;
-  try {
-    session = JSON.parse(content);
-  } catch {
-    console.error("Could not read the session as JSON; saving it unchanged.");
-    return content;
-  }
-  const result = capToolResults(session);
-  const line = shrinkLogLine(result, "oversized tool results shortened");
-  if (line !== undefined)
-    console.error(line);
-  return result.shrunk ? JSON.stringify(result.session, null, 2) : content;
 }
 if (import.meta.main)
   main();

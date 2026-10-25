@@ -38,10 +38,10 @@ run-name: '${{ inputs.agent }} on #${{ inputs.number }}'
         type: string
         default: continue
       atoma_version:
-        description: Atoma CLI version tag to install (e.g. v0.4.2). Use `source` to build from a checkout of yuma-seno/atoma@main.
+        description: Atoma CLI version tag to install (e.g. v0.4.3). Use `source` to build from a checkout of yuma-seno/atoma@main.
         required: false
         type: string
-        default: v0.4.2
+        default: v0.4.3
       reload_count:
         description: How many times this work has already rebuilt its environment (set by reload_environment; leave at 0)
         required: false
@@ -88,10 +88,10 @@ run-name: '${{ inputs.agent }} on #${{ inputs.number }}'
           - recover
         default: continue
       atoma_version:
-        description: Atoma CLI version tag to install (e.g. v0.4.2). Use `source` to build from a checkout of yuma-seno/atoma@main.
+        description: Atoma CLI version tag to install (e.g. v0.4.3). Use `source` to build from a checkout of yuma-seno/atoma@main.
         required: false
         type: string
-        default: v0.4.2
+        default: v0.4.3
       reload_count:
         description: How many times this work has already rebuilt its environment (set by reload_environment; leave at 0)
         required: false

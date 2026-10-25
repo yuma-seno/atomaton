@@ -17785,7 +17785,7 @@ function sniffMimeType(bytes) {
 }
 
 // src/shared/tool-output.ts
-var TOOL_OUTPUT_BUDGET = 50000;
+var TOOL_OUTPUT_BUDGET = 8000;
 var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
 
 // src/entrypoints/tools/lib/harden.ts

@@ -12,6 +12,14 @@
 watch:
   after_tool:
     - ./hooks/workspace_guard.ts
+  # #12: the session that is about to be compacted is archived to atomaton-data
+  # first. atoma runs the file-wide `before_compaction` hooks before it replaces
+  # the session with its compacted form (summary + recent turns), so the turns the
+  # summary replaces land on the data branch. Fail-open by contract: a hook that
+  # cannot archive does not stop the compaction, which cannot be refused anyway --
+  # the window is already full.
+  before_compaction:
+    - ./hooks/archive_before_compaction.ts
 servers:
   # Every server here is `unprefixed`, so a tool is called by its own name -- `read`,
   # `bash`, `create_pr` -- rather than by `server__name`. Those are the names every

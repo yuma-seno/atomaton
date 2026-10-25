@@ -10,7 +10,7 @@ import { parseArgs } from "util";
 import { isAbsolute, join as join2, resolve } from "path";
 
 // src/shared/tool-output.ts
-var TOOL_OUTPUT_BUDGET = 50000;
+var TOOL_OUTPUT_BUDGET = 8000;
 var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
 
 // src/domain/machinery/shipped-servers.ts
@@ -98,7 +98,7 @@ function mergedWatch(configured, defaults) {
   }
   return out;
 }
-var HOOK_SCRIPT_KEYS = ["before_tool", "after_tool"];
+var HOOK_SCRIPT_KEYS = ["before_tool", "after_tool", "before_compaction"];
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

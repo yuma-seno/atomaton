@@ -8,6 +8,10 @@ description: Does one small piece of work — reading, searching, editing files 
 # the tier's per-request cap.
 provider: orcarouter
 model: orcarouter/free
+# The sub-run is short by design, so no context budget is declared: the free tier's
+# per-request cap is the binding limit, and the description says what its refusal
+# means. Adding `context_limit` here would arm compaction for a sub-run that ends
+# before it matters.
 vision: false
 # Keeps consecutive requests on one deployment, so the provider's prompt cache still
 # holds the conversation. Measured on `reviewer` first: without it a run alternates
