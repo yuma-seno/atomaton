@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "PR #367: machinery: atoma v0.4.4 を載せる — compaction hooks が届くように\n\natoma v0.4.4（yuma-seno/atoma#14）を既定にします。\n\n## 何が直ったか\n\nv0.4.3 の compaction は \\\before_compaction\\ hooks を MCP registry を組むブロックの内側で収集し、ブロックが閉じた時点で捨てていました — 下の空 vec が shadow。**compaction 自体は動くが、hook（このリポジトリの archive_before_compaction.ts）は一度も発火していなかった**。\n\n実走での発見: #149 のチェーン、run 40166780902 が最初の実走 compaction（190/195 メッセージ置換、prompt 201,671 → 18,694）を記録したが、ログに hook 行が無く、\\sessions/issue-149/archive/\\ も無し。archive 保証は v0.4.4 から効きます。\n\n## 変更\n\n- \\ATOMA_DEFAULT_VERSION\\ → v0.4.4（workflow 記述の例示バージョンも追随）\n\n## テスト\n\n- typecheck クリーン、workflow-sources / generated-workflows 契約テスト pass",
+      "content": "PR #367: machinery: atoma v0.4.4 を載せる — compaction hooks が届くように\n**Labels:** atomaton/waiting-for-person\n\natoma v0.4.4（yuma-seno/atoma#14）を既定にします。\n\n## 何が直ったか\n\nv0.4.3 の compaction は \\\before_compaction\\ hooks を MCP registry を組むブロックの内側で収集し、ブロックが閉じた時点で捨てていました — 下の空 vec が shadow。**compaction 自体は動くが、hook（このリポジトリの archive_before_compaction.ts）は一度も発火していなかった**。\n\n実走での発見: #149 のチェーン、run 40166780902 が最初の実走 compaction（190/195 メッセージ置換、prompt 201,671 → 18,694）を記録したが、ログに hook 行が無く、\\sessions/issue-149/archive/\\ も無し。archive 保証は v0.4.4 から効きます。\n\n## 変更\n\n- \\ATOMA_DEFAULT_VERSION\\ → v0.4.4（workflow 記述の例示バージョンも追随）\n\n## テスト\n\n- typecheck クリーン、workflow-sources / generated-workflows 契約テスト pass",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-10-25T08:39:02Z",
@@ -33,7 +33,7 @@
       "content": "```diff\ndiff --git a/src/workflows/actions/atoma-cli.ts b/src/workflows/actions/atoma-cli.ts\nindex 7259697..bd8a1ea 100644\n--- a/src/workflows/actions/atoma-cli.ts\n+++ b/src/workflows/actions/atoma-cli.ts\n@@ -150,11 +150,20 @@ import { TypedOutputsStep } from \"./base.ts\";\n  * nothing in this tree caps a tool result anymore. An older binary ignores\n  * `context_limit` and runs with the larger cap -- the shape this tree's own session\n  * shrink used to cover, and why this raise rides with the removal of that shrink.\n+ *\n+ * **The hooks actually reach the loop.** Written by the core from v0.4.4\n+ * (yuma-seno/atoma#14): v0.4.3's compaction gathered the `before_compaction` scripts\n+ * inside the block that builds the MCP registry and an empty vec shadowed them below,\n+ * so the hooks -- this tree's archive among them -- silently never ran. The compaction\n+ * itself was unaffected. The first real compaction, observed on #149's chain, is what\n+ * showed it: 190 messages replaced, no hook line in the log, no archive on the data\n+ * branch. Every compaction this tree has recorded was against a hookless binary; the\n+ * archive guarantee the raise above describes holds only from v0.4.4.\n  */\n-export const ATOMA_DEFAULT_VERSION = \"v0.4.3\";\n+export const ATOMA_DEFAULT_VERSION = \"v0.4.4\";\n \n export const ATOMA_VERSION_DESC =\n-  \"Atoma CLI version tag to install (e.g. v0.4.3). Use `source` to build from a checkout of yuma-seno/atoma@main.\";\n+  \"Atoma CLI version tag to install (e.g. v0.4.4). Use `source` to build from a checkout of yuma-seno/atoma@main.\";\n \n /**\n  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead\n```",
       "atoma_metadata": {
         "author": "github",
-        "created_at": "2026-10-25T08:39:56Z",
+        "created_at": "2026-10-25T08:51:01Z",
         "event_type": "pr_diff",
         "id": "pr-367-diff",
         "layer": "github-context",
@@ -896,6 +896,10 @@
     {
       "role": "assistant",
       "content": "No merge-blocking defect: the pin bump is internally consistent and v0.4.4 exists upstream with exactly the hooks fix this PR claims. GitHub will not let an agent merge it — the only blocker is `human-authored` — so the merge is yours.\n\n**How I know**\n- `src/workflows/actions/atoma-cli.ts:163` now reads `export const ATOMA_DEFAULT_VERSION = \"v0.4.4\";`, and nothing else in the tree restates it: the live-tools check parses the constant out of that file (`self/atomaton/scripts/check-live-tools.sh:112`), and the two other consumers (`atomaton-runner.wac.ts:2401`, `atomaton-check.wac.ts:240`) import it.\n- The tag the installer will fetch exists, with the asset name the script builds: the v0.4.4 release lists `atoma-linux-x86_64`, and `src/workflows/actions/atoma-cli.ts:203` downloads `https://github.com/yuma-seno/atoma/releases/download/${VERSION}/atoma-linux-x86_64`.\n- The upstream release notes match the PR's account: \"Hand the compaction's hooks to the loop -- they were shadowed before it\" (yuma-seno/atoma#14).\n- The diff touches no generated output and leaves `package.json`'s `version` alone; `atomaton-check` is `success` on the branch head, and `check_merge_readiness(pull_number=367)` reports `merge_state_status: CLEAN` with a single blocker: `human-authored` — \"a person opened this pull request; review it and report, but leave the merge to them\". The body carries no `Opened by` line, which matches: this one was written and opened by hand, not by `create_pr`.\n\n**What I could not establish**\n- I have no shell in this run, so I did not run typecheck or the contract tests myself; I read the CI result instead of reproducing it.\n- I could not observe the hook actually firing under v0.4.4, since no run has used that binary yet. What I can say from reading is that the archive hook is defensive — `.github/atomaton-runtime/tools/hooks/archive_before_compaction.ts:96-122` prints `{\"archived\":false}` and returns instead of failing when stdin, the session path or `NUMBER` is missing — so a first fire that cannot archive will not abort compaction, but whether it writes to `atomaton-data` is only provable by a real compaction after deploy.\n- I did not try to verify v0.4.3 → v0.4.4 behaviour beyond the release notes; there is no run log on v0.4.4 yet to read.\n\n**What happens next**\n1. You merge this. Nothing is dispatched to an agent from here.\n2. To get v0.4.4 into this repository's own runs, release then self-deploy: the **Atomaton Release** workflow (whose PR carries only the `package.json` version edit), then dispatch **Atomaton Self Deploy** — `.github/**` is an adoption of the last release and this merge does not touch it.\n3. Until that deploy, runs here keep the hookless binary: `.github/workflows/atomaton-runner.yml:44` still defaults to `v0.4.3` (with the same literal in `atomaton-check.yml:200` and `atomaton-validate-pr.yml:69`), so the archive guarantee the comment describes stays off in this repository even though it is on for adopters of the next release.\n\n@yuma-seno",
+      "atoma_metadata": {
+        "agent": "reviewer",
+        "github_comment_id": 6395542746
+      },
       "provider_items": [
         {
           "id": "rs_02179291782939000000000000000000000ffffc0a8babd45723d",
@@ -909,9 +913,204 @@
           "type": "reasoning"
         }
       ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "user",
+      "content": "/reviewer",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-25T08:51:01Z",
+        "event_type": "pr_comment",
+        "id": 6395604775,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_02_8gcatyxirrkv66lgns0wwva4",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"issue_number\": 367}"
+          }
+        },
+        {
+          "id": "call_00_8wal20ohf5kufsvevq3suoe1",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\": 367}"
+          }
+        },
+        {
+          "id": "call_01_6lnuyl0pfgcam3k79psw3t3o",
+          "type": "function",
+          "function": {
+            "name": "get_pr_diff",
+            "arguments": "{\"pull_number\": 367}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179291832819000000000000000000000ffffc0a8820fcfb08d",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "A new run on the same PR #367, triggered by `/reviewer` again. I need to review the PR again — possibly it changed? Let me check the current state: PR metadata, diff, comments (whether my prior report was posted, whether anything changed), checks.\n\nThe prior run's report was posted presumably. Now the person re-triggered review. Maybe they want a re-review after something changed, or they just dispatched again. Let me check the diff and comments.\n\nLet me batch: get_pr, get_pr_diff, get_issue_comments(367), check_merge_readiness maybe later, get_check_runs.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":367,\"kind\":\"pull_request\",\"title\":\"machinery: atoma v0.4.4 を載せる — compaction hooks が届くように\",\"state\":\"OPEN\",\"total_comments\":6,\"children\":[],\"pull_requests\":[]},\"showing\":\"comment(s) 2-6 of 6; pass from/to to read the rest\",\"comments\":[{\"index\":2,\"id\":\"IC_kwDOUudl8s8AAAABfTOtBg\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: CI is running on this pull request (https://github.com/yuma-seno/atomaton/actions/runs/40177503576). Its result decides who works next.\",\"createdAt\":\"2026-10-25T08:39:56Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/pull/367#issuecomment-6395505926\",\"viewerDidAuthor\":true},{\"index\":3,\"id\":\"IC_kwDOUudl8s8AAAABfTP6Cw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"\",\"createdAt\":\"2026-10-25T08:42:10Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/pull/367#issuecomment-6395525643\",\"viewerDidAuthor\":true},{\"index\":4,\"id\":\"IC_kwDOUudl8s8AAAABfTQ82g\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"No merge-blocking defect: the pin bump is internally consistent and v0.4.4 exists upstream with exactly the hooks fix this PR claims. GitHub will not let an agent merge it — the only blocker is `human-authored` — so the merge is yours.\\n\\n**How I know**\\n- `src/workflows/actions/atoma-cli.ts:163` now reads `export const ATOMA_DEFAULT_VERSION = \\\"v0.4.4\\\";`, and nothing else in the tree restates it: the live-tools check parses the constant out of that file (`self/atomaton/scripts/check-live-tools.sh:112`), and the two other consumers (`atomaton-runner.wac.ts:2401`, `atomaton-check.wac.ts:240`) import it.\\n- The tag the installer will fetch exists, with the asset name the script builds: the v0.4.4 release lists `atoma-linux-x86_64`, and `src/workflows/actions/atoma-cli.ts:203` downloads `https://github.com/yuma-seno/atoma/releases/download/${VERSION}/atoma-linux-x86_64`.\\n- The upstream release notes match the PR's account: \\\"Hand the compaction's hooks to the loop -- they were shadowed before it\\\" (yuma-seno/atoma#14).\\n- The diff touches no generated output and leaves `package.json`'s `version` alone; `atomaton-check` is `success` on the branch head, and `check_merge_readiness(pull_number=367)` reports `merge_state_status: CLEAN` with a single blocker: `human-authored` — \\\"a person opened this pull request; review it and report, but leave the merge to them\\\". The body carries no `Opened by` line, which mat\\n\\n[1867 characters dropped from the end; 1600 shown]\",\"createdAt\":\"2026-10-25T08:44:05Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/pull/367#issuecomment-6395542746\",\"viewerDidAuthor\":true},{\"index\":5,\"id\":\"IC_kwDOUudl8s8AAAABfTUvJw\",\"author\":{\"login\":\"yuma-seno\"},\"authorAssociation\":\"OWNER\",\"body\":\"/reviewer\",\"createdAt\":\"2026-10-25T08:51:01Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/pull/367#issuecomment-6395604775\",\"viewerDidAuthor\":false},{\"index\":6,\"id\":\"IC_kwDOUudl8s8AAAABfTVPFA\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"\",\"createdAt\":\"2026-10-25T08:51:58Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/pull/367#issuecomment-6395612948\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_02_8gcatyxirrkv66lgns0wwva4"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"main\",\"createdAt\":\"2026-10-25T08:39:02Z\",\"headRefName\":\"release/atoma-0.4.4\",\"number\":367,\"state\":\"OPEN\",\"title\":\"machinery: atoma v0.4.4 を載せる — compaction hooks が届くように\",\"body\":\"atoma v0.4.4（yuma-seno/atoma#14）を既定にします。\\n\\n## 何が直ったか\\n\\nv0.4.3 の compaction は \\\\\\before_compaction\\\\ hooks を MCP registry を組むブロックの内側で収集し、ブロックが閉じた時点で捨てていました — 下の空 vec が shadow。**compaction 自体は動くが、hook（このリポジトリの archive_before_compaction.ts）は一度も発火していなかった**。\\n\\n実走での発見: #149 のチェーン、run 40166780902 が最初の実走 compaction（190/195 メッセージ置換、prompt 201,671 → 18,694）を記録したが、ログに hook 行が無く、\\\\sessions/issue-149/archive/\\\\ も無し。archive 保証は v0.4.4 から効きます。\\n\\n## 変更\\n\\n- \\\\ATOMA_DEFAULT_VERSION\\\\ → v0.4.4（workflow 記述の例示バージョンも追随）\\n\\n## テスト\\n\\n- typecheck クリーン、workflow-sources / generated-workflows 契約テスト pass\"}",
+      "tool_call_id": "call_00_8wal20ohf5kufsvevq3suoe1"
+    },
+    {
+      "role": "tool",
+      "content": "diff --git a/src/workflows/actions/atoma-cli.ts b/src/workflows/actions/atoma-cli.ts\nindex 7259697..bd8a1ea 100644\n--- a/src/workflows/actions/atoma-cli.ts\n+++ b/src/workflows/actions/atoma-cli.ts\n@@ -150,11 +150,20 @@ import { TypedOutputsStep } from \"./base.ts\";\n  * nothing in this tree caps a tool result anymore. An older binary ignores\n  * `context_limit` and runs with the larger cap -- the shape this tree's own session\n  * shrink used to cover, and why this raise rides with the removal of that shrink.\n+ *\n+ * **The hooks actually reach the loop.** Written by the core from v0.4.4\n+ * (yuma-seno/atoma#14): v0.4.3's compaction gathered the `before_compaction` scripts\n+ * inside the block that builds the MCP registry and an empty vec shadowed them below,\n+ * so the hooks -- this tree's archive among them -- silently never ran. The compaction\n+ * itself was unaffected. The first real compaction, observed on #149's chain, is what\n+ * showed it: 190 messages replaced, no hook line in the log, no archive on the data\n+ * branch. Every compaction this tree has recorded was against a hookless binary; the\n+ * archive guarantee the raise above describes holds only from v0.4.4.\n  */\n-export const ATOMA_DEFAULT_VERSION = \"v0.4.3\";\n+export const ATOMA_DEFAULT_VERSION = \"v0.4.4\";\n \n export const ATOMA_VERSION_DESC =\n-  \"Atoma CLI version tag to install (e.g. v0.4.3). Use `source` to build from a checkout of yuma-seno/atoma@main.\";\n+  \"Atoma CLI version tag to install (e.g. v0.4.4). Use `source` to build from a checkout of yuma-seno/atoma@main.\";\n \n /**\n  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead",
+      "tool_call_id": "call_01_6lnuyl0pfgcam3k79psw3t3o"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_rglh3o6y3hzdsjkqoe4ly368",
+          "type": "function",
+          "function": {
+            "name": "check_merge_readiness",
+            "arguments": "{\"pull_number\": 367}"
+          }
+        },
+        {
+          "id": "call_01_etoifsgabzjc6ds2im8h289f",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\": \"release/atoma-0.4.4\"}"
+          }
+        },
+        {
+          "id": "call_02_0bb113anpo6vaus06061u9jm",
+          "type": "function",
+          "function": {
+            "name": "get_check_runs",
+            "arguments": "{\"ref\": \"release/atoma-0.4.4\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179291833240700000000000000000000ffffc0a8b4875872ef",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The PR is unchanged (same diff, same head presumably). The person re-ran `/reviewer` at 08:51, and comment 6 (empty) is presumably this run's... no wait, comment 6 at 08:51:58 is probably the \"CI is running\" or an empty report from a run started by `/reviewer`. Actually the sequence: comment 5 = `/reviewer` at 08:51:01, comment 6 = empty at 08:51:58. That empty comment could be from the previous run of mine? No — my report is comment 4 at 08:44. Comment 6 empty at 08:51:58 is likely a run that was dispatched by comment 5 and ended without writing anything... but that's this run? No, this run's message will be posted after it ends.\n\nHmm, maybe comment 5 dispatched a run that ended empty (comment 3 and 6 both empty are the \"turn ended\" markers?). Then a new run — this one — started. Anyway.\n\nSo: same PR, unchanged. The review result stands: no defects, blocker human-authored, merge is the person's.\n\nNow, do I have anything new to add? Perhaps the person re-triggered because they expect the reviewer to... merge? But the merge is human-authored-blocked; the whole point of the \"human-authored\" blocker is that an agent can't merge a PR a person opened. Hmm — wait. Is that a policy in this repo? config says `merge.policy: auto  # this repository lets agents merge`. But the blocker says `human-authored`: \"a person opened this pull request; review it and report, but leave the merge to them\". So the tool refuses.\n\nIs that a defect in the tooling? Possibly the repo wants agents to merge human-authored PRs, given policy: auto. But the blocker kind exists and my table says: `human-authored` → \"the merge is a person's, by policy, by authorship... say it is ready for them to merge; do not retry\". So no.\n\nGiven the re-trigger, maybe I should check whether anything changed since my review (head commit, base). Let me check the current head sha / branch and whether main moved (behind?). check_merge_readiness will report it.\n\nAlso maybe the person re-ran because they want the review to happen again after they dismissed? Let's just re-verify state: get_branch for release/atoma-0.4.4 and main, get_check_runs, check_merge_readiness.\n\nIf nothing changed, my report should be brief: the review stands, nothing new, ready for the person to merge. Since this is a repeat run, I shouldn't repeat the whole report verbatim; but the machinery posts it as a new comment. Still, a concise restatement with the conclusion and next step is right.\n\nBut wait — should I look closer for defects I may have missed, since the person re-triggered? Perhaps they re-triggered because the first review's answer didn't let them merge, and they want a merge. Or maybe they simply dispatched `/reviewer` again by accident/habit.\n\nLet me reconsider more carefully whether there is a merge-blocking defect I overlooked, since a second review round is a chance to be thorough. Key areas:\n\n1. Is the version bump sufficient for \"workflow 記述の例示バージョンも追随\"? They changed ATOMA_VERSION_DESC. But `.github/workflows/atomaton-runner.yml` still has v0.4.3 in description and default — adoption lag, by design.\n\n2. Does any documentation state the default version and need updating? grep showed docs/tools/tasks/write-a-tool.md mentions \"atoma's own default since v0.4.3\" (historical about tool output cap — still accurate: the 8k cap came in v0.4.3).\n\n3. Could v0.4.4 have changed the tool-output cap or other behavior that the tree's comments claim? Let me check upstream: v0.4.4's only change is hooks (#14) per release notes. Good.\n\n4. Is the comment in the diff accurate about \"Written by the core from v0.4.4\"? Yes.\n\n5. Is there a contract test asserting that the doc comment and constant agree, or that the version appears in .github workflows? CI green.\n\n6. Does bumping the default version require updating `self/atomaton/scripts/check-live-tools.sh`'s hardcoded minimum (\"atoma v0.1.37 -- so a check on an older binary...\")? It reads the pin, fine.\n\n7. The `deploy` self-deploy step: after merge, `tag-release.sh` runs; package.json unchanged → no tag. Fine.\n\nOne thing: maybe the person's second `/reviewer` is because the previous run ended with `@yuma-seno` mention, and the machinery posted it, and they wanted the reviewer to actually *do* something else. But nothing else is possible.\n\nActually — wait. Maybe the empty comments 3 and 6 are the results of runs triggered *by the reviewer dispatch* that produced nothing, and my comment 4 was posted by the run I was. Now this run is the one from comment 5 (`/reviewer` at 08:51). Comment 6 at 08:51:58 though... hmm, that timing is after comment 5 by 57 seconds. Possibly that's the \"CI is running\" for a new run dispatched, then that run = me, and the empty comment 6 was... no, the empty comment is a posted comment; it could be a prior reviewer run that ended with no message (which the machinery posts as empty). Then this run started after. Actually comment 6 could be the \"run ended without writing\" warning comment, and my run started after it.\n\nWhatever. Let me just verify current state and write a short report.\n\nLet me check: get_branch main and release/atoma-0.4.4, get_check_runs, check_merge_readiness.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":367,\"ready\":false,\"blockers\":[{\"kind\":\"human-authored\",\"detail\":\"a person opened this pull request; review it and report, but leave the merge to them\"}],\"merge_state_status\":\"CLEAN\",\"required_checks\":[\"atomaton-check\"],\"checks\":[{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"default-branch-checks (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"pull-request-checks (verify)\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"atomaton-tools\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"default-branch-checks (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"pull-request-checks (verify)\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"dispatch-new-tags\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"deploy (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\"},{\"name\":\"atomaton-tools\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"completed\",\"conclusion\":\"success\"},{\"name\":\"plan-deploy\",\"status\":\"completed\",\"conclusion\":\"success\"}],\"ci_dispatched\":false,\"summary\":\"Not mergeable:\\n1. [human-authored] a person opened this pull request; review it and report, but leave the merge to them\"}",
+      "tool_call_id": "call_00_rglh3o6y3hzdsjkqoe4ly368"
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"release/atoma-0.4.4\",\"exists\":true,\"sha\":\"f265ac6177ef21f8e9cacd3a1370a9ba62db0c32\",\"protected\":false}",
+      "tool_call_id": "call_01_etoifsgabzjc6ds2im8h289f"
+    },
+    {
+      "role": "tool",
+      "content": "[{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/runs/121123630488\"},{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177503576/job/121121637184\"},{\"name\":\"atomaton-check\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177459084/job/121121477161\"},{\"name\":\"default-branch-checks (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177503576/job/121121311743\"},{\"name\":\"pull-request-checks (verify)\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177503576/job/121121309050\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177503576/job/121121283124\"},{\"name\":\"atomaton-tools\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177503576/job/121121283017\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177503576/job/121121282824\"},{\"name\":\"default-branch-checks (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177459084/job/121121183342\"},{\"name\":\"pull-request-checks (verify)\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177459084/job/121121176794\"},{\"name\":\"dispatch-new-tags\",\"status\":\"completed\",\"conclusion\":\"skipped\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177456748/job/121121176537\"},{\"name\":\"deploy (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177456748/job/121121175868\"},{\"name\":\"atomaton-tools\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177459084/job/121121149158\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177459084/job/121121149060\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177459084/job/121121148948\"},{\"name\":\"plan-deploy\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40177456748/job/121121142139\"}]",
+      "tool_call_id": "call_02_0bb113anpo6vaus06061u9jm"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_rkt9dioip1uakkh8xjyycwys",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \".github/atomaton/config.yaml\", \"offset\": 80, \"limit\": 50}"
+          }
+        },
+        {
+          "id": "call_01_0omaa6u39tzii5jsvh4yufzr",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\": 8, \"max_matches\": 30, \"path\": \".github/atomaton-runtime\", \"pattern\": \"human-authored\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179291834499300000000000000000000ffffc0a891054c28e0",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Same state as my prior review: head `f265ac6`, checks green, only `human-authored` blocker, `merge_state_status: CLEAN`.\n\nWait — the head sha is f265ac6. Did my prior review see the same head? Presumably yes (diff identical). Nothing changed.\n\nSo this round: nothing new. The honest report: the PR is unchanged since the review at 08:44; the verdict stands; the merge is the person's.\n\nHmm, but is that really all? Let me consider: maybe the point of the second `/reviewer` is that the person wants the reviewer to merge, and the `human-authored` blocker is a *tooling defect* — the repository's `merge.policy` is `auto`, and the PR was opened by a person, so the tool refuses. Is that intended? Let me read the runtime's logic for `human-authored` to see whether the rule is \"the pull request's author is a human\" or something else (e.g., a policy configurable). If this repo intends agents to merge people's PRs (policy auto), the blocker may be a mismatch between config and behavior worth reporting as an environment issue.\n\nLet me check `.github/atomaton/config.yaml` merge section fully (lines 82-120) and the runtime code for `human-authored`.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": ".github/atomaton/config.yaml lines 80-129 of 167\n\n80\t\n81\t\n82\t# When a person, not an agent, performs the merge. Any one of these firing is\n83\t# enough.\n84\tmerge:\n85\t  policy: auto              # this repository lets agents merge\n86\t  governed_paths:             # changes here are a person's to merge\n87\t    - \".github/**\"\n88\t    # This repository's own overlay onto .github/. Everything here BECOMES a\n89\t    # governed path at the next self-deploy -- this list included -- so leaving\n90\t    # it out let a change reach .github/** without meeting the rule that guards\n91\t    # it. The deploy pull request is a person's, but it rebuilds the whole tree,\n92\t    # which is the wrong place to first read a one-line change to a gate.\n93\t    - \"self/**\"\n94\t    # The version declaration. `tag-release.sh` derives the release tag from it,\n95\t    # so bumping it and merging IS the release -- and deciding that a set of work\n96\t    # is ready to ship is a judgement no agent is positioned to make. Without\n97\t    # this, an agent could merge its own release.\n98\t    #\n99\t    # The whole file, not just `version`: a governed path is a path, and this\n100\t    # matcher has no way to name one field of one file. So a dependency bump is\n101\t    # governed too, and an agent will not merge one. That is the intended\n102\t    # reading rather than a side effect -- a lockfile change is a change to what\n103\t    # runs, and it is worth the same look as the version beside it.\n104\t    - \"package.json\"\n105\t  gates:\n106\t    - reason: \"This changes the code that decides what an agent may merge. Read it before merging: a weakening here would not be caught anywhere later.\"\n107\t      when:\n108\t        files_changed:\n109\t          - \"src/domain/delivery/merge-readiness.ts\"\n110\t          - \"src/domain/delivery/merge-gates.ts\"\n111\t          - \"src/domain/delivery/path-patterns.ts\"\n112\t          - \"src/adapters/github/merge-signals.ts\"\n113\t\n114\t\n115\t# When a chain of runs stops and asks a person.\n116\tchain:\n117\t  after_handoffs: 5                 # handoffs with nobody else commenting\n118\t  after_runs_without_change: 2      # runs that pushed, opened and merged nothing\n119\t  # State one run leaves for the next. Change only on a name collision.\n120\t  labels:\n121\t    in_progress: atomaton/in-progress\n122\t    sub_issue: atomaton/sub-issue\n123\t    launched: atomaton/launched\n124\t    waiting_for_person: atomaton/waiting-for-person\n125\t\n126\t\n127\t# The agents a workflow starts when no issue or pull request can name one.\n128\t#\n129\t# Almost every run is started by something that already knows who it wants: a\n\n[38 more lines. Read again with offset: 130.]",
+      "tool_call_id": "call_00_rkt9dioip1uakkh8xjyycwys"
+    },
+    {
+      "role": "tool",
+      "content": "17 line(s), match and context, under .github/atomaton-runtime:\n\n.github/atomaton-runtime/tools/mcp/github.ts-6858-    default:\n.github/atomaton-runtime/tools/mcp/github.ts-6859-      blockers.push({\n.github/atomaton-runtime/tools/mcp/github.ts-6860-        kind: \"mergeability-unknown\",\n.github/atomaton-runtime/tools/mcp/github.ts-6861-        detail: `GitHub reports mergeStateStatus=${signals.mergeStateStatus ?? \"null\"}; retry shortly`\n.github/atomaton-runtime/tools/mcp/github.ts-6862-      });\n.github/atomaton-runtime/tools/mcp/github.ts-6863-  }\n.github/atomaton-runtime/tools/mcp/github.ts-6864-  if (!signals.authoredByAgent) {\n.github/atomaton-runtime/tools/mcp/github.ts-6865-    blockers.push({\n.github/atomaton-runtime/tools/mcp/github.ts:6866:      kind: \"human-authored\",\n.github/atomaton-runtime/tools/mcp/github.ts-6867-      detail: \"a person opened this pull request; review it and report, but leave the merge to them\"\n.github/atomaton-runtime/tools/mcp/github.ts-6868-    });\n.github/atomaton-runtime/tools/mcp/github.ts-6869-  }\n.github/atomaton-runtime/tools/mcp/github.ts-6870-  if (signals.mergePolicy !== \"auto\") {\n.github/atomaton-runtime/tools/mcp/github.ts-6871-    blockers.push({\n.github/atomaton-runtime/tools/mcp/github.ts-6872-      kind: \"merge-policy\",\n.github/atomaton-runtime/tools/mcp/github.ts-6873-      detail: `merge.policy is '${signals.mergePolicy}', not 'auto'; a human performs the merge`\n.github/atomaton-runtime/tools/mcp/github.ts-6874-    });",
+      "tool_call_id": "call_01_0omaa6u39tzii5jsvh4yufzr"
+    },
+    {
+      "role": "assistant",
+      "content": "Unchanged since the review above and still no merge-blocking defect: the only thing `check_merge_readiness` objects to is `human-authored`, so merging is yours.\n\n**How I know**\n- The diff is the same single hunk as the round I reviewed — `src/workflows/actions/atoma-cli.ts:163` pinning `v0.4.4` and `:166` the description — and the branch head is `f265ac6` (`get_branch(\"release/atoma-0.4.4\")`).\n- `check_merge_readiness(pull_number=367)` returns `ready: false`, `blockers: [{kind: \"human-authored\", detail: \"a person opened this pull request; review it and report, but leave the merge to them\"}]`, `merge_state_status: \"CLEAN\"`, and `atomaton-check` `success` on the head.\n- That blocker is the runtime's own rule rather than a setting this repository could relax: `.github/atomaton-runtime/tools/mcp/github.ts:6864` pushes `human-authored` whenever `signals.authoredByAgent` is false, and it does so independently of `merge.policy: auto` at `.github/atomaton/config.yaml:85`.\n\n**What I could not establish**\n- What posts the two bodyless `github-actions` comments on this thread (index 3 and 6, one after each `/reviewer`). Both arrived before the reviewer's report and carry no text, so I could not tell whether the slash-command path is meant to leave that empty comment or is ending a turn with nothing to say.\n- I could not re-check anything against a v0.4.4 run: none exists yet, so the hook firing is still only evidenced by the upstream release notes.\n\n**What happens next**\n1. You merge this; no agent is dispatched by another review — re-dispatching the review on this head returns the same answer.\n2. To move this repository's own runs to v0.4.4, release then self-deploy: **Atomaton Release** (a `package.json` version edit), then **Atomaton Self Deploy**. Until then `.github/workflows/atomaton-runner.yml:44` still defaults to `v0.4.3`.\n\n@yuma-seno",
+      "provider_items": [
+        {
+          "id": "rs_02179291834841800000000000000000000ffffc0a854306a0a87",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "So `human-authored` is a hard rule in the runtime: a person opened the PR → agent leaves the merge to them, regardless of `merge.policy: auto`. That's by design (\"review it and report, but leave the merge to them\"). My role table says exactly: `human-authored` → says it is ready for them to merge; do not retry.\n\nSo nothing to do beyond restating: ready, unchanged, merge is the person's.\n\nBut hold on — the repeated `/reviewer` on an unchanged PR: is there anything the run should do differently? The role says five or more previous rounds means non-convergence → no directive line and bring a person in. Here it's round 2 (comment 4 was my review; comment 5 is the re-trigger). And the person is already the one who must merge. So the outcome is the same.\n\nI should also make sure the empty comments (3, 6) aren't a symptom of a tooling defect worth filing: comment 3 at 08:42:10 empty and comment 6 at 08:51:58 empty, both by github-actions. Comment 3 preceded my run's report (08:44). Comment 6 followed the `/reviewer` at 08:51:01 and precedes this run. Hmm — these look like \"run ended without writing\" comments from runs that... Actually wait. If comment 6 was a run ending without writing at 08:51:58, and my current run started after that, then there was a reviewer run between 08:51 and 08:52 that delivered nothing. That matches the machinery's described behavior: \"When you end without writing anything at all it says that too, in a warning\". But the empty body doesn't look like a warning; an empty body posted by github-actions.\n\nTwo identical empty comments (3 and 6) suggest that a `/reviewer` dispatch is producing a run that posts an empty comment — i.e., two runs ended with no message. My run at 08:44 was the one that posted comment 4 — so comment 3 was a separate run that ended empty (probably the run dispatched by `/reviewer` at 08:39? But then my run would be that one...). Hmm timeline:\n\n- 08:39:02 PR created\n- 08:39:19 yuma-seno `/reviewer`\n- 08:39:56 \"CI is running\" comment\n- 08:42:10 empty comment\n- 08:44:05 my review report (comment 4)\n- 08:51:01 yuma-seno `/reviewer`\n- 08:51:58 empty comment\n- now: this run\n\nSo each `/reviewer` dispatch produces one run that posts an empty comment ~2-3 min later, then... another run (mine) posts the report. Possibly the empty comment is the \"run ended\" marker for the *dispatcher* run (the manual-comment workflow's run?) — e.g., the manual-comment job's own turn reports nothing. Actually the `/reviewer` slash command is parsed by `atomaton-manual-comment`, which dispatches the reviewer; that run takes no turn (\"that run dispatches validation and takes no turn\" — from the generated-workflows test comment: \"the manual-comment title must NOT read as a node when the comment is on a pull request — that run dispatches validation and takes no turn\"). Hmm, but that's about validation.\n\nMaybe the empty comment is posted by the run-watch or by the reviewer's re-invocation. Not worth chasing; it's not load-bearing for the review. It's an environment observation though: two identical empty comments from github-actions on the thread. Since the instructions say an empty comment means \"a run that finished and had nothing to say\" isn't read as a report — the machinery posts a warning. But these are empty, not warnings.\n\nShould I file a root issue about it? The guidance: \"A tool answering badly — file an issue and carry on\". But this isn't a tool answering badly to me. It's an observation of two empty machinery comments. Hmm. Given a person re-triggered review twice and got an empty comment each time before the actual report, this might be the `/reviewer` dispatch being processed by a run that ends empty (e.g., the manual-comment workflow's own turn on the PR) — a real cosmetic/ops defect. But I can't establish its cause from here, and filing a speculative issue adds noise.\n\nActually, I can check: maybe comment 3/6 are the \"Atomaton: CI is running...\" style messages with empty body due to the `dispatch` path. Or maybe they are the report from a *reviewer run that was re-invoked on the same PR and had no changes to review*, in which case my run is that run... no, my run hasn't ended yet.\n\nHmm, there is one plausible explanation: `/reviewer` on a PR dispatches a *reviewer* run via the manual-comment workflow. The reviewer run I am now is the one started at 08:51:xx by comment 5. Then what posted comment 6 at 08:51:58, 57 seconds in? A run ending after 57 seconds with nothing — perhaps the manual-comment workflow's own \"turn\" posting its (empty) report because it dispatched the reviewer and had no message. And the same thing happened at 08:39→08:42 (2.5 min). Then the reviewer run itself (mine) posts later. That's consistent: each `/reviewer` yields an empty comment from the dispatching turn, then the reviewer's report.\n\nSo it's a cosmetic behavior of the slash-command path, not something blocking. I'll note it in one sentence at the end (a tangent), as instructed: \"A tangent is one sentence at the end\". Careful: my last line must be the call (`@yuma-seno`). Hmm, tangent before the call line? The call line must be the last thing the message does. So put the tangent before the closing mention.\n\nActually, should I mention it at all? It could be useful but might be noise. The instruction says \"A tangent is one sentence at the end, not an interruption.\" I'll include one short sentence — it's a real observation (two empty comments). But it may confuse. I'll include it because it's observable and someone may want to know the slash path posts an empty comment.\n\nHmm, but the machinery itself says: \"When you end without writing anything at all it says that too, in a warning, so that a comment with no report in it is not read as a run that finished and had nothing to say.\" The empty comment (index 3/6) with empty body is exactly that. Fine.\n\nNow, what should this report contain? Since this is the second review round on an unchanged PR, the useful content: nothing changed since the 08:44 review; verdict unchanged (no defect; `human-authored` only; merge is the person's). I should avoid repeating 1900 chars of the same evidence, but the next reader (the person) may only read this comment. Still, the report should stand on its own minimally with anchors.\n\nLet me verify one more time that the diff blob is unchanged from what I reviewed: head sha f265ac6. Did my previous run see f265ac6? I didn't record it, but the diff is identical and the PR was created 08:39 with no pushes since (createdAt 08:39, no \"pushed\" marker). I can say \"unchanged since the review above — same diff, same head f265ac6\".\n\nWait, can I know there were no pushes? get_pr doesn't show updatedAt. But the diff is identical to what I reviewed, so content is unchanged. Good enough: \"the diff is byte-identical to the round I reviewed above\".\n\nNow the ending: mention @yuma-seno (handing the merge). That's consistent.\n\nLet me write a concise report:\n\nConclusion: Unchanged since the previous review and still no merge-blocking defect; the only blocker is `human-authored`, so merging is yours.\n\nHow I know:\n- `get_pr_diff(367)` returns the same single hunk in `src/workflows/actions/atoma-cli.ts` (pin `v0.4.4` at `:163`, description at `:166`), and the branch head is `f265ac6` (`get_branch`).\n- `check_merge_readiness(367)` → `ready: false`, blockers `[{kind: \"human-authored\", ...}]`, `merge_state_status: \"CLEAN\"`; `atomaton-check` `success` on the head.\n- The rule is the runtime's, not a config choice: `.github/atomaton-runtime/tools/mcp/github.ts:6864-6868` pushes `human-authored` whenever `signals.authoredByAgent` is false, independently of `merge.policy: auto` at `.github/atomaton/config.yaml:85`.\n\nWhat I could not establish:\n- Whether the empty github-actions comments at #3 and #6 are expected for the slash-command path — I could not read what posted them; they carry no body. (This is also my tangent, so maybe put it only here rather than twice.)\n\nActually put the empty-comment observation in \"what I could not establish\" — it fits: \"what you tried, what came back, and what is still unknown\". Good, and it avoids a stray tangent. But it's not about my review's claims... The part is for things I couldn't establish. It's acceptable: I noticed two empty comments and could not establish their origin. Hmm, keep it one line there.\n\nWhat happens next:\n1. You merge it (nothing dispatches an agent).\n2. Then release + Atomaton Self Deploy for this repo's runs to move to v0.4.4, since `.github/workflows/atomaton-runner.yml:44` still defaults to `v0.4.3`.\n\nThat's it. Keep it short.\n\nAlso should I say \"no further review is needed; a third /reviewer will return the same answer\"? That's useful: the person keeps re-triggering. One sentence: \"Re-dispatching `/reviewer` on this head will return the same answer; the merge call is what is left.\" Careful: writing `/reviewer` in my message — is that a slash line? Only a line holding nothing but `/name` counts as a call. Inline in a sentence with backticks is text. Safer to write it in backticks to avoid any ambiguity. Actually the machinery might parse `/reviewer` at line start; I'll keep it in backticks mid-sentence.\n\nLet me write it.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
       "finish_reason": "stop",
       "atoma_metadata": {
-        "github_comment_id": 6395542746,
+        "github_comment_id": 6395619855,
         "agent": "reviewer"
       }
     }
@@ -919,11 +1118,11 @@
   "metadata": {
     "github_context": {
       "agent": "reviewer",
-      "event_count": 3,
-      "snapshot_hash": "9970741f02a8b3722138b60018599c372cc8b329609c37eaf880be735e8ed1ea",
-      "version": 1,
+      "event_count": 4,
+      "session_number": "367",
+      "snapshot_hash": "cc3faf0e8979a45ee68452b3c7e456414372775ed46da570a291fd02c7ad2c7e",
       "type": "pr",
-      "session_number": "367"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -953,6 +1152,29 @@
         }
       },
       "started": "2026-10-25T08:42:16Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T08:52:44Z",
+      "ended_because": "completed",
+      "iterations": 4,
+      "messages": 76,
+      "seconds": 39,
+      "server_calls": {
+        "files_readonly": {
+          "grep": 1,
+          "read": 1
+        },
+        "github": {
+          "check_merge_readiness": 1,
+          "get_branch": 1,
+          "get_check_runs": 1,
+          "get_issue_comments": 1,
+          "get_pr": 1,
+          "get_pr_diff": 1
+        }
+      },
+      "started": "2026-10-25T08:52:05Z"
     }
   ]
 }
