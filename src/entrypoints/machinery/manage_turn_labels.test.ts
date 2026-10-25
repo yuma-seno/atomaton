@@ -89,6 +89,30 @@ describe("manage_turn_labels.ts", () => {
     expect(r.ghCalls.some((c) => c.join(" ").includes("waiting-for-person"))).toBe(false);
   });
 
+  test("closed on a node the read says is open writes nothing (#352)", () => {
+    const r = run("closed", [stateOpen, { match: ["label"] }, { match: ["issue", "edit"] }]);
+    expect(r.status).toBe(0);
+    // The mirror of the test above, and the one that keeps the hand-back intact:
+    // the runner's end-of-run strip fires on every ending, open nodes included —
+    // the release that just ran may have put waiting-for-person on this node, and
+    // a park is holding in-progress. A live turn is not the strip's business.
+    expect(removesOf(r)).toEqual([]);
+    expect(addsOf(r)).toEqual([]);
+    expect(createsOf(r)).toEqual([]);
+    expect(r.ghCalls.length).toBe(1); // the state read alone
+  });
+
+  test("closed on a node the read cannot answer strips unconditionally", () => {
+    const r = run("closed", [{ match: ["label"] }, { match: ["issue", "edit"] }]);
+    expect(r.status).toBe(0);
+    // No rule answers the state read: a failed read is not an answer, and the
+    // close-event strips must still take their labels off. This is the pre-#352
+    // behavior, kept for exactly the read that cannot say.
+    expect(removesOf(r).some((c) => c.includes("atomaton/in-progress"))).toBe(true);
+    expect(removesOf(r).some((c) => c.includes("atomaton/waiting-for-person"))).toBe(true);
+    expect(addsOf(r)).toEqual([]);
+  });
+
   test("with-person on a node that closed is bent to closed: no waiting-for-person goes on (#352)", () => {
     const r = run("with-person", [stateClosed, { match: ["label"] }, { match: ["issue", "edit"] }]);
     expect(r.status).toBe(0);

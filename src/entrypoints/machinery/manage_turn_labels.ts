@@ -8,12 +8,12 @@
  *     `atomaton/waiting-for-person` off.
  *   - `with-person` — the turn came back to a person: `in-progress` off,
  *     `waiting-for-person` on.
- *   - `closed` — the node closed (#352): both come off, neither goes on. The node
- *     is closed by the very event that runs the callers of this phase (a pull
- *     request's close, an issue's close, a run ending on a node its own close
- *     ended); the state read the other two phases make is still taken here, but
- *     only to learn what the node is wearing, so the strip touches what is on and
- *     nothing else.
+ *   - `closed` — the node closed (#352): both come off, neither goes on. The state
+ *     read the other two phases make gates this one too: a node the read says is
+ *     open gets no write at all — the runner's end-of-run strip fires on every
+ *     ending, open nodes included, and must not strip the labels a live turn is
+ *     wearing — while a node the read says is closed (or one the read could not
+ *     answer) is stripped of what it wears.
  *
  * One script, because the labels are moved at the same moments by the same
  * callers (the runner's start and release steps, a refused hand-off, a stop that

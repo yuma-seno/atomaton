@@ -1622,9 +1622,11 @@ const removeLabelStep = new TypedOutputsStep({
 // its own node inside one of them — `merge_pr` merging the pull request it is
 // reviewing, `request_close_issue` closing the issue it is concluding — would
 // otherwise leave `in-progress` on work that is over (#348 wore it for exactly that
-// reason). `always()` and unconditional on the ending, because "is the node
-// closed" is the script's question to read, not this step's to guess; on an open
-// node the script reads the state, finds the phase still true, and writes nothing.
+// reason). `always()` and unconditional on the ending, because "is the node closed"
+// is the script's question to read, not this step's to guess: it strips only a node
+// the read says is closed, and on a node the read says is open — the ordinary
+// hand-back whose release above just applied `waiting-for-person`, the park whose
+// skipped release left `in-progress` holding — it writes nothing.
 const stripClosedLabelsStep = new TypedOutputsStep({
   name: "Take the turn labels off the node if it closed (#352)",
   if: "always()",

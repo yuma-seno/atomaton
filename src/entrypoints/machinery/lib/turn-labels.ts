@@ -24,11 +24,13 @@
  * node closed — all of them arrive here carrying a phase the node has already left.
  * The state is read, not assumed; the writers that run AFTER a close are exactly
  * the ones whose phase knowledge is stale. The readers that name `closed` directly
- * (the close-event strips and the runner's end-of-run strip) make the same read,
- * for a different half: the state names nothing new to them, but it names what the
- * node is wearing, and the removals take only what is on — so a strip that fires
- * on a node with neither label makes no write at all, and the repository's
- * unlabeled closes stay silent.
+ * (the close-event strips and the runner's end-of-run strip) make the same read for
+ * the mirror reason: the runner's strip fires on every ending, open nodes included,
+ * and only the read can tell a node this run just closed from one whose turn is
+ * still live — an open node gets no write, so the release's `waiting-for-person`
+ * survives it. The removals take only what the read saw on, so a strip on a node
+ * wearing neither label makes no write either, and the repository's unlabeled
+ * closes stay silent.
  *
  * Best effort throughout, like every label write: the thread is the turn's record
  * and the labels are its cache. Every failure is a warning naming what was lost.
@@ -75,14 +77,22 @@ export function applyTurnLabels(phase: TurnLabelPhase, repo: string, number: str
   // merge, a refusal aimed at a closed target — has its phase bent to `closed`
   // (#352). A caller that could not read the state is not told the node is open:
   // it keeps the phase it brought, the pre-#352 behavior, rather than guessing.
+  // The caller that names `closed` itself reads for the mirror reason: the runner's
+  // end-of-run strip fires on every ending, open nodes included, and only the read
+  // can tell a node this run just closed from one whose turn is still live.
   let effective = phase;
-  if (phase !== "closed") {
-    if (!state.known) {
-      console.error(`::warning::could not read #${number}'s state (${state.why}); applying '${phase}' labels without the closed guard`);
-    } else if (state.state !== "open") {
-      console.error(`#${number} is closed; the turn labels come off and neither goes on (#352)`);
-      effective = "closed";
-    }
+  if (phase === "closed") {
+    // A node the read says is open is not the strip's business: the release that
+    // just ran may have put `waiting-for-person` on it, and a park the ending
+    // skipped the release for is holding `in-progress`. The read failing keeps
+    // the unconditional strip — a failed read is not an answer, and a close-event
+    // strip must still take its labels off.
+    if (state.known && state.state === "open") return;
+  } else if (!state.known) {
+    console.error(`::warning::could not read #${number}'s state (${state.why}); applying '${phase}' labels without the closed guard`);
+  } else if (state.state !== "open") {
+    console.error(`#${number} is closed; the turn labels come off and neither goes on (#352)`);
+    effective = "closed";
   }
 
   if (effective === "closed") {
