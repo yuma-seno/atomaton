@@ -1,0 +1,280 @@
+bun test v1.4.4 (38afee6c8)
+
+src/entrypoints/tools/mcp/mcp.test.ts:
+(pass) mcp/github.ts > initialize returns server info [77.11ms]
+(pass) mcp/github.ts > tools/list exposes the expected tool set [76.48ms]
+To /tmp/atomaton-sync-branch-n3Knj6/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-n3Knj6/work'...
+done.
+To /tmp/atomaton-sync-branch-n3Knj6/remote.git
+   14c7083..601f64b  atomaton/issue-1 -> atomaton/issue-1
+(pass) mcp/github.ts > sync_branch fast-forwards a clean branch from origin [149.06ms]
+To /tmp/atomaton-sync-branch-BsY3NJ/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-BsY3NJ/work'...
+done.
+To /tmp/atomaton-sync-branch-BsY3NJ/remote.git
+   14c7083..601f64b  atomaton/issue-1 -> atomaton/issue-1
+(pass) mcp/github.ts > create_pr rejects an unsynchronized HEAD without pushing [132.48ms]
+To /tmp/atomaton-sync-branch-e6dNYH/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-e6dNYH/work'...
+done.
+To /tmp/atomaton-sync-branch-e6dNYH/remote.git
+ * [new branch]      atomaton/issue-12 -> atomaton/issue-12
+From /tmp/atomaton-sync-branch-e6dNYH/remote
+ * [new branch]      atomaton/issue-12 -> origin/atomaton/issue-12
+(pass) mcp/github.ts > create_pr aims a sub-issue's pull request at its parent's branch [195.60ms]
+To /tmp/atomaton-sync-branch-8KE2n3/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-8KE2n3/work'...
+done.
+To /tmp/atomaton-sync-branch-8KE2n3/remote.git
+ * [new branch]      atomaton/issue-12 -> atomaton/issue-12
+From /tmp/atomaton-sync-branch-8KE2n3/remote
+ * [new branch]      atomaton/issue-12 -> origin/atomaton/issue-12
+(pass) mcp/github.ts > create_pr writes the agent that opened it into the pull request body [196.65ms]
+To /tmp/atomaton-sync-branch-0l3Liq/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-0l3Liq/work'...
+done.
+To /tmp/atomaton-sync-branch-0l3Liq/remote.git
+ * [new branch]      atomaton/issue-12 -> atomaton/issue-12
+From /tmp/atomaton-sync-branch-0l3Liq/remote
+ * [new branch]      atomaton/issue-12 -> origin/atomaton/issue-12
+(pass) mcp/github.ts > create_pr records the comment it ends the run on, and only when the session ends [192.77ms]
+To /tmp/atomaton-sync-branch-1izznv/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-1izznv/work'...
+done.
+To /tmp/atomaton-sync-branch-1izznv/remote.git
+ * [new branch]      atomaton/issue-12 -> atomaton/issue-12
+From /tmp/atomaton-sync-branch-1izznv/remote
+ * [new branch]      atomaton/issue-12 -> origin/atomaton/issue-12
+(pass) mcp/github.ts > create_pr records nothing when validation did not dispatch [177.03ms]
+To /tmp/atomaton-sync-branch-FJ37Qo/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-FJ37Qo/work'...
+done.
+To /tmp/atomaton-sync-branch-FJ37Qo/remote.git
+ * [new branch]      atomaton/issue-12 -> atomaton/issue-12
+From /tmp/atomaton-sync-branch-FJ37Qo/remote
+ * [new branch]      atomaton/issue-12 -> origin/atomaton/issue-12
+(pass) mcp/github.ts > create_pr parks the turn on the validation it dispatched [177.67ms]
+To /tmp/atomaton-sync-branch-A68NKG/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-A68NKG/work'...
+done.
+To /tmp/atomaton-sync-branch-A68NKG/remote.git
+ * [new branch]      atomaton/issue-12 -> atomaton/issue-12
+From /tmp/atomaton-sync-branch-A68NKG/remote
+ * [new branch]      atomaton/issue-12 -> origin/atomaton/issue-12
+(pass) mcp/github.ts > create_pr writes no park when validation was not dispatched [165.69ms]
+(pass) mcp/github.ts > create_pr refuses a base argument [73.65ms]
+To /tmp/atomaton-sync-branch-TkhlWn/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-TkhlWn/work'...
+done.
+HEAD is now at e4224ef initial
+(pass) mcp/github.ts > commit_and_push on a detached HEAD refuses before committing [119.90ms]
+To /tmp/atomaton-sync-branch-DyTuX5/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-DyTuX5/work'...
+done.
+HEAD is now at 83b92ca initial
+(pass) mcp/github.ts > create_pr on a detached HEAD refuses with the same message [127.60ms]
+To /tmp/atomaton-sync-branch-Ri5gBt/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-Ri5gBt/work'...
+done.
+(pass) mcp/github.ts > create_pr refuses a body carrying a command on its own line [103.20ms]
+(pass) mcp/github.ts > create_pr refuses on a pull request run [75.81ms]
+To /tmp/atomaton-sync-branch-kZ8WKx/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-kZ8WKx/work'...
+done.
+Switched to a new branch 'main'
+(pass) mcp/github.ts > an issue run still creates its branch and opens a pull request from it [294.74ms]
+To /tmp/atomaton-sync-branch-bOjZ6z/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-sync-branch-bOjZ6z/work'...
+done.
+To /tmp/atomaton-sync-branch-bOjZ6z/remote.git
+   83b92ca..0746800  atomaton/issue-1 -> atomaton/issue-1
+(pass) mcp/github.ts > sync_branch reports divergence without rewriting local history [152.53ms]
+To /tmp/atomaton-merge-base-JWS69H/remote.git
+ * [new branch]      main -> main
+Cloning into '/tmp/atomaton-merge-base-JWS69H/work'...
+done.
+Switched to a new branch 'atomaton/issue-1'
+To /tmp/atomaton-merge-base-JWS69H/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Already on 'main'
+To /tmp/atomaton-merge-base-JWS69H/remote.git
+   7749daa..7986cd6  main -> main
+(pass) mcp/github.ts > merge_base_into_branch merges the base in and pushes the merge commit [210.16ms]
+To /tmp/atomaton-shallow-merge-GxzDrj/remote.git
+ * [new branch]      main -> main
+Switched to a new branch 'atomaton/issue-1'
+To /tmp/atomaton-shallow-merge-GxzDrj/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-shallow-merge-GxzDrj/work'...
+Switched to branch 'main'
+To /tmp/atomaton-shallow-merge-GxzDrj/remote.git
+   4a1ebe3..a7cbe67  main -> main
+(pass) mcp/github.ts > merge_base_into_branch deepens a depth-1 checkout rather than reporting unrelated histories [221.80ms]
+To /tmp/atomaton-shallow-merge-52Degx/remote.git
+ * [new branch]      main -> main
+Switched to a new branch 'atomaton/issue-1'
+To /tmp/atomaton-shallow-merge-52Degx/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Cloning into '/tmp/atomaton-shallow-merge-52Degx/work'...
+(pass) mcp/github.ts > merge_base_into_branch sees a base that is already an ancestor on a depth-1 checkout [175.13ms]
+To /tmp/atomaton-merge-base-EwGcZL/remote.git
+ * [new branch]      main -> main
+Cloning into '/tmp/atomaton-merge-base-EwGcZL/work'...
+done.
+Switched to a new branch 'atomaton/issue-1'
+To /tmp/atomaton-merge-base-EwGcZL/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Switched to a new branch 'rewritten'
+To /tmp/atomaton-merge-base-EwGcZL/remote.git
+ + 4a1ebe3...6c131a1 rewritten -> main (forced update)
+(pass) mcp/github.ts > merge_base_into_branch names a genuinely missing merge base and merges nothing [178.80ms]
+To /tmp/atomaton-merge-base-dkZnJe/remote.git
+ * [new branch]      main -> main
+Cloning into '/tmp/atomaton-merge-base-dkZnJe/work'...
+done.
+Switched to a new branch 'atomaton/issue-1'
+To /tmp/atomaton-merge-base-dkZnJe/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+(pass) mcp/github.ts > merge_base_into_branch reports a base that is already an ancestor [154.01ms]
+To /tmp/atomaton-merge-base-Y3cbRC/remote.git
+ * [new branch]      main -> main
+Cloning into '/tmp/atomaton-merge-base-Y3cbRC/work'...
+done.
+Switched to a new branch 'atomaton/issue-1'
+To /tmp/atomaton-merge-base-Y3cbRC/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+Switched to a new branch 'atomaton/issue-12'
+To /tmp/atomaton-merge-base-Y3cbRC/remote.git
+ * [new branch]      atomaton/issue-12 -> atomaton/issue-12
+(pass) mcp/github.ts > a pull request run brings in the base its own pull request aims at [195.06ms]
+To /tmp/atomaton-merge-base-YgDGQl/remote.git
+ * [new branch]      main -> main
+Cloning into '/tmp/atomaton-merge-base-YgDGQl/work'...
+done.
+Switched to a new branch 'atomaton/issue-1'
+To /tmp/atomaton-merge-base-YgDGQl/remote.git
+ * [new branch]      atomaton/issue-1 -> atomaton/issue-1
+To /tmp/atomaton-merge-base-YgDGQl/remote.git
+   9b7d1d9..6a3f437  atomaton/issue-1 -> atomaton/issue-1
+Already on 'main'
+To /tmp/atomaton-merge-base-YgDGQl/remote.git
+   4a1ebe3..2897205  main -> main
+(pass) mcp/github.ts > a conflict is left in the worktree, committed by nobody but the agent [396.20ms]
+(pass) mcp/github.ts > create_sub_issue rejects malformed gh output [93.17ms]
+(pass) mcp/github.ts > create_root_issue rejects malformed gh output [76.90ms]
+(pass) mcp/github.ts > a body an agent writes escapes a mention it cannot vouch for [115.36ms]
+(pass) mcp/github.ts > create_sub_issue refuses a body that already names who to notify [74.80ms]
+(pass) mcp/github.ts > create_sub_issue refuses a body carrying a command on its own line [75.33ms]
+(pass) mcp/github.ts > create_sub_issue allows a command mentioned inside a sentence [104.47ms]
+(pass) mcp/github.ts > create_sub_issue refuses on a pull request run [77.52ms]
+(pass) mcp/github.ts > create_sub_issue provisions the sub-issue label before creating a child [118.62ms]
+(pass) mcp/github.ts > create_sub_issue refuses when this run has no issue to link under [71.73ms]
+(pass) mcp/github.ts > create_root_issue creates an unlabelled, unlinked issue on an issue run [97.55ms]
+(pass) mcp/github.ts > create_root_issue creates an unlabelled, unlinked issue on a pr run [94.67ms]
+(pass) mcp/github.ts > create_root_issue refuses the sub-issue label [73.34ms]
+(pass) mcp/github.ts > create_root_issue refuses a body that already names who to notify [72.59ms]
+(pass) mcp/github.ts > create_root_issue refuses a body carrying a command on its own line [70.39ms]
+(pass) mcp/github.ts > create_root_issue escapes a mention it cannot vouch for [96.02ms]
+(pass) mcp/github.ts > projections > get_check_runs keeps what a reader acts on and drops the rest [75.89ms]
+(pass) mcp/github.ts > projections > get_branch answers the question without the head commit object [76.83ms]
+(pass) mcp/github.ts > projections > a branch that does not exist is an answer, not an error [78.08ms]
+(pass) mcp/github.ts > projections > a server error is still an error, not a missing branch [77.08ms]
+(pass) mcp/github.ts > projections > merge_pr on an issue run is refused, with the node named [75.92ms]
+(pass) mcp/github.ts > projections > merge_pr on a pull request run asks about the run's own pull request [82.93ms]
+(pass) mcp/github.ts > projections > merge_pr's post-merge restart is recorded as the chain continuing [167.76ms]
+(pass) mcp/github.ts > projections > merge_pr's close-directly leaves a report on the delivered issue's parent [152.73ms]
+(pass) mcp/github.ts > projections > a rate-limited search waits out the limit instead of failing [97.17ms]
+(pass) mcp/github.ts > projections > get_pr_reviews drops the fields nothing decides on [80.37ms]
+(pass) mcp/github.ts > projections > list_pr_review_comments keeps where it is and what it says [79.20ms]
+(pass) mcp/github.ts > projections > list_pr_review_comments reads every page, not just the first [82.45ms]
+(pass) mcp/github.ts > projections > get_issue_comments caps one oversized comment [85.94ms]
+(pass) mcp/github.ts > projections > get_issue_comments carries children beside parent and pull requests [82.52ms]
+(pass) mcp/github.ts > tools/list advertises precise argument schemas [76.12ms]
+(pass) mcp/github.ts > get_issue accepts a stringified number [82.02ms]
+(pass) mcp/github.ts > get_issue falls back to the run's issue when number is omitted [82.53ms]
+(pass) mcp/github.ts > get_issue with no arguments on a pull request run returns that pull request, and says so [81.43ms]
+(pass) mcp/github.ts > get_pr with no arguments on an issue run is refused, not defaulted [72.54ms]
+(pass) mcp/github.ts > request_close_issue asking a person to close ends the turn, so their reply survives [95.91ms]
+(pass) mcp/github.ts > list_issues accepts a bare string for labels [78.86ms]
+(pass) mcp/shell.ts > executes a foreground command and returns its output [160.67ms]
+(pass) mcp/shell.ts > keeps a credential in its output from reaching the caller [159.37ms]
+(pass) mcp/shell.ts > terminates commands that exceed their timeout [1068.58ms]
+(pass) mcp/atomaton.ts > initialize returns server info [68.34ms]
+(pass) mcp/atomaton.ts > launch_sub_agent schema requires issue and agent [68.84ms]
+(pass) mcp/atomaton.ts > launch_sub_agent rejects empty tasks [72.51ms]
+(pass) mcp/atomaton.ts > launch_sub_agent refuses on a pull request run [71.15ms]
+(pass) mcp/atomaton.ts > request_close_issue refuses on a pull request run [72.03ms]
+(pass) mcp/atomaton.ts > launch_sub_agent refuses an issue that is not a child of this one [79.92ms]
+(pass) mcp/atomaton.ts > launch_sub_agent posts no comment when nothing was dispatched [80.00ms]
+(pass) mcp/atomaton.ts > launch_sub_agent refuses an issue that is a child of a different parent [77.96ms]
+(pass) mcp/atomaton.ts > launch_sub_agent refuses when the parent could not be read [75.67ms]
+(pass) mcp/atomaton.ts > launch_sub_agent dispatches a genuine child of this issue [115.24ms]
+(pass) mcp/atomaton.ts > launch_sub_agent refuses when an agent was already asked for on the sub-issue [91.58ms]
+(pass) mcp/atomaton.ts > launch_sub_agent dispatches when the sub-issue has no agent asked for [102.90ms]
+(pass) mcp/atomaton.ts > launch_sub_agent's dispatch comment ends the turn as `waiting` [115.28ms]
+(pass) mcp/atomaton.ts > request_close_issue records the comment it ends the run on [89.14ms]
+(pass) mcp/atomaton.ts > request_close_issue records nothing when the aggregation gate stalls [89.16ms]
+(pass) mcp/atomaton.ts > request_close_issue puts the child's report on its parent's thread [103.31ms]
+(pass) mcp/delegate.ts > initialize returns server info [68.84ms]
+(pass) mcp/delegate.ts > advertises one tool per folder the roster names, taking task and context [68.21ms]
+(pass) mcp/delegate.ts > each roster key offers only its own folders [66.19ms]
+(pass) mcp/delegate.ts > the read-only entry's description says it cannot change anything [65.75ms]
+(pass) mcp/delegate.ts > the command promise follows the shell, and the rosters do not share it [136.13ms]
+(pass) mcp/delegate.ts > the shared task description promises neither a change nor a command [134.53ms]
+(pass) mcp/delegate.ts > the tier a caller is told about comes from the model, not from the name [135.27ms]
+(pass) mcp/delegate.ts > refuses to start when the roster names no folders for this server [51.36ms]
+(pass) mcp/delegate.ts > refuses to start when a listed folder is missing its tools file [51.64ms]
+(pass) mcp/delegate.ts > refuses to start with no --roster [52.57ms]
+3266 |             resolve();
+3267 |           }
+3268 |         });
+3269 |         child.on("exit", (code) => {
+3270 |           clearTimeout(timer);
+3271 |           reject(new Error(`delegate exited ${code}: ${stderr}`));
+                            ^
+error: delegate exited 2: [atomaton-delegate] this process is now unreadable to its peers
+[atomaton-delegate] also removed 4 PATH entries this process cannot inspect
+[atomaton-delegate] dist/.github/atomaton/delegates/delegates.yaml is not valid YAML: ENOENT: no such file or directory, open 'dist/.github/atomaton/delegates/delegates.yaml'
+
+      at <anonymous> (/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/mcp.test.ts:3271:22)
+      at emit (node:events:103:22)
+      at #handleOnExit (node:child_process:571:14)
+(fail) mcp/delegate.ts > the read-only delegate's sub-run is given files_readonly, both ways the path resolves [158.38ms]
+(pass) mcp/web.ts > initializes and advertises fetch [134.44ms]
+(pass) mcp/web.ts > an unreachable host is an error, not a result [71.69ms]
+(pass) mcp/web.ts > a misspelled argument is refused rather than dropped [70.26ms]
+(pass) mcp/web.ts > refuses a file:// URL, which would make this a local-file read [202.62ms]
+(pass) mcp/files.ts > a truncated read names the offset to continue from [71.27ms]
+(pass) mcp/files.ts > a read that reaches the end says nothing about continuing [70.89ms]
+(pass) mcp/files.ts > an offset past the end is an error, not an empty result [70.34ms]
+(pass) mcp/files.ts > grep returns file and line, and says when it stopped early [143.45ms]
+(pass) mcp/files.ts > a pattern that matches nothing says so rather than failing [70.31ms]
+(pass) mcp/files.ts > grep accepts several places, spelled as an array or as its JSON text [214.57ms]
+(pass) mcp/files.ts > glob finds files by path and grep finds them by content [70.67ms]
+(pass) mcp/files.ts > edit refuses text that appears more than once [143.99ms]
+(pass) mcp/files.ts > edit refuses text that is not there [72.00ms]
+(pass) mcp/files.ts > write creates the directories above the file [70.58ms]
+(pass) mcp/files.ts > a path outside the roots is refused and says what is allowed [70.03ms]
+(pass) mcp/search.ts > starts without loading the reranker, and advertises both searches [68.32ms]
+
+1 tests failed:
+(fail) mcp/delegate.ts > the read-only delegate's sub-run is given files_readonly, both ways the path resolves [158.38ms]
+
+ 105 pass
+ 1 fail
+ 360 expect() calls
+Ran 106 tests across 1 file. [12.57s]
