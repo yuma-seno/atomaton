@@ -1352,13 +1352,19 @@ describe("mcp/github.ts", () => {
    * returns nothing.
    */
   describe("projections", () => {
-    const call = (name: string, args: Record<string, unknown>, responses: unknown[]) =>
+    const call = (
+      name: string,
+      args: Record<string, unknown>,
+      responses: unknown[],
+      extraEnv: Record<string, string> = {},
+    ) =>
       sendRequest(
         "github.ts",
         { jsonrpc: "2.0", id: 40, method: "tools/call", params: { name, arguments: args } },
         {
           ...fakeGhSeam(),
           FAKE_GH_RESPONSES: JSON.stringify(responses),
+          ...extraEnv,
         },
       );
 
@@ -1807,6 +1813,53 @@ describe("mcp/github.ts", () => {
         omitted: 0,
         comments: [{ author: "reviewer", path: "src/x.ts", line: 42, in_reply_to: 99, body: "rename this" }],
       });
+    });
+
+    /**
+     * The paginated half of the same read.
+     *
+     * `gh api` stops at one page unless it is told to follow them, and this tool read
+     * without `--paginate`: every review comment past the first page was missing, and
+     * `omitted` stayed 0, so the tool's own contract ("a non-zero `omitted` is the
+     * reason to believe something was left out") said the list was complete. On a pull
+     * request long enough to be reviewed twice, the older review is the one that is
+     * not there.
+     *
+     * Both halves are asserted: that the request asks for every page, and that pages
+     * arriving back to back are all read. With `--paginate`, `gh` writes one array per
+     * page in sequence, so the second page only appears if the split is real.
+     */
+    test("list_pr_review_comments reads every page, not just the first", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-review-pages-"));
+      const log = join(dir, "gh.log");
+      const first = [{ id: 1, user: { login: "reviewer" }, path: "src/x.ts", line: 4, body: "rename this" }];
+      const second = [{ id: 2, user: { login: "engineer" }, path: "src/y.ts", line: 9, body: "done" }];
+      try {
+        const r = await call(
+          "list_pr_review_comments",
+          { pull_number: 1 },
+          [{ match: ["pulls/1/comments"], stdout: `${JSON.stringify(first)}\n${JSON.stringify(second)}` }],
+          { FAKE_GH_LOG: log },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        const parsed = JSON.parse(r.result.content[0].text) as {
+          total: number;
+          omitted: number;
+          comments: { author: string; body: string }[];
+        };
+        expect(parsed.total).toBe(2);
+        expect(parsed.omitted).toBe(0);
+        expect(parsed.comments.map((c) => `${c.author}: ${c.body}`)).toEqual([
+          "reviewer: rename this",
+          "engineer: done",
+        ]);
+
+        const argv = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+        expect(argv).toHaveLength(1);
+        expect(argv[0]).toContain("--paginate");
+      } finally {
+        removeTemp(dir);
+      }
     });
 
     // A count limit is not a volume limit: the range bounds how MANY comments come
