@@ -279,12 +279,14 @@ function main(): void {
   // cannot answer here. The notice gave the node back to a person, so the labels
   // move to `with-person`: the in-progress guard comes off AND the
   // waiting-for-person label goes on (#223) — the crash is the third way a turn
-  // reaches a person, and the node must be findable in the filter of work stopped
-  // here. The `hasLabel` early return is deliberately gone: a run that fell over
-  // before its labels were applied still ends with a person waiting, and the
-  // waiting side is what that node is missing. Best-effort: a warning, never a
-  // failed step, because the thread is healed and the labels are a cache of an
-  // answer the thread now gives.
+  // reaches a person. Unless the node closed meanwhile, in which case
+  // `applyTurnLabels` takes both off and puts neither on (#352): the #223 filter
+  // of work stopped here is gone, because a closed node's thread tells that story
+  // and the label on it read as a question nobody could answer. The `hasLabel`
+  // early return is deliberately gone: a run that fell over before its labels were
+  // applied still ends with a person waiting, and the waiting side is what that
+  // node is missing. Best-effort: a warning, never a failed step, because the
+  // thread is healed and the labels are a cache of an answer the thread now gives.
   if (!releasesLabel(lastEndingComment(thread.dated, endingWalkReaders), endingWalkReaders)) {
     console.error(`reconcile_run_ending: the labels stay on #${number}; the thread's last ending keeps the turn with an agent`);
     return;

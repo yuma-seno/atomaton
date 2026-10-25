@@ -10,6 +10,7 @@ import { ref as dispatchIfSiblingsDoneRef } from "../entrypoints/machinery/dispa
 import { ref as checkSubIssueClosureRef } from "../entrypoints/machinery/check_sub_issue_closure.ts";
 import { ref as pruneAtomaDataRef } from "../entrypoints/machinery/prune_atomaton_data.ts";
 import { ref as stopOnCloseRef } from "../entrypoints/machinery/stop_on_close.ts";
+import { ref as manageTurnLabelsRef } from "../entrypoints/machinery/manage_turn_labels.ts";
 
 // FALLBACK for manually closed sub-issues.
 // Primary aggregation happens in atomaton-pr-closed.wac.ts (pull_request_target).
@@ -19,6 +20,8 @@ import { ref as stopOnCloseRef } from "../entrypoints/machinery/stop_on_close.ts
 //   check --> aggregate
 //   prune            (independent; every closed issue, not only sub-issues)
 //   stop-run         (independent; a person closing an issue an agent is working on)
+//   strip-turn-labels (independent; every closed issue -- a closed node carries
+//                     neither turn label, #352)
 //
 // `stop-run` rides on this event for the same reason `prune` does: closing is the
 // moment the question becomes askable, so the trigger and the condition are one thing.
@@ -91,6 +94,31 @@ const checkStep = new TypedOutputsStep(
   ["is_sub_issue", "parent_number"] as const,
 );
 
+/**
+ * A closed issue carries neither turn label (#352).
+ *
+ * Independent of `check`, and riding this event for the same reason `prune` does:
+ * closing is the moment the question becomes askable. Only a person's close
+ * reaches this workflow — GITHUB_TOKEN's own actions raise no event cascade, so an
+ * agent closing the issue it is finishing is the runner's end-of-run strip and the
+ * write-point guard in `lib/turn-labels.ts` instead — and the label a turn left on
+ * it, the `waiting-for-person` of a turn the person held when they decided to
+ * close, comes off here rather than riding on the close.
+ */
+const stripTurnLabelsStep = new TypedOutputsStep(
+  {
+    name: "Take the turn labels off the closed issue",
+    shell: "bash",
+    env: {
+      GH_TOKEN: "${{ github.token }}",
+      NUMBER: githubEvent<IssuesClosedEvent>((e) => e.issue.number),
+    },
+    run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: "closed", number: "\${NUMBER}" })}
+`,
+  },
+  [] as const,
+);
+
 export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
   name: "Atomaton Sub-Issue Closed",
   on: {
@@ -161,6 +189,14 @@ export const atomaSubIssueClosed = new Workflow("atomaton-sub-issue-closed", {
           if: JobCondition.isNot(githubEventRaw<IssuesClosedEvent>((e) => e.sender.type), "Bot"),
         },
         [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), stopOnCloseStep],
+      ),
+      new DefinedJob(
+        "strip-turn-labels",
+        {
+          "runs-on": "ubuntu-latest",
+          "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
+        },
+        [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), stripTurnLabelsStep],
       ),
       new DefinedJob("prune", { "runs-on": "ubuntu-latest", "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES }, [
         new ActionsCheckoutV4({}),

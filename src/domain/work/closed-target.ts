@@ -32,9 +32,15 @@ import type { NodeKind, NodeState } from "./work-tree.ts";
  * found out. Putting them in one enum is what let `state.kind === "unknown"` sit in
  * the same expression as `state.kind === "closed"` as though they were alternatives
  * of one thing.
+ *
+ * `labels` is what the node is wearing, from the same response — present only
+ * because the turn-label writer (#352) removes only what is on, and a second
+ * request to fetch it would be the "three spellings of one `gh` call" this reader
+ * exists to prevent. Optional, because every caller before that one reads the
+ * state alone, and none of them should have to name a field it does not use.
  */
 export type TargetState =
-  | { known: true; kind: NodeKind; state: NodeState }
+  | { known: true; kind: NodeKind; state: NodeState; labels?: string[] }
   | { known: false; why: string };
 
 /**

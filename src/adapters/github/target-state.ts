@@ -37,6 +37,7 @@ interface IssueOrPr {
   /** Why a closed ISSUE is closed. Absent on a pull request, which says `merged_at` instead. */
   state_reason?: string | null;
   pull_request?: { merged_at?: string | null };
+  labels?: { name?: string }[];
 }
 
 /**
@@ -66,7 +67,13 @@ export function readTargetState(number: number | string, repo?: string): TargetS
   // permissive reading is the one that lets work through.
   const isPr = parsed.pull_request !== undefined;
   const kind: NodeKind = isPr ? "pull-request" : "issue";
-  if (parsed.state === "open") return { known: true, kind, state: "open" };
+  // The names the node is wearing, read off the same response. A label without a
+  // name is not a label anybody asked for; dropping it costs the caller one removal
+  // it would have made anyway.
+  const labels = (parsed.labels ?? [])
+    .map((label) => label.name ?? "")
+    .filter((name) => name !== "");
+  if (parsed.state === "open") return { known: true, kind, state: "open", labels };
   if (parsed.state === "closed") {
     return {
       known: true,
@@ -74,6 +81,7 @@ export function readTargetState(number: number | string, repo?: string): TargetS
       state: isPr
         ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at))
         : issueOutcome(parsed.state_reason),
+      labels,
     };
   }
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };

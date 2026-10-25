@@ -193,7 +193,9 @@ function main(): void {
   // labels move with it — the in-progress guard comes off and the
   // waiting-for-person label goes on (#223). Nothing else removes them: the run's
   // own release step ran before the dispatch and held the label because the turn
-  // said `handoff`.
+  // said `handoff`. When the refusal is the target having closed
+  // (`refused-closed`), `applyTurnLabels` bends the phase itself (#352): the
+  // closed target takes both labels off and neither goes on.
   if (refusalEnding !== undefined && (outcome === "refused-closed" || outcome === "unconfirmed" || outcome === "failed")) {
     applyTurnLabels("with-person", values.repo ?? "", String(number));
   }
