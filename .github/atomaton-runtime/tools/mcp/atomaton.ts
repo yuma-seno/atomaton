@@ -6910,13 +6910,15 @@ function readTargetState(number, repo) {
   }
   const isPr = parsed.pull_request !== undefined;
   const kind = isPr ? "pull-request" : "issue";
+  const labels = (parsed.labels ?? []).map((label) => label.name ?? "").filter((name) => name !== "");
   if (parsed.state === "open")
-    return { known: true, kind, state: "open" };
+    return { known: true, kind, state: "open", labels };
   if (parsed.state === "closed") {
     return {
       known: true,
       kind,
-      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason),
+      labels
     };
   }
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
@@ -7656,8 +7658,10 @@ function* parentChain(start, read, maxHops = MAX_PARENT_HOPS) {
 // src/adapters/github/turn-comment.ts
 function turnHeader(h) {
   const context = h.audience === "model" ? "include" : "exclude";
+  const agent = (h.agent ?? "").trim();
   return [
     LLM_CONTEXT_TAG.write(context),
+    ...agent === "" ? [] : [AGENT_TAG.write(agent)],
     ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 })
   ];
 }
@@ -7674,6 +7678,9 @@ function endingIdentity() {
     ...Number.isFinite(ask) && ask > 0 ? { answers: ask } : {},
     ...Number.isFinite(run) && run > 0 ? { run } : {}
   };
+}
+function runAgent() {
+  return (process.env.AGENT ?? "").trim();
 }
 
 // src/adapters/github/ending-comment.ts
@@ -19215,7 +19222,7 @@ function handleLaunchSubAgent(args) {
   const summary = (args.summary ?? "").trim();
   const complete = errors.length === 0;
   if (parentIssue && dispatched.length) {
-    const bodyLines = complete ? turnHeader({ ended: "waiting", audience: "person", ...endingIdentity() }) : [LLM_CONTEXT_TAG.write("exclude")];
+    const bodyLines = complete ? turnHeader({ ended: "waiting", audience: "person", agent: runAgent(), ...endingIdentity() }) : [LLM_CONTEXT_TAG.write("exclude")];
     if (dispatched.length) {
       bodyLines.push("Atomaton: Launched sub-agent(s):", ...dispatched.map((d) => `- ${d}`));
     }

@@ -171,8 +171,10 @@ function fenceSegments(text) {
 // src/adapters/github/turn-comment.ts
 function turnHeader(h) {
   const context = h.audience === "model" ? "include" : "exclude";
+  const agent = (h.agent ?? "").trim();
   return [
     LLM_CONTEXT_TAG.write(context),
+    ...agent === "" ? [] : [AGENT_TAG.write(agent)],
     ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 })
   ];
 }

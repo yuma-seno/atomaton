@@ -237,8 +237,9 @@ function listBodies(repo, number) {
   }
   return comments;
 }
+var CLAIM_NOTICE = "Atomaton: claimed this turn.";
 function claimCommentBody(args) {
-  return [LLM_CONTEXT_TAG.write("exclude"), TOOK_TAG.write(args)].join(`
+  return [LLM_CONTEXT_TAG.write("exclude"), TOOK_TAG.write(args), CLAIM_NOTICE].join(`
 `);
 }
 function raceOutcome(comments, mine) {
