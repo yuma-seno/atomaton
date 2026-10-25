@@ -12119,6 +12119,56 @@
     ]
   },
   {
+    "path": "sessions/issue-381/engineer.json",
+    "agent": "engineer",
+    "messages": 159,
+    "calls": 80,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "atoma_builtin__load_skill": 1,
+      "bash": 37,
+      "read": 15,
+      "grep": 3,
+      "edit": 21,
+      "commit_and_push": 1,
+      "create_pr": 2
+    },
+    "acts": {
+      "other": 35,
+      "edit": 2
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T11:40:38Z",
+        "ended_because": "completed",
+        "iterations": 75,
+        "messages": 159,
+        "seconds": 554,
+        "server_calls": {
+          "files": {
+            "edit": 21,
+            "grep": 3,
+            "read": 15
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 2
+          },
+          "shell": {
+            "bash": 37
+          }
+        },
+        "started": "2026-10-25T11:31:24Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-4/atomaton.json",
     "agent": "atomaton",
     "messages": 20,
