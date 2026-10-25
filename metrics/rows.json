@@ -9850,8 +9850,8 @@
   {
     "path": "sessions/pr-338/reviewer.json",
     "agent": "reviewer",
-    "messages": 67,
-    "calls": 39,
+    "messages": 85,
+    "calls": 49,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -9860,16 +9860,17 @@
     "reported": true,
     "tools": {
       "atoma_builtin__load_skill": 1,
-      "get_pr": 1,
+      "get_pr": 2,
       "get_pr_diff": 1,
-      "get_issue_comments": 1,
+      "get_issue_comments": 3,
       "grep": 17,
       "list": 1,
-      "read": 10,
-      "get_check_runs": 1,
-      "fetch": 3,
+      "read": 12,
+      "get_check_runs": 3,
+      "fetch": 4,
       "glob": 2,
-      "check_merge_readiness": 1
+      "check_merge_readiness": 2,
+      "get_branch": 1
     },
     "acts": {},
     "runs": [
@@ -9898,6 +9899,29 @@
           }
         },
         "started": "2026-10-24T23:53:22Z"
+      },
+      {
+        "ended": "2026-10-25T00:02:12Z",
+        "ended_because": "completed",
+        "iterations": 6,
+        "messages": 85,
+        "seconds": 35,
+        "server_calls": {
+          "files_readonly": {
+            "read": 2
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 2,
+            "get_issue_comments": 2,
+            "get_pr": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-10-25T00:01:37Z"
       }
     ]
   }
