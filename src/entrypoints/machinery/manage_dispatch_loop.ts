@@ -31,7 +31,7 @@ import { parseArgs } from "node:util";
 import { handoffsSincePerson, resolveHandoffLimit, type ChainComment } from "../../domain/work/dispatch-chain.ts";
 import { resolveNoProgressLimit, runsWithoutChange, stopReason } from "../../domain/work/progress.ts";
 import { getHandoffLimit, getNoProgressLimit } from "../../adapters/runner/config.ts";
-import { gh } from "../../adapters/github/gh.ts";
+import { listComments } from "../../adapters/github/thread.ts";
 import { AGENT_TAG, CHANGED_TAG, isQuotation } from "../../adapters/github/tags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -45,41 +45,26 @@ export const ref = defineScript<ManageDispatchLoopArgs>(import.meta.url);
 /**
  * The target's comments, oldest first, reduced to what the decision reads.
  *
- * `--paginate` because a long-running issue passes 100 comments, and the tally is
- * read from the END of the list: a truncated read would silently drop the recent
- * handoffs, which are the only ones that matter.
+ * `--paginate` (inside the shared `listComments`) because a long-running issue passes
+ * 100 comments, and the tally is read from the END of the list: a truncated read would
+ * silently drop the recent handoffs, which are the only ones that matter.
  *
  * A failed read returns an empty list, which counts zero handoffs and lets the
  * chain continue. That is the wrong direction for a safety limit, and it is
  * deliberate: this bounds a loop that wastes model runs, and refusing to hand off
  * because GitHub was briefly unreachable would stop work that is going fine. The
- * caller logs it so a run that could not check says so.
+ * caller logs it so a run that could not check says so. The projection to
+ * `ChainComment` is this caller's; the pages are the reader's.
  */
 function readComments(repo: string, number: string): { comments: ChainComment[]; read: boolean } {
-  const { code, stdout } = gh(
-    "api",
-    `repos/${repo}/issues/${number}/comments?per_page=100`,
-    "--paginate",
-    "--jq",
-    // One JSON object per line, the same shape `readChangedFiles` uses and for the
-    // same reason: with `--paginate` the pages arrive as separate documents that
-    // `JSON.parse` cannot read as one.
-    '.[] | {authorType: .user.type, body: .body}',
-  );
-  if (code) return { comments: [], read: false };
-  const comments: ChainComment[] = [];
-  for (const line of stdout.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      comments.push(JSON.parse(line) as ChainComment);
-    } catch {
-      // One unparseable line is not a reason to lose the rest. It also cannot be
-      // an agent comment as far as this is concerned, so the tally errs low --
-      // the same direction as a failed read.
-      console.error(`  Skipping an unparseable comment line`);
-    }
+  try {
+    return {
+      comments: listComments(repo, number).map((comment) => ({ authorType: comment.user?.type, body: comment.body ?? "" })),
+      read: true,
+    };
+  } catch {
+    return { comments: [], read: false };
   }
-  return { comments, read: true };
 }
 
 function main(): void {

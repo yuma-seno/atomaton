@@ -88,6 +88,16 @@ export function stopRequested(comments: StopComment[], since: Date): boolean {
   });
 }
 
+/**
+ * One page of comments written since `since`, and whether one of them asks to stop.
+ *
+ * Not `listComments`, deliberately: that reader answers "every comment on this node",
+ * and this asks "anything NEW since this run started", once every 30 seconds. Re-reading
+ * a long thread on every poll would cost the whole thread to learn about one comment,
+ * and `?since=` is the API's own answer to exactly this question. It is a delta, one
+ * page, with its own failure answer (`false`: this poll learned nothing, and the next
+ * one asks again).
+ */
 function poll(repo: string, number: string, since: Date): boolean {
   const { code, stdout } = gh(
     "api", `repos/${repo}/issues/${number}/comments`,

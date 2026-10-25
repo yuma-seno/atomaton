@@ -33,7 +33,7 @@
  * script's `ref`, and the machinery scripts are bundled one per file — so the shared
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
-import { gh, ghRead, ghPaginated, splitConcatenatedJson } from "./gh.ts";
+import { gh, ghRead, splitConcatenatedJson } from "./gh.ts";
 import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, TOOK_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
@@ -143,13 +143,21 @@ export const endingWalkReaders: EndingWalkReaders = {
   ended: (body) => ENDED_TAG.readProse(body),
 };
 
-/** A comment as this needs it: an id to exclude by, a body to read, and who wrote it. */
-interface Comment {
+/**
+ * A comment as this needs it: an id to exclude by, a body to read, who wrote it, and
+ * when.
+ *
+ * The shape `listComments` hands back, and the reason it reads whole comment objects
+ * rather than a projected body list: the readers here need the id (to exclude a
+ * comment), `user.type` (to tell a person from the machinery) and `created_at` (to
+ * order an ask against an event outside the thread).
+ */
+export interface Comment {
   id: number;
   body?: string;
   /** When the comment was written, as GitHub reports it. Present on every comment the API returns. */
   created_at?: string;
-  user?: { type?: string };
+  user?: { login?: string; type?: string };
 }
 
 /** A thread entry that also carries when it happened, for asks ordered against events outside the thread. */
@@ -204,17 +212,15 @@ export interface RunWatchThread {
  * per question would triple a watch's API calls and let the answers disagree as
  * the thread moves; one read returns all three views, shaped once.
  *
- * `ghPaginated`, not `listComments`: past one page `gh --paginate` writes
- * back-to-back arrays, which a whole-output `JSON.parse` throws on — the shape
- * `mostRecentAgentOn`'s comment guards against, and a watch that threw there would
- * fail every notice on a long thread. Throws when the read fails, like every other
- * reader here: a watch deciding whether to post must not read a failed read as
- * "no ending".
+ * `listComments`, not a read of its own: past one page `gh --paginate` writes
+ * back-to-back arrays, which a whole-output `JSON.parse` throws on, and the split of
+ * those pages is one rule for the whole repository (see `listComments`). It is also
+ * the retrying read — a watch that gave up on a transient failure would fail every
+ * notice on a long thread. Throws when the read fails, like every other reader here:
+ * a watch deciding whether to post must not read a failed read as "no ending".
  */
 export function readRunWatchThread(repo: string, number: string | number): RunWatchThread {
-  const listed = ghPaginated<{ id: number; body?: string; created_at?: string; user?: { type?: string } }>(
-    "api", `repos/${repo}/issues/${number}/comments`,
-  );
+  const listed = listComments(repo, number);
   const entries: WatchComment[] = listed.map((comment) => ({
     ...entryOf(comment),
     createdAt: comment.created_at ?? "",
@@ -242,14 +248,26 @@ export function keptCommentIds(comments: readonly Comment[]): Set<number> {
 }
 
 /**
- * The raw comment list, oldest first, as the API returns it.
+ * A node's comments, oldest first, as one read.
  *
- * One read shared by every reader here: the shaped readers fold it, the guard walks it,
- * and the dispatch freshness probe scans it. Throws when the read fails — every caller
- * is deciding whether to keep a comment out of a race or whether to start a run, so an
- * answer nobody could determine must not be the one that lets work through.
+ * The ONE read of "every comment on this node". It was nine implementations with four
+ * page strategies before: some parsed the whole stdout as one document (which throws
+ * from the second page on), one split the pages by hand, one asked `--jq "[.[].body]"`
+ * and lost the ids two callers need, and one read line-per-comment. Every question
+ * about a thread starts from this list, so the page strategy — `--paginate` with the
+ * retrying `ghRead`, pages flattened by `splitConcatenatedJson` — is decided here and
+ * nowhere else.
+ *
+ * Whole comment objects rather than a projection: `entryOf` needs `user.type`,
+ * `readRunWatchThread` needs `created_at`, `claim_turn` needs `id`, and a projection
+ * that satisfies one reader is a read the others have to re-make. A caller that wants
+ * only the bodies asks `commentBodies`.
+ *
+ * Throws when the read fails. The failure POLICY is the caller's and stays there —
+ * `aggregation.ts` answers `undetermined`, `lastEnding` answers "nothing interrupted",
+ * validation lets it crash — but a shared reader cannot choose between them.
  */
-function listComments(repo: string, number: string | number): Comment[] {
+export function listComments(repo: string, number: string | number): Comment[] {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0) throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
   // `--paginate` writes one JSON array per page back to back, so from the second page
@@ -264,6 +282,18 @@ function listComments(repo: string, number: string | number): Comment[] {
     if (Array.isArray(page)) flat.push(...(page as Comment[]));
   }
   return flat;
+}
+
+/**
+ * The same read, reduced to the bodies — for the readers that ask a question of the
+ * text alone (`mostRecentAgent`, `lastEnding`, the aggregation marker, the CI-retry
+ * count).
+ *
+ * Still throws on a failed read: dropping to `[]` here would be the `catch → 0` this
+ * read exists to remove, one layer down where no caller could see it.
+ */
+export function commentBodies(repo: string, number: string | number): string[] {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
 }
 
 /**

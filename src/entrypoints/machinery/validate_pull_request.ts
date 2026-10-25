@@ -84,10 +84,10 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-validation.ts";
-import { dispatchWorkflow, gh, ghPaginated } from "../../adapters/github/gh.ts";
+import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
 import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG, isQuotation } from "../../adapters/github/tags.ts";
-import { latestRequestOn } from "../../adapters/github/thread.ts";
+import { commentBodies, latestRequestOn } from "../../adapters/github/thread.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -211,27 +211,26 @@ export function findExistingCiRun(runs: CiRun[], workflow: string, headSha: stri
  * retries this script never made.
  */
 export function countPriorRetries(repo: string, number: string): number {
-  // `ghPaginated`, not a `JSON.parse` of the whole stdout: with `--jq`, `gh`
-  // evaluates the filter once per page and writes each page's result to the same
-  // stream, so past one page the output is back-to-back arrays a whole-output
-  // parse refuses. `--jq "[.[].body]"` (not `. [].body`) because a bracketed
-  // filter's result is one JSON array per page, which is what `ghPaginated`
-  // flattens -- an unbracketed filter prints top-level scalars raw, which is not
-  // JSON at all and parses as nothing. The count is the retry bound: a read that
-  // silently answers 0 would let the engineer/CI loop run past its bound at a
-  // model run per turn.
-  try {
-    const bodies = ghPaginated<string>("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]");
-    // The notice quoting a removed comment carries that comment verbatim, and a
-    // `ci-retry` marker inside it is the DELETED author's words -- counting it would
-    // fire the retry limit early, on a turn the notice's own line says will not be
-    // acted on. See `isQuotation`. `hasProse` for the same reason one tag over: a
-    // person quoting the marker inside a fenced sample has not asked for a retry
-    // (#304).
-    return bodies.filter((body) => !isQuotation(body ?? "") && CI_RETRY_TAG.hasProse(body ?? "")).length;
-  } catch {
-    return 0;
-  }
+  // The count is the retry bound, so the read must not answer a number it could not
+  // determine. It used to: `catch { return 0; }`, which is the retry history reset the
+  // moment GitHub was unreachable -- and a reset count lets the engineer/CI loop run
+  // past its bound at one model run per turn. Not being able to look and finding no
+  // retries are different answers, and only one of them means "carry on".
+  //
+  // So the read throws, as `latestRequestOn` below already does: the script stops with
+  // the reason on stderr rather than deciding a verdict on a number it invented. The
+  // comment's own five lines said this and the code did the opposite.
+  //
+  // `commentBodies`, the shared reader: `--paginate` with the pages split, because a
+  // pull request past one page of comments still carries its retry markers.
+  const bodies = commentBodies(repo, number);
+  // The notice quoting a removed comment carries that comment verbatim, and a
+  // `ci-retry` marker inside it is the DELETED author's words -- counting it would
+  // fire the retry limit early, on a turn the notice's own line says will not be
+  // acted on. See `isQuotation`. `hasProse` for the same reason one tag over: a
+  // person quoting the marker inside a fenced sample has not asked for a retry
+  // (#304).
+  return bodies.filter((body) => !isQuotation(body) && CI_RETRY_TAG.hasProse(body)).length;
 }
 
 /**
