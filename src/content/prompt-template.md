@@ -293,7 +293,7 @@ or come back to it.
 
 Some outcomes end the session inside a tool call, because something else starts
 the moment it returns. There is no turn after one of those, so the report goes in that
-call's own text argument, and you write it there before you make the call. Which
+call's own argument, and you write it there before you make the call. Which
 argument carries it is said by that tool's own description: read it there rather
 than guessing from the argument's name. A report you meant to write afterwards is
 never written.

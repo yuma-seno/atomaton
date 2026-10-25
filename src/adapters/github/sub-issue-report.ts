@@ -54,10 +54,10 @@ export interface SubIssueReport {
 }
 
 /**
- * The folded block the parent's thread carries: `<details>` like `launch_sub_agent`'s
- * report, so a thread with several finished children is still scannable, with
- * `llm-context` written as `include` because this is context the parent's aggregation
- * is meant to read rather than bookkeeping.
+ * The folded block the parent's thread carries: `<details>`, so a thread with
+ * several finished children is still scannable, with `llm-context` written as
+ * `include` because this is context the parent's aggregation is meant to read
+ * rather than bookkeeping.
  *
  * The child's number is in the body rather than the summary line, so the summary keeps
  * the one spelling the folded-report convention has.

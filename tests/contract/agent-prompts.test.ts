@@ -669,10 +669,9 @@ describe("agent prompt contracts", () => {
    *
    * #210: a report whose conclusion carried the vocabulary of the implementation.
    * #16/#17 capped the length of each part; neither touched how much of the
-   * comment sits open on the page. The machinery already posts the dispatch report
-   * behind a fold for exactly this reason (`tools/mcp/atomaton.ts`, "the thread
-   * shows what was launched and the report is one click away") — the prompt now
-   * asks the same of the agent's own text.
+   * comment sits open on the page. The machinery already folds the report a finished
+   * child leaves on its parent's thread (`adapters/github/sub-issue-report.ts`) — the
+   * prompt now asks the same of the agent's own text.
    *
    * The line is "what verifies folds, what acts stays open": a reader acting on the
    * comment should not have to open anything, and the next run reads the full text
