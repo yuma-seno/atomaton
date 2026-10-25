@@ -14,8 +14,8 @@ describe("subIssueReportBody", () => {
   test("folds the child's own words under a Report block that names the child", () => {
     const body = subIssueReportBody({ child: 12, report: "It landed in #34.", pullRequests: [MERGED] });
 
-    // The spelling `launch_sub_agent` established for a folded report, so a parent's
-    // thread reads the same whichever tool put the fold there.
+    // The one spelling this project folds a report under, so a parent's thread reads
+    // the same whichever path put the fold there.
     expect(body).toContain("<details><summary>Report</summary>");
     expect(body.trimEnd().endsWith("</details>")).toBe(true);
     // Context the parent's aggregation is meant to read, not bookkeeping.
