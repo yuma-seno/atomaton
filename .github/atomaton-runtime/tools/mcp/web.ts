@@ -17927,7 +17927,7 @@ async function fetchUrl(a) {
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "fetch",
-    description: "Fetch a URL and return its content. HTML is converted to Markdown so the result is readable prose rather than markup; pass raw: true to get the body unchanged. A URL that resolves to an image is returned as an image for models that can read one. Supports POST with a form-encoded body for endpoints that require it. An unreachable host or a non-2xx status is an error, never a result: anything returned successfully is content that was actually read.",
+    description: "Fetch a URL and return its content. HTML is converted to Markdown so the result is readable prose rather than markup; pass raw: true to get the body unchanged. A URL that resolves to an image is returned as an image for models that can read one. Supports POST with a form-encoded body for endpoints that require it. An unreachable host, or a status outside 2xx, is an error rather than a result. A successful call is not an answer: a login wall, a consent page, a bot check and a service's front page each arrive as a 200 with an ordinary content-type. Read what came back and check that it is what the URL promised \u2014 a result list with no links in it, a documentation page with no documentation, an image announcement whose bytes are not an image are all a fetch that failed without saying so. Report such a response as the answer you did not get, never as the answer.",
     schema: FETCH_SCHEMA,
     handler: fetchUrl
   })

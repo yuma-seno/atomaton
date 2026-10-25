@@ -122,20 +122,6 @@ function splitConcatenatedJson(text) {
   }
   return results;
 }
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
-}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -702,6 +688,9 @@ function listComments(repo, number) {
   }
   return flat;
 }
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
+}
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
@@ -1171,7 +1160,7 @@ function mostRecentAgent(bodies) {
 }
 function mostRecentAgentOn(repo, number) {
   try {
-    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+    return mostRecentAgent(commentBodies(repo, number));
   } catch {
     return "";
   }
@@ -1241,18 +1230,17 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (commentsCode !== 0) {
+  let markerAlreadyWritten;
+  try {
+    markerAlreadyWritten = commentBodies(opts.repo, opts.parent).some((body) => AGGREGATED_TAG.readProse(body) === opts.closedNum);
+  } catch {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
     return withNotice(opts, { kind: "undetermined", why });
   }
-  const markerAlreadyWritten = splitConcatenatedJson(commentsOut).flatMap((page) => Array.isArray(page) ? page : []).some((entry) => typeof entry === "string" && AGGREGATED_TAG.readProse(entry) === opts.closedNum);
   if (markerAlreadyWritten) {
     return { kind: "already-aggregated" };
   }
-  if (opts.beforeDispatch)
-    await opts.beforeDispatch();
   const markerId = commentOnWithId(opts.repo, opts.parent, `${AGGREGATED_TAG.write(opts.closedNum)}
 Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
   if (markerId === null) {

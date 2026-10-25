@@ -6692,20 +6692,6 @@ function splitConcatenatedJson(text) {
   }
   return results;
 }
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
-}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -7007,6 +6993,14 @@ var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
 }
+function withoutTags(text) {
+  return fenceSegments(text).map((segment) => segment.code ? segment.text : stripTags(segment.text)).join("");
+}
+function stripTags(text) {
+  const tags = EVERY_TAG_PATTERN.join("|");
+  const lineEnd = String.raw`(?:\r?\n|(?:\\r)?\\n)?`;
+  return text.replace(new RegExp(String.raw`(?:^[ \t]*)?(?:${tags})[ \t]*${lineEnd}`, "gm"), "");
+}
 function proseOnly(text) {
   return fenceSegments(text).map((segment) => segment.code ? `
 ` : segment.text).join("");
@@ -7118,6 +7112,19 @@ function parseMangledCommand(body) {
     }
   }
   return NOTHING;
+}
+function isCommand(form) {
+  const parsed = parseCommentCommand(form);
+  return parsed.agent !== "" || parsed.control !== "";
+}
+function commandLinesIn(text) {
+  const found = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line && lineForms(line).some(isCommand))
+      found.push(line);
+  }
+  return found;
 }
 
 // src/domain/work/actor.ts
@@ -7279,6 +7286,9 @@ function listComments(repo, number) {
       flat.push(...page);
   }
   return flat;
+}
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
 }
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
@@ -7881,7 +7891,7 @@ function mostRecentAgent(bodies) {
 }
 function mostRecentAgentOn(repo, number) {
   try {
-    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+    return mostRecentAgent(commentBodies(repo, number));
   } catch {
     return "";
   }
@@ -7951,18 +7961,17 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (commentsCode !== 0) {
+  let markerAlreadyWritten;
+  try {
+    markerAlreadyWritten = commentBodies(opts.repo, opts.parent).some((body) => AGGREGATED_TAG.readProse(body) === opts.closedNum);
+  } catch {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
     return withNotice(opts, { kind: "undetermined", why });
   }
-  const markerAlreadyWritten = splitConcatenatedJson(commentsOut).flatMap((page) => Array.isArray(page) ? page : []).some((entry) => typeof entry === "string" && AGGREGATED_TAG.readProse(entry) === opts.closedNum);
   if (markerAlreadyWritten) {
     return { kind: "already-aggregated" };
   }
-  if (opts.beforeDispatch)
-    await opts.beforeDispatch();
   const markerId = commentOnWithId(opts.repo, opts.parent, `${AGGREGATED_TAG.write(opts.closedNum)}
 Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
   if (markerId === null) {
@@ -8035,6 +8044,59 @@ function closeRequestComment(request) {
 ${body}` : head;
 }
 
+// src/adapters/github/sub-issue-report.ts
+function subIssueReportBody(report) {
+  const said = withoutCommands(withoutTags(report.report.trim()));
+  const lines = [
+    LLM_CONTEXT_TAG.write("include"),
+    "<details><summary>Report</summary>",
+    "",
+    `**Sub-issue #${report.child}**`,
+    "",
+    ...said === "" ? ["Its closing run wrote no summary."] : [said],
+    ""
+  ];
+  if (report.pullRequests === undefined) {
+    lines.push("Its pull requests could not be read.");
+  } else if (report.pullRequests.length === 0) {
+    lines.push("No pull requests are linked to it.");
+  } else {
+    lines.push("Linked pull requests:", ...report.pullRequests.map((pr) => `- #${pr.number} ${pr.title} (${pr.state})`));
+  }
+  lines.push("", "</details>");
+  return lines.join(`
+`);
+}
+function reportSubIssueToParent(repo, child, report) {
+  const links = issueLinks(repo, child);
+  if (links.unavailable) {
+    console.error(`[atomaton-report] WARN could not read #${child}'s parent, so nothing was posted there: ${links.unavailable}`);
+    return false;
+  }
+  const parent = links.parent?.number ?? 0;
+  if (parent === 0)
+    return false;
+  const body = subIssueReportBody({ child, report, pullRequests: links.pullRequests });
+  const { code, stdout, stderr } = gh("issue", "comment", String(parent), "--repo", repo, "--body", body);
+  if (code !== 0) {
+    console.error(`[atomaton-report] WARN could not post #${child}'s report on #${parent}: ${stderr || stdout}`);
+    return false;
+  }
+  return true;
+}
+function withoutCommands(text) {
+  const commandLines = new Set(commandLinesIn(text));
+  if (commandLines.size === 0)
+    return text;
+  return text.split(`
+`).map((line) => commandLines.has(line.trim()) ? defuseCommandStart(line) : line).join(`
+`);
+}
+function defuseCommandStart(line) {
+  const at = line.search(/[<\/]/);
+  return at < 0 ? line : `${line.slice(0, at)}\\${line.slice(at)}`;
+}
+
 // src/entrypoints/tools/lib/conclude_issue.ts
 function mustSucceed(result, what) {
   if (result.code === 0)
@@ -8068,6 +8130,9 @@ ${summary}`;
   mustSucceed(posted, `comment on issue #${issue}`);
   mustSucceed(gh("issue", "close", String(issue), "--repo", repo), `close issue #${issue}`);
   console.error(`closed: issue=#${issue} (bot-authored)`);
+  reportSubIssueToParent(repo, issue, [reason, summary].filter(Boolean).join(`
+
+`));
   const aggregation = await dispatchOrchestratorIfSubIssueReady(repo, issue);
   console.error(describeGateResult(aggregation, issue));
   return { outcome: "closed", aggregation, commentId: commentIdFromUrl(posted.stdout) };
@@ -19280,7 +19345,7 @@ async function handleRequestCloseIssue(args) {
     text: [
       concluded,
       aggregation ? describeGateResult(aggregation, issueNumber) : "",
-      stalled ? "The parent was not re-invoked, and that is not yours to fix from here: the " + "parent's thread is not yours to comment on, and this issue's own report is " + "already posted. The reason is in the run log. End your turn without repeating it." : "Nothing else is yours to do here."
+      stalled ? "The parent was not re-invoked, and that is not yours to fix from here: what you found is " + "already on the parent's thread as a report, and this issue's own report is posted. The reason " + "is in the run log. End your turn without repeating it." : "Nothing else is yours to do here."
     ].filter(Boolean).join(" "),
     meta: ends ? { session_ends: true } : {}
   };

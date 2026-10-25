@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.44",
+  "version": "v0.21.45",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -76,6 +76,7 @@
     ".github/atomaton-runtime/tools/mcp/files.ts",
     ".github/atomaton-runtime/tools/mcp/github.ts",
     ".github/atomaton-runtime/tools/mcp/search.ts",
+    ".github/atomaton-runtime/tools/mcp/session.ts",
     ".github/atomaton-runtime/tools/mcp/shell.ts",
     ".github/atomaton-runtime/tools/mcp/web.ts",
     ".github/atomaton-runtime/tools/packages.json",

@@ -87,9 +87,6 @@ function graphqlResult({ code, stdout, stderr }) {
 function ghGraphqlRead(query, variables = {}) {
   return graphqlResult(ghRead(...graphqlArgs(query, variables)));
 }
-function gitRun(...args) {
-  return run(["git", ...args]);
-}
 function splitConcatenatedJson(text) {
   const results = [];
   let depth = 0;
@@ -124,20 +121,6 @@ function splitConcatenatedJson(text) {
     }
   }
   return results;
-}
-function ghPaginated(...args) {
-  const { code, stdout, stderr } = gh(...args, "--paginate");
-  if (code !== 0) {
-    throw new Error(`gh ${args.join(" ")} --paginate: ${stderr || stdout}`);
-  }
-  if (!stdout.trim())
-    return [];
-  const flat = [];
-  for (const page of splitConcatenatedJson(stdout)) {
-    if (Array.isArray(page))
-      flat.push(...page);
-  }
-  return flat;
 }
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
@@ -705,6 +688,9 @@ function listComments(repo, number) {
   }
   return flat;
 }
+function commentBodies(repo, number) {
+  return listComments(repo, number).map((comment) => comment.body ?? "");
+}
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
@@ -1174,7 +1160,7 @@ function mostRecentAgent(bodies) {
 }
 function mostRecentAgentOn(repo, number) {
   try {
-    return mostRecentAgent(ghPaginated("api", `repos/${repo}/issues/${number}/comments`, "--jq", "[.[].body]"));
+    return mostRecentAgent(commentBodies(repo, number));
   } catch {
     return "";
   }
@@ -1244,18 +1230,17 @@ ${opts.progressMessage(remaining)}`);
     }
     return { kind: "waiting", remaining };
   }
-  const { code: commentsCode, stdout: commentsOut } = gh("api", `repos/${opts.repo}/issues/${opts.parent}/comments`, "--paginate", "--jq", "[.[].body]");
-  if (commentsCode !== 0) {
+  let markerAlreadyWritten;
+  try {
+    markerAlreadyWritten = commentBodies(opts.repo, opts.parent).some((body) => AGGREGATED_TAG.readProse(body) === opts.closedNum);
+  } catch {
     const why = `could not read #${opts.parent}'s comments, so this cannot tell whether the aggregation already ran`;
     console.error(`${why}; not dispatching`);
     return withNotice(opts, { kind: "undetermined", why });
   }
-  const markerAlreadyWritten = splitConcatenatedJson(commentsOut).flatMap((page) => Array.isArray(page) ? page : []).some((entry) => typeof entry === "string" && AGGREGATED_TAG.readProse(entry) === opts.closedNum);
   if (markerAlreadyWritten) {
     return { kind: "already-aggregated" };
   }
-  if (opts.beforeDispatch)
-    await opts.beforeDispatch();
   const markerId = commentOnWithId(opts.repo, opts.parent, `${AGGREGATED_TAG.write(opts.closedNum)}
 Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
   if (markerId === null) {
@@ -1304,165 +1289,8 @@ function withNotice(opts, result) {
   return result;
 }
 
-// src/adapters/atoma/inject-sub-results.ts
-function findLastToolIndex(messages) {
-  for (let i = messages.length - 1;i >= 0; i--) {
-    if (messages[i]?.role === "tool")
-      return i;
-  }
-  return null;
-}
-function gatherSubResults(repo, subIssues) {
-  const lines = ["All sub-issues have been completed.", "", "## Sub-issue Results", ""];
-  for (const num of subIssues) {
-    let title = "Unknown";
-    let state = "could not be read";
-    try {
-      const { code, stdout } = gh("issue", "view", String(num), "--repo", repo, "--json", "title,state,closedAt");
-      if (code === 0 && stdout) {
-        const info = JSON.parse(stdout);
-        title = info.title ?? "Unknown";
-        state = info.state ?? "could not be read";
-      }
-    } catch {}
-    const linkedPrs = [];
-    let prLookupFailed = false;
-    for (const state_ of ["merged", "open"]) {
-      try {
-        const { code, stdout } = gh("pr", "list", "--repo", repo, "--state", state_, "--search", `#${num} in:body`, "--json", "number,title,url");
-        if (code === 0 && stdout) {
-          const prs = JSON.parse(stdout);
-          for (const pr of prs) {
-            linkedPrs.push(`- PR #${pr.number}: ${pr.title} (${pr.url})`);
-          }
-        } else {
-          prLookupFailed = true;
-        }
-      } catch {
-        prLookupFailed = true;
-      }
-    }
-    lines.push(`### #${num}: ${title}`);
-    lines.push(`Status: ${state}`);
-    if (linkedPrs.length) {
-      lines.push("Linked PRs:");
-      lines.push(...linkedPrs);
-    } else if (prLookupFailed) {
-      lines.push("Linked PRs could not be read.");
-    } else {
-      lines.push("No linked PRs found.");
-    }
-    lines.push("");
-  }
-  lines.push("---");
-  lines.push("All sub-issues are complete. Please review the results and aggregate them into a final summary.");
-  return lines.join(`
-`);
-}
-function injectSummary(session, summary) {
-  const messages = session.messages ?? [];
-  const lastToolIdx = findLastToolIndex(messages);
-  if (lastToolIdx === null) {
-    console.error("No tool message found in session. Appending as user message.");
-    messages.push({ role: "user", content: summary });
-  } else {
-    messages[lastToolIdx].content = summary;
-  }
-  session.messages = messages;
-  return session;
-}
-
-// src/entrypoints/machinery/lib/atomaton-data.ts
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { dirname, join } from "path";
-
-// src/domain/machinery/data-layout.ts
-var SESSIONS_TREE = "sessions/";
-function sessionDir(type, number) {
-  return `${SESSIONS_TREE}${type}-${number}`;
-}
-
-// src/entrypoints/machinery/lib/atomaton-data.ts
-var DATA_BRANCH = "atomaton-data";
-function sessionTargetPath(type, number, agent) {
-  return `${sessionDir(type, number)}/${agent}.json`;
-}
-function restoreSession(targetPath) {
-  if (gitRun("fetch", "origin", DATA_BRANCH, "--depth=1").code !== 0) {
-    return;
-  }
-  if (gitRun("cat-file", "-e", `origin/${DATA_BRANCH}:${targetPath}`).code !== 0) {
-    return;
-  }
-  const shown = gitRun("show", `origin/${DATA_BRANCH}:${targetPath}`);
-  return shown.code === 0 ? shown.stdout : undefined;
-}
-function gitIn(cwd, ...args) {
-  const proc = Bun.spawnSync({ cmd: ["git", ...args], cwd, stdout: "pipe", stderr: "pipe" });
-  return { code: proc.exitCode ?? 1, stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "" };
-}
-function saveSession(targetPath, content, commitMessage) {
-  if (gitRun("ls-remote", "--exit-code", "origin", DATA_BRANCH).code !== 0) {
-    gitRun("config", "user.email", "action@github.com");
-    gitRun("config", "user.name", "GitHub Actions");
-    const commit = gitRun("commit-tree", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "-m", `init: ${DATA_BRANCH} session store`).stdout;
-    gitRun("push", "origin", `${commit}:refs/heads/${DATA_BRANCH}`);
-  }
-  gitRun("fetch", "origin", DATA_BRANCH);
-  const worktreeDir = mkdtempSync(join(tmpdir(), "atomaton-data-wt-"));
-  gitRun("worktree", "add", worktreeDir, `origin/${DATA_BRANCH}`);
-  let saved = false;
-  try {
-    gitIn(worktreeDir, "config", "user.email", "action@github.com");
-    gitIn(worktreeDir, "config", "user.name", "GitHub Actions");
-    for (let attempt = 1;attempt <= 5; attempt++) {
-      gitIn(worktreeDir, "fetch", "origin", DATA_BRANCH);
-      gitIn(worktreeDir, "reset", "--hard", `origin/${DATA_BRANCH}`);
-      const fullTarget = join(worktreeDir, targetPath);
-      mkdirSync(dirname(fullTarget), { recursive: true });
-      writeFileSync(fullTarget, content);
-      gitIn(worktreeDir, "add", targetPath);
-      if (gitIn(worktreeDir, "diff", "--cached", "--quiet").code === 0) {
-        saved = true;
-        break;
-      }
-      gitIn(worktreeDir, "commit", "-m", commitMessage);
-      if (gitIn(worktreeDir, "push", "origin", `HEAD:${DATA_BRANCH}`).code === 0) {
-        saved = true;
-        break;
-      }
-      console.error(`Push attempt ${attempt} failed (concurrent push) -- resetting and retrying with a fresh pull...`);
-      Bun.sleepSync(attempt * 2000);
-    }
-  } finally {
-    gitRun("worktree", "remove", "--force", worktreeDir);
-    rmSync(worktreeDir, { recursive: true, force: true });
-  }
-  return saved;
-}
-
 // src/entrypoints/machinery/aggregate_sub_issues.ts
 var ref = defineScript(import.meta.url);
-function linkedSubIssues(repo, parent) {
-  const links = issueLinks(repo, parent);
-  if (links.unavailable) {
-    throw new Error(`could not list sub-issues of #${parent}: ${links.unavailable}`);
-  }
-  return links.children.map((child) => child.number);
-}
-function injectResultsIntoParentSession(repo, parent, agent) {
-  const subIssues = linkedSubIssues(repo, parent);
-  console.error(`Sub-issues of #${parent}: ${subIssues.join(", ") || "(none)"}`);
-  const sessionPath = sessionTargetPath("issue", parent, agent);
-  const existing = restoreSession(sessionPath);
-  const session = existing ? JSON.parse(existing) : { messages: [] };
-  const updated = injectSummary(session, gatherSubResults(repo, subIssues));
-  const message = `atomaton: inject sub-issue results for parent #${parent}`;
-  if (!saveSession(sessionPath, JSON.stringify(updated, null, 2), message)) {
-    console.error(`::warning::Failed to save session to atomaton-data:${sessionPath} after all retries.`);
-  }
-}
 async function main() {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
@@ -1485,8 +1313,7 @@ async function main() {
     parent: Number(parent),
     closedNum: Number(closedNum),
     exclude: true,
-    progressMessage: (remaining) => `Atomaton: Sub-task #${closedNum} completed. ${remaining} sub-task(s) still in progress.`,
-    beforeDispatch: () => injectResultsIntoParentSession(repo, Number(parent), mostRecentAgentOn(repo, Number(parent)))
+    progressMessage: (remaining) => `Atomaton: Sub-task #${closedNum} completed. ${remaining} sub-task(s) still in progress.`
   });
   console.error(describeGateResult(result, Number(closedNum), Number(parent)));
   if (needsAttention(result))

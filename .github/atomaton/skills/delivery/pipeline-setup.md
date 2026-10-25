@@ -13,14 +13,22 @@ does not work.
 
 ## You cannot write a workflow. You do not need to.
 
-`GITHUB_TOKEN` is refused on `.github/workflows/**`. Not by a rule someone set —
-by identity, on every path, on every branch, through `git push` and through the
-API alike. There is no permission that grants it. Do not try, and do not ask a
-person to paste a workflow file for you.
+`GITHUB_TOKEN` is refused a write under `.github/workflows/**`. Measured where this
+was written: by identity rather than by a rule someone set, on every path and
+branch tried, through `git push` and through the API alike, and with no permission
+in the token's own set that grants it.
 
-Everything a pipeline actually *does* is a command, and commands go in
-`.github/atomaton/config.yaml`, which you can write. Two workflows that already ship
-run them.
+**What would show this has changed is a workflow write that is ACCEPTED**, or a
+refusal whose own words name a permission the token could be granted. Neither is
+an answer you are hoping for, so this is not a question to put to the endpoint:
+make the change the paragraph implies. Everything a pipeline actually *does* is a
+command, and a command goes in `.github/atomaton/config.yaml`, which you can write
+— two workflows that already ship run them. The expected refusal is confirmation
+rather than news: if one does arrive, quote its own words in your report and stop.
+Do not retry it as another token, another request shape or another branch, and do
+not ask a person to paste a workflow file in its place — a pipeline outside the
+reviewed path is what the refusal exists to prevent, and the file you can write
+already does the job.
 
 ## The environment
 

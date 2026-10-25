@@ -140,6 +140,31 @@ function parentIssueOf(repo, issue) {
   }
 }
 
+// src/adapters/github/pull-request.ts
+function whyNot(what, result) {
+  return `${what}: ${result.stderr || result.stdout || `gh exited ${result.code}`}`;
+}
+function readPullRequestObject(repo, number) {
+  const what = `gh api repos/${repo}/pulls/${number}`;
+  const result = ghRead("api", `repos/${repo}/pulls/${number}`);
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  if (!result.stdout.trim())
+    return { known: false, why: `${what}: gh printed nothing` };
+  try {
+    return { known: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { known: false, why: `${what}: the answer was not JSON` };
+  }
+}
+function readPullRequestDiff(repo, number) {
+  const what = `gh api repos/${repo}/pulls/${number} (diff)`;
+  const result = ghRead("api", `repos/${repo}/pulls/${number}`, "-H", "Accept: application/vnd.github.v3.diff");
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  return { known: true, diff: result.stdout };
+}
+
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
@@ -442,6 +467,18 @@ function keptCommentIds(comments) {
   const entries = comments.map((comment) => ({ id: comment.id, ...entryOf(comment) }));
   return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
 }
+function listComments(repo, number) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const pages = splitConcatenatedJson(listed.stdout);
+  const flat = [];
+  for (const page of pages) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
 
 // src/domain/work/node-type.ts
 function isNodeType(value) {
@@ -490,6 +527,14 @@ function contextList(what, ...args) {
     return [];
   }
 }
+function threadComments(what, repo, number) {
+  try {
+    return listComments(repo, number);
+  } catch (error) {
+    console.error(`::warning::Could not fetch ${what}: ${error.message}. Continuing without it \u2014 the run has less context than usual.`);
+    return [];
+  }
+}
 function requiredJson(what, ...args) {
   const { code, stdout, stderr } = ghRead(...args);
   if (code !== 0) {
@@ -514,20 +559,24 @@ ${issue.body ?? ""}`,
     author_type: issue.user.type,
     created_at: issue.created_at
   };
-  const comments = contextList(`comments on #${issueNum}`, "api", `repos/${owner}/${repo}/issues/${issueNum}/comments`);
+  const comments = threadComments(`comments on #${issueNum}`, `${owner}/${repo}`, issueNum);
   const kept = keptCommentIds(comments);
   const commentEvents = comments.filter((c) => kept.has(c.id)).map((c) => ({
     id: c.id,
     event_type: commentType,
-    content: c.body,
-    author: c.user.login,
-    author_type: c.user.type,
-    created_at: c.created_at
+    content: c.body ?? "",
+    author: c.user?.login ?? "",
+    author_type: c.user?.type,
+    created_at: c.created_at ?? ""
   }));
   return [openedEvent, ...commentEvents];
 }
 function fetchPrEvents(owner, repo, number, maxDiffChars) {
-  const pr = requiredJson(`pull request #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}`);
+  const read = readPullRequestObject(`${owner}/${repo}`, number);
+  if (!read.known) {
+    throw new Error(`Could not fetch pull request #${number}, which a run cannot proceed without: ${read.why}`);
+  }
+  const pr = read.value;
   const prBody = pr.body ?? "";
   const parentIssue = PARENT_ISSUE_TAG.readProse(prBody);
   const headSha = pr.head.sha.slice(0, 8);
@@ -545,8 +594,8 @@ function fetchPrEvents(owner, repo, number, maxDiffChars) {
     author_type: pr.user.type,
     created_at: pr.created_at
   });
-  const diffResult = gh("api", `repos/${owner}/${repo}/pulls/${number}`, "-H", "Accept: application/vnd.github.v3.diff");
-  const diff = diffResult.code === 0 ? diffResult.stdout : "";
+  const diffRead = readPullRequestDiff(`${owner}/${repo}`, number);
+  const diff = diffRead.known ? diffRead.diff : "";
   if (diff) {
     const truncated = diff.slice(0, maxDiffChars);
     let diffContent = "```diff\n" + truncated + "\n```";
@@ -563,15 +612,15 @@ function fetchPrEvents(owner, repo, number, maxDiffChars) {
       created_at: pr.updated_at
     });
   }
-  const prComments = contextList(`comments on #${number}`, "api", `repos/${owner}/${repo}/issues/${number}/comments`);
+  const prComments = threadComments(`comments on #${number}`, `${owner}/${repo}`, number);
   const keptPrComments = keptCommentIds(prComments);
   events.push(...prComments.filter((comment) => keptPrComments.has(comment.id)).map((comment) => ({
     id: comment.id,
     event_type: "pr_comment",
-    content: comment.body,
-    author: comment.user.login,
-    author_type: comment.user.type,
-    created_at: comment.created_at
+    content: comment.body ?? "",
+    author: comment.user?.login ?? "",
+    author_type: comment.user?.type,
+    created_at: comment.created_at ?? ""
   })));
   const reviews = contextList(`reviews on #${number}`, "api", `repos/${owner}/${repo}/pulls/${number}/reviews`);
   events.push(...reviews.filter((review) => review.submitted_at != null).map((review) => ({

@@ -24,6 +24,26 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function ghRead(...args) {
+  let result = gh(...args);
+  for (const delay of [2000, 6000]) {
+    if (result.code === 0 || !looksTransient(result))
+      return result;
+    console.error(`::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`);
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+function looksTransient(result) {
+  const text = `${result.stderr} ${result.stdout}`;
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
+    return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
+function gitRun(...args) {
+  return run(["git", ...args]);
+}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -41,6 +61,10 @@ var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 // src/domain/work/mention.ts
 var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
 var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
+function mentionPrefix(login) {
+  const name = (login ?? "").trim();
+  return name ? `@${name} ` : "";
+}
 
 // src/adapters/github/tags.ts
 var TAG_PREFIX = `atomaton:`;
@@ -355,6 +379,27 @@ var endingWalkReaders = {
   claim: (body) => TOOK_TAG.readProse(body),
   ended: (body) => ENDED_TAG.readProse(body)
 };
+
+// src/adapters/github/branch-reads.ts
+function log(message) {
+  console.error(`[atomaton-branch-reads] ${message}`);
+}
+function readOriginBranch(branch) {
+  const { code, stdout, stderr } = gitRun("ls-remote", "--heads", "origin", `refs/heads/${branch}`);
+  if (code !== 0) {
+    const why = `could not read '${branch}' from origin: ${stderr || stdout || `git ls-remote exited ${code}`}`;
+    log(`WARN ${why}`);
+    return { known: false, why };
+  }
+  const wanted = `refs/heads/${branch}`;
+  for (const line of stdout.split(`
+`)) {
+    const [sha, ref] = line.trim().split(/\s+/);
+    if (ref === wanted && sha)
+      return { known: true, present: true, sha };
+  }
+  return { known: true, present: false };
+}
 // src/adapters/github/branch-placement.ts
 var NO_BRANCH_MESSAGE = "This run is on a detached checkout with no local branch, so there is no branch to push: " + "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 
@@ -427,7 +472,7 @@ var DEPLOY_ARMS = {
 var TRIGGERS = Object.keys(DEPLOY_ARMS);
 
 // src/adapters/actions/dispatch-targets.ts
-function log(message) {
+function log2(message) {
   console.error(`[atomaton-github] ${message}`);
 }
 function dispatchPrValidation(repo, prNumber, branch, options = {}) {
@@ -442,12 +487,110 @@ function dispatchPrValidation(repo, prNumber, branch, options = {}) {
     `asked_by_person=${options.askedByPerson === true ? "true" : "false"}`,
     "-f",
     `ask=${options.ask ?? ""}`
-  ], log);
+  ], log2);
+}
+
+// src/domain/work/pr-head-branch.ts
+function describePrHeadRefusal(number, refusal) {
+  switch (refusal.kind) {
+    case "unreadable":
+      return `pull request #${number} could not be read: ${refusal.detail}`;
+    case "fork":
+      return `pull request #${number} comes from a fork, so its head branch is a branch of ` + "the fork rather than of this repository";
+    case "no-branch":
+      return `pull request #${number} names no head branch`;
+    case "not-a-branch-name":
+      return `pull request #${number} names '${refusal.branch}', which is not a branch name`;
+    case "not-on-origin":
+      return `pull request #${number}'s head branch '${refusal.branch}' is not a branch of this repository`;
+    case "origin-unreadable":
+      return `pull request #${number}'s head branch could not be checked against this repository: ${refusal.detail}`;
+  }
+}
+function validationNotDispatchedNotice(commenter, number, refusal) {
+  return [
+    `${mentionPrefix(commenter)}Atomaton: the run you asked for on #${number} was not started \u2014 ${describePrHeadRefusal(number, refusal)}.`,
+    "",
+    advice(number, refusal)
+  ].join(`
+`);
+}
+function advice(number, refusal) {
+  switch (refusal.kind) {
+    case "fork":
+      return "Validation runs CI against a branch of this repository, which a fork's branch is not. Push the branch into this repository and comment again. Nothing was dispatched.";
+    case "unreadable":
+      return `Comment again once #${number} can be read. Nothing was dispatched.`;
+    case "no-branch":
+    case "not-a-branch-name":
+    case "not-on-origin":
+      return "Comment again once the pull request has a head branch in this repository. Nothing was dispatched.";
+    case "origin-unreadable":
+      return "Comment again once this repository's branches can be read. Nothing was dispatched.";
+  }
 }
 
 // src/entrypoints/machinery/lib/flags.ts
 function isTrue(value) {
   return value === "true";
+}
+
+// src/adapters/github/pull-request.ts
+function viewArgs(repo, number, fields) {
+  const json = typeof fields === "string" ? fields : fields.join(",");
+  return ["pr", "view", String(number), "--repo", repo, "--json", json];
+}
+function whyNot(what, result) {
+  return `${what}: ${result.stderr || result.stdout || `gh exited ${result.code}`}`;
+}
+function readPullRequest(repo, number, fields) {
+  const what = `gh pr view ${number} --repo ${repo}`;
+  const result = ghRead(...viewArgs(repo, number, fields));
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  if (!result.stdout.trim())
+    return { known: false, why: `${what}: gh printed nothing` };
+  try {
+    return { known: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { known: false, why: `${what}: the answer was not JSON` };
+  }
+}
+
+// src/entrypoints/machinery/lib/pr-head-branch.ts
+var PR_HEAD_FIELDS = "headRefName,isCrossRepository";
+function prHead(pr) {
+  return {
+    branch: typeof pr?.headRefName === "string" ? pr.headRefName.trim() : "",
+    crossRepository: pr?.isCrossRepository === true
+  };
+}
+function isBranchName(name) {
+  if (!name)
+    return false;
+  return gitRun("check-ref-format", "--branch", name).code === 0;
+}
+function resolvePrHeadBranch(repo, number) {
+  const read = readPullRequest(repo, number, PR_HEAD_FIELDS);
+  if (!read.known) {
+    return { branch: "", refusal: { kind: "unreadable", detail: read.why } };
+  }
+  const head = prHead(read.value);
+  if (head.crossRepository)
+    return { branch: "", refusal: { kind: "fork" } };
+  if (!head.branch)
+    return { branch: "", refusal: { kind: "no-branch" } };
+  if (!isBranchName(head.branch)) {
+    return { branch: "", refusal: { kind: "not-a-branch-name", branch: head.branch } };
+  }
+  const onOrigin = readOriginBranch(head.branch);
+  if (!onOrigin.known) {
+    return { branch: "", refusal: { kind: "origin-unreadable", detail: onOrigin.why } };
+  }
+  if (!onOrigin.present) {
+    return { branch: "", refusal: { kind: "not-on-origin", branch: head.branch } };
+  }
+  return { branch: head.branch, refusal: null };
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -467,16 +610,17 @@ function main() {
       number: { type: "string" },
       branch: { type: "string" },
       "asked-by-person": { type: "string" },
+      commenter: { type: "string" },
       ask: { type: "string" }
     }
   });
   const repo = values.repo ?? "";
   const number = values.number ?? "";
-  const branch = values.branch ?? "";
-  if (!repo || !number || !branch) {
-    console.error("usage: dispatch_pr_validation.ts --repo OWNER/REPO --number N --branch B");
+  if (!repo || !number) {
+    console.error("usage: dispatch_pr_validation.ts --repo OWNER/REPO --number N [--branch B]");
     process.exit(2);
   }
+  const branch = (values.branch ?? "").trim() || resolvedBranch(repo, number, values.commenter ?? "");
   const dispatched = dispatchPrValidation(repo, Number(number), branch, {
     askedByPerson: isTrue(values["asked-by-person"]),
     ask: (values.ask ?? "").trim() || undefined
@@ -486,6 +630,19 @@ function main() {
     process.exit(1);
   }
   console.error(`dispatched validation for PR #${number}`);
+}
+function resolvedBranch(repo, number, commenter) {
+  const { branch, refusal } = resolvePrHeadBranch(repo, Number(number));
+  if (!refusal)
+    return branch;
+  const notice = validationNotDispatchedNotice(commenter, Number(number), refusal);
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", [LLM_CONTEXT_TAG.write("exclude"), notice].join(`
+`));
+  if (posted.code !== 0) {
+    console.error(`Warning: could not post the refusal on #${number}: ${posted.stderr || posted.stdout}`);
+  }
+  console.error(`::error::${describePrHeadRefusal(Number(number), refusal)}; nothing was dispatched for PR #${number}`);
+  process.exit(1);
 }
 if (import.meta.main)
   main();

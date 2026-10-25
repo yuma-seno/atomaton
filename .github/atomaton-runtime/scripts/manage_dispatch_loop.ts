@@ -213,6 +213,58 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function ghRead(...args) {
+  let result = gh(...args);
+  for (const delay of [2000, 6000]) {
+    if (result.code === 0 || !looksTransient(result))
+      return result;
+    console.error(`::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`);
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+function looksTransient(result) {
+  const text = `${result.stderr} ${result.stdout}`;
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
+    return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
+function splitConcatenatedJson(text) {
+  const results = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0;i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped)
+        escaped = false;
+      else if (c === "\\")
+        escaped = true;
+      else if (c === '"')
+        inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === "{" || c === "[") {
+      if (depth === 0)
+        start = i;
+      depth++;
+    } else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        results.push(JSON.parse(text.slice(start, i + 1)));
+        start = -1;
+      }
+    }
+  }
+  return results;
+}
 
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
@@ -340,6 +392,128 @@ function fenceSegments(text) {
   return segments;
 }
 
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined)
+      return parsed;
+  }
+  return NOTHING;
+}
+function parseCommandLine(rawLine) {
+  const line = rawLine.trim();
+  const commandMatch = COMMAND_RE.exec(line);
+  if (commandMatch) {
+    const name = commandMatch[1];
+    const modifier = commandMatch[2]?.trim() ?? "";
+    if (isControlCommand(name)) {
+      if (!modifier)
+        return { ...NOTHING, control: name };
+      return {
+        ...NOTHING,
+        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+      };
+    }
+    if (!modifier)
+      return { ...NOTHING, agent: name };
+    if (modifier === "recover")
+      return { ...NOTHING, agent: name, sessionMode: "recover" };
+    return {
+      ...NOTHING,
+      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+    };
+  }
+  const dispatchMatch = DISPATCH_RE.exec(line);
+  if (dispatchMatch)
+    return { ...NOTHING, agent: dispatchMatch[1] };
+  return;
+}
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function parseMangledCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "")
+        return parsed;
+    }
+  }
+  return NOTHING;
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  ending: (body) => {
+    const ended = ENDED_TAG.readProse(body)?.verb;
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
+      return "returned";
+    return "";
+  },
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
+  claim: (body) => TOOK_TAG.readProse(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.readProse(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var askReaders = {
+  ...readers,
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var endingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body)
+};
+function listComments(repo, number) {
+  const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
+  if (listed.code !== 0)
+    throw new Error(`could not read comments on #${number}: ${listed.stderr || listed.stdout}`);
+  const pages = splitConcatenatedJson(listed.stdout);
+  const flat = [];
+  for (const page of pages) {
+    if (Array.isArray(page))
+      flat.push(...page);
+  }
+  return flat;
+}
+
 // src/entrypoints/machinery/lib/script-ref.ts
 import { basename } from "path";
 import { fileURLToPath } from "url";
@@ -350,21 +524,14 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/manage_dispatch_loop.ts
 var ref = defineScript(import.meta.url);
 function readComments(repo, number) {
-  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments?per_page=100`, "--paginate", "--jq", ".[] | {authorType: .user.type, body: .body}");
-  if (code)
+  try {
+    return {
+      comments: listComments(repo, number).map((comment) => ({ authorType: comment.user?.type, body: comment.body ?? "" })),
+      read: true
+    };
+  } catch {
     return { comments: [], read: false };
-  const comments = [];
-  for (const line of stdout.split(`
-`)) {
-    if (!line.trim())
-      continue;
-    try {
-      comments.push(JSON.parse(line));
-    } catch {
-      console.error(`  Skipping an unparseable comment line`);
-    }
   }
-  return { comments, read: true };
 }
 function main() {
   const { values } = parseArgs({
