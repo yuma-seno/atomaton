@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #385: docs: how-it-works/the-branch-a-run-commits-to predates resolved_paths\n\nFound while reviewing #384 (the fix for #381, which makes conflict resolution a declaration).\n\n`docs/work/how-it-works/the-branch-a-run-commits-to.md:36-38` still describes the old way a\nconflict is closed:\n\n> A conflict stops it — the markers stay in the worktree and nothing is committed — and the run\n> resolves them and calls `commit_and_push` to close the merge.\n\nSince #384 that is no longer sufficient: `commit_and_push` asks git's index which paths are\nunmerged and refuses until each is named in `resolved_paths`, so editing a file and calling the\ntool is refused once (the refusal names the parameter). And a conflicted binary never holds\nmarkers at all — `:23-24` of the same page, \"A file both sides changed is a conflict in the\nworktree\", is true for text only; a binary's two sides are index stages 2 and 3, and the worktree\ncopy is the other side's bytes.\n\nThe page is hand-written (nothing generates `docs/`), and code comments in `src/domain/work/turn.ts`\nand `src/entrypoints/machinery/decide_turn_ending.ts` treat this directory as the normative\ndescription of how a run behaves, so leaving it wrong is not only cosmetic.\n\nFix: one clause in the merge bullet (`...resolves them and calls commit_and_push with\nresolved_paths naming each path`), and one sentence in the stacked-branch bullet saying a text\nconflict shows markers while a binary does not, both sides being in the index. No code reads this\npage; no test covers it.\n\nFiled rather than fixed in #384 because the plan agreed on #381 named only the tool descriptions\nand the engineer definition for the wording change, and a reviewer blocking a merged-quality fix\non a doc clause would be broadening that scope.\n",
+      "content": "Issue #385: docs: how-it-works/the-branch-a-run-commits-to predates resolved_paths\n**Labels:** atomaton/in-progress\n\nFound while reviewing #384 (the fix for #381, which makes conflict resolution a declaration).\n\n`docs/work/how-it-works/the-branch-a-run-commits-to.md:36-38` still describes the old way a\nconflict is closed:\n\n> A conflict stops it — the markers stay in the worktree and nothing is committed — and the run\n> resolves them and calls `commit_and_push` to close the merge.\n\nSince #384 that is no longer sufficient: `commit_and_push` asks git's index which paths are\nunmerged and refuses until each is named in `resolved_paths`, so editing a file and calling the\ntool is refused once (the refusal names the parameter). And a conflicted binary never holds\nmarkers at all — `:23-24` of the same page, \"A file both sides changed is a conflict in the\nworktree\", is true for text only; a binary's two sides are index stages 2 and 3, and the worktree\ncopy is the other side's bytes.\n\nThe page is hand-written (nothing generates `docs/`), and code comments in `src/domain/work/turn.ts`\nand `src/entrypoints/machinery/decide_turn_ending.ts` treat this directory as the normative\ndescription of how a run behaves, so leaving it wrong is not only cosmetic.\n\nFix: one clause in the merge bullet (`...resolves them and calls commit_and_push with\nresolved_paths naming each path`), and one sentence in the stacked-branch bullet saying a text\nconflict shows markers while a binary does not, both sides being in the index. No code reads this\npage; no test covers it.\n\nFiled rather than fixed in #384 because the plan agreed on #381 named only the tool descriptions\nand the engineer definition for the wording change, and a reviewer blocking a merged-quality fix\non a doc clause would be broadening that scope.\n",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-10-25T11:46:37Z",
@@ -609,13 +609,175 @@
       "role": "tool",
       "content": "{\"number\":386,\"url\":\"https://github.com/yuma-seno/atomaton/pull/386\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_00_483o9z62k8qu5370hjhblnkh"
+    },
+    {
+      "role": "user",
+      "content": "PR #386: docs: describe conflict resolution by declaration in the branch page\n**Labels:** atomaton/in-progress\n**Linked Issue:** #385\n\n/reviewer\n\nPart of #385\n`docs/work/how-it-works/the-branch-a-run-commits-to.md` no longer describes the pre-#384 way a conflict is closed, and no longer promises conflict markers for a path that cannot hold them.\n\n## Behaviour\n\n- The merge bullet no longer says a conflict leaves markers and is closed by calling `commit_and_push` alone. It says nothing is committed, both sides of each conflicted path stay in git's index, and `commit_and_push` closes the merge with `resolved_paths` naming each path — the parameter the tool now refuses without.\n- The stacked-branch bullet now says where both sides actually are: git's index, `git show :2:<path>` (already on the branch) and `git show :3:<path>` (this run's). A text file holds markers in the worktree and a binary does not, so the run writes the side it wants and names the path in `resolved_paths`. This is the case `src/adapters/github/branch-placement.ts:230` already documents when the stash application conflicts.\n- The merge bullet's \"the markers stay in the worktree\" was the same text-only claim; it is replaced by the index statement, and the marker/binary distinction now lives in the one place the page states it.\n\nThe page is hand-written — nothing generates `docs/` — and no code reads it, so the diff is only the two bullets.\n\n## Verification\n\n- `bun run src/entrypoints/machinery/scan_secrets.ts`, `bun run typecheck`, `bun run synth` — all exited 0 (the scanner warned it could not resolve the latest gitleaks release, as it does on this tree).\n- `bun run test` — `2122 pass, 0 fail`, 169 files.\n- `git status --short` after synth shows only the doc file; `dist/` is ignored and `.github/atomaton-release.json` was unchanged, so no generated output is in the commit.\n\nWording checked against the merged behaviour, not from memory: `unresolvedConflictRefusal` at `src/entrypoints/tools/mcp/github.ts:1286-1294`, `commitAndPush`'s refusal at `:1412-1434`, the stash-conflict error at `src/adapters/github/branch-placement.ts:224-232`, and the tool description at `:2225,2241`.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40192200411)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T12:17:31Z",
+        "event_type": "pr_opened",
+        "id": "pr-386",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T12:21:52Z",
+        "event_type": "issue_comment",
+        "id": 6397573023,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/docs/work/how-it-works/the-branch-a-run-commits-to.md b/docs/work/how-it-works/the-branch-a-run-commits-to.md\nindex be64ced..0dfddaa 100644\n--- a/docs/work/how-it-works/the-branch-a-run-commits-to.md\n+++ b/docs/work/how-it-works/the-branch-a-run-commits-to.md\n@@ -23,7 +23,11 @@\n   it. A file both sides changed is a conflict in the worktree, named, for the run\n   to resolve before it commits; it is not a checkout that refuses because the tree\n   is dirty, and no file the run did not touch keeps a base-branch version over the\n-  parent's.\n+  parent's. Both sides of a conflicted path are in git's index — `git show\n+  :2:<path>` is the version already on the branch, `git show :3:<path>` the one\n+  this run brings — and a text file holds git's markers in the worktree while a\n+  binary does not, so the run writes the side it wants into the file and names the\n+  path in `resolved_paths` on `commit_and_push`.\n - A node's base is exactly one branch: its parent's, or the base branch for a root\n   issue. When that branch moves ahead, the node brings it into its own branch with\n   `merge_base_into_branch`. The direction is always a pull — nothing writes to a\n@@ -34,8 +38,9 @@\n   its parent's newer commits — the one it did not have before this.\n - The base arrives as a merge commit, never as a rebase: the branch's own commits\n   keep their hashes, and the merge records where it came from. A conflict stops it\n-  — the markers stay in the worktree and nothing is committed — and the run\n-  resolves them and calls `commit_and_push` to close the merge. Which side wins is\n+  — nothing is committed, and both sides of each conflicted path stay in git's\n+  index — and the run resolves them and calls `commit_and_push` with\n+  `resolved_paths` naming each path to close the merge. Which side wins is\n   the agent's decision; a version in `package.json` is the case that shows why no\n   rule belongs there, since a machine choosing one could roll a release back\n   quietly.\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-25T12:22:06Z",
+        "event_type": "pr_diff",
+        "id": "pr-386-diff",
+        "layer": "github-context",
+        "sha": "6049457c",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The page now describes conflict resolution by declaration and no longer promises markers for a path that cannot hold them; I found no merge-blocking defect, and PR #386 is merged into `main`.\n\n**How I know**\n\n- The stacked-branch bullet now says both sides sit in git's index and that text holds markers while a binary does not: `docs/work/how-it-works/the-branch-a-run-commits-to.md:26-30`. The merge bullet now requires `resolved_paths`: `docs/work/how-it-works/the-branch-a-run-commits-to.md:40-43` — exactly the two edits #385 asked for.\n- That matches the code: `commit_and_push` reads the index and refuses any undeclared path (`src/entrypoints/tools/mcp/github.ts:1412-1434`), the refusal itself says `:2`/`:3` and the marker/binary split (`:1286-1294`), and the tool descriptions at `:2225` and `:2241` ship the same wording.\n- The doc's wording is not new invention: it matches the shipped engineer instruction at `src/content/agent-definitions/engineer.md:147`, and the stash-conflict error at `src/adapters/github/branch-placement.ts:223-232`.\n- No other page carries the old flow — a search for `commit_and_push`/`resolved_paths` under `docs/` returns only this page — and nothing under `src/` writes or generates `docs/`, so the hand-written page is the right source.\n- The diff is one file; `atomaton-check` completed `success`, and `check_merge_readiness` reported `ready: true` with `blockers: []`.\n\n<details><summary>Evidence I could not produce myself</summary>\n\nNo shell in this run, so I did not re-run `bun test`/`typecheck`/`synth`; the verification above is source reading plus the required check's `success` conclusion on the head commit.\n\n</details>\n\n**What happens next**\n\nThe merge handoff reported `parent_outcome: reinvoked` with `engineer` on #385. #385 was not auto-closed because the PR body says \"Part of #385\" rather than a closing keyword, so `engineer` is the run that should conclude #385 on the evidence that the fix is on `main`.\n\n\n---\n_Tokens: 380965 total (368882 prompt + 12083 completion, 315008 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/40192635329) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\n_Counted from the session: 2 refused or errored tool calls._",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T12:22:06Z",
+        "event_type": "pr_comment",
+        "id": 6397575290,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_nrsflly77bmd4dwcjwn98ux9",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && git branch --show-current && git log --oneline -3 && echo '=== merged page ===' && sed -n '19,46p' docs/work/how-it-works/the-branch-a-run-commits-to.md\"}"
+          }
+        },
+        {
+          "id": "call_01_ydfzzu9tg75zwdrqpqztxo6r",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\": 386}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179293095582300000000000000000000ffffc0a8a119a146bd",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The PR merged. I need to verify what merged satisfies issue #385, then call request_close_issue.\n\nLet me check the merged content on main and the issue's acceptance criteria. The issue asked for two changes. The diff shown matches. Let me verify main's file and the PR state, plus check runs maybe. Then request_close_issue.\n\nI should check the current repo state — the run's working tree: am I on main or the branch? The prompt says a run started again on the issue after merge. Let me inspect git status/log and the file on main.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"main\\nf0fc18a Merge pull request #386 from yuma-seno/atomaton/issue-385\\n=== merged page ===\\n- The run is checked out on the base branch, so it learns where its work goes only\\n  at the first commit — by which time the parent's branch may have moved in the\\n  same files. The work is carried across as a three-way merge: the changes are\\n  stashed, the branch is cut from the parent, and `git stash pop` applies them to\\n  it. A file both sides changed is a conflict in the worktree, named, for the run\\n  to resolve before it commits; it is not a checkout that refuses because the tree\\n  is dirty, and no file the run did not touch keeps a base-branch version over the\\n  parent's. Both sides of a conflicted path are in git's index — `git show\\n  :2:<path>` is the version already on the branch, `git show :3:<path>` the one\\n  this run brings — and a text file holds git's markers in the worktree while a\\n  binary does not, so the run writes the side it wants into the file and names the\\n  path in `resolved_paths` on `commit_and_push`.\\n- A node's base is exactly one branch: its parent's, or the base branch for a root\\n  issue. When that branch moves ahead, the node brings it into its own branch with\\n  `merge_base_into_branch`. The direction is always a pull — nothing writes to a\\n  child's or a sibling's branch and nothing cascades, so two siblings catching up\\n  with the same parent never touch each other's work, and there is no shared state\\n  to keep consistent. A pull request run brings in the base its own pull request\\n  aims at, which is the same branch. It is also the route a stacked child takes to\\n  its parent's newer commits — the one it did not have before this.\\n- The base arrives as a merge commit, never as a rebase: the branch's own commits\\n  keep their hashes, and the merge records where it came from. A conflict stops it\\n  — nothing is committed, and both sides of each conflicted path stay in git's\\n  index — and the run resolves them and calls `commit_and_push` with\\n  `resolved_paths` naming each path to close the merge. Which side wins is\\n  the agent's decision; a version in `package.json` is the case that shows why no\\n  rule belongs there, since a machine choosing one could roll a release back\\n  quietly.\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":313}",
+      "tool_call_id": "call_00_nrsflly77bmd4dwcjwn98ux9"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"main\",\"createdAt\":\"2026-10-25T12:17:31Z\",\"headRefName\":\"atomaton/issue-385\",\"number\":386,\"state\":\"MERGED\",\"title\":\"docs: describe conflict resolution by declaration in the branch page\",\"body\":\"/reviewer\\n\\nPart of #385\\n`docs/work/how-it-works/the-branch-a-run-commits-to.md` no longer describes the pre-#384 way a conflict is closed, and no longer promises conflict markers for a path that cannot hold them.\\n\\n## Behaviour\\n\\n- The merge bullet no longer says a conflict leaves markers and is closed by calling `commit_and_push` alone. It says nothing is committed, both sides of each conflicted path stay in git's index, and `commit_and_push` closes the merge with `resolved_paths` naming each path — the parameter the tool now refuses without.\\n- The stacked-branch bullet now says where both sides actually are: git's index, `git show :2:<path>` (already on the branch) and `git show :3:<path>` (this run's). A text file holds markers in the worktree and a binary does not, so the run writes the side it wants and names the path in `resolved_paths`. This is the case `src/adapters/github/branch-placement.ts:230` already documents when the stash application conflicts.\\n- The merge bullet's \\\"the markers stay in the worktree\\\" was the same text-only claim; it is replaced by the index statement, and the marker/binary distinction now lives in the one place the page states it.\\n\\nThe page is hand-written — nothing generates `docs/` — and no code reads it, so the diff is only the two bullets.\\n\\n## Verification\\n\\n- `bun run src/entrypoints/machinery/scan_secrets.ts`, `bun run typecheck`, `bun run synth` — all exited 0 (the scanner warned it could not resolve the latest gitleaks release, as it does on this tree).\\n- `bun run test` — `2122 pass, 0 fail`, 169 files.\\n- `git status --short` after synth shows only the doc file; `dist/` is ignored and `.github/atomaton-release.json` was unchanged, so no generated output is in the commit.\\n\\nWording checked against the merged behaviour, not from memory: `unresolvedConflictRefusal` at `src/entrypoints/tools/mcp/github.ts:1286-1294`, `commitAndPush`'s refusal at `:1412-1434`, the stash-conflict error at `src/adapters/github/branch-placement.ts:224-232`, and the tool description at `:2225,2241`.\\n\\n---\\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40192200411)_\\n\"}",
+      "tool_call_id": "call_01_ydfzzu9tg75zwdrqpqztxo6r"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_rwfofxso8ahc5k5zc48a5bp6",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 385}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179293095893500000000000000000000ffffc0a8a81a62f06a",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The merged page on main contains both requested changes. Issue #385's acceptance criteria:\n\n1. Merge bullet says resolved_paths: yes, lines 40-43.\n2. Stacked-branch bullet says text conflict shows markers, binary does not, both sides in the index: yes, lines 26-30.\n3. No code reads page; no test. Nothing else needed.\n\nLet me also confirm #385 is still open and check the issue body quickly, plus check runs on main? The required check already passed per reviewer. Let me get issue 385 to confirm state and that no other requirement.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":null,\"createdAt\":\"2026-10-25T11:46:37Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"}],\"number\":385,\"state\":\"OPEN\",\"title\":\"docs: how-it-works/the-branch-a-run-commits-to predates resolved_paths\",\"body\":\"Found while reviewing #384 (the fix for #381, which makes conflict resolution a declaration).\\n\\n`docs/work/how-it-works/the-branch-a-run-commits-to.md:36-38` still describes the old way a\\nconflict is closed:\\n\\n> A conflict stops it — the markers stay in the worktree and nothing is committed — and the run\\n> resolves them and calls `commit_and_push` to close the merge.\\n\\nSince #384 that is no longer sufficient: `commit_and_push` asks git's index which paths are\\nunmerged and refuses until each is named in `resolved_paths`, so editing a file and calling the\\ntool is refused once (the refusal names the parameter). And a conflicted binary never holds\\nmarkers at all — `:23-24` of the same page, \\\"A file both sides changed is a conflict in the\\nworktree\\\", is true for text only; a binary's two sides are index stages 2 and 3, and the worktree\\ncopy is the other side's bytes.\\n\\nThe page is hand-written (nothing generates `docs/`), and code comments in `src/domain/work/turn.ts`\\nand `src/entrypoints/machinery/decide_turn_ending.ts` treat this directory as the normative\\ndescription of how a run behaves, so leaving it wrong is not only cosmetic.\\n\\nFix: one clause in the merge bullet (`...resolves them and calls commit_and_push with\\nresolved_paths naming each path`), and one sentence in the stacked-branch bullet saying a text\\nconflict shows markers while a binary does not, both sides being in the index. No code reads this\\npage; no test covers it.\\n\\nFiled rather than fixed in #384 because the plan agreed on #381 named only the tool descriptions\\nand the engineer definition for the wording change, and a reviewer blocking a merged-quality fix\\non a doc clause would be broadening that scope.\\n\",\"total_comments\":6,\"children\":[],\"pull_requests\":[{\"number\":386,\"title\":\"docs: describe conflict resolution by declaration in the branch page\",\"state\":\"done\"}]}",
+      "tool_call_id": "call_00_rwfofxso8ahc5k5zc48a5bp6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_s9515ilcg9dlv89ui1en12uu",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"reason\": \"Both wording fixes #385 asked for are merged into main in PR #386, and the page no longer describes the pre-#384 resolution flow or promises markers on a binary.\", \"summary\": \"Issue #385 is satisfied by what merged into `main` as `f0fc18a`. The page now says a conflict is closed by declaring each path, and it says markers exist only for text.\\n\\n**How I know**\\n\\n- The merge bullet now reads \\\"resolves them and calls `commit_and_push` with `resolved_paths` naming each path to close the merge\\\", and no longer claims \\\"the markers stay in the worktree\\\": `docs/work/how-it-works/the-branch-a-run-commits-to.md:40-43`.\\n- The stacked-branch bullet now says both sides are in git's index (`git show :2:<path>`, `git show :3:<path>`) and that \\\"a text file holds git's markers in the worktree while a binary does not\\\": `docs/work/how-it-works/the-branch-a-run-commits-to.md:26-30`.\\n- Those are exactly the two edits the issue specified, and they match the merged behaviour in `src/entrypoints/tools/mcp/github.ts:1412-1434` (refuses every undeclared unmerged path) and `:1286-1294` (the `:2`/`:3` and marker/binary wording), plus the stash-conflict error at `src/adapters/github/branch-placement.ts:224-232`.\\n- PR #386 is `MERGED` into `main`; it changed one hand-written file and nothing generates `docs/`. The required check was `success` on the head commit, and the run that opened it ran `scan_secrets`, `typecheck`, `synth` (all exit 0) and `bun run test` (`2122 pass, 0 fail`).\\n\\n<details><summary>Scope note and what I could not establish</summary>\\n\\nThe merge bullet's \\\"the markers stay in the worktree\\\" was the same text-only claim the issue flags in the stacked bullet, so I replaced it with the index statement rather than leaving the page internally inconsistent. That is one clause beyond the literal instruction, in the same bullet and about the same defect.\\n\\nI did not re-run the test suite in this post-merge run; the diff is prose only, nothing under `src/` reads it, and no test covers it, so the earlier run's results and the required check remain the evidence.\\n\\n</details>\\n\\n**What happens next**\\n\\nNothing further: the work is done and the issue is ready to close.\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179293096201200000000000000000000ffffc0a8820fed463b",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Both requested edits are on main:\n\n1. Merge bullet: \"…resolves them and calls `commit_and_push` with `resolved_paths` naming each path to close the merge.\" — present.\n2. Stacked-branch bullet: \"Both sides of a conflicted path are in git's index — `git show :2:<path>` ... `:3:<path>` ... — and a text file holds git's markers in the worktree while a binary does not...\" — present.\n\nAn extra: the merge bullet no longer says \"the markers stay in the worktree\"; replaced by the index statement. The issue didn't ask for that change, but it removes a text-only claim consistent with the issue's premise. Does it violate anything? No — it's accurate. The issue's second paragraph flags the markers claim at :23-24; the same claim at :36-37 was replaced with a universally true statement. Good.\n\nNo code reads the page, no test covers it. So the issue is satisfied.\n\nCall request_close_issue with reason and summary. That ends the session; report goes in the summary.\n\nThe issue is a root issue? `children: []`, no parent field shown. The tool will close it or ask the author. Either way.\n\nLet me write the summary carefully: conclusion first, how I know, what I couldn't establish, what happens next.\n\nNo `@mention` or directive line alongside request_close_issue — the tool call is the outcome. The instructions say for request_close_issue the report goes in `summary` before making the call. Do I add `/atomaton`? The role table says: \"A pull request you opened has merged and what merged satisfies the issue | request_close_issue\". So just request_close_issue. No agent line.\n\nSummary content: state criteria met with anchors (file:line on merged main), verification (the check passed), note my prior run's tests. What I could not establish: nothing material — maybe that I did not re-run the suite in this run, but the doc-only change cannot affect code and the required check passed. Actually in this re-entry run I read main; the tests were run in the earlier run on the same content. I can say the required check on the merged head was success (reviewer reported), and the diff is docs-only with no code reading it.\n\nLet me be precise: reviewer's comment says `atomaton-check` completed `success` and `check_merge_readiness` reported ready:true. I can cite that. And the merged commit f0fc18a contains the changes.\n\nWrite it.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #385 is concluded: your reason and summary are on the issue. #385 is not a tracked sub-issue; nothing to aggregate. Nothing else is yours to do here.",
+      "tool_call_id": "call_00_s9515ilcg9dlv89ui1en12uu"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 2,
-      "snapshot_hash": "3d164134118e65b31bab02542ebea55c24696e68678ef1f4cc2ba78ae695f57f",
+      "event_count": 6,
+      "snapshot_hash": "a91d26b7212f9702b091c65ac8460fff2d3723f58b8ab484de5bb8a1e1d483f0",
       "version": 1
     }
   },
@@ -642,6 +804,27 @@
         }
       },
       "started": "2026-10-25T12:14:36Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T12:22:51Z",
+      "ended_because": "completed",
+      "iterations": 3,
+      "messages": 55,
+      "seconds": 18,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "github": {
+          "get_issue": 1,
+          "get_pr": 1
+        },
+        "shell": {
+          "bash": 1
+        }
+      },
+      "started": "2026-10-25T12:22:33Z"
     }
   ]
 }
