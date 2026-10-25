@@ -21,6 +21,10 @@ function signals(overrides: Partial<MergeSignals> = {}): MergeSignals {
     // where it cannot is a paid feature a free private repository lacks, and it has
     // its own tests rather than being the default here.
     requiredChecksEnforceable: true,
+    // The delivery merge — the one into `main` — is what almost every case below is
+    // about, so it is the default. A stacked merge (into a parent issue's branch) is
+    // its own test.
+    stackedMerge: false,
     mergePolicy: "auto",
     governancePaths: [],
     gateMatches: [],
@@ -279,6 +283,63 @@ describe("decideMergeReadiness", () => {
     const text = formatBlockers(blockers);
     expect(text).toContain("1. [conflicting]");
     expect(text).toContain("2. [merge-policy]");
+  });
+
+  /**
+   * A sub-issue's pull request merges into its parent issue's branch, which is the
+   * normal shape of a tree's delivery. That merge has reached nothing the three
+   * checks below describe: it ships nothing, no run obeys it yet, and the pull
+   * request that carries the parent's branch to the base branch is judged on the
+   * whole aggregate. Judging it here too was the same change decided twice, and the
+   * first decision was made on something not in effect.
+   */
+  const everythingTheThreeChecksReport = {
+    mergePolicy: "manual",
+    governanceUnknown: "gh pr view failed: 502",
+    governancePaths: [".github/workflows/ci.yml"],
+    gateMatches: [{ reason: "This adds a migration.", evidence: ["db/migrations/001.sql"] }],
+    gateProblems: ["`merge.governed_paths`: `**/*.sql` is not a pattern this matcher honours"],
+  };
+
+  test("a stacked merge is not stopped by merge.policy, governed paths or a gate", () => {
+    const result = decideMergeReadiness(
+      signals({ ...everythingTheThreeChecksReport, stackedMerge: true }),
+    );
+    expect(result.blockers.map((b) => b.kind)).toEqual([]);
+    expect(result.ready).toBe(true);
+  });
+
+  // The other direction, so the exemption is a condition and not a deletion: the
+  // same signals stop a merge into the base branch exactly as before.
+  test("the delivery merge still fires all of them", () => {
+    const kinds = decideMergeReadiness(
+      signals({ ...everythingTheThreeChecksReport, stackedMerge: false }),
+    ).blockers.map((b) => b.kind);
+    expect(kinds).toEqual(
+      expect.arrayContaining([
+        "merge-policy",
+        "governance-unknown",
+        "governance-change",
+        "merge-gate",
+        "gate-config-invalid",
+      ]),
+    );
+  });
+
+  // The exemption is the three, not the merge. A stacked pull request still has to
+  // be open, undrafted, conflict-free, its checks green and its author an agent —
+  // and a person's stacked pull request is still theirs.
+  test("a stacked merge is still refused for every reason that is not one of the three", () => {
+    const kinds = decideMergeReadiness(
+      signals({
+        ...everythingTheThreeChecksReport,
+        stackedMerge: true,
+        isDraft: true,
+        mergeStateStatus: "DIRTY",
+        authoredByAgent: false,
+      }),
+    ).blockers.map((b) => b.kind);
+    expect(kinds).toEqual(["draft", "conflicting", "human-authored"]);
   });
 });
 

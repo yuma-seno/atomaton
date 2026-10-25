@@ -1987,6 +1987,59 @@ describe("mcp/github.ts", () => {
         },
       );
 
+    /**
+     * A stacked merge's answer has to say so, and it has to be ready under the
+     * DEFAULT policy. `merge.policy`, `merge.governed_paths` and `merge.gates` all
+     * describe the merge into the base branch; a sub-issue's pull request merges
+     * into its parent issue's branch, which is a checkpoint rather than a delivery,
+     * and the parent's own pull request is judged against all three on the whole
+     * aggregate. Under the default `manual` the old answer stopped every child for a
+     * person — five children, five human merges before the parent could be judged.
+     */
+    test("check_merge_readiness says a stacked merge skipped the delivery checks", async () => {
+      const configDir = makeConfigDir({});
+      try {
+        const r = await call(
+          "check_merge_readiness",
+          {},
+          [
+            {
+              match: ["pr", "view", "802", "isDraft,author"],
+              stdout: JSON.stringify({
+                isDraft: false,
+                author: { is_bot: true },
+                state: "OPEN",
+                headRefOid: "abc123",
+                headRefName: "atomaton/issue-300",
+                baseRefName: "atomaton/issue-300",
+                title: "Deliver #300",
+                labels: [],
+              }),
+            },
+            { match: ["pr", "view", "802", "mergeStateStatus"], stdout: JSON.stringify({ mergeStateStatus: "CLEAN" }) },
+            { match: ["commits/abc123/check-runs"], stdout: JSON.stringify({ check_runs: [] }) },
+            { match: ["rules/branches/atomaton/issue-300"], stdout: "[]" },
+            { match: ["pulls/802/files"], stdout: "" },
+          ],
+          { TYPE: "pr", NUMBER: "802", ATOMATON_MACHINERY_ROOT: configDir },
+        );
+        const answer = JSON.parse(r.result.content[0].text) as {
+          ready: boolean;
+          blockers: { kind: string }[];
+          stacked_merge: boolean;
+          stacked_merge_note?: string;
+        };
+        // No config sets `merge.policy`, so it is `manual`: the delivery merge this
+        // fixture describes would stop here, and the stacked one does not.
+        expect(answer.blockers).toEqual([]);
+        expect(answer.ready).toBe(true);
+        expect(answer.stacked_merge).toBe(true);
+        expect(answer.stacked_merge_note).toContain("atomaton/issue-300");
+      } finally {
+        removeTemp(configDir);
+      }
+    });
+
     test("get_check_runs keeps what a reader acts on and drops the rest", async () => {
       const payload = {
         check_runs: [
@@ -2230,7 +2283,14 @@ describe("mcp/github.ts", () => {
           parent_outcome: string;
           reinvoked_agent?: string;
         };
-        expect(parsed).toMatchObject({ merged: true, parent_outcome: "reinvoked", reinvoked_agent: "engineer" });
+        expect(parsed).toMatchObject({
+          merged: true,
+          parent_outcome: "reinvoked",
+          reinvoked_agent: "engineer",
+          // The merge's own answer says the delivery checks were not applied: this
+          // fixture's base is a parent issue's branch.
+          stacked_merge: true,
+        });
 
         // The dispatch went to the parent issue, not to the pull request.
         const calls = readFileSync(ghLog, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]);
