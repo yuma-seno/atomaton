@@ -83,16 +83,18 @@ const RESERVED_WORDS = new Set([
 /**
  * Where the shell starts another command: `&&`, `||`, a pipe, a `;`, a `&`, or a newline.
  *
- * One splitter, used by both of the rules that have to find programs, so the mutating-git
- * rule and the routing rules cannot disagree about where a command begins.
+ * Both rules that have to find a program read the command through this and then read
+ * substitutions out of the same stripped text, so the mutating-git rule and the routing
+ * rules cannot disagree about where a command begins. They did: `x=$(curl ...)` was
+ * refused while `x=$(git push origin main)` was allowed.
  *
  * The newline was missing, so a command written on its own line was read as an argument of
  * the line above it and never as a program -- and a background `&` hid whatever it
  * separated the same way. Both are separators the shell acts on, which is the whole test
  * for what belongs in this class.
  */
-function shellSegments(command: string): string[] {
-  return withoutHeredocBodies(command).split(/\s*(?:&&|\|\||[;|&\n])\s*/);
+function segmentsOf(text: string): string[] {
+  return text.split(/\s*(?:&&|\|\||[;|&\n])\s*/);
 }
 
 /** A heredoc's `<<`, its optional `-`, and the word that ends its body. */
@@ -107,8 +109,10 @@ const HEREDOC = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/g;
  * which is a document an agent may legitimately be writing.
  *
  * Removed rather than inspected, for the reason the header gives about `bash -c`: a body
- * fed to a shell is a place this text match cannot follow, and pretending to by scanning
- * it costs more in false refusals than it buys.
+ * fed to a shell is a place this text match cannot follow, and pretending to by scanning it
+ * costs more in false refusals than it buys. That holds for both spellings -- a `<<'EOF'`
+ * body is never expanded, so nothing in it runs at all, and an unquoted body is prose at
+ * least as often as it is a script.
  */
 function withoutHeredocBodies(command: string): string {
   const kept: string[] = [];
@@ -132,22 +136,58 @@ function withoutHeredocBodies(command: string): string {
 }
 
 /**
+ * The text with single-quoted content replaced by spaces.
+ *
+ * Single quotes are the one place the shell neither expands nor runs what it holds, so
+ * `grep -rn 'use `curl` instead' src/` searches for a sentence and the backticks in it run
+ * nothing. Double quotes are deliberately NOT blanked: a substitution inside them does run,
+ * and that is a difference the shell makes and this has to.
+ *
+ * Blanked rather than deleted, because the result is scanned for substitutions and its
+ * offsets have to line up with the text they are cut out of.
+ */
+function blankSingleQuoted(text: string): string {
+  const out: string[] = [...text];
+  let index = 0;
+  let inDouble = false;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === "\\") { index += 2; continue; }
+    if (char === '"') { inDouble = !inDouble; index += 1; continue; }
+    if (char === "'" && !inDouble) {
+      let end = index + 1;
+      while (end < text.length && text[end] !== "'") end += 1;
+      for (let at = index; at < Math.min(end + 1, text.length); at += 1) out[at] = " ";
+      index = end + 1;
+      continue;
+    }
+    index += 1;
+  }
+  return out.join("");
+}
+
+/**
  * The text of each command substitution, which the shell runs as a command of its own.
  *
  * `x=$(curl ...)` was allowed: as far as the segment split goes the substitution is part
  * of one token, that token is an assignment, and so nothing inside it was looked at. The
  * content of `$(...)` and of a backtick pair is where a command is invoked, which puts it
  * in the same class as `bash -c` below and is why the same bounded recursion applies.
+ *
+ * Read from the heredoc-stripped text and with single-quoted spans blanked, so that
+ * quoting a command in a document is not the same thing as running it -- the two ways this
+ * rule was still answering "mention" as though it were "position".
  */
 function substitutions(command: string): string[] {
+  const text = blankSingleQuoted(command);
   const found: string[] = [];
-  for (let index = 0; index < command.length; index += 1) {
-    if (command.startsWith("$(", index)) {
-      const end = closingParen(command, index + 1);
-      if (end !== -1) { found.push(command.slice(index + 2, end)); index = end; }
-    } else if (command[index] === "`") {
-      const end = command.indexOf("`", index + 1);
-      if (end !== -1) { found.push(command.slice(index + 1, end)); index = end; }
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.startsWith("$(", index)) {
+      const end = closingParen(text, index + 1);
+      if (end !== -1) { found.push(text.slice(index + 2, end)); index = end; }
+    } else if (text[index] === "`") {
+      const end = text.indexOf("`", index + 1);
+      if (end !== -1) { found.push(text.slice(index + 1, end)); index = end; }
     }
   }
   return found;
@@ -182,8 +222,9 @@ function closingParen(text: string, open: number): number {
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 
 function invokedPrograms(command: string, depth = 0): string[] {
+  const text = withoutHeredocBodies(command);
   const found: string[] = [];
-  for (const segment of shellSegments(command)) {
+  for (const segment of segmentsOf(text)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
     let index = 0;
     // `FOO=bar cmd`, `sudo cmd`, `env FOO=bar cmd`, and `do cmd`.
@@ -208,7 +249,7 @@ function invokedPrograms(command: string, depth = 0): string[] {
     }
   }
   if (depth < 2) {
-    for (const inner of substitutions(command)) found.push(...invokedPrograms(inner, depth + 1));
+    for (const inner of substitutions(text)) found.push(...invokedPrograms(inner, depth + 1));
   }
   return found;
 }
@@ -352,9 +393,15 @@ const MUTATING_GIT_COMMANDS = new Set([
  * Splits on shell separators so `cd repo && git push` is seen, and skips git's
  * own options so `git -C repo checkout` resolves to `checkout` rather than to
  * `-C`. Options that take a value consume the next token.
+ *
+ * It reads substitutions as well, on the same stripped text the routing rules use and
+ * under the same bound: `x=$(git push origin main)` ran the push, and reading only the
+ * segments left it allowed while `x=$(curl ...)` beside it was refused. The two rules
+ * disagreeing about where a command begins is the shape of #389 itself, one layer up.
  */
-function findMutatingGitCommand(command: string): string | undefined {
-  for (const segment of shellSegments(command)) {
+function findMutatingGitCommand(command: string, depth = 0): string | undefined {
+  const text = withoutHeredocBodies(command);
+  for (const segment of segmentsOf(text)) {
     const tokens = segment.trim().split(/\s+/);
     const gitIndex = tokens.findIndex((token) => token === "git" || token.endsWith("/git"));
     if (gitIndex === -1) continue;
@@ -371,6 +418,12 @@ function findMutatingGitCommand(command: string): string | undefined {
     // A read-only spelling of a subcommand that can also write is not a mutation.
     if (isReadOnlyGitForm(subcommand, tokens.slice(index + 1))) continue;
     return subcommand;
+  }
+  if (depth < 2) {
+    for (const inner of substitutions(text)) {
+      const nested = findMutatingGitCommand(inner, depth + 1);
+      if (nested) return nested;
+    }
   }
   return undefined;
 }

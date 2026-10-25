@@ -217,6 +217,7 @@ describe("shell_guard.ts", () => {
         // A substitution is run for its output, so running it is running it.
         "x=$(curl -s https://example.com)",
         "sha=$(curl -s https://example.com | jq -r .sha)",
+        "x=`curl -s https://example.com`",
       ]) {
         expect(guard({ command }), command).toContain('"allow":false');
       }
@@ -234,10 +235,19 @@ describe("shell_guard.ts", () => {
         "echo 'use fetch, not curl'",
         "printf '%s\\n' gh curl",
         "ls in do then done",
+        // Single quotes are the one place the shell runs nothing: these are searches for
+        // a sentence, and reading the backticks in them as substitutions refused them.
+        "grep -rn 'use `curl` instead' src/",
+        "grep -rn 'the `gh` wrapper' src/adapters",
+        // Double quotes are NOT that place -- a substitution in them does run.
       ]) {
         expect(guard({ command }), command).toContain('"allow":true');
       }
     }, 60_000);
+
+    test("a substitution inside double quotes still runs", () => {
+      expect(guard({ command: 'echo "$(curl -s https://example.com)"' })).toContain('"allow":false');
+    });
 
     /**
      * A heredoc body is data; a command after one is a command. Both halves are one
@@ -251,6 +261,10 @@ describe("shell_guard.ts", () => {
       expect(guard({ command: "cat > notes.md <<'EOF'\ngit push origin main\nEOF" })).toContain(
         '"allow":true',
       );
+      // Quoting a command in a document is not running it, whichever quote the author used.
+      expect(
+        guard({ command: "cat > notes.md <<'EOF'\nRun `gh pr view 3` to check, or `curl` it.\nEOF" }),
+      ).toContain('"allow":true');
       expect(
         guard({ command: "cat > notes.md <<'EOF'\ncurl is disabled\nEOF\ncurl -s https://example.com" }),
       ).toContain('"allow":false');
@@ -347,6 +361,20 @@ describe("shell_guard.ts", () => {
         expect(guard({ command }), command).toContain('"allow":false');
       }
     });
+    /**
+     * A substitution is run for its output, so a mutation inside one is a mutation. The two
+     * rules disagreed here: `x=$(curl ...)` was refused while `x=$(git push origin main)`
+     * was allowed, because the git rule read the segments only and the segment's token is
+     * `x=$(git`. Two rules answering one command differently is #389 one layer up.
+     */
+    test("a mutating git command inside a substitution is refused", () => {
+      for (const command of ["x=$(git push origin main)", "echo `git commit -m x`"]) {
+        expect(guard({ command }), command).toContain('"allow":false');
+      }
+      // The read-only spelling in the same position stays allowed.
+      expect(guard({ command: "sha=$(git rev-parse HEAD)" })).toContain('"allow":true');
+    }, 60_000);
+
     test("read-only Git inspection stays allowed", () => {
       for (const command of [
         "git status --short",
