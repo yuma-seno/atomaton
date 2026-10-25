@@ -1179,11 +1179,11 @@ echo "ending_invalid=\${ENDING_INVALID}" >> "$GITHUB_OUTPUT"
 #
 # A dispatch onto a DIFFERENT node -- launch_sub_agent starting children,
 # create_pr starting the reviewer on the pull request -- is deliberately NOT this
-# flag. Those start work UNDER this node and leave it waiting, so this node's turn
-# is over and its \`atomaton/in-progress\` guard must come off; holding it left the
-# node looking busy while nothing ran on it, and a person's /resume and /stop
-# skipped it. See \`ops-log.ts\` for the two op names and \`domain/work/turn.ts\` for
-# what each ending implies.
+# flag. Those start work UNDER this node, which is a PARK (read below, #208): the node
+# holds its \`atomaton/in-progress\` guard because the turn is parked on that work, not
+# because anything is running on it, and the parked run is not a link in this node's
+# chain. See \`ops-log.ts\` for the two op names and \`domain/work/turn.ts\` for what
+# each ending implies.
 #
 # Every dispatch site writes a structured \`{"op":...}\` entry to the ops log (see
 # lib/ops-log.ts's logDispatch()), and WHICH entry it writes carries that
@@ -1613,6 +1613,29 @@ const removeLabelStep = new TypedOutputsStep({
   // also release — a failure, a run that said nothing — end with a person being
   // mentioned, so the person-ball label is true in every case this step runs for.
   run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: "with-person", number: "\${NUMBER}" })
+}`,
+});
+
+// A closed node carries neither turn label (#352) — and this is the one strip the
+// runner can make that the release step above cannot reach: the endings that keep
+// the guard (`handed-off`, `parked`) skip that step by design, so a run that closed
+// its own node inside one of them — `merge_pr` merging the pull request it is
+// reviewing, `request_close_issue` closing the issue it is concluding — would
+// otherwise leave `in-progress` on work that is over (#348 wore it for exactly that
+// reason). `always()` and unconditional on the ending, because "is the node closed"
+// is the script's question to read, not this step's to guess: it strips only a node
+// the read says is closed, and on a node the read says is open — the ordinary
+// hand-back whose release above just applied `waiting-for-person`, the park whose
+// skipped release left `in-progress` holding — it writes nothing.
+const stripClosedLabelsStep = new TypedOutputsStep({
+  name: "Take the turn labels off the node if it closed (#352)",
+  if: "always()",
+  shell: "bash",
+  env: {
+    GH_TOKEN: "${{ github.token }}",
+    NUMBER: "${{ inputs.number }}",
+  },
+  run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: "closed", number: "\${NUMBER}" })
 }`,
 });
 
@@ -2347,6 +2370,7 @@ echo "tool servers will run as ${TOOL_USER} (no sudo), caches in ${TOOL_CACHE}"
   loopControlStep,
   turnEndingStep,
   removeLabelStep,
+  stripClosedLabelsStep,
   dispatchNextAgentStep,
   loopLimitCommentStep,
 ]);

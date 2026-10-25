@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AGGREGATED_TAG, AGENT_TAG, CHANGED_TAG, DISPATCH_TAG, ENDED_TAG, LLM_CONTEXT_TAG, NOTIFY_TAG, PARENT_ISSUE_TAG, proseOnly, withoutTags } from "./tags.ts";
+import { AGGREGATED_TAG, AGENT_TAG, CHANGED_TAG, DISPATCH_TAG, ENDED_TAG, isResultComment, LLM_CONTEXT_TAG, NOTIFY_TAG, PARENT_ISSUE_TAG, proseOnly, QUOTES_TAG, withoutTags } from "./tags.ts";
 
 /**
  * These markers carry state between workflow runs through GitHub, so they live in the
@@ -217,6 +217,38 @@ describe("readProse and hasProse", () => {
     expect(ENDED_TAG.readProse(body)).toEqual({ verb: "refused", answers: 900, run: 42 });
   });
 });
+
+/**
+ * The question the tallies ask of a body, which the agent tag alone no longer answers.
+ */
+describe("isResultComment", () => {
+  /**
+   * `atomaton:agent` says which agent wrote a body, and since #354 every turn-ending
+   * comment a run writes carries it — so the tag alone no longer answers "is this a
+   * result comment", which is what the handoff and no-progress tallies count.
+   *
+   * A parked turn is the case that matters: the run ended inside a child-starting tool,
+   * so its work is UNDER the node and not handed to the next agent on it. Counted as a
+   * handoff, a long orchestration reached the handoff limit and the next automatic
+   * dispatch was withheld with a message about an agent loop that was not happening.
+   */
+  test("a result comment is not a parked turn, a quotation, or a fenced sample", () => {
+    const result = [AGENT_TAG.write("engineer"), CHANGED_TAG.write("yes"), "Done."].join("\n");
+    expect(isResultComment(result)).toBe(true);
+
+    const parked = [AGENT_TAG.write("atomaton"), ENDED_TAG.write({ verb: "waiting", answers: 7, run: 9 })].join("\n");
+    expect(isResultComment(parked)).toBe(false);
+
+    const quoted = [QUOTES_TAG.write(12), result].join("\n");
+    expect(isResultComment(quoted)).toBe(false);
+
+    const documented = ["```", result, "```"].join("\n");
+    expect(isResultComment(documented)).toBe(false);
+
+    expect(isResultComment("just a remark")).toBe(false);
+  });
+});
+
 
 /**
  * The form GitHub search can actually match.

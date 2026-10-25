@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { claimCommentBody, raceOutcome } from "./claim_turn.ts";
+import { readers } from "../../adapters/github/thread.ts";
 
 /**
  * The claim's race check (#285): two runs reaching for one ask are separated by
@@ -80,5 +81,27 @@ describe("claimCommentBody", () => {
     const body = claimCommentBody({ ask: 55, run: 7 });
     expect(body).toContain("atomaton:llm-context=exclude");
     expect(body).toContain("<!-- atomaton:took=55 run=7 -->");
+  });
+
+  test("the claim also carries a line a person can read, under the tags (#349)", () => {
+    // GitHub renders neither tag, so tags alone reached the page as a comment with
+    // an empty body — the record has to stay and something visible has to join it.
+    expect(claimCommentBody({ ask: 55, run: 7 })).toBe(
+      [
+        "<!-- atomaton:llm-context=exclude -->",
+        "<!-- atomaton:took=55 run=7 -->",
+        "Atomaton: claimed this turn.",
+      ].join("\n"),
+    );
+  });
+
+  test("the visible line is prose only: it claims the turn and moves nothing else", () => {
+    // The trap the line could have set: prose that reads as a request for an agent
+    // or as an ending would make the claim itself a turn-changing event.
+    const body = claimCommentBody({ ask: 55, run: 7 });
+    expect(readers.claim(body)).toEqual({ ask: 55, run: 7 });
+    expect(readers.requestedAgent(body)).toBe("");
+    expect(readers.ending(body)).toBe("");
+    expect(readers.isDispatchMarker(body)).toBe(false);
   });
 });

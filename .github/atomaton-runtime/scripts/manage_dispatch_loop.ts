@@ -297,6 +297,13 @@ var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
 }
+function isResultComment(body) {
+  if (isQuotation(body))
+    return false;
+  if (!AGENT_TAG.hasProse(body))
+    return false;
+  return ENDED_TAG.readProse(body)?.verb !== "waiting";
+}
 function proseOnly(text) {
   return fenceSegments(text).map((segment) => segment.code ? `
 ` : segment.text).join("");
@@ -378,8 +385,8 @@ function main() {
   const { comments, read } = readComments(repo, number);
   if (!read)
     console.error(`WARN could not read comments on ${repo}#${number}; treating the chain as fresh`);
-  const handoffs = handoffsSincePerson(comments, (body) => !isQuotation(body) && AGENT_TAG.hasProse(body));
-  const stalled = runsWithoutChange(comments, (body) => !isQuotation(body) && AGENT_TAG.hasProse(body) && CHANGED_TAG.readProse(body) === "no");
+  const handoffs = handoffsSincePerson(comments, isResultComment);
+  const stalled = runsWithoutChange(comments, (body) => isResultComment(body) && CHANGED_TAG.readProse(body) === "no");
   const decision = stopReason({
     handoffs,
     handoffLimit: limit,

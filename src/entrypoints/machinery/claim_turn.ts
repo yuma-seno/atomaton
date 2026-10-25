@@ -6,6 +6,7 @@
  *
  *     <!-- atomaton:llm-context=exclude -->
  *     <!-- atomaton:took=<ask comment id> run=<run id> -->
+ *     Atomaton: claimed this turn.
  *
  * — and that comment is the turn's identity from the taking side. The run watch
  * compares it against the endings by run id ("did THIS run take a turn", "did THIS
@@ -72,8 +73,20 @@ function listBodies(repo: string, number: number): { id: number; body: string }[
   return listComments(repo, number).map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
 }
 
+/**
+ * The line a person reads under the two tags.
+ *
+ * GitHub renders neither tag, so a body of tags alone reaches the page as an empty
+ * comment — a run announcing itself looked like a comment somebody had posted and
+ * left blank (#349). The tags are the record and must stay; this is the part a
+ * person sees, written in the shape the dispatch marker uses for the same reason.
+ * It carries no tag and no `/agent` command: prose that read as either would move
+ * the turn this comment exists to name.
+ */
+const CLAIM_NOTICE = "Atomaton: claimed this turn.";
+
 export function claimCommentBody(args: { ask: number; run: number }): string {
-  return [LLM_CONTEXT_TAG.write("exclude"), TOOK_TAG.write(args)].join("\n");
+  return [LLM_CONTEXT_TAG.write("exclude"), TOOK_TAG.write(args), CLAIM_NOTICE].join("\n");
 }
 
 /**

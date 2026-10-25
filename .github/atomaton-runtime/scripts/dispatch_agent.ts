@@ -146,13 +146,15 @@ function readTargetState(number, repo) {
   }
   const isPr = parsed.pull_request !== undefined;
   const kind = isPr ? "pull-request" : "issue";
+  const labels = (parsed.labels ?? []).map((label) => label.name ?? "").filter((name) => name !== "");
   if (parsed.state === "open")
-    return { known: true, kind, state: "open" };
+    return { known: true, kind, state: "open", labels };
   if (parsed.state === "closed") {
     return {
       known: true,
       kind,
-      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason),
+      labels
     };
   }
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
@@ -930,20 +932,40 @@ function applyTurnLabels(phase, repo, number) {
   const waitingForPerson = getLabel("waiting_for_person");
   const edit = (action, label) => gh("issue", "edit", number, action, label, ...repo ? ["--repo", repo] : []);
   const create = (label, color, description) => gh("label", "create", label, "--force", "-c", color, "-d", description, ...repo ? ["--repo", repo] : []);
-  if (phase === "running") {
+  const state = readTargetState(number, repo);
+  const present = state.known ? new Set(state.labels ?? []) : undefined;
+  const remove = (label) => {
+    if (present !== undefined && !present.has(label))
+      return;
+    const removed = edit("--remove-label", label);
+    if (removed.code !== 0)
+      console.error(`::warning::could not remove '${label}' from #${number}`);
+  };
+  let effective = phase;
+  if (phase === "closed") {
+    if (state.known && state.state === "open")
+      return;
+  } else if (!state.known) {
+    console.error(`::warning::could not read #${number}'s state (${state.why}); applying '${phase}' labels without the closed guard`);
+  } else if (state.state !== "open") {
+    console.error(`#${number} is closed; the turn labels come off and neither goes on (#352)`);
+    effective = "closed";
+  }
+  if (effective === "closed") {
+    remove(waitingForPerson);
+    remove(inProgress);
+    return;
+  }
+  if (effective === "running") {
     create(inProgress, "0366d6", "Issue is being worked on by an Atomaton agent");
     const added = edit("--add-label", inProgress);
     if (added.code !== 0)
       console.error(`::warning::could not add '${inProgress}' to #${number}`);
-    const removed = edit("--remove-label", waitingForPerson);
-    if (removed.code !== 0)
-      console.error(`::warning::could not remove '${waitingForPerson}' from #${number}`);
+    remove(waitingForPerson);
     return;
   }
   create(waitingForPerson, "fbca04", "The turn is with a person on this issue or pull request");
-  const removed = edit("--remove-label", inProgress);
-  if (removed.code !== 0)
-    console.error(`::warning::could not remove '${inProgress}' from #${number}`);
+  remove(inProgress);
   const added = edit("--add-label", waitingForPerson);
   if (added.code !== 0)
     console.error(`::warning::could not add '${waitingForPerson}' to #${number}`);

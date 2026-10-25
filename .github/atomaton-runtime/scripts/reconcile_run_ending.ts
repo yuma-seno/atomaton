@@ -24,6 +24,23 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function ghRead(...args) {
+  let result = gh(...args);
+  for (const delay of [2000, 6000]) {
+    if (result.code === 0 || !looksTransient(result))
+      return result;
+    console.error(`::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`);
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+function looksTransient(result) {
+  const text = `${result.stderr} ${result.stdout}`;
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
+    return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
 function splitConcatenatedJson(text) {
   const results = [];
   let depth = 0;
@@ -410,8 +427,10 @@ function readRunWatchThread(repo, number) {
 // src/adapters/github/turn-comment.ts
 function turnHeader(h) {
   const context = h.audience === "model" ? "include" : "exclude";
+  const agent = (h.agent ?? "").trim();
   return [
     LLM_CONTEXT_TAG.write(context),
+    ...agent === "" ? [] : [AGENT_TAG.write(agent)],
     ENDED_TAG.write({ verb: h.ended, answers: h.answers ?? 0, run: h.run ?? 0 })
   ];
 }
@@ -539,26 +558,85 @@ function getLabel(key) {
   return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
 }
 
+// src/adapters/github/outcome.ts
+function issueOutcome(reason) {
+  const said = (reason ?? "").toLowerCase();
+  return said === "not_planned" || said === "duplicate" ? "abandoned" : "done";
+}
+function pullRequestOutcome(merged) {
+  return merged ? "done" : "abandoned";
+}
+
+// src/adapters/github/target-state.ts
+function readTargetState(number, repo) {
+  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
+  const { code, stdout, stderr } = ghRead("api", path);
+  if (code !== 0) {
+    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
+`)[0] ?? "" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { known: false, why: "the response was not JSON" };
+  }
+  const isPr = parsed.pull_request !== undefined;
+  const kind = isPr ? "pull-request" : "issue";
+  const labels = (parsed.labels ?? []).map((label) => label.name ?? "").filter((name) => name !== "");
+  if (parsed.state === "open")
+    return { known: true, kind, state: "open", labels };
+  if (parsed.state === "closed") {
+    return {
+      known: true,
+      kind,
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason),
+      labels
+    };
+  }
+  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
+}
+
 // src/entrypoints/machinery/lib/turn-labels.ts
 function applyTurnLabels(phase, repo, number) {
   const inProgress = getLabel("in_progress");
   const waitingForPerson = getLabel("waiting_for_person");
   const edit = (action, label) => gh("issue", "edit", number, action, label, ...repo ? ["--repo", repo] : []);
   const create = (label, color, description) => gh("label", "create", label, "--force", "-c", color, "-d", description, ...repo ? ["--repo", repo] : []);
-  if (phase === "running") {
+  const state = readTargetState(number, repo);
+  const present = state.known ? new Set(state.labels ?? []) : undefined;
+  const remove = (label) => {
+    if (present !== undefined && !present.has(label))
+      return;
+    const removed = edit("--remove-label", label);
+    if (removed.code !== 0)
+      console.error(`::warning::could not remove '${label}' from #${number}`);
+  };
+  let effective = phase;
+  if (phase === "closed") {
+    if (state.known && state.state === "open")
+      return;
+  } else if (!state.known) {
+    console.error(`::warning::could not read #${number}'s state (${state.why}); applying '${phase}' labels without the closed guard`);
+  } else if (state.state !== "open") {
+    console.error(`#${number} is closed; the turn labels come off and neither goes on (#352)`);
+    effective = "closed";
+  }
+  if (effective === "closed") {
+    remove(waitingForPerson);
+    remove(inProgress);
+    return;
+  }
+  if (effective === "running") {
     create(inProgress, "0366d6", "Issue is being worked on by an Atomaton agent");
     const added = edit("--add-label", inProgress);
     if (added.code !== 0)
       console.error(`::warning::could not add '${inProgress}' to #${number}`);
-    const removed = edit("--remove-label", waitingForPerson);
-    if (removed.code !== 0)
-      console.error(`::warning::could not remove '${waitingForPerson}' from #${number}`);
+    remove(waitingForPerson);
     return;
   }
   create(waitingForPerson, "fbca04", "The turn is with a person on this issue or pull request");
-  const removed = edit("--remove-label", inProgress);
-  if (removed.code !== 0)
-    console.error(`::warning::could not remove '${inProgress}' from #${number}`);
+  remove(inProgress);
   const added = edit("--add-label", waitingForPerson);
   if (added.code !== 0)
     console.error(`::warning::could not add '${waitingForPerson}' to #${number}`);

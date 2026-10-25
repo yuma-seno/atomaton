@@ -11,6 +11,7 @@ import { ref as aggregateSubIssuesRef } from "../entrypoints/machinery/aggregate
 import { ref as parsePrMetadataRef } from "../entrypoints/machinery/parse_pr_metadata.ts";
 import { ref as dispatchPostMergeRef } from "../entrypoints/machinery/dispatch_post_merge.ts";
 import { ref as dispatchRejectedRef } from "../entrypoints/machinery/dispatch_rejected.ts";
+import { ref as manageTurnLabelsRef } from "../entrypoints/machinery/manage_turn_labels.ts";
 import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // Detect what became of a pull request and act on the two things a close can
@@ -70,6 +71,8 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 //   dispatch-rejected (NOT merged, and the pull request's head branch is this
 //          repository's -- the membership gate that keeps a fork's forged body
 //          from starting anything)
+//   strip-turn-labels (BOTH outcomes; no `needs` -- a closed pull request carries
+//          neither turn label, whoever closed it, #352)
 
 const parseMetadataStep = new TypedOutputsStep(
   {
@@ -293,6 +296,43 @@ const dispatchRejectedJob = new DefinedJob(
   [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), rejectedStep],
 );
 
+/**
+ * A closed pull request carries neither turn label (#352).
+ *
+ * This is the strip for the closes THIS workflow sees — a person's merge or close,
+ * since GITHUB_TOKEN's own actions raise no event cascade. It runs for BOTH
+ * outcomes of `closed` and needs nothing: the question is the pull request's
+ * state, which the event itself answers, so a label the turn left on it — the
+ * `waiting-for-person` of a turn that was with the person when they merged (#335,
+ * #338) — comes off at the close rather than riding on it. An agent's own merge
+ * never fires this workflow; the runner's end-of-run strip and the write-point
+ * guard in `lib/turn-labels.ts` are that close's half of the same rule.
+ */
+const stripTurnLabelsStep = new TypedOutputsStep(
+  {
+    name: "Take the turn labels off the closed pull request",
+    shell: "bash",
+    env: {
+      GH_TOKEN: "${{ github.token }}",
+      PR_NUMBER: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.number),
+    },
+    run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: "closed", number: "\${PR_NUMBER}" })}
+`,
+  },
+  [] as const,
+);
+
+const stripTurnLabelsJob = new DefinedJob(
+  "strip-turn-labels",
+  {
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
+    // No `if`, and no `needs`: both outcomes of `closed` carry the labels off,
+    // whoever closed it, and the job reads nothing the jobs above produce.
+  },
+  [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), stripTurnLabelsStep],
+);
+
 export const atomaPrClosed = new Workflow("atomaton-pr-closed", {
   name: "Atomaton PR Closed",
   on: {
@@ -387,4 +427,5 @@ PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
     ],
   ),
   dispatchRejectedJob,
+  stripTurnLabelsJob,
 ]);

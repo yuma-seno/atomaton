@@ -39,9 +39,9 @@ function apiComment(body: string, id?: number): Record<string, unknown> {
   return { id, body, user: { type: "Bot" } };
 }
 
-/** The claim the watched run's runner wrote at start (#285). */
+/** The claim the watched run's runner wrote at start (#285), including the line a person reads (#349). */
 function claim(ask = ASK, run = RUN_ID): string {
-  return `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->`;
+  return `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:took=${ask} run=${run} -->\nAtomaton: claimed this turn.`;
 }
 
 /** An ending in the #285 wire format. */
@@ -68,8 +68,10 @@ const LABELS_OFF = JSON.stringify(["other"]);
 
 type FakeGhRules = NonNullable<Parameters<typeof runWithFakeGh>[2]>["rules"];
 
-function rulesFor(opts: { comments?: Record<string, unknown>[]; commentsStdout?: string; labels?: string; postCode?: number } = {}): FakeGhRules {
-  return [
+function rulesFor(
+  opts: { comments?: Record<string, unknown>[]; commentsStdout?: string; labels?: string; postCode?: number; state?: "open" | "closed"; wearing?: string[] } = {},
+): FakeGhRules {
+  const rules: FakeGhRules = [
     // Order matters: the comments path CONTAINS the issue path, so the more
     // specific rule is listed first. The `--jq` form is `mostRecentAgentOn`'s
     // read, which asks for the bodies alone and only fires on the notice path.
@@ -81,11 +83,26 @@ function rulesFor(opts: { comments?: Record<string, unknown>[]; commentsStdout?:
       match: ["api", `repos/${REPO}/issues/${NUMBER}/comments`],
       stdout: opts.commentsStdout ?? JSON.stringify(opts.comments ?? []),
     },
+  ];
+  // The state read `applyTurnLabels` has made since #352, answered only when a test
+  // names the state — the tests that do not keep the pre-#352 shape, where the
+  // labels moved without consulting the node. The Issues-API shape, labels
+  // included, because the removals are presence-aware now; the comments rules above
+  // must stay in front, since their paths contain this one.
+  if (opts.state !== undefined) {
+    const wearing = opts.wearing ?? ["atomaton/in-progress"];
+    rules.push({
+      match: ["api", `repos/${REPO}/issues/${NUMBER}`],
+      stdout: JSON.stringify({ state: opts.state, labels: wearing.map((name) => ({ name })) }),
+    });
+  }
+  rules.push(
     { match: [`repos/${REPO}/issues/${NUMBER}`, "--jq"], stdout: opts.labels ?? LABELS_ON },
     { match: ["issue", "comment"], ...(opts.postCode === undefined ? {} : { code: opts.postCode }) },
     { match: ["label"] },
     { match: ["issue", "edit"] },
-  ];
+  );
+  return rules;
 }
 
 function run(args: string[], rules: ReturnType<typeof rulesFor>): ReturnType<typeof runWithFakeGh> {
@@ -173,6 +190,32 @@ describe("reconcile_run_ending.ts", () => {
     expect(r.status).toBe(0);
     const edits = r.ghCalls.filter((argv) => argv[0] === "issue" && argv[1] === "edit").map((a) => a.join(" "));
     expect(edits.some((c) => c.includes("--remove-label") && c.includes("atomaton/in-progress"))).toBe(true);
+    expect(edits.some((c) => c.includes("--add-label") && c.includes("atomaton/waiting-for-person"))).toBe(true);
+  });
+
+  // #352: the crash landed on a node that closed meanwhile — the pull request its
+  // run merged, the issue a person closed while the run was dying. The node is
+  // closed, so the labels come off and the waiting-for-person does NOT go on: the
+  // read says the turn is over, and the caller's phase was stale.
+  test("a node that closed takes both labels off and waits for nobody", () => {
+    const comments = [apiComment(ending("done", 41, 9, "engineer")), apiComment(claim())];
+    const r = run(argv(), rulesFor({ comments, state: "closed" }));
+    expect(r.status).toBe(0);
+    const edits = r.ghCalls.filter((argv) => argv[0] === "issue" && argv[1] === "edit").map((a) => a.join(" "));
+    expect(edits.some((c) => c.includes("--remove-label") && c.includes("atomaton/in-progress"))).toBe(true);
+    expect(edits.some((c) => c.includes("--add-label") && c.includes("atomaton/waiting-for-person"))).toBe(false);
+    expect(r.stderr).toContain("is closed");
+  });
+
+  // #352's presence half: the node is open and wearing nothing, so the removal is
+  // not attempted at all — the waiting side still goes on, which is the part the
+  // node is missing.
+  test("a removal is attempted only for a label the read says is on", () => {
+    const comments = [apiComment(ending("done", 41, 9, "engineer")), apiComment(claim())];
+    const r = run(argv(), rulesFor({ comments, state: "open", wearing: [] }));
+    expect(r.status).toBe(0);
+    const edits = r.ghCalls.filter((argv) => argv[0] === "issue" && argv[1] === "edit").map((a) => a.join(" "));
+    expect(edits.some((c) => c.includes("--remove-label"))).toBe(false);
     expect(edits.some((c) => c.includes("--add-label") && c.includes("atomaton/waiting-for-person"))).toBe(true);
   });
 

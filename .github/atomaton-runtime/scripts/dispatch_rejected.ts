@@ -360,13 +360,15 @@ function readTargetState(number, repo) {
   }
   const isPr = parsed.pull_request !== undefined;
   const kind = isPr ? "pull-request" : "issue";
+  const labels = (parsed.labels ?? []).map((label) => label.name ?? "").filter((name) => name !== "");
   if (parsed.state === "open")
-    return { known: true, kind, state: "open" };
+    return { known: true, kind, state: "open", labels };
   if (parsed.state === "closed") {
     return {
       known: true,
       kind,
-      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason)
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason),
+      labels
     };
   }
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };

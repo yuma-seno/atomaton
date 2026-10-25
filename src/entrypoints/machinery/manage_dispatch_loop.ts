@@ -32,7 +32,7 @@ import { handoffsSincePerson, resolveHandoffLimit, type ChainComment } from "../
 import { resolveNoProgressLimit, runsWithoutChange, stopReason } from "../../domain/work/progress.ts";
 import { getHandoffLimit, getNoProgressLimit } from "../../adapters/runner/config.ts";
 import { listComments } from "../../adapters/github/thread.ts";
-import { AGENT_TAG, CHANGED_TAG, isQuotation } from "../../adapters/github/tags.ts";
+import { CHANGED_TAG, isResultComment } from "../../adapters/github/tags.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ManageDispatchLoopArgs {
@@ -88,22 +88,20 @@ function main(): void {
   const { comments, read } = readComments(repo, number);
   if (!read) console.error(`WARN could not read comments on ${repo}#${number}; treating the chain as fresh`);
 
-  // The notice quoting a removed comment carries that comment verbatim: an
-  // `atomaton:agent` tag inside it is the DELETED author's words, and counting it as a
-  // handoff would read the deleted comment as a run the notice's own line says will
-  // not be acted on. See `isQuotation`. `hasProse`/`readProse` one tag over for the
-  // same reason: a tag inside a fenced sample is a person quoting the format, not a
-  // run's result comment (#304). The domain stays pure; the tag rule is
-  // composed into the reader here, which is where the raw bodies arrive.
-  const handoffs = handoffsSincePerson(comments, (body) => !isQuotation(body) && AGENT_TAG.hasProse(body));
-  // A result comment that says it changed nothing. Both halves: the agent tag says
-  // it is a result comment at all, and the changed tag says what the run did. A
-  // comment from before this tag existed has no `changed` value and is read as
-  // something else, which ends the walk -- old threads count zero rather than
-  // guessing. Quotations are excluded for the same reason as above.
+  // `isResultComment` is where the three shapes that look like a result comment from
+  // the outside are sorted out (#354): a quotation of one, a body inside a fenced
+  // sample, and a `waiting` ending — the run parked on work UNDER the node, which is a
+  // decomposition progressing rather than one agent handing the node to the next. The
+  // domain stays pure; the tag rules are composed into the reader there, which is where
+  // the raw bodies' vocabulary lives.
+  const handoffs = handoffsSincePerson(comments, isResultComment);
+  // A result comment that says it changed nothing. Both halves: the result tag says it
+  // is a result comment at all, and the changed tag says what the run did. A comment
+  // from before this tag existed has no `changed` value and is read as something else,
+  // which ends the walk -- old threads count zero rather than guessing.
   const stalled = runsWithoutChange(
     comments,
-    (body) => !isQuotation(body) && AGENT_TAG.hasProse(body) && CHANGED_TAG.readProse(body) === "no",
+    (body) => isResultComment(body) && CHANGED_TAG.readProse(body) === "no",
   );
   const decision = stopReason({
     handoffs,

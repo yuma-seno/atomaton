@@ -478,6 +478,127 @@ describe("mcp/github.ts", () => {
   }, 60_000);
 
   /**
+   * `create_pr` PARKS the turn (#351). The session ends inside the call and the work
+   * it started runs on the pull request, so the node keeps its `atomaton/in-progress`
+   * label until the merge route re-invokes it — the same treatment `launch_sub_agent`'s
+   * children get. The runner reads that out of this run's own ops log, grepping for
+   * `"op":"dispatch-elsewhere"`; with no entry it read the ending as `finished`,
+   * released the guard, and the node went to `atomaton/waiting-for-person` while a
+   * reviewer was working its pull request.
+   *
+   * The parked entry is also NOT a `"op":"dispatch"` entry: the two are what the runner
+   * tells a park from a hand-off on this node with, and a run that wrote both would be
+   * both at once.
+   */
+  test("create_pr parks the turn on the validation it dispatched", async () => {
+    const { root, seed, work } = makeRemoteBranchFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-parked-pr-"));
+    const log = join(dir, "gh.log");
+    try {
+      git(seed, "branch", "atomaton/issue-12");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      git(work, "fetch", "origin");
+
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 24, method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR", reviewer: "reviewer" } },
+        },
+        {
+          BRANCH: "atomaton/issue-1",
+          TYPE: "issue",
+          NUMBER: "1",
+          AGENT: "engineer",
+          ATOMATON_RUN_DIR: dir,
+          ATOMATON_OPS_LOG: join(dir, "ops.log"),
+          ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/42",
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
+            { match: ["workflow", "run"], stdout: "" },
+            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
+            { match: ["issue", "comment"], stdout: "https://github.com/owner/repo/issues/1#issuecomment-777" },
+            { match: ["pr", "comment"], stdout: "" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(response.result.content[0].text).validation_dispatched).toBe(true);
+
+      const entries = opsLog(dir);
+      const parked = entries.filter((entry) => entry.op === "dispatch-elsewhere");
+      expect(parked).toHaveLength(1);
+      // The pull request is the node the work runs on, and the reviewer the caller
+      // named is the agent it routes toward.
+      expect(parked[0]).toMatchObject({ target: "pr", agent: "reviewer", number: 123 });
+      expect(
+        entries.filter((entry) => entry.op === "dispatch"),
+        "a parked run is not also a hand-off on its own node",
+      ).toHaveLength(0);
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * A failed validation dispatch keeps the session open — the agent gets another turn
+   * and can retry — so the turn is not parked and no entry is written. An entry here
+   * would hold the node's `atomaton/in-progress` guard on a run whose only live thing
+   * is the agent still typing.
+   */
+  test("create_pr writes no park when validation was not dispatched", async () => {
+    const { root, seed, work } = makeRemoteBranchFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-parked-pr-"));
+    try {
+      git(seed, "branch", "atomaton/issue-12");
+      git(seed, "push", "origin", "atomaton/issue-12");
+      git(work, "fetch", "origin");
+
+      const response = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 25, method: "tools/call",
+          params: { name: "create_pr", arguments: { title: "Test PR", reviewer: "reviewer" } },
+        },
+        {
+          BRANCH: "atomaton/issue-1",
+          TYPE: "issue",
+          NUMBER: "1",
+          AGENT: "engineer",
+          ATOMATON_RUN_DIR: dir,
+          ATOMATON_OPS_LOG: join(dir, "ops.log"),
+          ...fakeGhSeam(),
+          FAKE_GH_RESPONSES: JSON.stringify([
+            { match: ["graphql"], stdout: JSON.stringify({ data: { repository: { issue: { parent: { number: 12 } } } } }) },
+            { match: ["pr", "list"], stdout: "[]" },
+            { match: ["pr", "create"], stdout: "https://github.com/owner/repo/pull/123" },
+            { match: ["workflow", "run"], code: 1 },
+            { match: ["api", "issues/123"], stdout: JSON.stringify({ body: "", login: "someone", type: "User" }) },
+            { match: ["issue", "comment"], stdout: "" },
+            { match: ["pr", "comment"], stdout: "" },
+          ]),
+        },
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(response.result.content[0].text).validation_dispatched).toBe(false);
+      expect(
+        opsLog(dir).filter((entry) => entry.op === "dispatch-elsewhere"),
+        "a run that continues is not parked",
+      ).toHaveLength(0);
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
    * `base` is not an argument any more. The base is resolved from the tree, so a
    * caller that names one is refused rather than obeyed -- a schema that strips it
    * would open the pull request somewhere else and report success.
