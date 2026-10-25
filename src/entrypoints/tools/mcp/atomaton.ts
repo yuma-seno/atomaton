@@ -362,9 +362,9 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_
       concluded,
       aggregation ? describeGateResult(aggregation, issueNumber) : "",
       stalled
-        ? "The parent was not re-invoked, and that is not yours to fix from here: the " +
-          "parent's thread is not yours to comment on, and this issue's own report is " +
-          "already posted. The reason is in the run log. End your turn without repeating it."
+        ? "The parent was not re-invoked, and that is not yours to fix from here: what you found is " +
+          "already on the parent's thread as a report, and this issue's own report is posted. The reason " +
+          "is in the run log. End your turn without repeating it."
         : "Nothing else is yours to do here.",
     ]
       .filter(Boolean)

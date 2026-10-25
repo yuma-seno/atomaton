@@ -2,11 +2,20 @@
 /**
  * aggregate_sub_issues.ts — Called after a PR merges and its linked
  * sub-issue's atomaton parent is known. If any sibling sub-issues are
- * still open, just posts a progress comment. Once all siblings are done,
- * aggregates their results into the atomaton's session (stored on the
- * orphan `atomaton-data` branch) and re-dispatches the atomaton.
+ * still open, just posts a progress comment. Once all siblings are done, it
+ * re-dispatches the atomaton.
  *
- * Thin CLI wrapper around lib/aggregation.ts's shared dispatch gate -- see that
+ * It carries nothing into the parent's session, and that is the point (#149).
+ * It used to read every child's title, state and "linked pull requests" and overwrite
+ * the parent's last tool message with them — a summary assembled by a different route
+ * than the one the parent reads, and one whose pull request lookup was a body search
+ * with no predicate behind it (`#109` matched `#1090`, and a body saying "the bug found
+ * in #109" counted as a delivery). What the parent is told about its children is one
+ * thing now: the report each child's own closing run posts on the parent's thread (see
+ * `adapters/github/sub-issue-report.ts`). This path posts none of its own, because a
+ * person merging a pull request is not a run with anything to say.
+ *
+ * Thin CLI wrapper around app/aggregation.ts's shared dispatch gate -- see that
  * module's doc comment for the other two callers of the same gate and for the
  * race between them.
  *
@@ -14,14 +23,8 @@
  *   aggregate_sub_issues.ts --repo OWNER/REPO --parent N --closed-num N
  */
 import { parseArgs } from "node:util";
-import { gh } from "../../adapters/github/gh.ts";
 import { defineScript } from "./lib/script-ref.ts";
 import { describeGateResult, dispatchOrchestratorIfReady, needsAttention } from "../../app/aggregation.ts";
-import { gatherSubResults, injectSummary } from "../../adapters/atoma/inject-sub-results.ts";
-import type { Session } from "../../domain/work/session.ts";
-import { issueLinks } from "../../adapters/github/issue-links.ts";
-import { mostRecentAgentOn } from "../../adapters/github/agent-on-issue.ts";
-import { restoreSession, saveSession, sessionTargetPath } from "./lib/atomaton-data.ts";
 
 export interface AggregateSubIssuesArgs {
   repo: string;
@@ -30,65 +33,6 @@ export interface AggregateSubIssuesArgs {
 }
 
 export const ref = defineScript<AggregateSubIssuesArgs>(import.meta.url);
-
-/**
- * Every sub-issue linked to `parent`, open or closed.
- *
- * GitHub's own sub-issue links, which is where every other reader of this
- * relationship now looks. It used to search for `atomaton:parent=N in:body` and then
- * re-check each hit with `PARENT_TAG.read`, because GitHub's issue search tokenizes
- * and returned `atomaton:parent=50` for a query of `5` — a prefilter that needed a
- * predicate behind it, and before that predicate existed this collected every
- * sub-issue of a numeric range and fed their results into the wrong atomaton's
- * session. A link has no such failure mode: it is an edge, not a string.
- *
- * Throws when the links could not be read. Aggregation injects these results into
- * the atomaton's session, and an empty list read as "no sub-issues" would
- * re-invoke it with none of the work it is supposed to be summarising.
- */
-function linkedSubIssues(repo: string, parent: number): number[] {
-  const links = issueLinks(repo, parent);
-  if (links.unavailable) {
-    throw new Error(`could not list sub-issues of #${parent}: ${links.unavailable}`);
-  }
-  return links.children.map((child) => child.number);
-}
-
-/**
- * Injects every linked sub-issue's result into the parent's persisted session on
- * the `atomaton-data` branch.
- *
- * Reads and writes through lib/atomaton-data.ts rather than driving git here. That
- * module's `saveSession` already owns the part that is easy to get wrong -- it
- * creates the branch if absent, holds the push-retry loop for the races that are
- * expected when sibling agents finish together, and does all of it in a
- * throwaway worktree so the job's own checkout is untouched. This function used
- * to reimplement that with `git checkout -B atomaton-data` in the main checkout
- * (and `git rm -rf .` on the branch-missing path), which worked only because
- * nothing in this job reads a file afterwards.
- *
- * `agent` is the one that was working on the parent, read from the parent's own
- * thread. It was the literal `"atomaton"`, which meant a project that renamed
- * its atomaton injected the results into a session file nothing would ever
- * restore -- the aggregation ran, reported success, and the re-invoked agent
- * started with none of the work it was supposed to summarise.
- */
-function injectResultsIntoParentSession(repo: string, parent: number, agent: string): void {
-  const subIssues = linkedSubIssues(repo, parent);
-  console.error(`Sub-issues of #${parent}: ${subIssues.join(", ") || "(none)"}`);
-
-  const sessionPath = sessionTargetPath("issue", parent, agent);
-  const existing = restoreSession(sessionPath);
-  const session: Session = existing ? (JSON.parse(existing) as Session) : { messages: [] };
-
-  // Composed here, where the I/O belongs: read what the sub-issues did, then
-  // put it in the session. `injectSummary` is the half that decides where.
-  const updated = injectSummary(session, gatherSubResults(repo, subIssues));
-  const message = `atomaton: inject sub-issue results for parent #${parent}`;
-  if (!saveSession(sessionPath, JSON.stringify(updated, null, 2), message)) {
-    console.error(`::warning::Failed to save session to atomaton-data:${sessionPath} after all retries.`);
-  }
-}
 
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -120,11 +64,6 @@ async function main(): Promise<void> {
     // its first (and normally only) run instead of depending on that timing.
     exclude: true,
     progressMessage: (remaining) => `Atomaton: Sub-task #${closedNum} completed. ${remaining} sub-task(s) still in progress.`,
-    // The agent that was on the parent, read from the parent's own thread. The
-    // gate reads the same name for its dispatch; this is the session file that
-    // dispatch will restore, so the two have to agree -- and both come from the
-    // thread rather than from a literal.
-    beforeDispatch: () => injectResultsIntoParentSession(repo, Number(parent), mostRecentAgentOn(repo, Number(parent))),
   });
 
   console.error(describeGateResult(result, Number(closedNum), Number(parent)));
@@ -134,4 +73,3 @@ async function main(): Promise<void> {
 }
 
 if (import.meta.main) void main();
-
