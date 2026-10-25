@@ -36,7 +36,7 @@ import { parseArgs } from "node:util";
 import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
 import { gh, ghJson, ghPaginated, ghRead } from "../../adapters/github/gh.ts";
 import { AGENT_TAG, LLM_CONTEXT_TAG, PARENT_ISSUE_TAG, withoutTags } from "../../adapters/github/tags.ts";
-import { keptCommentIds } from "../../adapters/github/thread.ts";
+import { keptCommentIds, listComments, type Comment } from "../../adapters/github/thread.ts";
 import { isNodeType } from "../../domain/work/node-type.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -89,13 +89,6 @@ interface GhIssueApi {
   title: string;
   body: string | null;
   labels: { name: string }[];
-  user: { login: string; type?: string };
-  created_at: string;
-}
-
-interface GhCommentApi {
-  id: number;
-  body: string;
   user: { login: string; type?: string };
   created_at: string;
 }
@@ -171,6 +164,26 @@ function contextList<T>(what: string, ...args: string[]): T[] {
 }
 
 /**
+ * The node's whole thread, through `listComments` — the one reader of "every comment
+ * on this node", so the pages past the first are split there instead of by whichever
+ * caller remembered.
+ *
+ * A failed read is a warning and an empty list, the policy `contextList` had for the
+ * same reads: this is enrichment, and a run whose thread could not be read still
+ * works, with less context than usual.
+ */
+function threadComments(what: string, repo: string, number: number): Comment[] {
+  try {
+    return listComments(repo, number);
+  } catch (error) {
+    console.error(
+      `::warning::Could not fetch ${what}: ${(error as Error).message}. Continuing without it — the run has less context than usual.`,
+    );
+    return [];
+  }
+}
+
+/**
  * Fetch something the run cannot proceed without.
  *
  * Fails, but says why. `JSON.parse` on the empty stdout of a failed call throws
@@ -221,11 +234,7 @@ function fetchIssueEvents(
     created_at: issue.created_at,
   };
 
-  const comments = contextList<GhCommentApi>(
-    `comments on #${issueNum}`,
-    "api",
-    `repos/${owner}/${repo}/issues/${issueNum}/comments`,
-  );
+  const comments = threadComments(`comments on #${issueNum}`, `${owner}/${repo}`, issueNum);
   // The guard deletes a person's comment made while an agent is working, and the
   // deletion is not instant. The model's context is built from this list, so it has
   // to see the thread the guard is producing -- otherwise the agent reads a comment
@@ -237,10 +246,10 @@ function fetchIssueEvents(
     .map((c) => ({
       id: c.id,
       event_type: commentType,
-      content: c.body,
-      author: c.user.login,
-      author_type: c.user.type,
-      created_at: c.created_at,
+      content: c.body ?? "",
+      author: c.user?.login ?? "",
+      author_type: c.user?.type,
+      created_at: c.created_at ?? "",
     }));
 
   return [openedEvent, ...commentEvents];
@@ -282,11 +291,7 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     });
   }
 
-  const prComments = contextList<GhCommentApi>(
-    `comments on #${number}`,
-    "api",
-    `repos/${owner}/${repo}/issues/${number}/comments`,
-  );
+  const prComments = threadComments(`comments on #${number}`, `${owner}/${repo}`, number);
   // Same shaping as the issue path: the model must not read a comment the guard is
   // removing. See `keptCommentIds`.
   const keptPrComments = keptCommentIds(prComments);
@@ -295,10 +300,10 @@ function fetchPrEvents(owner: string, repo: string, number: number, maxDiffChars
     .map((comment) => ({
       id: comment.id,
       event_type: "pr_comment",
-      content: comment.body,
-      author: comment.user.login,
-      author_type: comment.user.type,
-      created_at: comment.created_at,
+      content: comment.body ?? "",
+      author: comment.user?.login ?? "",
+      author_type: comment.user?.type,
+      created_at: comment.created_at ?? "",
     })));
 
   // The endpoint that failed on 2026-08-17. See `contextList`.

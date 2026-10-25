@@ -20,9 +20,10 @@
  */
 import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import { gh, ghPaginated } from "../../adapters/github/gh.ts";
+import { gh } from "../../adapters/github/gh.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { mostRecentAgent, mostRecentAgentOn } from "../../adapters/github/agent-on-issue.ts";
+import { commentBodies } from "../../adapters/github/thread.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ResolveResumeAgentArgs {
@@ -46,14 +47,13 @@ function main(): void {
   }
 
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  // `ghPaginated`, not a `JSON.parse` of the whole stdout: with `--paginate`, `gh`
-  // evaluates `--jq` once per page and writes each page's result to the same
-  // stream, so past one page the output is back-to-back arrays and a whole-output
-  // parse throws -- which would read "" here, and "" is "no previous run", the
-  // answer that silently starts nothing.
+  // The same read `/resume`'s sibling callers make, through `commentBodies` — the
+  // pages past the first are split there, so a long thread names its agent instead of
+  // throwing. This caller's policy differs from `mostRecentAgentOn`'s on purpose: it
+  // logs the failure AND says so on the issue below, rather than answering "" silently.
   let agent = "";
   try {
-    agent = mostRecentAgent(ghPaginated<string>("api", `repos/${repo}/issues/${values.number}/comments`, "--jq", "[.[].body]"));
+    agent = mostRecentAgent(commentBodies(repo, values.number));
   } catch (error) {
     console.error(`Could not read comments on #${values.number}: ${error instanceof Error ? error.message : error}`);
   }

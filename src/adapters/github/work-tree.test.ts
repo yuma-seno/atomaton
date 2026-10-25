@@ -4,17 +4,23 @@ import { FAKE_GH_IMPL } from "../../entrypoints/machinery/testing/fake-gh-env.ts
 
 /**
  * `lastEnding`, as the subtree resume asks it of the real adapter with a fake `gh`
- * answering. The fold over the tag is one line; what this pins is the READ: the bodies
- * arrive as one JSON array (so a body's end is known), the walk is newest first, and
- * the guard's notice quoting a removed comment is stepped over -- the removed text is
- * verbatim, so an `atomaton:ended` tag inside it is the DELETED author's words, and a
- * subtree resume reading it would treat the quoted ending as the node's own.
+ * answering. The fold over the tag is one line; what this pins is the READ: the
+ * comments arrive as whole objects from the shared `listComments` (so a body's end is
+ * known), the walk is newest first, and the guard's notice quoting a removed comment
+ * is stepped over -- the removed text is verbatim, so an `atomaton:ended` tag inside
+ * it is the DELETED author's words, and a subtree resume reading it would treat the
+ * quoted ending as the node's own.
  */
 const SRC = join(import.meta.dir, "work-tree.ts");
 
+/** A page of comments in the shape the API returns: whole objects, bodies inside. */
+function asComments(bodies: string[]): { id: number; body: string }[] {
+  return bodies.map((body, i) => ({ id: i + 1, body }));
+}
+
 /** How the last run on #9 ended, through the real adapter with the fake `gh` answering. */
 function lastEnding(bodies: string[]): string | undefined {
-  return lastEndingStdout(JSON.stringify(bodies));
+  return lastEndingStdout(JSON.stringify(asComments(bodies)));
 }
 
 /** The same, from raw stdout — the shape `gh` itself writes past one page. */
@@ -90,16 +96,15 @@ describe("lastEnding", () => {
     expect(lastEnding(["<!-- atomaton:ended=stopped answers=0 run=0 -->", notice])).toBe("stopped");
   });
 
-  // With `--paginate`, `gh` evaluates `--jq` once per page and writes each page's
-  // result to the same stream: past one page the output is TWO back-to-back arrays,
-  // not one document, and a whole-output `JSON.parse` throws. The old read parsed
-  // the stdout as one document, so a thread past 100 comments returned `undefined`
-  // -- which `/resume` reads as "nothing was interrupted here", silently skipping a
-  // stopped node. The page boundary at 100 is what produces the shape, so this is
-  // the only test whose fake emits it.
+  // With `--paginate`, `gh` writes one response body per page back to back: past one
+  // page the stdout is TWO arrays, not one document, and a whole-output `JSON.parse`
+  // throws. A read that parsed it as one document returned `undefined` for a thread
+  // past 100 comments -- which `/resume` reads as "nothing was interrupted here",
+  // silently skipping a stopped node. `listComments` splits the pages, so the answer
+  // survives the boundary; this is the only test whose fake emits it.
   test("a thread past one page still names its ending", () => {
-    const firstPage = JSON.stringify(["just a remark", "<!-- atomaton:ended=stopped answers=0 run=0 -->"]);
-    const secondPage = JSON.stringify(["<!-- atomaton:ended=waiting answers=0 run=0 -->"]);
+    const firstPage = JSON.stringify(asComments(["just a remark", "<!-- atomaton:ended=stopped answers=0 run=0 -->"]));
+    const secondPage = JSON.stringify(asComments(["<!-- atomaton:ended=waiting answers=0 run=0 -->"]));
     expect(lastEndingStdout(firstPage + secondPage)).toBe("waiting");
   });
 
