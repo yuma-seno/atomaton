@@ -351,13 +351,105 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#344→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_92xzhztbn1mnls9k7lfmx9nu"
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #344). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T06:40:08Z",
+        "event_type": "issue_comment",
+        "id": 6394480189,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "#344 の engineer が完了しました。#344 の成果と親ブランチの状態を確認します：",
+      "tool_calls": [
+        {
+          "id": "call_em5x2rl01dj6u1s2ijuvla83",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 344}"
+          }
+        },
+        {
+          "id": "call_nj2yefwnjlkvjrjh8k2cx78z",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\": \"atomaton/issue-149\"}"
+          }
+        }
+      ],
+      "reasoning_content": "#344's engineer finished. Parent re-invoked. Continue the chain: check #344's state (PR merged? all acceptance criteria met?), then launch #345.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":\"2026-10-25T06:40:05Z\",\"createdAt\":\"2026-10-25T05:10:24Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":344,\"state\":\"CLOSED\",\"title\":\"人コメント→PR検証の入口が resolve_pr_branch のガードを通らない\",\"body\":\"# 人コメント → PR 検証の入口が `resolve_pr_branch` のガードを通らない\\n\\n**親: #149**（観点3「判断が経路の入口にあり、共通のゲートを通っていない」に該当。実例1-3 とは別箇所の新規発見）\\n\\n## 根拠\\n\\n- `src/workflows/atomaton-manual-comment.wac.ts:335` が PR の head ブランチを**インライン**で読む:\\n  `gh pr view \\\"$NUMBER\\\" --repo \\\"$REPO\\\" --json headRefName --jq .headRefName`\\n  → 空チェックだけして `dispatch_pr_validation.ts` に渡す。\\n- 共有の解決手続き `src/entrypoints/machinery/resolve_pr_branch.ts` には 3 つのガードがある: `isCrossRepository`（:70）/ `isBranchName`（:89）/ `existsOnOrigin`（:103）。インライン読みは**この 3 つを全部素通りする**。\\n- `src/workflows/atomaton-validate-pr.wac.ts:54-55` は「A fork's head would not resolve here, and does not arrive here」と主張するが、「到達しない」のは `create_pr` / push の経路だけ。人が **fork の PR にコメントした**経路は `issue_comment` として届く（PARSE_ALLOWED が見るのはコメント者の会員資格であって PR の head リポジトリではない）。\\n- 同じ信頼境界を `atomaton-pr-closed.wac.ts:280-284`（dispatch-rejected ジョブ）は head-repo テストで**明示的に**書いている。PR を扱う入口が 2 つあるのに、片方だけが境界テストを持つ。\\n\\n## 割れ方の具体的な帰結（コード構造からの推論。実測は未）\\n\\nfork の PR にメンバーが `/engineer` とコメントすると、この経路はこのリポジトリに存在しないブランチ名を検証に渡す。CI の dispatch（`--ref <forkブランチ名>`）が失敗するか、検証が存在しない ref を見に行く。\\n\\n## 直し方\\n\\n1. `prValidationStep` の head ブランチ読みを `resolve_pr_branch.ts`（ガード付き経路）に置き換える。または fork を弾く条件（head-repo テスト）をこのステップに足す。\\n2. `atomaton-validate-pr.wac.ts:54-55` の「does not arrive here」という主張を実態に合わせて直す（または置き換えによって主張が真になる）。\\n3. 進め方 3: なぜインラインのままになったか（ステップ出力を bash で受ける都合等）を最初に確かめ、正当なら残して理由を PR コメントに書く。\\n\\n## 受け入れ基準\\n\\n- 人コメント経路の PR 検証が 3 ガードを通る（fork head は拒まれ、拒否は人に読める言葉で出る）。\\n- validate workflow の doc 主張と実態が一致する。\\n\\n## 閉じ条件\\n\\n親 #149 のブランチ上にマージされた PR のヘッドで、manual-comment 経路が `resolve_pr_branch` のガードを通ることがコードで確認できること。\\n\\n## 順序\\n\\n**#343（コメント全件読みの統一）のマージ後**に起動すること。この issue への `/atomaton` コメントで起動する。\",\"total_comments\":7,\"parent\":{\"number\":149,\"title\":\"同じ判断が複数箇所にある箇所、および外部の主張が偽になっても検出できない箇所を洗い出す\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":361,\"title\":\"Gate the head branch a person's comment hands to validation\",\"state\":\"done\"}]}",
+      "tool_call_id": "call_em5x2rl01dj6u1s2ijuvla83"
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"atomaton/issue-149\",\"exists\":true,\"sha\":\"fcc7ec8c320c9b6f9ac9380f4c785bc10eed14d3\",\"protected\":false}",
+      "tool_call_id": "call_nj2yefwnjlkvjrjh8k2cx78z"
+    },
+    {
+      "role": "assistant",
+      "content": "#344 はクローズ済み（PR #361）、親ブランチは `fcc7ec8` に進んでいます。締め報告を読んで受け入れ基準を確認します：",
+      "tool_calls": [
+        {
+          "id": "call_whomozmbwzkli1ahae5cq4an",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\": 6, \"issue_number\": 344, \"to\": 7}"
+          }
+        }
+      ],
+      "reasoning_content": "#344 closed with PR #361 merged. Parent branch head is now `fcc7ec8`. Read #344's closing report (comments 6-7) to verify acceptance criteria before launching #345.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":344,\"kind\":\"issue\",\"title\":\"人コメント→PR検証の入口が resolve_pr_branch のガードを通らない\",\"state\":\"CLOSED\",\"total_comments\":7,\"parent\":{\"number\":149,\"title\":\"同じ判断が複数箇所にある箇所、および外部の主張が偽になっても検出できない箇所を洗い出す\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":361,\"title\":\"Gate the head branch a person's comment hands to validation\",\"state\":\"done\"}]},\"showing\":\"comment(s) 6-7 of 7; pass from/to to read the rest\",\"comments\":[{\"index\":6,\"id\":\"IC_kwDOUudl8s8AAAABfSPNQw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"\",\"createdAt\":\"2026-10-25T06:38:16Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/344#issuecomment-6394465603\",\"viewerDidAuthor\":true},{\"index\":7,\"id\":\"IC_kwDOUudl8s8AAAABfSQEIQ\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: the agent on this issue considers its work complete.\\n\\n**Reason:** Both acceptance criteria hold on atomaton/issue-149's merged head: the person's-comment entrance resolves the head branch through the same three gates a `pr` run uses, refuses a fork's head with a comment addressed to the person, and the validate workflow's doc claim now names each entrance.\\n\\nBoth acceptance criteria are met on the head of `atomaton/issue-149`, the branch PR #361 merged into. The manual-comment entrance no longer reads or passes a head branch itself; `dispatch_pr_validation.ts` resolves one through `isCrossRepository` / `isBranchName` / `existsOnOrigin` and, when it cannot, posts a person-readable refusal and dispatches nothing.\\n\\n**How I know**\\n\\n<details><summary>Evidence: the merged head, the gates, the refusal, and the doc</summary>\\n\\n- PR #361 is `MERGED` with `baseRefName: atomaton/issue-149` (`get_pr`), so the close condition's branch is the one the work landed on.\\n- On that branch's head `fcc7ec8c320c9b6f9ac9380f4c785bc10eed14d3`, `src/entrypoints/machinery/dispatch_pr_validation.ts:97` chooses the branch as `(values.branch ?? \\\"\\\").trim() || resolvedBranch(...)`, `:132` calls `resolvePrHeadBranch`, and `:146` is `process.exit(1)` after the notice is posted — so a person's comment (which passes no `--branch`) cannot reach `--ref` without the gates, and a refusal cannot fall through to a dispatch.\\n- The three gates are one i\\n\\n[2969 characters dropped from the end; 1600 shown]\",\"createdAt\":\"2026-10-25T06:40:04Z\",\"includesCreatedEdit\":true,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/344#issuecomment-6394479649\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_whomozmbwzkli1ahae5cq4an"
+    },
+    {
+      "role": "assistant",
+      "content": "#344 は完了・検証済みです：PR #361 が親ブランチにマージされ、3ガード（`isCrossRepository` / `isBranchName` / `existsOnOrigin`）が人コメント経路を保護し、fork head は人に読める拒否で止まり、workflow の doc 主張も実態に一致。#345 の前提が満たされたので起動します：",
+      "tool_calls": [
+        {
+          "id": "call_q4ogtgb7qciwl314om2j4iyp",
+          "type": "function",
+          "function": {
+            "name": "launch_sub_agent",
+            "arguments": "{\"summary\": \"**#344 は完了・検証済み。#345 を起動する。**\\n\\n- **#344（人コメント→PR検証の入口）完了**: PR #361 が `atomaton/issue-149` にマージ済み。マージヘッドは `fcc7ec8`。2つの受け入れ基準すべて達成: 人コメント経路の head ブランチ読みが `dispatch_pr_validation.ts` から `resolve_pr_branch` の 3 ガード（`isCrossRepository` / `isBranchName` / `existsOnOrigin`）を通るようになり、解決不能なら人に読める拒否コメントを投稿して dispatch しない（`process.exit(1)`）。validate workflow の doc 主張も実態に一致するよう修正済み。\\n- **集約ディスパッチの失敗**: #342 クローズ時に1回失敗したが、#343・#344 のクローズ後の親再起動は成功している。一過性と判断、監視は続ける。\\n- **#345 起動の前提は充足**: #344 の PR が親ブランチにマージ済み（`fcc7ec8`）。engineer に起動する。\\n- **engineer への注意**: #343 の engineer は checkout が `main` から始まっていたため、編集を親ブランチの版に載せ替えて対応した。#345 もブランチを親 `atomaton/issue-149` から切り、PR の base も親ブランチに向けること。#345 は `mcp/github.ts` と workflows に触れる — 親ブランチの版（`fcc7ec8`）を基底にすること。\\n- **残りのチェーン**: #346（#345 のマージ後）→ #347（#346 のマージ後）。各子のクローズ後に親が再起動され、順次起動する。#149 は全子完了後の集約 run で締める。\", \"tasks\": [{\"agent\": \"engineer\", \"issue\": 345}]}"
+          }
+        }
+      ],
+      "reasoning_content": "#344 is done and verified: PR #361 merged into `atomaton/issue-149`, head `fcc7ec8`, both acceptance criteria met (three gates now guard the person-comment path, fork head refused with a person-readable notice, doc claim fixed). The truncated part likely has more evidence, but the visible part confirms the criteria and the merged head matches `get_branch`.\n\nNext in the chain: #345 (after #344's merge). Launch it via `launch_sub_agent` with the summary. The summary should report: #344 done/verified, #345 launched, remaining chain #346→#347, and the standing note about the branch/base handling (engineer should cut from parent branch).\n\nAlso carry forward the monitoring note: the failed aggregation dispatch happened once (after #342), did not recur after #343 or #344. Fine.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"dispatched\":[\"#345→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
+      "tool_call_id": "call_q4ogtgb7qciwl314om2j4iyp"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 5,
-      "snapshot_hash": "4af49a2b323fbd839374aed4a95854b4d18a4c6f2b9128356a6b5b92cccfe89b",
+      "event_count": 6,
+      "snapshot_hash": "1af23a32c5c5735d46e6b669c22501f89811af9b993c2922e580103d9452d2f8",
       "version": 1
     }
   },
@@ -434,6 +526,25 @@
         }
       },
       "started": "2026-10-25T06:23:45Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T06:41:17Z",
+      "ended_because": "completed",
+      "iterations": 3,
+      "messages": 42,
+      "seconds": 32,
+      "server_calls": {
+        "atomaton": {
+          "launch_sub_agent": 1
+        },
+        "github": {
+          "get_branch": 1,
+          "get_issue": 1,
+          "get_issue_comments": 1
+        }
+      },
+      "started": "2026-10-25T06:40:45Z"
     }
   ]
 }
