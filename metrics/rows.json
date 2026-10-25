@@ -6291,25 +6291,25 @@
   {
     "path": "sessions/issue-220/reviewer.json",
     "agent": "reviewer",
-    "messages": 68,
-    "calls": 38,
-    "failed": 1,
+    "messages": 87,
+    "calls": 50,
+    "failed": 2,
     "refused": 0,
     "skills": [
       "project/conventions"
     ],
     "reported": true,
     "tools": {
-      "get_pr": 1,
+      "get_pr": 2,
       "list": 1,
       "get_pr_reviews": 1,
       "atoma_builtin__load_skill": 1,
-      "read": 14,
-      "grep": 12,
+      "read": 19,
+      "grep": 14,
       "search_code": 2,
-      "get_pr_diff": 1,
-      "get_branch": 1,
-      "get_check_runs": 1,
+      "get_pr_diff": 2,
+      "get_branch": 2,
+      "get_check_runs": 3,
       "list_pr_review_comments": 1,
       "search_issues": 1,
       "get_issue_comments": 1
@@ -6344,6 +6344,27 @@
           }
         },
         "started": "2026-10-25T18:09:11Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T18:24:29Z",
+        "ended_because": "completed",
+        "iterations": 5,
+        "messages": 87,
+        "seconds": 97,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 2,
+            "read": 5
+          },
+          "github": {
+            "get_branch": 1,
+            "get_check_runs": 2,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          }
+        },
+        "started": "2026-10-25T18:22:52Z"
       }
     ]
   },
