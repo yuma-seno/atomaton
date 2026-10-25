@@ -11606,5 +11606,60 @@
         "started": "2026-10-25T00:01:37Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-367/reviewer.json",
+    "agent": "reviewer",
+    "messages": 62,
+    "calls": 36,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "get_pr": 1,
+      "get_pr_diff": 1,
+      "grep": 17,
+      "atoma_builtin__load_skill": 1,
+      "glob": 2,
+      "read": 7,
+      "fetch": 3,
+      "get_issue_comments": 1,
+      "get_check_runs": 1,
+      "get_issue": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T08:44:04Z",
+        "ended_because": "completed",
+        "iterations": 21,
+        "messages": 62,
+        "seconds": 108,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 17,
+            "read": 7
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          },
+          "web": {
+            "fetch": 3
+          }
+        },
+        "started": "2026-10-25T08:42:16Z"
+      }
+    ]
   }
 ]
