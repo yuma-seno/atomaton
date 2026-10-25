@@ -52,7 +52,7 @@
  * `C:\Program Files\...`. CONTRIBUTING.md carried a two-command workaround for
  * that; it does not need one now.
  */
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -140,6 +140,40 @@ async function main(): Promise<void> {
     // header's `<source-file-path>` is replaced with, and an adopter reading a
     // generated workflow follows it into this repository.
     written += writeWorkflowJSONToYamlFiles(workflows, source, config, rootDir, createdDirectories);
+  }
+
+  // A source that was renamed or deleted leaves its old output behind, and the
+  // deliverable then ships a workflow nothing generates -- one that runs on the
+  // adopter's triggers with nobody able to say what it is. Measured: the rename
+  // of `atomaton-pr-merged` to `atomaton-pr-closed` (#267) left the old file in
+  // `dist/` for days, and the first thing that noticed was this repository's own
+  // contract test, reading a `dist/` nobody had cleaned. So the build owns the
+  // directory: whatever a `.yml` down there names as its source is checked
+  // against the sources above, and one naming nothing current is removed.
+  //
+  // The directory is the config's workflows output resolved the way the writer
+  // resolves it (overrides, then default, then the library's own), relative to
+  // the same root the sources were read from.
+  const outputPaths = config.outputPaths?.workflows ?? {};
+  // The overrides map patterns to paths; this repository uses none, and a build
+  // that did would need per-file resolution here. The default is the shape both
+  // the writer and this sweep use.
+  const outputDir = join(
+    rootDir,
+    typeof outputPaths.default === "string" ? outputPaths.default : ".github/workflows",
+  );
+  const generatedFrom = "Generated from: ";
+  for (const file of readdirSync(outputDir)) {
+    if (!file.endsWith(".yml")) continue;
+    const path = join(outputDir, file);
+    const header = readFileSync(path, "utf8")
+      .split(/\r?\n/)
+      .find((line) => line.includes(generatedFrom));
+    const source = header?.split(generatedFrom)[1]?.trim();
+    if (source === undefined || !sources.includes(source)) {
+      unlinkSync(path);
+      console.log(`synth-workflows: removed ${file} (its source is gone or renamed)`);
+    }
   }
 
   console.log(`synth-workflows: generated ${written} workflow file(s) from ${sources.length} source(s) in ${WORKFLOW_SOURCE_DIR}/`);

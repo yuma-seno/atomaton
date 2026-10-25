@@ -12,6 +12,10 @@ description: The same reading as `delegate_readonly`, on a model with no per-req
 # reading.
 provider: orcarouter-responses
 model: deepseek/deepseek-v4.1-flash
+# The same context budget the main agents declare (atoma#12): a large read is the
+# one that grows past a small window, so this sub-run compacts in place rather
+# than dying on the provider's 400.
+context_limit: 200000
 vision: false
 # Keeps consecutive requests on one deployment, so the provider's prompt cache still
 # holds the conversation. See `delegate/agent.md` — and as there, this name belongs to

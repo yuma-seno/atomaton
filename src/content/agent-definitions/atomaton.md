@@ -6,6 +6,10 @@ description: The agent a person reaches first. Answers what it is asked, decompo
 # `orcarouter-responses` for it is a 404. See `vision` below for what that costs.
 provider: orcarouter
 model: z-ai/glm-5.3-flash
+# The model's context window, in tokens (atoma#12). The atomaton reads a whole issue
+# tree's conversations; crossing it compacts in place rather than dying on the
+# provider's 400. 200k: the flash model's window with headroom.
+context_limit: 200000
 # Off, and the reason is the provider rather than the model. GLM 5.3 Flash reads
 # images, but Responses is the only dialect here whose tool results can carry one
 # back to the model, and Responses is not reachable for this model. Declaring

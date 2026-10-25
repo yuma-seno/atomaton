@@ -4,9 +4,14 @@
  * lib/atomaton-data.ts's saveSession(), which handles push-race retries using
  * an isolated git worktree).
  *
- * Caps each tool result on the way out, so a session never grows past what a model
- * will accept in the first place. See `domain/work/session-size.ts` for the measurement
- * behind the number and for why this is the cheaper of the two places to do it.
+ * No size work happens here anymore: atoma caps each tool result where it ARRIVES
+ * (`domain/tool_output.rs`, 8,000 characters, from v0.4.3 / atoma#12), and a
+ * session whose parts are already small needs no second cap at save. The save-side
+ * cap this script used to run (4,000, and before it the restore-side shrink) was
+ * the second of two ideas about how big a result is; this is the removal of the
+ * one that saw the result too late. A run over its model's window is atoma's
+ * COMPACTION to answer, not a save-time trim: the definition declares
+ * `context_limit`, and the compacted session is what lands here.
  *
  * Usage: save_agent_session.ts --session session.json --type issue|pr --number N --agent NAME
  * No-ops quietly if --session doesn't exist.
@@ -14,8 +19,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { saveSession, sessionTargetPath } from "./lib/atomaton-data.ts";
-import { capToolResults, shrinkLogLine } from "../../domain/work/session-size.ts";
-import type { Session } from "../../domain/work/session.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface SaveAgentSessionArgs {
@@ -47,7 +50,7 @@ function main(): void {
   }
 
   const target = sessionTargetPath(values.type, values.number, values.agent);
-  const content = capped(readFileSync(values.session, "utf8"));
+  const content = readFileSync(values.session, "utf8");
   const runId = process.env.GITHUB_RUN_ID ?? "";
   const saved = saveSession(target, content, `session: ${values.agent} on ${values.type} ${values.number} (run ${runId})`);
   if (!saved) {
@@ -55,28 +58,6 @@ function main(): void {
   } else {
     console.error(`Session saved to atomaton-data:${target}`);
   }
-}
-
-/**
- * The session with its oversized tool results shortened, or unchanged.
- *
- * Unreadable JSON is saved as it is rather than refused. This script's job is to get
- * the session onto the branch; a session that cannot be parsed is a problem for
- * whatever reads it next, and losing it here would be worse than storing it whole.
- */
-function capped(content: string): string {
-  let session: Session;
-  try {
-    session = JSON.parse(content) as Session;
-  } catch {
-    console.error("Could not read the session as JSON; saving it unchanged.");
-    return content;
-  }
-
-  const result = capToolResults(session);
-  const line = shrinkLogLine(result, "oversized tool results shortened");
-  if (line !== undefined) console.error(line);
-  return result.shrunk ? JSON.stringify(result.session, null, 2) : content;
 }
 
 if (import.meta.main) main();
