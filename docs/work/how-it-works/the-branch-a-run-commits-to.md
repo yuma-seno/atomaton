@@ -31,6 +31,11 @@
   the agent's decision; a version in `package.json` is the case that shows why no
   rule belongs there, since a machine choosing one could roll a release back
   quietly.
+- A run's checkout is shallow — `actions/checkout` at its default
+  `fetch-depth: 1` — so the branch's own ancestry stops at the one commit it
+  checked out. `merge_base_into_branch` deepens the checkout to where the two
+  histories meet before merging, so `refusing to merge unrelated histories` is
+  never the answer to a merge base that only this clone had truncated.
 - `sync_branch` is the other question and does not answer this one: it
   fast-forwards a branch to its own remote branch, and brings no base in.
 

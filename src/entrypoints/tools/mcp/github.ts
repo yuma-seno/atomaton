@@ -1437,6 +1437,55 @@ function baseBranchForMerge(): string {
   return base.branch;
 }
 
+/** Whether this checkout's history stops short of its roots. */
+function isShallowCheckout(): boolean {
+  return gitRun("rev-parse", "--is-shallow-repository").stdout.trim() === "true";
+}
+
+/**
+ * The commit `ref` and HEAD share, or undefined when this checkout shows none.
+ *
+ * Asked with `merge-base` rather than read off `--is-ancestor`, whose exit code 1
+ * means either "not an ancestor" or "no common ancestor at all" — and the two need
+ * opposite things done about them.
+ */
+function mergeBaseWith(ref: string): string | undefined {
+  const base = gitRun("merge-base", ref, "HEAD");
+  return base.code === 0 && base.stdout ? base.stdout.trim() : undefined;
+}
+
+/**
+ * Deepen a shallow checkout until the merge base with the base branch is present.
+ *
+ * Returns whether the merge base is reachable afterwards. #372: a depth-1 checkout,
+ * which is what `actions/checkout` leaves when no workflow asks for more, has no
+ * ancestry for the branch's own tip, so `git merge` finds no common ancestor and
+ * refuses with `fatal: refusing to merge unrelated histories` — a fact about this
+ * checkout said as if it were a fact about the branches, when GitHub has the merge
+ * base all along.
+ *
+ * The refspec is explicit because `actions/checkout` writes a narrow one into
+ * `.git/config`: `git fetch --unshallow origin` on its own deepens that one ref and
+ * leaves everything else where it was. `--unshallow` rather than a bounded
+ * `--deepen`: how far back the merge base lies cannot be known from here, and a
+ * deepening loop is several round trips to a remote that can answer once. A checkout
+ * that can already answer `merge-base` never reaches this, so the ordinary merge pays
+ * nothing for it.
+ *
+ * The alternative — checking every machinery run out at `fetch-depth: 0` — was
+ * rejected: it charges every run the full history of the repository, when the tools
+ * that need it (`merge-base` here, the credential scan's branch range) are the ones
+ * that can say so and ask.
+ */
+function deepenToMergeBase(remoteRef: string): boolean {
+  const fetch = gitRun("fetch", "--unshallow", "origin", "+refs/heads/*:refs/remotes/origin/*");
+  if (fetch.code) {
+    log(`this checkout is shallow, and deepening it failed: ${fetch.stderr || fetch.stdout}`);
+    return false;
+  }
+  return mergeBaseWith(remoteRef) !== undefined;
+}
+
 /**
  * Bring this branch's base into it, as a merge commit, and push.
  *
@@ -1489,13 +1538,44 @@ function mergeBaseIntoBranchOrThrow(): string {
   const remoteRef = `refs/remotes/origin/${base}`;
   const fetch = gitRun("fetch", "origin", `refs/heads/${base}:${remoteRef}`);
   if (fetch.code) mcpFail(`Cannot fetch base branch '${base}': ${fetch.stderr || fetch.stdout}`);
-  const resolved = gitRun("rev-parse", remoteRef);
-  if (resolved.code) mcpFail(`Cannot resolve base branch '${base}': ${resolved.stderr || resolved.stdout}`);
-  const baseSha = resolved.stdout.trim();
+  const remoteTip = (): string => {
+    const resolved = gitRun("rev-parse", remoteRef);
+    if (resolved.code) mcpFail(`Cannot resolve base branch '${base}': ${resolved.stderr || resolved.stdout}`);
+    return resolved.stdout.trim();
+  };
+  let baseSha = remoteTip();
+
+  // Before the ancestry question, because a truncated checkout cannot answer that one
+  // either: `--is-ancestor` reads history it does not have as "not an ancestor".
+  let deepened = false;
+  if (mergeBaseWith(remoteRef) === undefined) {
+    if (!isShallowCheckout()) {
+      mcpFail(
+        `'${branch}' and '${base}' share no common ancestor in this checkout, so git would refuse the merge ` +
+          `with "fatal: refusing to merge unrelated histories". Nothing was merged.`,
+      );
+    }
+    deepened = deepenToMergeBase(remoteRef);
+    if (!deepened) {
+      mcpFail(
+        `Cannot find the merge base between '${branch}' and '${base}': this checkout is shallow (the workflow ` +
+          `clones at fetch-depth 1) and deepening it did not reach one. That is what "fatal: refusing to merge ` +
+          `unrelated histories" would have been describing — the truncated checkout, not the branches. Nothing ` +
+          `was merged.`,
+      );
+    }
+    // The deepening fetched every branch, so where the base's tip is now is worth
+    // re-reading rather than carrying the sha resolved before it.
+    baseSha = remoteTip();
+  }
+
+  // Recorded only when it happened: an ordinary merge says nothing, and a reader
+  // wondering why one merge was slow has the answer in the entry.
+  const deepening = deepened ? { deepened: true } : {};
 
   const ancestor = gitRun("merge-base", "--is-ancestor", remoteRef, "HEAD");
   if (ancestor.code === 0) {
-    logOp("merge_base_into_branch", { branch, base, status: "up_to_date", base_sha: baseSha });
+    logOp("merge_base_into_branch", { branch, base, status: "up_to_date", base_sha: baseSha, ...deepening });
     return JSON.stringify({ status: "up_to_date", branch, base, base_sha: baseSha });
   }
   if (ancestor.code !== 1) {
@@ -1516,7 +1596,7 @@ function mergeBaseIntoBranchOrThrow(): string {
   const files = unmerged.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
   if (files.length > 0) {
     // Not committed, and deliberately not `merge --abort`: the markers are the work.
-    logOp("merge_base_into_branch", { branch, base, status: "conflicts", base_sha: baseSha, files });
+    logOp("merge_base_into_branch", { branch, base, status: "conflicts", base_sha: baseSha, files, ...deepening });
     return JSON.stringify({
       status: "conflicts",
       branch,
@@ -1534,7 +1614,7 @@ function mergeBaseIntoBranchOrThrow(): string {
   if (head.code) mcpFail(`Cannot resolve HEAD after the merge: ${head.stderr || head.stdout}`);
   const commit = head.stdout.trim();
   pushBranch(branch);
-  logOp("merge_base_into_branch", { branch, base, status: "merged", base_sha: baseSha, commit });
+  logOp("merge_base_into_branch", { branch, base, status: "merged", base_sha: baseSha, commit, ...deepening });
   return JSON.stringify({ status: "merged", branch, base, base_sha: baseSha, commit });
 }
 

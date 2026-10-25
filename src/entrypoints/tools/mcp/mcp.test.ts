@@ -167,6 +167,40 @@ function commitOnWork(work: string, file: string, content: string): string {
 }
 
 /**
+ * The same shape, checked out the way a run's own checkout leaves it: depth 1.
+ *
+ * `file://` rather than a plain path, because `git clone` ignores `--depth` for a local
+ * path and hardlinks the objects instead — a fixture that came out complete would be
+ * testing nothing (#372). The work branch is made and pushed in the seed first, because
+ * a depth-1 clone has to be told which branch to fetch.
+ */
+function makeShallowMergeBaseFixture(): { root: string; seed: string; work: string } {
+  const root = mkdtempSync(join(tmpdir(), "atomaton-shallow-merge-"));
+  const remote = join(root, "remote.git");
+  const seed = join(root, "seed");
+  const work = join(root, "work");
+  git(root, "init", "--bare", "--initial-branch=main", remote);
+  git(root, "init", "--initial-branch=main", seed);
+  git(seed, "config", "user.name", "Atomaton Test");
+  git(seed, "config", "user.email", "atomaton@example.com");
+  writeFileSync(join(seed, "shared.txt"), "one\n");
+  writeFileSync(join(seed, "README.md"), "readme\n");
+  git(seed, "add", ".");
+  git(seed, "commit", "-m", "initial");
+  git(seed, "remote", "add", "origin", remote);
+  git(seed, "push", "-u", "origin", "main");
+  git(seed, "checkout", "-b", "atomaton/issue-1");
+  writeFileSync(join(seed, "work.txt"), "the work\n");
+  git(seed, "add", "work.txt");
+  git(seed, "commit", "-m", "the work");
+  git(seed, "push", "-u", "origin", "atomaton/issue-1");
+  git(root, "clone", "--depth=1", "--branch", "atomaton/issue-1", `file://${remote}`, work);
+  git(work, "config", "user.name", "Atomaton Test");
+  git(work, "config", "user.email", "atomaton@example.com");
+  return { root, seed, work };
+}
+
+/**
  * The environment a merge needs on an issue run with no `config.yaml` beside it.
  *
  * `parentIssueOf` is asked whether #1 is a sub-issue (it is not, so the base is the
@@ -906,6 +940,116 @@ describe("mcp/github.ts", () => {
         base: "main",
         base_sha: baseSha,
       });
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * #372: `actions/checkout` clones at depth 1 unless a workflow asks for more, so the
+   * branch's own ancestry stops at the commit that was checked out. `git merge` then
+   * finds no common ancestor and refuses with `fatal: refusing to merge unrelated
+   * histories` — while GitHub has the merge base all along. The tool deepens the
+   * checkout to where the merge base is and merges, rather than handing the run a
+   * message about its own clone.
+   */
+  test("merge_base_into_branch deepens a depth-1 checkout rather than reporting unrelated histories", async () => {
+    const { root, seed, work } = makeShallowMergeBaseFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-base-env-"));
+    try {
+      expect(existsSync(join(work, ".git", "shallow"))).toBe(true);
+      const baseSha = commitOnMain(seed, "README.md", "readme, updated\n");
+      const before = git(work, "rev-parse", "HEAD");
+
+      const response = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 26, method: "tools/call", params: { name: "merge_base_into_branch", arguments: {} } },
+        mergeBaseEnv(dir),
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      const result = JSON.parse(response.result.content[0].text) as {
+        status: string; base: string; base_sha: string; commit: string;
+      };
+      expect(result).toMatchObject({ status: "merged", base: "main", base_sha: baseSha });
+
+      const parents = git(work, "rev-list", "--parents", "-n", "1", "HEAD").split(/\s+/);
+      expect(parents.length).toBe(3);
+      expect(git(work, "rev-parse", "HEAD^1")).toBe(before);
+      expect(git(work, "rev-parse", "HEAD^2")).toBe(baseSha);
+      expect(git(work, "rev-parse", "origin/atomaton/issue-1")).toBe(result.commit);
+      expect(opsLog(dir).find((entry) => entry.op === "merge_base_into_branch")).toMatchObject({
+        status: "merged",
+        deepened: true,
+      });
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * The other half of the same truncation: on a depth-1 checkout `--is-ancestor` reads
+   * history it does not have as "not an ancestor", so a base that is already in gets
+   * merged again — or, with no merge base visible, fails instead. Nothing should be
+   * committed when there is nothing to bring in.
+   */
+  test("merge_base_into_branch sees a base that is already an ancestor on a depth-1 checkout", async () => {
+    const { root, work } = makeShallowMergeBaseFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-base-env-"));
+    try {
+      const before = git(work, "rev-parse", "HEAD");
+
+      const response = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 27, method: "tools/call", params: { name: "merge_base_into_branch", arguments: {} } },
+        mergeBaseEnv(dir),
+        work,
+      );
+      expect(response.result.isError, response.result.content?.[0]?.text).toBeFalsy();
+      expect(JSON.parse(response.result.content[0].text)).toMatchObject({ status: "up_to_date" });
+      expect(git(work, "rev-parse", "HEAD")).toBe(before);
+      expect(existsSync(join(work, ".git", "MERGE_HEAD"))).toBe(false);
+    } finally {
+      removeTemp(root);
+      removeTemp(dir);
+    }
+  }, 60_000);
+
+  /**
+   * A merge base that really is absent is the tool's to say plainly. git's own
+   * `refusing to merge unrelated histories` is true of the branches here, and the run
+   * should hear that with nothing half-done behind it.
+   */
+  test("merge_base_into_branch names a genuinely missing merge base and merges nothing", async () => {
+    const { root, seed, work } = makeMergeBaseFixture();
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-base-env-"));
+    try {
+      // `main` rewritten to an unrelated root: the one case where no common ancestor
+      // exists in any checkout.
+      git(seed, "checkout", "--orphan", "rewritten");
+      git(seed, "rm", "-rf", ".");
+      writeFileSync(join(seed, "README.md"), "an unrelated root\n");
+      git(seed, "add", "README.md");
+      git(seed, "commit", "-m", "a rewritten main");
+      git(seed, "push", "-f", "origin", "rewritten:main");
+      // The rewritten base is not a fast-forward, and the tool fetches the base with a
+      // refspec that is not forced: without dropping the stale copy, this would fail on
+      // the fetch and never reach the question the test is about.
+      git(work, "update-ref", "-d", "refs/remotes/origin/main");
+      const before = git(work, "rev-parse", "HEAD");
+
+      const response = await sendRequest(
+        "github.ts",
+        { jsonrpc: "2.0", id: 28, method: "tools/call", params: { name: "merge_base_into_branch", arguments: {} } },
+        mergeBaseEnv(dir),
+        work,
+      );
+      expect(response.result.isError).toBe(true);
+      expect(response.result.content[0].text).toContain("share no common ancestor");
+      expect(git(work, "rev-parse", "HEAD")).toBe(before);
+      expect(existsSync(join(work, ".git", "MERGE_HEAD"))).toBe(false);
     } finally {
       removeTemp(root);
       removeTemp(dir);
