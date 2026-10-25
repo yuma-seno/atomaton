@@ -59,11 +59,21 @@ export interface RunWithFakeGhResult {
  * its own. The run that found this spent its remaining iterations hunting one of the
  * phantom failures and never finished the task.
  *
+ * `AGENT` and `GITHUB_RUN_ID` are the same gap seen from the other side: they are the
+ * identity of the run that is executing the suite. The runner exports `AGENT` and
+ * Actions supplies `GITHUB_RUN_ID`, so a test that spawns a server without declaring
+ * them posts comment bodies carrying `atomaton:agent=<whoever ran the suite>` and
+ * `run=<that run's id>` -- a body assertion that passes in one agent's run and fails
+ * in another, which is a suite whose result depends on who ran it. CI has a
+ * `GITHUB_RUN_ID` of its own, but a different one every run, so "what CI has always
+ * tested" is not the fixed value a fixture needs: both are removed and a test that
+ * wants either declares it. #355 measured the leak.
+ *
  * Only those variables are removed, and deliberately not `GITHUB_REPOSITORY` or the
- * tokens: those exist in CI too, so they are not the discrepancy, and taking them
- * away would change what CI has been testing all along. A test that wants any of
- * these declares it, and an explicit value still wins -- callers spread their own
- * `env` after this.
+ * tokens: those are the same value in CI and in a run, so they are not the
+ * discrepancy, and taking them away would change what CI has been testing all along.
+ * A test that wants any of these declares it, and an explicit value still wins --
+ * callers spread their own `env` after this.
  *
  * Every call site is the thing that decays -- eleven files that spawn a script were
  * still spreading `process.env` when this was written -- so
@@ -74,7 +84,7 @@ export interface RunWithFakeGhResult {
 export function hermeticEnv(): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("ATOMA_") || key.startsWith("ATOMATON_") || key === "NUMBER" || key === "TYPE" || key === "NOTIFY" || key.startsWith("FAKE_GH_")) continue;
+    if (key.startsWith("ATOMA_") || key.startsWith("ATOMATON_") || key === "NUMBER" || key === "TYPE" || key === "NOTIFY" || key === "AGENT" || key === "GITHUB_RUN_ID" || key.startsWith("FAKE_GH_")) continue;
     // `git` finds its repository through these, and they OVERRIDE `cwd`: a child started
     // with `cwd: tempDir` and `GIT_DIR` set runs every `git` command against `GIT_DIR`,
     // not the temp dir. A test that reconstructs another branch's tree and runs the
