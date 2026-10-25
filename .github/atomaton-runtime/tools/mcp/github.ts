@@ -6762,16 +6762,30 @@ function isGeneratedWorkflow(path) {
 function governedPathsIn(files, patterns) {
   return files.filter((file) => patterns.some((pattern) => pathMatches(file, pattern)));
 }
+var RUNS_NAMED = 2;
+function describeActiveRuns(activeRuns) {
+  const named = activeRuns.slice(0, RUNS_NAMED).map((run) => `"${run.name}" (${run.status})`);
+  const rest = activeRuns.length - named.length;
+  const more = rest > 0 ? `, +${rest} more` : "";
+  return `${named.length === 1 ? "workflow run" : "workflow runs"} ${named.join(", ")}${more}`;
+}
 function explainRequiredChecks(signals) {
   const blockers = [];
   const byName = new Map(signals.checks.map((c) => [c.name, c]));
   for (const context of signals.requiredChecks) {
     const run = byName.get(context);
     if (!run) {
-      blockers.push({
-        kind: "checks-missing",
-        detail: `required check "${context}" has not run on the head commit`
-      });
+      if (signals.activeRuns.length > 0) {
+        blockers.push({
+          kind: "checks-pending",
+          detail: `required check "${context}" has not registered yet; ${describeActiveRuns(signals.activeRuns)} ` + "unfinished on this commit, and dispatching CI would duplicate it"
+        });
+      } else {
+        blockers.push({
+          kind: "checks-missing",
+          detail: `required check "${context}" has not run on the head commit`
+        });
+      }
     } else if (run.status !== "completed") {
       blockers.push({
         kind: "checks-pending",
@@ -6853,40 +6867,42 @@ function decideMergeReadiness(signals) {
       detail: "a person opened this pull request; review it and report, but leave the merge to them"
     });
   }
-  if (signals.mergePolicy !== "auto") {
-    blockers.push({
-      kind: "merge-policy",
-      detail: `merge.policy is '${signals.mergePolicy}', not 'auto'; a human performs the merge`
-    });
-  }
-  if (signals.governanceUnknown) {
-    blockers.push({
-      kind: "governance-unknown",
-      detail: "whether this pull request changes how agents themselves run could not be determined " + `(${signals.governanceUnknown}), so the merge falls to a person`
-    });
-  }
-  if (signals.governancePaths.length > 0) {
-    const shown = signals.governancePaths.slice(0, 5).join(", ");
-    const rest = signals.governancePaths.length - 5;
-    blockers.push({
-      kind: "governance-change",
-      detail: `this pull request changes how agents themselves run (${shown}${rest > 0 ? `, +${rest} more` : ""}); ` + "review it and report, but leave the merge to a person" + (signals.governancePaths.some(isGeneratedWorkflow) ? ". If the intent was to change what CI or deployment does, that belongs in " + "`.github/atomaton/config.yaml` (`checks.from_pull_request`, `deploy.on_merge`) rather than in a " + "workflow file \u2014 an agent can write config and cannot write a workflow. If this is an " + "upgrade of the generated deliverable, it is exactly what a person should be merging" : "")
-    });
-  }
-  for (const match of signals.gateMatches) {
-    const shown = match.evidence.slice(0, 5).join(", ");
-    const rest = match.evidence.length - 5;
-    const because = shown ? ` (matched ${shown}${rest > 0 ? `, +${rest} more` : ""})` : "";
-    blockers.push({
-      kind: "merge-gate",
-      detail: `a merge gate declared by this project applies${because}: ${match.reason}` + " \u2014 review it and report, but leave the merge to a person"
-    });
-  }
-  for (const problem of signals.gateProblems) {
-    blockers.push({
-      kind: "gate-config-invalid",
-      detail: `a declared merge gate could not be evaluated, so this merge falls to a person: ${problem}`
-    });
+  if (!signals.stackedMerge) {
+    if (signals.mergePolicy !== "auto") {
+      blockers.push({
+        kind: "merge-policy",
+        detail: `merge.policy is '${signals.mergePolicy}', not 'auto'; a human performs the merge`
+      });
+    }
+    if (signals.governanceUnknown) {
+      blockers.push({
+        kind: "governance-unknown",
+        detail: "whether this pull request changes how agents themselves run could not be determined " + `(${signals.governanceUnknown}), so the merge falls to a person`
+      });
+    }
+    if (signals.governancePaths.length > 0) {
+      const shown = signals.governancePaths.slice(0, 5).join(", ");
+      const rest = signals.governancePaths.length - 5;
+      blockers.push({
+        kind: "governance-change",
+        detail: `this pull request changes how agents themselves run (${shown}${rest > 0 ? `, +${rest} more` : ""}); ` + "review it and report, but leave the merge to a person" + (signals.governancePaths.some(isGeneratedWorkflow) ? ". If the intent was to change what CI or deployment does, that belongs in " + "`.github/atomaton/config.yaml` (`checks.from_pull_request`, `deploy.on_merge`) rather than in a " + "workflow file \u2014 an agent can write config and cannot write a workflow. If this is an " + "upgrade of the generated deliverable, it is exactly what a person should be merging" : "")
+      });
+    }
+    for (const match of signals.gateMatches) {
+      const shown = match.evidence.slice(0, 5).join(", ");
+      const rest = match.evidence.length - 5;
+      const because = shown ? ` (matched ${shown}${rest > 0 ? `, +${rest} more` : ""})` : "";
+      blockers.push({
+        kind: "merge-gate",
+        detail: `a merge gate declared by this project applies${because}: ${match.reason}` + " \u2014 review it and report, but leave the merge to a person"
+      });
+    }
+    for (const problem of signals.gateProblems) {
+      blockers.push({
+        kind: "gate-config-invalid",
+        detail: `a declared merge gate could not be evaluated, so this merge falls to a person: ${problem}`
+      });
+    }
   }
   const needsCiDispatch = blockers.some((b) => b.kind === "checks-missing") && !blockers.some((b) => CI_WOULD_BE_WASTED.has(b.kind));
   return { ready: blockers.length === 0, blockers, needsCiDispatch };
@@ -20320,6 +20336,21 @@ function readChangedFiles(repo, num) {
   }
   return { files, problem: "" };
 }
+function readActiveRuns(repo, sha) {
+  const { code, stdout, stderr } = ghRead("api", `repos/${repo}/actions/runs?head_sha=${sha}`);
+  if (code) {
+    log7(`WARN could not list the workflow runs for ${sha}: ${stderr || stdout}`);
+    return [];
+  }
+  let answer;
+  try {
+    answer = stdout ? JSON.parse(stdout) : {};
+  } catch {
+    log7(`WARN could not parse the workflow runs for ${sha}`);
+    return [];
+  }
+  return (answer?.workflow_runs ?? []).filter((run) => (run.status ?? "completed") !== "completed").map((run) => ({ name: run.name ?? "(unnamed workflow)", status: run.status ?? "unknown" }));
+}
 function gatherMergeSignals(repo, num, throwOnFailure) {
   const json = (...args) => {
     const { code, stdout, stderr } = ghRead(...args);
@@ -20346,6 +20377,7 @@ function gatherMergeSignals(repo, num, throwOnFailure) {
   const mergeStateStatus = mergeState.known ? mergeState.value.mergeStateStatus ?? "UNKNOWN" : "UNKNOWN";
   const sha = view.headRefOid ?? "";
   const runs = sha ? json("api", `repos/${repo}/commits/${sha}/check-runs`) : null;
+  const activeRuns = sha ? readActiveRuns(repo, sha) : [];
   const baseRefName = view.baseRefName ?? "";
   const required = readBranchRules(repo, baseRefName);
   if (!required.known)
@@ -20375,7 +20407,9 @@ function gatherMergeSignals(repo, num, throwOnFailure) {
         conclusion: run.conclusion,
         ...run.details_url ? { detailsUrl: run.details_url } : {}
       })),
+      activeRuns,
       requiredChecks: required.known ? required.contexts : [],
+      stackedMerge: isIssueBranch(baseRefName),
       mergePolicy: getMergePolicy(),
       governancePaths: changed.problem ? [] : governedPathsIn(changed.files.map((file) => file.path), getGovernedPaths()),
       governanceUnknown: changed.problem || undefined,
@@ -21353,6 +21387,7 @@ function checkMergeReadiness(a) {
     number: num,
     ready: readiness.ready,
     blockers: readiness.blockers,
+    ...stackedMergeFields(signals, refs),
     merge_state_status: signals.mergeStateStatus,
     required_checks: signals.requiredChecks,
     checks: signals.checks.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion })),
@@ -21362,6 +21397,14 @@ ${formatBlockers(readiness.blockers)}` + (dispatched ? `
 
 CI has been dispatched for the head commit; re-check shortly.` : "")
   });
+}
+function stackedMergeFields(signals, refs) {
+  if (!signals.stackedMerge)
+    return { stacked_merge: false };
+  return {
+    stacked_merge: true,
+    stacked_merge_note: `this pull request merges into ${refs.baseRefName}, a work branch rather than the branch the work ` + "is delivered to. `merge.policy`, `merge.governed_paths` and `merge.gates` describe the delivery " + "merge and were not applied: the pull request that carries " + `${refs.baseRefName} to the base branch is judged on that aggregate instead.`
+  };
 }
 function deleteMergedBranch(branch) {
   if (!branch)
@@ -21384,12 +21427,14 @@ async function mergePr() {
   const { signals, refs } = gatherMergeSignals(REPO, num, mcpFail);
   const { headRefName, baseRefName } = refs;
   const readiness = decideMergeReadiness(signals);
+  const stackedMerge = stackedMergeFields(signals, refs);
   if (!readiness.ready) {
     log8(`mergePr: refusing PR #${num} \u2014 ${readiness.blockers.map((b) => b.kind).join(", ")}`);
     const dispatched = readiness.needsCiDispatch && headRefName ? dispatchCi(headRefName) : false;
     return JSON.stringify({
       merged: false,
       blockers: readiness.blockers,
+      ...stackedMerge,
       ci_dispatched: dispatched,
       reason: `Not mergeable:
 ${formatBlockers(readiness.blockers)}`
@@ -21412,7 +21457,7 @@ ${formatBlockers(readiness.blockers)}`
   });
   switch (handoff.kind) {
     case "no-parent":
-      return JSON.stringify({ merged: true, closed_issue: null, parent_outcome: "no-parent" });
+      return JSON.stringify({ merged: true, closed_issue: null, parent_outcome: "no-parent", ...stackedMerge });
     case "already-closed":
       log8(`mergePr: parent issue #${handoff.parentIssue} already closed -- skipping post-merge re-invocation`);
       return JSON.stringify({
@@ -21420,6 +21465,7 @@ ${formatBlockers(readiness.blockers)}`
         closed_issue: null,
         parent_issue: handoff.parentIssue,
         parent_outcome: "already-closed",
+        ...stackedMerge,
         note: 'GitHub closed the parent itself, from a "Closes #N" line. Nothing further was needed.'
       });
     case "reinvoke-origin-agent":
@@ -21429,15 +21475,16 @@ ${formatBlockers(readiness.blockers)}`
           closed_issue: null,
           parent_issue: handoff.parentIssue,
           parent_outcome: "reinvoked",
-          reinvoked_agent: handoff.agent
+          reinvoked_agent: handoff.agent,
+          ...stackedMerge
         });
       }
-      return await closeParentAndReport(handoff.parentIssue);
+      return await closeParentAndReport(handoff.parentIssue, stackedMerge);
     case "close-directly":
-      return await closeParentAndReport(handoff.parentIssue);
+      return await closeParentAndReport(handoff.parentIssue, stackedMerge);
   }
 }
-async function closeParentAndReport(parentIssue) {
+async function closeParentAndReport(parentIssue, extra = {}) {
   try {
     const outcome = JSON.parse(await closeIssueAndDispatch({ [ISSUE_NUMBER_ARG]: parentIssue }, { continuesChain: true }));
     if (outcome.close_requested !== undefined) {
@@ -21446,6 +21493,7 @@ async function closeParentAndReport(parentIssue) {
         closed_issue: null,
         parent_issue: parentIssue,
         parent_outcome: "close-requested",
+        ...extra,
         note: `The pull request merged. Issue #${parentIssue} was opened by a person, so it was not closed -- they have been asked on the thread to close it. Nothing further is needed from you.`
       });
     }
@@ -21453,7 +21501,8 @@ async function closeParentAndReport(parentIssue) {
       merged: true,
       closed_issue: parentIssue,
       parent_issue: parentIssue,
-      parent_outcome: "closed"
+      parent_outcome: "closed",
+      ...extra
     });
   } catch (e) {
     const why = e.message ?? String(e);
@@ -21463,6 +21512,7 @@ async function closeParentAndReport(parentIssue) {
       closed_issue: null,
       parent_issue: parentIssue,
       parent_outcome: "close-failed",
+      ...extra,
       note: `The pull request merged, but issue #${parentIssue} could not be closed: ${why}. It is still open and nothing will retry. Close it with request_close_issue, or report it.`
     });
   }
@@ -21504,7 +21554,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "get_check_runs", description: "Retrieve GitHub Actions and other check runs for a commit, branch, or tag. Use this to verify CI status after pushing or before merge decisions. Returns one object per check with `name`, `status`, `conclusion` and `html_url` -- follow the URL for a failing check's log, which is not included. Does not wait for incomplete checks.", schema: GET_CHECK_RUNS_SCHEMA, handler: getCheckRuns }),
   defineMcpTool({
     name: "check_merge_readiness",
-    description: "Report whether a pull request can be merged right now, and every reason it cannot. Read the `blockers` array rather than assuming a fixed set: kinds include failing, pending and absent required checks, merge conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. Call this before merge_pr, and to explain a refused merge. When the only thing missing is a CI run on the head commit, this dispatches CI and says so \u2014 re-check afterwards rather than merging blind. Read-only apart from that dispatch.",
+    description: "Report whether a pull request can be merged right now, and every reason it cannot. Read the `blockers` array rather than assuming a fixed set: kinds include failing, pending and absent required checks, merge conflicts, a branch behind its base, branch protection, draft state, a human author, a change under a governed path, a condition this project declared in `merge.gates`, and merge policy. Call this before merge_pr, and to explain a refused merge. When the only thing missing is a CI run on the head commit, this dispatches CI and says so \u2014 re-check afterwards rather than merging blind. A required check that has not registered yet while a workflow run for the head commit is still going is `checks-pending`, not `checks-missing`: the run in flight will create it, and nothing is dispatched. Read-only apart from that dispatch.",
     schema: PR_CONTEXT_NUMBER_ARG_SCHEMA,
     handler: checkMergeReadiness
   }),

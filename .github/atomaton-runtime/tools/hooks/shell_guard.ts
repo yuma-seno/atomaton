@@ -69,10 +69,122 @@ var ROUTING_RULES = {
   rsync: "rsync is disabled: this run works on the checked-out repository, not on other hosts."
 };
 var COMMAND_WRAPPERS = new Set(["sudo", "env", "time", "nohup", "nice", "xargs", "command", "exec"]);
+var RESERVED_WORDS = new Set([
+  "if",
+  "then",
+  "else",
+  "elif",
+  "fi",
+  "for",
+  "while",
+  "until",
+  "do",
+  "done",
+  "case",
+  "esac",
+  "select",
+  "function",
+  "in",
+  "!",
+  "{",
+  "}",
+  "(",
+  ")",
+  "[[",
+  "]]"
+]);
+function segmentsOf(text) {
+  return text.split(/\s*(?:&&|\|\||[;|&\n])\s*/);
+}
+var HEREDOC = /<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1/g;
+function withoutHeredocBodies(command) {
+  const kept = [];
+  const terminators = [];
+  for (const line of command.split(`
+`)) {
+    const ending = terminators[0];
+    if (ending !== undefined) {
+      if (line.trim() === ending)
+        terminators.shift();
+      continue;
+    }
+    kept.push(line);
+    for (const match of line.matchAll(HEREDOC)) {
+      const before = match.index === 0 ? "" : line[match.index - 1] ?? "";
+      if (before !== "" && !/[\s\d]/.test(before))
+        continue;
+      terminators.push(match[2]);
+    }
+  }
+  return kept.join(`
+`);
+}
+function blankSingleQuoted(text) {
+  const out = [...text];
+  let index = 0;
+  let inDouble = false;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === "\\") {
+      index += 2;
+      continue;
+    }
+    if (char === '"') {
+      inDouble = !inDouble;
+      index += 1;
+      continue;
+    }
+    if (char === "'" && !inDouble) {
+      let end = index + 1;
+      while (end < text.length && text[end] !== "'")
+        end += 1;
+      for (let at = index;at < Math.min(end + 1, text.length); at += 1)
+        out[at] = " ";
+      index = end + 1;
+      continue;
+    }
+    index += 1;
+  }
+  return out.join("");
+}
+function substitutions(command) {
+  const text = blankSingleQuoted(command);
+  const found = [];
+  for (let index = 0;index < text.length; index += 1) {
+    if (text.startsWith("$(", index)) {
+      const end = closingParen(text, index + 1);
+      if (end !== -1) {
+        found.push(text.slice(index + 2, end));
+        index = end;
+      }
+    } else if (text[index] === "`") {
+      const end = text.indexOf("`", index + 1);
+      if (end !== -1) {
+        found.push(text.slice(index + 1, end));
+        index = end;
+      }
+    }
+  }
+  return found;
+}
+function closingParen(text, open) {
+  let depth = 0;
+  for (let index = open;index < text.length; index += 1) {
+    if (text[index] === "(")
+      depth += 1;
+    else if (text[index] === ")") {
+      depth -= 1;
+      if (depth === 0)
+        return index;
+    }
+  }
+  return -1;
+}
 var SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
 function invokedPrograms(command, depth = 0) {
+  const text = withoutHeredocBodies(command);
   const found = [];
-  for (const segment of command.split(/\s*(?:&&|\|\||[;|])\s*/)) {
+  for (const segment of segmentsOf(text)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
     let index = 0;
     while (index < tokens.length) {
@@ -82,7 +194,7 @@ function invokedPrograms(command, depth = 0) {
         continue;
       }
       const name = token.split("/").pop() ?? token;
-      if (COMMAND_WRAPPERS.has(name)) {
+      if (COMMAND_WRAPPERS.has(name) || RESERVED_WORDS.has(name)) {
         index++;
         continue;
       }
@@ -99,6 +211,10 @@ function invokedPrograms(command, depth = 0) {
       if (inner)
         found.push(...invokedPrograms(inner, depth + 1));
     }
+  }
+  if (depth < 2) {
+    for (const inner of substitutions(text))
+      found.push(...invokedPrograms(inner, depth + 1));
   }
   return found;
 }
@@ -169,8 +285,9 @@ var MUTATING_GIT_COMMANDS = new Set([
   "tag",
   "worktree"
 ]);
-function findMutatingGitCommand(command) {
-  for (const segment of command.split(/\s*(?:&&|\|\||[;|])\s*/)) {
+function findMutatingGitCommand(command, depth = 0) {
+  const text = withoutHeredocBodies(command);
+  for (const segment of segmentsOf(text)) {
     const tokens = segment.trim().split(/\s+/);
     const gitIndex = tokens.findIndex((token) => token === "git" || token.endsWith("/git"));
     if (gitIndex === -1)
@@ -188,6 +305,13 @@ function findMutatingGitCommand(command) {
     if (isReadOnlyGitForm(subcommand, tokens.slice(index + 1)))
       continue;
     return subcommand;
+  }
+  if (depth < 2) {
+    for (const inner of substitutions(text)) {
+      const nested = findMutatingGitCommand(inner, depth + 1);
+      if (nested)
+        return nested;
+    }
   }
   return;
 }
