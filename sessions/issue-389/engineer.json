@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #389: shell_guard refuses `curl` for one call and allows it for the four before it\n\n`shell_guard.ts` is not deterministic within one run: on issue #96 the same tool, same working directory and the same command shape were allowed four times and then refused.\n\n| call | command shape | result |\n| --- | --- | --- |\n| 1 | `cd /tmp && for n in 363; do curl -s \"https://api.github.com/repos/yuma-seno/atomaton/issues/$n/events?per_page=100\" -o ev-$n.json && …; done` | ran, exit 0 |\n| 2 | `cd /tmp && for n in 348 … 371; do curl -s \"…/pulls/$n\" -o pr-$n.json; done; command -v jq` | ran, exit 0 |\n| 3 | `cd /tmp && for n in 348 … 371; do curl -s \"…/pulls/$n/files?per_page=100\" -o files-$n.json; done` | ran, exit 0 |\n| 4 | `cd /tmp && for n in 363 368 348; do curl -s \"…/issues/$n/comments?per_page=100\" -o cm-$n.json; …; done` | ran, exit 0 |\n| 5 | `cd /tmp && for n in 348 … 371; do sha=$(jq -r .head.sha pr-$n.json); curl -s \"https://api.github.com/repos/yuma-seno/atomaton/commits/$sha/check-runs?per_page=100\" -o cr-$n.json; done` | **refused** |\n\nThe refusal, copied out of the tool result:\n\n> Error: Tool blocked by hook '…/.github/atomaton-runtime/tools/hooks/shell_guard.ts': Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: cd /tmp && for n in 348 359 361 363 365 366 368 371; do sha=$(jq -r .head.sha pr-$n.json); curl -s \"https://api.github.c)\n\nThe refusal is the correct policy; the four calls before it are the defect. Either the guard reads the command differently between calls, or it is not applied on every call — and a network egress rule that fires on the fifth invocation of the same pattern is a rule nobody can reason about. The one visible difference is the `$(…)` command substitution around the URL's `$sha`, which may be what the matcher sees as not-a-curl.\n\nNot load-bearing here: I got the check-run conclusions through `get_check_runs` instead, so the report on #96 is complete.",
+      "content": "Issue #389: shell_guard refuses `curl` for one call and allows it for the four before it\n**Labels:** atomaton/in-progress\n\n`shell_guard.ts` is not deterministic within one run: on issue #96 the same tool, same working directory and the same command shape were allowed four times and then refused.\n\n| call | command shape | result |\n| --- | --- | --- |\n| 1 | `cd /tmp && for n in 363; do curl -s \"https://api.github.com/repos/yuma-seno/atomaton/issues/$n/events?per_page=100\" -o ev-$n.json && …; done` | ran, exit 0 |\n| 2 | `cd /tmp && for n in 348 … 371; do curl -s \"…/pulls/$n\" -o pr-$n.json; done; command -v jq` | ran, exit 0 |\n| 3 | `cd /tmp && for n in 348 … 371; do curl -s \"…/pulls/$n/files?per_page=100\" -o files-$n.json; done` | ran, exit 0 |\n| 4 | `cd /tmp && for n in 363 368 348; do curl -s \"…/issues/$n/comments?per_page=100\" -o cm-$n.json; …; done` | ran, exit 0 |\n| 5 | `cd /tmp && for n in 348 … 371; do sha=$(jq -r .head.sha pr-$n.json); curl -s \"https://api.github.com/repos/yuma-seno/atomaton/commits/$sha/check-runs?per_page=100\" -o cr-$n.json; done` | **refused** |\n\nThe refusal, copied out of the tool result:\n\n> Error: Tool blocked by hook '…/.github/atomaton-runtime/tools/hooks/shell_guard.ts': Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: cd /tmp && for n in 348 359 361 363 365 366 368 371; do sha=$(jq -r .head.sha pr-$n.json); curl -s \"https://api.github.c)\n\nThe refusal is the correct policy; the four calls before it are the defect. Either the guard reads the command differently between calls, or it is not applied on every call — and a network egress rule that fires on the fifth invocation of the same pattern is a rule nobody can reason about. The one visible difference is the `$(…)` command substitution around the URL's `$sha`, which may be what the matcher sees as not-a-curl.\n\nNot load-bearing here: I got the check-run conclusions through `get_check_runs` instead, so the report on #96 is complete.",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-10-25T13:47:21Z",
@@ -1296,14 +1296,885 @@
       "role": "tool",
       "content": "{\"number\":394,\"url\":\"https://github.com/yuma-seno/atomaton/pull/394\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_00_mc6s48y2amxabu9yz77rjlu7"
+    },
+    {
+      "role": "user",
+      "content": "PR #394: shell_guard: judge the program a shell segment runs, not the first word of the split\n**Labels:** atomaton/in-progress\n**Linked Issue:** #389\n\n/reviewer\n\nPart of #389\n## What this fixes\n\nThe guard judged one loop four times and refused it the fifth because of where a `;` fell. `for n in 1; do curl ...; done` was **allowed**: the split left `do curl ...` as one segment, `do` was read as the program, and the routed name after it was never looked at. The refusing call on #96 happened to have a `;` between `do` and the `curl`, so `curl` landed at the start of a segment and was caught.\n\nMeasured before the change, driving the hook the way the shell tool does (JSON on stdin), against the source guard:\n\n```\ncall 1 (do curl ...)          {\"allow\":true}     <- allowed\ncall 5 (do sha=$(...); curl)  {\"allow\":false}    <- refused\n```\n\n## What changed — `src/entrypoints/tools/hooks/shell_guard.ts`\n\n1. **`RESERVED_WORDS`** — the shell's own words (`do`, `then`, `else`, `{`, `(`, `!`, …) are skipped when deciding which program a segment runs. Only the leading run is skipped, so a routed name in an argument position is still an argument.\n2. **`shellSegments()`** — one splitter for both rules (routing and mutating-git), now splitting on a newline and a background `&` as well. A command written on its own line used to be read as an argument of the line above it: `cd /tmp` / newline / `curl …` was allowed.\n3. **`substitutions()`** — the content of `$(...)` and of a backtick pair is read as a command, since it runs one. `x=$(curl -s …)` was allowed because the whole substitution is one token and that token is an assignment.\n4. **`withoutHeredocBodies()`** — heredoc bodies are dropped before that reading. This is required *by* the newline split: a body line beginning `curl` would otherwise be read as a command. Measured: `cat > notes.md <<'EOF'` with a body line `curl is disabled` was refused before this, and is allowed now, while a real command after the heredoc is still refused.\n\nNot covered, and not claimed: `a=curl; $a`, `bash -c` beyond two levels, `find … -exec`, and a `case` arm. The file's header already says this is a text match that redirects the agent to the right tool, not a boundary.\n\n## Verification\n\nAll four commands from `checks.from_pull_request` in `.github/atomaton/config.yaml`, run in this tree:\n\n| command | result |\n| --- | --- |\n| `bun run src/entrypoints/machinery/scan_secrets.ts` | exit 0 (gitleaks release could not be resolved, so the branch was not scanned for credentials — the warning is the scan's, not this change's) |\n| `bun run typecheck` | exit 0 |\n| `bun run synth` | exit 0 (writes only `dist/`, which is gitignored) |\n| `bun run test` | 2132 pass, 0 fail, 169 files |\n\nNew tests in `shell_guard.test.ts`, all passing and all failing before the fix in their `do curl` / `then` / `{` / `(` / `&` / newline / `$( )` cases:\n\n- *a routed program is refused whatever shell construct invokes it* — the two shapes from #389 plus `until`, `if/then/else`, brace group, subshell, background `&`, newline, `sudo env A=1`, and two substitutions.\n- *a routed name in a loop header or an argument is still just a name* — `for f in curl wget`, `grep -rn 'curl -s' src/`, `echo 'use fetch, not curl'`.\n- *a heredoc body is data, and a command after it is still a command*.\n\n## What this does not do\n\n`.github/atomaton-runtime/tools/hooks/shell_guard.ts` is not touched: `.github/**` here is this repository's adoption of the last release and lags `src/` until a self-deploy (`.github/atomaton/config.yaml:39`). So this fixes the deliverable now and this repository's own guard only after a release plus **Atomaton Self Deploy** — until then a run here still meets the old matcher.\n\n🤖 Opened by the engineer agent.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40205963768)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T15:22:36Z",
+        "event_type": "pr_opened",
+        "id": "pr-394",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\n**1. `substitutions()` reads text the shell never executes, so writing a document that quotes a command is refused — including the heredoc case this PR says it fixed.** `invokedPrograms` scans the raw command for `$( )`/backtick content (`src/entrypoints/tools/hooks/shell_guard.ts:211`), while heredoc stripping happens only inside `shellSegments` (`src/entrypoints/tools/hooks/shell_guard.ts:95`), and the scan has no notion of quoting at all (`src/entrypoints/tools/hooks/shell_guard.ts:142`). Consequences, both deterministic:\n\n- `cat > notes.md <<'EOF'` / ``Run `gh pr view` to check.`` / `EOF` → refused: `gh` is found between the backticks and the segment split never removed the body. The new test at `src/entrypoints/tools/hooks/shell_guard.test.ts:247` passes only because its bodies contain no backtick pair and no `$(`.\n- `grep -rn 'use `curl` instead' src/` → refused, while the neighbouring assertion at `src/entrypoints/tools/hooks/shell_guard.test.ts:233` (`grep -rn 'curl -s' src/`) requires it allowed. In bash, single quotes are literal; nothing runs.\n\nThis is the \"mention, not position\" class the `invokedPrograms` comment says was already fixed once (`src/entrypoints/tools/hooks/shell_guard.ts:169`), and it matters here because this repository's own documentation is written that way: `docs/pipeline/reference.md:87`, `src/content/skills/engineering/secrets-in-a-check.md:19`.\n\nRequired correction: take substitution contents from the same text the segment split reads — `withoutHeredocBodies(command)` — and skip any `$(`/backtick occurrence inside a single-quoted region, which the shell does not expand. A `<<'EOF'` body can be dropped wholesale (it is never expanded); if you want to keep scanning an unquoted heredoc's body, the terminator's quoting has to survive into `terminators` — the `HEREDOC` regex already captures it in group 1 (`src/entrypoints/tools/hooks/shell_guard.ts:99`) and it is discarded at `src/entrypoints/tools/hooks/shell_guard.ts:128`. Add a test for each: a quoted heredoc whose body contains a backticked `gh`/`curl` must be allowed, and `grep -rn 'use `curl`' src/` must be allowed.\n\n**2. The mutating-git rule does not read substitutions, so the two rules already disagree about where a command begins.** `findMutatingGitCommand` iterates `shellSegments` only (`src/entrypoints/tools/hooks/shell_guard.ts:357`); `substitutions()` is called from `invokedPrograms` alone. So `x=$(curl -s …)` is refused while `x=$(git push origin main)` is allowed — the split in the segment leaves the token `x=$(git`, which matches neither `git` nor `*/git`. That contradicts the new comment's claim of \"one splitter … so the mutating-git rule and the routing rules cannot disagree\" (`src/entrypoints/tools/hooks/shell_guard.ts:86`). Correction: run the same bounded substitution reading in `findMutatingGitCommand`, with tests that `x=$(git push origin main)` is refused and `x=$(git rev-parse HEAD)` is allowed. It is pre-existing rather than introduced; if you would rather not extend it here, the PR must say the git rule does not read substitutions instead of claiming the rules agree.\n\n<details><summary>The traces behind both findings, and what CI did not see</summary>\n\nFinding 1, first case — `checkInvocation` → `findMutatingGitCommand`: `shellSegments` drops the body, program `cat`, no refusal. → `invokedPrograms`: program `cat`. → `substitutions(command)` on the *unstripped* text: backtick pair at `` `gh pr view` ``, `invokedPrograms(\"gh pr view\", 1)` → program `gh` → `ROUTING_RULES.gh` → `allow:false`.\n\nFinding 1, second case — `grep -rn 'use `curl`' src/`: one segment, program `grep`; `substitutions` finds the backtick pair `curl` (single quotes are not tracked) → `ROUTING_RULES.curl` → `allow:false`.\n\nFinding 2 — `echo $(git push origin main)`: `findMutatingGitCommand` reads one segment whose tokens are `echo`, `$(git`, `push`, `origin`, `main)`; no token equals `git` and none ends with `/git`, so no refusal. `invokedPrograms` then reads the substitution and finds program `git`, which is in no routing rule.\n\n`check_merge_readiness(pull_number=394)` returned `\"ready\":true`, `\"blockers\":[]`, with `atomaton-check` and `pull-request-checks (verify)` both `success`, so none of the above is visible to CI; the verify job ran `bun run test` in this tree and the new tests pass because neither case is covered.\n\n</details>\n\n**What I concluded.** The fix makes the five spellings from #389 agree, but it introduces a new class of refusal on text the shell never runs, so a run writing a document that quotes `gh` or `curl` is now refused — the same kind of unexplainable verdict the issue was opened about.\n\n**How I know.** The substitution scan receives the raw command at `src/entrypoints/tools/hooks/shell_guard.ts:211` while heredoc bodies are removed only for the segment split at `src/entrypoints/tools/hooks/shell_guard.ts:95`; the backtick/`$(` scan at `src/entrypoints/tools/hooks/shell_guard.ts:142` has no quote state; the mutating-git loop at `src/entrypoints/tools/hooks/shell_guard.ts:357` never consults it; and the neighbouring assertions at `src/entrypoints/tools/hooks/shell_guard.test.ts:233` and `src/entrypoints/tools/hooks/shell_guard.test.ts:247` cover only the quoteless spellings.\n\n**What I could not establish.** I could not execute the guard here — this review has no shell — so both traces are read off the code rather than measured; the first rework should run them as tests. Whether an unquoted heredoc's body should stay scanned (`$( )` in it does execute) is a judgement the code structure already forces you to make, and I have not decided it for you.\n\n**What happens next.**\n1. Rework `substitutions()` so it reads only text the shell executes, per finding 1, and add the two tests named there.\n2. Apply the same reading to `findMutatingGitCommand`, or state in the PR that the git rule does not — per finding 2.\n3. Re-run the four verify commands and leave `.github/atomaton-runtime/` untouched, as you already have.\n\nNote, not part of the block: `<<` inside ordinary prose (`echo \"see <<x\"`) starts a heredoc that never terminates, so every later line is dropped from both rules — it is not a regression, since before this change a newline hid those lines anyway.\n\n\n---\n_Tokens: 404984 total (381184 prompt + 23800 completion, 334336 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/40206845714) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\n_Counted from the session: 3 refused or errored tool calls._",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T15:28:51Z",
+        "event_type": "pr_comment",
+        "id": 6399526557,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/entrypoints/tools/hooks/shell_guard.test.ts b/src/entrypoints/tools/hooks/shell_guard.test.ts\nindex bd9682d0..c1507b66 100644\n--- a/src/entrypoints/tools/hooks/shell_guard.test.ts\n+++ b/src/entrypoints/tools/hooks/shell_guard.test.ts\n@@ -193,6 +193,69 @@ describe(\"shell_guard.ts\", () => {\n         expect(guard({ command }), command).toContain('\"allow\":false');\n       }\n     });\n+    /**\n+     * #389: one run, one agent, one loop, four allows and then a refusal. The difference\n+     * between the spellings was where the `;` fell -- `for n in 1; do curl ...` put `do`\n+     * where the guard read the program, and the fifth call happened to have a `;` between\n+     * `do` and the `curl`. A network rule that fires on the fifth invocation of the same\n+     * pattern is a rule nobody can reason about, so every construct that runs a command\n+     * has to answer the same way.\n+     */\n+    test(\"a routed program is refused whatever shell construct invokes it\", () => {\n+      for (const command of [\n+        \"cd /tmp && for n in 363; do curl -s https://example.com -o ev.json; done\",\n+        \"cd /tmp && for n in 348 371; do sha=$(jq -r .head.sha pr.json); curl -s https://example.com/$sha; done\",\n+        \"for n in 1; do echo hi; curl -s https://example.com; done\",\n+        \"until false; do curl -s https://example.com; done\",\n+        \"if true; then curl -s https://example.com; fi\",\n+        \"if false; then :; else curl -s https://example.com; fi\",\n+        \"{ curl -s https://example.com; }\",\n+        \"( curl -s https://example.com )\",\n+        \"sleep 1 & curl -s https://example.com\",\n+        \"cd /tmp\\ncurl -s https://example.com\",\n+        \"echo start && sudo env A=1 curl -s https://example.com\",\n+        // A substitution is run for its output, so running it is running it.\n+        \"x=$(curl -s https://example.com)\",\n+        \"sha=$(curl -s https://example.com | jq -r .sha)\",\n+      ]) {\n+        expect(guard({ command }), command).toContain('\"allow\":false');\n+      }\n+    }, 60_000);\n+\n+    /**\n+     * The other half: a name is not an invocation. Skipping the shell's own words is the\n+     * fix above, and it must not turn the word after one -- or an argument anywhere -- into\n+     * a program, which is the trap the position rules were written for in the first place.\n+     */\n+    test(\"a routed name in a loop header or an argument is still just a name\", () => {\n+      for (const command of [\n+        \"for f in curl wget; do echo $f; done\",\n+        \"grep -rn 'curl -s' src/\",\n+        \"echo 'use fetch, not curl'\",\n+        \"printf '%s\\\\n' gh curl\",\n+        \"ls in do then done\",\n+      ]) {\n+        expect(guard({ command }), command).toContain('\"allow\":true');\n+      }\n+    }, 60_000);\n+\n+    /**\n+     * A heredoc body is data; a command after one is a command. Both halves are one\n+     * reading of the same text, and the body matters here because newlines now separate\n+     * commands: without it, writing a document whose line begins `curl` was refused.\n+     */\n+    test(\"a heredoc body is data, and a command after it is still a command\", () => {\n+      expect(guard({ command: \"cat > notes.md <<'EOF'\\ncurl is disabled\\nEOF\" })).toContain(\n+        '\"allow\":true',\n+      );\n+      expect(guard({ command: \"cat > notes.md <<'EOF'\\ngit push origin main\\nEOF\" })).toContain(\n+        '\"allow\":true',\n+      );\n+      expect(\n+        guard({ command: \"cat > notes.md <<'EOF'\\ncurl is disabled\\nEOF\\ncurl -s https://example.com\" }),\n+      ).toContain('\"allow\":false');\n+    }, 60_000);\n+\n     test(\"allows safe commands\", () => {\n       expect(guard({ command: \"ls -la\" })).toContain('\"allow\":true');\n     });\ndiff --git a/src/entrypoints/tools/hooks/shell_guard.ts b/src/entrypoints/tools/hooks/shell_guard.ts\nindex c09b4c1a..f85b2dfd 100755\n--- a/src/entrypoints/tools/hooks/shell_guard.ts\n+++ b/src/entrypoints/tools/hooks/shell_guard.ts\n@@ -63,6 +63,106 @@ const ROUTING_RULES: Record<string, string> = {\n /** Wrappers that run the command named after them, so the name to judge is further along. */\n const COMMAND_WRAPPERS = new Set([\"sudo\", \"env\", \"time\", \"nohup\", \"nice\", \"xargs\", \"command\", \"exec\"]);\n \n+/**\n+ * The words the shell itself consumes, so that a program can stand where one stands.\n+ *\n+ * `for n in 1; do curl ...; done` was ALLOWED while the same loop with a `;` between\n+ * `do` and the `curl` was refused (#389): the split left `do curl ...` as one segment,\n+ * the program was read as `do`, and the walk stopped there. One loop shape, two\n+ * verdicts, decided by where a semicolon happened to fall -- which is the kind of rule\n+ * nobody can reason about. `then`, `{`, `(`, `!` and the rest of these were the same\n+ * hole in their own spelling. They keep the reading of one command consistent with\n+ * another; nothing here is trying to parse a shell, and only the leading run of a\n+ * segment is skipped, so a routed name in an argument position is still an argument.\n+ */\n+const RESERVED_WORDS = new Set([\n+  \"if\", \"then\", \"else\", \"elif\", \"fi\", \"for\", \"while\", \"until\", \"do\", \"done\", \"case\", \"esac\",\n+  \"select\", \"function\", \"in\", \"!\", \"{\", \"}\", \"(\", \")\", \"[[\", \"]]\",\n+]);\n+\n+/**\n+ * Where the shell starts another command: `&&`, `||`, a pipe, a `;`, a `&`, or a newline.\n+ *\n+ * One splitter, used by both of the rules that have to find programs, so the mutating-git\n+ * rule and the routing rules cannot disagree about where a command begins.\n+ *\n+ * The newline was missing, so a command written on its own line was read as an argument of\n+ * the line above it and never as a program -- and a background `&` hid whatever it\n+ * separated the same way. Both are separators the shell acts on, which is the whole test\n+ * for what belongs in this class.\n+ */\n+function shellSegments(command: string): string[] {\n+  return withoutHeredocBodies(command).split(/\\s*(?:&&|\\|\\||[;|&\\n])\\s*/);\n+}\n+\n+/** A heredoc's `<<`, its optional `-`, and the word that ends its body. */\n+const HEREDOC = /<<-?\\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\\1/g;\n+\n+/**\n+ * The command with heredoc bodies removed.\n+ *\n+ * A heredoc body is text handed to a command on stdin, not a command line -- and once\n+ * newlines separate commands it would otherwise be read as one. Measured: `cat > notes.md\n+ * <<'EOF'` with a body line beginning `curl` was refused as though the write invoked curl,\n+ * which is a document an agent may legitimately be writing.\n+ *\n+ * Removed rather than inspected, for the reason the header gives about `bash -c`: a body\n+ * fed to a shell is a place this text match cannot follow, and pretending to by scanning\n+ * it costs more in false refusals than it buys.\n+ */\n+function withoutHeredocBodies(command: string): string {\n+  const kept: string[] = [];\n+  const terminators: string[] = [];\n+  for (const line of command.split(\"\\n\")) {\n+    const ending = terminators[0];\n+    if (ending !== undefined) {\n+      if (line.trim() === ending) terminators.shift();\n+      continue;\n+    }\n+    kept.push(line);\n+    for (const match of line.matchAll(HEREDOC)) {\n+      // `a<<b` inside a quoted argument is not a redirect; a redirect's `<<` follows\n+      // whitespace, a digit (an fd), or the start of the line.\n+      const before = match.index === 0 ? \"\" : (line[match.index - 1] ?? \"\");\n+      if (before !== \"\" && !/[\\s\\d]/.test(before)) continue;\n+      terminators.push(match[2]!);\n+    }\n+  }\n+  return kept.join(\"\\n\");\n+}\n+\n+/**\n+ * The text of each command substitution, which the shell runs as a command of its own.\n+ *\n+ * `x=$(curl ...)` was allowed: as far as the segment split goes the substitution is part\n+ * of one token, that token is an assignment, and so nothing inside it was looked at. The\n+ * content of `$(...)` and of a backtick pair is where a command is invoked, which puts it\n+ * in the same class as `bash -c` below and is why the same bounded recursion applies.\n+ */\n+function substitutions(command: string): string[] {\n+  const found: string[] = [];\n+  for (let index = 0; index < command.length; index += 1) {\n+    if (command.startsWith(\"$(\", index)) {\n+      const end = closingParen(command, index + 1);\n+      if (end !== -1) { found.push(command.slice(index + 2, end)); index = end; }\n+    } else if (command[index] === \"`\") {\n+      const end = command.indexOf(\"`\", index + 1);\n+      if (end !== -1) { found.push(command.slice(index + 1, end)); index = end; }\n+    }\n+  }\n+  return found;\n+}\n+\n+/** The index of the `)` that closes the `(` at `open`, or -1 if it is not closed. */\n+function closingParen(text: string, open: number): number {\n+  let depth = 0;\n+  for (let index = open; index < text.length; index += 1) {\n+    if (text[index] === \"(\") depth += 1;\n+    else if (text[index] === \")\") { depth -= 1; if (depth === 0) return index; }\n+  }\n+  return -1;\n+}\n+\n /**\n  * The programs a command line actually invokes.\n  *\n@@ -83,15 +183,15 @@ const SHELLS = new Set([\"sh\", \"bash\", \"zsh\", \"dash\", \"ksh\"]);\n \n function invokedPrograms(command: string, depth = 0): string[] {\n   const found: string[] = [];\n-  for (const segment of command.split(/\\s*(?:&&|\\|\\||[;|])\\s*/)) {\n+  for (const segment of shellSegments(command)) {\n     const tokens = segment.trim().split(/\\s+/).filter(Boolean);\n     let index = 0;\n-    // `FOO=bar cmd`, and `sudo cmd`, and `env FOO=bar cmd`.\n+    // `FOO=bar cmd`, `sudo cmd`, `env FOO=bar cmd`, and `do cmd`.\n     while (index < tokens.length) {\n       const token = tokens[index]!;\n       if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) { index++; continue; }\n       const name = token.split(\"/\").pop() ?? token;\n-      if (COMMAND_WRAPPERS.has(name)) { index++; continue; }\n+      if (COMMAND_WRAPPERS.has(name) || RESERVED_WORDS.has(name)) { index++; continue; }\n       break;\n     }\n     const program = tokens[index];\n@@ -107,6 +207,9 @@ function invokedPrograms(command: string, depth = 0): string[] {\n       if (inner) found.push(...invokedPrograms(inner, depth + 1));\n     }\n   }\n+  if (depth < 2) {\n+    for (const inner of substitutions(command)) found.push(...invokedPrograms(inner, depth + 1));\n+  }\n   return found;\n }\n \n@@ -251,7 +354,7 @@ const MUTATING_GIT_COMMANDS = new Set([\n  * `-C`. Options that take a value consume the next token.\n  */\n function findMutatingGitCommand(command: string): string | undefined {\n-  for (const segment of command.split(/\\s*(?:&&|\\|\\||[;|])\\s*/)) {\n+  for (const segment of shellSegments(command)) {\n     const tokens = segment.trim().split(/\\s+/);\n     const gitIndex = tokens.findIndex((token) => token === \"git\" || token.endsWith(\"/git\"));\n     if (gitIndex === -1) continue;\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-25T15:29:06Z",
+        "event_type": "pr_diff",
+        "id": "pr-394-diff",
+        "layer": "github-context",
+        "sha": "c6fc90cd",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "The reviewer's findings are code-reads, not measurements. Let me reproduce both before changing anything.",
+      "tool_calls": [
+        {
+          "id": "call_00_q6hmv44pjwple1ydudjvrpgh",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && cat > /tmp/atomaton-workspace/review-check.ts <<'TSEOF'\\nimport { spawnSync } from \\\"node:child_process\\\";\\nconst cases: [string, string][] = [\\n  [\\\"1a quoted heredoc, backticked gh in body\\\", \\\"cat > notes.md <<'EOF'\\\\nRun `gh pr view` to check.\\\\nEOF\\\"],\\n  [\\\"1b single-quoted backtick curl in a search\\\", \\\"grep -rn 'use `curl` instead' src/\\\"],\\n  [\\\"1c control: backtick substitution runs\\\", \\\"x=`curl -s https://example.com`\\\"],\\n  [\\\"1d control: $( ) substitution runs\\\", \\\"x=$(curl -s https://example.com)\\\"],\\n  [\\\"2a substitution: git push\\\", \\\"echo $(git push origin main)\\\"],\\n  [\\\"2b substitution: git rev-parse\\\", \\\"echo $(git rev-parse HEAD)\\\"],\\n];\\nfor (const [label, command] of cases) {\\n  const out = spawnSync(\\\"bun\\\", [\\\"run\\\", \\\"src/entrypoints/tools/hooks/shell_guard.ts\\\"], {\\n    input: JSON.stringify({ arguments: { command } }), encoding: \\\"utf8\\\",\\n    env: { PATH: process.env.PATH ?? \\\"\\\" },\\n  }).stdout.trim();\\n  console.log(`${label.padEnd(46)} ${out.slice(0, 60)}`);\\n}\\nTSEOF\\nbun run /tmp/atomaton-workspace/review-check.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294219821200000000000000000000ffffc0a8628d27f0d3",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The reviewer requested changes on PR #394. Two findings:\n\n1. `substitutions()` scans the raw command, not the heredoc-stripped text, and has no quote tracking. Consequences:\n   - `cat > notes.md <<'EOF'` with body line `` Run `gh pr view` to check. `` → refused (because backtick content scanned on raw text).\n   - `grep -rn 'use `curl` instead' src/` → refused, while single quotes are literal.\n   Required correction: take substitution contents from `withoutHeredocBodies(command)`; skip `$(`/backtick occurrences inside single-quoted regions. Add tests for both.\n\n2. `findMutatingGitCommand` doesn't read substitutions, so `x=$(git push origin main)` allowed while `x=$(curl ...)` refused. Correction: same bounded substitution reading in `findMutatingGitCommand`, with tests `x=$(git push origin main)` refused and `x=$(git rev-parse HEAD)` allowed.\n\nAlso review's note: `<<` inside prose (`echo \"see <<x\"`) starts a heredoc that never terminates → later lines dropped. Reviewer says not a regression, but I could improve by requiring the redirect not be inside quotes... My current guard on preceding char handles `a<<b` but not `echo \"see <<x\"` (preceded by space). Could track quote state for heredoc detection too. Reviewer says not part of the block, but I could consider. Let's think about scope: Finding 1 asks for quote tracking for substitutions anyway; the same quote state could serve heredoc detection. But careful: implementing quote state needs to handle multi-line (heredoc bodies, etc.).\n\nLet me verify the two failures empirically first (I have a shell; reviewer didn't). Then fix.\n\nLet me design a small single-quote/quote-aware scanner.\n\nApproach: write one function that walks the command and returns, for the *stripped* text, the substitution contents, skipping single-quoted regions. Since backticks inside double quotes DO execute; inside single quotes they don't. `$(` inside double quotes executes. So: skip single-quoted spans; treat double quotes as transparent (backticks and `$(` still execute inside double quotes). That's shell semantics.\n\nAlso escaping: `\\`` inside double quotes is escaped; a backslash before a backtick or `$(` means not executed. Should I handle backslash escapes? Minor; but easy to include: when scanning outside single quotes, if char is `\\`, skip next char. Inside double quotes, backslash also escapes. So handle uniformly (outside single quotes) — with one caveat: inside single quotes a backslash is literal. Since we skip single-quoted spans entirely, fine.\n\nNow ordering problem: heredoc stripping happens on raw text before quote awareness, and `<<` detection has the same \"inside a quoted string\" issue (`echo \"see <<x\"`). If I build quote tracking, I could use it for both. But careful: heredoc bodies are shell syntax: the `<<` is recognized by the shell outside quotes; the body then is literal (quoted heredoc) or expanded (unquoted). Reviewer said: a `<<'EOF'` body can be dropped wholesale (never expanded); if I want to keep scanning an unquoted heredoc's body, terminator quoting has to survive. Simplest and most consistent with the file's philosophy (drop what can't be followed): drop all heredoc bodies wholesale — as I already do. Fine; I don't need group 1.\n\nBut: with quote tracking available, should I also require `<<` to be outside quotes? That fixes the reviewer's non-blocking note (`echo \"see <<x\"`). It's a small addition if the scanner is shared. Let me think about how to implement cleanly without turning this into a parser.\n\nDesign: a single scanner that produces the \"executable text\" of a command: strips heredoc bodies and single-quoted spans? Wait — but stripping single-quoted spans from the text passed to `shellSegments` changes program detection: `grep -rn 'curl -s' src/` — program is grep anyway. But what about `'curl' -s x`? A command whose program name is single-quoted — quoted program names are the obfuscation class (`cu\"\"rl`) the file explicitly does not resist. So stripping single-quoted content before segmentation is... hmm, it would also blank out arguments that affect git subcommand detection? e.g. `git -c 'x=y' commit`? `-c` takes a value; tokens would change but `commit` still found. Risky.\n\nCleaner: keep two separate readings:\n- `shellSegments` → heredoc-stripped text (as now), for splitting into commands.\n- `substitutions` → operates on... also heredoc-stripped text, plus single-quote skipping, applied to the *segment* text? No: substitutions are found within a segment token, and the segment splitting already loses nothing (splitting on operators inside quotes can split a quoted arg — e.g. `grep -rn 'a;b'` splits — harmless).\n\nSo the minimal fix per the reviewer: `invokedPrograms` should call `substitutions(withoutHeredocBodies(command))` and, when collecting, skip single-quoted regions. Since `shellSegments` already calls `withoutHeredocBodies`, calling it again in `invokedPrograms` is redundant work but simple and correct. Better: compute the stripped text once at the top of `invokedPrograms` and pass it to `shellSegments`? Let me restructure:\n\n```ts\nfunction invokedPrograms(command: string, depth = 0): string[] {\n  const text = withoutHeredocBodies(command);\n  const found: string[] = [];\n  for (const segment of segmentsOf(text)) { ... }\n  if (depth < 2) for (const inner of substitutions(text)) found.push(...invokedPrograms(inner, depth + 1));\n  return found;\n}\n```\n\nwhere `shellSegments(command)` = `segmentsOf(withoutHeredocBodies(command))` and `segmentsOf(text)` = text.split(...). And `findMutatingGitCommand` uses `shellSegments` plus substitution recursion too.\n\nFor `findMutatingGitCommand`, need the same bounded recursion:\n\n```ts\nfunction findMutatingGitCommand(command: string, depth = 0): string | undefined {\n  const text = withoutHeredocBodies(command);\n  for (const segment of segmentsOf(text)) { ...existing... }\n  if (depth < 2) {\n    for (const inner of substitutions(text)) {\n      const found = findMutatingGitCommand(inner, depth + 1);\n      if (found) return found;\n    }\n  }\n  return undefined;\n}\n```\n\nHmm, `x=$(git rev-parse HEAD)` → inner `git rev-parse HEAD` → subcommand `rev-parse` not mutating → undefined ✓ allowed. `x=$(git push origin main)` → refused ✓.\n\nNow single-quote skipping in `substitutions`:\n\n```ts\nfunction substitutions(command: string): string[] {\n  const found: string[] = [];\n  let index = 0;\n  while (index < command.length) {\n    const char = command[index]!;\n    if (char === \"'\") {\n      const end = command.indexOf(\"'\", index + 1);\n      index = end === -1 ? command.length : end + 1;\n      continue;\n    }\n    if (char === \"\\\\\") { index += 2; continue; }\n    if (command.startsWith(\"$(\", index)) { ... }\n    else if (char === \"`\") { ... }\n    index += 1;\n  }\n  return found;\n}\n```\n\nCareful: an apostrophe in prose (`don't`) would open a single-quoted span and swallow the rest. E.g. `echo \"it's fine\" && curl x` — the apostrophe is inside double quotes, but my scanner doesn't track double quotes, so it treats `'` as opening a single-quoted span that never closes → `index = command.length` → skips the rest → `curl` in a substitution? No wait, this only affects `substitutions`, not segments. `echo \"it's\" && curl x`: curl is found via segments anyway. The risk is only that a substitution after an apostrophe goes unexamined. Acceptable? Hmm, it's a hole rather than a false positive. The guard is routing, and the header accepts blind spots. But could I do better with double-quote tracking too? Inside double quotes, `'` is literal. So track double quotes as well: inside `\"`, only `$(`/backtick/`\\` matter; a `'` there is not a quote.\n\nLet's write a scanner with a small state: outside, single, double.\n\n```ts\nfunction substitutions(command: string): string[] {\n  const found: string[] = [];\n  let index = 0;\n  let quote: \"'\" | '\"' | undefined;\n  while (index < command.length) {\n    const char = command[index]!;\n    if (quote === \"'\") {\n      if (char === \"'\") quote = undefined;\n      index += 1;\n      continue;\n    }\n    if (char === \"\\\\\") { index += 2; continue; }\n    if (char === \"'\" && quote === undefined) { quote = \"'\"; index += 1; continue; }\n    if (char === '\"') { quote = quote === '\"' ? undefined : '\"'; index += 1; continue; }\n    if (command.startsWith(\"$(\", index)) { ...; continue; }\n    if (char === \"`\") { ...; continue; }\n    index += 1;\n  }\n  return found;\n}\n```\n\nWait: even inside single quotes, is anything executed? No. Even the `$( )` inside single quotes is literal. ✓.\n\nBut hmm — the substitution inner text: when we extract `$(curl -s 'x')`, the inner scan handles quotes again. Fine.\n\nOne problem: a command containing an unmatched `'` (e.g. prose apostrophe outside quotes: `echo it's fine`), the rest is skipped. That's the same before/after as... before my change there was no quote awareness at all, so this is a new hole introduced by the quote fix. Trade-off: reviewer explicitly asked for single-quote skipping; unmatched apostrophes in unquoted prose are rare (and `echo it's` in shell is itself an unterminated quote error). Accept.\n\nAlso case: `$'...'` ANSI-C quoting: `$'...'` — my scanner sees `'` at index+1 after `$`... `$` then `'` → sets quote single → skips content ✓ (content is literal-ish; `$'a\\'b'` escapes... edge, ignore).\n\nNow heredoc detection inside quotes: with a scanner for quotes, could pass the same quote-state to heredoc detection. Reviewer's note says non-blocking. My current heredoc detection checks the preceding char which handles `a<<b` but not `echo \"see <<x\"` (preceded by space → treated as a heredoc start → all following lines dropped). Is that worth fixing? It's a false-negative source (lines dropped from both rules). Example: `echo \"see <<x\"\\ncurl -s https://example.com` → curl line dropped → allowed. Hmm, that's a silent hole. But such a command is odd. Yet it'd be a hole an agent could hit accidentally... not maliciously meaningful.\n\nI could implement heredoc detection with the same quote scanner: scan the line for `<<` occurrences that are outside single/double quotes. That means sharing the scan logic. Given the reviewer wants quote awareness in substitutions, sharing a `quoteSpans`/`scan` helper is natural.\n\nLet me design one low-level helper that yields \"unquoted positions\" — a step generator is overkill. Alternative: a function `unquotedSegments(text)`? Hmm.\n\nMaybe simplest: a helper that returns the text with all single-quoted regions blanked (replaced by spaces of equal length) — preserving indices. Then:\n- substitution scanning runs on the blanked text (indices align), and extracts contents from the blanked text... but the content inside `$( )` could itself contain single quotes, which we'd have blanked. E.g. `x=$(grep 'curl' f)` → blanking gives `x=$(grep         f)` → inner `grep         f` → program grep ✓. Good, blanking is fine because we only need program names (which are not quoted... unless someone quotes the program name, which is in the obfuscation class we don't resist).\n\nSo: `blankSingleQuoted(text)` → replaces chars inside single-quoted spans (inclusive of the quotes? keep quotes but blank content) with spaces. But must respect double quotes when deciding whether a `'` opens a span, and backslash escapes.\n\nThen heredoc detection could also run on the blanked text: `echo \"see <<x\"` — inside double quotes, not blanked → still detected. Hmm, that doesn't fix the `<<` in double quotes case. Do I need it? Reviewer called it a non-block note. I'll leave it — but maybe I can cheaply extend blanking to cover *both* quote kinds for heredoc detection... but then `<<` detection should also be quote-masked for both quote types, while substitution detection must NOT mask double quotes (substitutions execute there). So two masks. Getting complicated.\n\nDecision: implement `blankSingleQuoted()` for substitutions (with double-quote awareness so that `'` inside `\"` doesn't open a span), and leave heredoc detection as is (already documented; reviewer agreed it's not a regression). Keep the change focused on the two blocking findings.\n\nHmm, but blanking single quotes for substitution scanning: consider `grep -rn 'use `curl` instead' src/` → the backticks are inside single quotes → blanked → no substitution found → allowed ✓.\n\nAnd `` cat > notes.md <<'EOF' `` body line `` Run `gh pr view` to check. `` — heredoc body dropped by `withoutHeredocBodies` before substitution scanning ✓ (as long as substitutions receives the stripped text).\n\nWhat about an *unquoted* heredoc body containing `` `gh` ``? Dropped wholesale → allowed. Reviewer: \"A `<<'EOF'` body can be dropped wholesale (it is never expanded); if you want to keep scanning an unquoted heredoc's body, the terminator's quoting has to survive\". Dropping all bodies wholesale is what I do; document that in the comment (currently the comment says removed rather than inspected for the bash -c reason; now I can add the heredoc-quoting reason: an unquoted body is expanded by the shell, and scanning it costs false refusals in prose).\n\nHmm — but is dropping an unquoted body a hole? `bash <<EOF\\ncurl x\\nEOF` runs curl. Already accepted: bodies fed to shells are out of scope (like `bash -c` beyond depth 2). Fine; but let me be honest in the comment.\n\nNow, does blanking single-quoted spans also need to apply to `shellSegments`, e.g. `grep -rn 'a;b' src/`? Splitting inside a quoted arg is harmless for program detection (first token). Not needed.\n\nBut there's a subtlety for `findMutatingGitCommand`: `git log --grep='x;git push'`? Splitting on `;` inside quotes → segment `git push'` → hmm: tokens [`git`, `push'`] → gitIndex 0 → subcommand `push'` not in set → no refusal ✓. And with `git commit -m 'fix; git push'` → segments: `git commit -m 'fix`, `git push'` → second: tokens [git, push'] → `push'` ≠ `push` → allowed ✓. OK.\n\nNow let me also double check the reviewer's first case end-to-end after the fix, and write tests:\n\nTests to add:\n1. `\"cat > notes.md <<'EOF'\\nRun `gh pr view` to check.\\nEOF\"` → allowed.\n2. `\"grep -rn 'use `curl` instead' src/\"` → allowed. (Careful: writing this in a TS string with backticks — use double-quoted string with backticks inside.)\n3. Also a positive control: backtick substitution still refused: `` \"x=`curl -s https://example.com`\" `` → refused.\n4. `x=$(git push origin main)` refused; `x=$(git rev-parse HEAD)` allowed.\n\nWhere to put: in the \"routing\" describe for 1-3 (a mention-not-position test extension), and in the \"raw Git mutations\" describe for 4.\n\nLet me first verify the reported failures empirically, then implement.\n\nAlso note: reviewer's line numbers refer to the file at head; fine.\n\nOne more consideration from finding 2: \"if you would rather not extend it here, the PR must say the git rule does not read substitutions instead of claiming the rules agree.\" I'll extend it — it's small and correct.\n\nAlso, my `shellSegments` doc says \"one splitter ... so the mutating-git rule and the routing rules cannot disagree about where a command begins\" — after extending git to substitutions, that claim becomes fully true (both read the same segments and the same substitutions). I'll adjust the wording to mention both halves.\n\nLet me implement now. Plan of edits:\n\nA. Refactor:\n```ts\nfunction segmentsOf(text: string): string[] {\n  return text.split(/\\s*(?:&&|\\|\\||[;|&\\n])\\s*/);\n}\n\nfunction shellSegments(command: string): string[] {\n  return segmentsOf(withoutHeredocBodies(command));\n}\n```\n\nB. `blankSingleQuoted(text)`:\n\n```ts\n/**\n * The text with single-quoted content replaced by spaces, so a mention inside it is not\n * read as anything.\n *\n * Single quotes are the one place the shell neither expands nor runs what it holds: `grep\n * -rn 'use `curl` instead' src/` is a search for a sentence, and the backticks in it run\n * nothing. Double quotes are NOT blanked: a substitution inside them does run, and that is\n * a difference the shell makes and this has to.\n *\n * Replaced rather than removed, because the result has to line up with the text the\n * substitutions are then taken from.\n */\nfunction blankSingleQuoted(text: string): string {\n  const out = text.split(\"\");\n  let index = 0;\n  let inDouble = false;\n  while (index < text.length) {\n    const char = text[index]!;\n    if (char === \"\\\\\" && !inDouble) { index += 2; continue; }   // hmm backslash inside double quotes also escapes\n    ...\n  }\n}\n```\n\nCareful with escapes: outside quotes, `\\'` is a literal quote; inside double quotes `\\'` is also literal quote. So backslash escapes the next char in both; only inside single quotes is backslash literal (but there we're blanking).\n\nLet me write:\n\n```ts\nfunction blankSingleQuoted(text: string): string {\n  const out = [...text];\n  let index = 0;\n  let double = false;\n  while (index < text.length) {\n    const char = text[index]!;\n    if (char === \"\\\\\") { index += 2; continue; }\n    if (char === '\"') { double = !double; index += 1; continue; }\n    if (char === \"'\" && !double) {\n      let end = index + 1;\n      while (end < text.length && text[end] !== \"'\") end += 1;\n      for (let blank = index; blank <= Math.min(end, text.length - 1); blank += 1) out[blank] = \" \";\n      index = end + 1;\n      continue;\n    }\n    index += 1;\n  }\n  return out.join(\"\");\n}\n```\n\nNote: blanking from index (the opening quote) through end (closing quote) inclusive; if unterminated, blank to the end. Note `Math.min(end, text.length - 1)` handles unterminated: end === text.length → blank to length-1, then index = text.length+1 → loop ends. ✓\n\nHmm, careful with `\\n` inside: out array handles newlines fine (each char).\n\nThen:\n\n```ts\nfunction substitutions(command: string): string[] {\n  const text = blankSingleQuoted(command);\n  ... scan text ...\n}\n```\n\nC. `invokedPrograms` uses the stripped text once:\n\n```ts\nfunction invokedPrograms(command: string, depth = 0): string[] {\n  const text = withoutHeredocBodies(command);\n  const found: string[] = [];\n  for (const segment of segmentsOf(text)) { ... }\n  if (depth < 2) for (const inner of substitutions(text)) found.push(...invokedPrograms(inner, depth + 1));\n  return found;\n}\n```\n\nWait — but the substitution inner text extracted from blanked text has blanks where single quotes were; then recursive `invokedPrograms(inner)` gets a string with blanks — fine (whitespace). But it loses original quoting; e.g. `$(grep 'curl' f)` inner = `grep       f`? No: inner extracted from the blanked text, so `'curl'` became spaces. Program grep ✓.\n\nHmm, but `$(git commit -m 'x')` inner `git commit -m    ` → git commit refused ✓.\n\nD. `findMutatingGitCommand` with substitution recursion.\n\nE. Tests.\n\nF. Verify the reviewer's exact cases and rerun full checks.\n\nLet me first verify the two reported failures with the current HEAD to confirm the review (they said it's read, not measured).",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"1a quoted heredoc, backticked gh in body       {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: gh \\n1b single-quoted backtick curl in a search     {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: cur\\n1c control: backtick substitution runs         {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: cur\\n1d control: $( ) substitution runs             {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: cur\\n2a substitution: git push                      {\\\"allow\\\":true}\\n2b substitution: git rev-parse                 {\\\"allow\\\":true}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1018}",
+      "tool_call_id": "call_00_q6hmv44pjwple1ydudjvrpgh"
+    },
+    {
+      "role": "assistant",
+      "content": "Both findings confirmed by measurement. Fixing them now:",
+      "tool_calls": [
+        {
+          "id": "call_00_hulo8tpqefwujktgog30hfef",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\", \"old_string\": \"function shellSegments(command: string): string[] {\\n  return withoutHeredocBodies(command).split(/\\\\s*(?:&&|\\\\|\\\\||[;|&\\\\n])\\\\s*/);\\n}\", \"new_string\": \"function segmentsOf(text: string): string[] {\\n  return text.split(/\\\\s*(?:&&|\\\\|\\\\||[;|&\\\\n])\\\\s*/);\\n}\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294223232500000000000000000000ffffc0a87e763556bc",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Both findings confirmed by measurement:\n- 1a refused (should be allowed): quoted heredoc body's backticked `gh` read as a command.\n- 1b refused (should be allowed): backticked `curl` inside single quotes.\n- 1c/1d correctly refused (must stay).\n- 2a allowed (should be refused): `git push` inside `$()`.\n- 2b allowed (correct; `rev-parse` isn't mutating).\n\nNow implement.\n\nEdit 1: split `shellSegments`, add `segmentsOf`, `blankSingleQuoted`, change `substitutions` to use blanked text, and pass stripped text into substitutions from `invokedPrograms`.\n\nLet me write the new block replacing lines 83-164 (shellSegments through closingParen), carefully.\n\nCurrent code (from the diff) is:\n\n```ts\n/**\n * Where the shell starts another command: ...\n */\nfunction shellSegments(command: string): string[] {\n  return withoutHeredocBodies(command).split(/\\s*(?:&&|\\|\\||[;|&\\n])\\s*/);\n}\n\n/** A heredoc's `<<`, ... */\nconst HEREDOC = ...;\n\n/** ... */\nfunction withoutHeredocBodies(command: string): string { ... }\n\n/** substitutions doc */\nfunction substitutions(command: string): string[] { ... }\n\n/** closingParen */\nfunction closingParen(...)\n```\n\nNew:\n\n```ts\n/**\n * Where the shell starts another command: `&&`, `||`, a pipe, a `;`, a `&`, or a newline.\n *\n * Both of the rules that have to find programs read a command through this, and both of\n * them read substitutions through `substitutions` on the same stripped text, so the\n * mutating-git rule and the routing rules cannot disagree about where a command begins.\n *\n * The newline was missing, so a command written on its own line was read as an argument of\n * the line above it and never as a program -- and a background `&` hid whatever it\n * separated the same way. Both are separators the shell acts on, which is the whole test\n * for what belongs in this class.\n */\nfunction segmentsOf(text: string): string[] {\n  return text.split(/\\s*(?:&&|\\|\\||[;|&\\n])\\s*/);\n}\n```\n\nand shellSegments → hmm, is `shellSegments` still needed? `findMutatingGitCommand` and `invokedPrograms` both need stripped text; both will do `const text = withoutHeredocBodies(command)` then `segmentsOf(text)` and `substitutions(text)`. So drop `shellSegments` entirely. Yes — cleaner.\n\nOrder of definitions: `segmentsOf` before `withoutHeredocBodies`? Function declarations hoist, so order doesn't matter for execution; but readability: keep `unquote`-ish helpers together. Since `substitutions` needs `closingParen` and `blankSingleQuoted`, and heredoc strip first. I'll order:\n\n1. `segmentsOf`\n2. `HEREDOC` + `withoutHeredocBodies`\n3. `blankSingleQuoted`\n4. `substitutions` + `closingParen`\n\nThen `invokedPrograms`, then `findMutatingGitCommand`.\n\nLet me write the edits.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_hulo8tpqefwujktgog30hfef"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_t96ytpbvztlkmo132m166zje",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * Where the shell starts another command: `&&`, `||`, a pipe, a `;`, a `&`, or a newline.\\n *\\n * Both rules that have to find a program read the command through this and then read\\n * substitutions out of the same stripped text, so the mutating-git rule and the routing\\n * rules cannot disagree about where a command begins. They did: `x=$(curl ...)` was\\n * refused while `x=$(git push origin main)` was allowed.\\n *\\n * The newline was missing, so a command written on its own line was read as an argument of\\n * the line above it and never as a program -- and a background `&` hid whatever it\\n * separated the same way. Both are separators the shell acts on, which is the whole test\\n * for what belongs in this class.\\n */\", \"old_string\": \"/**\\n * Where the shell starts another command: `&&`, `||`, a pipe, a `;`, a `&`, or a newline.\\n *\\n * One splitter, used by both of the rules that have to find programs, so the mutating-git\\n * rule and the routing rules cannot disagree about where a command begins.\\n *\\n * The newline was missing, so a command written on its own line was read as an argument of\\n * the line above it and never as a program -- and a background `&` hid whatever it\\n * separated the same way. Both are separators the shell acts on, which is the whole test\\n * for what belongs in this class.\\n */\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_t96ytpbvztlkmo132m166zje"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_t2dm3ihaf2g3u964ismxwu6u",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * The command with heredoc bodies removed.\\n *\\n * A heredoc body is text handed to a command on stdin, not a command line -- and once\\n * newlines separate commands it would otherwise be read as one. Measured: `cat > notes.md\\n * <<'EOF'` with a body line beginning `curl` was refused as though the write invoked curl,\\n * which is a document an agent may legitimately be writing.\\n *\\n * Removed rather than inspected, for the reason the header gives about `bash -c`: a body\\n * fed to a shell is a place this text match cannot follow, and pretending to by scanning it\\n * costs more in false refusals than it buys. That holds for both spellings -- a `<<'EOF'`\\n * body is never expanded, so nothing in it runs at all, and an unquoted body is prose at\\n * least as often as it is a script.\\n */\", \"old_string\": \"/**\\n * The command with heredoc bodies removed.\\n *\\n * A heredoc body is text handed to a command on stdin, not a command line -- and once\\n * newlines separate commands it would otherwise be read as one. Measured: `cat > notes.md\\n * <<'EOF'` with a body line beginning `curl` was refused as though the write invoked curl,\\n * which is a document an agent may legitimately be writing.\\n *\\n * Removed rather than inspected, for the reason the header gives about `bash -c`: a body\\n * fed to a shell is a place this text match cannot follow, and pretending to by scanning\\n * it costs more in false refusals than it buys.\\n */\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294224248200000000000000000000ffffc0a8910aa04489",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now update the heredoc doc (mention unquoted bodies too) and add `blankSingleQuoted`, then rework `substitutions` to scan blanked text.\n\nCurrent heredoc doc says \"Removed rather than inspected, for the reason the header gives about `bash -c`: a body fed to a shell is a place this text match cannot follow, and pretending to by scanning it costs more in false refusals than it buys.\" Add the quoting nuance: a body of `<<'EOF'` is never expanded, so quoting inside it runs nothing; and an unquoted body is expanded but is prose as often as code — either way scanning it produces refusals on text that runs nothing, so it is dropped whole.\n\nLet me edit that doc and then substitutions.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_t2dm3ihaf2g3u964ismxwu6u"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_db3xmyh4by9agsy45jqj5idp",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * The text with single-quoted content replaced by spaces.\\n *\\n * Single quotes are the one place the shell neither expands nor runs what it holds, so\\n * `grep -rn 'use `curl` instead' src/` searches for a sentence and the backticks in it run\\n * nothing. Double quotes are deliberately NOT blanked: a substitution inside them does run,\\n * and that is a difference the shell makes and this has to.\\n *\\n * Blanked rather than deleted, because the result is scanned for substitutions and its\\n * offsets have to line up with the text they are cut out of.\\n */\\nfunction blankSingleQuoted(text: string): string {\\n  const out: string[] = [...text];\\n  let index = 0;\\n  let inDouble = false;\\n  while (index < text.length) {\\n    const char = text[index];\\n    if (char === \\\"\\\\\\\\\\\") { index += 2; continue; }\\n    if (char === '\\\"') { inDouble = !inDouble; index += 1; continue; }\\n    if (char === \\\"'\\\" && !inDouble) {\\n      let end = index + 1;\\n      while (end < text.length && text[end] !== \\\"'\\\") end += 1;\\n      for (let at = index; at < Math.min(end + 1, text.length); at += 1) out[at] = \\\" \\\";\\n      index = end + 1;\\n      continue;\\n    }\\n    index += 1;\\n  }\\n  return out.join(\\\"\\\");\\n}\\n\\n/**\\n * The text of each command substitution, which the shell runs as a command of its own.\\n *\\n * `x=$(curl ...)` was allowed: as far as the segment split goes the substitution is part\\n * of one token, that token is an assignment, and so nothing inside it was looked at. The\\n * content of `$(...)` and of a backtick pair is where a command is invoked, which puts it\\n * in the same class as `bash -c` below and is why the same bounded recursion applies.\\n *\\n * Read from the heredoc-stripped text and with single-quoted spans blanked, so that\\n * quoting a command in a document is not the same thing as running it -- the two ways this\\n * rule was still answering \\\"mention\\\" as though it were \\\"position\\\".\\n */\\nfunction substitutions(command: string): string[] {\\n  const text = blankSingleQuoted(command);\\n  const found: string[] = [];\\n  for (let index = 0; index < text.length; index += 1) {\\n    if (text.startsWith(\\\"$(\\\", index)) {\\n      const end = closingParen(text, index + 1);\\n      if (end !== -1) { found.push(text.slice(index + 2, end)); index = end; }\\n    } else if (text[index] === \\\"`\\\") {\\n      const end = text.indexOf(\\\"`\\\", index + 1);\\n      if (end !== -1) { found.push(text.slice(index + 1, end)); index = end; }\\n    }\\n  }\\n  return found;\\n}\", \"old_string\": \"/**\\n * The text of each command substitution, which the shell runs as a command of its own.\\n *\\n * `x=$(curl ...)` was allowed: as far as the segment split goes the substitution is part\\n * of one token, that token is an assignment, and so nothing inside it was looked at. The\\n * content of `$(...)` and of a backtick pair is where a command is invoked, which puts it\\n * in the same class as `bash -c` below and is why the same bounded recursion applies.\\n */\\nfunction substitutions(command: string): string[] {\\n  const found: string[] = [];\\n  for (let index = 0; index < command.length; index += 1) {\\n    if (command.startsWith(\\\"$(\\\", index)) {\\n      const end = closingParen(command, index + 1);\\n      if (end !== -1) { found.push(command.slice(index + 2, end)); index = end; }\\n    } else if (command[index] === \\\"`\\\") {\\n      const end = command.indexOf(\\\"`\\\", index + 1);\\n      if (end !== -1) { found.push(command.slice(index + 1, end)); index = end; }\\n    }\\n  }\\n  return found;\\n}\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_db3xmyh4by9agsy45jqj5idp"
+    },
+    {
+      "role": "assistant",
+      "content": "Now the two rules read the same stripped text, and the git rule reads substitutions too:",
+      "tool_calls": [
+        {
+          "id": "call_00_dym5epcdv7em7vmiezaxfzi3",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"function invokedPrograms(command: string, depth = 0): string[] {\\n  const text = withoutHeredocBodies(command);\\n  const found: string[] = [];\\n  for (const segment of segmentsOf(text)) {\", \"old_string\": \"function invokedPrograms(command: string, depth = 0): string[] {\\n  const found: string[] = [];\\n  for (const segment of shellSegments(command)) {\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_dym5epcdv7em7vmiezaxfzi3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_owlsf8egrcwowiuegwwc2y6o",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  if (depth < 2) {\\n    for (const inner of substitutions(text)) found.push(...invokedPrograms(inner, depth + 1));\\n  }\\n  return found;\\n}\", \"old_string\": \"  if (depth < 2) {\\n    for (const inner of substitutions(command)) found.push(...invokedPrograms(inner, depth + 1));\\n  }\\n  return found;\\n}\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_owlsf8egrcwowiuegwwc2y6o"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_1zbji4upyghlb7vdqwyv3mu7",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 50, \"offset\": 355, \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/tools/hooks/shell_guard.ts lines 355-404 of 552\n\n355\t  // Bare `git branch` lists them. A positional name creates one, so any non-flag\n356\t  // argument -- and any flag not named above -- falls through to the refusal.\n357\t  branch: (args) => args.every((arg) => READ_ONLY_BRANCH_FLAG.test(arg)),\n358\t  // Bare `git stash` is `git stash push`: it stashes. Only the two reporting forms\n359\t  // read, and an empty argument list is NOT one of them -- the first version of this\n360\t  // allowed it, which would have handed the agent a silent way to shelve its work.\n361\t  stash: (args) => /^(list|show)$/.test(args[0] ?? \"\"),\n362\t  // `--get` and friends take a key after them, so only the first token is judged.\n363\t  config: (args) => /^(--get|--get-all|--get-regexp|--list|-l)$/.test(args[0] ?? \"\"),\n364\t  // Bare or `-v` lists them; `show` and `get-url` take a remote name and report on it.\n365\t  remote: (args) =>\n366\t    args.every((arg) => /^(-v|--verbose)$/.test(arg)) || /^(show|get-url)$/.test(args[0] ?? \"\"),\n367\t  tag: (args) => args.every((arg) => READ_ONLY_TAG_FLAG.test(arg)),\n368\t};\n369\t\n370\t/**\n371\t * Whether this invocation of a mutating subcommand is one of its read-only forms.\n372\t *\n373\t * A predicate per subcommand rather than one pattern over all of them, because the\n374\t * subcommands do not agree on what an empty argument list means: `git branch` lists,\n375\t * `git stash` stashes. One shared rule got that wrong in the obvious direction.\n376\t *\n377\t * The default is refusal. Nothing is allowed here that has not been checked by hand,\n378\t * and an unrecognised flag keeps the refusal rather than being assumed harmless.\n379\t */\n380\tfunction isReadOnlyGitForm(subcommand: string, args: string[]): boolean {\n381\t  return READ_ONLY_GIT_FORMS[subcommand]?.(args) ?? false;\n382\t}\n383\t\n384\tconst MUTATING_GIT_COMMANDS = new Set([\n385\t  \"add\", \"am\", \"apply\", \"bisect\", \"branch\", \"checkout\", \"cherry-pick\", \"clean\", \"commit\", \"config\",\n386\t  \"fetch\", \"init\", \"merge\", \"mv\", \"pull\", \"push\", \"rebase\", \"remote\", \"reset\", \"restore\", \"revert\", \"rm\",\n387\t  \"stash\", \"switch\", \"tag\", \"worktree\",\n388\t]);\n389\t\n390\t/**\n391\t * The mutating git subcommand this command line runs, if any.\n392\t *\n393\t * Splits on shell separators so `cd repo && git push` is seen, and skips git's\n394\t * own options so `git -C repo checkout` resolves to `checkout` rather than to\n395\t * `-C`. Options that take a value consume the next token.\n396\t */\n397\tfunction findMutatingGitCommand(command: string): string | undefined {\n398\t  for (const segment of shellSegments(command)) {\n399\t    const tokens = segment.trim().split(/\\s+/);\n400\t    const gitIndex = tokens.findIndex((token) => token === \"git\" || token.endsWith(\"/git\"));\n401\t    if (gitIndex === -1) continue;\n402\t\n403\t    let index = gitIndex + 1;\n404\t    while (index < tokens.length && tokens[index]!.startsWith(\"-\")) {\n\n[148 more lines. Read again with offset: 405.]",
+      "tool_call_id": "call_00_1zbji4upyghlb7vdqwyv3mu7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_rrhgr3hy28lz0rwk4nn49h8l",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * The mutating git subcommand this command line runs, if any.\\n *\\n * Splits on shell separators so `cd repo && git push` is seen, and skips git's\\n * own options so `git -C repo checkout` resolves to `checkout` rather than to\\n * `-C`. Options that take a value consume the next token.\\n *\\n * It reads substitutions as well, on the same stripped text the routing rules use and\\n * under the same bound: `x=$(git push origin main)` ran the push, and reading only the\\n * segments left it allowed while `x=$(curl ...)` beside it was refused. The two rules\\n * disagreeing about where a command begins is the shape of #389 itself, one layer up.\\n */\\nfunction findMutatingGitCommand(command: string, depth = 0): string | undefined {\\n  const text = withoutHeredocBodies(command);\\n  for (const segment of segmentsOf(text)) {\", \"old_string\": \"/**\\n * The mutating git subcommand this command line runs, if any.\\n *\\n * Splits on shell separators so `cd repo && git push` is seen, and skips git's\\n * own options so `git -C repo checkout` resolves to `checkout` rather than to\\n * `-C`. Options that take a value consume the next token.\\n */\\nfunction findMutatingGitCommand(command: string): string | undefined {\\n  for (const segment of shellSegments(command)) {\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_rrhgr3hy28lz0rwk4nn49h8l"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_0707fu30eed2xan8hohmfmlu",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\": 30, \"offset\": 403, \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/tools/hooks/shell_guard.ts lines 403-432 of 558\n\n403\t  const text = withoutHeredocBodies(command);\n404\t  for (const segment of segmentsOf(text)) {\n405\t    const tokens = segment.trim().split(/\\s+/);\n406\t    const gitIndex = tokens.findIndex((token) => token === \"git\" || token.endsWith(\"/git\"));\n407\t    if (gitIndex === -1) continue;\n408\t\n409\t    let index = gitIndex + 1;\n410\t    while (index < tokens.length && tokens[index]!.startsWith(\"-\")) {\n411\t      const option = tokens[index++]!;\n412\t      if ([\"-C\", \"-c\", \"--git-dir\", \"--work-tree\", \"--namespace\", \"--super-prefix\", \"--config-env\"].includes(option)) {\n413\t        index++;\n414\t      }\n415\t    }\n416\t    const subcommand = tokens[index];\n417\t    if (!subcommand || !MUTATING_GIT_COMMANDS.has(subcommand)) continue;\n418\t    // A read-only spelling of a subcommand that can also write is not a mutation.\n419\t    if (isReadOnlyGitForm(subcommand, tokens.slice(index + 1))) continue;\n420\t    return subcommand;\n421\t  }\n422\t  return undefined;\n423\t}\n424\t\n425\tinterface ShellInvocation {\n426\t  command: string;\n427\t  workingDirectory?: string;\n428\t}\n429\t\n430\tinterface GuardVerdict {\n431\t  allow: boolean;\n432\t  reason: string;\n\n[126 more lines. Read again with offset: 433.]",
+      "tool_call_id": "call_00_0707fu30eed2xan8hohmfmlu"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_sddoaevl0kt05rgr73zeq6rz",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    if (isReadOnlyGitForm(subcommand, tokens.slice(index + 1))) continue;\\n    return subcommand;\\n  }\\n  if (depth < 2) {\\n    for (const inner of substitutions(text)) {\\n      const nested = findMutatingGitCommand(inner, depth + 1);\\n      if (nested) return nested;\\n    }\\n  }\\n  return undefined;\\n}\", \"old_string\": \"    if (isReadOnlyGitForm(subcommand, tokens.slice(index + 1))) continue;\\n    return subcommand;\\n  }\\n  return undefined;\\n}\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.ts.",
+      "tool_call_id": "call_00_sddoaevl0kt05rgr73zeq6rz"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_bodqsvqrzvppxaibgrwhlv6m",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run /tmp/atomaton-workspace/review-check.ts; echo '=== issue shapes still refused'; bash /tmp/atomaton-workspace/repro.sh 2>&1 | sed 's/{\\\"reason.*//' | head -20; echo '=== heredoc'; bun run /tmp/atomaton-workspace/heredoc-check.ts\", \"timeout_seconds\": 300}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"1a quoted heredoc, backticked gh in body       {\\\"allow\\\":true}\\n1b single-quoted backtick curl in a search     {\\\"allow\\\":true}\\n1c control: backtick substitution runs         {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: cur\\n1d control: $( ) substitution runs             {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: cur\\n2a substitution: git push                      {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: Raw\\n2b substitution: git rev-parse                 {\\\"allow\\\":true}\\n=== issue shapes still refused\\ncall 1 (do curl ...)                           {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: cd /tmp && for n in 363; do curl -s \\\\\\\"https://api.github.com/repos/o/r/issues/$n/events?per_page=100\\\\\\\" -o ev-$n.json && ec)\\\"}\\ncall 2 (do curl only)                          {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: cd /tmp && for n in 348 371; do curl -s \\\\\\\"https://api.github.com/repos/o/r/pulls/$n\\\\\\\" -o pr-$n.json; done; command -v jq)\\\"}\\ncall 5 (do sha=$(...); curl)                   {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: cd /tmp && for n in 348 359 361; do sha=$(jq -r .head.sha pr-$n.json); curl -s \\\\\\\"https://api.github.com/repos/o/r/commits)\\\"}\\n\\nminimal: for ... do CURL                       {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: for n in 1; do curl -s https://example.com -o x; done)\\\"}\\nminimal: do echo; CURL                         {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: for n in 1; do echo hi; curl -s https://example.com -o x; done)\\\"}\\nminimal: if true; then CURL                    {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: if true; then curl -s https://example.com; fi)\\\"}\\nminimal: brace group                           {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: { curl -s https://example.com; })\\\"}\\nminimal: subshell                              {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: ( curl -s https://example.com ))\\\"}\\nminimal: newline-separated                     {\\\"allow\\\":false,\\\"reason\\\":\\\"shell_guard: failed to parse input\\\"}\\nminimal: background &                          {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: sleep 1 & curl -s https://example.com)\\\"}\\nminimal: assignment subst                      {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: x=$(curl -s https://example.com))\\\"}\\n\\ncontrol: plain CURL                            {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: curl -s https://example.com)\\\"}\\ncontrol: do CURL, separated                    {\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, which returns the page as text. (attempted: for n in 1; do echo hi; curl -s https://example.com; done)\\\"}\\n=== heredoc\\n{\\\"allow\\\":true} <= \\\"cat > notes.md <<'EOF'\\\\ncurl is disabled\\\\nEOF\\\"\\n{\\\"allow\\\":true} <= \\\"cat > notes.md <<'EOF'\\\\ngit push origin main\\\\nEOF\\\"\\n{\\\"allow\\\":false,\\\"reason\\\":\\\"Command blocked by shell guard: curl is disabled. Use fetch, whic <= \\\"cat > notes.md <<'EOF'\\\\ncurl is disabled\\\\nEOF\\\\ncurl -s https://example.com\\\"\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":421}",
+      "tool_call_id": "call_00_bodqsvqrzvppxaibgrwhlv6m"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_a9vft9b8nmwok7xfn1ss5dn1",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"        // A substitution is run for its output, so running it is running it.\\n        \\\"x=$(curl -s https://example.com)\\\",\\n        \\\"sha=$(curl -s https://example.com | jq -r .sha)\\\",\\n        \\\"x=`curl -s https://example.com`\\\",\\n      ]) {\", \"old_string\": \"        // A substitution is run for its output, so running it is running it.\\n        \\\"x=$(curl -s https://example.com)\\\",\\n        \\\"sha=$(curl -s https://example.com | jq -r .sha)\\\",\\n      ]) {\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294227578200000000000000000000ffffc0a85422d4632e",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "All six review cases now behave as required, and every #389 shape is still refused.\n\nNow add regression tests for the review findings:\n\nIn the routing describe (\"a routed name ... still just a name\" test or a new one):\n- quoted heredoc with backticked `gh` in body → allowed\n- `grep -rn 'use `curl` instead' src/` → allowed\n- control: `` x=`curl -s https://example.com` `` → refused (in the \"refused whatever shell construct\" list add backtick substitution)\n\nIn the \"raw Git mutations\" describe:\n- `x=$(git push origin main)` refused; `echo $(git rev-parse HEAD)` allowed.\n\nCareful writing backticks in TS strings: use double-quoted strings containing backticks — fine in TS.\n\nLet me add:\n\n1. In the first test's list (refused whatever construct): add `\"x=`curl -s https://example.com`\"` → backtick form. Need TS double-quoted string: \"x=`curl -s https://example.com`\" ✓.\n\n2. In the \"still just a name\" test: add\n   - \"grep -rn 'use `curl` instead' src/\"\n   - \"cat > notes.md <<'EOF'\\nRun `gh pr view` to check.\\nEOF\"\n\nHmm, the second is more of a heredoc test. Put it in the heredoc test (which covers bodies-as-data) — the reviewer asked for a test that a quoted heredoc whose body contains a backticked gh/curl must be allowed. Add to the heredoc test.\n\n3. New git test in \"raw Git mutations\":\n```ts\n    /**\n     * A substitution is run, so the mutation in it is a mutation. `x=$(curl ...)` was\n     * refused beside `x=$(git push origin main)` allowed -- the git rule read only the\n     * segments, where the token is `x=$(git`.\n     */\n    test(\"a mutating git command inside a substitution is refused\", () => {\n      for (const command of [\"x=$(git push origin main)\", \"echo `git commit -m x`\"]) {\n        expect(guard({ command }), command).toContain('\"allow\":false');\n      }\n      // The read-only spelling in the same position stays allowed.\n      expect(guard({ command: \"sha=$(git rev-parse HEAD)\" })).toContain('\"allow\":true');\n    }, 60_000);\n```\n\nCareful: `echo \\`git commit -m x\\`` — tokens inside substitution: `git commit -m x` → commit mutating ✓ refused.\n\nAnd `sha=$(git rev-parse HEAD)` → rev-parse not mutating → allowed ✓ (verify by running).\n\nLet me apply the edits.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.test.ts.",
+      "tool_call_id": "call_00_a9vft9b8nmwok7xfn1ss5dn1"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_x44sq3j6q3xjyyhlcaxdrcxx",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    test(\\\"a routed name in a loop header or an argument is still just a name\\\", () => {\\n      for (const command of [\\n        \\\"for f in curl wget; do echo $f; done\\\",\\n        \\\"grep -rn 'curl -s' src/\\\",\\n        \\\"echo 'use fetch, not curl'\\\",\\n        \\\"printf '%s\\\\\\\\n' gh curl\\\",\\n        \\\"ls in do then done\\\",\\n        // Single quotes are the one place the shell runs nothing: these are searches for\\n        // a sentence, and reading the backticks in them as substitutions refused them.\\n        \\\"grep -rn 'use `curl` instead' src/\\\",\\n        \\\"grep -rn 'the `gh` wrapper' src/adapters\\\",\\n        // Double quotes are NOT that place -- a substitution in them does run.\\n      ]) {\\n        expect(guard({ command }), command).toContain('\\\"allow\\\":true');\\n      }\\n    }, 60_000);\\n\\n    test(\\\"a substitution inside double quotes still runs\\\", () => {\\n      expect(guard({ command: 'echo \\\"$(curl -s https://example.com)\\\"' })).toContain('\\\"allow\\\":false');\\n    });\", \"old_string\": \"    test(\\\"a routed name in a loop header or an argument is still just a name\\\", () => {\\n      for (const command of [\\n        \\\"for f in curl wget; do echo $f; done\\\",\\n        \\\"grep -rn 'curl -s' src/\\\",\\n        \\\"echo 'use fetch, not curl'\\\",\\n        \\\"printf '%s\\\\\\\\n' gh curl\\\",\\n        \\\"ls in do then done\\\",\\n      ]) {\\n        expect(guard({ command }), command).toContain('\\\"allow\\\":true');\\n      }\\n    }, 60_000);\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.test.ts.",
+      "tool_call_id": "call_00_x44sq3j6q3xjyyhlcaxdrcxx"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_x58mr7v5so4srtam35ibyz3y",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    test(\\\"a heredoc body is data, and a command after it is still a command\\\", () => {\\n      expect(guard({ command: \\\"cat > notes.md <<'EOF'\\\\ncurl is disabled\\\\nEOF\\\" })).toContain(\\n        '\\\"allow\\\":true',\\n      );\\n      expect(guard({ command: \\\"cat > notes.md <<'EOF'\\\\ngit push origin main\\\\nEOF\\\" })).toContain(\\n        '\\\"allow\\\":true',\\n      );\\n      // Quoting a command in a document is not running it, whichever quote the author used.\\n      expect(\\n        guard({ command: \\\"cat > notes.md <<'EOF'\\\\nRun `gh pr view 3` to check, or `curl` it.\\\\nEOF\\\" }),\\n      ).toContain('\\\"allow\\\":true');\\n      expect(\\n        guard({ command: \\\"cat > notes.md <<'EOF'\\\\ncurl is disabled\\\\nEOF\\\\ncurl -s https://example.com\\\" }),\\n      ).toContain('\\\"allow\\\":false');\\n    }, 60_000);\", \"old_string\": \"    test(\\\"a heredoc body is data, and a command after it is still a command\\\", () => {\\n      expect(guard({ command: \\\"cat > notes.md <<'EOF'\\\\ncurl is disabled\\\\nEOF\\\" })).toContain(\\n        '\\\"allow\\\":true',\\n      );\\n      expect(guard({ command: \\\"cat > notes.md <<'EOF'\\\\ngit push origin main\\\\nEOF\\\" })).toContain(\\n        '\\\"allow\\\":true',\\n      );\\n      expect(\\n        guard({ command: \\\"cat > notes.md <<'EOF'\\\\ncurl is disabled\\\\nEOF\\\\ncurl -s https://example.com\\\" }),\\n      ).toContain('\\\"allow\\\":false');\\n    }, 60_000);\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.test.ts.",
+      "tool_call_id": "call_00_x58mr7v5so4srtam35ibyz3y"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_dlklxoc7cxtyt0gkxii7yq65",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    test(\\\"read-only Git inspection stays allowed\\\", () => {\", \"old_string\": \"    test(\\\"read-only Git inspection stays allowed\\\", () => {\\n\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.test.ts.",
+      "tool_call_id": "call_00_dlklxoc7cxtyt0gkxii7yq65"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_x531eg10os0jaq09ucvj6ac4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'read-only Git inspection' -B4 -A6 src/entrypoints/tools/hooks/shell_guard.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294229285200000000000000000000ffffc0a87eacfea6bc",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Oops, I did that same accidental trick again (removing the newline). Let me check and fix properly this time — I intended to insert a new test *before* \"read-only Git inspection stays allowed\".\n\nLet me view that region.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"360-      ]) {\\n361-        expect(guard({ command }), command).toContain('\\\"allow\\\":false');\\n362-      }\\n363-    });\\n364:    test(\\\"read-only Git inspection stays allowed\\\", () => {      for (const command of [\\n365-        \\\"git status --short\\\",\\n366-        \\\"git diff --check\\\",\\n367-        \\\"git log -1 --oneline\\\",\\n368-        \\\"git rev-parse HEAD\\\",\\n369-      ]) {\\n370-        expect(guard({ command }), command).toContain('\\\"allow\\\":true');\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":133}",
+      "tool_call_id": "call_00_x531eg10os0jaq09ucvj6ac4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_pv3ej134ga6p5bmugzqk7mn3",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    /**\\n     * A substitution is run for its output, so a mutation inside one is a mutation. The two\\n     * rules disagreed here: `x=$(curl ...)` was refused while `x=$(git push origin main)`\\n     * was allowed, because the git rule read the segments only and the segment's token is\\n     * `x=$(git`. Two rules answering one command differently is #389 one layer up.\\n     */\\n    test(\\\"a mutating git command inside a substitution is refused\\\", () => {\\n      for (const command of [\\\"x=$(git push origin main)\\\", \\\"echo `git commit -m x`\\\"]) {\\n        expect(guard({ command }), command).toContain('\\\"allow\\\":false');\\n      }\\n      // The read-only spelling in the same position stays allowed.\\n      expect(guard({ command: \\\"sha=$(git rev-parse HEAD)\\\" })).toContain('\\\"allow\\\":true');\\n    }, 60_000);\\n\\n    test(\\\"read-only Git inspection stays allowed\\\", () => {\\n      for (const command of [\", \"old_string\": \"    test(\\\"read-only Git inspection stays allowed\\\", () => {      for (const command of [\", \"path\": \"src/entrypoints/tools/hooks/shell_guard.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/hooks/shell_guard.test.ts.",
+      "tool_call_id": "call_00_pv3ej134ga6p5bmugzqk7mn3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_7myrf20blvl4ghmfyrcd2i1a",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun test src/entrypoints/tools/hooks/shell_guard.test.ts 2>&1 | tail -22\", \"timeout_seconds\": 300}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) shell_guard.ts > routing to the MCP tool that does the job > a substitution inside double quotes still runs [9.06ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > a heredoc body is data, and a command after it is still a command [37.51ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > allows safe commands [9.78ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > no longer inspects interpreters, eval, or obfuscated spellings [67.04ms]\\n(pass) shell_guard.ts > raw Git mutations > are routed to the github tools [44.19ms]\\n(pass) shell_guard.ts > raw Git mutations > a merge names the tool that brings a base into a branch [8.84ms]\\n(pass) shell_guard.ts > raw Git mutations > a read-only spelling of a mutating subcommand is allowed [64.24ms]\\n(pass) shell_guard.ts > raw Git mutations > the write spellings of those same subcommands stay refused [66.58ms]\\n(pass) shell_guard.ts > raw Git mutations > a mutating git command inside a substitution is refused [25.33ms]\\n(pass) shell_guard.ts > raw Git mutations > read-only Git inspection stays allowed [34.48ms]\\n(pass) shell_guard.ts > reading another process's environment > is refused whatever reads it [41.58ms]\\n(pass) shell_guard.ts > reading another process's environment > leaves the rest of /proc alone [26.95ms]\\n(pass) shell_guard.ts > reading another process's environment > does not catch the word environment [9.36ms]\\n(pass) shell_guard.ts > working_directory > outside the repository is refused [8.17ms]\\n(pass) shell_guard.ts > working_directory > inside the repository is fine [10.76ms]\\n(pass) shell_guard.ts > the arguments the guard no longer inspects > declared variables and stdin text are passed through [29.37ms]\\n(pass) shell_guard.ts > unparseable input is refused [8.62ms]\\n\\n 29 pass\\n 0 fail\\n 164 expect() calls\\nRan 29 tests across 1 file. [1.89s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":2018}",
+      "tool_call_id": "call_00_7myrf20blvl4ghmfyrcd2i1a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_c5g1hhg6z0h94vhqq6eloz5f",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run src/entrypoints/machinery/scan_secrets.ts; echo \\\"scan exit=$?\\\"; bun run typecheck; echo \\\"typecheck exit=$?\\\"; bun run synth >/dev/null 2>&1; echo \\\"synth exit=$?\\\"; bun run test 2>&1 | tail -5\", \"timeout_seconds\": 1800}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294230292800000000000000000000ffffc0a8b304db18a0",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "29 pass. Now check that the new tests actually fail on the previous commit (the PR head), to prove they're regression tests. I can do this by checking out the previous version of the source file into a temp path and pointing... the test spawns a fixed SCRIPT path. Alternative: copy the repo's src tree? Too heavy.\n\nSimpler: I already measured with `review-check.ts` against the PR-head code before the fix (the outputs above showed 1a/1b refused and 2a allowed). Those measurements are the evidence. Good enough.\n\nNow run the full CI check set: scan_secrets, typecheck, synth, test.\n\nAlso double check a few edge cases of my `blankSingleQuoted`:\n- `echo 'it'\\''s' && curl x` — messy but let's not worry.\n- The `\\\\` skip: `text[index]` typed as `string` (not `string | undefined`?) — with `[...text]` array of strings and index access, `noUncheckedIndexedAccess` might be on. Let me check tsconfig; typecheck passed earlier? I haven't run typecheck after these edits. Let me run it now with the full set.\n\nAlso consider: `blankSingleQuoted` when `\"` is unbalanced and a `'` follows — acceptable.\n\nOne more: `substitutions` is now called with stripped text from `invokedPrograms`; but `blankSingleQuoted` runs inside `substitutions` on that text ✓.\n\nAlso: `checkInvocation` calls `findMutatingGitCommand(invocation.command)` — default depth 0 ✓.\n\nRun the four checks.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"Scanning 40c365dd1f9743f1602bc7b10c9da9dbdf6683f2..HEAD\\n::warning::could not resolve the latest gitleaks release, so this branch was not scanned for credentials\\nscan exit=0\\ntypecheck exit=0\\nsynth exit=0\\n\\n 2134 pass\\n 0 fail\\n 6316 expect() calls\\nRan 2134 tests across 169 files. [93.82s]\\n\",\"stderr\":\"$ tsc --noEmit\\n\",\"output_truncated\":false,\"execution_time_ms\":106447}",
+      "tool_call_id": "call_00_c5g1hhg6z0h94vhqq6eloz5f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_re6y0fzf96etsfu2jflcm2qp",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn 'shellSegments' src/ | head; echo '---'; sed -n '83,240p' src/entrypoints/tools/hooks/shell_guard.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294241507300000000000000000000ffffc0a8babda2650c",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "All four pass: 2134 tests.\n\nLet me review the final full diff of the source once more to be sure nothing unrelated, and check the new code for any leftover issue (e.g. `shellSegments` references — I removed the function; make sure no references remain).\n\ngrep for shellSegments.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"---\\n/**\\n * Where the shell starts another command: `&&`, `||`, a pipe, a `;`, a `&`, or a newline.\\n *\\n * Both rules that have to find a program read the command through this and then read\\n * substitutions out of the same stripped text, so the mutating-git rule and the routing\\n * rules cannot disagree about where a command begins. They did: `x=$(curl ...)` was\\n * refused while `x=$(git push origin main)` was allowed.\\n *\\n * The newline was missing, so a command written on its own line was read as an argument of\\n * the line above it and never as a program -- and a background `&` hid whatever it\\n * separated the same way. Both are separators the shell acts on, which is the whole test\\n * for what belongs in this class.\\n */\\nfunction segmentsOf(text: string): string[] {\\n  return text.split(/\\\\s*(?:&&|\\\\|\\\\||[;|&\\\\n])\\\\s*/);\\n}\\n\\n/** A heredoc's `<<`, its optional `-`, and the word that ends its body. */\\nconst HEREDOC = /<<-?\\\\s*(['\\\"]?)([A-Za-z_][A-Za-z0-9_]*)\\\\1/g;\\n\\n/**\\n * The command with heredoc bodies removed.\\n *\\n * A heredoc body is text handed to a command on stdin, not a command line -- and once\\n * newlines separate commands it would otherwise be read as one. Measured: `cat > notes.md\\n * <<'EOF'` with a body line beginning `curl` was refused as though the write invoked curl,\\n * which is a document an agent may legitimately be writing.\\n *\\n * Removed rather than inspected, for the reason the header gives about `bash -c`: a body\\n * fed to a shell is a place this text match \\n\\n[1127 characters dropped from the middle; 6000 shown]\\n\\nther expands nor runs what it holds, so\\n * `grep -rn 'use `curl` instead' src/` searches for a sentence and the backticks in it run\\n * nothing. Double quotes are deliberately NOT blanked: a substitution inside them does run,\\n * and that is a difference the shell makes and this has to.\\n *\\n * Blanked rather than deleted, because the result is scanned for substitutions and its\\n * offsets have to line up with the text they are cut out of.\\n */\\nfunction blankSingleQuoted(text: string): string {\\n  const out: string[] = [...text];\\n  let index = 0;\\n  let inDouble = false;\\n  while (index < text.length) {\\n    const char = text[index];\\n    if (char === \\\"\\\\\\\\\\\") { index += 2; continue; }\\n    if (char === '\\\"') { inDouble = !inDouble; index += 1; continue; }\\n    if (char === \\\"'\\\" && !inDouble) {\\n      let end = index + 1;\\n      while (end < text.length && text[end] !== \\\"'\\\") end += 1;\\n      for (let at = index; at < Math.min(end + 1, text.length); at += 1) out[at] = \\\" \\\";\\n      index = end + 1;\\n      continue;\\n    }\\n    index += 1;\\n  }\\n  return out.join(\\\"\\\");\\n}\\n\\n/**\\n * The text of each command substitution, which the shell runs as a command of its own.\\n *\\n * `x=$(curl ...)` was allowed: as far as the segment split goes the substitution is part\\n * of one token, that token is an assignment, and so nothing inside it was looked at. The\\n * content of `$(...)` and of a backtick pair is where a command is invoked, which puts it\\n * in the same class as `bash -c` below and is why the same bounded recursion applies.\\n *\\n * Read from the heredoc-stripped text and with single-quoted spans blanked, so that\\n * quoting a command in a document is not the same thing as running it -- the two ways this\\n * rule was still answering \\\"mention\\\" as though it were \\\"position\\\".\\n */\\nfunction substitutions(command: string): string[] {\\n  const text = blankSingleQuoted(command);\\n  const found: string[] = [];\\n  for (let index = 0; index < text.length; index += 1) {\\n    if (text.startsWith(\\\"$(\\\", index)) {\\n      const end = closingParen(text, index + 1);\\n      if (end !== -1) { found.push(text.slice(index + 2, end)); index = end; }\\n    } else if (text[index] === \\\"`\\\") {\\n      const end = text.indexOf(\\\"`\\\", index + 1);\\n      if (end !== -1) { found.push(text.slice(index + 1, end)); index = end; }\\n    }\\n  }\\n  return found;\\n}\\n\\n/** The index of the `)` that closes the `(` at `open`, or -1 if it is not closed. */\\nfunction closingParen(text: string, open: number): number {\\n  let depth = 0;\\n  for (let index = open; index < text.length; index += 1) {\\n    if (text[index] === \\\"(\\\") depth += 1;\\n    else if (text[index] === \\\")\\\") { depth -= 1; if (depth === 0) return index; }\\n  }\\n  return -1;\\n}\\n\\n/**\\n * The programs a command line actually invokes.\\n *\\n * Position, not mention. The rules above used to match `\\\\bgh\\\\b` anywhere in the\\n * string, and this repository keeps its shared `gh` wrapper in `../../../adapters/github/gh.ts` -- so\\n * `grep -n dispatchWorkflow ../../../adapters/github/gh.ts` was refused as though it were the GitHub\\n * CLI. An agent hit that three times in a row on the file it needed and the run was\\n * aborted by the repeated-call guard. The same trap sat under every other rule:\\n * `curl` would have taken any path containing a `curl` segment with it.\\n *\\n * This is routing, not security, and the header of this file has always said so --\\n * `bash -c \\\"gh ...\\\"` walks past it either way, and the `shell` server holds no\\n * `GH_TOKEN` for a `gh` that got through to use. Given that, matching where a program\\n * is invoked rather than where its name appears costs nothing real and stops refusing\\n * reads of the repository's own source.\\n */\\nconst SHELLS = new Set([\\\"sh\\\", \\\"bash\\\", \\\"zsh\\\", \\\"dash\\\", \\\"ksh\\\"]);\\n\\nfunction invokedPrograms(command: string, depth = 0): string[] {\\n  const text = withoutHeredocBodies(command);\\n  const found: string[] = [];\\n  for (const segment of segmentsOf(text)) {\\n    const tokens = segment.trim().split(/\\\\s+/).filter(Boolean);\\n    let index = 0;\\n    // `FOO=bar cmd`, `sudo cmd`, `env FOO=bar cmd`, and `do cmd`.\\n    while (index < tokens.length) {\\n      const token = tokens[index]!;\\n      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) { index++; continue; }\\n      const name = token.split(\\\"/\\\").pop() ?? token;\\n      if (COMMAND_WRAPPERS.has(name) || RESERVED_WORDS.has(name)) { index++; continue; }\\n      break;\\n    }\\n    const program = tokens[index];\\n    if (!program) continue;\\n    const name = program.split(\\\"/\\\").pop() ?? program;\\n\",\"stderr\":\"\",\"output_truncated\":true,\"execution_time_ms\":131}",
+      "tool_call_id": "call_00_re6y0fzf96etsfu2jflcm2qp"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_bb0vbn27di7keeomdz2tv36p",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"shell_guard: read substitutions and heredoc bodies the way the shell does\\n\\nTwo review findings on #394, both reproduced by measurement against the hook\\nbefore this change:\\n\\n- The substitution scan ran on the raw command while heredoc bodies were stripped\\n  only for the segment split, so a document being written that quotes a command in\\n  backticks was refused: `cat > notes.md <<'EOF'` with a body line reading\\n  \\\"Run `gh pr view` to check.\\\" answered allow:false.\\n- That scan had no notion of quoting either, so `grep -rn 'use `curl` instead'\\n  src/` was refused although a single-quoted span runs nothing.\\n\\nBoth rules now read one stripped text, and `substitutions` blanks single-quoted\\nspans before scanning. Double quotes are deliberately not blanked: a substitution\\ninside them does run, and a test pins that difference.\\n\\nThe mutating-git rule reads substitutions too. It allowed\\n`x=$(git push origin main)` while `x=$(curl ...)` beside it was refused, which is\\nthe same disagreement between two rules about where a command begins that #389\\nwas, one layer up.\\n\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294241844700000000000000000000ffffc0a8a119f0a9c7",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Looks fine. One detail in `blankSingleQuoted`: `const char = text[index];` — with `noUncheckedIndexedAccess` this would be `string | undefined`; typecheck passed, so tsconfig likely doesn't enable it (or `text[index]` on a string returns string). Fine.\n\nNow: the git rule now recurses substitutions and returns a *subcommand* from the substitution. Note the refusal message uses `git ${gitCommand}` — for `x=$(git push ...)` it says \"Raw 'git push' is disabled...\" ✓ (verified in review-check: \"Raw ...\" which is right).\n\nNow commit and update the PR. The PR already exists; `commit_and_push` then the PR updates automatically (no need to create a new PR). Then report.\n\nActually — what does the reviewer agent need? The role says: if a review requests changes, inspect the current PR, address findings, validate, commit, and update the same pull request. Updating = push (done via commit_and_push). Do I need to re-dispatch the reviewer? The `create_pr` is for new PRs. After pushing to an existing PR, presumably CI validation runs and dispatches the reviewer per config (the machinery's workflow triggers on push). Let me check: in the engineer role, \"Call create_pr ... read validation_dispatched\". For a re-entry after review, tool list has no \"update_pr\". The push likely triggers the validation workflow which dispatches reviewer on pass (the config's PR workflow runs on pull_request: synchronize presumably). I'll just commit and push, then report; the machinery's post-push flow handles it.\n\nLet me write a good commit message for the rework, and then report with the review findings addressed, with measurements.\n\nCommit message:\n\n```\nshell_guard: read substitutions and heredocs the way the shell does\n\nReview of #394 found two ways the new reading still answered \"mention\" as\nthough it were \"position\", and both reproduce by measurement:\n\n- the substitution scan ran on the raw command while heredoc bodies were\n  stripped only for the segment split, so a document being written that\n  quotes a command in backticks was refused: `cat > notes.md <<'EOF'` with a\n  body line \"Run `gh pr view` to check.\" -- allow:false before this.\n- it had no notion of quoting, so `grep -rn 'use `curl` instead' src/` was\n  refused although single quotes run nothing.\n\nBoth rules now read one stripped text, and `substitutions` blanks\nsingle-quoted spans first (double quotes are deliberately not blanked -- a\nsubstitution in them does run).\n\nThe mutating-git rule reads substitutions too. It allowed\n`x=$(git push origin main)` while `x=$(curl ...)` beside it was refused,\nwhich is the same disagreement between two rules that #389 was.\n```\n\nThen final report. Include the measurements (the six review cases) and the four verify commands.\n\nAlso mention the deployment note again? Already in the PR description; keep the report focused on the rework.\n\nAlso: I should update the PR body since finding 2's claim changed (\"not covered: ...\") — the body said \"Not covered, and not claimed: `a=curl; $a`, `bash -c` beyond two levels, `find … -exec`, and a `case` arm.\" That's still accurate. But the body also said the git rule does not read substitutions? Let me check: the PR body says \"**shellSegments()** — one splitter for both rules (routing and mutating-git), now splitting on a newline and a background `&` as well.\" It doesn't claim more. But the body's \"What changed\" should now mention the quoting/heredoc correction. The PR body is editable? There's no tool for editing a PR body here (create_pr only). Hmm. The commit + report will carry it. The report is posted as a comment on the PR, so the correction is visible there. Good enough; mention in the report that the PR body's change list predates the rework and point to the report comment.\n\nLet me commit.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "call_00_bb0vbn27di7keeomdz2tv36p"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_yiop2aw6qcmac8potwiu15ax",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'function segmentsOf\\\\|function withoutHeredocBodies\\\\|function blankSingleQuoted\\\\|function substitutions\\\\|function invokedPrograms\\\\|function findMutatingGitCommand\\\\|const RESERVED_WORDS\\\\|function closingParen' src/entrypoints/tools/hooks/shell_guard.ts; echo '--- test lines'; grep -n 'a routed program is refused whatever\\\\|a routed name in a loop header\\\\|a substitution inside double quotes\\\\|a heredoc body is data\\\\|a mutating git command inside a substitution' src/entrypoints/tools/hooks/shell_guard.test.ts; echo '--- head'; git log --oneline -2\"}"
+          }
+        },
+        {
+          "id": "call_01_st8qnx5hdzzihqrazk0orxdj",
+          "type": "function",
+          "function": {
+            "name": "get_check_runs",
+            "arguments": "{\"ref\": \"atomaton/issue-389\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294243235600000000000000000000ffffc0a8a81aa07b6f",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Pushed. Now write the report. The session continues (no create_pr needed for updating a PR; the push triggers validation/review dispatch per the machinery).\n\nHmm — should I re-dispatch the reviewer? The engineer role's tool list has no \"request review\" tool other than create_pr (which would fail/duplicate). The config's PR workflow presumably triggers on `synchronize`. I'll note in the report that the push re-triggers the check and the reviewer per config, and if nothing is dispatched, that's visible.\n\nActually, careful: per the role, \"If a review requests changes, inspect the current pull request and address only concrete findings, then validate, commit, and update the same pull request.\" That's what I did. End with nobody (report stands) or hand off? The reviewer agent will be dispatched by validation on the push (the machinery decides). I should not name a call I can't make (create_pr again would create another PR? It might refuse). I'll end with no call — the machinery tells @yuma-seno nothing is running... Hmm, but the run that started this was... the reviewer's handoff was via `/engineer` from the reviewer? The task message came as a PR event with `/engineer`. The \"started by\" — the closing rules say report to whoever started this run; an agent that started it is named at the start of the run. Nothing named in my context; the message was the PR + review. List of callable agents: reviewer, atomaton. Hmm — should I end with `/reviewer` to get the rework reviewed? The push likely dispatches validation → reviewer automatically on pass (per create_pr's description: \"validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass\"). That path triggers on the PR's validation workflow, which runs on push to the PR branch. Since commit_and_push pushed, the workflow should fire.\n\nBut I can't measure that. If I end with `/reviewer`, that's a handoff that starts the reviewer directly — but the pull request requires checks to pass first, and the review workflow... The instructions say \"opening a pull request starts nobody by itself\" — for updating an existing PR, presumably synchronize event triggers validation. Ending with `/reviewer` might dispatch the reviewer before checks run. Risk: it reviews with failing checks, or it's fine (it calls check_merge_readiness which would report pending).\n\nI think the safest reading: end with `/reviewer` asking for a re-review of the rework, since nothing else is scheduled by my own action (`commit_and_push` does not dispatch). Wait — but if the push already triggers the reviewer, then `/reviewer` would create a duplicate dispatch... The machinery refuses two calls but one agent call is fine; a duplicate reviewer run on the same PR is wasteful but not harmful, and the reviewer tool description says check_merge_readiness dispatches CI when only a CI run is missing.\n\nHmm. What does the previous turn's structure suggest? My first turn ended with `create_pr(reviewer=\"reviewer\")` which dispatched validation. Now I've pushed a fix. In the same pattern, a re-review needs dispatching. There's no tool to re-dispatch validation... `create_pr` requires a clean worktree and would create a second PR (refused? \"Create a pull request from the checked-out Atomaton branch\" — a PR already exists for this branch; GitHub would refuse a duplicate).\n\nSo the honest options: end with no call (nothing running; the machinery tells @yuma-seno) or `/reviewer`. Given the role requires the work to be reviewed before merge and nothing else dispatches it explicitly, I'll end with `/reviewer` and a concrete request: re-review the two findings' corrections. That is a genuine hand-off of work to be done (the re-review), not a courtesy copy.\n\nWait, but will the `/reviewer` line be interpreted as a request in my report? Yes: one agent, slash line, then the request on following lines.\n\nHmm, but there's a risk: the reviewer might be dispatched in a state where CI hasn't run/passed. The reviewer's own tool check_merge_readiness reports pending checks as blockers, so it would report them rather than merge wrongly. Acceptable.\n\nNow write the report with the four parts:\n\n**What you concluded** — 1-2 sentences: the rework closes both review findings; the guard now reads one stripped text, and both rules agree; re-run 2134 tests pass.\n\n**How you know** — max 5 anchors:\n- measurements before/after (the six cases) — put in a fold as a table.\n- `src/entrypoints/tools/hooks/shell_guard.ts:...` line numbers: blankSingleQuoted, substitutions, findMutatingGitCommand recursion. Let me get current line numbers.\n- test names/lines in shell_guard.test.ts.\n- commands + exit codes.\n\n**What you could not establish** — e.g. whether the push re-dispatched CI/review (I didn't check get_check_runs — could check now? I could call get_check_runs on the branch to see if checks started. Let me do that: it's cheap and gives a measured statement). Also the reviewer's non-blocking note about `<<` inside double quotes remains unaddressed — say so, and why (quote state covers single quotes only for substitutions; heredoc detection still uses the preceding-char check). That's honest.\n\n**What happens next** — the reviewer re-reviews; then self-deploy note for the live guard.\n\nLet me get line numbers now and check runs.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"78:const RESERVED_WORDS = new Set([\\n96:function segmentsOf(text: string): string[] {\\n117:function withoutHeredocBodies(command: string): string {\\n149:function blankSingleQuoted(text: string): string {\\n181:function substitutions(command: string): string[] {\\n197:function closingParen(text: string, open: number): number {\\n224:function invokedPrograms(command: string, depth = 0): string[] {\\n402:function findMutatingGitCommand(command: string, depth = 0): string | undefined {\\n--- test lines\\n204:    test(\\\"a routed program is refused whatever shell construct invokes it\\\", () => {\\n231:    test(\\\"a routed name in a loop header or an argument is still just a name\\\", () => {\\n248:    test(\\\"a substitution inside double quotes still runs\\\", () => {\\n257:    test(\\\"a heredoc body is data, and a command after it is still a command\\\", () => {\\n370:    test(\\\"a mutating git command inside a substitution is refused\\\", () => {\\n--- head\\n3a2e24a shell_guard: read substitutions and heredoc bodies the way the shell does\\nc6fc90c shell_guard: find the program where the shell puts it, not where a split leaves it\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":125}",
+      "tool_call_id": "call_00_yiop2aw6qcmac8potwiu15ax"
+    },
+    {
+      "role": "tool",
+      "content": "[]",
+      "tool_call_id": "call_01_st8qnx5hdzzihqrazk0orxdj"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_va1ngawlgz8l3bd8dedx1s6a",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\": 394}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294244463500000000000000000000ffffc0a8731a8f9f39",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "`get_check_runs` for `atomaton/issue-389` returned `[]` — no check runs on the branch head yet (either not triggered yet or the workflow name/ref differs). Let me check the PR's head branch name and check runs for the commit SHA. Let me get the PR.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"main\",\"createdAt\":\"2026-10-25T15:22:36Z\",\"headRefName\":\"atomaton/issue-389\",\"number\":394,\"state\":\"OPEN\",\"title\":\"shell_guard: judge the program a shell segment runs, not the first word of the split\",\"body\":\"/reviewer\\n\\nPart of #389\\n## What this fixes\\n\\nThe guard judged one loop four times and refused it the fifth because of where a `;` fell. `for n in 1; do curl ...; done` was **allowed**: the split left `do curl ...` as one segment, `do` was read as the program, and the routed name after it was never looked at. The refusing call on #96 happened to have a `;` between `do` and the `curl`, so `curl` landed at the start of a segment and was caught.\\n\\nMeasured before the change, driving the hook the way the shell tool does (JSON on stdin), against the source guard:\\n\\n```\\ncall 1 (do curl ...)          {\\\"allow\\\":true}     <- allowed\\ncall 5 (do sha=$(...); curl)  {\\\"allow\\\":false}    <- refused\\n```\\n\\n## What changed — `src/entrypoints/tools/hooks/shell_guard.ts`\\n\\n1. **`RESERVED_WORDS`** — the shell's own words (`do`, `then`, `else`, `{`, `(`, `!`, …) are skipped when deciding which program a segment runs. Only the leading run is skipped, so a routed name in an argument position is still an argument.\\n2. **`shellSegments()`** — one splitter for both rules (routing and mutating-git), now splitting on a newline and a background `&` as well. A command written on its own line used to be read as an argument of the line above it: `cd /tmp` / newline / `curl …` was allowed.\\n3. **`substitutions()`** — the content of `$(...)` and of a backtick pair is read as a command, since it runs one. `x=$(curl -s …)` was allowed because the whole substitution is one token and that token is an assignment.\\n4. **`withoutHeredocBodies()`** — heredoc bodies are dropped before that reading. This is required *by* the newline split: a body line beginning `curl` would otherwise be read as a command. Measured: `cat > notes.md <<'EOF'` with a body line `curl is disabled` was refused before this, and is allowed now, while a real command after the heredoc is still refused.\\n\\nNot covered, and not claimed: `a=curl; $a`, `bash -c` beyond two levels, `find … -exec`, and a `case` arm. The file's header already says this is a text match that redirects the agent to the right tool, not a boundary.\\n\\n## Verification\\n\\nAll four commands from `checks.from_pull_request` in `.github/atomaton/config.yaml`, run in this tree:\\n\\n| command | result |\\n| --- | --- |\\n| `bun run src/entrypoints/machinery/scan_secrets.ts` | exit 0 (gitleaks release could not be resolved, so the branch was not scanned for credentials — the warning is the scan's, not this change's) |\\n| `bun run typecheck` | exit 0 |\\n| `bun run synth` | exit 0 (writes only `dist/`, which is gitignored) |\\n| `bun run test` | 2132 pass, 0 fail, 169 files |\\n\\nNew tests in `shell_guard.test.ts`, all passing and all failing before the fix in their `do curl` / `then` / `{` / `(` / `&` / newline / `$( )` cases:\\n\\n- *a routed program is refused whatever shell construct invokes it* — the two shapes from #389 plus `until`, `if/then/else`, brace group, subshell, background `&`, newline, `sudo env A=1`, and two substitutions.\\n- *a routed name in a loop header or an argument is still just a name* — `for f in curl wget`, `grep -rn 'curl -s' src/`, `echo 'use fetch, not curl'`.\\n- *a heredoc body is data, and a command after it is still a command*.\\n\\n## What this does not do\\n\\n`.github/atomaton-runtime/tools/hooks/shell_guard.ts` is not touched: `.github/**` here is this repository's adoption of the last release and lags `src/` until a self-deploy (`.github/atomaton/config.yaml:39`). So this fixes the deliverable now and this repository's own guard only after a release plus **Atomaton Self Deploy** — until then a run here still meets the old matcher.\\n\\n🤖 Opened by the engineer agent.\\n\\n---\\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40205963768)_\\n\"}",
+      "tool_call_id": "call_00_va1ngawlgz8l3bd8dedx1s6a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_yyolxjzx6hhbbxcbl1d5367j",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git rev-parse HEAD && git status --porcelain\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294244796600000000000000000000ffffc0a87eaced76d8",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "PR head branch is `atomaton/issue-389`, base `main`. No check runs yet for the branch (the push happened moments ago; the synchronize-triggered workflow may not have created runs yet, or it triggers only on PR opened/ready). Let me check the check runs for the commit SHA 3a2e24a... I need the full SHA: `git rev-parse HEAD`.\n\nLet me check get_check_runs with the full sha. If none, then nothing is scheduled and I should hand off to `/reviewer`.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"3a2e24aa37506348c73c606ae906336b80198cfd\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":125}",
+      "tool_call_id": "call_00_yyolxjzx6hhbbxcbl1d5367j"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_3tic81d5whv5bys1q1ck7av3",
+          "type": "function",
+          "function": {
+            "name": "get_check_runs",
+            "arguments": "{\"ref\": \"3a2e24aa37506348c73c606ae906336b80198cfd\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "[{\"name\":\"pull-request-checks (verify)\",\"status\":\"queued\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40207549027/job/121211669442\"},{\"name\":\"atomaton-tools\",\"status\":\"in_progress\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40207549027/job/121211631602\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"in_progress\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40207549027/job/121211631552\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"in_progress\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/40207549027/job/121211631342\"}]",
+      "tool_call_id": "call_00_3tic81d5whv5bys1q1ck7av3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_chvjpwnex79b39rpe8ncxoqc",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn 'reviewer' .github/workflows/*.yml | head -20\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294245431200000000000000000000ffffc0a8b3c394e3d4",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Checks are running on the pushed head (queued/in_progress) — so the push did trigger the validation workflow, which on pass dispatches the reviewer (as create_pr's description says the validation dispatches the agent the result calls for). So nothing more for me to dispatch: the machinery will route it once the verify job passes.\n\nHmm — but does the push-triggered run dispatch the reviewer? The `pull-request-checks (verify)` job runs checks; per the create_pr description, \"On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass\". The same workflow on synchronize would presumably do the same. So the reviewer will be started when the verify job passes. I cannot wait (no waiting allowed), and I must not \"end by saying I will wait for a check\".\n\nSo my report: state that checks are queued on the pushed head (measured: 4 runs, verify queued) and that validation dispatches the reviewer on pass. End with nobody? Or `/reviewer`? If I end with `/reviewer`, and validation also dispatches the reviewer, there could be two reviewer runs. That's wasteful. If I end with nobody, the machinery tells @yuma-seno nothing is running — but something IS running (the queued checks). The machinery's notice is generic.\n\nHmm. Which is right? The three shared outcomes: report stands on its own with nobody. Since validation is now in flight and it dispatches the reviewer on pass (that is the documented mechanism of the pull-request workflow), the handoff is already made by the system. Ending with nobody risks the machinery telling @yuma-seno that nothing is running — a mild inconsistency but harmless, and the report explains the state.\n\nBut is the \"validation dispatches reviewer on pass\" guaranteed for a synchronize push? The evidence: the workflow ran with jobs `plan-pull-request-checks`, `pull-request-checks (verify)`, `atomaton-tools`, `plan-default-branch-checks`. Whether the post-verify step dispatches reviewer — per create_pr's description, \"Read validation_dispatched: when it is true the session ends here and you are re-invoked later\". That was for create_pr. For commit_and_push there's no such flag.\n\nConsider consequences: if the verify passes and nothing dispatches the reviewer, the PR sits waiting until a person acts. Which is not terrible (governed path? no, src only, but the reviewer applies merge policy). To be safe and to keep the rework reviewed, ending with `/reviewer` is a real hand-off: it starts the review of the rework. The risk is a duplicate reviewer run. The reviewer's own run would call check_merge_readiness, which waits for/pending checks → it reports blockers and asks a person or re-runs. Hmm, that could produce a \"cannot merge yet, checks pending\" review — noise but not damaging.\n\nAlternatively `/atomaton`? No.\n\nLet me think about what the machinery does with two dispatches... I can't control it. The safest choice given ambiguity: end with nobody, since the machinery has already dispatched CI on the push and the documented flow hands the PR to the reviewer when checks pass. My report says so, and if verification finished after my session, the machinery's post-run dispatch handles it.\n\nHmm, but the guidance says: \"opening a pull request starts nobody by itself, so omitting it leaves the work waiting with nothing scheduled\" — that's about create_pr. Here the PR is open and CI is running; the reviewer dispatch on pass is the machinery's own path.\n\nActually, let me check the workflow to see whether the verify job dispatches the reviewer. That's a concrete read of `self/workflows` or generated `.github/workflows/*.yml`. Let me grep for \"reviewer\" in the workflows to see the dispatch condition.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\".github/workflows/atomaton-runner.yml:245:          # the diff -- the reviewer's two halves of one evidence base -- disagreed within\\n.github/workflows/atomaton-runner.yml:1049:          # create_pr starting the reviewer on the pull request -- is deliberately NOT this\\n.github/workflows/atomaton-runner.yml:1093:          # outcome. That is the route #264 added: a reviewer sees `behind` or `conflicting`,\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":124}",
+      "tool_call_id": "call_00_chvjpwnex79b39rpe8ncxoqc"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_tcu0gd6ny713lw8ua3zwa78t",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '1035,1075p' .github/workflows/atomaton-runner.yml\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"            # The message's calls were refused, so nothing it named is started. The comment is\\n            # posted with them left as text, and the machinery makes the one call it still can.\\n            echo \\\"directive=\\\" >> \\\"$GITHUB_OUTPUT\\\"\\n          else\\n            bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/extract_directive.ts\\\" --output-file \\\"${RUNNER_TEMP}/atomaton-run/atomaton_output.txt\\\" --def-dir \\\"${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions\\\"\\n          fi\\n          echo \\\"ending_invalid=${ENDING_INVALID}\\\" >> \\\"$GITHUB_OUTPUT\\\"\\n\\n          # Detect whether a tool call already triggered an automatic follow-up\\n          # dispatch ON THIS NODE during this run (a hand-off to a colleague:\\n          # merge_pr -> re-invoked agent), as opposed to the agent genuinely\\n          # finishing with nothing further happening.\\n          #\\n          # A dispatch onto a DIFFERENT node -- launch_sub_agent starting children,\\n          # create_pr starting the reviewer on the pull request -- is deliberately NOT this\\n          # flag. Those start work UNDER this node, which is a PARK (read below, #208): the node\\n          # holds its `atomaton/in-progress` guard because the turn is parked on that work, not\\n          # because anything is running on it, and the parked run is not a link in this node's\\n          # chain. See `ops-log.ts` for the two op names and `domain/work/turn.ts` for what\\n          # each ending implies.\\n          #\\n          # Every dispatch site writes a structured `{\\\"op\\\":...}` entry to the ops log (see\\n          # lib/ops-log.ts's logDispatch()), and WHICH entry it writes carries that\\n          # distinction -- `\\\"op\\\":\\\"dispatch\\\"` is this node, `\\\"op\\\":\\\"dispatch-elsewhere\\\"` is\\n          # another. Checking that one stable, documented JSON field is far more robust than\\n          # grepping the agent's raw stderr TEXT for hand-written strings like\\n          # \\\"dispatched: agent=...\\\", which silently broke once already when a refactor\\n          # changed a log message's wording without updating the grep pattern to match. The\\n          # trailing quote does the work: `\\\"op\\\":\\\"dispatch\\\"` cannot match\\n          # `\\\"op\\\":\\\"dispatch-elsewhere\\\"`.\\n          CHAIN_CONTINUES=false\\n          if [ -f \\\"${RUNNER_TEMP}/atomaton-run/atomaton_ops.log\\\" ] && grep -q '\\\"op\\\":\\\"dispatch\\\"' \\\"${RUNNER_TEMP}/atomaton-run/atomaton_ops.log\\\"; then\\n            CHAIN_CONTINUES=true\\n          fi\\n          echo \\\"chain_continues=${CHAIN_CONTINUES}\\\" >> \\\"$GITHUB_OUTPUT\\\"\\n\\n          # Whether this run PARKED its turn on work under this node (#208): a child-starting\\n          # tool (`launch_sub_agent`, `create_pr`) dispatches onto ANOTHER node, and the ops log\\n          # says so with `dispatch-elsewhere`. The trailing quote is the same instrument the\\n          # chain check uses: `\\\"op\\\":\\\"dispatch-elsewhere\\\"` cannot be matched by the\\n          # `\\\"op\\\":\\\"dispatch\\\"` pattern above, so one run cannot read as both handing off and\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":121}",
+      "tool_call_id": "call_00_tcu0gd6ny713lw8ua3zwa78t"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_21cwk1ghqi6s2zm0kek8h045",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && ls .github/workflows/; grep -rln 'pull-request-checks' .github/workflows/ | head\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294246531000000000000000000000ffffc0a8910ab83780",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "That was about the run-ender, not the PR validation dispatch. Let me grep the generated workflow that handles pull_request checks — probably `checks.yml` or in `atomaton-runner.yml` the `pull-request-checks` job dispatching the reviewer. Let me search for \"dispatch_agent\" or \"failing then the engineer\" text.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"atomaton-check.yml\\natomaton-deploy.yml\\natomaton-entry.yml\\natomaton-manual-comment.yml\\natomaton-pr-closed.yml\\natomaton-release.yml\\natomaton-run-watch.yml\\natomaton-runner.yml\\natomaton-self-deploy.yml\\natomaton-sub-issue-closed.yml\\natomaton-validate-pr.yml\\n.github/workflows/atomaton-check.yml\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":125}",
+      "tool_call_id": "call_00_21cwk1ghqi6s2zm0kek8h045"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_xp45x6hobii46005ucwuh6qf",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'reviewer\\\\|dispatch_agent\\\\|agent:' .github/workflows/atomaton-check.yml | head -30\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":123}",
+      "tool_call_id": "call_00_xp45x6hobii46005ucwuh6qf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_du0n0fvouv0suvlhr2it0oeb",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn 'validation' .github/workflows/*.yml | head -20; echo '=== src'; grep -rln 'validation_dispatched\\\\|dispatchValidation' src | head\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294247240700000000000000000000ffffc0a854229c73fb",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "`atomaton-check.yml` has no reviewer dispatch — so validation on push does not start the reviewer by itself. The reviewer is started by `create_pr`'s dispatch (the first turn). On a rework push, nothing starts the reviewer.\n\nWait, but the machinery comment in atomaton-runner.yml said \"create_pr starting the reviewer on the pull request\" is a dispatch onto a different node. And create_pr's description says validation dispatches the reviewer when checks pass. Let me check how the earlier flow worked: on my first turn, `create_pr` returned `validation_dispatched: true`. That presumably triggered a workflow that runs checks and dispatches reviewer. Let me find that dispatch logic — maybe in atomaton-runner.yml under a `validation` job or in the `entry` workflow triggered by workflow_dispatch with a \"validation\" mode.\n\ngrep for 'validation_dispatched' in .github/workflows and src.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\".github/workflows/atomaton-manual-comment.yml:148:      - name: Hand the pull request to validation, which waits for CI\\n.github/workflows/atomaton-manual-comment.yml:157:          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_pr_validation.ts\\\" --repo \\\"${REPO}\\\" --number \\\"${NUMBER}\\\" --commenter \\\"${COMMENTER}\\\" --asked-by-person \\\"true\\\" --ask \\\"${ASK}\\\"\\n.github/workflows/atomaton-validate-pr.yml:118:          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_agent.ts\\\" --agent \\\"${AGENT}\\\" --number \\\"${NUMBER}\\\" --type \\\"pr\\\" --repo \\\"${REPO}\\\" --ask \\\"${ASK}\\\" --run-id \\\"${{ github.run_id }}\\\" --answers-request \\\"true\\\" --verdict-passed \\\"${VERDICT_PASSED}\\\" --context \\\"validation of #${NUMBER} finished: ${SUMMARY}\\\"\\n=== src\\nsrc/content/agent-definitions/engineer.md\\nsrc/entrypoints/tools/mcp/mcp.test.ts\\nsrc/entrypoints/tools/mcp/github.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":129}",
+      "tool_call_id": "call_00_du0n0fvouv0suvlhr2it0oeb"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_tuki04r1vqk0bfzrmvjl2w8t",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '1,60p' .github/workflows/atomaton-validate-pr.yml\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"# AUTO-GENERATED by Atomaton -- DO NOT EDIT DIRECTLY.\\n# Generated from: src/workflows/atomaton-validate-pr.wac.ts\\n# Edits here are lost when this file is regenerated upstream.\\n#\\n# To change what CI or deployment DOES, you do not need this file: put the\\n# commands in .github/atomaton/config.yaml, under `checks` or `deploy`. That\\n# file is yours, it survives upgrades, and an\\n# agent can write it -- GitHub refuses to let one write a workflow.\\n# See docs/pipeline/overview.md, \\\"The pipeline as commands\\\".\\n#\\n# Upstream: https://github.com/yuma-seno/atomaton\\n\\nname: Atomaton Validate PR\\n'on':\\n  workflow_dispatch:\\n    inputs:\\n      number:\\n        description: Pull request number\\n        required: true\\n        type: string\\n      branch:\\n        description: Head branch of the pull request\\n        required: true\\n        type: string\\n      ask:\\n        description: 'Ask comment id the dispatched run claims (atomaton:took, #285); the answers-request check verifies the wait against it'\\n        required: false\\n        type: string\\n        default: ''\\n      asked_by_person:\\n        description: Whether a person asked for this run, which decides who a failed check goes back to\\n        required: false\\n        type: string\\n        default: 'false'\\npermissions:\\n  actions: write\\n  issues: write\\n  pull-requests: write\\n  contents: write\\n  checks: write\\njobs:\\n  validate:\\n    runs-on: ubuntu-latest\\n    timeout-minutes: 45\\n    concurrency:\\n      group: atomaton-validate-${{ inputs.number }}\\n      cancel-in-progress: true\\n    permissions:\\n      actions: write\\n      issues: write\\n      pull-requests: write\\n      contents: write\\n      checks: write\\n    steps:\\n      - name: Checkout repository\\n        uses: actions/checkout@v4\\n      - name: Checkout the pull request's own tree, as data\\n        uses: actions/checkout@v4\\n        with:\\n          ref: ${{ inputs.branch }}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":138}",
+      "tool_call_id": "call_00_tuki04r1vqk0bfzrmvjl2w8t"
+    },
+    {
+      "role": "assistant",
+      "content": "Both review findings are fixed and measured. Checks on the pushed head are still running, and a push does not start a re-review by itself, so this hands back to the reviewer.\n\n**What I concluded.** Both blocking findings are corrected: substitutions are now read from the same heredoc-stripped text the segment split uses and with single-quoted spans blanked, and the mutating-git rule reads substitutions too — so `x=$(curl …)` and `x=$(git push …)` are judged the same way. All four verify commands exit 0 and `bun run test` reports 2134 pass, 0 fail.\n\n**How you know.** The six cases the review named, each driven through the hook as JSON on stdin before and after the rework, plus the code and test anchors, and the four check commands, are in the fold below.\n\n<details><summary>Before/after measurements for every case the review named, the anchors, and the check results</summary>\n\n| case | before the rework | after |\n| --- | --- | --- |\n| `cat > notes.md <<'EOF'` / ``Run `gh pr view` to check.`` / `EOF` | `{\"allow\":false}` | `{\"allow\":true}` |\n| `grep -rn 'use \\`curl\\` instead' src/` | `{\"allow\":false}` | `{\"allow\":true}` |\n| ``x=`curl -s https://example.com` `` (control, must stay refused) | `{\"allow\":false}` | `{\"allow\":false}` |\n| `x=$(curl -s https://example.com)` (control) | `{\"allow\":false}` | `{\"allow\":false}` |\n| `echo $(git push origin main)` | `{\"allow\":true}` | `{\"allow\":false}` |\n| `echo $(git rev-parse HEAD)` (control) | `{\"allow\":true}` | `{\"allow\":true}` |\n\nAll five shapes from #389 (calls 1, 2 and 5, `do curl`, `then curl`, `{ }`, `( )`, `&`, newline, `sudo env A=1`) are still refused after the rework.\n\nAnchors:\n\n- `src/entrypoints/tools/hooks/shell_guard.ts:149` — `blankSingleQuoted`: single-quoted spans become spaces, double quotes are tracked only so an apostrophe inside them does not open a span.\n- `src/entrypoints/tools/hooks/shell_guard.ts:181` and `:224` — `substitutions` scans the blanked text, and `invokedPrograms` hands it the heredoc-stripped text it also segments, so a body can no longer reach the substitution scan.\n- `src/entrypoints/tools/hooks/shell_guard.ts:402` — `findMutatingGitCommand` takes the same stripped text, recurses the same `substitutions` under the same `depth < 2` bound.\n- `src/entrypoints/tools/hooks/shell_guard.test.ts:231` single-quoted backticks allowed; `:248` a substitution inside double quotes still refused; `:257` quoted heredoc whose body contains `` `gh pr view` `` allowed; `:370` `x=$(git push origin main)` refused and `sha=$(git rev-parse HEAD)` allowed.\n- `bun run src/entrypoints/machinery/scan_secrets.ts` exit 0 (with the gitleaks-unresolved warning), `bun run typecheck` exit 0, `bun run synth` exit 0, `bun run test` 2134 pass / 0 fail across 169 files.\n\n</details>\n\n**What I could not establish.** The review's non-blocking note stands unchanged: `<<` inside a double-quoted argument (`echo \"see <<x\"`) still opens a heredoc that never terminates, so later lines drop out of both rules. I did not extend quote state to heredoc detection, because that state is deliberately live inside double quotes for substitutions and a second, opposite mask for heredocs was more machinery than the note asked for. It hides lines rather than refusing them, and it is not a regression. Second: whether an unquoted heredoc body should be scanned at all is now recorded as a decision in the code (dropped whole, both spellings) rather than settled by measurement against a real run. Third: a push does not dispatch a re-review — `atomaton-validate-pr.yml` is `workflow_dispatch` only, and what ran on head `3a2e24a` is `atomaton-check` (4 jobs, queued/in-progress), which starts nobody.\n\n**What happens next.**\n\n1. Review head `3a2e24a` against the two findings; the PR body's change list predates the rework, so this comment is the current account of it.\n2. Merge once satisfied — the change is `src/` only, so it reaches this repository's own live guard only after a release plus **Atomaton Self Deploy** (`.github/atomaton/config.yaml:39`), and runs here keep the old matcher until then.\n\n/reviewer\n\nRe-review `src/entrypoints/tools/hooks/shell_guard.ts` on head `3a2e24a` against your two findings — substitution scanning on stripped, single-quote-blanked text, and the git rule reading substitutions under the same bound — and merge if they hold.\n\n<details><summary>What to check, and what is deliberately unchanged</summary>\n\nThe two corrections are `blankSingleQuoted` at `src/entrypoints/tools/hooks/shell_guard.ts:149` (called from `substitutions` at `:181`, which is now fed the heredoc-stripped text by `invokedPrograms` at `:224`) and the substitution recursion in `findMutatingGitCommand` at `:402`. New tests are at `src/entrypoints/tools/hooks/shell_guard.test.ts:231`, `:248`, `:257` and `:370`.\n\nNot changed, and stated as such above: heredoc detection still keys on the preceding character rather than quote state, so `echo \"see <<x\"` drops the lines after it; unquoted heredoc bodies are dropped whole. `.github/atomaton-runtime/` is untouched — `.github/**` here is the last release's adoption.\n\n</details>",
+      "provider_items": [
+        {
+          "id": "rs_02179294247958600000000000000000000ffffc0a87eac17fb4c",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "\"Atomaton Validate PR\" is a workflow_dispatch, triggered by `dispatch_pr_validation.ts`, not by the push. So my push to the PR branch did NOT dispatch validation for review purposes — the checks I see (`atomaton-check.yml` runs on pull_request) are the ordinary CI checks, which run but do not dispatch the reviewer.\n\nSo on a rework push, nothing starts the reviewer. The handoff must be mine: end with `/reviewer`, asking for the re-review, and mention that `atomaton-check` is in flight on head 3a2e24a.\n\nHmm, wait: could I instead use a GitHub tool to dispatch validation? There's no such tool exposed. `create_pr` is the tool that dispatches validation, and it's for a new PR. So `/reviewer` it is. The reviewer will see pending checks and can wait via its own tooling (check_merge_readiness dispatches CI if needed) — and it did exactly that last time (it called check_merge_readiness and got ready:true).\n\nHmm, careful: might the reviewer then complain \"checks pending\"? At the time it runs, the `atomaton-check` runs I saw would likely have finished (they take minutes; the reviewer starts after dispatch). Acceptable.\n\nSo the closing message ends with a `/reviewer` line, then the request.\n\nNow compose the report:\n\n**What I concluded.** Both review findings are fixed: the guard now reads substitutions from the same heredoc-stripped text as the segment split and blanks single-quoted spans first, and the mutating-git rule reads substitutions with the same bound, so `x=$(curl …)` and `x=$(git push …)` get the same treatment. All four verify commands exit 0; 2134 tests pass.\n\n**How you know.** anchors:\n- Before/after measurements for the reviewer's six cases (fold them).\n- `src/entrypoints/tools/hooks/shell_guard.ts:149` blankSingleQuoted; `:181` substitutions reads blanked text; `:224` invokedPrograms passes stripped text; `:402` findMutatingGitCommand recurses substitutions.\n- tests at `shell_guard.test.ts:231` (single-quoted), `:248` (double quotes still run), `:257` (quoted heredoc body), `:370` (git in substitution).\n- command results: `bun run test`: 2134 pass, 0 fail.\n\n**What I could not establish.**\n- The reviewer's non-blocking note (`echo \"see <<x\"` inside double quotes starts an unterminated heredoc, dropping later lines) is unchanged: heredoc detection still keys on the preceding character, not on quote state. I did not extend quote state to it, because the same scanner serves substitutions where double quotes must stay live, and a second mask for heredocs was more machinery than the note asked for. It's a hole that hides later lines rather than a refusal, and it was not a regression.\n- The push does not dispatch a re-review: `atomaton-validate-pr.yml` is `workflow_dispatch`, only `atomaton-check` runs on push (4 runs queued/in_progress on head 3a2e24a). That's why this ends with a handoff.\n- Whether an unquoted heredoc body should be scanned at all is now a decision recorded in the code (dropped), not measured against a run.\n\n**What happens next** — numbered:\n1. Reviewer re-reviews head 3a2e24a against the two findings.\n2. On approval, merge; the guard reaches runs here only after a release plus Atomaton Self Deploy (`.github/atomaton/config.yaml:39`).\n\nKeep it tight. Include the fold with the six measured cases.\n\nThe last thing: the `/reviewer` line, then the request lines. Per the format: \"one agent, as a line holding nothing but `/` and the agent's name... What follows it is the request\". Lead with the request, fold the grounds.\n\nAlso note: report must lead with conclusion, no preamble.\n\nLet me write it.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop",
+      "atoma_metadata": {
+        "github_comment_id": 6399592667,
+        "agent": "engineer"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 2,
-      "snapshot_hash": "5181016be53e5963010886abe7e299fb615fdee6c7b5ccc8b74a482f859e265a",
-      "version": 1
+      "event_count": 5,
+      "snapshot_hash": "c6d91125a610457675e753a8f394286bd2fef1c2394562e8410c72a84869ab90",
+      "version": 1,
+      "type": "issue",
+      "session_number": "389"
     }
   },
   "atoma_runs": [
@@ -1331,6 +2202,29 @@
         }
       },
       "started": "2026-10-25T15:14:51Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T15:34:53Z",
+      "ended_because": "completed",
+      "iterations": 33,
+      "messages": 165,
+      "seconds": 302,
+      "server_calls": {
+        "files": {
+          "edit": 13,
+          "read": 2
+        },
+        "github": {
+          "commit_and_push": 1,
+          "get_check_runs": 2,
+          "get_pr": 1
+        },
+        "shell": {
+          "bash": 14
+        }
+      },
+      "started": "2026-10-25T15:29:51Z"
     }
   ]
 }
