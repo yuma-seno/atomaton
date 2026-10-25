@@ -11,6 +11,68 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * An opinion asked for is answered, and nothing is started for it.
+   *
+   * The shared template already says a question is an outcome (`What was asked is a
+   * question`), and it was not enough. #220 reports the crossing on #204: a comment
+   * asking what it thought came back as sub-issues and dispatched work. #209 is the
+   * same boundary at the end of a run — asked to investigate, the orchestrator had no
+   * row for a report and reached for the close, which #209's own investigation traced
+   * to this table as well as to the tool's "only correct way"; that report is on the
+   * thread, and this change is the table half. The table is the last thing a run in
+   * this role reads before choosing how to end, so the boundary is stated beside it
+   * rather than only in the shared exit three sections up.
+   *
+   * The close rule is the same boundary seen from the end of the run: an issue whose
+   * deliverable is the answer is not the issue `request_close_issue` was written for,
+   * and the issue stays open for the person who asked.
+   *
+   * Pinned as single-line fragments, because these files are wrapped prose and a phrase
+   * spanning a line break also picks up whatever indentation wraps it.
+   */
+  test("an opinion asked of the orchestrator is answered rather than acted on", () => {
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    expect(atomaton, "the boundary needs a section of its own").toContain(
+      "## What the person asked for",
+    );
+    expect(atomaton, "an ask for an opinion is answered by the answer").toContain(
+      "is answered by the answer",
+    );
+    expect(atomaton, "and nothing is created or dispatched for it").toContain(
+      "no sub-issue, dispatch nobody, and start none of the work",
+    );
+    expect(atomaton, "an investigation is reported, and the issue is left open").toContain(
+      "leave the issue open",
+    );
+    expect(atomaton, "a close is for a delivered artifact, not an answered question").toContain(
+      "for a question that has been answered",
+    );
+  });
+
+  /**
+   * The orchestrator's first move is a hand-off, and its own hands are for the
+   * mechanical parts.
+   *
+   * #212: it split the work and then wrote the larger changes itself instead of
+   * handing them to `engineer`. The definition was not silent — it said "you may do
+   * it yourself" and put "do it yourself" in the outcome table — so the permission was
+   * the instruction. The role statement, the section that carried it and the row that
+   * chose it now point one way.
+   */
+  test("the orchestrator hands implementation to the engineer and keeps the mechanical edits", () => {
+    const atomaton = readFileSync("src/content/agent-definitions/atomaton.md", "utf8");
+    expect(atomaton, "the role statement says whose code it is").toContain(
+      "Code that changes behaviour is not yours to write",
+    );
+    expect(atomaton, "an engineer-ready leaf is handed over, not done here").toContain(
+      "do it yourself only when the change is small and mechanical",
+    );
+    expect(atomaton, "including the leaf that is already one child's worth").toContain(
+      "hand it to `engineer` when it is one",
+    );
+  });
+
+  /**
    * The outcome that did not exist, and the run that measured its absence.
    *
    * The engineer's `Outcome` table was five rows, all of them "implement and open a
@@ -629,6 +691,12 @@ describe("agent prompt contracts", () => {
     );
     expect(atomaton, "the purpose is explicitly not the thing to hand up").toContain(
       "Do not hand up what the work is *for*",
+    );
+    expect(atomaton, "the outcome row is the architect's own bar, not 'being unsure'").toContain(
+      "one decision would move several parts at once",
+    );
+    expect(atomaton, "and an implementation without such a choice goes to the engineer").toContain(
+      "An implementation that holds no such choice goes to `/engineer` instead",
     );
   });
 
