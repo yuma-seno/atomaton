@@ -54,6 +54,7 @@ import { decideMergeReadiness, formatBlockers } from "../../../domain/delivery/m
 import { gatherMergeSignals } from "../../../adapters/github/merge-signals.ts";
 import { readTargetState } from "../../../adapters/github/target-state.ts";
 import { selectCommentRange } from "../../../domain/work/comment-range.ts";
+import { readCommentBody } from "../../../domain/work/comment-body.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 
 function log(msg: string): void {
@@ -221,6 +222,17 @@ const ISSUE_COMMENTS_SCHEMA = z.object({
       "This is the number `search_issues` reports as `comment`, so a match can be read directly.",
   ).optional(),
   to: positiveInt("Last comment to return, inclusive. Defaults to `from`, so passing only `from` reads one comment.").optional(),
+  // A character offset, not a comment number, so it is not `positiveInt`: 0 is a
+  // valid offset and means the beginning.
+  body_offset: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .describe(
+      "Character offset into ONE comment's body, 0-based. Set it to the offset a cut body's marker named to read the rest. " +
+        "Only valid when the range selects exactly one comment: pass `from` naming that comment, and `to` equal to it or omitted.",
+    )
+    .optional(),
 });
 
 /**
@@ -636,12 +648,45 @@ function getIssueComments(a: z.infer<typeof ISSUE_COMMENTS_SCHEMA>): string {
   // The four interacting defaults live in `domain/work/comment-range.ts`, where the
   // truth table is testable without a `gh` in the loop.
   const range = selectCommentRange(all.length, a.from, a.to);
-  // Capped per comment AND as a whole. The range bounds how MANY comments come
-  // back and says nothing about how big one is, so a single comment with a log
-  // pasted into it filled the window while `showing` reported three of forty.
+
+  // A continuation names ONE comment, because a character offset has no meaning
+  // across several. Refused rather than silently applied to each: the caller would
+  // get every comment in the range cut at an offset taken from one of them, and
+  // nothing would say so.
+  if (a.body_offset !== undefined && range.count !== 1) {
+    mcpFail(
+      "`body_offset` continues ONE comment, so the range has to name exactly one: " +
+        (range.count === 0
+          ? `${range.showing}.`
+          : `this read selects comment(s) ${range.from}-${range.to} of ${all.length}.`) +
+        " Pass `from` naming the comment whose cut marker gave the offset.",
+    );
+  }
+
+  // The budget is divided among the comments this read selects, so a read of one
+  // comment -- the shape a search hit leads to -- gets all of it. `PER_ITEM_BUDGET`'s
+  // fixed fifth is what came back cut at 1,600 characters on #149, with the tail --
+  // the decision being looked for -- the part that never arrived.
+  const perCommentBudget = Math.max(
+    MIN_COMMENT_BUDGET,
+    Math.floor(TOOL_OUTPUT_BUDGET / Math.max(1, range.count)),
+  );
+
   const selected = (range.count > 0 ? all.slice(range.from - 1, range.to) : []).map((comment) => {
     const body = (comment as { body?: unknown }).body;
-    return typeof body === "string" ? { ...comment, body: capText(body, PER_ITEM_BUDGET).text } : comment;
+    if (typeof body !== "string") return comment;
+    const index = (comment as { index: number }).index;
+    // Only a one-comment range can carry an offset, so no comment in a wider range
+    // is ever read mid-body.
+    const offset = range.count === 1 ? (a.body_offset ?? 0) : 0;
+    if (offset > 0 && offset >= body.length) {
+      mcpFail(
+        `Comment ${index} is ${body.length} characters long; \`body_offset\` ${offset} is past its end. ` +
+          "Pass the offset its cut marker named, or omit it to read from the beginning.",
+      );
+    }
+    const segment = readCommentBody(body, { index, budget: perCommentBudget, offset });
+    return { ...comment, body: segment.text };
   });
 
   const links = issueLinks(REPO, number);
@@ -1550,6 +1595,20 @@ function mergeBaseIntoBranchOrThrow(): string {
 const PER_ITEM_BUDGET = Math.floor(TOOL_OUTPUT_BUDGET / 5);
 
 /**
+ * The least one comment may be allotted when a read's budget is split among the
+ * comments it selects.
+ *
+ * `get_issue_comments` divides the budget by how many comments came back, so a
+ * read of ONE comment gets the whole of it instead of `PER_ITEM_BUDGET`'s fifth —
+ * the fifth is what cut a long comment at 1,600 characters, and the tail was the
+ * part a reader was looking for. A range wide enough to push the split below this
+ * keeps 400 rather than shrinking toward a footnote; such a read already costs
+ * more than the budget at twenty comments, and `showing` says how many there are
+ * and that a narrower range reads the rest.
+ */
+const MIN_COMMENT_BUDGET = 400;
+
+/**
  * Fields of one REST object, and nothing else.
  *
  * Every tool below that reached `gh api` returned the response whole. That is not
@@ -1991,7 +2050,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({ name: "get_issue", description: "Retrieve one issue's — or, when the number names one, pull request's — title, body, state, labels, timestamps, comment count, and what it is attached to: its parent issue, its sub-issues, and the pull requests that say they close it (each marked merged or not). The result carries `kind` (`issue` or `pull_request`) because the two share one number space, so a read pointed at the other kind still resolves. It does NOT return the comments themselves — use get_issue_comments for those, which takes a range. Returns a JSON object and does not mutate GitHub.", schema: ISSUE_CONTEXT_NUMBER_ARG_SCHEMA, handler: getIssue }),
   defineMcpTool({ name: "list_issues", description: "List issue summaries in the current repository, optionally filtered by state and labels. Use this to discover or scan issues; use get_issue when full body and comments are needed. Returns a JSON array and does not mutate GitHub.", schema: LIST_ISSUES_SCHEMA, handler: listIssues }),
-  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. Each result also carries the issue's title, state, `kind` (`issue` or `pull_request`), parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
+  defineMcpTool({ name: "get_issue_comments", description: "Read a range of one issue's comments, numbered from 1 in the order they were posted. Pass `from` (and optionally `to`) to read exactly the comment a search result pointed at; with no range it returns the last few, and always states which of how many it showed. A comment longer than the read's budget comes back as a marked segment; the marker names the `body_offset` that reads the rest, which needs `from` naming that one comment. Each result also carries the issue's title, state, `kind` (`issue` or `pull_request`), parent, and the pull requests that close it, so a comment read on its own is not mistaken for settled work when its pull request is still open. Returns JSON and does not mutate GitHub.", schema: ISSUE_COMMENTS_SCHEMA, handler: getIssueComments }),
   defineMcpTool({ name: "create_pr", description: "Create a pull request from the checked-out Atomaton branch and return its number, URL and base. The base is resolved from the tree and is not yours to choose: a sub-issue's pull request targets its parent's branch, and anything else targets the configured base branch. Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality, and it never pushes for you. On success it dispatches CI validation -- NOT the reviewer directly: validation runs the checks and then dispatches whichever agent the result calls for, the reviewer when they pass and the engineer when they do not. Read `validation_dispatched`: when it is true the session ends here and you are re-invoked later; when it is false nothing is scheduled and the session stays open for you to act.", schema: CREATE_PR_SCHEMA, handler: createPr }),
   defineMcpTool({ name: "get_pr", description: "Retrieve one pull request's metadata, including state and base/head branches. Use this for PR status and identity; use get_pr_diff or review tools for code and review details. Returns a JSON object and does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPr }),
   defineMcpTool({ name: "get_pr_diff", description: "Retrieve the unified diff for one pull request. Use this to review code changes; it does not include review conversations. Returns plain diff text and does not mutate GitHub. A large diff is truncated and says so in the text where the cut falls -- if you see that marker, the files after it were NOT shown and you have not seen the whole change.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: getPrDiff }),
