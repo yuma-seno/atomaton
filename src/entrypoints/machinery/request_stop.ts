@@ -298,8 +298,9 @@ function main(): void {
   // that quotes the stopped comment carries `atomaton:quotes`, and the thread skips
   // a quotation whole — an ending inside one would reach no reader. The labels move
   // with it (#223): the in-progress guard comes off, the waiting-for-person label
-  // goes on — the node the park held is now the person's. Best effort, like every
-  // label write.
+  // goes on — the node the park held is now the person's. When the node closed
+  // meanwhile, `applyTurnLabels` takes both off instead (#352). Best effort, like
+  // every label write.
   if (park !== undefined) {
     gh("issue", "comment", String(number), "--body", parkEndedNotice(park));
     applyTurnLabels("with-person", repo, String(number));

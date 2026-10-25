@@ -1616,6 +1616,29 @@ const removeLabelStep = new TypedOutputsStep({
 }`,
 });
 
+// A closed node carries neither turn label (#352) — and this is the one strip the
+// runner can make that the release step above cannot reach: the endings that keep
+// the guard (`handed-off`, `parked`) skip that step by design, so a run that closed
+// its own node inside one of them — `merge_pr` merging the pull request it is
+// reviewing, `request_close_issue` closing the issue it is concluding — would
+// otherwise leave `in-progress` on work that is over (#348 wore it for exactly that
+// reason). `always()` and unconditional on the ending, because "is the node closed"
+// is the script's question to read, not this step's to guess: it strips only a node
+// the read says is closed, and on a node the read says is open — the ordinary
+// hand-back whose release above just applied `waiting-for-person`, the park whose
+// skipped release left `in-progress` holding — it writes nothing.
+const stripClosedLabelsStep = new TypedOutputsStep({
+  name: "Take the turn labels off the node if it closed (#352)",
+  if: "always()",
+  shell: "bash",
+  env: {
+    GH_TOKEN: "${{ github.token }}",
+    NUMBER: "${{ inputs.number }}",
+  },
+  run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: "closed", number: "\${NUMBER}" })
+}`,
+});
+
 /**
  * Hand this run's work to the agent its directive named.
  *
@@ -2347,6 +2370,7 @@ echo "tool servers will run as ${TOOL_USER} (no sudo), caches in ${TOOL_CACHE}"
   loopControlStep,
   turnEndingStep,
   removeLabelStep,
+  stripClosedLabelsStep,
   dispatchNextAgentStep,
   loopLimitCommentStep,
 ]);

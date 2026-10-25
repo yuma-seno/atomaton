@@ -4,7 +4,11 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 /** The target's state, which `dispatchRunner` reads before starting anything. */
 const open = { match: ["api", "issues"], stdout: JSON.stringify({ state: "open" }) };
-const closed = { match: ["api", "issues"], stdout: JSON.stringify({ state: "closed" }) };
+/** Closed, and still wearing the label its last run claimed — the shape #348's merge left. */
+const closed = {
+  match: ["api", "issues"],
+  stdout: JSON.stringify({ state: "closed", labels: [{ name: "atomaton/in-progress" }] }),
+};
 
 /**
  * The dispatch marker, and the thread read that follows it.
@@ -119,8 +123,7 @@ describe("dispatch_agent.ts", () => {
    * #194: a hand-off is a PROMISE, and the refusal breaks it. The thread's newest word
    * would stay "a hand-off" — read by `runInFlight` as a run working or coming, forever
    * — so the refusal writes the ending itself, answering the ask the successor was to
-   * claim with this run's id on it, and takes the label down with it: the run's own
-   * release step already ran and held the label because the turn said `handoff`.
+   * claim with this run's id on it.
    */
   test("a refused hand-off writes the refused ending and releases the node", () => {
     const r = run(
@@ -133,11 +136,13 @@ describe("dispatch_agent.ts", () => {
     expect(notice.join(" ")).toContain("<!-- atomaton:ended=refused answers=900 run=42 -->");
     expect(notice.join(" ")).toContain("llm-context=exclude");
     expect(notice.join(" ")).toContain("was not started");
-    // The turn came back to a person, so the labels move together (#223): the
-    // in-progress guard comes off and the waiting-for-person label goes on.
+    // The turn came back to a person — but the target is CLOSED, so the labels
+    // take the #352 branch: the in-progress the closed node still wore comes off,
+    // and the waiting-for-person label does NOT go on. A closed node is not
+    // waiting for anybody; stamping it was the defect #352 is about.
     const labelEdits = r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "edit");
     expect(labelEdits.some((c) => c.join(" ").includes("--remove-label") && c.join(" ").includes("atomaton/in-progress"))).toBe(true);
-    expect(labelEdits.some((c) => c.join(" ").includes("--add-label") && c.join(" ").includes("atomaton/waiting-for-person"))).toBe(true);
+    expect(labelEdits.some((c) => c.join(" ").includes("--add-label") && c.join(" ").includes("atomaton/waiting-for-person"))).toBe(false);
   });
 
   /** Nothing is running and nothing will retry, which is what a failing step is for. */
