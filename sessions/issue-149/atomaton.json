@@ -554,13 +554,102 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#346→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_gq0lmh8hy6dbpx75qh6dfz2y"
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #346). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T08:15:46Z",
+        "event_type": "issue_comment",
+        "id": 6395293233,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "#346 の engineer が完了しました。#346 の状態と親ブランチを確認します：",
+      "tool_calls": [
+        {
+          "id": "call_xwvb9ijoy040no7wedujpu8c",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 346}"
+          }
+        },
+        {
+          "id": "call_eyf7gqs2kxty3tdxd42to649",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\": \"atomaton/issue-149\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":\"2026-10-25T08:15:43Z\",\"createdAt\":\"2026-10-25T05:11:02Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":346,\"state\":\"CLOSED\",\"title\":\"ブランチの存在・現在位置・デフォルトの読みが複数実装で、一時的失敗の読みが割れている\",\"body\":\"# 「origin にブランチ X はあるか」「今どのブランチか」「デフォルトブランチは何か」 — 複数実装で、一時的失敗の読みが割れている\\n\\n**親: #149**（観点1・2「同じ問いに複数の答え」+ 観点5「読めないことを『無い』と読む形」に該当。新規発見）\\n\\n## 根拠（行単位で確認済み）\\n\\n**1. `git ls-remote --heads origin refs/heads/<name>` の 5 実装:**\\n\\n| 実装 | 失敗・空の読み方 |\\n| --- | --- |\\n| `src/adapters/github/branch-placement.ts:134` | 「親ブランチはまだ無い」と読み、`:149` で `git/refs` POST による**作成**に進む |\\n| `src/adapters/github/branch-placement.ts:235` | 同じテストの再掲（`stackedPrBase`） |\\n| `src/entrypoints/machinery/resolve_pr_branch.ts:104` | `existsOnOrigin` — 同じ形の判定 |\\n| `src/entrypoints/tools/mcp/attachments.ts:654` | 失敗で **拒否**（判断不能として進まない） |\\n| `src/entrypoints/tools/mcp/github.ts:941` | 失敗で fail |\\n\\n- 割れ方: **一時的な `ls-remote` 失敗**が `branch-placement.ts:134` では「ブランチ無し」＝親ブランチを想定外の基底から切る／作る操作につながる。`attachments.ts:654` では「判断不能、拒否」。同じ読みに 2 つの失敗の意味がある。\\n- これは `aggregation.ts:249-273` が確立した原則（「見つからない」と「見られない」は別の答え。出口コードが load-bearing）が、同じ種類の読みのここに適用されていない、という構図。\\n\\n**2. 「今どのブランチか」の 4 実装:** `branch-placement.ts:73-106` `resolveBranch`（detached HEAD の疑似エントリを拒む落ち着き先つき）+ `:175` 同じ `rev-parse` の再掲、`mcp/github.ts:1302` と `attachments.ts:732` は素の `branch --show-current`（detached HEAD で `\\\"\\\"` → 拒否）。\\n\\n**3. 「デフォルトブランチは何か」の 3 実装:** `src/entrypoints/machinery/scan_secrets.ts:57`（`gh repo view` + `getBaseBranch()`）、`src/entrypoints/tools/mcp/github.ts:1372`（`gh repo view`）、`src/entrypoints/tools/mcp/attachments.ts:715-719`（`git ls-remote --symref origin HEAD`）。\\n\\n## 直し方\\n\\n1. 「origin 上の存在確認」を 1 つのリーダーにする。**「無い」と「読めない」を型で区別し**、`branch-placement` の作成経路は「読めない」で作成に進まない。\\n2. 「今どのブランチか」を `resolveBranch` に寄せる（`--show-current` の 2 箇所を置き換える）。\\n3. 「デフォルトブランチは何か」を 1 つのリーダーにする（`base_branch` 設定との関係も 1 箇所に書く）。\\n4. 進め方 3: 5 箇所それぞれがなぜ独自か（attachments が別ツールサーバで共有 import を持たない、等）を最初に確かめ、正当なら残して理由を PR コメントに書く。\\n\\n## 受け入れ基準\\n\\n- 存在確認の 5 箇所が共有リーダー経由で、一時的失敗が「ブランチ無し」と読まれない（作成に進まない）。\\n- 現在ブランチの読みが 1 つ、デフォルトブランチの読みが 1 つ。\\n- 既存の branch 関連テストが通る。\\n\\n## 閉じ条件\\n\\n親 #149 のブランチ上にマージされた PR のヘッドで、上記がコードで確認できること。\\n\\n## 順序\\n\\n**#345（PR 読みの統一）のマージ後**に起動すること（どちらも `mcp/github.ts` に触れる）。この issue への `/atomaton` コメントで起動する。\",\"total_comments\":7,\"parent\":{\"number\":149,\"title\":\"同じ判断が複数箇所にある箇所、および外部の主張が偽になっても検出できない箇所を洗い出す\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":365,\"title\":\"Read branch existence, checkout and default in one place each\",\"state\":\"done\"}]}",
+      "tool_call_id": "call_xwvb9ijoy040no7wedujpu8c"
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"atomaton/issue-149\",\"exists\":true,\"sha\":\"20baeeaa942ef8826050cfc8b37109b4bf59a004\",\"protected\":false}",
+      "tool_call_id": "call_eyf7gqs2kxty3tdxd42to649"
+    },
+    {
+      "role": "assistant",
+      "content": "#346 はクローズ済み（PR #365）、親ブランチは `20baeea` に進んでいます。締め報告を確認します：",
+      "tool_calls": [
+        {
+          "id": "call_3dldhckgyx5slp6eum06ikzr",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\": 6, \"issue_number\": 346, \"to\": 7}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":346,\"kind\":\"issue\",\"title\":\"ブランチの存在・現在位置・デフォルトの読みが複数実装で、一時的失敗の読みが割れている\",\"state\":\"CLOSED\",\"total_comments\":7,\"parent\":{\"number\":149,\"title\":\"同じ判断が複数箇所にある箇所、および外部の主張が偽になっても検出できない箇所を洗い出す\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":365,\"title\":\"Read branch existence, checkout and default in one place each\",\"state\":\"done\"}]},\"showing\":\"comment(s) 6-7 of 7; pass from/to to read the rest\",\"comments\":[{\"index\":6,\"id\":\"IC_kwDOUudl8s8AAAABfTBFIw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"\",\"createdAt\":\"2026-10-25T08:14:42Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/346#issuecomment-6395282723\",\"viewerDidAuthor\":true},{\"index\":7,\"id\":\"IC_kwDOUudl8s8AAAABfTBrcQ\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: the agent on this issue considers its work complete.\\n\\n**Reason:** #365 merged into atomaton/issue-149 at a tree byte-identical to the CI-verified head, and all three acceptance criteria are readable there: the five existence checks go through readOriginBranch and a failed read no longer reaches the parent-branch creation, and checkedOutBranch / readRemoteDefaultBranch are the single implementations of the other two questions.\\n\\n#346 delivered by #365 (merged into `atomaton/issue-149`, merge `20baeea`, first parent `1474d3e`).\\n\\n## Acceptance criteria, against the merged head\\n\\n1. **Existence checks through one reader, transient failure not read as \\\"no branch\\\".** Met. `readOriginBranch` (`src/adapters/github/branch-reads.ts:89`) answers `{known:false, why}` / `{known:true, present:false}` / `{known:true, present:true, sha}` as separate fields; the five sites use it — `stackedBaseFor` and `stackedPrBase` (`branch-placement.ts`), `resolvePrHeadBranch` (`lib/pr-head-branch.ts`, both entrances), `remoteTip` (`mcp/attachments.ts`), `createPr` (`mcp/github.ts`). The creation path returns the base on an unreadable origin, before the `git/refs` POST.\\n2. **One current-branch read, one default-branch read.** Met. `checkedOutBranch` and `readRemoteDefaultBranch` are each the only implementation; the two `--show-current` copies and the two `gh repo view … defaultBranchRef` reads are gone, and the `base_branch`-vs-default re\\n\\n[1252 characters dropped from the end; 1600 shown]\",\"createdAt\":\"2026-10-25T08:15:42Z\",\"includesCreatedEdit\":true,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/346#issuecomment-6395292529\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_3dldhckgyx5slp6eum06ikzr"
+    },
+    {
+      "role": "assistant",
+      "content": "#346 は完了・検証済みです：PR #365 がマージされ、3つの受け入れ基準すべて達成 — 存在確認5箇所が `readOriginBranch` の3値応答（known/present/sha）経由になり一時的失敗が作成に進まず、現在ブランチ・デフォルトブランチの読みも各1実装に統一。#347 の前提が満たされたので起動します：",
+      "tool_calls": [
+        {
+          "id": "call_kfble4bjkmoq2md6cvpz7uq2",
+          "type": "function",
+          "function": {
+            "name": "launch_sub_agent",
+            "arguments": "{\"summary\": \"**#346 は完了・検証済み。#347 を起動する。**\\n\\n- **#346（ブランチ読みの統一）完了**: PR #365 が `atomaton/issue-149` にマージ済み。マージヘッドは `20baeea`。3つの受け入れ基準すべて達成: 存在確認5箇所が `readOriginBranch`（`src/adapters/github/branch-reads.ts:89`��経由で `{known:false, why}` / `{known:true, present:false}` / `{known:true, present:true, sha}` の3値応答を受け、「無い」と「読めない」を型で区別（作成経路は読めない場合 base を返して作成に進まない）。現在ブランチは `checkedOutBranch`、デフォルトは `readRemoteDefaultBranch` の各1実装に統一。`base_branch` 設定との関係も1箇所に記述済み。\\n- **#347 起動の前提は充足**: #346 の PR が親ブランチにマージ済み（`20baeea`）。engineer に起動する。\\n- **#347 の内容**: 外部システム主張6件の修正（#158 型）。skills / agent-definitions / docs / `web.ts` の description。**#342–#346 とはファイルが重ならない**が、チェーンの原則に従い #346 のマージ後に起動。\\n- **engineer への注意**: ブランチを親 `atomaton/issue-149`（head `20baeea`）から切り、PR の base も親ブランチに向けること。#347 の本文にある6件の行番号は `20baeea` 時点のもの — 対象ファイルは #342–#346 の変更対象外なので行番号は動いていないはずだが、疑問があれば親ブランチの最新で再特定すること。\\n- **残りのチェーン**: #364（#345 直し方2・3 の残り。#347 の後に起動 — 両者とも `mcp/github.ts` に触れる可能性があるため一つずつ）。#364 がマージされた時点で全子完了となり、その次の親再起動で #149 の集約を行う。\", \"tasks\": [{\"agent\": \"engineer\", \"issue\": 347}]}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"dispatched\":[\"#347→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
+      "tool_call_id": "call_kfble4bjkmoq2md6cvpz7uq2"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 7,
-      "snapshot_hash": "3b1405374c59a2120bbaf38449ed051a37c732963dd8afe1048c81f578ee1976",
+      "event_count": 8,
+      "snapshot_hash": "c6d8fc88643d7b2ec93b5e1efc4a7ab878f715a934ced33504f43909ebc8598c",
       "version": 1
     }
   },
@@ -676,6 +765,25 @@
         }
       },
       "started": "2026-10-25T07:52:13Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T08:16:49Z",
+      "ended_because": "completed",
+      "iterations": 3,
+      "messages": 62,
+      "seconds": 30,
+      "server_calls": {
+        "atomaton": {
+          "launch_sub_agent": 1
+        },
+        "github": {
+          "get_branch": 1,
+          "get_issue": 1,
+          "get_issue_comments": 1
+        }
+      },
+      "started": "2026-10-25T08:16:19Z"
     }
   ]
 }
