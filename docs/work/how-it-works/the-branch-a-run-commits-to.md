@@ -16,6 +16,14 @@
   done. Deployment is not dispatched for a merge into a parent branch: that work
   is still in progress, and only the final pull request into the base branch
   carries it to release.
+- The run is checked out on the base branch, so it learns where its work goes only
+  at the first commit — by which time the parent's branch may have moved in the
+  same files. The work is carried across as a three-way merge: the changes are
+  stashed, the branch is cut from the parent, and `git stash pop` applies them to
+  it. A file both sides changed is a conflict in the worktree, named, for the run
+  to resolve before it commits; it is not a checkout that refuses because the tree
+  is dirty, and no file the run did not touch keeps a base-branch version over the
+  parent's.
 - A node's base is exactly one branch: its parent's, or the base branch for a root
   issue. When that branch moves ahead, the node brings it into its own branch with
   `merge_base_into_branch`. The direction is always a pull — nothing writes to a

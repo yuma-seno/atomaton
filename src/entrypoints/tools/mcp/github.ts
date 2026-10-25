@@ -1226,29 +1226,25 @@ function mergeMessage(): string {
 }
 
 /**
- * The merge an unfinished `merge_base_into_branch` left behind, if there is one.
+ * The paths that still hold git's conflict markers.
  *
- * `MERGE_HEAD` is git's own record that the next commit has two parents, and the
- * unmerged entries in the index are the paths the merge could not decide. Both have to
- * be read BEFORE `git add -A`, which is what stages a conflicted path and so tells git
- * the conflict is resolved.
+ * Asked of the FILE, not of the index, and that is not a shortcut: an agent that
+ * resolved a conflict by editing it has no way to stage the result -- raw `git add` is
+ * a mutation the shell guard refuses -- so the index would call every conflict
+ * unresolved until `commit_and_push` had already committed it. The content can answer:
+ * git's markers are `<<<<<<< label` and `>>>>>>> label` at the start of a line, and they
+ * are gone exactly when the conflict has been decided. A resolved path needs to be
+ * bracketed by git's end of it; a path written down as a literal, in a comment or a
+ * test, does not.
  *
- * Which of those paths are still unresolved is asked of the FILE, not of the index, and
- * that is not a shortcut: an agent that resolved a conflict by editing it has no way to
- * stage the result -- raw `git add` is a mutation the shell guard refuses -- so the
- * index would call every conflict unresolved until `commit_and_push` had already
- * committed it. The content can answer: git's markers are `<<<<<<< label` and
- * `>>>>>>> label` at the start of a line, and they are gone exactly when the conflict
- * has been decided. A resolved path needs to be bracketed by git's end of it; a path
- * written down as a literal, in a comment or a test, does not.
+ * Read BEFORE `git add -A`, which is what stages a conflicted path and so tells git the
+ * conflict is resolved -- and, with the markers still in the file, commits them.
  */
-function unfinishedMerge(): { head: string; unresolved: string[]; description: string } | undefined {
-  const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
-  if (head.code !== 0) return undefined;
+function unresolvedConflictPaths(): string[] {
   const unmerged = gitRun("diff", "--name-only", "--diff-filter=U");
   const paths =
     unmerged.code === 0 ? unmerged.stdout.split("\n").map((line) => line.trim()).filter(Boolean) : [];
-  const unresolved = paths.filter((path) => {
+  return paths.filter((path) => {
     try {
       return /^(?:<{7} |>{7} )/m.test(readFileSync(path, "utf8"));
     } catch {
@@ -1256,7 +1252,21 @@ function unfinishedMerge(): { head: string; unresolved: string[]; description: s
       return false;
     }
   });
-  return { head: head.stdout.trim(), unresolved, description: mergeMessage() };
+}
+
+/**
+ * The merge an unfinished `merge_base_into_branch` left behind, if there is one.
+ *
+ * `MERGE_HEAD` is git's own record that the next commit has two parents. A merge is
+ * not the only way to reach a conflicted index, so "is there a merge in progress" and
+ * "is anything unresolved" are asked separately: `createStackedBranch` in
+ * `branch-placement.ts` re-applies a run's work onto its parent's branch through
+ * `git stash pop`, which conflicts the same way and records no `MERGE_HEAD`.
+ */
+function unfinishedMerge(): { head: string; description: string } | undefined {
+  const head = gitRun("rev-parse", "-q", "--verify", "MERGE_HEAD");
+  if (head.code !== 0) return undefined;
+  return { head: head.stdout.trim(), description: mergeMessage() };
 }
 
 /**
@@ -1350,12 +1360,19 @@ function commitAndPush(a: z.infer<typeof COMMIT_AND_PUSH_SCHEMA>): string {
   // Before `git add -A` below, which would stage the conflict markers and so tell git
   // every conflict is resolved. `merge_base_into_branch` stops on a conflict and
   // leaves the work in the worktree; this is the only way that merge is ever
-  // concluded, so refusing here is what keeps a marker file out of the branch.
+  // concluded, so refusing here is what keeps a marker file out of the branch. The
+  // same applies to the conflicts that carrying a run's work onto its parent's branch
+  // leaves, which is why the paths are asked for first and the merge only decides how
+  // the refusal is worded.
   const merge = unfinishedMerge();
-  if (merge && merge.unresolved.length > 0) {
+  const unresolved = unresolvedConflictPaths();
+  if (unresolved.length > 0) {
     mcpFail(
-      `The merge in progress still has unresolved conflicts: ${merge.unresolved.join(", ")}. ` +
-        "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge.",
+      merge
+        ? `The merge in progress still has unresolved conflicts: ${unresolved.join(", ")}. ` +
+            "Resolve them (the conflict markers are in those files), then call commit_and_push again to close the merge."
+        : `The worktree still has unresolved conflicts: ${unresolved.join(", ")}. ` +
+            "Resolve them (the conflict markers are in those files), then call commit_and_push again.",
     );
   }
   {
@@ -2162,7 +2179,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({ name: "list_pr_review_comments", description: "Retrieve line-level review comments for one pull request. Use this to find file- and line-specific feedback; use get_pr_reviews for overall review decisions. Returns { total, omitted, comments } where each comment has `author`, `path`, `line`, `in_reply_to` and `body`; the surrounding code is not included, read it with the `read` tool or get_pr_diff, and a non-zero `omitted` means the rest did not fit. Does not mutate GitHub.", schema: PR_CONTEXT_NUMBER_ARG_SCHEMA, handler: listPrReviewComments }),
   defineMcpTool({
     name: "commit_and_push",
-    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
+    description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files and leaves git's conflict markers in them for you to resolve before calling it again. While a merge is in progress it refuses if any conflicted path is still unresolved, naming them, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush,
   }),
