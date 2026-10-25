@@ -10069,8 +10069,8 @@
   {
     "path": "sessions/issue-345/reviewer.json",
     "agent": "reviewer",
-    "messages": 56,
-    "calls": 33,
+    "messages": 65,
+    "calls": 37,
     "failed": 0,
     "refused": 0,
     "skills": [
@@ -10080,7 +10080,7 @@
     "tools": {
       "get_issue": 1,
       "atoma_builtin__load_skill": 1,
-      "grep": 13,
+      "grep": 17,
       "read": 14,
       "get_pr": 1,
       "get_issue_comments": 1,
@@ -10110,6 +10110,20 @@
           }
         },
         "started": "2026-10-25T06:53:42Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T07:47:44Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 65,
+        "seconds": 25,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 4
+          }
+        },
+        "started": "2026-10-25T07:47:19Z"
       }
     ]
   },
