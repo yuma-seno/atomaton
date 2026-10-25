@@ -41,13 +41,13 @@ export function logOp(op: string, payload: Record<string, unknown> = {}): void {
  * ## Two entries, because a dispatch says two different things
  *
  * A dispatch STARTS A RUN EVERYWHERE, so it always silences the "nobody is coming"
- * mention. What it does NOT always do is end THIS node's turn: a hand-off to a
- * colleague runs on this very node, while `launch_sub_agent` and `create_pr` start
- * work UNDER it and leave it waiting. Reading one flag for both held the node's
- * `atomaton/in-progress` guard through the second kind — after every orchestration
- * the node was still "the agent's" while nothing ran on it, so a person's `/resume`
- * and `/stop` skipped it, and `manage_dispatch_loop` counted the chain as continuing.
- * See `domain/work/turn.ts` for what each ending implies.
+ * mention. What it does NOT always do is keep THIS node's turn going: a hand-off puts
+ * the next agent ON this node, while `launch_sub_agent` and `create_pr` start work
+ * UNDER it and park the turn — the node holds its `atomaton/in-progress` guard because
+ * the turn is parked, not because anything is running on it, and the run is not a link
+ * in this node's chain. A single flag said "a run is going on this node" for both, so
+ * `manage_dispatch_loop` counted a parked run as one that continues. See
+ * `domain/work/turn.ts` for what each ending implies.
  *
  * So the op NAME carries which kind it was, and a reader greps for the one it means:
  *

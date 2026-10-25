@@ -1179,11 +1179,11 @@ echo "ending_invalid=\${ENDING_INVALID}" >> "$GITHUB_OUTPUT"
 #
 # A dispatch onto a DIFFERENT node -- launch_sub_agent starting children,
 # create_pr starting the reviewer on the pull request -- is deliberately NOT this
-# flag. Those start work UNDER this node and leave it waiting, so this node's turn
-# is over and its \`atomaton/in-progress\` guard must come off; holding it left the
-# node looking busy while nothing ran on it, and a person's /resume and /stop
-# skipped it. See \`ops-log.ts\` for the two op names and \`domain/work/turn.ts\` for
-# what each ending implies.
+# flag. Those start work UNDER this node, which is a PARK (read below, #208): the node
+# holds its \`atomaton/in-progress\` guard because the turn is parked on that work, not
+# because anything is running on it, and the parked run is not a link in this node's
+# chain. See \`ops-log.ts\` for the two op names and \`domain/work/turn.ts\` for what
+# each ending implies.
 #
 # Every dispatch site writes a structured \`{"op":...}\` entry to the ops log (see
 # lib/ops-log.ts's logDispatch()), and WHICH entry it writes carries that
