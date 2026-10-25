@@ -443,13 +443,124 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#345→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_q4ogtgb7qciwl314om2j4iyp"
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #345). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-25T07:51:32Z",
+        "event_type": "issue_comment",
+        "id": 6395078384,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "#345 の engineer が完了しました。#345 の状態と親ブランチを確認します：",
+      "tool_calls": [
+        {
+          "id": "call_9hrr7skhhrbacdlmzqdelzmy",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 345}"
+          }
+        },
+        {
+          "id": "call_gagkkwt7r9lam475cfpyq4y6",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\": \"atomaton/issue-149\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":\"2026-10-25T07:51:29Z\",\"createdAt\":\"2026-10-25T05:10:28Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":345,\"state\":\"CLOSED\",\"title\":\"「1つのPRを読む」が13の独立した呼び — 未ページ化と失敗方針の割れを直す\",\"body\":\"# 「1 つの PR を読む」が 13 の独立した呼び — レビューコメントの未ページ化と失敗方針の割れを直す\\n\\n**親: #149**（観点1・2「同じ問いに複数の答え / 同じ判断が複数箇所」に該当。新規発見）\\n\\n## 根拠（動作として既に割れている 2 つは行単位で確認済み）\\n\\n1. **レビュー コメントの読みがページ化されていない**: `src/entrypoints/tools/mcp/github.ts:1662-1664` `listPrReviewComments` が `api repos/<repo>/pulls/<n>/comments` を `--paginate` なしで読む。REST は 1 ページで打ち切られるので、古いレビュー コメントが**静かに見えない**。ツールの返す `omitted` は `fitItems` の予算刈り込みだけを数え、ページ落ちを数えない — 「omitted が非ゼロなら残りは見ていない」というこのツール群の契約が、ページ落ちの場合に満たされない。\\n2. **同じ関数に 2 つの失敗方針が同居**: `src/adapters/github/merge-signals.ts:190-217` — `json`（素の `gh`、リトライなし、失敗で throw）と `tryJson`（`ghRead`、リトライあり、失敗は null）。PR view の一時的 504 は `merge_pr` を殺し、`mergeStateStatus` の同じ一時的失敗は UNKNOWN でブロックするだけ。`tryJson` 側にだけリトライの理由が書かれており、`json` 側は更新されていない（観点2 の定型: 片方だけ直された）。\\n\\n## 周辺（同じ問い「この PR を読む」の 13 の argv 構築）\\n\\n`fetch_events.ts:250,269` / `validate_pull_request.ts:462,538` / `merge-signals.ts:219,246` / `mcp/github.ts:1526,1361,1811,1643` / `resolve_pr_branch.ts:124` / `workspace-scope.ts:20`（��影の違いは意図的かもしれない — 進め方 3 で確かめること）。\\n\\n## 直し方\\n\\n1. まず動作が割れている 2 点: (a) レビュー コメント読みのページ化（または `omitted` にページ落ちを数えさせる）(b) `json` / `tryJson` の方針統一 — または非対称を残すならその理由を書く。\\n2. その後、pr-by-number 読みを共有リーダーへ寄せる（1 PR に収まる範囲で。投影の違いは引数として表現する）。\\n3. 進め方 3: 13 の独立 argv のうち残すものには、なぜ残すのかを各所に書く。\\n\\n## 受け入れ基準\\n\\n- レビュー コメント読みが全ページを見るか、落ちた分が `omitted` に現れる。\\n- `merge-signals` の 2 読みが同じ失敗方針を持つか、非対称に理由が書かれている。\\n- 既存の merge 関連テストが通る。\\n\\n## 閉じ条件\\n\\n親 #149 のブランチ上にマージされた PR のヘッドで、上記 2 点がコードで確認できること。\\n\\n## 順序\\n\\n**#344（人コメント→PR検証の入口）のマージ後**に起動すること（どちらも workflows / `mcp/github.ts` に触れる）。この issue への `/atomaton` コメントで起動する。\",\"total_comments\":7,\"parent\":{\"number\":149,\"title\":\"同じ判断が複数箇所にある箇所、および外部の主張が偽になっても検出できない箇所を洗い出す\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":363,\"title\":\"Page the review-comment read, and give the merge path one retry policy\",\"state\":\"done\"}]}",
+      "tool_call_id": "call_9hrr7skhhrbacdlmzqdelzmy"
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"atomaton/issue-149\",\"exists\":true,\"sha\":\"1474d3e93738e499e4e9f030fbcb6c25308b8615\",\"protected\":false}",
+      "tool_call_id": "call_gagkkwt7r9lam475cfpyq4y6"
+    },
+    {
+      "role": "assistant",
+      "content": "#345 はクローズ済み（PR #363）、親ブランチは `1474d3e` に進んでいます。締め報告を確認します：",
+      "tool_calls": [
+        {
+          "id": "call_skttseqfq0mhpvyhwpwacuoi",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\": 6, \"issue_number\": 345, \"to\": 7}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":345,\"kind\":\"issue\",\"title\":\"「1つのPRを読む」が13の独立した呼び — 未ページ化と失敗方針の割れを直す\",\"state\":\"CLOSED\",\"total_comments\":7,\"parent\":{\"number\":149,\"title\":\"同じ判断が複数箇所にある箇所、および外部の主張が偽になっても検出できない箇所を洗い出す\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":363,\"title\":\"Page the review-comment read, and give the merge path one retry policy\",\"state\":\"done\"}]},\"showing\":\"comment(s) 6-7 of 7; pass from/to to read the rest\",\"comments\":[{\"index\":6,\"id\":\"IC_kwDOUudl8s8AAAABfS0LSA\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"\",\"createdAt\":\"2026-10-25T07:50:40Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/345#issuecomment-6395071304\",\"viewerDidAuthor\":true},{\"index\":7,\"id\":\"IC_kwDOUudl8s8AAAABfS0k7w\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: the agent on this issue considers its work complete.\\n\\n**Reason:** Both code points the closing condition names are in the merged PR #363 — the review-comment read asks for every page, and the merge path's reads share one retry policy with the remaining asymmetry stated — and the merge-related checks pass at that PR's head.\\n\\n#345 の 2 点はマージ済みの PR #363 に入っており、`atomaton/issue-149` 向けにマージされました。受け入れ基準 3 つは満たされています。`直し方` 2・3（13 の argv を共有リーダーへ寄せる／残す理由を各所に書く）は入っておらず、どこにも登録されていません。\\n\\n**結論**\\n\\n受け入れ基準は 3 つとも満たされています — レビューコメント読みは全ページを読み、`merge-signals` の 2 読みは同じ再試行方針を持ち、非対称は「失敗が何を意味するか」だけに縮んでその場所に書かれています。残るのは `直し方` 2・3 で、これは #149 配下の別 issue になる必要があります（#345 に子は無く、この close で消えます）。\\n\\n**根拠**\\n\\n- ページ化: `src/entrypoints/tools/mcp/github.ts:114` の `ghJsonPagesOrThrow` が `--paginate` を付け、`splitConcatenatedJson` でページを平坦化。使用箇所は `src/entrypoints/tools/mcp/github.ts:1702`（`?per_page=100` 付き）。\\n- 方針統一: `src/adapters/github/merge-signals.ts:207`（`json`）と `:226`（`tryJson`）がどちらも `ghRead`、残る非対称の理由は `src/adapters/github/merge-signals.ts:194`。`readChangedFiles` も `src/adapters/github/merge-signals.ts:135` で `ghRead`。\\n- 既存テスト: PR ヘッド `2ecfe5c` の check runs で `atomaton-check` = `success`、`pull-request-checks (verify)` = `success`（run 40170579023）。同じ木での自分の実測は `2061 pass, 0 fail`（164 files）、`bun run typecheck` exit 0、`scan_secrets` exit 0。\\n- テストが挙動を固定していることは反転して実測: 旧読みに戻すとページ化テストは `JSON Parse error: Unable to parse JSON string`、再試行 2 本は `gh pr vi\\n\\n[1114 characters dropped from the end; 1600 shown]\",\"createdAt\":\"2026-10-25T07:51:28Z\",\"includesCreatedEdit\":true,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/345#issuecomment-6395077871\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_skttseqfq0mhpvyhwpwacuoi"
+    },
+    {
+      "role": "assistant",
+      "content": "#345 は3つの受け入れ基準をすべて達成してクローズされましたが、締め報告が明確に指摘しています：`直し方` 2・3（13の argv 構築を共有リーダーへ寄せる／残す箇所に理由を書く）は PR #363 に入っておらず、#345 のクローズとともに消える — #149 配下の別 issue が必要だと。これは私の統合ギャップなので、今ここでフォローアップの子 issue を作成します：",
+      "tool_calls": [
+        {
+          "id": "call_4t3xm5x946wyohhm5anbhjhy",
+          "type": "function",
+          "function": {
+            "name": "create_sub_issue",
+            "arguments": "{\"body\": \"# PR を番号で読む呼びを共有リーダーへ寄せ、残す箇所に理由を書く（#345 の残り）\\n\\n**親: #149**。**#345 の残り**である。#345 の受け入れ基準 3 つ（レビューコメント読みのページ化、`merge-signals` の失敗方針統一、既存テスト通過）は **PR #363 のマージで全て達成済み** — その2点を redo しないこと。\\n\\n## 残っていること（#345 の `直し方` 2・3）\\n\\n#345 の監査が挙げた「同じ問い『この PR を読む』」の **13 の独立した argv 構築**のうち、#363 が直したのは動作が割れていた 2 点のみ。残る統合と記録が未着手:\\n\\n- `fetch_events.ts`（旧 :250, :269）\\n- `validate_pull_request.ts`（旧 :462, :538）\\n- `merge-signals.ts`（旧 :219, :246 — #363 で行番号が動いている）\\n- `mcp/github.ts`（旧 :1526, :1361, :1811, :1643 — #363 でレビューコメント読みは :1702 近くへ移動）\\n- `resolve_pr_branch.ts`（旧 :124）\\n- `workspace-scope.ts`（旧 :20 — 投影の違いは意図的かもしれない）\\n\\n**行番号は #343 / #344 / #345 / #346 のマージで動いている。親ブランチの最新ヘッドで再特定すること。**\\n\\n## やること\\n\\n1. **pr-by-number 読みを共有リーダーへ寄せる**（1 PR に収まる範囲で）。投影の違い（`{title, headRefName}` だけ欲しい、全文欲しい、等）は引数として表現する。モデルは #343 の `thread.ts` リーダーと `tests/contract/comment-read-sites.test.ts`（集合を両方向に閉じる契約テスト）— 同じ形で「`src/` 下で pr view を綴る箇所」の集合を閉じてよい。\\n2. **残す箇所には各所に理由を書く**（#149 の進め方 3）。例: `workspace-scope.ts` が別投影を持つ理由、`fetch_events.ts` がイベント文脈で違う形を取る理由。正当なら残して、その場所に理由を書く。共有 import を持たないツールサーバー（attachments 等）は残す正当な理由になり得る。\\n3. 各統合前に「なぜ独立実装になったか」を確かめ、消すのでなく理由とともに残すか寄せるかを判断する。\\n\\n## 受け入れ基準\\n\\n- 寄せられる pr-by-number 読みが共有リーダー経由になる（1 PR に収まる範囲）。\\n- 残す独立した読みの各箇所に、なぜ残すのかがコードのそばに書かれている。\\n- 既存の PR 読み関連テストが通る（#363 が追加したページ化・再試行のテストを含む）。\\n- （契約テストを入れた場合）集合が両方向に閉じている。\\n\\n## 閉じ条件\\n\\n親 #149 のブランチ（`atomaton/issue-149`）上にマージされた PR のヘッドで、上記がコードで確認できること。確認者はこの PR の reviewer と、その後の #149 の集約 run。\\n\\n## 順序\\n\\n**#346（ブランチ読みの統一）のマージ後**に起動すること（`mcp/github.ts` が重なる）。#347 とはファイルが重ならないが、一つずつの原則に従い #347 の後に起動する（チェーン: #346 → #347 → 本 issue）。この issue への `/atomaton` コメントで起動する。\", \"title\": \"PR-by-number 読みの共有リーダーへの統合と、残す箇所の理由記述（#345 直し方2・3 の残り）\"}"
+          }
+        }
+      ],
+      "reasoning_content": "#345's engineer delivered the two broken behaviors (pagination, retry policy unification) but explicitly did NOT do 直し方 2・3 (consolidating the 13 argv sites into a shared reader, writing reasons at remaining sites). The engineer's close report says: \"残るは `直し方` 2・3 で、これは #149 配下の別 issue になる必要があります（#345 に子は無く、この close で消えます）。\" — meaning the remaining work needs a new issue under #149, and it will disappear with #345's close.\n\nThe acceptance criteria (3) are all met, so #345's close is justified. But the follow-up work (直し方 2・3 — consolidating PR-by-number reads into a shared reader) is now orphaned. Per my role: \"If integration gaps remain, create narrowly scoped follow-up children and dispatch them under the same policy.\"\n\nSo I should create a follow-up sub-issue for 直し方 2・3 of #345, and slot it into the chain. Where? The chain order was #342→#343→#344→#345→#346→#347. #346 touches mcp/github.ts (branch reads) and #347 touches skills/docs/web.ts (no file overlap with #346 per #347's body: \"他の子（#342-#346）とファイルが重ならないが、一つずつの原則に従い #346 のマージ後に起動する\").\n\nThe new follow-up would touch mcp/github.ts (pr-by-number reads at github.ts:1526,1361,1811,1643 etc.) — same file as #346's targets (mcp/github.ts:941, 1302, 1372). So the follow-up should come after #346, like #347 — or even after #347 to keep one-at-a-time.\n\nHmm, but wait. Should I create the follow-up now or note it for the aggregation? The #345 engineer said it \"needs to become another issue under #149\". As the parent's agent, I should create it now as a sub-issue of #149, and schedule it in the chain.\n\nLet me think about the chain order:\n- #346 (branch reads) — touches mcp/github.ts, attachments.ts, branch-placement.ts, resolve_pr_branch.ts, scan_secrets.ts\n- #347 (external claims) — touches skills/docs/web.ts — no overlap with #346\n- New follow-up (PR-read consolidation, 直し方 2・3) — touches mcp/github.ts (pr reads), fetch_events.ts, validate_pull_request.ts, merge-signals.ts, resolve_pr_branch.ts, workspace-scope.ts\n\nThe follow-up overlaps mcp/github.ts and resolve_pr_branch.ts with #346. So it should go after #346. And #347 was scheduled after #346 merely by the one-at-a-time principle, not file overlap. \n\nOptions:\n1. Launch #346 next (as originally planned), then decide between #347 and the new follow-up.\n2. Create the follow-up now, then launch #346, then launch the follow-up after #346, then #347 after that (or #347 and follow-up in sequence).\n\nSimplest: create the follow-up sub-issue now (stating it launches after #346's merge, i.e., in #347's slot or before #347). Actually since #347 doesn't overlap with either, the order between #347 and the follow-up doesn't matter much. Keep it simple: chain becomes #346 → #347 → follow-up, or #346 → follow-up → #347.\n\n#347's body says \"一つずつの原則に従い #346 のマージ後に起動する\" — that's its own stated order. The follow-up overlaps mcp/github.ts with #346, so it must be after #346. Either position works. I'll put the follow-up after #347 to avoid rewriting #347's precondition... wait, #347's precondition is \"#346 のマージ後\" — that doesn't change. The follow-up's precondition will be \"#346 のマージ後\" too... but if both #347 and follow-up launch after #346, they could conflict? No — I launch one at a time, so no conflict. Order: #346 → #347 → follow-up keeps every stated precondition intact (#347 launches after #346 as its body says; follow-up launches after #346's merge AND after #347 completes since I do one at a time).\n\nHmm, but actually the follow-up is more related to #345's work. But file overlap-wise, mcp/github.ts is shared with #346. Since I dispatch one at a time anyway, either slot is fine. Let me put it last (after #347) so I don't have to reorder anything: the chain becomes #346 → #347 → new. \n\nWait, actually, there's a subtlety: the follow-up's work (PR-read consolidation in mcp/github.ts) is adjacent to #346's work (branch reads in mcp/github.ts). Doing #346 first means the follow-up builds on the latest mcp/github.ts. Good.\n\nAlternatively — should I even create a new issue, or should the follow-up work fold into the final aggregation? It's real engineering work (consolidating ~13 argv sites into a shared reader across 6 files). It deserves its own child. Yes, create it.\n\nNow, per my Core Policy: when uncertain use atomaton for children; but this follow-up is quite well-specified already (the #345 body's 直し方 2・3 + the engineer's notes). It could be an engineer leaf. The prior pattern: I dispatched all children to engineer. The follow-up has concrete scope: consolidate PR-by-number reads into a shared reader where it fits in one PR, with projections as arguments, and write reasons at remaining sites. Acceptance criteria can be observable. It's similar in nature to #345 itself which I gave to engineer. I'll assign engineer.\n\nActually wait — create_sub_issue doesn't take an agent parameter; assignment happens via launch_sub_agent. So I create the sub-issue with full body, then launch it when its turn comes.\n\nAlso: should I launch #346 now? #345's PR merged (branch at 1474d3e). #346's precondition is \"#345 のマージ後\" — satisfied. So yes, launch #346 now, and create the follow-up issue in the same turn (both actions are independent... well, create_sub_issue then launch_sub_agent — the launch only launches #346, so no dependency).\n\nOrder of operations in this turn:\n1. create_sub_issue for the follow-up (child of #149).\n2. launch_sub_agent for #346 → engineer, with summary noting the follow-up issue created and chain updated.\n\nCan I do both in one turn? create_sub_issue first, then launch_sub_agent. The launch's summary should reference the new issue number, so I need create_sub_issue's result first. Dependent — so sequential turns.\n\nLet me create the follow-up issue first. Its body should:\n- State parent #149, that it's the remainder of #345 (直し方 2・3), acceptance criteria for #345 already met by PR #363.\n- List the 13 argv sites (from #345's body): fetch_events.ts:250,269 / validate_pull_request.ts:462,538 / merge-signals.ts:219,246 / mcp/github.ts:1526,1361,1811,1643 / resolve_pr_branch.ts:124 / workspace-scope.ts:20 — with the caveat that line numbers have moved after #343/#344/#345 merges (e.g., mcp/github.ts review-comment read is now at :1702). The engineer should re-locate them on the parent branch head.\n- Scope: consolidate PR-by-number reads into one shared reader where it fits in one PR; projections as arguments; remaining sites keep a written reason (進め方 3).\n- Note: the review-comment pagination and merge-signals retry unification are DONE in PR #363 — do not redo.\n- Acceptance criteria: PR reads share a reader (as far as fits one PR); every remaining independent site has a written reason why it stays; existing PR-read tests pass.\n- Close condition: on a PR merged into atomaton/issue-149's head, code confirms the consolidation and the written reasons.\n- Order: launch after #346's merge (file overlap with mcp/github.ts), via /atomaton comment.\n- Also mention #343's contract test pattern (tests/contract/comment-read-sites.test.ts) as a model for holding the set closed — a contract test for PR read sites would fit 直し方 3.\n\nAlso I should keep the chain info: after #346 → #347 → this new one. Hmm wait, actually let me reconsider the order once more. #347 (external claims, 6 fixes in skills/docs/web.ts) — zero file overlap with #346. The new follow-up (mcp/github.ts PR reads) — overlaps #346. The one-at-a-time principle means order doesn't functionally matter, but the bodies state preconditions: #347 says \"launch after #346's merge\". If I put the follow-up between #346 and #347, #347's stated precondition is still satisfied (it launches after #346's merge — even later). So both orders are consistent with stated preconditions.\n\nWhich is better? The follow-up is the direct continuation of #345's work and is smaller (one reader consolidation). #347 is independent. Actually, to minimize risk of the follow-up's line numbers drifting further (it references sites that #346 will also move in mcp/github.ts), doing the follow-up right after #346 keeps it adjacent. But equally, doing #347 first keeps the follow-up last... The follow-up references mcp/github.ts sites that #346 will edit — so doing the follow-up AFTER #346 means it reads the post-#346 file. Either way it must re-locate. I'll do #346 → #347 → follow-up. That way the follow-up is last and lands on the most settled tree, and I don't touch #347's stated ordering at all.\n\nHmm, one more consideration: the chain is long already. Is there value in dispatching #347 and the follow-up... no, one at a time was the established principle (files overlap or not, sequential dispatch has been the pattern).\n\nWait, actually — is the one-at-a-time still needed between #347 and the follow-up? They share NO files (#347: skills/agent-definitions/docs/web.ts; follow-up: mcp/github.ts, fetch_events.ts, validate_pull_request.ts, merge-signals.ts, resolve_pr_branch.ts, workspace-scope.ts). Hmm, #347 touches `src/entrypoints/tools/mcp/web.ts` — not mcp/github.ts. No overlap. But #346→(both) — parallel dispatch of #347 and follow-up after #346 would create two PRs against atomaton/issue-149 simultaneously; they don't overlap files, so merge order wouldn't conflict... but branches cut from the same parent base then merge sequentially — fine in principle. But the established pattern all along has been strictly one at a time, and the machinery re-invokes me after each child closes anyway. Keeping it one-at-a-time is simpler and matches the issue bodies' stated ordering. I'll keep sequential.\n\nSo now:\n1. Create follow-up sub-issue.\n2. Launch #346.\n\nLet me also double-check #345's close was proper. The #345 engineer closed #345 with 3/3 acceptance criteria met but 直し方 2・3 unaddressed — the close is justified by acceptance criteria (the issue's 受け入れ基準 only require the two broken behaviors + existing tests). 直し方 was \"how to fix\" guidance, and items 2-3 were partially conditional (\"1 PR に収まる範囲で\"). The engineer correctly flagged the remainder rather than silently dropping it. Good — my job is to catch it, which I'm doing by creating the follow-up.\n\nAlso, the full single-pass version of #343's change was preserved at /tmp/atomaton-workspace/comment-reader.patch — not relevant here.\n\nOne more thing to verify eventually at aggregation: #345's close report noted its PR head 2ecfe5c checks green. Parent now at 1474d3e. Fine.\n\nNow write the follow-up issue body. Keep it in Japanese matching the other children. Include:\n\n- Title: something like 「PR を番号で読む呼びを共有リーダーへ寄せ、残す箇所に理由を書く（#345 の残り）」\n- Parent #149, remainder of #345.\n- What's already done (don't redo): PR #363 did the pagination + retry policy unification. Verify against parent head 1474d3e.\n- The 13 argv sites from #345's audit, with the caveat that line numbers have moved (re-locate on the parent head).\n- 直し方 2: consolidate pr-by-number reads into a shared reader, within one PR, projections as arguments. Model: #343's thread.ts reader + tests/contract/comment-read-sites.test.ts holding the set closed.\n- 直し方 3: sites that stay independent get a written reason at each site (進め方 3 of #149).\n- Acceptance criteria.\n- Close condition: on a PR merged into parent branch.\n- Order: after #346's merge (mcp/github.ts overlap). Launch via /atomaton comment.\n\nThen launch #346 with a summary. The summary needs: #345 done/verified, follow-up created (number), #346 launching, its precondition satisfied, chain updated to #346 → #347 → follow-up, engineer notes (branch from parent, base to parent branch).\n\nLet me write the create_sub_issue call now.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":364,\"url\":\"https://github.com/yuma-seno/atomaton/issues/364\",\"parent\":149}",
+      "tool_call_id": "call_4t3xm5x946wyohhm5anbhjhy"
+    },
+    {
+      "role": "assistant",
+      "content": "フォローアップを #364 として作成しました（親 #149）。チェーンは #346 → #347 → #364 に更新。#346 の前提（#345 のマージ）は満たされているので起動します：",
+      "tool_calls": [
+        {
+          "id": "call_gq0lmh8hy6dbpx75qh6dfz2y",
+          "type": "function",
+          "function": {
+            "name": "launch_sub_agent",
+            "arguments": "{\"summary\": \"**#345 は完了・検証済み。#346 を起動する。**\\n\\n- **#345（PR 読みの統一）完了**: PR #363 が `atomaton/issue-149` にマージ済み。マージヘッドは `1474d3e`。3つの受け入れ基準すべて達成: レビューコメント読みが `ghJsonPagesOrThrow` + `--paginate` + `?per_page=100` で全ページを読むようになり（`mcp/github.ts:114`, `:1702`）、`merge-signals` の `json`/`tryJson` が共に `ghRead` で同じ再試行方針に統一（残る非対称は「失敗の意味」のみで `:194` に理由記述済み）。PR ヘッドで `atomaton-check` = success、実測 2061 パス、typecheck クリーン。テストは反転実測で挙動固定を確認済み。\\n- **#345 の残りを #364 として起票済み**: `直し方` 2・3（pr-by-number 読みの 13 argv の共有リーダーへの統合、残す箇所の理由記述）は #363 に入らず、#345 のクローズで消えるため、子 issue #364（親 #149）として起票。チェーンは **#346 → #347 → #364** に更新。\\n- **#346 起動の前提は充足**: #345 の PR が親ブランチにマージ済み（`1474d3e`）。engineer に起動する。\\n- **engineer への注意**: ブランチを親 `atomaton/issue-149`（head `1474d3e`）から切り、PR の base も親ブランチに向けること（#343 の engineer は checkout が `main` から始まり載せ替えが必要だった）。#346 は `mcp/github.ts`・`attachments.ts`・`branch-placement.ts`・`resolve_pr_branch.ts`・`scan_secrets.ts` に触れる — 親ブランチの最新版を基底にし、#363 が動かした行番号に注意。「無い」と「読めない」を型で区別する共有リーダーへの統一が核心。\\n- **残りのチェーン**: #347（#346 のマージ後）→ #364（#347 の後）。各子のクローズ後に親が再起動され、順次起動する。#149 は全子（#342–#347, #364）完了後の集約 run で締める。\", \"tasks\": [{\"agent\": \"engineer\", \"issue\": 346}]}"
+          }
+        }
+      ],
+      "reasoning_content": "Follow-up created as #364, child of #149. Now launch #346 (precondition satisfied: #345's PR #363 merged, parent at 1474d3e).\n\nChain is now: #346 → #347 → #364.\n\nSummary for the launch: #345 done/verified, follow-up #364 created, #346 launching with precondition satisfied, updated chain, engineer notes (branch from parent head 1474d3e, base PR at parent branch, note #345/#343 patterns).",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"dispatched\":[\"#346→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
+      "tool_call_id": "call_gq0lmh8hy6dbpx75qh6dfz2y"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 6,
-      "snapshot_hash": "1af23a32c5c5735d46e6b669c22501f89811af9b993c2922e580103d9452d2f8",
+      "event_count": 7,
+      "snapshot_hash": "3b1405374c59a2120bbaf38449ed051a37c732963dd8afe1048c81f578ee1976",
       "version": 1
     }
   },
@@ -545,6 +656,26 @@
         }
       },
       "started": "2026-10-25T06:40:45Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T07:53:37Z",
+      "ended_because": "completed",
+      "iterations": 4,
+      "messages": 53,
+      "seconds": 84,
+      "server_calls": {
+        "atomaton": {
+          "launch_sub_agent": 1
+        },
+        "github": {
+          "create_sub_issue": 1,
+          "get_branch": 1,
+          "get_issue": 1,
+          "get_issue_comments": 1
+        }
+      },
+      "started": "2026-10-25T07:52:13Z"
     }
   ]
 }
