@@ -5751,6 +5751,54 @@
     ]
   },
   {
+    "path": "sessions/issue-220/engineer.json",
+    "agent": "engineer",
+    "messages": 50,
+    "calls": 30,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "atoma_builtin__load_skill": 1,
+      "bash": 6,
+      "read": 10,
+      "grep": 1,
+      "get_issue": 6,
+      "get_issue_comments": 6
+    },
+    "acts": {
+      "other": 3,
+      "search": 3
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-25T16:48:30Z",
+        "ended_because": "stopped",
+        "iterations": 15,
+        "messages": 50,
+        "seconds": 65,
+        "server_calls": {
+          "files": {
+            "grep": 1,
+            "read": 10
+          },
+          "github": {
+            "get_issue": 6,
+            "get_issue_comments": 6
+          },
+          "shell": {
+            "bash": 6
+          }
+        },
+        "started": "2026-10-25T16:47:25Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-222/atomaton.json",
     "agent": "atomaton",
     "messages": 117,
