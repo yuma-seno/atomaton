@@ -288,7 +288,13 @@ describe("notifyCiWaiting, through the whole script", () => {
       { ...runsRule, stdout: runs([ciActionRun("completed", "success")]), attempt: 3 },
       { match: ["repos/o/r/issues/7/comments"], stdout: "[]" },
       { match: ["repos/o/r/issues/7"], stdout: "just a body" },
-      { match: ["repos/o/r/pulls/7"], stdout: JSON.stringify({ head: { sha: HEAD }, base: { ref: "main" } }) },
+      // Two projections of one pull request, so two rules: the commit and base branch
+      // this validation works against, and the body the origin agent is read out of.
+      {
+        match: ["pr", "view", "7", "headRefOid"],
+        stdout: JSON.stringify({ headRefOid: HEAD, baseRefName: "main" }),
+      },
+      { match: ["pr", "view", "7", "body"], stdout: JSON.stringify({ body: "" }) },
       { match: ["repos/o/r/rules/branches/main"], stdout: "[]" },
       { match: ["repos/o/r/commits/"], stdout: "2099-01-01T00:00:00Z" },
       // The dispatch itself. `--ref` is what keeps this rule off the runs-list call,

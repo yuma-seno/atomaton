@@ -14,21 +14,21 @@ import { isBranchName, prHead } from "./pr-head-branch.ts";
  */
 describe("lib/pr-head-branch.ts", () => {
   test("prHead reads the head branch and the fork flag", () => {
-    expect(prHead('{"headRefName":"atomaton/issue-9","isCrossRepository":false}')).toEqual({
+    expect(prHead({ headRefName: "atomaton/issue-9", isCrossRepository: false })).toEqual({
       branch: "atomaton/issue-9",
       crossRepository: false,
     });
-    expect(prHead('{"headRefName":" main ","isCrossRepository":true}')).toEqual({
+    expect(prHead({ headRefName: " main ", isCrossRepository: true })).toEqual({
       branch: "main",
       crossRepository: true,
     });
-    // Absent, null and malformed all mean the same thing here: nothing to name. An
-    // answer that cannot be parsed is a refusal, not an exception -- the caller has
-    // something to tell a person either way.
-    expect(prHead("{}").branch).toBe("");
-    expect(prHead('{"headRefName":null}').branch).toBe("");
-    expect(prHead("[").branch).toBe("");
-    expect(prHead("[").crossRepository).toBe(false);
+    // Absent, null and an answer the reader could not parse all mean the same thing
+    // here: nothing to name. A refusal, not an exception -- the caller has something to
+    // tell a person either way, and `resolvePrHeadBranch` says which of the two it was.
+    expect(prHead({}).branch).toBe("");
+    expect(prHead({ headRefName: null }).branch).toBe("");
+    expect(prHead(null).branch).toBe("");
+    expect(prHead(null).crossRepository).toBe(false);
   });
 
   test("isBranchName is git's rule, not a pattern of our own", () => {

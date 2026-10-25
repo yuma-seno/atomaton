@@ -86,6 +86,7 @@ import { parseArgs } from "node:util";
 import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-validation.ts";
 import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
+import { readPullRequest } from "../../adapters/github/pull-request.ts";
 import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG, isQuotation } from "../../adapters/github/tags.ts";
 import { commentBodies, latestRequestOn } from "../../adapters/github/thread.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
@@ -458,10 +459,18 @@ function main(): void {
     if (githubOutput) appendFileSync(githubOutput, `${line}\n`);
   };
 
-  const prJson = gh("api", `repos/${repo}/pulls/${values.number}`).stdout;
-  const pr = JSON.parse(prJson || "{}") as { head?: { sha?: string }; base?: { ref?: string } };
-  const headSha = pr.head?.sha ?? "";
-  const baseRef = pr.base?.ref ?? "";
+  // Two fields, and the fields are the question: the commit CI runs against and the
+  // branch whose rules say what passing means. A failed read is NOT "no head SHA" —
+  // this script mirrors one check run per required context and decides with `every()`,
+  // so a read treated as empty would report a failing run as passed. It stops instead.
+  const prRead = readPullRequest<{ headRefOid?: string; baseRefName?: string }>(
+    repo,
+    Number(values.number),
+    ["headRefOid", "baseRefName"],
+  );
+  if (!prRead.known) log(prRead.why);
+  const headSha = prRead.known ? (prRead.value.headRefOid ?? "") : "";
+  const baseRef = prRead.known ? (prRead.value.baseRefName ?? "") : "";
   if (!headSha) {
     log("could not read the pull request's head SHA");
     process.exit(1);
@@ -534,7 +543,10 @@ function main(): void {
   // against -- a newer push cancels this validation rather than moving it.
   const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
   const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
-  const prBody = gh("api", `repos/${repo}/pulls/${values.number}`, "--jq", ".body").stdout ?? "";
+  // Degraded rather than fatal, unlike the read above: by this point CI has run and the
+  // verdict is mostly decided, and an empty body only means the origin agent is unknown.
+  const bodyRead = readPullRequest<{ body?: string }>(repo, Number(values.number), "body");
+  const prBody = bodyRead.known ? (bodyRead.value.body ?? "") : "";
   const engineerAgent = ORIGIN_AGENT_TAG.readProse(prBody) ?? "";
 
   const outcome = decideValidationOutcome({

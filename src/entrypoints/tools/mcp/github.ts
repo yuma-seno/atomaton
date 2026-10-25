@@ -44,6 +44,7 @@ import { decidePostMergeHandoff } from "../../../domain/work/handoff.ts";
 import { isAttended, unattendedNotice } from "../../../domain/work/unattended-pull-request.ts";
 import { branchForCommit, resolveBranch, stackedPrBase } from "../../../adapters/github/branch-placement.ts";
 import { baseBranch, checkedOutBranch, readOriginBranch } from "../../../adapters/github/branch-reads.ts";
+import { readPullRequestDiff, readPullRequestOrThrow } from "../../../adapters/github/pull-request.ts";
 import { isIssueRun, isPrRun, nodeNumber, refusePrRun } from "../../../adapters/runner/run-node.ts";
 import { dispatchCd, dispatchCi, dispatchPostMergeAgent, dispatchPrValidation } from "../../../adapters/actions/dispatch-targets.ts";
 import { issueLinks } from "../../../adapters/github/issue-links.ts";
@@ -1394,10 +1395,8 @@ function syncBranch(a: z.infer<typeof SYNC_BRANCH_SCHEMA>): string {
 function baseBranchForMerge(): string {
   const number = nodeNumber();
   if (isPrRun() && number !== undefined) {
-    const pr = ghJsonOrThrow<{ baseRefName?: string }>(
-      "pr", "view", String(number), "--repo", REPO, "--json", "baseRefName",
-    );
-    const fromPullRequest = (pr?.baseRefName ?? "").trim();
+    const pr = readPullRequestOrThrow<{ baseRefName?: string }>(REPO, number, "baseRefName");
+    const fromPullRequest = (pr.baseRefName ?? "").trim();
     if (fromPullRequest) return fromPullRequest;
   }
 
@@ -1557,22 +1556,27 @@ function pick<K extends string>(source: unknown, keys: readonly K[]): Partial<Re
 }
 
 function getPr(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const pr = ghJsonOrThrow<{ body?: unknown }>(
-    "pr", "view", String(prContextNumber(a)), "--repo", REPO,
-    "--json", "number,title,body,state,baseRefName,headRefName,createdAt",
-  );
-  const { body, ...rest } = pr ?? {};
+  const pr = readPullRequestOrThrow<{ body?: unknown }>(REPO, prContextNumber(a), [
+    "number",
+    "title",
+    "body",
+    "state",
+    "baseRefName",
+    "headRefName",
+    "createdAt",
+  ]);
+  const { body, ...rest } = pr;
   // Same as `get_issue`: the description is the one unbounded field here.
   return JSON.stringify({ ...rest, body: typeof body === "string" ? capText(body).text : body });
 }
 
 function getPrDiff(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const { code, stdout, stderr } = gh("pr", "diff", String(prContextNumber(a)), "--repo", REPO);
-  if (code) mcpFail(stderr || stdout);
+  const read = readPullRequestDiff(REPO, prContextNumber(a));
+  if (!read.known) mcpFail(read.why);
   // `head`: a diff's first files are the subject of the change. And the cut is now
   // announced in the text rather than being a silent `slice` -- a truncated read
   // that looks complete is how a reviewer concludes a file was not touched.
-  return capText(stdout).text;
+  return capText(read.diff).text;
 }
 
 function listPrs(a: z.infer<typeof LIST_PRS_SCHEMA>): string {
@@ -1675,9 +1679,7 @@ function getCheckRuns(a: z.infer<typeof GET_CHECK_RUNS_SCHEMA>): string {
 }
 
 function getPrReviews(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
-  const d = ghJsonOrThrow<{ reviews?: unknown[] }>(
-    "pr", "view", String(prContextNumber(a)), "--repo", REPO, "--json", "reviews",
-  );
+  const d = readPullRequestOrThrow<{ reviews?: unknown[] }>(REPO, prContextNumber(a), "reviews");
   // `reactionGroups`, `includesCreatedEdit` and `authorAssociation` are dropped:
   // nothing an agent does with a review depends on them. Each body is capped on its
   // own, because a count of reviews says nothing about the size of one.
@@ -1693,6 +1695,14 @@ function getPrReviews(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
   return JSON.stringify({ total: reviews.length, omitted, reviews: kept });
 }
 
+/**
+ * The inline comments a pull request's review carries.
+ *
+ * Not `pull-request.ts`'s read, and not a second spelling of it: this is a paginated
+ * sub-resource (`pulls/<n>/comments`) — a list of review objects, projected down to
+ * where each comment is and what it says. The pull request's own object does not carry
+ * them, and its projection is what a caller names fields of rather than a list.
+ */
 function listPrReviewComments(a: z.infer<typeof PR_CONTEXT_NUMBER_ARG_SCHEMA>): string {
   // Every page, and `?per_page=100` so that "every page" is one or two requests: the
   // cost of this read is the number of requests, not of comments, and the default 30
@@ -1846,8 +1856,8 @@ async function mergePr(): Promise<string> {
   // no workflow run for events GITHUB_TOKEN triggers.
   dispatchCd(baseRefName);
 
-  const d = ghJsonOrThrow<{ body?: string }>("pr", "view", String(num), "--repo", REPO, "--json", "body");
-  const body = d?.body ?? "";
+  const d = readPullRequestOrThrow<{ body?: string }>(REPO, num, "body");
+  const body = d.body ?? "";
   // Prose only: a body quoting either tag in a fenced sample is not carrying it (#304).
   const parentIssue = PARENT_ISSUE_TAG.readProse(body);
 

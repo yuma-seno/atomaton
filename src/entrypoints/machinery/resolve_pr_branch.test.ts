@@ -172,11 +172,16 @@ describe("resolve_pr_branch.ts", () => {
     expect(r.stderr).toContain("pull request #9 could not be read");
   });
 
+  // An answer that cannot be parsed is a pull request that could not be READ, not one
+  // that "names no head branch": before `pull-request.ts` owned the parse, this arrived
+  // as a successful read of `{}` and sent the person to the wrong sentence. The outcome
+  // is the same -- no branch, exit 0 -- and that is what this pins.
   test("output that is not the JSON asked for is no branch either", () => {
     const r = run([{ match: ["pr", "view"], stdout: "not json" }]);
     expect(r.status).toBe(0);
     expect(r.branch).toBe("");
-    expect(r.stderr).toContain("names no head branch");
+    expect(r.stderr).toContain("pull request #9 could not be read");
+    expect(r.stderr).toContain("the answer was not JSON");
   });
 
   /** Without the number there is no pull request to ask about, and no branch to name. */

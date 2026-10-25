@@ -6,7 +6,7 @@
  * request one extra hop first, because a pull request's link to its issue is the
  * `atomaton:parent-issue` tag rather than a sub-issue relationship.
  */
-import { gh } from "./gh.ts";
+import { readPullRequest } from "./pull-request.ts";
 import { parentChain, parentIssueOf, type ParentIssue } from "./parent-issue.ts";
 import { PARENT_ISSUE_TAG } from "./tags.ts";
 import { workspaceScope, type WorkspaceScope } from "../../domain/work/workspace.ts";
@@ -15,16 +15,24 @@ function log(message: string): void {
   console.error(`[atomaton-workspace] ${message}`);
 }
 
-/** The issue a pull request was opened for, or undefined when it says nothing. */
+/**
+ * The issue a pull request was opened for, or undefined when it says nothing.
+ *
+ * One field of the pull request, read through `pull-request.ts` like every other
+ * question about a pull request. The read is the same; only what a failure means is
+ * this module's, and it is `undefined` — a pull request nobody could read gets a
+ * private workspace rather than borrowing one, which is the direction
+ * `domain/work/workspace.ts` argues for.
+ */
 function issueOfPullRequest(repo: string, number: number): number | undefined {
-  const { code, stdout } = gh("pr", "view", String(number), "--repo", repo, "--json", "body", "--jq", ".body");
-  if (code) {
-    log(`WARN could not read pull request #${number}`);
+  const read = readPullRequest<{ body?: string }>(repo, number, "body");
+  if (!read.known) {
+    log(`WARN ${read.why}`);
     return undefined;
   }
   // Prose only, like every other read of a GitHub body (#304): a pull request body
   // quoting the tag inside a fenced sample names no parent.
-  return PARENT_ISSUE_TAG.readProse(stdout);
+  return PARENT_ISSUE_TAG.readProse(read.value.body ?? "");
 }
 
 /**
