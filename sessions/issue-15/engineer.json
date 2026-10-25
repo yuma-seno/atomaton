@@ -2425,7 +2425,7 @@
       "content": "`request_close_issue.reason` は削除してよい（重複は実在）。`launch_sub_agent.summary` は削除できない — issue の「なぜ問題か 1」は現在のコードでは成り立たず、削ると次の run が読む報告が消える。推奨は **A（`reason` 削除）＋ B（`summary` は残し、重複の実在する1経路だけ直す）＋ C（プロンプトから引数名の列挙を外す）**。\n\n## 1. 主張の検証（現在のコード）\n\n| ツール / 引数 | 現在のコード | 判定 |\n| --- | --- | --- |\n| `create_pr.body` | `github.ts:311`（optional、\"Pull request body\"） | 正しい。報告は慣習でここに載るだけ |\n| `request_close_issue.summary` | `atomaton.ts:104`（optional）、`conclude_issue.ts:102-104` がコメント本体として連結、`:144` で親スレッドの報告にもなる | 正しい（ただし「本体」なのに optional） |\n| `request_close_issue.reason` | `atomaton.ts:97-103`（必須）、`conclude_issue.ts:101` が `**Reason:**` 行として前置 | 正しい。重複は実在 |\n| `launch_sub_agent.summary` | `atomaton.ts:85-93`（optional）、`:255-257` が dispatch コメント内の `<details>` に入れる | **偽**（§2） |\n| `reload_environment.reason` | `atomaton.ts:402-410`（必須）、`:463` が `Reason: ...` として handoff コメントに載る | 正しい |\n\n`conclude_issue.ts:101-104` の連結は issue の抜粋どおり（`summary` が空なら付かない点だけ相違）。プロンプトの段落は **`src/content/prompt-template.md:294-298`** にあり、列挙している引数名は3つ（`body`/`summary`/`reason`）。issue の 161-165 行は #17 執筆時点の行番号で、いまは 294-298 行。\n\n## 2. `launch_sub_agent.summary` は機構コメントと重複していない\n\n- `Atomaton: Launched sub-agent(s):` を出しているのは**機構ではなく同じツール**（`atomaton.ts:253`、投稿は `:261` の `postTurnComment`）。\n- セッション終了ツールで終わった run に、機構は結果コメントを投稿しない（`post_result_comment.ts:866-881`）。footer を ending comment に足すだけ。だから「機構のコメント」は別に存在しない。\n- `summary` は**その同じ1つのコメントの中に1回だけ**入る。ページ上に2箇所は無い。\n- 重複が実在するのは**部分 dispatch のときだけ**: `complete=false` でセッションが開いたまま残り（`:249-251`）、後でモデル自身の結果コメントが出る。そこだけ同じ報告が2コメントになる。\n\n→ 部分 dispatch の重複は `if (summary && complete)` で消える。引数を消す理由にはならない。\n\n### 削除した場合に記録は残るか\n\nissue の4行のうち launch の行は、**人には当てはまるが次の run には当てはまらない**。\n\n- 次の run は同じノードのセッションを復元する（`restore_agent_session.ts:36,78`）。報告のコピーはツール呼び出しの引数。\n- dispatch コメントは `audience: \"person\"` → `llm-context=exclude`（`turn-comment.ts:103`）。モデルは読まない。\n- `post_result_comment` は投稿しない（`post_result_comment.ts:866-881`）。\n- `closing-report.ts:78` は assistant のテキストだけを数えるので、この run は `summary` を書いても `no-report`（`turn.ts:212`）。\n\nつまり `summary` を消すと、**launch した run の報告は誰にも届かない**（人には dispatch リストだけ、次の run には `tasks` だけ）。`tests/contract/agent-prompts.test.ts:272-281` が「4つ目の呼び出しにも置き場所を作った」と記録している変更の巻き戻しになる。\n\n## 3. 削除設計案\n\n### A. `request_close_issue` — `reason` を削除、`summary` を必須化\n\n```ts\n// before : atomaton.ts:96-105\nz.object({\n  reason: z.string().min(1).describe(\"Why this issue's work is considered complete — one sentence. …\"),\n  summary: z.string().optional().describe(\"Final summary to include in the posted comment (e.g. an aggregation report).\"),\n})\n\n// after\nz.object({\n  summary: z.string().min(1).describe(\n    \"The comment this call posts, as its body: what you concluded, and why the work is complete. \" +\n      \"It is also what the parent's aggregation reads.\",\n  ),\n})\n```\n\n- handler: `concludeIssue(issueNumber, summary)`、`if (!reason) mcpFail(...)` を削除（`atomaton.ts:311-314,328`）。\n- `conclude_issue.ts:82` の署名を `(issue, summary)` に。コメント本体:\n\n```\nAtomaton: the agent on this issue considers its work complete.\n\n<summary>\n```\n\n- 人間が開いた issue では、この本文の上に既存の close request 行が付く（`close-request.ts:74` は変更不要。`github.ts:759` も `reason` を使わないので無関係）。\n- 親への報告は `reportSubIssueToParent(repo, issue, summary)`（`:144`）。\n- description（`atomaton.ts:528`）の \"Your reason and summary are posted to the issue\" を summary のみに。\n- `summary` を必須にするのは、「空の `summary` で閉じると `**Reason:**` も本体も無いコメントが残る」のを防ぐため。`merge_pr` の内部 close は `summary` を渡さない別経路なので、`subIssueReportBody` の「wrote no summary」経路（`sub-issue-report.ts:78`）はそのまま生きる。\n\n### B. `launch_sub_agent` — `summary` は残す（正味2行）\n\n- `atomaton.ts:255` を `if (summary && complete)` に。部分 dispatch の二重報告が消える。\n- describe（`:88-93`）を「この run の報告」から「**dispatch コメントの報告節**」へ。これで引数に「そのツールの用事」ができる。\n\n### C. prompt-template — 引数名の列挙をやめる\n\n`src/content/prompt-template.md:294-298`（と配布コピー）を:\n\n```\nSome outcomes end the session inside a tool call, because something else starts\nthe moment it returns. There is no turn after one of those, so the report goes in that\ncall's own text argument, and you write it there before you make the call. Which\nargument that is belongs to the tool: its description says so. A report you meant to\nwrite afterwards is never written.\n```\n\n引数名を持つのはツール description（machinery 側）にする。理由は、`prompt-template.md` は配布後は採用先のもので（`build-dist.ts:140`）、スキーマと一緒には変わらないから。引数を足すたびに採用先の文とツールがずれる、というのが issue の指摘4の実体で、名前を消せば段落は伸びない。\n\n### D. 触るファイル\n\n- `src/entrypoints/tools/mcp/atomaton.ts`（96-105, 311-328, 255, 528）\n- `src/entrypoints/tools/lib/conclude_issue.ts`（82, 101-104, 126-129, 144）\n- `src/content/prompt-template.md:294-298`\n- `src/content/agent-definitions/atomaton.md:172, 176-180`（`reason` の1文を削除、\"printed directly above the summary\" の説明も消える）\n- テスト: `src/entrypoints/tools/mcp/mcp.test.ts`（2893-2925, 3061, 3384, 3425, 3471-3475）、`tests/contract/agent-prompts.test.ts:272-281`（引数名3つの pin を C に合わせる）、`tests/e2e/request-close-issue.e2e.test.ts:31`、`tests/e2e/request-close-issue-aggregation.e2e.test.ts:52`\n- 触らない: `.github/atomaton/**`（self-deploy が上書き、governed path）、`.github/atomaton-runtime/**` と `dist/**`（`bun run synth` の生成物）。`close-request.test.ts` の `**Reason:**` はフィクスチャ文字列なので任意。\n\n### 強制の方法（issue の最後の問い）\n\nスキーマから消すだけでは足りない。`defineMcpTool` は `.strict()`（`mcp-tool.ts:188-193`）なので、古いプロンプトが `reason` を渡すと**ツールエラー**になり、`request_close_issue` はセッションを終えられない（最後のイテレーションで起きると close コメント無しで run が終わる）。だから:\n\n1. 引数はスキーマから消す（真実の場所をひとつに）。\n2. `guidance` を1つ足す: `{reason, summary}` で落ちたときだけ「`reason` は廃止。その1文を `summary` の先頭に置く」。`mcp-tool.ts:126-135` の「次の行動を名指す refusal は守られる」に沿う。\n3. 規約として書く先はプロンプトではなく**各ツール description**（C）。プロンプトは引数名を持たない。\n\n## 4. #16 との関係\n\n- **解消する**: `reason`/`summary` の言い直し。#17 本文の実測では #4 のコメント 2,947 文字のうち `reason` が 1,320 文字（44.8%）で、下の 243 文字の結論と同じ判断だった。A はこれを消す。\n- **残る**: (i) 報告契約そのものが3つの出口の引数の長さを決める（#15 は長さを縛らない）、(ii) engineer のレポートと atomaton の `summary` の重複は #17 の「結論は一度だけ」が担当で、引数名の問題ではない、(iii) `launch_sub_agent.summary` を消すと長さは減るが報告が消える（解決ではなく欠落）。#16 の根は「4部・省略禁止」で、#17 が上限で扱った。#15 が扱えるのは引数の重複だけ。\n\n<details><summary>却下した代替案</summary>\n\n- **`launch_sub_agent` の `summary` を消し、dispatch コメントを `audience: \"model\"` に変える。** 却下。コメントは読まれるようになるが、書く本文が無い（fold が空）。報告そのものが消える。\n- **`launch_sub_agent` から `session_ends` を外し、次の turn でモデルに報告させる。** 却下（別 issue 級）。1 turn 1 コメントの規約が崩れ、`turn.ts:202-212` の parked/handed-off 判定と `shouldReleaseGuard` が変わり、launch の「呼んだら即終了」契約も変わる。\n- **`reason` を残して `summary` を消す。** 却下。コメントから4部レポートが消える。#16 の逆方向。\n- **`summary` の改名（`dispatch_note` など）。** 却下。意味は B の describe 書き換えで足り、改名は挙動を変えずに移行コストだけ増やす。\n</details>\n\n**What you concluded.** `request_close_issue.reason` は `summary` と重複しており削除できる。`launch_sub_agent.summary` は重複ではなく、セッション終了ツールで終わる run が報告を残せる唯一の経路なので、削ると報告が失われる。\n\n**How you know.** 前者は `conclude_issue.ts:101-104` が `**Reason:** ${reason}` と `${summary}` を1コメントに連結していること（#17 本文の実測で #4 の 44.8% が `reason`）。後者は `atomaton.ts:253,261` の dispatch コメントが同一ツールの投稿で `turn-comment.ts:103` により `exclude`、`post_result_comment.ts:866-881` が結果コメントを投稿しない、`restore_agent_session.ts:78` がセッション（引数を含む）を次の run に書き戻す、の4点。\n\n**What you could not establish.** (1) 実運用で `summary` がどれくらい省略されているか（close コメントの分布）は測っていない。(2) atoma の compaction が窓超過時に launch の tool call 引数を要約へ残すかは確認していない（コード上の復元経路のみ読んだ）。(3) 古いプロンプトが残った採用先で `reason` が実際にエラーになるかは実行していない（`.strict()` の読みのみ）。(4) #16 の長さが実際どこまで減るかは未測定（#17 の数値は変更前のもの）。\n\n**What happens next.** A/B/C の採否は yuma-seno の判断。決まれば実装は別 run で、`src/` の4ファイルとテスト5ファイル、検証は `bun run typecheck && bun run synth && bun run test`。\n\n@yuma-seno",
       "atoma_metadata": {
         "agent": "engineer",
-        "github_comment_id": 6400205767
+        "github_comment_id": 6400415874
       },
       "provider_items": [
         {
@@ -2967,14 +2967,1504 @@
       "role": "tool",
       "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
       "tool_call_id": "call_00_3s1qrbdy89q3507etbt3a909"
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\n**決定（yuma-seno、2026-10-26）: A + B + C で実装する。** 調査報告から1点変更: `launch_sub_agent.summary` は「残して修正」ではなく**引数ごと削除**する（yuma-seno の判断）。\n\n## 実装指示\n\n1. **A — `request_close_issue.reason` を削除、`summary` を必須化**（調査報告 §3-A の設計どおり）:\n   - `src/entrypoints/tools/mcp/atomaton.ts:96-105` — スキーマから `reason` を削除し、`summary` を `z.string().min(1)` に。describe は「この呼び出しが投稿するコメントの本体: 何を結論し、なぜ完了か。親の集約が読むのもこれ」\n   - handler（`:311-328`）— `args.reason` の参照・`if (!reason)` を削除し `concludeIssue(issueNumber, summary)` へ\n   - `src/entrypoints/tools/lib/conclude_issue.ts`（`:82` 署名、`:101-104` コメント形式、`:126-129`、`:144`）— `**Reason:**` 前置きを廃止し、本体は summary のみ\n   - `src/content/agent-definitions/atomaton.md:172, 176-179` — `reason` への言及を削除（「printed directly above the summary」の文も）。「The conclusion is written once」の節は summary だけで成立する形に\n2. **B — `launch_sub_agent.summary` を引数ごと削除**:\n   - `src/entrypoints/tools/mcp/atomaton.ts:85-93` — `summary` をスキーマから削除。`:80-83` の「REQUEST_CLOSE_ISSUE_SCHEMA.summary と同型」の説明コメントも削除\n   - `:255-257` — dispatch コメントの `<details><summary>Report</summary>` ブロックを削除（`summary` 変数は消える）\n   - トレードオフ（決定済み・了承済み）: 全 dispatch で終わる run の足跡コメントは launch 一覧のみ。子 issue のタイトルと `tasks` が説明を運ぶ\n3. **C — prompt-template の引数名列挙を廃止**:\n   - `src/content/prompt-template.md:294-298` — `body` / `summary` / `reason` の列挙をやめ、「セッションを終える呼び出しでは、返答のためのターンが無い。報告はその呼び出しが運ぶ引数に、呼び出す前に書く。**どの引数がそれかは、そのツールの description が言う**」という一般文に置き換える（引数名は書かない）。配布コピー（build-dist が出すもの）があれば同様に\n4. **移行 guidance**: strict スキーマのため、古い走行が廃止済み引数を渡すとツールエラーになる。`mcp-tool.ts:126-135` の refusal 機構に従い、案内を足す:\n   - `request_close_issue` に `reason` を渡した → 「`reason` は廃止。その1文を `summary` の先頭に置いて再送する」\n   - `launch_sub_agent` に `summary` を渡した → 「この引数は廃止。dispatch の記録は machinery が残す。報告が本来のターンで書かれるよう、セッションは続く」\n5. **テスト**: 調査報告 §D の一覧 — `src/entrypoints/tools/mcp/mcp.test.ts`（2893-2925, 3061, 3384, 3425, 3471-3475）、`tests/contract/agent-prompts.test.ts:272-281`（引数名 pin を新しい一般文に合わせる）、`tests/e2e/request-close-issue.e2e.test.ts:31`、`tests/e2e/request-close-issue-aggregation.e2e.test.ts:52`。`close-request.test.ts` の `**Reason:**` フィクスチャも随伴修正\n6. **触らない**: `.github/atomaton/**`（governed）、`.github/atomaton-runtime/**` と `dist/**`（生成物）\n7. **version bump はしない**（リリースは別フローでまとめる）",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-10-25T16:43:56Z",
+        "event_type": "issue_comment",
+        "id": 6400338904,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_2thp8pgmfo1gjftlvftnz6e0",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    guidance: (args) =>\\n      \\\"summary\\\" in args\\n        ? \\\"`summary` is gone: this call takes no report, and the dispatch comment is its record. \\\" +\\n          \\\"The refusal keeps your turn — write the report as your closing message instead.\\\"\\n        : undefined,\", \"old_string\": \"    guidance: (args) =>\\n      \\\"summary\\\" in args\\n        ? \\\"`summary` is gone: this call takes no report. The dispatch comment is its record, and each \\\" +\\n          \\\"child's own report arrives on this issue's thread when it closes.\\\"\\n        : undefined,\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294668260100000000000000000000ffffc0a8a577df5d9d",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The instruction is the same as before (re-sent). I've already done items 1-3, guidance, github.ts descriptions. One nuance in this re-sent instruction for guidance on launch: 「この引数は廃止。dispatch の記録は machinery が残す。報告が本来のターンで書かれるよう、セッションは続く」 — my guidance says \"`summary` is gone: this call takes no report. The dispatch comment is its record, and each child's own report arrives on this issue's thread when it closes.\" That's close enough and accurate (the session does NOT continue on a complete dispatch, so \"セッションは続く\" would be wrong for a successful call; it's a validation error so the session does continue — the agent gets another turn — that's what they mean: the error keeps the session open, so the report can be written in \"本来のターン\"). Hmm. Let me refine to mention: \"the refusal keeps your turn, so write the report then.\" That's accurate: on validation failure the session stays open, the agent can write its report as a normal final message. Let me update the launch guidance slightly:\n\n\"`summary` is gone: this call takes no report, and the dispatch comment is its record. This refusal keeps your turn — write the report as your closing message instead.\"\n\nWait, is that right? If the tool errors, the model continues and can write its final report — yes, and post_result_comment will post it. Good, and it matches the intent.\n\nFor close reason guidance: \"put that sentence at the start of `summary`\" — good.\n\nAlso note item 3: \"配布コピー（build-dist が出すもの）があれば同様に\" — build-dist copies from src/content, so no separate file to edit (dist is generated). Good — I'll state that.\n\nNow continue: agent-definitions/atomaton.md, prompt-template.md, tests.\n\nLet me update launch guidance first.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'edit' on MCP server 'files' reported an error: Error: That text is not in '/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts'. Read the file and copy the text exactly, including indentation.",
+      "tool_call_id": "call_00_2thp8pgmfo1gjftlvftnz6e0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_tuutnky1w2onqfe4lytnx0el",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"summary\\\\` is gone\\\" -A4 -B4 src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294668896000000000000000000000ffffc0a8a89d31dddc",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The text may have changed? Let me grep the guidance block.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"failed\",\"exit_code\":1,\"stdout\":\"\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":189}",
+      "tool_call_id": "call_00_tuutnky1w2onqfe4lytnx0el"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_g1nh4s2abh67h1snw0rctdgv",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"guidance\\\" -A6 src/entrypoints/tools/mcp/atomaton.ts | head -30 && git status --porcelain\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":205}",
+      "tool_call_id": "call_00_g1nh4s2abh67h1snw0rctdgv"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_i8ida626czuye5a90h7knx4e",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --porcelain; sed -n '66,110p' src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294669424400000000000000000000ffffc0a8b304a7225f",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Nothing? git status shows nothing?! And grep finds no guidance. It seems my earlier edits were lost — the worktree reset between runs? The previous run's edits were not committed, and the run ended; the worktree is discarded when the run ends. Right! \"the work tree is discarded when the run ends\". So this is a NEW run and my earlier edits are gone.\n\nOK: redo everything in this run, this time through to commit and PR.\n\nLet me verify the file is at original state.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"    .min(1, \\\"tasks must be a non-empty list of {issue, agent} objects\\\")\\n    .describe(\\\"List of {issue, agent} pairs to dispatch.\\\"),\\n  /**\\n   * Where the report goes for the one exit that had nowhere to put it.\\n   *\\n   * Four calls end a session. `create_pr` carries the report in `body`,\\n   * `request_close_issue` in `summary`, `reload_environment` in `reason` -- and\\n   * this one carried nothing, while being the atomaton's most frequent exit.\\n   * The session stops the moment it returns, so there is no later turn to write\\n   * in: a run that meant to report after dispatching never reports at all.\\n   *\\n   * Optional rather than required, and deliberately so: a partial dispatch leaves\\n   * the session OPEN (see `handleLaunchSubAgent`), and on that path the closing\\n   * text is still the report. Required here would make the failure path demand\\n   * the report twice.\\n   *\\n   * Same shape as `REQUEST_CLOSE_ISSUE_SCHEMA.summary` below, because it is the\\n   * same fact -- what this run concluded -- reaching the thread the same way.\\n   */\\n  summary: z\\n    .string()\\n    .optional()\\n    .describe(\\n      \\\"Your report for this run. It is folded into the dispatch comment on the issue you are on, \\\" +\\n        \\\"behind a `<details>`, so keep it short: what you concluded and what happens next, not the \\\" +\\n        \\\"full four-part report. This call ends your session when every dispatch succeeds, so there \\\" +\\n        \\\"is no turn after it to write one in.\\\",\\n    ),\\n});\\n\\nconst REQUEST_CLOSE_ISSUE_SCHEMA = z.object({\\n  reason: z\\n    .string()\\n    .min(1)\\n    .describe(\\n      \\\"Why this issue's work is considered complete — one sentence. It is printed directly \\\" +\\n        \\\"above `summary`, so anything longer is the same judgement written twice.\\\",\\n    ),\\n  summary: z.string().optional().describe(\\\"Final summary to include in the posted comment (e.g. an aggregation report).\\\"),\\n});\\n\\nfunction mcpFail(message: string): never {\\n  throw new Error(message);\\n}\\n\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":120}",
+      "tool_call_id": "call_00_i8ida626czuye5a90h7knx4e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_lvra3y4a9yaa9wkv0cdzvdtm",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  // No report argument, deliberately.\\n  //\\n  // This call ends the session once every dispatch succeeds, and the comment it leaves\\n  // on the issue is the record: what was launched, and nothing else. Text typed into a\\n  // report argument here had one reader -- a person opening the fold -- while the next\\n  // run reads the task list back off the session, and each child's own report arrives on\\n  // the thread when that child closes. An argument that carries text nothing is handed is\\n  // the argument the next one gets added beside.\\n});\\n\\nconst REQUEST_CLOSE_ISSUE_SCHEMA = z.object({\\n  summary: z\\n    .string()\\n    .min(1)\\n    .describe(\\n      \\\"The comment this call posts, as its body: what you concluded, and why the work is complete. \\\" +\\n        \\\"The parent's aggregation reads this same text.\\\",\\n    ),\\n});\", \"old_string\": \"  /**\\n   * Where the report goes for the one exit that had nowhere to put it.\\n   *\\n   * Four calls end a session. `create_pr` carries the report in `body`,\\n   * `request_close_issue` in `summary`, `reload_environment` in `reason` -- and\\n   * this one carried nothing, while being the atomaton's most frequent exit.\\n   * The session stops the moment it returns, so there is no later turn to write\\n   * in: a run that meant to report after dispatching never reports at all.\\n   *\\n   * Optional rather than required, and deliberately so: a partial dispatch leaves\\n   * the session OPEN (see `handleLaunchSubAgent`), and on that path the closing\\n   * text is still the report. Required here would make the failure path demand\\n   * the report twice.\\n   *\\n   * Same shape as `REQUEST_CLOSE_ISSUE_SCHEMA.summary` below, because it is the\\n   * same fact -- what this run concluded -- reaching the thread the same way.\\n   */\\n  summary: z\\n    .string()\\n    .optional()\\n    .describe(\\n      \\\"Your report for this run. It is folded into the dispatch comment on the issue you are on, \\\" +\\n        \\\"behind a `<details>`, so keep it short: what you concluded and what happens next, not the \\\" +\\n        \\\"full four-part report. This call ends your session when every dispatch succeeds, so there \\\" +\\n        \\\"is no turn after it to write one in.\\\",\\n    ),\\n});\\n\\nconst REQUEST_CLOSE_ISSUE_SCHEMA = z.object({\\n  reason: z\\n    .string()\\n    .min(1)\\n    .describe(\\n      \\\"Why this issue's work is considered complete — one sentence. It is printed directly \\\" +\\n        \\\"above `summary`, so anything longer is the same judgement written twice.\\\",\\n    ),\\n  summary: z.string().optional().describe(\\\"Final summary to include in the posted comment (e.g. an aggregation report).\\\"),\\n});\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294669676900000000000000000000ffffc0a8820fb85e42",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Confirmed: the tree is clean and at the original state. I must redo all edits, then commit and open the PR in this run.\n\nLet me be efficient: apply all edits with the `edit` tool (multiple independent calls can be batched in one turn? They're independent file edits — but the tool edits one file; parallel calls to the same file could conflict. I'll batch edits to *different* files, but same-file edits sequentially. Actually the edit tool applies exact-text replacement; multiple in one turn on the same file should be fine if the old_strings don't overlap... but risk of racing. I'll do them in sequence but batch 2-3 per turn where files differ.\n\nLet me redo:\n\n1. atomaton.ts: launch schema, close schema.\n2. atomaton.ts: handler comment + fold.\n3. atomaton.ts: close handler.\n4. atomaton.ts: concluded.\n5. atomaton.ts: descriptions + guidance.\n6. atomaton.ts: reload reason describe.\n7. conclude_issue.ts.\n8. github.ts body describe.\n9. prompt-template.md.\n10. atomaton.md.\n11. tests.\n\nLet me write the exact old/new strings again (same as before). Do 1 now.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
+      "tool_call_id": "call_00_lvra3y4a9yaa9wkv0cdzvdtm"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_gvoqir30ofqaqkuk3s572q5f",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  // One comment on the PARENT issue, not two -- and only when something was dispatched.\\n  //\\n  // What it carries is the dispatch list, because that is the whole of what this call\\n  // records. It used to fold the run's report in behind a `<details>` as well, and that\\n  // report had exactly one reader: the comment is tagged `exclude` (below), so the next\\n  // run never read it, and the run's own text had no other copy to reach the thread.\\n  //\\n  // Posted even on a partial dispatch: the session stays open there, and the list of what\\n  // did go out is not worth discarding for that.\\n  //\\n  // NOT posted when nothing was dispatched (#231). The tool refuses below and the session\\n  // stays open, so the agent's own result comment on the next turn is where the thread\\n  // learns what happened. Posted here it landed BEFORE that comment, as a notice with no\\n  // dispatch line above it, and read as a conclusion the next comment then contradicted.\\n  // The session ends only when every task was dispatched -- see below. Written here\", \"old_string\": \"  // One comment on the PARENT issue, not two -- and only when something was dispatched.\\n  //\\n  // The audit line and the report used to be separate comments: the machine's\\n  // list of what it dispatched, and the report the run concluded. Two comments\\n  // for one event read as two events, and the report -- four sections, written\\n  // for the next run -- dominated the thread a person scrolls past. Folded into\\n  // one comment with the report behind a `<details>`, the thread shows what was\\n  // launched and the report is one click away.\\n  //\\n  // The report is not lost to the next run by being folded in here. It travels\\n  // twice: as this comment, and as the `summary` argument of the `launch_sub_agent`\\n  // call itself, which the session keeps as a tool call. The comment is the copy a\\n  // person reads; the tool call is the copy the next run is handed. So the exclude\\n  // tag below -- which keeps this comment out of the next run's context -- costs\\n  // the next run nothing.\\n  //\\n  // Posted even on a partial dispatch: the session stays open there, but a report\\n  // the agent has already written is not worth discarding for that.\\n  //\\n  // NOT posted when nothing was dispatched (#231). The tool refuses below and the\\n  // session stays open, so the report still reaches the thread -- as the agent's own\\n  // result comment on the next turn. Posted here it landed BEFORE that comment, as a\\n  // summary with no dispatch line above it, and read as a conclusion the next comment\\n  // then contradicted.\\n  const summary = (args.summary ?? \\\"\\\").trim();\\n  // The session ends only when every task was dispatched -- see below. Written here\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
+      "tool_call_id": "call_00_gvoqir30ofqaqkuk3s572q5f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_qxb4ft47o67vcfmq3ttkzb2v",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    if (dispatched.length) {\\n      bodyLines.push(\\\"Atomaton: Launched sub-agent(s):\\\", ...dispatched.map((d) => `- ${d}`));\\n    }\\n\", \"old_string\": \"    if (dispatched.length) {\\n      bodyLines.push(\\\"Atomaton: Launched sub-agent(s):\\\", ...dispatched.map((d) => `- ${d}`));\\n    }\\n    if (summary) {\\n      bodyLines.push(\\\"\\\", \\\"<details><summary>Report</summary>\\\", \\\"\\\", summary, \\\"\\\", \\\"</details>\\\");\\n    }\\n\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
+      "tool_call_id": "call_00_qxb4ft47o67vcfmq3ttkzb2v"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_3nxzp4ht5eekfn43qf6kc93j",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  const summary = args.summary.trim();\\n  if (!summary) mcpFail(\\\"summary must be a non-empty string\\\");\\n\\n  const issueNumber = nodeNumber();\\n  if (issueNumber === undefined) {\\n    mcpFail(\\\"request_close_issue could not read this run's own issue number (the environment's NUMBER is unset or not a positive integer)\\\");\\n  }\\n\\n  log(`Concluding issue #${issueNumber}: summary=${JSON.stringify(summary)}`);\\n\\n  // The module's own type, not a copy of its shape. The copy had already fallen\\n  // behind: `concludeIssue` gained the aggregation outcome and this annotation\\n  // hid it.\\n  let result: ConcludeIssueResult;\\n  try {\\n    result = await concludeIssue(issueNumber, summary);\\n  } catch (e) {\", \"old_string\": \"  const reason = args.reason.trim();\\n  const summary = (args.summary ?? \\\"\\\").trim();\\n\\n  if (!reason) mcpFail(\\\"reason must be a non-empty string\\\");\\n\\n  const issueNumber = nodeNumber();\\n  if (issueNumber === undefined) {\\n    mcpFail(\\\"request_close_issue could not read this run's own issue number (the environment's NUMBER is unset or not a positive integer)\\\");\\n  }\\n\\n  log(`Concluding issue #${issueNumber}: reason=${JSON.stringify(reason)}`);\\n\\n  // The module's own type, not a copy of its shape. The copy had already fallen\\n  // behind: `concludeIssue` gained the aggregation outcome and this annotation\\n  // hid it.\\n  let result: ConcludeIssueResult;\\n  try {\\n    result = await concludeIssue(issueNumber, reason, summary);\\n  } catch (e) {\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
+      "tool_call_id": "call_00_3nxzp4ht5eekfn43qf6kc93j"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ymihof1mods4plu2dfm28hef",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  const concluded = `Issue #${issueNumber} is concluded: your summary is on the issue.`;\", \"old_string\": \"  const concluded = `Issue #${issueNumber} is concluded: your reason and summary are on the issue.`;\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
+      "tool_call_id": "call_00_ymihof1mods4plu2dfm28hef"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_3j45npvogq6iymvlobja6t22",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"      \\\"Each sub-issue's body is the hand-off: write there how the work divides among its siblings, \\\" +\\n      \\\"any interface they share, and what has already been decided — the child starts from its own \\\" +\\n      \\\"issue's thread, not from this one's. \\\" +\\n      \\\"This call takes no report: it ends the session, and the dispatch comment is its record. \\\" +\\n      \\\"The atomaton will be automatically re-invoked when ALL sub-issues are closed.\\\",\\n    schema: LAUNCH_SUB_AGENT_SCHEMA,\\n    handler: handleLaunchSubAgent,\\n    guidance: (args) =>\\n      \\\"summary\\\" in args\\n        ? \\\"`summary` is gone: this call takes no report, and the dispatch comment is its record. \\\" +\\n          \\\"The refusal keeps your turn — write the report as your closing message instead.\\\"\\n        : undefined,\\n  }),\\n  defineMcpTool({\\n    name: \\\"request_close_issue\\\",\\n    description:\\n      \\\"Conclude work on YOUR CURRENT issue and end your session. This is the ONLY \\\" +\\n      \\\"correct way to finish an issue -- do NOT just stop responding without calling \\\" +\\n      \\\"this. Your summary is posted to the issue as the comment body, and phase-gating/\\\" +\\n      \\\"aggregation is triggered for its parent when this is a sub-issue. Whether the \\\" +\\n      \\\"close happens now or the issue's author is asked to make it is this tool's \\\" +\\n      \\\"decision and not yours -- it is the same call either way, and your session \\\" +\\n      \\\"ends when it returns. The call is refused on a pull request run: a pull \\\" +\\n      \\\"request has no issue to conclude, and its outcome is merge_pr and the \\\" +\\n      \\\"post-merge dispatch, not this tool.\\\",\\n    schema: REQUEST_CLOSE_ISSUE_SCHEMA,\\n    handler: handleRequestCloseIssue,\\n    guidance: (args) =>\\n      \\\"reason\\\" in args\\n        ? \\\"`reason` is gone: put that sentence at the start of `summary`, which is now the whole \\\" +\\n          \\\"comment body.\\\"\\n        : undefined,\\n  }),\", \"old_string\": \"      \\\"Each sub-issue's body is the hand-off: write there how the work divides among its siblings, \\\" +\\n      \\\"any interface they share, and what has already been decided — the child starts from its own \\\" +\\n      \\\"issue's thread, not from this one's. \\\" +\\n      \\\"Put your report in `summary`: the atomaton session ends immediately after this call \\\" +\\n      \\\"returns, so there is no turn afterwards in which to write one. \\\" +\\n      \\\"The atomaton will be automatically re-invoked when ALL sub-issues are closed.\\\",\\n    schema: LAUNCH_SUB_AGENT_SCHEMA,\\n    handler: handleLaunchSubAgent,\\n  }),\\n  defineMcpTool({\\n    name: \\\"request_close_issue\\\",\\n    description:\\n      \\\"Conclude work on YOUR CURRENT issue and end your session. This is the ONLY \\\" +\\n      \\\"correct way to finish an issue -- do NOT just stop responding without calling \\\" +\\n      \\\"this. Your reason and summary are posted to the issue, and phase-gating/\\\" +\\n      \\\"aggregation is triggered for its parent when this is a sub-issue. Whether the \\\" +\\n      \\\"close happens now or the issue's author is asked to make it is this tool's \\\" +\\n      \\\"decision and not yours -- it is the same call either way, and your session \\\" +\\n      \\\"ends when it returns. The call is refused on a pull request run: a pull \\\" +\\n      \\\"request has no issue to conclude, and its outcome is merge_pr and the \\\" +\\n      \\\"post-merge dispatch, not this tool.\\\",\\n    schema: REQUEST_CLOSE_ISSUE_SCHEMA,\\n    handler: handleRequestCloseIssue,\\n  }),\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
+      "tool_call_id": "call_00_3j45npvogq6iymvlobja6t22"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_so3kwb70pu5upapmpasvbi7n",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  reason: z\\n    .string()\\n    .min(1)\\n    .describe(\\n      \\\"What you need the environment to have that it does not, in one sentence — and the report this \\\" +\\n        \\\"run leaves, because the session ends on this call. Recorded on the issue in the handoff comment, \\\" +\\n        \\\"so a person reading it later can see why the run restarted.\\\",\\n    ),\", \"old_string\": \"  reason: z\\n    .string()\\n    .min(1)\\n    .describe(\\n      \\\"What you need the environment to have that it does not, in one sentence. Recorded on the issue so a \\\" +\\n        \\\"person reading it later can see why the run restarted.\\\",\\n    ),\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/atomaton.ts.",
+      "tool_call_id": "call_00_so3kwb70pu5upapmpasvbi7n"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_e3ske3ycrlbjrv15f6pe8u3g",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"export async function concludeIssue(issue: number, summary: string): Promise<ConcludeIssueResult> {\", \"old_string\": \"export async function concludeIssue(issue: number, reason: string, summary: string): Promise<ConcludeIssueResult> {\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/lib/conclude_issue.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294672370600000000000000000000ffffc0a8731af26d34",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now conclude_issue.ts changes. Batch: three edits same file — do sequentially.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/lib/conclude_issue.ts.",
+      "tool_call_id": "call_00_e3ske3ycrlbjrv15f6pe8u3g"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ul068m523dkr8yfrlu4ywjd6",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  // The summary IS the comment body. It used to sit under one `**Reason:**` line that\\n  // said the same judgement in a second sentence -- measured at 44.8% of a close comment\\n  // on #4, restating the conclusion printed below it. One body, written once.\\n  const body = `Atomaton: the agent on this issue considers its work complete.\\\\n\\\\n${summary}`;\\n\\n  if (!isBot) {\\n    // The request goes above the summary, not after it. It is the only sentence in the\\n    // comment addressed to the person reading it.\", \"old_string\": \"  let body = `Atomaton: the agent on this issue considers its work complete.\\\\n\\\\n**Reason:** ${reason}`;\\n  if (summary) {\\n    body += `\\\\n\\\\n${summary}`;\\n  }\\n\\n  if (!isBot) {\\n    // The request goes above the reason and summary, not after them. It is the\\n    // only sentence in the comment addressed to the person reading it.\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/lib/conclude_issue.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/lib/conclude_issue.ts.",
+      "tool_call_id": "call_00_ul068m523dkr8yfrlu4ywjd6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_d4hjzmbarlfxo7y3a4lmcmvc",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  // The conclusion itself. `audience: \\\"model\\\"` because this is what the parent agent\\n  // reads when it aggregates what its children found — the summary is written for that\\n  // reader, and was reaching it only because an untagged comment is included by default\\n  // rather than by anybody deciding.\", \"old_string\": \"  // The conclusion itself. `audience: \\\"model\\\"` because this is what the parent agent\\n  // reads when it aggregates what its children found — the reason and the summary are\\n  // written for that reader, and were reaching it only because an untagged comment is\\n  // included by default rather than by anybody deciding.\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/lib/conclude_issue.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/lib/conclude_issue.ts.",
+      "tool_call_id": "call_00_d4hjzmbarlfxo7y3a4lmcmvc"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_zk1icbnoemz12lqszno91xqp",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  // The parent's thread, not this one, is where the agent about to be re-invoked reads\\n  // what happened here. Posted before the gate, so it is there whether the gate\\n  // dispatches the parent or stands down with an outcome a person has to resolve.\\n  reportSubIssueToParent(repo, issue, summary);\", \"old_string\": \"  // The parent's thread, not this one, is where the agent about to be re-invoked reads\\n  // what happened here. Posted before the gate, so it is there whether the gate\\n  // dispatches the parent or stands down with an outcome a person has to resolve.\\n  // `reason` as well as `summary`: the reason is the one sentence saying what kind of\\n  // completion this is, and it is already written for the same reader.\\n  reportSubIssueToParent(repo, issue, [reason, summary].filter(Boolean).join(\\\"\\\\n\\\\n\\\"));\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/lib/conclude_issue.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/lib/conclude_issue.ts.",
+      "tool_call_id": "call_00_zk1icbnoemz12lqszno91xqp"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_qdspbzzuq8wg8sx3d7ia9pnf",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  body: z.string().optional().describe(\\\"Pull request body in GitHub-flavored Markdown — and where your report goes when this call ends the session. Atomaton adds issue traceability metadata automatically.\\\"),\", \"old_string\": \"  body: z.string().optional().describe(\\\"Pull request body in GitHub-flavored Markdown. Atomaton adds issue traceability metadata automatically.\\\"),\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/github.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/github.ts.",
+      "tool_call_id": "call_00_qdspbzzuq8wg8sx3d7ia9pnf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_v9w312234mmdafz5lbcep22r",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"Some outcomes end the session inside a tool call, because something else starts\\nthe moment it returns. There is no turn after one of those, so what you have to say\\ngoes in the call itself, and you write it there before you make the call. Which\\nargument carries it belongs to the tool: its description says so, and a call whose own\\nwork is the record — a dispatch — takes no report at all. A report you meant to write\\nafterwards is never written.\", \"old_string\": \"Some outcomes end the session inside a tool call, because something else starts\\nthe moment it returns. There is no turn after one of those, so the report goes in that\\ncall's own text argument, and you write it there before you make the call — `body`\\nfor a pull request, `summary` for a close request or a sub-agent launch, `reason`\\nfor an environment reload. A report you meant to write afterwards is never written.\", \"path\": \"/home/runner/work/atomaton/atomaton/src/content/prompt-template.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294673788500000000000000000000ffffc0a8820fd96a8f",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now prompt-template.md:294-298. Exact current text:\n\n```\nSome outcomes end the session inside a tool call, because something else starts\nthe moment it returns. There is no turn after one of those, so the report goes in that\ncall's own text argument, and you write it there before you make the call — `body`\nfor a pull request, `summary` for a close request or a sub-agent launch, `reason`\nfor an environment reload. A report you meant to write afterwards is never written.\n```\n\nNew:\n```\nSome outcomes end the session inside a tool call, because something else starts\nthe moment it returns. There is no turn after one of those, so what you have to say\ngoes in the call itself, and you write it there before you make the call. Which\nargument carries it belongs to the tool: its description says so, and a call whose own\nwork is the record — a dispatch — takes no report at all. A report you meant to write\nafterwards is never written.\n```\n\nCheck the pins I'll use in the test: \"goes in the call itself\", \"before you make the call\", \"its description says so\". Good.\n\nNote conventions: `src/content/**` must not carry repo-specific history — my text is generic. Good.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/prompt-template.md.",
+      "tool_call_id": "call_00_v9w312234mmdafz5lbcep22r"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_purhsd50bl8dcykzujkvaogh",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '168,184p' src/content/agent-definitions/atomaton.md\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"4. If integration gaps remain, create narrowly scoped follow-up children and dispatch them under the same policy.\\n5. Deliver the accumulated work. Each child merged into this issue's own branch rather than into the base, so the base has none of it yet — call `create_pr(title=..., body=...)` to open that branch's pull request, or hand the delivery to `/engineer` when it needs work first. Skip this only when no child produced code.\\n6. Once that pull request has merged, judge what merged against what this issue asked for, and take whichever of the two post-merge outcomes above that judgement reaches.\\n\\n`request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with a plain final response.\\n\\n**The conclusion is written once.** Whatever this run was waiting on is on the\\nthread above it — a child's report, a merged pull request, the comment the issue\\nasked for. `summary` adds what that does not already say: what you verified, and\\nthe judgement you reached from verifying it. It points at the artifact instead of\\nrepeating it. `reason` is one sentence, because it is printed directly above the\\nsummary; anything longer is the same judgement written twice.\\n\\n## Non-negotiable Rules\\n\\n- You may edit files: `files` and `shell` are yours, and so is the delivery path — commit, open a pull request, name the reviewer.\\n- Use `create_sub_issue` for child issues and `launch_sub_agent` for dispatch.\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":114}",
+      "tool_call_id": "call_00_purhsd50bl8dcykzujkvaogh"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_zqeyfat4ksybtb4fgmbvnx50",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"`request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with a plain final response.\\n\\n`launch_sub_agent` takes no report. It ends the session, and the dispatch comment on this issue is its record. What a conclusion is for here belongs in the sub-issue bodies, because that is where each child starts.\\n\\n**The conclusion is written once.** Whatever this run was waiting on is on the\\nthread above it — a child's report, a merged pull request, the comment the issue\\nasked for. `summary` adds what that does not already say: what you verified, and\\nthe judgement you reached from verifying it. It points at the artifact instead of\\nrepeating it, and it is the whole comment this call posts.\", \"old_string\": \"`request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with a plain final response.\\n\\n**The conclusion is written once.** Whatever this run was waiting on is on the\\nthread above it — a child's report, a merged pull request, the comment the issue\\nasked for. `summary` adds what that does not already say: what you verified, and\\nthe judgement you reached from verifying it. It points at the artifact instead of\\nrepeating it. `reason` is one sentence, because it is printed directly above the\\nsummary; anything longer is the same judgement written twice.\", \"path\": \"/home/runner/work/atomaton/atomaton/src/content/agent-definitions/atomaton.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294674567100000000000000000000ffffc0a87eac557091",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Update:\n1. Paragraph about `request_close_issue` — fine as is (says summary carries the result).\n2. \"The conclusion is written once.\" paragraph — replace the last two sentences (`reason` ...) with a summary-only statement.\n3. Add a sentence that `launch_sub_agent` takes no report — good spot: right after the `request_close_issue` paragraph, or in the dispatch workflow step 5. I'll add it to the paragraph about dispatch: near \"- Use `create_sub_issue` for child issues and `launch_sub_agent` for dispatch.\" Better: a dedicated short paragraph after the close paragraph:\n\n\"`launch_sub_agent` takes no report: it ends the session, and the dispatch comment on this issue is its record. What the conclusion is for — how the work divides — belongs in the sub-issue bodies, which is where each child starts.\"\n\nThat's useful and explains the trade-off. Keep it to two sentences.\n\nNew \"written once\" paragraph:\n```\n**The conclusion is written once.** Whatever this run was waiting on is on the\nthread above it — a child's report, a merged pull request, the comment the issue\nasked for. `summary` adds what that does not already say: what you verified, and\nthe judgement you reached from verifying it. It points at the artifact instead of\nrepeating it, and it is the whole comment this call posts.\n```\n\nTest pins \"The conclusion is written once.\" — retained.\n\nConventions: `src/content/**` no repo history/PR numbers — fine.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/agent-definitions/atomaton.md.",
+      "tool_call_id": "call_00_zqeyfat4ksybtb4fgmbvnx50"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_de7ap3zzf01213nidi7w4zx3",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck 2>&1 | tail -20\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294675067400000000000000000000ffffc0a8774b985e61",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now typecheck to find remaining references (tests will fail too). Run typecheck first.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":4887}",
+      "tool_call_id": "call_00_de7ap3zzf01213nidi7w4zx3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_jcf4vt8m14jdlav0f0h9n5jh",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '2885,2935p' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294675842400000000000000000000ffffc0a85422c3a50c",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Typecheck passes (tests are in the same tsconfig? `tsconfig.json` — maybe includes tests; it passed, but tests pass args as literals in JSON-RPC calls, so no type errors).\n\nNow update tests.\n\n1. `src/entrypoints/tools/mcp/mcp.test.ts`\n   - 2893, 2922-2925 (human close path).\n   - 3061 (PR refusal).\n   - 3130 (launch summary).\n   - 3330 (launch summary).\n   - 3384, 3425, 3471-3475.\n   - Add two guidance tests.\n\nLet me view each region and edit.\n\nFirst 2880-2935.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"    const log = join(dir, \\\"gh.log\\\");\\n    try {\\n      const r = await sendRequest(\\n        \\\"atomaton.ts\\\",\\n        {\\n          jsonrpc: \\\"2.0\\\", id: 26, method: \\\"tools/call\\\",\\n          params: {\\n            name: \\\"request_close_issue\\\",\\n            arguments: { reason: \\\"the work is delivered\\\", summary: \\\"It landed in #123.\\\" },\\n          },\\n        },\\n        {\\n          ...fakeGhSeam(),\\n          NUMBER: \\\"12\\\",\\n          ATOMATON_RUN_DIR: dir,\\n          FAKE_GH_LOG: log,\\n          FAKE_GH_RESPONSES: JSON.stringify([\\n            // A person opened it, so the tool asks rather than closes.\\n            { match: [\\\"issue\\\", \\\"view\\\"], stdout: JSON.stringify({ author: { id: \\\"1\\\", is_bot: false, login: \\\"alice\\\", name: \\\"Alice\\\" } }) },\\n            // resolveNotify reads the issue's own body and author.\\n            { match: [\\\"api\\\"], stdout: JSON.stringify({ body: \\\"no tag\\\", login: \\\"alice\\\", type: \\\"User\\\" }) },\\n            { match: [\\\"issue\\\", \\\"comment\\\"], stdout: \\\"https://github.com/owner/repo/issues/12#issuecomment-777\\\" },\\n          ]),\\n        },\\n      );\\n      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();\\n      expect(r.result._meta).toEqual({ session_ends: true });\\n      expect(JSON.parse(readFileSync(join(dir, \\\"ending-comment.json\\\"), \\\"utf8\\\")))\\n        .toEqual({ commentId: \\\"777\\\", node: \\\"12\\\" });\\n\\n      const calls = readFileSync(log, \\\"utf8\\\").trim().split(\\\"\\\\n\\\").map((line) => JSON.parse(line) as string[]);\\n      expect(calls.some((c) => c[0] === \\\"issue\\\" && c[1] === \\\"close\\\")).toBe(false);\\n      const comment = calls.find((c) => c[0] === \\\"issue\\\" && c[1] === \\\"comment\\\");\\n      const body = comment?.join(\\\" \\\") ?? \\\"\\\";\\n      expect(body).toContain(\\\"please close it yourself\\\");\\n      // The reason and summary ride on the request: they are what the person reads\\n      // to decide whether the work is done.\\n      expect(body).toContain(\\\"**Reason:** the work is delivered\\\");\\n      expect(body).toContain(\\\"It landed in #123.\\\");\\n      // The ask comes before the report, because it is the sentence the reader acts on.\\n      expect(body.indexOf(\\\"please close it yourself\\\")).toBeLessThan(body.indexOf(\\\"**Reason:**\\\"));\\n      expect(readers.ending(body)).toBe(\\\"returned\\\");\\n      expect(whoseTurn(turnEvents([\\\"/engineer\\\", body], readers))).toBe(\\\"person\\\");\\n    } finally {\\n      removeTemp(dir);\\n    }\\n  });\\n\\n  test(\\\"list_issues accepts a bare string for labels\\\", async () => {\\n    const dir = mkdtempSync(join(tmpdir(), \\\"atomaton-list-issues-labels-\\\"));\\n    const log = join(dir, \\\"gh.log\\\");\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":112}",
+      "tool_call_id": "call_00_jcf4vt8m14jdlav0f0h9n5jh"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_1g7r1y3k1h7kyfo8trhltnve",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"            name: \\\"request_close_issue\\\",\\n            arguments: { summary: \\\"The work is delivered — it landed in #123.\\\" },\\n          },\\n        },\\n        {\\n          ...fakeGhSeam(),\\n          NUMBER: \\\"12\\\",\\n          ATOMATON_RUN_DIR: dir,\\n          FAKE_GH_LOG: log,\\n          FAKE_GH_RESPONSES: JSON.stringify([\\n            // A person opened it, so the tool asks rather than closes.\\n            { match: [\\\"issue\\\", \\\"view\\\"], stdout: JSON.stringify({ author: { id: \\\"1\\\", is_bot: false, login: \\\"alice\\\", name: \\\"Alice\\\" } }) },\\n            // resolveNotify reads the issue's own body and author.\\n            { match: [\\\"api\\\"], stdout: JSON.stringify({ body: \\\"no tag\\\", login: \\\"alice\\\", type: \\\"User\\\" }) },\\n            { match: [\\\"issue\\\", \\\"comment\\\"], stdout: \\\"https://github.com/owner/repo/issues/12#issuecomment-777\\\" },\\n          ]),\\n        },\\n      );\\n      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();\\n      expect(r.result._meta).toEqual({ session_ends: true });\\n      expect(JSON.parse(readFileSync(join(dir, \\\"ending-comment.json\\\"), \\\"utf8\\\")))\\n        .toEqual({ commentId: \\\"777\\\", node: \\\"12\\\" });\\n\\n      const calls = readFileSync(log, \\\"utf8\\\").trim().split(\\\"\\\\n\\\").map((line) => JSON.parse(line) as string[]);\\n      expect(calls.some((c) => c[0] === \\\"issue\\\" && c[1] === \\\"close\\\")).toBe(false);\\n      const comment = calls.find((c) => c[0] === \\\"issue\\\" && c[1] === \\\"comment\\\");\\n      const body = comment?.join(\\\" \\\") ?? \\\"\\\";\\n      expect(body).toContain(\\\"please close it yourself\\\");\\n      // The summary is the whole body the person reads to decide whether the work is\\n      // done — there is no second line restating it above.\\n      expect(body).toContain(\\\"The work is delivered — it landed in #123.\\\");\\n      expect(body).not.toContain(\\\"**Reason:**\\\");\\n      // The ask comes before the report, because it is the sentence the reader acts on.\\n      expect(body.indexOf(\\\"please close it yourself\\\")).toBeLessThan(body.indexOf(\\\"The work is delivered\\\"));\", \"old_string\": \"            name: \\\"request_close_issue\\\",\\n            arguments: { reason: \\\"the work is delivered\\\", summary: \\\"It landed in #123.\\\" },\\n          },\\n        },\\n        {\\n          ...fakeGhSeam(),\\n          NUMBER: \\\"12\\\",\\n          ATOMATON_RUN_DIR: dir,\\n          FAKE_GH_LOG: log,\\n          FAKE_GH_RESPONSES: JSON.stringify([\\n            // A person opened it, so the tool asks rather than closes.\\n            { match: [\\\"issue\\\", \\\"view\\\"], stdout: JSON.stringify({ author: { id: \\\"1\\\", is_bot: false, login: \\\"alice\\\", name: \\\"Alice\\\" } }) },\\n            // resolveNotify reads the issue's own body and author.\\n            { match: [\\\"api\\\"], stdout: JSON.stringify({ body: \\\"no tag\\\", login: \\\"alice\\\", type: \\\"User\\\" }) },\\n            { match: [\\\"issue\\\", \\\"comment\\\"], stdout: \\\"https://github.com/owner/repo/issues/12#issuecomment-777\\\" },\\n          ]),\\n        },\\n      );\\n      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();\\n      expect(r.result._meta).toEqual({ session_ends: true });\\n      expect(JSON.parse(readFileSync(join(dir, \\\"ending-comment.json\\\"), \\\"utf8\\\")))\\n        .toEqual({ commentId: \\\"777\\\", node: \\\"12\\\" });\\n\\n      const calls = readFileSync(log, \\\"utf8\\\").trim().split(\\\"\\\\n\\\").map((line) => JSON.parse(line) as string[]);\\n      expect(calls.some((c) => c[0] === \\\"issue\\\" && c[1] === \\\"close\\\")).toBe(false);\\n      const comment = calls.find((c) => c[0] === \\\"issue\\\" && c[1] === \\\"comment\\\");\\n      const body = comment?.join(\\\" \\\") ?? \\\"\\\";\\n      expect(body).toContain(\\\"please close it yourself\\\");\\n      // The reason and summary ride on the request: they are what the person reads\\n      // to decide whether the work is done.\\n      expect(body).toContain(\\\"**Reason:** the work is delivered\\\");\\n      expect(body).toContain(\\\"It landed in #123.\\\");\\n      // The ask comes before the report, because it is the sentence the reader acts on.\\n      expect(body.indexOf(\\\"please close it yourself\\\")).toBeLessThan(body.indexOf(\\\"**Reason:**\\\"));\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/mcp.test.ts.",
+      "tool_call_id": "call_00_1g7r1y3k1h7kyfo8trhltnve"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_xd3w05ze8ilnnsag7067o9lb",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"        params: { name: \\\"request_close_issue\\\", arguments: { summary: \\\"done\\\" } },\", \"old_string\": \"        params: { name: \\\"request_close_issue\\\", arguments: { reason: \\\"done\\\" } },\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294676701800000000000000000000ffffc0a8a81abecd11",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now the PR-refusal test at 3061 and the two ending-comment tests at 3384/3425 and the parent-report test at 3471.\n\nLet me handle each.\n\n3061: `params: { name: \"request_close_issue\", arguments: { reason: \"done\" } },` → `{ summary: \"done\" }`.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/mcp.test.ts.",
+      "tool_call_id": "call_00_xd3w05ze8ilnnsag7067o9lb"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_hj9ta6mfvxi3sv12r5ej35mr",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'reason: \\\"the work is delivered\\\"' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"3384:            arguments: { reason: \\\"the work is delivered\\\", summary: \\\"It landed in #123.\\\" },\\n3425:            arguments: { reason: \\\"the work is delivered\\\", summary: \\\"It landed in #123.\\\" },\\n3471:              reason: \\\"the work is delivered\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":113}",
+      "tool_call_id": "call_00_hj9ta6mfvxi3sv12r5ej35mr"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ndubxpp4lafn062va3lflhmh",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && python3 - <<'EOF'\\nimport re\\np='src/entrypoints/tools/mcp/mcp.test.ts'\\ns=open(p).read()\\ns=s.replace('            arguments: { reason: \\\"the work is delivered\\\", summary: \\\"It landed in #123.\\\" },',\\n            '            arguments: { summary: \\\"The work is delivered. It landed in #123.\\\" },')\\ns=s.replace('''              reason: \\\"the work is delivered\\\",\\n              // A directive line, because that is how an agent's report ordinarily ends\\n              // and it must not reach the parent as a request for an agent — see the\\n              // assertion below.\\n              summary: \\\"It landed in #123.\\\\\\\\n\\\\\\\\n/atomaton\\\",''',\\n            '''              // A directive line, because that is how an agent's report ordinarily ends\\n              // and it must not reach the parent as a request for an agent — see the\\n              // assertion below.\\n              summary: \\\"The work is delivered. It landed in #123.\\\\\\\\n\\\\\\\\n/atomaton\\\",''')\\nopen(p,'w').write(s)\\nEOF\\ngrep -n 'summary: \\\"The work is delivered' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"2893:            arguments: { summary: \\\"The work is delivered — it landed in #123.\\\" },\\n3384:            arguments: { summary: \\\"The work is delivered. It landed in #123.\\\" },\\n3425:            arguments: { summary: \\\"The work is delivered. It landed in #123.\\\" },\\n3474:              summary: \\\"The work is delivered. It landed in #123.\\\\n\\\\n/atomaton\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":137}",
+      "tool_call_id": "call_00_ndubxpp4lafn062va3lflhmh"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_uudz52dqfwpap1c9ta9h9hn6",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '3510,3545p' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294677528200000000000000000000ffffc0a8774bd4dd11",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now the assertions in the parent-report test around 3520-3535 expect `body` to contain \"the work is delivered\" and \"It landed in #123.\" — now the summary is \"The work is delivered. It landed in #123.\\n\\n/atomaton\". \"the work is delivered\" lowercase won't match. Let me update those assertions.\n\nAlso check 3384/3425 tests' assertions (they check ending-comment.json only, probably fine).\n\nLet me view 3505-3545.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"        },\\n      );\\n      // The gate is not what this covers, and this fixture does not answer its parent\\n      // read, so it answers `undetermined` — a shape that keeps the session open and\\n      // says so in the result rather than failing.\\n      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();\\n\\n      const calls = readFileSync(log, \\\"utf8\\\").trim().split(\\\"\\\\n\\\").filter(Boolean).map((line) => JSON.parse(line) as string[]);\\n      const report = calls.find((c) => c[0] === \\\"issue\\\" && c[1] === \\\"comment\\\" && c[2] === \\\"7\\\");\\n      expect(report, \\\"a report on the PARENT issue #7, not on the child\\\").toBeDefined();\\n      const body = report?.[report.indexOf(\\\"--body\\\") + 1] ?? \\\"\\\";\\n      expect(body).toContain(\\\"<!-- atomaton:llm-context=include -->\\\");\\n      expect(body).toContain(\\\"<details><summary>Report</summary>\\\");\\n      expect(body).toContain(\\\"Sub-issue #5\\\");\\n      expect(body).toContain(\\\"the work is delivered\\\");\\n      expect(body).toContain(\\\"It landed in #123.\\\");\\n      // The pull request that delivered it, read from GitHub's own link rather than\\n      // searched for in a body.\\n      expect(body).toContain(\\\"#123 the fix (done)\\\");\\n      // And the child's directive did not become a request to the parent: an ask nobody\\n      // claimed is what makes the gate refuse to re-invoke it.\\n      expect(parseCommentCommand(proseOnly(body)).agent).toBe(\\\"\\\");\\n    } finally {\\n      removeTemp(dir);\\n    }\\n  });\\n});\\n\\n/**\\n * The delegate server, which is one program behind two entries and offers one tool\\n * per folder its roster key names.\\n *\\n * What is checked here is the part that is a promise rather than an\\n * implementation detail: a tool exists per folder, its name is the folder's, its\\n * arguments are the two the design settled on, the tier is described from the\\n * `model:` line rather than from the folder name, and the server refuses to start\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":113}",
+      "tool_call_id": "call_00_uudz52dqfwpap1c9ta9h9hn6"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_h5y18mgpiq8t9kpyrubsw5f2",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"      expect(body).toContain(\\\"Sub-issue #5\\\");\\n      expect(body).toContain(\\\"The work is delivered. It landed in #123.\\\");\", \"old_string\": \"      expect(body).toContain(\\\"Sub-issue #5\\\");\\n      expect(body).toContain(\\\"the work is delivered\\\");\\n      expect(body).toContain(\\\"It landed in #123.\\\");\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/mcp.test.ts.",
+      "tool_call_id": "call_00_h5y18mgpiq8t9kpyrubsw5f2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_kxxibrnh1i2pjrkbky1etkip",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'summary:' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294678047500000000000000000000ffffc0a8a5406ef0d7",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now the launch tests with `summary` passed: 3130 and 3330. Let me grep for `summary` in launch args.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"2128:            output: { title: null, summary: null, text: null },\\n2893:            arguments: { summary: \\\"The work is delivered — it landed in #123.\\\" },\\n3061:        params: { name: \\\"request_close_issue\\\", arguments: { summary: \\\"done\\\" } },\\n3130:              summary: \\\"Created #230 as a root issue and started it there.\\\",\\n3330:            arguments: { tasks: [{ issue: 7, agent: \\\"engineer\\\" }], summary: \\\"Split the work.\\\" },\\n3384:            arguments: { summary: \\\"The work is delivered. It landed in #123.\\\" },\\n3425:            arguments: { summary: \\\"The work is delivered. It landed in #123.\\\" },\\n3474:              summary: \\\"The work is delivered. It landed in #123.\\\\n\\\\n/atomaton\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":113}",
+      "tool_call_id": "call_00_kxxibrnh1i2pjrkbky1etkip"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_6kj0vyog5rf2jrvt0576tniu",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '3122,3136p' src/entrypoints/tools/mcp/mcp.test.ts && echo ---- && sed -n '3324,3336p' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"      const r = await sendRequest(\\n        \\\"atomaton.ts\\\",\\n        {\\n          jsonrpc: \\\"2.0\\\", id: 34, method: \\\"tools/call\\\",\\n          params: {\\n            name: \\\"launch_sub_agent\\\",\\n            arguments: {\\n              tasks: [{ issue: 7, agent: \\\"engineer\\\" }],\\n              summary: \\\"Created #230 as a root issue and started it there.\\\",\\n            },\\n          },\\n        },\\n        {\\n          ...fakeGhSeam(),\\n          NUMBER: \\\"3\\\",\\n----\\n      const r = await sendRequest(\\n        \\\"atomaton.ts\\\",\\n        {\\n          jsonrpc: \\\"2.0\\\", id: 9, method: \\\"tools/call\\\",\\n          params: {\\n            name: \\\"launch_sub_agent\\\",\\n            arguments: { tasks: [{ issue: 7, agent: \\\"engineer\\\" }], summary: \\\"Split the work.\\\" },\\n          },\\n        },\\n        {\\n          ...fakeGhSeam(),\\n          // The parent this run is on. `launch_sub_agent` posts its dispatch comment\\n          // THERE, not on the child, so an unset number skips the very comment this test\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":115}",
+      "tool_call_id": "call_00_6kj0vyog5rf2jrvt0576tniu"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_3hu14wpmgbvmkydirrscbq94",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && python3 - <<'EOF'\\np='src/entrypoints/tools/mcp/mcp.test.ts'\\ns=open(p).read()\\ns=s.replace('''            arguments: {\\n              tasks: [{ issue: 7, agent: \\\"engineer\\\" }],\\n              summary: \\\"Created #230 as a root issue and started it there.\\\",\\n            },''','''            arguments: {\\n              tasks: [{ issue: 7, agent: \\\"engineer\\\" }],\\n            },''')\\ns=s.replace('arguments: { tasks: [{ issue: 7, agent: \\\"engineer\\\" }], summary: \\\"Split the work.\\\" },',\\n            'arguments: { tasks: [{ issue: 7, agent: \\\"engineer\\\" }] },')\\nopen(p,'w').write(s)\\nEOF\\ngrep -n 'summary' src/entrypoints/tools/mcp/mcp.test.ts | sed -n '1,20p'\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"2128:            output: { title: null, summary: null, text: null },\\n2386:     * (#149). No run wrote a summary on this path, so the report carries what GitHub\\n2469:        expect(body).toContain(\\\"<details><summary>Report</summary>\\\");\\n2471:        // No run wrote a summary on this path, and the report says so rather than\\n2473:        expect(body).toContain(\\\"Its closing run wrote no summary.\\\");\\n2893:            arguments: { summary: \\\"The work is delivered — it landed in #123.\\\" },\\n2920:      // The summary is the whole body the person reads to decide whether the work is\\n3061:        params: { name: \\\"request_close_issue\\\", arguments: { summary: \\\"done\\\" } },\\n3115:   * the next turn. Posted here it landed BEFORE that comment, as a summary with no\\n3383:            arguments: { summary: \\\"The work is delivered. It landed in #123.\\\" },\\n3424:            arguments: { summary: \\\"The work is delivered. It landed in #123.\\\" },\\n3454:   * `request_close_issue`'s `summary` is written for the aggregation that reads it, and\\n3473:              summary: \\\"The work is delivered. It landed in #123.\\\\n\\\\n/atomaton\\\",\\n3521:      expect(body).toContain(\\\"<details><summary>Report</summary>\\\");\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":130}",
+      "tool_call_id": "call_00_3hu14wpmgbvmkydirrscbq94"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_po0ujpldtj09ochsmi52jwxt",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '3000,3075p' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294678795100000000000000000000ffffc0a8a89dc29d6b",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Good. Now check the test at 3350-3360 that asserts the dispatch comment contains \"Launched sub-agent(s)\" — fine. And the test at 3115's comment mentions \"a summary with no dispatch line above it\" — that describes the old defect; update wording? It says \"Posted here it landed BEFORE that comment, as a summary with no dispatch line above it\" — this comment is in the test docstring for #231. Now that there is no summary arg, the phrasing \"as a summary with no dispatch line\" is stale. It's a test comment; update for accuracy: \"as a notice with no dispatch line above it\". Let me check that block.\n\nAlso 3454 docstring \"request_close_issue's summary is written for the aggregation that reads it\" — still true. OK.\n\nNow add the two guidance tests. Where to add? Near the launch refuses tests (around 3040-3070) and near the close tests. I'll add them after the PR-refusal tests block, or at the end of the atomaton describe. Let me find a good anchor: after the \"request_close_issue refuses on a pull request run\" test and after \"launch_sub_agent refuses on a pull request run\".\n\nLet me view 3020-3075.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\ndescribe(\\\"mcp/atomaton.ts\\\", () => {\\n  test(\\\"initialize returns server info\\\", async () => {\\n    const r = await sendRequest(\\\"atomaton.ts\\\", {\\n      jsonrpc: \\\"2.0\\\", id: 1, method: \\\"initialize\\\", params: INIT_PARAMS,\\n    });\\n    expect(r.result.serverInfo.name).toBe(\\\"atomaton-mcp-server\\\");\\n  });\\n\\n  test(\\\"launch_sub_agent schema requires issue and agent\\\", async () => {\\n    const r = await sendRequest(\\\"atomaton.ts\\\", {\\n      jsonrpc: \\\"2.0\\\", id: 2, method: \\\"tools/list\\\", params: {},\\n    });\\n    const tool = r.result.tools.find((t: { name: string }) => t.name === \\\"launch_sub_agent\\\");\\n    expect(tool.inputSchema.required).toEqual([\\\"tasks\\\"]);\\n    const item = tool.inputSchema.properties.tasks.items;\\n    expect(item.properties).toHaveProperty(\\\"issue\\\");\\n    expect(item.properties).toHaveProperty(\\\"agent\\\");\\n  });\\n\\n  test(\\\"launch_sub_agent rejects empty tasks\\\", async () => {\\n    const r = await sendRequest(\\\"atomaton.ts\\\", {\\n      jsonrpc: \\\"2.0\\\", id: 3, method: \\\"tools/call\\\",\\n      params: { name: \\\"launch_sub_agent\\\", arguments: { tasks: [] } },\\n    });\\n    expect(r.result.isError).toBe(true);\\n    expect(r.result.content[0].text).toContain(\\\"tasks must be a non-empty list\\\");\\n  });\\n\\n  /**\\n   * A pull request run reviews or fixes one pull request; it does not decompose work.\\n   * `NUMBER` on such a run is the pull request's own number, so a dispatch from here\\n   * would start sub-agents under a node that was never decomposing anything -- and the\\n   * pull request's `atomaton/in-progress` guard would be held by a chain that had\\n   * moved elsewhere. This is the shape #21 walked into.\\n   */\\n  test(\\\"launch_sub_agent refuses on a pull request run\\\", async () => {\\n    const r = await sendRequest(\\n      \\\"atomaton.ts\\\",\\n      {\\n        jsonrpc: \\\"2.0\\\", id: 6, method: \\\"tools/call\\\",\\n        params: { name: \\\"launch_sub_agent\\\", arguments: { tasks: [{ issue: 7, agent: \\\"engineer\\\" }] } },\\n      },\\n      { ...fakeGhSeam(), TYPE: \\\"pr\\\", NUMBER: \\\"21\\\" },\\n    );\\n    expect(r.result.isError).toBe(true);\\n    expect(r.result.content[0].text).toContain(\\\"pull request\\\");\\n  });\\n\\n  /**\\n   * A pull request run has no issue to conclude. Its outcomes are the review it\\n   * posts, a fix pushed with commit_and_push, and merge_pr — and the issue it\\n   * delivers is concluded by a run on that issue, which merge_pr's post-merge\\n   * dispatch starts. Checked before the arguments, because the refusal is about\\n   * the node the run sits on, not about what the caller passed.\\n   */\\n  test(\\\"request_close_issue refuses on a pull request run\\\", async () => {\\n    const r = await sendRequest(\\n      \\\"atomaton.ts\\\",\\n      {\\n        jsonrpc: \\\"2.0\\\", id: 7, method: \\\"tools/call\\\",\\n        params: { name: \\\"request_close_issue\\\", arguments: { summary: \\\"done\\\" } },\\n      },\\n      { ...fakeGhSeam(), TYPE: \\\"pr\\\", NUMBER: \\\"21\\\" },\\n    );\\n    expect(r.result.isError).toBe(true);\\n    expect(r.result.content[0].text).toContain(\\\"pull request\\\");\\n    // And names the route the pull request run has instead.\\n    expect(r.result.content[0].text).toContain(\\\"merge_pr\\\");\\n  });\\n\\n  /**\\n   * `launch_sub_agent` used to dispatch whatever number it was handed, and the\\n   * dispatch comment says \\\"sub-task\\\" whatever the truth is — so an issue that is not\\n   * under this one was announced, counted and waited on as a child. The aggregation\\n   * counts GitHub's sub-issue links, so a dispatch onto an unlinked issue leaves the\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":115}",
+      "tool_call_id": "call_00_po0ujpldtj09ochsmi52jwxt"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_vrn07178x94l8yopme52dxhj",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  /**\\n   * No report argument, and the schema says so.\\n   *\\n   * A report typed here had one reader -- a person opening a fold in the dispatch\\n   * comment -- while the next run reads the task list back off the session, and each\\n   * child's own report arrives on the thread when it closes. Pinned by name, because an\\n   * argument is where the next report gets added.\\n   */\\n  test(\\\"launch_sub_agent advertises no report argument\\\", async () => {\\n    const r = await sendRequest(\\\"atomaton.ts\\\", {\\n      jsonrpc: \\\"2.0\\\", id: 8, method: \\\"tools/list\\\", params: {},\\n    });\\n    const tool = r.result.tools.find((t: { name: string }) => t.name === \\\"launch_sub_agent\\\");\\n    expect(tool.inputSchema.properties).not.toHaveProperty(\\\"summary\\\");\\n  });\\n\\n  test(\\\"launch_sub_agent rejects empty tasks\\\", async () => {\", \"old_string\": \"  test(\\\"launch_sub_agent rejects empty tasks\\\", async () => {\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294679260000000000000000000000ffffc0a854302d3064",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "There's a schema test at 3008: `expect(tool.inputSchema.required).toEqual([\"tasks\"])` — still true. Good. I'll add a schema assertion that `summary` is absent, plus two guidance tests.\n\nInsert after the `launch_sub_agent schema requires issue and agent` test:\n\n```ts\n  /**\n   * The dispatch call carries no report argument, and the schema says so.\n   *\n   * A report typed here had one reader — a person opening a fold in the dispatch\n   * comment — while the next run reads the task list back off the session and each\n   * child's own report arrives on the thread when it closes. The name is pinned\n   * because an argument is where the next report gets added.\n   */\n  test(\"launch_sub_agent advertises no report argument\", async () => {\n    const r = await sendRequest(\"atomaton.ts\", {\n      jsonrpc: \"2.0\", id: 8, method: \"tools/list\", params: {},\n    });\n    const tool = r.result.tools.find((t: { name: string }) => t.name === \"launch_sub_agent\");\n    expect(tool.inputSchema.properties).not.toHaveProperty(\"summary\");\n  });\n```\n\nAnd guidance tests — place after the PR refusal tests (which are about refusals):\n\n```ts\n  /**\n   * A run whose prompt still writes the retired argument gets told what to do with\n   * the sentence, not just that the key is unknown. Strict schemas refuse an unknown\n   * key, and both of these calls end a session — so the refusal is the one turn in\n   * which the agent can still move what it wrote.\n   */\n  test(\"request_close_issue's refusal moves a retired `reason` into `summary`\", async () => {\n    const r = await sendRequest(\"atomaton.ts\", {\n      jsonrpc: \"2.0\", id: 35, method: \"tools/call\",\n      params: { name: \"request_close_issue\", arguments: { reason: \"done\" } },\n    }, { ...fakeGhSeam(), NUMBER: \"5\" });\n    expect(r.result.isError).toBe(true);\n    expect(r.result.content[0].text).toContain(\"`reason` is gone\");\n    expect(r.result.content[0].text).toContain(\"start of `summary`\");\n  });\n\n  test(\"launch_sub_agent's refusal says the retired `summary` kept no report\", async () => {\n    const r = await sendRequest(\"atomaton.ts\", {\n      jsonrpc: \"2.0\", id: 36, method: \"tools/call\",\n      params: { name: \"launch_sub_agent\", arguments: { tasks: [{ issue: 7, agent: \"engineer\" }], summary: \"Split it.\" } },\n    }, { ...fakeGhSeam(), NUMBER: \"3\" });\n    expect(r.result.isError).toBe(true);\n    expect(r.result.content[0].text).toContain(\"`summary` is gone\");\n    expect(r.result.content[0].text).toContain(\"keeps your turn\");\n  });\n```\n\nCareful: `sendRequest` signature is (server, request, env?). Yes, as used.\n\nNote: for request_close_issue with `{reason:\"done\"}` and no summary — the strict parse fails on two counts: missing summary and unrecognized reason. Guidance fires (it's called on failure) and returns the reason message. Good.\n\nFor launch: parse fails on unrecognized summary. Guidance returns. Good.\n\nLet me add these.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/mcp.test.ts.",
+      "tool_call_id": "call_00_vrn07178x94l8yopme52dxhj"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_sibw827za05e4v1bkl3g7v3w",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    // And names the route the pull request run has instead.\\n    expect(r.result.content[0].text).toContain(\\\"merge_pr\\\");\\n  });\\n\\n  /**\\n   * A prompt that still writes a retired argument gets told what to do with the\\n   * sentence, not only that the key is unknown. The schema is strict, and both calls\\n   * end a session -- so this refusal is the one turn in which the agent can still move\\n   * what it wrote somewhere it is read.\\n   */\\n  test(\\\"request_close_issue's refusal moves a retired `reason` into `summary`\\\", async () => {\\n    const r = await sendRequest(\\n      \\\"atomaton.ts\\\",\\n      {\\n        jsonrpc: \\\"2.0\\\", id: 35, method: \\\"tools/call\\\",\\n        params: { name: \\\"request_close_issue\\\", arguments: { reason: \\\"done\\\" } },\\n      },\\n      { ...fakeGhSeam(), NUMBER: \\\"5\\\" },\\n    );\\n    expect(r.result.isError).toBe(true);\\n    expect(r.result.content[0].text).toContain(\\\"`reason` is gone\\\");\\n    expect(r.result.content[0].text).toContain(\\\"start of `summary`\\\");\\n  });\\n\\n  test(\\\"launch_sub_agent's refusal names the retired `summary` and keeps the turn\\\", async () => {\\n    const r = await sendRequest(\\n      \\\"atomaton.ts\\\",\\n      {\\n        jsonrpc: \\\"2.0\\\", id: 36, method: \\\"tools/call\\\",\\n        params: {\\n          name: \\\"launch_sub_agent\\\",\\n          arguments: { tasks: [{ issue: 7, agent: \\\"engineer\\\" }], summary: \\\"Split the work.\\\" },\\n        },\\n      },\\n      { ...fakeGhSeam(), NUMBER: \\\"3\\\" },\\n    );\\n    expect(r.result.isError).toBe(true);\\n    expect(r.result.content[0].text).toContain(\\\"`summary` is gone\\\");\\n    expect(r.result.content[0].text).toContain(\\\"keeps your turn\\\");\\n  });\", \"old_string\": \"    // And names the route the pull request run has instead.\\n    expect(r.result.content[0].text).toContain(\\\"merge_pr\\\");\\n  });\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/mcp.test.ts.",
+      "tool_call_id": "call_00_sibw827za05e4v1bkl3g7v3w"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_1luj5sd6qcs8vuxmvagdl9cl",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '3130,3160p' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294680322700000000000000000000ffffc0a8731afb2e0c",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Also update the #231 test docstring wording at ~3115 (\"as a summary with no dispatch line above it\"). Let me check and update.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"   */\\n  test(\\\"launch_sub_agent refuses an issue that is not a child of this one\\\", async () => {\\n    const dir = mkdtempSync(join(tmpdir(), \\\"atomaton-launch-parent-\\\"));\\n    const log = join(dir, \\\"gh.log\\\");\\n    try {\\n      const r = await sendRequest(\\n        \\\"atomaton.ts\\\",\\n        {\\n          jsonrpc: \\\"2.0\\\", id: 30, method: \\\"tools/call\\\",\\n          params: { name: \\\"launch_sub_agent\\\", arguments: { tasks: [{ issue: 7, agent: \\\"engineer\\\" }] } },\\n        },\\n        {\\n          ...fakeGhSeam(),\\n          NUMBER: \\\"3\\\",\\n          FAKE_GH_LOG: log,\\n          FAKE_GH_RESPONSES: JSON.stringify([\\n            // #7's parent is nothing — a root issue, not a child of #3.\\n            { match: [\\\"api\\\", \\\"graphql\\\", \\\"num=7\\\"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },\\n          ]),\\n        },\\n      );\\n      expect(r.result.isError).toBe(true);\\n      expect(r.result.content[0].text).toContain(\\\"not a child of #3\\\");\\n      const calls = readFileSync(log, \\\"utf8\\\").trim().split(\\\"\\\\n\\\").map((line) => JSON.parse(line) as string[]);\\n      // Nothing was started, and no marker was written on #7: the refusal happens\\n      // before the dispatch, not after it.\\n      expect(calls.some((c) => c[0] === \\\"workflow\\\" && c[1] === \\\"run\\\")).toBe(false);\\n      expect(calls.some((c) => c.includes(\\\"POST\\\") && c.some((a) => a.includes(\\\"issues/7/comments\\\")))).toBe(false);\\n    } finally {\\n      removeTemp(dir);\\n    }\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":114}",
+      "tool_call_id": "call_00_1luj5sd6qcs8vuxmvagdl9cl"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_7h75eta4x5pckbitf6c3ah9o",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '3160,3200p' src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"    }\\n  });\\n\\n  /**\\n   * #231: a dispatch that refused every task still posted the report on the parent.\\n   *\\n   * The run's own report is not this call's to post when nothing was dispatched: the\\n   * tool refuses, the session stays OPEN, and the agent writes its result comment on\\n   * the next turn. Posted here it landed BEFORE that comment, as a summary with no\\n   * dispatch line above it, and read as a conclusion the next comment contradicted.\\n   */\\n  test(\\\"launch_sub_agent posts no comment when nothing was dispatched\\\", async () => {\\n    const dir = mkdtempSync(join(tmpdir(), \\\"atomaton-launch-nothing-\\\"));\\n    const log = join(dir, \\\"gh.log\\\");\\n    try {\\n      const r = await sendRequest(\\n        \\\"atomaton.ts\\\",\\n        {\\n          jsonrpc: \\\"2.0\\\", id: 34, method: \\\"tools/call\\\",\\n          params: {\\n            name: \\\"launch_sub_agent\\\",\\n            arguments: {\\n              tasks: [{ issue: 7, agent: \\\"engineer\\\" }],\\n            },\\n          },\\n        },\\n        {\\n          ...fakeGhSeam(),\\n          NUMBER: \\\"3\\\",\\n          FAKE_GH_LOG: log,\\n          FAKE_GH_RESPONSES: JSON.stringify([\\n            // #7 is a root issue, so the one task is refused and nothing is dispatched.\\n            { match: [\\\"api\\\", \\\"graphql\\\", \\\"num=7\\\"], stdout: JSON.stringify({ data: { repository: { issue: { parent: null } } } }) },\\n          ]),\\n        },\\n      );\\n      expect(r.result.isError).toBe(true);\\n      const calls = readFileSync(log, \\\"utf8\\\").trim().split(\\\"\\\\n\\\").map((line) => JSON.parse(line) as string[]);\\n      // No dispatch, and no comment on the parent: the refusal is the whole outcome.\\n      expect(calls.some((c) => c[0] === \\\"workflow\\\" && c[1] === \\\"run\\\")).toBe(false);\\n      expect(calls.some((c) => c[0] === \\\"issue\\\" && c[1] === \\\"comment\\\" && c[2] === \\\"3\\\")).toBe(false);\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":112}",
+      "tool_call_id": "call_00_7h75eta4x5pckbitf6c3ah9o"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_1g9ykc0cmu478dia368cqw6q",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  /**\\n   * #231: a dispatch that refused every task still posted a comment on the parent.\\n   *\\n   * The run's own words are not this call's to post when nothing was dispatched: the\\n   * tool refuses, the session stays OPEN, and the agent writes its result comment on\\n   * the next turn. Posted here it landed BEFORE that comment, as a notice with no\\n   * dispatch line above it, and read as a conclusion the next comment contradicted.\\n   */\", \"old_string\": \"  /**\\n   * #231: a dispatch that refused every task still posted the report on the parent.\\n   *\\n   * The run's own report is not this call's to post when nothing was dispatched: the\\n   * tool refuses, the session stays OPEN, and the agent writes its result comment on\\n   * the next turn. Posted here it landed BEFORE that comment, as a summary with no\\n   * dispatch line above it, and read as a conclusion the next comment contradicted.\\n   */\", \"path\": \"/home/runner/work/atomaton/atomaton/src/entrypoints/tools/mcp/mcp.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/tools/mcp/mcp.test.ts.",
+      "tool_call_id": "call_00_1g9ykc0cmu478dia368cqw6q"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_e4cxuy0waqna4did1fc4jro9",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '246,285p' tests/contract/agent-prompts.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294681228200000000000000000000ffffc0a8a81a320ada",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now `tests/contract/agent-prompts.test.ts`:\n- the comment block above the test (~lines 250-271) says every call carries a text argument including launch_sub_agent — update.\n- the test pins three arg names — update.\n\nLet me view lines 245-285.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"      prompt,\\n      \\\"the part that goes missing keeps its floor and no ceiling\\\",\\n    ).toContain(\\\"with no ceiling, because it is the one that goes missing.\\\");\\n\\n    const atomaton = readFileSync(\\\"src/content/agent-definitions/atomaton.md\\\", \\\"utf8\\\");\\n    expect(\\n      atomaton,\\n      \\\"the close call must add a judgement rather than restate the thread\\\",\\n    ).toContain(\\\"The conclusion is written once.\\\");\\n  });\\n\\n  /**\\n   * And it has to say where the report goes when there is no turn left to write it in.\\n   *\\n   * A session-ending tool call stops the inference loop the moment it returns, so a run\\n   * that meant to report afterwards never does. Measured: 27 of 108 engineer runs left\\n   * no report at all, and the shape they share is the successful one -- the run opened\\n   * its pull request and stopped. The report is not missing from those runs, it is in a\\n   * tool argument, and nothing said so.\\n   *\\n   * Every one of those calls carries a text argument now, `launch_sub_agent` included.\\n   * That one had none until this change: three of the four session-ending calls carried\\n   * the report and the fourth did not, which is an exception rather than a gap in the\\n   * contract. Pinned by argument name, because the name is the part a run has to get\\n   * right.\\n   */\\n  test(\\\"the report has a named place in every call that ends the session\\\", () => {\\n    const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\");\\n    expect(prompt).toContain(\\\"the report goes in that\\\");\\n    expect(prompt, \\\"and before the call, because there is no after\\\").toContain(\\n      \\\"before you make the call\\\",\\n    );\\n    for (const argument of [\\\"`body`\\\", \\\"`summary`\\\", \\\"`reason`\\\"]) {\\n      expect(prompt, `the report's place must be named: ${argument}`).toContain(argument);\\n    }\\n  });\\n\\n  // Pins the two rules the agents were observed breaking, because each failure\\n  // looked like success: the reviewer answered `LGTM` in prose and merged nothing,\\n  // and it announced that it would wait for a check with nothing able to resume\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":114}",
+      "tool_call_id": "call_00_e4cxuy0waqna4did1fc4jro9"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_5f1e5tsssailwkb37x4ozyu2",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  /**\\n   * And it has to say where what a run has to say goes, when there is no turn left to\\n   * write it in.\\n   *\\n   * A session-ending tool call stops the inference loop the moment it returns, so a run\\n   * that meant to report afterwards never does. Measured: 27 of 108 engineer runs left\\n   * no report at all, and the shape they share is the successful one -- the run opened\\n   * its pull request and stopped. The report is not missing from those runs, it is in the\\n   * call, and nothing said so.\\n   *\\n   * Two things changed since that measurement. The names of the arguments are no longer\\n   * the prompt's to write down: the prompt is adopted by a project and the tool schemas\\n   * are not, so a paragraph that lists them goes stale in an adopter's tree the moment an\\n   * argument is renamed. The tool's own description carries the name, and this test holds\\n   * the general sentence that sends a run there. And a call whose work IS the record (a\\n   * dispatch) carries no report at all, so the contract cannot promise one everywhere --\\n   * only that no run loses what it meant to say inside a call.\\n   */\\n  test(\\\"the report's place in a session-ending call is the tool's to name\\\", () => {\\n    const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\");\\n    expect(prompt, \\\"what a run has to say goes in the call itself\\\").toContain(\\n      \\\"goes in the call itself\\\",\\n    );\\n    expect(prompt, \\\"and before the call, because there is no after\\\").toContain(\\n      \\\"before you make the call\\\",\\n    );\\n    expect(prompt, \\\"which argument carries it is the tool's answer\\\").toContain(\\n      \\\"its description says so\\\",\\n    );\\n    // The retired enumeration, pinned by the phrase that opened it: a prompt that lists\\n    // argument names is one that has to be edited in every adopter's tree.\\n    expect(prompt, \\\"the prompt must not enumerate the argument names\\\").not.toContain(\\n      \\\"for a pull request,\\\",\\n    );\\n  });\", \"old_string\": \"  /**\\n   * And it has to say where the report goes when there is no turn left to write it in.\\n   *\\n   * A session-ending tool call stops the inference loop the moment it returns, so a run\\n   * that meant to report afterwards never does. Measured: 27 of 108 engineer runs left\\n   * no report at all, and the shape they share is the successful one -- the run opened\\n   * its pull request and stopped. The report is not missing from those runs, it is in a\\n   * tool argument, and nothing said so.\\n   *\\n   * Every one of those calls carries a text argument now, `launch_sub_agent` included.\\n   * That one had none until this change: three of the four session-ending calls carried\\n   * the report and the fourth did not, which is an exception rather than a gap in the\\n   * contract. Pinned by argument name, because the name is the part a run has to get\\n   * right.\\n   */\\n  test(\\\"the report has a named place in every call that ends the session\\\", () => {\\n    const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\");\\n    expect(prompt).toContain(\\\"the report goes in that\\\");\\n    expect(prompt, \\\"and before the call, because there is no after\\\").toContain(\\n      \\\"before you make the call\\\",\\n    );\\n    for (const argument of [\\\"`body`\\\", \\\"`summary`\\\", \\\"`reason`\\\"]) {\\n      expect(prompt, `the report's place must be named: ${argument}`).toContain(argument);\\n    }\\n  });\", \"path\": \"/home/runner/work/atomaton/atomaton/tests/contract/agent-prompts.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in tests/contract/agent-prompts.test.ts.",
+      "tool_call_id": "call_00_5f1e5tsssailwkb37x4ozyu2"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_c2sdd5p50d6u6jkjx9iqepsw",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"for a pull request,\\\" src/content/prompt-template.md; grep -n \\\"goes in the call itself\\\\|before you make the call\\\\|its description says so\\\" src/content/prompt-template.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294682084300000000000000000000ffffc0a854305628bd",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Careful: `expect(prompt).not.toContain(\"for a pull request,\")` — the prompt-template might contain that phrase elsewhere (e.g., \"a sub-issue's pull request targets...\"). Let me check. Also the em-dash version: my new text has \"a call whose own work is the record — a dispatch — takes no report at all.\" No \"for a pull request,\". Let me grep.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"296:goes in the call itself, and you write it there before you make the call. Which\\n297:argument carries it belongs to the tool: its description says so, and a call whose own\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":115}",
+      "tool_call_id": "call_00_c2sdd5p50d6u6jkjx9iqepsw"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_xk5jlokfeg0g9m8ui0upo3kg",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '20,40p' tests/e2e/request-close-issue.e2e.test.ts && echo ---- && sed -n '45,58p' tests/e2e/request-close-issue-aggregation.e2e.test.ts && grep -n \\\"reason\\\\|All done\\\\|Shipped it\\\" tests/e2e/request-close-issue.e2e.test.ts tests/e2e/request-close-issue-aggregation.e2e.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294682488400000000000000000000ffffc0a85422c6b14b",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Good: \"for a pull request,\" absent. But there's a wrapped-line concern: \"goes in the call itself\" is on line 296 with \"you write it there before you make the call\" — contiguous in the file within a line. Fine.\n\n\"its description says so\" is on one line. Good.\n\nNow e2e tests: request-close-issue.e2e.test.ts:31 and request-close-issue-aggregation.e2e.test.ts:52.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"import { join } from \\\"node:path\\\";\\nimport { CLOSE_REQUEST_LINE } from \\\"../../src/domain/work/close-request.ts\\\";\\nimport { setupFakeGh } from \\\"./fake-gh.ts\\\";\\nimport { startMockLlmServer } from \\\"./mock-llm-server.ts\\\";\\nimport { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from \\\"./run-atoma.ts\\\";\\n\\nconst ATOMA_MCP_SCRIPT = join(REPO_ROOT, \\\"dist/.github/atomaton-runtime/tools/mcp/atomaton.ts\\\");\\n\\ndescribe.skipIf(!atomaAvailable)(\\\"E2E: real atoma binary + real mcp/atomaton.ts\\\", () => {\\n  test(\\\"agent calls request_close_issue for a human-authored issue\\\", async () => {\\n    const mock = startMockLlmServer([\\n      { toolCalls: [{ id: \\\"call_1\\\", name: \\\"request_close_issue\\\", arguments: { reason: \\\"All done\\\", summary: \\\"Shipped it.\\\" } }] },\\n    ]);\\n    const fakeGh = setupFakeGh([\\n      // concludeIssue: `gh issue view 99 --repo ... --json author`\\n      { match: [\\\"issue\\\", \\\"view\\\"], stdout: JSON.stringify({ author: { id: \\\"1\\\", is_bot: false, login: \\\"alice\\\", name: \\\"Alice\\\" } }) },\\n      // resolveNotify: `gh api repos/.../issues/99 --jq ...`\\n      { match: [\\\"issues/99\\\"], stdout: JSON.stringify({ body: \\\"no tag\\\", login: \\\"alice\\\", type: \\\"User\\\" }) },\\n      { match: [\\\"issue\\\", \\\"comment\\\"] },\\n    ]);\\n\\n----\\n/** The parent whose children are all done, and the child being concluded. */\\nconst PARENT = 5;\\nconst CHILD = 99;\\n\\ndescribe.skipIf(!atomaAvailable)(\\\"E2E: the aggregation branch of request_close_issue\\\", () => {\\n  test(\\\"a bot-authored close walks the aggregation gate, and writes its marker the way gh accepts\\\", async () => {\\n    const mock = startMockLlmServer([\\n      { toolCalls: [{ id: \\\"call_1\\\", name: \\\"request_close_issue\\\", arguments: { reason: \\\"All done\\\", summary: \\\"Shipped it.\\\" } }] },\\n      // A second turn, with no tool call. `request_close_issue` is session-ending only\\n      // on the outcomes that `needsAttention` excludes, and `dispatched` is one of\\n      // those -- so the run is handed one more turn and then ends. A queue of one\\n      // response leaves that turn unanswered, and the run fails on a 500 from the mock\\n      // rather than on anything this file is about.\\n      { content: \\\"Done.\\\" },\\ntests/e2e/request-close-issue.e2e.test.ts:31:      { toolCalls: [{ id: \\\"call_1\\\", name: \\\"request_close_issue\\\", arguments: { reason: \\\"All done\\\", summary: \\\"Shipped it.\\\" } }] },\\ntests/e2e/request-close-issue.e2e.test.ts:99:      expect(body).toContain(\\\"All done\\\");\\ntests/e2e/request-close-issue.e2e.test.ts:102:      expect(body.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(body.indexOf(\\\"All done\\\"));\\ntests/e2e/request-close-issue-aggregation.e2e.test.ts:52:      { toolCalls: [{ id: \\\"call_1\\\", name: \\\"request_close_issue\\\", arguments: { reason: \\\"All done\\\", summary: \\\"Shipped it.\\\" } }] },\\ntests/e2e/request-close-issue-aggregation.e2e.test.ts:81:      // aggregation branch — the whole reason this file exists.\\ntests/e2e/request-close-issue-aggregation.e2e.test.ts:151:      // same reason.\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":117}",
+      "tool_call_id": "call_00_xk5jlokfeg0g9m8ui0upo3kg"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_4dz6xcn10vw9g4j97bfhpzcq",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '90,110p' tests/e2e/request-close-issue.e2e.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"      // Prove the REAL chain ran: a comment was posted mentioning the\\n      // resolved human author, WITHOUT closing the issue (no `gh issue\\n      // close` call), and the tool's real (not hardcoded) response text\\n      // made it into the session.\\n      const calls = fakeGh.calls();\\n      expect(calls.some((c) => c[0] === \\\"issue\\\" && c[1] === \\\"close\\\")).toBe(false);\\n      const commentCall = calls.find((c) => c.includes(\\\"comment\\\"));\\n      const body = commentCall?.join(\\\" \\\") ?? \\\"\\\";\\n      expect(body).toContain(\\\"@alice\\\");\\n      expect(body).toContain(\\\"All done\\\");\\n      // The ask comes before the report, because it is the sentence the reader acts on.\\n      expect(body.indexOf(CLOSE_REQUEST_LINE)).toBeGreaterThan(-1);\\n      expect(body.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(body.indexOf(\\\"All done\\\"));\\n\\n      const session = JSON.parse(readFileSync(join(dir, \\\"session.json\\\"), \\\"utf8\\\")) as {\\n        messages: { role: string; content: string }[];\\n      };\\n      const toolMessage = session.messages.find((m) => m.role === \\\"tool\\\");\\n      // What the agent is told is that it is done -- not that a tool declined\\n      // something. The refusal it used to read here is what ended up in the\\n      // report a person then had to read (#933).\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":113}",
+      "tool_call_id": "call_00_4dz6xcn10vw9g4j97bfhpzcq"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_7dha6xy80qr01sesd9sqb6du",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && python3 - <<'EOF'\\np='tests/e2e/request-close-issue.e2e.test.ts'\\ns=open(p).read()\\ns=s.replace('arguments: { reason: \\\"All done\\\", summary: \\\"Shipped it.\\\" }',\\n            'arguments: { summary: \\\"All done. Shipped it.\\\" }')\\nopen(p,'w').write(s)\\np='tests/e2e/request-close-issue-aggregation.e2e.test.ts'\\ns=open(p).read()\\ns=s.replace('arguments: { reason: \\\"All done\\\", summary: \\\"Shipped it.\\\" }',\\n            'arguments: { summary: \\\"All done. Shipped it.\\\" }')\\nopen(p,'w').write(s)\\nEOF\\ngrep -n \\\"All done\\\" tests/e2e/request-close-issue.e2e.test.ts tests/e2e/request-close-issue-aggregation.e2e.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"tests/e2e/request-close-issue.e2e.test.ts:31:      { toolCalls: [{ id: \\\"call_1\\\", name: \\\"request_close_issue\\\", arguments: { summary: \\\"All done. Shipped it.\\\" } }] },\\ntests/e2e/request-close-issue.e2e.test.ts:99:      expect(body).toContain(\\\"All done\\\");\\ntests/e2e/request-close-issue.e2e.test.ts:102:      expect(body.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(body.indexOf(\\\"All done\\\"));\\ntests/e2e/request-close-issue-aggregation.e2e.test.ts:52:      { toolCalls: [{ id: \\\"call_1\\\", name: \\\"request_close_issue\\\", arguments: { summary: \\\"All done. Shipped it.\\\" } }] },\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":127}",
+      "tool_call_id": "call_00_7dha6xy80qr01sesd9sqb6du"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_hbwup390qjeheqlxng3r3jpd",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    const comment = closeRequestComment({ notify: \\\"alice\\\", body: \\\"Atomaton: work complete.\\\\n\\\\nIt landed.\\\" });\\n    const [first] = comment.split(\\\"\\\\n\\\");\\n    expect(first).toBe(`@alice ${CLOSE_REQUEST_LINE}`);\\n    // The report follows it rather than burying it.\\n    expect(comment.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(comment.indexOf(\\\"It landed.\\\"));\", \"old_string\": \"    const comment = closeRequestComment({ notify: \\\"alice\\\", body: \\\"Atomaton: work complete.\\\\n\\\\n**Reason:** merged\\\" });\\n    const [first] = comment.split(\\\"\\\\n\\\");\\n    expect(first).toBe(`@alice ${CLOSE_REQUEST_LINE}`);\\n    // The report follows it rather than burying it.\\n    expect(comment.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(comment.indexOf(\\\"**Reason:**\\\"));\", \"path\": \"/home/runner/work/atomaton/atomaton/src/domain/work/close-request.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294683275400000000000000000000ffffc0a8babd3d808a",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now close-request.test.ts fixture: \"Atomaton: work complete.\\n\\n**Reason:** merged\" and ordering assertion. Update to a neutral body.\n\nFixtures: body \"Atomaton: work complete.\\n\\n**Reason:** merged\" → \"Atomaton: work complete.\\n\\nIt landed.\" Then assertion indexOf(\"It landed.\") — but \"still posts...\" test uses \"Atomaton: work complete.\" which contains \"work complete\", so use \"It landed\" as the marker.\n\nEdit:\n```ts\nconst comment = closeRequestComment({ notify: \"alice\", body: \"Atomaton: work complete.\\n\\nIt landed.\" });\n...\nexpect(comment.indexOf(CLOSE_REQUEST_LINE)).toBeLessThan(comment.indexOf(\"It landed.\"));\n```\nAnd the comment line \"// The report follows it rather than burying it.\" fine.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/domain/work/close-request.test.ts.",
+      "tool_call_id": "call_00_hbwup390qjeheqlxng3r3jpd"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_utfv0nee6f87s1ax4xjsdkvw",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn \\\"reason\\\" src/entrypoints/tools/mcp/atomaton.ts src/entrypoints/tools/lib/conclude_issue.ts | head -20 && echo ==== && grep -rn \\\"summary\\\" src/entrypoints/tools/mcp/atomaton.ts | head -20\"}"
+          }
+        },
+        {
+          "id": "call_01_nnv509zwcnunhta6og315fu0",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn \\\"**Reason:**\\\" --include=*.ts --include=*.md src/ tests/ | head -10; grep -rn \\\"reason:\\\" tests/ src/ --include=*.ts | grep -v \\\"stateReason\\\\|endedBecause\\\\|reason:\\\" | head -5\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294683652700000000000000000000ffffc0a85430551fcd",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now check for any remaining references to the removed args in src/ and tests/ (excluding generated).\n\ngrep: `args.reason` in atomaton.ts (reload still uses args.reason — fine), `summary` in atomaton.ts.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/tools/mcp/atomaton.ts:337:          \\\"already on the parent's thread as a report, and this issue's own report is posted. The reason \\\" +\\nsrc/entrypoints/tools/mcp/atomaton.ts:368:  reason: z\\nsrc/entrypoints/tools/mcp/atomaton.ts:386: * useful thing left to do. A run that died here would take the reason with it.\\nsrc/entrypoints/tools/mcp/atomaton.ts:402:    // reload, and returning `session_ends` would end the run with the reason inside\\nsrc/entrypoints/tools/mcp/atomaton.ts:429:        `(reload ${next} of ${limit}). Reason: ${args.reason}`,\\nsrc/entrypoints/tools/mcp/atomaton.ts:508:      \\\"reason\\\" in args\\nsrc/entrypoints/tools/mcp/atomaton.ts:509:        ? \\\"`reason` is gone: put that sentence at the start of `summary`, which is now the whole \\\" +\\nsrc/entrypoints/tools/lib/conclude_issue.ts:131:  // `ended: \\\"done\\\"` for the same reason as the branch above: this run is over and the\\n====\\n79:  summary: z\\n278:  const summary = args.summary.trim();\\n279:  if (!summary) mcpFail(\\\"summary must be a non-empty string\\\");\\n286:  log(`Concluding issue #${issueNumber}: summary=${JSON.stringify(summary)}`);\\n293:    result = await concludeIssue(issueNumber, summary);\\n306:  const concluded = `Issue #${issueNumber} is concluded: your summary is on the issue.`;\\n488:      \\\"summary\\\" in args\\n489:        ? \\\"`summary` is gone: this call takes no report, and the dispatch comment is its record. \\\" +\\n498:      \\\"this. Your summary is posted to the issue as the comment body, and phase-gating/\\\" +\\n509:        ? \\\"`reason` is gone: put that sentence at the start of `summary`, which is now the whole \\\" +\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":119}",
+      "tool_call_id": "call_00_utfv0nee6f87s1ax4xjsdkvw"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/shared/code-search.ts:160:export function unreachableQueryReason(\\nsrc/shared/code-search.test.ts:12:  unreachableQueryReason,\\nsrc/shared/code-search.test.ts:228:    expect(unreachableQueryReason(coverage)).toBeUndefined();\\nsrc/shared/code-search.test.ts:237:describe(\\\"unreachableQueryReason\\\", () => {\\nsrc/shared/code-search.test.ts:239:    expect(unreachableQueryReason(1)).toBeUndefined();\\nsrc/shared/code-search.test.ts:243:    expect(unreachableQueryReason(MIN_QUERY_COVERAGE)).toBeUndefined();\\nsrc/shared/code-search.test.ts:252:    const reason = unreachableQueryReason(0.12)!;\\nsrc/domain/work/search-streak.ts:116: * by it, which is what kept a now-false invariant looking true — see `refusalReason`,\\nsrc/domain/work/search-streak.ts:147:export function refusalReason(streak: number, limit = MAX_SEARCHES_WITHOUT_OPENING): string | undefined {\\nsrc/domain/work/progress.ts:123:export function stopReason(counts: {\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":129}",
+      "tool_call_id": "call_01_nnv509zwcnunhta6og315fu0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_w2sjxt2aom153dl0r6uqhe2q",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && printenv ATOMATON_MACHINERY_ROOT; bun run typecheck 2>&1 | tail -5 && bun run synth 2>&1 | tail -8\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294683955100000000000000000000ffffc0a84220be2fa7",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Good. No remaining `**Reason:**` in src/tests.\n\nNow run typecheck + synth + tests. First synth (pretest does it anyway) — run `bun run typecheck && bun run synth && bun run test`. Tests could take a while. Let me run typecheck+synth first, then the full test with a generous timeout. Note #17's note: inside agent execution `ATOMATON_MACHINERY_ROOT` is inherited and 3 tests fail for environment reasons; use `env -u ATOMATON_MACHINERY_ROOT bun run test`. Let me check if that env var is set.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"/home/runner/work/_temp/atomaton-machinery\\n$ tsc --noEmit\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-runner.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-sub-issue-closed.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-validate-pr.yml:\\nsynth-workflows: generated 9 workflow file(s) from 9 source(s) in src/workflows/\\nbuild-dist: bundled 62 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/machinery -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/scripts\\nbuild-dist: bundled 14 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.48 (111 files)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":5055}",
+      "tool_call_id": "call_00_w2sjxt2aom153dl0r6uqhe2q"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_6pbybci6jmurso78qqra5ant",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && env -u ATOMATON_MACHINERY_ROOT bun run test 2>&1 | tail -40\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294684725900000000000000000000ffffc0a8babdfb4e1c",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "ATOMATON_MACHINERY_ROOT is set (this is a run inside machinery), so the 3 known environment failures will appear. Use `env -u ATOMATON_MACHINERY_ROOT bun run test`.\n\nRun the full suite now (timeout maybe 900s).",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) mcp/files.ts > edit refuses text that is not there [95.56ms]\\n(pass) mcp/files.ts > write creates the directories above the file [92.01ms]\\n(pass) mcp/files.ts > a path outside the roots is refused and says what is allowed [94.77ms]\\n(pass) mcp/search.ts > starts without loading the reranker, and advertises both searches [93.57ms]\\n\\nsrc/entrypoints/tools/hooks/shell_guard.test.ts:\\n(pass) shell_guard.ts > searching without opening anything > an ordinary amount of searching is allowed [70.18ms]\\n(pass) shell_guard.ts > searching without opening anything > at the limit the search is refused, and the run is not [127.45ms]\\n(pass) shell_guard.ts > searching without opening anything > opening a file clears the count [134.29ms]\\n(pass) shell_guard.ts > searching without opening anything > another run's searching does not count against this one [133.83ms]\\n(pass) shell_guard.ts > searching without opening anything > no run directory means no rule [164.54ms]\\n(pass) shell_guard.ts > searching without opening anything > work that is not searching neither climbs nor clears the count [133.15ms]\\n(pass) shell_guard.ts > searching without opening anything > past the limit, work that is not searching is still allowed [184.94ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > names the replacement for each disabled CLI [49.71ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > a path that merely contains a routed name is not the program [40.93ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > the routed programs are still refused where they are run [51.62ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > a routed program is refused whatever shell construct invokes it [113.81ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > a routed name in a loop header or an argument is still just a name [57.36ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > a substitution inside double quotes still runs [7.71ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > a heredoc body is data, and a command after it is still a command [35.17ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > allows safe commands [8.24ms]\\n(pass) shell_guard.ts > routing to the MCP tool that does the job > no longer inspects interpreters, eval, or obfuscated spellings [57.12ms]\\n(pass) shell_guard.ts > raw Git mutations > are routed to the github tools [37.90ms]\\n(pass) shell_guard.ts > raw Git mutations > a merge names the tool that brings a base into a branch [7.52ms]\\n(pass) shell_guard.ts > raw Git mutations > a read-only spelling of a mutating subcommand is allowed [58.45ms]\\n(pass) shell_guard.ts > raw Git mutations > the write spellings of those same subcommands stay refused [62.45ms]\\n(pass) shell_guard.ts > raw Git mutations > a mutating git command inside a substitution is refused [23.87ms]\\n(pass) shell_guard.ts > raw Git mutations > read-only Git inspection stays allowed [33.19ms]\\n(pass) shell_guard.ts > reading another process's environment > is refused whatever reads it [38.18ms]\\n(pass) shell_guard.ts > reading another process's environment > leaves the rest of /proc alone [24.49ms]\\n(pass) shell_guard.ts > reading another process's environment > does not catch the word environment [8.05ms]\\n(pass) shell_guard.ts > working_directory > outside the repository is refused [7.23ms]\\n(pass) shell_guard.ts > working_directory > inside the repository is fine [8.08ms]\\n(pass) shell_guard.ts > the arguments the guard no longer inspects > declared variables and stdin text are passed through [25.82ms]\\n(pass) shell_guard.ts > unparseable input is refused [7.19ms]\\n\\n 2143 pass\\n 0 fail\\n 6338 expect() calls\\nRan 2143 tests across 169 files. [90.98s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":91507}",
+      "tool_call_id": "call_00_6pbybci6jmurso78qqra5ant"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_707a9cod7dq6kplgzzbzub93",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && env -u ATOMATON_MACHINERY_ROOT bun test src/entrypoints/tools/mcp/mcp.test.ts -t \\\"advertises no report argument\\\" 2>&1 | tail -6; env -u ATOMATON_MACHINERY_ROOT bun test src/entrypoints/tools/mcp/mcp.test.ts -t \\\"refusal\\\" 2>&1 | tail -8\", \"timeout_seconds\": 180}"
+          }
+        },
+        {
+          "id": "call_01_8uq0jmjsblhsukc9re2umlez",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --porcelain && git diff --stat\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294694279200000000000000000000ffffc0a8a577202028",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "All 2143 tests pass.\n\nNow let me review the diff carefully for omissions and unrelated changes.\n\nAlso: check that `dist/` isn't tracked (gitignored) — `git status --porcelain` should show only src/ and tests/ changes.\n\nAlso verify the guidance compiles/behaves: the tests I added passed (they're in the suite: 2143 pass includes mcp tests). Let me confirm the new tests actually ran. grep the output? The tail didn't show. Let me run just those test names to confirm.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\n 1 pass\\n 119 filtered out\\n 0 fail\\n 1 expect() calls\\nRan 1 test across 1 file. [107.00ms]\\n(pass) mcp/atomaton.ts > request_close_issue's refusal moves a retired `reason` into `summary` [95.84ms]\\n(pass) mcp/atomaton.ts > launch_sub_agent's refusal names the retired `summary` and keeps the turn [92.34ms]\\n\\n 2 pass\\n 118 filtered out\\n 0 fail\\n 6 expect() calls\\nRan 2 tests across 1 file. [201.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":435}",
+      "tool_call_id": "call_00_707a9cod7dq6kplgzzbzub93"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" M src/content/agent-definitions/atomaton.md\\n M src/content/prompt-template.md\\n M src/domain/work/close-request.test.ts\\n M src/entrypoints/tools/lib/conclude_issue.ts\\n M src/entrypoints/tools/mcp/atomaton.ts\\n M src/entrypoints/tools/mcp/github.ts\\n M src/entrypoints/tools/mcp/mcp.test.ts\\n M tests/contract/agent-prompts.test.ts\\n M tests/e2e/request-close-issue-aggregation.e2e.test.ts\\n M tests/e2e/request-close-issue.e2e.test.ts\\n src/content/agent-definitions/atomaton.md          |   5 +-\\n src/content/prompt-template.md                     |   9 +-\\n src/domain/work/close-request.test.ts              |   4 +-\\n src/entrypoints/tools/lib/conclude_issue.ts        |  24 +++--\\n src/entrypoints/tools/mcp/atomaton.ts              | 107 ++++++++-------------\\n src/entrypoints/tools/mcp/github.ts                |   2 +-\\n src/entrypoints/tools/mcp/mcp.test.ts              |  86 +++++++++++++----\\n tests/contract/agent-prompts.test.ts               |  38 +++++---\\n .../request-close-issue-aggregation.e2e.test.ts    |   2 +-\\n tests/e2e/request-close-issue.e2e.test.ts          |   2 +-\\n 10 files changed, 157 insertions(+), 122 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":129}",
+      "tool_call_id": "call_01_8uq0jmjsblhsukc9re2umlez"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_428rzbxrncawby706baoq9x0",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git diff src/entrypoints/tools/mcp/atomaton.ts src/entrypoints/tools/lib/conclude_issue.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294694679700000000000000000000ffffc0a8b304393120",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Clean: only intended files, no dist, no version bump.\n\nLet me review the full diff to check for accidental issues.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"diff --git a/src/entrypoints/tools/lib/conclude_issue.ts b/src/entrypoints/tools/lib/conclude_issue.ts\\nindex 0f8c4fb..ef7a80d 100644\\n--- a/src/entrypoints/tools/lib/conclude_issue.ts\\n+++ b/src/entrypoints/tools/lib/conclude_issue.ts\\n@@ -79,7 +79,7 @@ function mustSucceed(result: { code: number; stdout: string; stderr: string }, w\\n  * `domain/work/close-request.ts` for the reports that came out of answering it\\n  * the other way.\\n  */\\n-export async function concludeIssue(issue: number, reason: string, summary: string): Promise<ConcludeIssueResult> {\\n+export async function concludeIssue(issue: number, summary: string): Promise<ConcludeIssueResult> {\\n   const repo = process.env.GITHUB_REPOSITORY ?? \\\"\\\";\\n   // The exit code decides, not just the presence of output. An unread author is\\n   // not a human author: closing the issue outright and telling a person \\\"this was\\n@@ -98,14 +98,14 @@ export async function concludeIssue(issue: number, reason: string, summary: stri\\n   // `domain/work/actor.ts`'s, shared with every other reader of the same fact.\\n   const isBot = !isHumanAuthor(authorInfo.author?.is_bot);\\n \\n-  let body = `Atomaton: the agent on this issue considers its work complete.\\\\n\\\\n**Reason:** ${reason}`;\\n-  if (summary) {\\n-    body += `\\\\n\\\\n${summary}`;\\n-  }\\n+  // The summary IS the comment body. It used to sit under one `**Reason:**` line that\\n+  // said the same judgement in a second sentence -- measured at 44.8% of a close comment\\n+  // on #4, restating the co\\n\\n[8972 characters dropped from the middle; 6000 shown]\\n\\nson) mcpFail(\\\"reason must be a non-empty string\\\");\\n+  const summary = args.summary.trim();\\n+  if (!summary) mcpFail(\\\"summary must be a non-empty string\\\");\\n \\n   const issueNumber = nodeNumber();\\n   if (issueNumber === undefined) {\\n     mcpFail(\\\"request_close_issue could not read this run's own issue number (the environment's NUMBER is unset or not a positive integer)\\\");\\n   }\\n \\n-  log(`Concluding issue #${issueNumber}: reason=${JSON.stringify(reason)}`);\\n+  log(`Concluding issue #${issueNumber}: summary=${JSON.stringify(summary)}`);\\n \\n   // The module's own type, not a copy of its shape. The copy had already fallen\\n   // behind: `concludeIssue` gained the aggregation outcome and this annotation\\n   // hid it.\\n   let result: ConcludeIssueResult;\\n   try {\\n-    result = await concludeIssue(issueNumber, reason, summary);\\n+    result = await concludeIssue(issueNumber, summary);\\n   } catch (e) {\\n     const message = (e as Error).message ?? String(e);\\n     log(`concludeIssue failed for #${issueNumber}: ${message}`);\\n@@ -338,7 +303,7 @@ async function handleRequestCloseIssue(args: z.infer<typeof REQUEST_CLOSE_ISSUE_\\n   // last thing it heard before ending — wrote it into its report, so a person\\n   // asking for work got a paragraph about which tool declined to do what (#933).\\n   // Who may close the issue is decided here; what the reader sees is the comment.\\n-  const concluded = `Issue #${issueNumber} is concluded: your reason and summary are on the issue.`;\\n+  const concluded = `Issue #${issueNumber} is concluded: your summary is on the issue.`;\\n \\n   if (result.outcome !== \\\"closed\\\") {\\n     // The close request is the comment this run ends on: the session ends here\\n@@ -404,8 +369,9 @@ const RELOAD_ENVIRONMENT_SCHEMA = z.object({\\n     .string()\\n     .min(1)\\n     .describe(\\n-      \\\"What you need the environment to have that it does not, in one sentence. Recorded on the issue so a \\\" +\\n-        \\\"person reading it later can see why the run restarted.\\\",\\n+      \\\"What you need the environment to have that it does not, in one sentence — and the report this \\\" +\\n+        \\\"run leaves, because the session ends on this call. Recorded on the issue in the handoff comment, \\\" +\\n+        \\\"so a person reading it later can see why the run restarted.\\\",\\n     ),\\n });\\n \\n@@ -514,18 +480,22 @@ const { tools: TOOLS, dispatch } = buildMcpTools([\\n       \\\"Each sub-issue's body is the hand-off: write there how the work divides among its siblings, \\\" +\\n       \\\"any interface they share, and what has already been decided — the child starts from its own \\\" +\\n       \\\"issue's thread, not from this one's. \\\" +\\n-      \\\"Put your report in `summary`: the atomaton session ends immediately after this call \\\" +\\n-      \\\"returns, so there is no turn afterwards in which to write one. \\\" +\\n+      \\\"This call takes no report: it ends the session, and the dispatch comment is its record. \\\" +\\n       \\\"The atomaton will be automatically re-invoked when ALL sub-issues are closed.\\\",\\n     schema: LAUNCH_SUB_AGENT_SCHEMA,\\n     handler: handleLaunchSubAgent,\\n+    guidance: (args) =>\\n+      \\\"summary\\\" in args\\n+        ? \\\"`summary` is gone: this call takes no report, and the dispatch comment is its record. \\\" +\\n+          \\\"The refusal keeps your turn — write the report as your closing message instead.\\\"\\n+        : undefined,\\n   }),\\n   defineMcpTool({\\n     name: \\\"request_close_issue\\\",\\n     description:\\n       \\\"Conclude work on YOUR CURRENT issue and end your session. This is the ONLY \\\" +\\n       \\\"correct way to finish an issue -- do NOT just stop responding without calling \\\" +\\n-      \\\"this. Your reason and summary are posted to the issue, and phase-gating/\\\" +\\n+      \\\"this. Your summary is posted to the issue as the comment body, and phase-gating/\\\" +\\n       \\\"aggregation is triggered for its parent when this is a sub-issue. Whether the \\\" +\\n       \\\"close happens now or the issue's author is asked to make it is this tool's \\\" +\\n       \\\"decision and not yours -- it is the same call either way, and your session \\\" +\\n@@ -534,6 +504,11 @@ const { tools: TOOLS, dispatch } = buildMcpTools([\\n       \\\"post-merge dispatch, not this tool.\\\",\\n     schema: REQUEST_CLOSE_ISSUE_SCHEMA,\\n     handler: handleRequestCloseIssue,\\n+    guidance: (args) =>\\n+      \\\"reason\\\" in args\\n+        ? \\\"`reason` is gone: put that sentence at the start of `summary`, which is now the whole \\\" +\\n+          \\\"comment body.\\\"\\n+        : undefined,\\n   }),\\n   defineMcpTool({\\n     name: \\\"reload_environment\\\",\\n\",\"stderr\":\"\",\"output_truncated\":true,\"execution_time_ms\":115}",
+      "tool_call_id": "call_00_428rzbxrncawby706baoq9x0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_uhzt4fehcoxonvtmvt7kydqz",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git diff src/content/ tests/contract/agent-prompts.test.ts src/entrypoints/tools/mcp/github.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294694972600000000000000000000ffffc0a8babd303e8a",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The diff looks right. One consideration: the conclude_issue comment says \"measured at 44.8% of a close comment on #4\" — this is a measurement reference in `src/entrypoints` (code, not `src/content`), so repo history/issue numbers are allowed there (the codebase does this everywhere, e.g. #933). Fine.\n\nBut wait: is \"44.8% ... on #4\" self-contained enough? It's a \"why not\" comment: the alternative (a separate one-line reason) was measured to restate. Good.\n\nLet me view the full diff of prompt-template and atomaton.md, plus the mcp.test diff quickly, to check for wording/wrapping problems.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"diff --git a/src/content/agent-definitions/atomaton.md b/src/content/agent-definitions/atomaton.md\\nindex 3fc9513..66a7ab3 100644\\n--- a/src/content/agent-definitions/atomaton.md\\n+++ b/src/content/agent-definitions/atomaton.md\\n@@ -171,12 +171,13 @@ On re-entry:\\n \\n `request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with a plain final response.\\n \\n+`launch_sub_agent` takes no report. It ends the session, and the dispatch comment on this issue is its record. What a conclusion is for here belongs in the sub-issue bodies, because that is where each child starts.\\n+\\n **The conclusion is written once.** Whatever this run was waiting on is on the\\n thread above it — a child's report, a merged pull request, the comment the issue\\n asked for. `summary` adds what that does not already say: what you verified, and\\n the judgement you reached from verifying it. It points at the artifact instead of\\n-repeating it. `reason` is one sentence, because it is printed directly above the\\n-summary; anything longer is the same judgement written twice.\\n+repeating it, and it is the whole comment this call posts.\\n \\n ## Non-negotiable Rules\\n \\ndiff --git a/src/content/prompt-template.md b/src/content/prompt-template.md\\nindex 0e3365a..b54e46c 100644\\n--- a/src/content/pr\\n\\n[678 characters dropped from the middle; 6000 shown]\\n\\no say\\n+goes in the call itself, and you write it there before you make the call. Which\\n+argument carries it belongs to the tool: its description says so, and a call whose own\\n+work is the record — a dispatch — takes no report at all. A report you meant to write\\n+afterwards is never written.\\n \\n A quotation is a copy, not a recollection. Copy what a tool returned out of the\\n result rather than writing it again from memory: the wording is usually the whole\\ndiff --git a/src/entrypoints/tools/mcp/github.ts b/src/entrypoints/tools/mcp/github.ts\\nindex 8d07e6a..f28c1c0 100644\\n--- a/src/entrypoints/tools/mcp/github.ts\\n+++ b/src/entrypoints/tools/mcp/github.ts\\n@@ -308,7 +308,7 @@ const LIST_ISSUES_SCHEMA = z.object({\\n \\n const CREATE_PR_SCHEMA = z.object({\\n   title: z.string().min(1).describe(\\\"Concise pull request title.\\\"),\\n-  body: z.string().optional().describe(\\\"Pull request body in GitHub-flavored Markdown. Atomaton adds issue traceability metadata automatically.\\\"),\\n+  body: z.string().optional().describe(\\\"Pull request body in GitHub-flavored Markdown — and where your report goes when this call ends the session. Atomaton adds issue traceability metadata automatically.\\\"),\\n   reviewer: z\\n     .string()\\n     .optional()\\ndiff --git a/tests/contract/agent-prompts.test.ts b/tests/contract/agent-prompts.test.ts\\nindex 72a9e09..b6b4a1c 100644\\n--- a/tests/contract/agent-prompts.test.ts\\n+++ b/tests/contract/agent-prompts.test.ts\\n@@ -255,29 +255,39 @@ describe(\\\"agent prompt contracts\\\", () => {\\n   });\\n \\n   /**\\n-   * And it has to say where the report goes when there is no turn left to write it in.\\n+   * And it has to say where what a run has to say goes, when there is no turn left to\\n+   * write it in.\\n    *\\n    * A session-ending tool call stops the inference loop the moment it returns, so a run\\n    * that meant to report afterwards never does. Measured: 27 of 108 engineer runs left\\n    * no report at all, and the shape they share is the successful one -- the run opened\\n-   * its pull request and stopped. The report is not missing from those runs, it is in a\\n-   * tool argument, and nothing said so.\\n-   *\\n-   * Every one of those calls carries a text argument now, `launch_sub_agent` included.\\n-   * That one had none until this change: three of the four session-ending calls carried\\n-   * the report and the fourth did not, which is an exception rather than a gap in the\\n-   * contract. Pinned by argument name, because the name is the part a run has to get\\n-   * right.\\n+   * its pull request and stopped. The report is not missing from those runs, it is in the\\n+   * call, and nothing said so.\\n+   *\\n+   * Two things changed since that measurement. The names of the arguments are no longer\\n+   * the prompt's to write down: the prompt is adopted by a project and the tool schemas\\n+   * are not, so a paragraph that lists them goes stale in an adopter's tree the moment an\\n+   * argument is renamed. The tool's own description carries the name, and this test holds\\n+   * the general sentence that sends a run there. And a call whose work IS the record (a\\n+   * dispatch) carries no report at all, so the contract cannot promise one everywhere --\\n+   * only that no run loses what it meant to say inside a call.\\n    */\\n-  test(\\\"the report has a named place in every call that ends the session\\\", () => {\\n+  test(\\\"the report's place in a session-ending call is the tool's to name\\\", () => {\\n     const prompt = readFileSync(\\\"src/content/prompt-template.md\\\", \\\"utf8\\\");\\n-    expect(prompt).toContain(\\\"the report goes in that\\\");\\n+    expect(prompt, \\\"what a run has to say goes in the call itself\\\").toContain(\\n+      \\\"goes in the call itself\\\",\\n+    );\\n     expect(prompt, \\\"and before the call, because there is no after\\\").toContain(\\n       \\\"before you make the call\\\",\\n     );\\n-    for (const argument of [\\\"`body`\\\", \\\"`summary`\\\", \\\"`reason`\\\"]) {\\n-      expect(prompt, `the report's place must be named: ${argument}`).toContain(argument);\\n-    }\\n+    expect(prompt, \\\"which argument carries it is the tool's answer\\\").toContain(\\n+      \\\"its description says so\\\",\\n+    );\\n+    // The retired enumeration, pinned by the phrase that opened it: a prompt that lists\\n+    // argument names is one that has to be edited in every adopter's tree.\\n+    expect(prompt, \\\"the prompt must not enumerate the argument names\\\").not.toContain(\\n+      \\\"for a pull request,\\\",\\n+    );\\n   });\\n \\n   // Pins the two rules the agents were observed breaking, because each failure\\n\",\"stderr\":\"\",\"output_truncated\":true,\"execution_time_ms\":119}",
+      "tool_call_id": "call_00_uhzt4fehcoxonvtmvt7kydqz"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_rfupn8bsnqilqpf9lt9kaeja",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '292,300p' src/content/prompt-template.md | cat -A | sed 's/\\\\$$//' | awk '{print length($0), $0}' | head\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294695343900000000000000000000ffffc0a87e7630672b",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "All good. One more check: the prompt text lines are wrapped ~78 chars; mine are a bit long (line 297 \"argument carries it belongs to the tool: its description says so, and a call whose own\" = ~84). Let me check the wrapping and fix to match ~78 columns, keeping pinned phrases on one line (they are).\n\nLet me view the paragraph.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"19 or come back to it.\\n0 \\n79 Some outcomes end the session inside a tool call, because something else starts\\n83 the moment it returns. There is no turn after one of those, so what you have to say\\n79 goes in the call itself, and you write it there before you make the call. Which\\n86 argument carries it belongs to the tool: its description says so, and a call whose own\\n105 work is the record M-bM-^@M-^T a dispatch M-bM-^@M-^T takes no report at all. A report you meant to write\\n28 afterwards is never written.\\n0 \\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":119}",
+      "tool_call_id": "call_00_rfupn8bsnqilqpf9lt9kaeja"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_pa5k8may3madm1hs8xddmiaw",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"Some outcomes end the session inside a tool call, because something else starts\\nthe moment it returns. There is no turn after one of those, so what you have to\\nsay goes in the call itself, and you write it there before you make the call.\\nWhich argument carries it belongs to the tool: its description says so, and a\\ncall whose own work is the record — a dispatch — takes no report at all. A report\\nyou meant to write afterwards is never written.\", \"old_string\": \"Some outcomes end the session inside a tool call, because something else starts\\nthe moment it returns. There is no turn after one of those, so what you have to say\\ngoes in the call itself, and you write it there before you make the call. Which\\nargument carries it belongs to the tool: its description says so, and a call whose own\\nwork is the record — a dispatch — takes no report at all. A report you meant to write\\nafterwards is never written.\", \"path\": \"/home/runner/work/atomaton/atomaton/src/content/prompt-template.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294695693300000000000000000000ffffc0a8731a468c42",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Byte lengths include the em dash as multibyte; visual length is shorter. Let me count characters properly with python.\n\nLines:\n1. \"Some outcomes end the session inside a tool call, because something else starts\" = 79\n2. \"the moment it returns. There is no turn after one of those, so what you have to say\" = 83\n3. \"goes in the call itself, and you write it there before you make the call. Which\" = 79\n4. \"argument carries it belongs to the tool: its description says so, and a call whose own\" = 86\n5. \"work is the record — a dispatch — takes no report at all. A report you meant to write\" = 87 chars visually\n\nThe original file wraps around 78-80. Let me rewrap to ~78 without splitting pinned phrases:\n\n```\nSome outcomes end the session inside a tool call, because something else starts\nthe moment it returns. There is no turn after one of those, so what you have to\nsay goes in the call itself, and you write it there before you make the call.\nWhich argument carries it belongs to the tool: its description says so, and a\ncall whose own work is the record — a dispatch — takes no report at all. A report\nyou meant to write afterwards is never written.\n```\n\nCheck the pins: \"goes in the call itself\" is on one line ✓; \"before you make the call\" on one line ✓; \"its description says so\" on one line ✓.\n\nCompute lengths:\n- \"the moment it returns. There is no turn after one of those, so what you have to\" = 80\n- \"say goes in the call itself, and you write it there before you make the call.\" = 78\n- \"Which argument carries it belongs to the tool: its description says so, and a\" = 77\n- \"call whose own work is the record — a dispatch — takes no report at all. A report\" = 81\n- \"you meant to write afterwards is never written.\" = 47\n\nGood enough.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/prompt-template.md.",
+      "tool_call_id": "call_00_pa5k8may3madm1hs8xddmiaw"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_sttexn94u6gnjq8w6qhxs5qp",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && env -u ATOMATON_MACHINERY_ROOT bun test tests/contract/agent-prompts.test.ts 2>&1 | tail -6\", \"timeout_seconds\": 180}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) agent prompt contracts > the prompt says a check needing a real secret happens after the merge [0.32ms]\\n\\n 25 pass\\n 0 fail\\n 106 expect() calls\\nRan 25 tests across 1 file. [9.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":131}",
+      "tool_call_id": "call_00_sttexn94u6gnjq8w6qhxs5qp"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_q22qr0z050x5zsoj2gbz1gr1",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn \\\"considers its work complete\\\\|Reason:\\\" --include=*.ts src/ tests/ | head -20\"}"
+          }
+        },
+        {
+          "id": "call_01_sfjzuf6ahxf8abbg76br2n6v",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn \\\"summary\\\" src/content/agent-definitions/*.md | head -10 && grep -rn \\\"launch_sub_agent\\\" src/content/skills/*/*.md 2>/dev/null | head\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294696547900000000000000000000ffffc0a8628d17b3b3",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Now let me also check the atomaton.md formatting (my added paragraph is one long line — the file has long lines elsewhere, fine).\n\nNext: does any other test assert the old close comment shape? Let me grep tests for \"considers its work complete\" and \"Reason\".",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/adapters/adapters.test.ts:788:      const result = issueWith([{ number: 1, title: \\\"c\\\", state: \\\"CLOSED\\\", stateReason: \\\"COMPLETED\\\" }]);\\nsrc/adapters/adapters.test.ts:793:      const result = issueWith([{ number: 1, title: \\\"c\\\", state: \\\"CLOSED\\\", stateReason: \\\"NOT_PLANNED\\\" }]);\\nsrc/adapters/adapters.test.ts:799:      const result = issueWith([{ number: 1, title: \\\"c\\\", state: \\\"CLOSED\\\", stateReason: \\\"DUPLICATE\\\" }]);\\nsrc/adapters/adapters.test.ts:813:      const result = issueWith([{ number: 1, title: \\\"c\\\", state: \\\"OPEN\\\", stateReason: \\\"REOPENED\\\" }]);\\nsrc/entrypoints/machinery/post_result_comment.ts:973:    escapedMentionsReason: notACall ? \\\"not-a-call\\\" : \\\"unknown\\\",\\nsrc/entrypoints/machinery/post_result_comment.test.ts:1186:      escapedMentionsReason: \\\"not-a-call\\\",\\nsrc/entrypoints/tools/lib/conclude_issue.ts:101:  // The summary IS the comment body. It used to sit under one `**Reason:**` line that\\nsrc/entrypoints/tools/lib/conclude_issue.ts:104:  const body = `Atomaton: the agent on this issue considers its work complete.\\\\n\\\\n${summary}`;\\nsrc/entrypoints/tools/mcp/mcp.test.ts:2923:      expect(body).not.toContain(\\\"**Reason:**\\\");\\nsrc/entrypoints/tools/mcp/atomaton.ts:429:        `(reload ${next} of ${limit}). Reason: ${args.reason}`,\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":125}",
+      "tool_call_id": "call_00_q22qr0z050x5zsoj2gbz1gr1"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/content/agent-definitions/architect.md:35:  # a cheap model, and what comes back is one summary. A decision that needs six\\nsrc/content/agent-definitions/architect.md:39:  # So this entry is a fallback rather than a habit: reach for it when a summary\\nsrc/content/agent-definitions/architect.md:87:summary cannot carry it: an interface's exact signature, the order of two calls, a\\nsrc/content/agent-definitions/atomaton.md:172:`request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with a plain final response.\\nsrc/content/agent-definitions/atomaton.md:178:asked for. `summary` adds what that does not already say: what you verified, and\\nsrc/content/agent-definitions/engineer.md:8:# archives the previous session first, then the run continues from a summary plus\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":120}",
+      "tool_call_id": "call_01_sfjzuf6ahxf8abbg76br2n6v"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_pd86d5coc7e6wkzhhqp3az4z",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"report\\\" src/entrypoints/tools/mcp/atomaton.ts | head -20\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294696865500000000000000000000ffffc0a8b3c323aa79",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "All consistent.\n\nOne more consideration: the `launch_sub_agent` tool result / notes mention \"report\" anywhere? Let me grep the handler result text for \"report\". The handler returns `note: \"Every sub-agent is running...\"` — no report. But the handler's error path at line ~337 says \"already on the parent's thread as a report\" — that's the request_close_issue stalled text. Fine.\n\nAlso `handleLaunchSubAgent`'s comment at 183 I rewrote. Any other place in atomaton.ts referring to the launch report? Check \"report\" occurrences.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"68:  // No report argument, deliberately.\\n72:  // report argument here had one reader -- a person opening the fold -- while the next\\n73:  // run reads the task list back off the session, and each child's own report arrives on\\n186:  // records. It used to fold the run's report in behind a `<details>` as well, and that\\n187:  // report had exactly one reader: the comment is tagged `exclude` (below), so the next\\n303:  // last thing it heard before ending — wrote it into its report, so a person\\n337:          \\\"already on the parent's thread as a report, and this issue's own report is posted. The reason \\\" +\\n350:    // that: report it on the parent issue\\\" -- and there is no such tool.\\n361:    // one thing #143 removed: the marker write cannot report `undetermined` on a\\n372:      \\\"What you need the environment to have that it does not, in one sentence — and the report this \\\" +\\n385: * agent keeps its turn and can switch to reporting what it found, which is the\\n403:    // it. Neither leaves the agent able to report.\\n483:      \\\"This call takes no report: it ends the session, and the dispatch comment is its record. \\\" +\\n489:        ? \\\"`summary` is gone: this call takes no report, and the dispatch comment is its record. \\\" +\\n490:          \\\"The refusal keeps your turn — write the report as your closing message instead.\\\"\\n526:      \\\"`environment.setup_commands` in .github/atomaton/config.yaml, say so in your report, and a person merges \\\" +\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":115}",
+      "tool_call_id": "call_00_pd86d5coc7e6wkzhhqp3az4z"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_j6knj5c1pln9e0xrhrx5gatl",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck && bun run synth >/dev/null && env -u ATOMATON_MACHINERY_ROOT bun run test 2>&1 | tail -6\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179294697169400000000000000000000ffffc0a8a1196de9bc",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Line 68 comment: \"a person opening the fold\" — but the fold is gone now, so the comment is describing what used to happen. It says \"Text typed into a report argument here had one reader -- a person opening the fold\". That's history, which is the \"why not\" for a removed arg; acceptable but let me tighten to avoid referencing a fold that no longer exists as if current. It's past tense (\"had\"), fine.\n\nNow run the full suite once more after the prompt rewrap (contract test passed; the full suite already passed before the rewrap, which only affects markdown). Let me run typecheck + synth + full test again to be safe and to match the declared check. Actually the declared check is `bun run typecheck`, `bun run synth`, `bun run test`. I ran all three, but I changed prompt-template.md after. The prompt is not typechecked; contract test passed. To be rigorous, run the whole check again (90s). Do it.\n\nAlso run the e2e? `bun run test` excludes tests/e2e (separate script, needs atoma binary). The two e2e files I changed are opt-in and skipped without the binary. Should I run test:e2e? It needs a prebuilt atoma binary; `atomaAvailable` check will skip. Running it would just skip. Not needed; I'll note it.\n\nLet me run the full check.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) shell_guard.ts > unparseable input is refused [7.28ms]\\n\\n 2143 pass\\n 0 fail\\n 6338 expect() calls\\nRan 2143 tests across 169 files. [90.69s]\\n\",\"stderr\":\"$ tsc --noEmit\\n$ bun run src/synth-workflows.ts && bun run src/build-dist.ts\\n\",\"output_truncated\":false,\"execution_time_ms\":96286}",
+      "tool_call_id": "call_00_j6knj5c1pln9e0xrhrx5gatl"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 3,
+      "event_count": 4,
       "session_number": "15",
-      "snapshot_hash": "5e8de963d7dd28b8633c5a3d5f67f0eec9332e2d2be2abbbc3087d92288cfb89",
+      "snapshot_hash": "6f0e58915ed3e10df5eba5a36612bbb19e1a503d8d729924da14ae95f587154a",
       "type": "issue",
       "version": 1
     }
@@ -3021,6 +4511,23 @@
         }
       },
       "started": "2026-10-25T16:30:00Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-25T16:51:10Z",
+      "ended_because": "stopped",
+      "iterations": 55,
+      "messages": 321,
+      "seconds": 390,
+      "server_calls": {
+        "files": {
+          "edit": 24
+        },
+        "shell": {
+          "bash": 34
+        }
+      },
+      "started": "2026-10-25T16:44:40Z"
     }
   ]
 }
