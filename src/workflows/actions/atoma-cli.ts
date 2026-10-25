@@ -150,11 +150,20 @@ import { TypedOutputsStep } from "./base.ts";
  * nothing in this tree caps a tool result anymore. An older binary ignores
  * `context_limit` and runs with the larger cap -- the shape this tree's own session
  * shrink used to cover, and why this raise rides with the removal of that shrink.
+ *
+ * **The hooks actually reach the loop.** Written by the core from v0.4.4
+ * (yuma-seno/atoma#14): v0.4.3's compaction gathered the `before_compaction` scripts
+ * inside the block that builds the MCP registry and an empty vec shadowed them below,
+ * so the hooks -- this tree's archive among them -- silently never ran. The compaction
+ * itself was unaffected. The first real compaction, observed on #149's chain, is what
+ * showed it: 190 messages replaced, no hook line in the log, no archive on the data
+ * branch. Every compaction this tree has recorded was against a hookless binary; the
+ * archive guarantee the raise above describes holds only from v0.4.4.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.3";
+export const ATOMA_DEFAULT_VERSION = "v0.4.4";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.4.3). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.4.4). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead
