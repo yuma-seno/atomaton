@@ -23,7 +23,7 @@ describe("dispatch_pr_validation.ts", () => {
   }
 
   /**
-   * A real remote and a clone of it, because `existsOnOrigin` asks git rather than a
+   * A real remote and a clone of it, because the `origin` read asks git rather than a
    * fake: the question is whether `origin` has the branch, and a stubbed answer would
    * only assert this test's idea of that.
    */

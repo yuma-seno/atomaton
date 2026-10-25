@@ -38,6 +38,15 @@ export type PrHeadRefusal =
   | { kind: "fork" }
   /** The answer named no branch at all. */
   | { kind: "no-branch" }
+  /**
+   * `origin` could not be read, so whether this repository has the branch is unknown.
+   *
+   * Separate from `unreadable`, which is about the pull request, and from
+   * `not-on-origin`, which is an answer. A person reading "not a branch of this
+   * repository" over a network blip is given advice about a problem that does not
+   * exist; this kind is the retry.
+   */
+  | { kind: "origin-unreadable"; detail: string }
   /** A name git itself would not accept as a branch (`HEAD`, whitespace, `..`, ...). */
   | { kind: "not-a-branch-name"; branch: string }
   /** A branch name this repository does not have. */
@@ -65,6 +74,8 @@ export function describePrHeadRefusal(number: number, refusal: PrHeadRefusal): s
       return `pull request #${number} names '${refusal.branch}', which is not a branch name`;
     case "not-on-origin":
       return `pull request #${number}'s head branch '${refusal.branch}' is not a branch of this repository`;
+    case "origin-unreadable":
+      return `pull request #${number}'s head branch could not be checked against this repository: ${refusal.detail}`;
   }
 }
 
@@ -102,5 +113,7 @@ function advice(number: number, refusal: PrHeadRefusal): string {
     case "not-a-branch-name":
     case "not-on-origin":
       return "Comment again once the pull request has a head branch in this repository. Nothing was dispatched.";
+    case "origin-unreadable":
+      return "Comment again once this repository's branches can be read. Nothing was dispatched.";
   }
 }
