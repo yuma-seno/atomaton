@@ -18,15 +18,17 @@ was written: by identity rather than by a rule someone set, on every path and
 branch tried, through `git push` and through the API alike, and with no permission
 in the token's own set that grants it.
 
-**That reading is held open by what a refusal says, not by trying harder.**
-Everything a pipeline actually *does* is a command, and a command goes in
-`.github/atomaton/config.yaml`, which you can write — two workflows that already
-ship run them. So make that change instead of testing this one. If a workflow write
-ever does come back refused, its own words are the measurement that the paragraph
-above has stopped being true: quote them in your report and stop. Do not retry it
-as another token, another request shape or another branch, and do not ask a person
-to paste a workflow file in its place — a pipeline outside the reviewed path is
-what the refusal exists to prevent, and the file you can write already does the job.
+**What would show this has changed is a workflow write that is ACCEPTED**, or a
+refusal whose own words name a permission the token could be granted. Neither is
+an answer you are hoping for, so this is not a question to put to the endpoint:
+make the change the paragraph implies. Everything a pipeline actually *does* is a
+command, and a command goes in `.github/atomaton/config.yaml`, which you can write
+— two workflows that already ship run them. The expected refusal is confirmation
+rather than news: if one does arrive, quote its own words in your report and stop.
+Do not retry it as another token, another request shape or another branch, and do
+not ask a person to paste a workflow file in its place — a pipeline outside the
+reviewed path is what the refusal exists to prevent, and the file you can write
+already does the job.
 
 ## The environment
 

@@ -154,8 +154,8 @@ publish_draft({
   against either.
 - **That is one run's measurement, and nothing runs it again.** If the route has
   to be reconsidered — a person asks for it, or the branch refuses something that
-  has to be delivered — `probe` is the instrument that settles it: `endpoint` is
-  the mode that stores nothing, and its status and body belong in your report,
+  has to be delivered — `probe` is the instrument to measure it with: `endpoint`
+  is the mode that stores nothing, and its status and body belong in your report,
   where the next reader can see that the paragraph above has aged. Do not run
   `upload` to find out — it stores the one thing this section says nothing removes
   — and do not reach for `probe` to deliver a file: delivering is `publish_draft`'s
