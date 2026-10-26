@@ -25,7 +25,9 @@ describe("agent prompt contracts", () => {
    *
    * The close rule is the same boundary seen from the end of the run: an issue whose
    * deliverable is the answer is not the issue `request_close_issue` was written for,
-   * and the issue stays open for the person who asked.
+   * and the issue stays open for the person who asked. The tool half -- its description
+   * stopped calling itself the only correct way -- is pinned in `mcp/mcp.test.ts` as
+   * "request_close_issue is for delivered work, and names the exit it is not".
    *
    * Pinned as single-line fragments, because these files are wrapped prose and a phrase
    * spanning a line break also picks up whatever indentation wraps it.
@@ -55,6 +57,19 @@ describe("agent prompt contracts", () => {
     expect(atomaton, "a person's question stays open until they decide").toContain(
       "It is not for a question a person asked",
     );
+    // #209's absolute, one file over: `Re-entry and Aggregation` said "Never replace the
+    // call with a plain final response", which is the ending the tool's description now
+    // names for a question or an investigation. A run reads both, so the rule is scoped
+    // to the two post-merge outcomes the section is about, and points at the other
+    // ending rather than leaving a reader to find it.
+    expect(
+      atomaton,
+      "the never-end-plainly rule is scoped to the post-merge outcomes it is about",
+    ).toContain("For those two post-merge outcomes, never replace the call");
+    expect(
+      atomaton,
+      "and the unconditional form, which is what produced #209, cannot come back",
+    ).not.toContain("Never replace the call with a plain final response");
   });
 
   /**
