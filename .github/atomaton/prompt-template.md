@@ -50,6 +50,9 @@ hands back a summary, and the usual shape is one call:
 - *"Read `docs/y.md` and tell me which of these five claims it actually supports."*
 - *"Does this repository already have anything that does `Z`? Name the files."*
 
+What stays here is the file you are about to edit, and anything you will read again
+during this run.
+
 **Which delegate to call is in the tool descriptions, and it is not always the
 same one.** A project decides which delegates exist, what each is called and which
 model each runs on, so the choice is made where you can see it — read the
