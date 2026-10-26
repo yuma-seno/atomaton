@@ -5771,8 +5771,8 @@
   {
     "path": "sessions/issue-216/reviewer.json",
     "agent": "reviewer",
-    "messages": 50,
-    "calls": 27,
+    "messages": 86,
+    "calls": 46,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -5782,14 +5782,14 @@
     "tools": {
       "atoma_builtin__load_skill": 1,
       "get_pr": 1,
-      "get_issue_comments": 1,
-      "get_pr_reviews": 1,
-      "list_pr_review_comments": 1,
-      "read": 7,
-      "grep": 12,
-      "get_check_runs": 1,
-      "check_merge_readiness": 1,
-      "merge_pr": 1
+      "get_issue_comments": 2,
+      "get_pr_reviews": 2,
+      "list_pr_review_comments": 2,
+      "read": 14,
+      "grep": 18,
+      "get_check_runs": 2,
+      "check_merge_readiness": 2,
+      "merge_pr": 2
     },
     "acts": {},
     "runs": [
@@ -5816,6 +5816,29 @@
           }
         },
         "started": "2026-10-25T17:59:34Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-26T00:55:13Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "messages": 86,
+        "seconds": 110,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 6,
+            "read": 7
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1,
+            "merge_pr": 1
+          }
+        },
+        "started": "2026-10-26T00:53:23Z"
       }
     ]
   },
