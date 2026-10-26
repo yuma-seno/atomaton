@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #403: e2e suite reports red for reasons that are not the change: it inherits the run's TYPE/NUMBER, and its first atoma spawn can hit a 5s shell timeout\n\nTwo defects in `tests/e2e/`, both measured on 2026-10-26 while working #220 (PR #401). They are one issue because they share the files and the effect: a required check goes red for something the diff did not do.\n\n## 1. The spawned `atoma` inherits the agent run's `TYPE`/`NUMBER`\n\n`tests/e2e/run-atoma.ts:133` spawns with `env: { ...process.env, ...opts.env }`, and the tools read the node kind from the environment (`src/adapters/runner/run-node.ts:33`, `nodeType()` reads `TYPE`). So a `bun run test:e2e` started from inside an agent run hands the test's atoma the *run's* node.\n\nMeasured: an agent run whose env carries `TYPE=pr`, `NUMBER=401` (the re-entry after opening a pull request) fails\n\n```\n(fail) E2E: real atoma binary + real mcp/atomaton.ts > agent calls launch_sub_agent through the real MCP server\nTool 'launch_sub_agent' failed: ... launch_sub_agent is for an issue run, and this run is on a pull request ...\n```\n\nat `tests/e2e/launch-sub-agent.e2e.test.ts:118`, and the same suite in the same tree with `env -u TYPE -u NUMBER` gives `9 pass, 0 fail`. Nothing about the change under test produced either result.\n\nFix shape: `runAtoma` should drop the run-scoped names (`TYPE`, `NUMBER`, `NOTIFY`, `SESSION_*`, whatever `AGENT_ENV_NAMES` lists) from the inherited environment unless `opts.env` sets them, rather than letting an ambient run decide what the fixture is.\n\n## 2. `printf shell-ok` has a 5-second budget, and CI spent 5.14 of them\n\nCI on PR #401 (`atomaton-check` run 40218786744, job 121245613709) failed `atomaton-tools` at \"Run the end-to-end suite against the real CLI\", annotation at `tests/e2e/run-agent.e2e.test.ts:92`:\n\n```\n- \"exit_code\": 0, \"status\": \"completed\", \"stdout\": \"shell-ok\", \"execution_time_ms\": 183\n+ \"execution_time_ms\": 5140, \"exit_code\": 143, \"output_truncated\": false, \"status\": \"timeout\", \"stderr\": \"\", \"stdout\": \"\"\n```\n\nThe test asks the real shell server to run `printf shell-ok` with `timeout_seconds: 5` (`tests/e2e/run-agent.e2e.test.ts:44`); exit 143 is the server's own SIGTERM at that budget. The server behaved as asked — the number is the test's, and it is below what a loaded `ubuntu-latest` gives a cold `bun run` of `dist/.../shell.ts`. Locally the same call returns in 183 ms, and the whole 9-test suite in 798 ms, so there is no defect in the shell server to chase: the budget is too tight for the runner.\n\nFix shape: raise the test's `timeout_seconds` (30, like the test's own `30_000` outer limit), or make the assertion about the command's result rather than about the wall clock it took.\n\n## Not established\n\nI could not read the CI log itself — `gh` is refused in the shell and the job page needs a GitHub session; the evidence above is the job's annotation block as the page renders it to an anonymous reader. Which of the two defects, if any, explains any earlier red `atomaton-tools` run is not checked.\n",
+      "content": "Issue #403: e2e suite reports red for reasons that are not the change: it inherits the run's TYPE/NUMBER, and its first atoma spawn can hit a 5s shell timeout\n**Labels:** atomaton/in-progress\n\nTwo defects in `tests/e2e/`, both measured on 2026-10-26 while working #220 (PR #401). They are one issue because they share the files and the effect: a required check goes red for something the diff did not do.\n\n## 1. The spawned `atoma` inherits the agent run's `TYPE`/`NUMBER`\n\n`tests/e2e/run-atoma.ts:133` spawns with `env: { ...process.env, ...opts.env }`, and the tools read the node kind from the environment (`src/adapters/runner/run-node.ts:33`, `nodeType()` reads `TYPE`). So a `bun run test:e2e` started from inside an agent run hands the test's atoma the *run's* node.\n\nMeasured: an agent run whose env carries `TYPE=pr`, `NUMBER=401` (the re-entry after opening a pull request) fails\n\n```\n(fail) E2E: real atoma binary + real mcp/atomaton.ts > agent calls launch_sub_agent through the real MCP server\nTool 'launch_sub_agent' failed: ... launch_sub_agent is for an issue run, and this run is on a pull request ...\n```\n\nat `tests/e2e/launch-sub-agent.e2e.test.ts:118`, and the same suite in the same tree with `env -u TYPE -u NUMBER` gives `9 pass, 0 fail`. Nothing about the change under test produced either result.\n\nFix shape: `runAtoma` should drop the run-scoped names (`TYPE`, `NUMBER`, `NOTIFY`, `SESSION_*`, whatever `AGENT_ENV_NAMES` lists) from the inherited environment unless `opts.env` sets them, rather than letting an ambient run decide what the fixture is.\n\n## 2. `printf shell-ok` has a 5-second budget, and CI spent 5.14 of them\n\nCI on PR #401 (`atomaton-check` run 40218786744, job 121245613709) failed `atomaton-tools` at \"Run the end-to-end suite against the real CLI\", annotation at `tests/e2e/run-agent.e2e.test.ts:92`:\n\n```\n- \"exit_code\": 0, \"status\": \"completed\", \"stdout\": \"shell-ok\", \"execution_time_ms\": 183\n+ \"execution_time_ms\": 5140, \"exit_code\": 143, \"output_truncated\": false, \"status\": \"timeout\", \"stderr\": \"\", \"stdout\": \"\"\n```\n\nThe test asks the real shell server to run `printf shell-ok` with `timeout_seconds: 5` (`tests/e2e/run-agent.e2e.test.ts:44`); exit 143 is the server's own SIGTERM at that budget. The server behaved as asked — the number is the test's, and it is below what a loaded `ubuntu-latest` gives a cold `bun run` of `dist/.../shell.ts`. Locally the same call returns in 183 ms, and the whole 9-test suite in 798 ms, so there is no defect in the shell server to chase: the budget is too tight for the runner.\n\nFix shape: raise the test's `timeout_seconds` (30, like the test's own `30_000` outer limit), or make the assertion about the command's result rather than about the wall clock it took.\n\n## Not established\n\nI could not read the CI log itself — `gh` is refused in the shell and the job page needs a GitHub session; the evidence above is the job's annotation block as the page renders it to an anonymous reader. Which of the two defects, if any, explains any earlier red `atomaton-tools` run is not checked.\n",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-10-25T18:01:06Z",
@@ -1180,13 +1180,175 @@
       "role": "tool",
       "content": "{\"number\":411,\"url\":\"https://github.com/yuma-seno/atomaton/pull/411\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_00_a66ohkqqg66hek8tg962c1lr"
+    },
+    {
+      "role": "user",
+      "content": "PR #411: e2e: spawn the fixture's atoma hermetically, and give printf a 30s budget\n**Labels:** atomaton/in-progress\n**Linked Issue:** #403\n\n/reviewer\n\nPart of #403\nTwo defects in `tests/e2e/`, both of which made a required check red for something the diff did not do. `tests/e2e/` only; no product code, no version bump (the suite is not in the deliverable).\n\n## 1. The spawned `atoma` inherited the agent run's `TYPE`/`NUMBER`\n\n`runAtoma` spawned with `env: { ...process.env, ...opts.env }`, so `bun run test:e2e` from inside an agent run handed the fixture's atoma the *run's* node: the tools read the node kind from `TYPE`, `isPrRun()` was true, and `launch_sub_agent` refused.\n\n`tests/e2e/run-atoma.ts:123` now builds the child environment through:\n\n```ts\nexport function fixtureEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {\n  return { ...hermeticEnv(), ...overrides };\n}\n```\n\n`hermeticEnv()` (`src/entrypoints/machinery/testing/harness.ts:84`) drops `TYPE`, `NUMBER`, `NOTIFY`, `AGENT`, `GITHUB_RUN_ID`, `ATOMA_*`, `ATOMATON_*` (and `GIT_*`, `FAKE_GH_*`) and keeps `PATH`, `HOME` and the caches, so the child still starts. **The alternative ruled out** was a drop-list written in this helper: that is a second copy of what the runner exports, right until one is added and only one side learns it. `hermeticEnv()` is the copy `tests/contract/test-hermetic-env.test.ts` already holds to the runner. `opts.env` is spread after it, so a fixture that means something by one of those names declares it — which is what every existing call site already does with `OPENAI_BASE_URL`/`ATOMA_PROVIDER`.\n\n## 2. `printf shell-ok` had a 5-second budget\n\n`tests/e2e/run-agent.e2e.test.ts:44` asked the real shell server for `timeout_seconds: 5`, which covers the server's own cold `bun run` start rather than the command; PR #401's CI measured 5.14 s and got back `exit_code: 143, status: \"timeout\", stdout: \"\"`. Raised to `30`, matching the test's own `30_000` outer limit. The assertion (`toMatchObject({ status: \"completed\", exit_code: 0, stdout: \"shell-ok\" })`) was already about the command's result rather than the wall clock, so nothing else changed — the budget was the only clock in it.\n\n## Regression coverage\n\n`tests/e2e/fixture-env.test.ts` — no binary, no spawn. It forces a run-shaped environment onto `process.env` (restoring it after, since this file may itself run inside an agent run), then asserts the child would not get those names, that `PATH` still comes through, and that an explicit override still wins.\n\n## Verification\n\n| Command | Result |\n| --- | --- |\n| `TYPE=pr NUMBER=401 NOTIFY=yuma-seno ATOMA_BIN=/usr/local/bin/atoma bun test ./tests/e2e` **before** the change | `8 pass, 1 fail` — `Tool 'launch_sub_agent' failed: ... launch_sub_agent is for an issue run, and this run is on a pull request ...`, i.e. the issue's own reproduction |\n| same command **after** the change | `11 pass, 0 fail` (804 ms) |\n| `ATOMA_BIN=/usr/local/bin/atoma bun test ./tests/e2e` (no `TYPE`/`NUMBER`) | `11 pass, 0 fail` (790 ms) |\n| the new guard, with `fixtureEnv` temporarily back to `...process.env` | fails, listing `AGENT`, `ATOMATON_MACHINERY_ROOT`, `ATOMATON_OPS_LOG`, `ATOMATON_RUN_DIR`, `GITHUB_RUN_ID` as inherited — restored after |\n| `bun run typecheck` | exit 0 |\n| `bun run test` (the default suite) | `2150 pass, 0 fail` across 169 files |\n\n`ATOMA_BIN=/usr/local/bin/atoma` is this runner's `atoma 0.4.4`, the version the e2e job installs. The 5.14 s figure is from the issue's CI annotation — I did not reproduce a loaded runner, so defect 2 is verified as \"the budget is now 30 s and the assertion still holds\", not as \"5.14 s no longer happens\".\n\nOne thing this does not close: `tests/contract/test-hermetic-env.test.ts` checks file by file, and the spawn it guards here lives in a helper (`run-atoma.ts`, not a `.test.ts`), which is why the leak survived the ratchet. Its own doc comment already names that limit; extending it is a separate change in `tests/contract/`.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40267395324)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T04:12:30Z",
+        "event_type": "pr_opened",
+        "id": "pr-411",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T04:18:28Z",
+        "event_type": "issue_comment",
+        "id": 6408123890,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/tests/e2e/fixture-env.test.ts b/tests/e2e/fixture-env.test.ts\nnew file mode 100644\nindex 0000000..70265ce\n--- /dev/null\n+++ b/tests/e2e/fixture-env.test.ts\n@@ -0,0 +1,66 @@\n+/**\n+ * fixture-env.test.ts — what `runAtoma` hands the fixture's `atoma` (#403).\n+ *\n+ * The defect was the inheritance, not the fixture: an agent's run carries the runner's\n+ * `TYPE`/`NUMBER`, the test's atoma read the node kind from `TYPE`, and\n+ * `launch_sub_agent` refused with \"this run is on a pull request\" for a change that\n+ * touched neither. `bun test ./tests/e2e` with `TYPE=pr NUMBER=401` reproduced it at\n+ * `launch-sub-agent.e2e.test.ts:118`; the same tree with `env -u TYPE -u NUMBER` was\n+ * 9 pass, 0 fail.\n+ *\n+ * No binary and no spawn: this is the half of it that can be asserted in milliseconds,\n+ * and it is the half a regression would come back through — putting `process.env` back\n+ * into that spawn is the whole of the change that caused it.\n+ */\n+import { expect, test } from \"bun:test\";\n+import { fixtureEnv } from \"./run-atoma.ts\";\n+\n+/**\n+ * What an agent run's environment has and CI's does not: the node the run sits on, the\n+ * run's own identity, and the machinery it is deployed in.\n+ */\n+const RUN_ENV = {\n+  TYPE: \"pr\",\n+  NUMBER: \"401\",\n+  NOTIFY: \"yuma-seno\",\n+  AGENT: \"engineer\",\n+  ATOMATON_MACHINERY_ROOT: \"/nonexistent-machinery\",\n+  ATOMATON_OPS_LOG: \"/tmp/decoy-ops.log\",\n+  ATOMATON_RUN_DIR: \"/tmp/decoy-run\",\n+  GITHUB_RUN_ID: \"999999999\",\n+};\n+\n+/**\n+ * Runs `fn` with `RUN_ENV` forced into this process's environment, then puts back\n+ * whatever was there — this file may itself be running inside an agent's run, which is\n+ * the situation it is about.\n+ */\n+function withRunEnv<T>(fn: () => T): T {\n+  const saved = Object.entries(RUN_ENV).map(([name]) => [name, process.env[name]] as const);\n+  Object.assign(process.env, RUN_ENV);\n+  try {\n+    return fn();\n+  } finally {\n+    for (const [name, value] of saved) {\n+      if (value === undefined) delete process.env[name];\n+      else process.env[name] = value;\n+    }\n+  }\n+}\n+\n+test(\"the fixture's atoma does not inherit the run that started the suite\", () => {\n+  withRunEnv(() => {\n+    const env = fixtureEnv({ OPENAI_BASE_URL: \"http://127.0.0.1:1/v1\" });\n+    expect(Object.keys(RUN_ENV).filter((name) => env[name] !== undefined)).toEqual([]);\n+    // What a child needs in order to start at all still comes through, or every\n+    // fixture would fail for a reason of its own.\n+    expect(env.PATH).toBe(process.env.PATH);\n+    expect(env.OPENAI_BASE_URL).toBe(\"http://127.0.0.1:1/v1\");\n+  });\n+});\n+\n+test(\"a name a fixture means something by is still the fixture's value\", () => {\n+  withRunEnv(() => {\n+    expect(fixtureEnv({ TYPE: \"issue\", NUMBER: \"7\" })).toMatchObject({ TYPE: \"issue\", NUMBER: \"7\" });\n+  });\n+});\ndiff --git a/tests/e2e/run-agent.e2e.test.ts b/tests/e2e/run-agent.e2e.test.ts\nindex 742b1ec..40d6612 100644\n--- a/tests/e2e/run-agent.e2e.test.ts\n+++ b/tests/e2e/run-agent.e2e.test.ts\n@@ -41,7 +41,13 @@ describe.skipIf(!atomaAvailable)(\"E2E: real atoma binary + real mcp/github.ts\",\n         toolCalls: [{\n           id: \"shell_1\",\n           name: \"bash\",\n-          arguments: { command: \"printf shell-ok\", execution_mode: \"foreground\", timeout_seconds: 5 },\n+          // 30, not the 5 this was: that budget covers the server's own cold start\n+          // (`bun run` of the built shell.ts), which on a loaded `ubuntu-latest` took\n+          // 5.14 s and returned exit 143 with empty stdout -- the server's own SIGTERM,\n+          // for a `printf` that did nothing slow. The assertion below is about the\n+          // command's result, not how long it took, and 30 is this test's own outer\n+          // limit.\n+          arguments: { command: \"printf shell-ok\", execution_mode: \"foreground\", timeout_seconds: 30 },\n         }],\n       },\n       { content: \"Done: shell command completed.\" },\ndiff --git a/tests/e2e/run-atoma.ts b/tests/e2e/run-atoma.ts\nindex de9dcdd..93f141d 100644\n--- a/tests/e2e/run-atoma.ts\n+++ b/tests/e2e/run-atoma.ts\n@@ -9,6 +9,7 @@\n import { existsSync } from \"node:fs\";\n import { delimiter, dirname, join } from \"node:path\";\n import { fileURLToPath } from \"node:url\";\n+import { hermeticEnv } from \"../../src/entrypoints/machinery/testing/harness.ts\";\n \n const HERE = dirname(fileURLToPath(import.meta.url));\n export const REPO_ROOT = join(HERE, \"..\", \"..\");\n@@ -102,6 +103,27 @@ export interface RunAtomaResult {\n   stderr: string;\n }\n \n+/**\n+ * The environment the fixture's `atoma` is spawned with: the ambient one as a test\n+ * needs it, with `overrides` on top.\n+ *\n+ * `hermeticEnv()`, not `process.env`, because the fixture is not inside the run that\n+ * started the suite. `bun run test:e2e` in an agent's run carries the runner's\n+ * `TYPE`/`NUMBER`/`NOTIFY`/`ATOMATON_*`, and the tools read the node kind from `TYPE`:\n+ * the test's atoma then believed it sat on the run's pull request, `launch_sub_agent`\n+ * refused with a sentence about pull requests, and a required check went red for a\n+ * change that touched neither the helper nor the tool.\n+ *\n+ * A list of names to drop kept here would be a second copy of what the runner sets,\n+ * right until one of them is added and only one side learns it. `hermeticEnv()` is the\n+ * copy `tests/contract/test-hermetic-env.test.ts` already holds to the runner, and\n+ * `overrides` is spread after it, so a fixture that wants one of those names declares\n+ * it rather than inheriting it.\n+ */\n+export function fixtureEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {\n+  return { ...hermeticEnv(), ...overrides };\n+}\n+\n /**\n  * Spawns the real `atoma` binary with `Bun.spawn` (async), NOT\n  * `Bun.spawnSync`: spawnSync blocks this whole JS thread until the child\n@@ -130,7 +152,7 @@ export async function runAtoma(opts: RunAtomaOpts): Promise<RunAtomaResult> {\n       \"--max-iterations\",\n       String(opts.maxIterations ?? 5),\n     ],\n-    env: { ...process.env, ...opts.env },\n+    env: fixtureEnv(opts.env),\n     stdout: \"pipe\",\n     stderr: \"pipe\",\n   });\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-26T04:18:43Z",
+        "event_type": "pr_diff",
+        "id": "pr-411-diff",
+        "layer": "github-context",
+        "sha": "0d5df877",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "**#411 is merged.** Both defects in #403 are fixed at their source: the fixture's `atoma` no longer inherits the run's `TYPE`/`NUMBER`, and `printf shell-ok` has a 30 s budget instead of 5, with an assertion that was never about the clock. No merge-blocking defect survived the review.\n\n<details><summary>How I know — the anchors</summary>\n\n- `tests/e2e/run-atoma.ts:155` spawns with `env: fixtureEnv(opts.env)`; `fixtureEnv` (`tests/e2e/run-atoma.ts:123`) is `{...hermeticEnv(), ...overrides}`. `src/entrypoints/machinery/testing/harness.ts:87` drops `TYPE`, `NUMBER`, `NOTIFY`, `AGENT`, `GITHUB_RUN_ID`, everything under `ATOMA_`/`ATOMATON_`/`FAKE_GH_`, and the four `GIT_*` names, while keeping `PATH`/`HOME`, so the child still starts.\n- Spread-after ordering keeps the fixtures meaningful instead of muting them: `tests/e2e/request-close-issue.e2e.test.ts:77` and `tests/e2e/request-close-issue-aggregation.e2e.test.ts:230` still declare `NUMBER`/`TYPE`, and all six `runAtoma` call sites declare `OPENAI_BASE_URL`, so a stripped inherited `ATOMA_*` cannot re-point a fixture at the run's provider.\n- `tests/e2e/run-agent.e2e.test.ts:50` is `timeout_seconds: 30`, within the shell server's `min(1).max(3600)` (`src/entrypoints/tools/mcp/shell.ts:82`), and `tests/e2e/run-agent.e2e.test.ts:98` matches `status`/`exit_code`/`stdout` only.\n- The new guard `tests/e2e/fixture-env.test.ts` is reached by `bun test ./tests/e2e` (`package.json:15`), needs no binary, and fails on exactly the revert that caused defect 1; it is outside the default suite (`package.json:13`).\n- The required check on this head was green: `atomaton-check` and `atomaton-tools` both `completed/success`, and `atomaton-tools` is the job that runs `bun run test:e2e`. `check_merge_readiness` reported `ready: true`, `blockers: []`.\n\n</details>\n\n**What I could not establish.** I did not execute the suite or reproduce the 5.14 s cold start — this run has no shell, so defect 2 is verified as \"30 s budget, assertion unchanged, CI green on this head\", not as \"a loaded runner's cold start stays under 30 s\". The contract ratchet still cannot see a spawn in a non-`.test.ts` helper (`tests/contract/test-hermetic-env.test.ts:39`), which is why the new `fixture-env.test.ts` is the guard for `run-atoma.ts` rather than an extension of that scan.\n\n**What happens next.** The merge returned `parent_outcome: \"reinvoked\"` with `reinvoked_agent: \"engineer\"`, so #403 continues with the engineer, which is where the remaining question of the issue — whether the two defects are considered closed — now sits.\n\n\n---\n_Tokens: 621727 total (599222 prompt + 22505 completion, 527616 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/40268087890) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T04:18:43Z",
+        "event_type": "pr_comment",
+        "id": 6408126969,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_u20tygjs2zzjtgbgg4gu9fek",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status -sb | head -3; git log --oneline -3; echo ---; grep -n \\\"fixtureEnv\\\\|hermeticEnv\\\" tests/e2e/run-atoma.ts | head; echo ---; sed -n 44,52p tests/e2e/run-agent.e2e.test.ts; echo ---; ls tests/e2e/; echo ---; git diff HEAD~1 --stat 2>/dev/null | tail -6; echo \\\"package.json version:\\\"; grep -n '\\\"version\\\"' package.json\"}"
+          }
+        },
+        {
+          "id": "call_01_ustdgh40dli3y0i4pzjicthm",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\": 411}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179298834493400000000000000000000ffffc0a872d2eaafab",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The pull request merged. I need to judge whether what merged satisfies what the issue asked for.\n\nThe issue's decision (from yuma-seno) listed 4 items:\n1. Fix runAtoma env — drop parent-run env vars per AGENT_ENV_NAMES, opts.env wins. Verify e2e passes with TYPE=pr NUMBER=401. ✅ (offline; in the merged diff)\n2. Fix timeout_seconds 5 → 30. ✅\n3. Existing e2e all pass + typecheck clean; report defect-1 reproduction gone. ✅ (my report carried: before 8 pass 1 fail; after 11 pass 0 fail; typecheck exit 0; full suite 2150 pass)\n4. No version bump. ✅ — need to verify the merged diff has no package.json change. The diff shown doesn't include package.json.\n\nThe reviewer's post-merge message says required checks green, ready:true, blockers:[].\n\nShould I verify against the merged head rather than trust? The base is main (this is a top-level issue? #403 — is it a sub-issue? The PR merged into... base was \"\" in create_pr result, hmm). Let me check the merged state myself: get_pr(411) to see merged, base branch; then check the files on that branch contain the changes.\n\nGiven this is an issue run now (re-invoked after merge), I should verify acceptance criteria against the branch the PR merged into, then call request_close_issue.\n\nLet me check: get_pr(411), and read the files locally? The local worktree is on which branch? Let me check git log/status to see whether the merged commit is in HEAD. Actually after merge, the run restarts and the checkout is presumably the base branch/issue branch. Let me verify locally: grep for fixtureEnv in tests/e2e/run-atoma.ts and `timeout_seconds: 30` in run-agent.\n\nLet me do that plus get_pr(411).",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"## main...origin/main\\n791bcd1 Merge pull request #411 from yuma-seno/atomaton/issue-403\\n---\\n12:import { hermeticEnv } from \\\"../../src/entrypoints/machinery/testing/harness.ts\\\";\\n110: * `hermeticEnv()`, not `process.env`, because the fixture is not inside the run that\\n118: * right until one of them is added and only one side learns it. `hermeticEnv()` is the\\n123:export function fixtureEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {\\n124:  return { ...hermeticEnv(), ...overrides };\\n155:    env: fixtureEnv(opts.env),\\n---\\n          // 30, not the 5 this was: that budget covers the server's own cold start\\n          // (`bun run` of the built shell.ts), which on a loaded `ubuntu-latest` took\\n          // 5.14 s and returned exit 143 with empty stdout -- the server's own SIGTERM,\\n          // for a `printf` that did nothing slow. The assertion below is about the\\n          // command's result, not how long it took, and 30 is this test's own outer\\n          // limit.\\n          arguments: { command: \\\"printf shell-ok\\\", execution_mode: \\\"foreground\\\", timeout_seconds: 30 },\\n        }],\\n      },\\n---\\nfake-gh.ts\\nfixture-env.test.ts\\nlaunch-sub-agent.e2e.test.ts\\nmock-llm-server.ts\\nprovider-credential-check.e2e.test.ts\\nrequest-close-issue-aggregation.e2e.test.ts\\nrequest-close-issue.e2e.test.ts\\nrun-agent.e2e.test.ts\\nrun-atoma.ts\\n---\\npackage.json version:\\n5:  \\\"version\\\": \\\"0.21.51\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":341}",
+      "tool_call_id": "call_00_u20tygjs2zzjtgbgg4gu9fek"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"main\",\"createdAt\":\"2026-10-26T04:12:30Z\",\"headRefName\":\"atomaton/issue-403\",\"number\":411,\"state\":\"MERGED\",\"title\":\"e2e: spawn the fixture's atoma hermetically, and give printf a 30s budget\",\"body\":\"/reviewer\\n\\nPart of #403\\nTwo defects in `tests/e2e/`, both of which made a required check red for something the diff did not do. `tests/e2e/` only; no product code, no version bump (the suite is not in the deliverable).\\n\\n## 1. The spawned `atoma` inherited the agent run's `TYPE`/`NUMBER`\\n\\n`runAtoma` spawned with `env: { ...process.env, ...opts.env }`, so `bun run test:e2e` from inside an agent run handed the fixture's atoma the *run's* node: the tools read the node kind from `TYPE`, `isPrRun()` was true, and `launch_sub_agent` refused.\\n\\n`tests/e2e/run-atoma.ts:123` now builds the child environment through:\\n\\n```ts\\nexport function fixtureEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {\\n  return { ...hermeticEnv(), ...overrides };\\n}\\n```\\n\\n`hermeticEnv()` (`src/entrypoints/machinery/testing/harness.ts:84`) drops `TYPE`, `NUMBER`, `NOTIFY`, `AGENT`, `GITHUB_RUN_ID`, `ATOMA_*`, `ATOMATON_*` (and `GIT_*`, `FAKE_GH_*`) and keeps `PATH`, `HOME` and the caches, so the child still starts. **The alternative ruled out** was a drop-list written in this helper: that is a second copy of what the runner exports, right until one is added and only one side learns it. `hermeticEnv()` is the copy `tests/contract/test-hermetic-env.test.ts` already holds to the runner. `opts.env` is spread after it, so a fixture that means something by one of those names declares it — which is what every existing call site already does with `OPENAI_BASE_URL`/`ATOMA_PROVIDER`.\\n\\n## 2. `printf shell-ok` had a 5-second budget\\n\\n`tests/e2e/run-agent.e2e.test.ts:44` asked the real shell server for `timeout_seconds: 5`, which covers the server's own cold `bun run` start rather than the command; PR #401's CI measured 5.14 s and got back `exit_code: 143, status: \\\"timeout\\\", stdout: \\\"\\\"`. Raised to `30`, matching the test's own `30_000` outer limit. The assertion (`toMatchObject({ status: \\\"completed\\\", exit_code: 0, stdout: \\\"shell-ok\\\" })`) was already about the command's result rather than the wall clock, so nothing else changed — the budget was the only clock in it.\\n\\n## Regression coverage\\n\\n`tests/e2e/fixture-env.test.ts` — no binary, no spawn. It forces a run-shaped environment onto `process.env` (restoring it after, since this file may itself run inside an agent run), then asserts the child would not get those names, that `PATH` still comes through, and that an explicit override still wins.\\n\\n## Verification\\n\\n| Command | Result |\\n| --- | --- |\\n| `TYPE=pr NUMBER=401 NOTIFY=yuma-seno ATOMA_BIN=/usr/local/bin/atoma bun test ./tests/e2e` **before** the change | `8 pass, 1 fail` — `Tool 'launch_sub_agent' failed: ... launch_sub_agent is for an issue run, and this run is on a pull request ...`, i.e. the issue's own reproduction |\\n| same command **after** the change | `11 pass, 0 fail` (804 ms) |\\n| `ATOMA_BIN=/usr/local/bin/atoma bun test ./tests/e2e` (no `TYPE`/`NUMBER`) | `11 pass, 0 fail` (790 ms) |\\n| the new guard, with `fixtureEnv` temporarily back to `...process.env` | fails, listing `AGENT`, `ATOMATON_MACHINERY_ROOT`, `ATOMATON_OPS_LOG`, `ATOMATON_RUN_DIR`, `GITHUB_RUN_ID` as inherited — restored after |\\n| `bun run typecheck` | exit 0 |\\n| `bun run test` (the default suite) | `2150 pass, 0 fail` across 169 files |\\n\\n`ATOMA_BIN=/usr/local/bin/atoma` is this runner's `atoma 0.4.4`, the version the e2e job installs. The 5.14 s figure is from the issue's CI annotation — I did not reproduce a loaded runner, so defect 2 is verified as \\\"the budget is now 30 s and the assertion still holds\\\", not as \\\"5.14 s no longer happens\\\".\\n\\nOne thing this does not close: `tests/contract/test-hermetic-env.test.ts` checks file by file, and the spawn it guards here lives in a helper (`run-atoma.ts`, not a `.test.ts`), which is why the leak survived the ratchet. Its own doc comment already names that limit; extending it is a separate change in `tests/contract/`.\\n\\n---\\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40267395324)_\\n\"}",
+      "tool_call_id": "call_01_ustdgh40dli3y0i4pzjicthm"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_4uwebhx1c9tl88bk6o4ih9sn",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && TYPE=pr NUMBER=401 NOTIFY=yuma-seno ATOMA_BIN=/usr/local/bin/atoma bun run test:e2e >/tmp/e2e-merged.log 2>&1; echo \\\"merged-head e2e exit=$?\\\"; tail -5 /tmp/e2e-merged.log; echo ---; grep -c \\\"(fail)\\\" /tmp/e2e-merged.log || true; git status --short | head\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179298835092900000000000000000000ffffc0a872d228e48a",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Everything is on main now (HEAD is the merge commit, worktree clean, main...origin/main).\n\nVerify the four decision items against the merged head:\n1. `tests/e2e/run-atoma.ts:123/155` — fixtureEnv with hermeticEnv, opts.env after. ✅\n2. `tests/e2e/run-agent.e2e.test.ts:50` timeout_seconds: 30. ✅\n3. Existing e2e all pass + typecheck clean: reported in the PR from the pre-merge run. Should I re-run on merged head to confirm? The merged head equals my branch plus main merge; nothing else changed in tests/e2e. I could run the e2e suite once on the merged head for a post-merge confirmation — cheap (~1s + synth). Atoma binary present at /usr/local/bin/atoma. dist isn't built in this fresh run? Let me check. Running it gives a real post-merge verification, which strengthens the close. Worth doing: `bun run test:e2e` with TYPE=pr NUMBER=403 maybe — actually to prove defect 1 on the merged head, run with TYPE=pr NUMBER=401 (the original repro shape). Let's do it: pretest:e2e runs synth.\n\n4. No version bump: package.json 0.21.51 — need to confirm it wasn't bumped by the PR. The merge diff only shows tests/e2e files, and version is 0.21.51 which matches what build-dist said for the release (`wrote .github/atomaton-release.json for v0.21.51`). ✅\n\nLet me run the e2e suite on the merged head with a run-shaped env, then close with request_close_issue.\n\nAlso check the check runs on main? The reviewer already reported green. Not necessary, but I can cite `get_check_runs` for the merged commit... The reviewer's report says atomaton-tools and atomaton-check succeeded. I'll cite the merge commit and my own re-run.\n\nRun it.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"merged-head e2e exit=0\\n\\n 11 pass\\n 0 fail\\n 63 expect() calls\\nRan 11 tests across 6 files. [854.00ms]\\n---\\n0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1417}",
+      "tool_call_id": "call_00_4uwebhx1c9tl88bk6o4ih9sn"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_oa37nxpzllslu92rb9zluh07",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"summary\": \"Both defects are fixed on `main` and the four items of the 2026-10-26 decision are met: the fixture's `atoma` no longer inherits the run's `TYPE`/`NUMBER`, and `printf shell-ok` now runs under a 30-second budget. No product code and no version change went in — the diff is three files under `tests/e2e/`.\\n\\n**How I know**\\n\\n- Defect 1: `tests/e2e/run-atoma.ts:155` spawns with `env: fixtureEnv(opts.env)`, and `fixtureEnv` (`tests/e2e/run-atoma.ts:123`) is `{ ...hermeticEnv(), ...overrides }`. `src/entrypoints/machinery/testing/harness.ts:87` is the name list it uses — `TYPE`, `NUMBER`, `NOTIFY`, `AGENT`, `GITHUB_RUN_ID`, everything under `ATOMA_`/`ATOMATON_` — while keeping `PATH`/`HOME`, so the child still starts. `opts.env` spread after it means the rule is \\\"dropped unless the fixture declares it\\\", which is what the decision asked for.\\n- Defect 2: `tests/e2e/run-agent.e2e.test.ts:50` is `timeout_seconds: 30`, inside the shell server's own `1..3600` range, and the assertion at `tests/e2e/run-agent.e2e.test.ts:98` matches `status`/`exit_code`/`stdout` only — as it already did, so the budget was the only clock in the test.\\n- The merged head, in the environment that used to break it: `TYPE=pr NUMBER=401 NOTIFY=yuma-seno ATOMA_BIN=/usr/local/bin/atoma bun run test:e2e` on `main` at `791bcd1` → exit 0, `11 pass, 0 fail`, 854 ms. Before the fix the same command on the same tree gave `8 pass, 1 fail` with `launch_sub_agent is for an issue run, and this run is on a pull request`, i.e. the issue's own sentence.\\n- `bun run typecheck` exited 0 and the default suite `bun run test` was `2150 pass, 0 fail` across 169 files, both recorded in #411 before merge.\\n- No version bump: `package.json:5` still reads `\\\"version\\\": \\\"0.21.51\\\"`, and the merged diff touches no file outside `tests/e2e/`.\\n- A regression guard went in that needs no binary: `tests/e2e/fixture-env.test.ts` fails if `fixtureEnv` is put back to `...process.env` (measured — it listed `AGENT`, `ATOMATON_MACHINERY_ROOT`, `ATOMATON_OPS_LOG`, `ATOMATON_RUN_DIR`, `GITHUB_RUN_ID`), and passes at the merged head.\\n\\n**What I could not establish**\\n\\nThe 5.14 s cold start is quoted from the job annotation on #401; I did not reproduce a loaded `ubuntu-latest`, so defect 2 is verified as \\\"the budget is 30 s and the assertion still holds\\\", not as \\\"the cold start now fits\\\". One gap is left open deliberately and is not part of this issue: `tests/contract/test-hermetic-env.test.ts:39` scans `.test.ts` files only, so a spawn living in a helper like `run-atoma.ts` is outside the ratchet — its own doc comment names that limit, and widening it is a change in `tests/contract/`, which the decision put out of scope.\\n\\n**What happens next**\\n\\nNothing follows: the work is delivered and verified on `main`, so this issue closes.\\n\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179298835703200000000000000000000ffffc0a89d9ceb1cae",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Merged head, run-shaped environment (TYPE=pr NUMBER=401 NOTIFY=yuma-seno): 11 pass, 0 fail. Defect 1's reproduction is gone on main.\n\nNow close the issue with request_close_issue, and the summary carries the report. Per the instructions, the report goes in the tool call's own argument.\n\nLet me write the summary in the four-part structure, in Japanese? The issue body had a Japanese decision section; the issue's defect description is English, the decision Japanese. Language: the repository's issues — the issue title/body is English with a Japanese decision appended. I'll write in English (the thread is mostly English) — hmm, the decision is in Japanese. The reviewer wrote English. I'll write in English, matching the thread's main language.\n\nSummary content:\n\nConclusion: both defects fixed on main; the four items of the decision are met.\n\nHow I know, with anchors:\n- tests/e2e/run-atoma.ts:123 fixtureEnv, :155 env: fixtureEnv(opts.env)\n- src/entrypoints/machinery/testing/harness.ts:87 drops TYPE/NUMBER/...\n- tests/e2e/run-agent.e2e.test.ts:50 timeout_seconds: 30\n- merged head re-run: `TYPE=pr NUMBER=401 NOTIFY=yuma-seno ATOMA_BIN=/usr/local/bin/atoma bun run test:e2e` → 11 pass, 0 fail (854 ms), exit 0\n- package.json:5 \"version\": \"0.21.51\" unchanged; no version bump in the merged diff.\n\nCould not establish: didn't reproduce a loaded CI runner for defect 2 (30s budget not measured against a cold start); the contract ratchet still can't see a helper spawn.\n\nNext: nothing — work done. But must I keep the report+handoff line? request_close_issue ends the run and posts the summary. No `/atomaton` line needed? The role table says: \"A pull request you opened has merged and what merged satisfies the issue → request_close_issue\". A sub-issue's close fires parent phase-gating automatically. Is #403 a sub-issue of something? The issue didn't show \"Sub-issue of\" in the task context; it's a root issue labeled atomaton/in-progress. So closing is enough. I should not add a dispatch line inside summary... The instruction: no multiple calls. request_close_issue is the call. Fine.\n\nWrite the summary.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #403 is concluded: your conclusion is on the issue. #403 is not a tracked sub-issue; nothing to aggregate. Nothing else is yours to do here.",
+      "tool_call_id": "call_00_oa37nxpzllslu92rb9zluh07"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 2,
-      "snapshot_hash": "6deb295f3a1c72b1aef7fa0f391a464bae6426e5503740c20f86bf03111f7fc8",
+      "event_count": 6,
+      "snapshot_hash": "4a62ae483c5b580440992503d1e319847b1764d15e4409e1811144c9de9f2be3",
       "version": 1
     }
   },
@@ -1215,6 +1377,26 @@
         }
       },
       "started": "2026-10-26T04:07:45Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-26T04:19:28Z",
+      "ended_because": "completed",
+      "iterations": 3,
+      "messages": 98,
+      "seconds": 26,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "github": {
+          "get_pr": 1
+        },
+        "shell": {
+          "bash": 2
+        }
+      },
+      "started": "2026-10-26T04:19:02Z"
     }
   ]
 }
