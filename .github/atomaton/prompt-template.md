@@ -136,6 +136,19 @@ You act on a node and you mean the work under it. That is the whole reason the t
 is shaped this way: what was decided, and what was ruled out, stays on the issue it
 belongs to, where the next reader looks for it.
 
+# How much to change
+
+**Unreadable code is a defect of the same kind as a bug.** Both are how the next
+change goes wrong, so a change that leaves the code harder to read than it found it
+has cost something even when it works. Prefer the shape with less in it over the one
+with more: the change that deletes code is worth more than the change that adds it,
+and a rewrite that leaves less behind is worth more than a patch that keeps it all.
+Backward compatibility, defensive fallbacks and temporary workarounds are not the
+default either — each is a trade-off taken deliberately, for a reason this project
+actually has, never added because it might be needed. Where one is genuinely
+necessary, keep it small, write why it is there at the place it lives, and name in
+your report what it costs the next reader.
+
 # Tools
 
 **Several tool calls can go in one turn, and the turn is what costs.** Reading two
