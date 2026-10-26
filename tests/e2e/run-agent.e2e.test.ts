@@ -41,7 +41,13 @@ describe.skipIf(!atomaAvailable)("E2E: real atoma binary + real mcp/github.ts", 
         toolCalls: [{
           id: "shell_1",
           name: "bash",
-          arguments: { command: "printf shell-ok", execution_mode: "foreground", timeout_seconds: 5 },
+          // 30, not the 5 this was: that budget covers the server's own cold start
+          // (`bun run` of the built shell.ts), which on a loaded `ubuntu-latest` took
+          // 5.14 s and returned exit 143 with empty stdout -- the server's own SIGTERM,
+          // for a `printf` that did nothing slow. The assertion below is about the
+          // command's result, not how long it took, and 30 is this test's own outer
+          // limit.
+          arguments: { command: "printf shell-ok", execution_mode: "foreground", timeout_seconds: 30 },
         }],
       },
       { content: "Done: shell command completed." },

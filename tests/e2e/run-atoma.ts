@@ -9,6 +9,7 @@
 import { existsSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = join(HERE, "..", "..");
@@ -103,6 +104,27 @@ export interface RunAtomaResult {
 }
 
 /**
+ * The environment the fixture's `atoma` is spawned with: the ambient one as a test
+ * needs it, with `overrides` on top.
+ *
+ * `hermeticEnv()`, not `process.env`, because the fixture is not inside the run that
+ * started the suite. `bun run test:e2e` in an agent's run carries the runner's
+ * `TYPE`/`NUMBER`/`NOTIFY`/`ATOMATON_*`, and the tools read the node kind from `TYPE`:
+ * the test's atoma then believed it sat on the run's pull request, `launch_sub_agent`
+ * refused with a sentence about pull requests, and a required check went red for a
+ * change that touched neither the helper nor the tool.
+ *
+ * A list of names to drop kept here would be a second copy of what the runner sets,
+ * right until one of them is added and only one side learns it. `hermeticEnv()` is the
+ * copy `tests/contract/test-hermetic-env.test.ts` already holds to the runner, and
+ * `overrides` is spread after it, so a fixture that wants one of those names declares
+ * it rather than inheriting it.
+ */
+export function fixtureEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
+  return { ...hermeticEnv(), ...overrides };
+}
+
+/**
  * Spawns the real `atoma` binary with `Bun.spawn` (async), NOT
  * `Bun.spawnSync`: spawnSync blocks this whole JS thread until the child
  * exits, which would starve the event loop a `Bun.serve()` mock LLM server
@@ -130,7 +152,7 @@ export async function runAtoma(opts: RunAtomaOpts): Promise<RunAtomaResult> {
       "--max-iterations",
       String(opts.maxIterations ?? 5),
     ],
-    env: { ...process.env, ...opts.env },
+    env: fixtureEnv(opts.env),
     stdout: "pipe",
     stderr: "pipe",
   });
