@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #216: 実装のアグレッシブさをプロンプトで示したい\n**Labels:** atomaton/waiting-for-person\n\n「後方互換なんか捨てて最も美しい形を目指せ」という指示を各エージェントのプロンプトに入れたい。\nもちろんプロジェクトによるのでもう少し丸くしたい。\n基準を設けるのか、プロジェクトの特性を考慮して判断させるのか、方向性から検討。\n\nただ、個人的な開発倫理として、「コードを汚すのはバグを入れるのと同じくらい避けるべきこと」という考えがあるので、その哲学に合わせたい。（そのうえで、バグを残してでも業務的に暫定対応を入れるべき場面では選択肢になりうる、という感じ。）",
+      "content": "Issue #216: 実装のアグレッシブさをプロンプトで示したい\n**Labels:** atomaton/in-progress\n\n「後方互換なんか捨てて最も美しい形を目指せ」という指示を各エージェントのプロンプトに入れたい。\nもちろんプロジェクトによるのでもう少し丸くしたい。\n基準を設けるのか、プロジェクトの特性を考慮して判断させるのか、方向性から検討。\n\nただ、個人的な開発倫理として、「コードを汚すのはバグを入れるのと同じくらい避けるべきこと」という考えがあるので、その哲学に合わせたい。（そのうえで、バグを残してでも業務的に暫定対応を入れるべき場面では選択肢になりうる、という感じ。）",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-10-18T16:13:10Z",
@@ -2598,14 +2598,195 @@
       "role": "tool",
       "content": "{\"number\":406,\"url\":\"https://github.com/yuma-seno/atomaton/pull/406\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_00_r5t9y0jk15uplbr8nyxtf5wr"
+    },
+    {
+      "role": "user",
+      "content": "PR #406: Name the four reads worth delegating in the delegate description (#216)\n**Labels:** atomaton/in-progress\n**Linked Issue:** #216\n\n/reviewer\n\nPart of #216\n## What changed\n\n**`delegateDescription` names four kinds of read worth delegating** (`src/entrypoints/tools/mcp/delegate.ts:642`), inside the trigger that was already there:\n\n> It is for a large file, or several, opened for one thing you will not edit (a signature, a config value, a line); for candidate files opened in turn to narrow down, when only the last one is kept; for grep hits you would otherwise read one by one, when the few that match are enough; and for a question whose answer is one line, such as whether something still exists.\n\n**And it names the boundary in the same breath**, which is what keeps those four from reading as \"delegate more\":\n\n> The file you are about to edit, and anything you will consult again during this run, stay here.\n\nThe limits are now one tail — `Ten minutes, one report, no session: if the task is larger, or needs a decision, do it here.` — and the old \"the investigation you do not know how to start\" paragraph is gone, replaced by the examples it was gesturing at.\n\n**Short, measured, not asserted.** A tool description is resent on every turn of every run holding the tool, so the four examples were paid for out of the old text's own budget rather than added on top. Rendered lengths, measured from a running server (`/tmp/atomaton-workspace/desc-length.ts`):\n\n| tool | before | after |\n| --- | ---: | ---: |\n| `delegate` | 1,918 | 1,982 |\n| `delegate_large` | 1,578 | 1,642 |\n| `delegate_readonly` | 2,066 | 2,086 |\n| `delegate_readonly_large` | 1,726 | 1,746 |\n\n+3.3% with four examples added. \"Before\" is the deployed copy at `.github/atomaton-runtime/tools/mcp/delegate.js` (last release), which is the same text HEAD had.\n\n**`src/content/prompt-template.md:53` gains one sentence** — `What stays here is the file you are about to edit, and anything you will read again during this run.` — placed after the three example bullets. Nothing else in the prompt changed.\n\n## Tests\n\n- `src/entrypoints/tools/mcp/mcp.test.ts:3717` — new: the four shapes, the saving, the boundary, the limits tail, and a **ceiling** (`< 2100`) so the next good example is not appended on top. The pin lives here rather than in `tests/contract/agent-prompts.test.ts` (which the decision named) because this is where the description has always been asserted — `:3668`, `:3688`, `:3723`, `:3752` read the same `tools/list` response.\n- `tests/contract/agent-prompts.test.ts:634` — new: the shared prompt keeps the trigger and the boundary sentence.\n- Existing pins still hold and were not weakened: `CANNOT change anything`, `run one command to answer a question` / `CANNOT run commands` + `no shell`, the `FREE`/`PAID`/`no task fits` tier text, and `task`'s `read and report`.\n\n## Verification\n\nThe four commands this repository's `check` job runs (`.github/atomaton/config.yaml:34`), from a clean tree at this commit:\n\n- `bun run src/entrypoints/machinery/scan_secrets.ts` → exit 0, with the same `could not resolve the latest gitleaks release` warning that this sandbox always produces (no route to the release API); the scan is a CI-side step.\n- `bun run typecheck` → exit 0.\n- `bun run synth` → exit 0; the new prompt sentence is at `dist/.github/atomaton/prompt-template.md:53`.\n- `bun run test` → `2149 pass, 0 fail`, 169 files.\n\nOne thing worth knowing if you run a single file instead of `bun run test`: `mcp.test.ts` reads `dist/.github/atomaton/delegates/`, so a bare `bun test src/entrypoints/tools/mcp/mcp.test.ts` fails on `delegates.yaml is not valid YAML: ENOENT` unless `bun run synth` has run. That is `pretest`'s job, and it is pre-existing, not this change.\n\nNo version bump — `package.json` is untouched. No re-measurement run: the effect is a judgement by the owner, per the decision.\n\n## What this does not do\n\nIt does not change the sub-run's own prompt (`src/content/delegates/*/agent.md`) or the roster, and it does not add a fifth example. If four shapes still do not move the rate, the next lever is where the prompt asks for a delegate at the moment of choosing rather than what the tool says about itself.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40250612745)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T00:50:12Z",
+        "event_type": "pr_opened",
+        "id": "pr-406",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T00:55:02Z",
+        "event_type": "issue_comment",
+        "id": 6405823576,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/content/prompt-template.md b/src/content/prompt-template.md\nindex 2ce4583..9ce5cc6 100644\n--- a/src/content/prompt-template.md\n+++ b/src/content/prompt-template.md\n@@ -50,6 +50,9 @@ hands back a summary, and the usual shape is one call:\n - *\"Read `docs/y.md` and tell me which of these five claims it actually supports.\"*\n - *\"Does this repository already have anything that does `Z`? Name the files.\"*\n \n+What stays here is the file you are about to edit, and anything you will read again\n+during this run.\n+\n **Which delegate to call is in the tool descriptions, and it is not always the\n same one.** A project decides which delegates exist, what each is called and which\n model each runs on, so the choice is made where you can see it — read the\ndiff --git a/src/entrypoints/tools/mcp/delegate.ts b/src/entrypoints/tools/mcp/delegate.ts\nindex 463796d..7766f68 100644\n--- a/src/entrypoints/tools/mcp/delegate.ts\n+++ b/src/entrypoints/tools/mcp/delegate.ts\n@@ -621,33 +621,48 @@ async function handleDelegateRun(def: ResolvedDelegate, args: z.infer<typeof DEL\n  *\n  * So the caller's prompt says \"delegate this\" and this text says \"which one\", and\n  * the roster is what keeps the second sentence honest.\n+ *\n+ * ## The four kinds of reading, because \"reading you will not use again\" named none\n+ *\n+ * The trigger was already here and in the caller's prompt, and delegate calls were\n+ * still 0.32% of all tool calls over 185 sessions — 1 call in the 67 sessions of the\n+ * two days before this was written. A rule stated twice and obeyed by nobody is a\n+ * rule a model cannot see the edge of: \"will I use this again?\" has no obvious answer\n+ * at the moment a file is opened, so the cheap answer is to read it. The four cases\n+ * below are the ones an owner of this project read as unambiguously delegate-able,\n+ * and they are stated as shapes rather than as examples about a particular file,\n+ * because the shape is what a caller can match against the tree in front of it.\n+ *\n+ * They are also chosen so the boundary survives them. Every one of the four is a read\n+ * whose *product* is a line, a shortlist, or a yes; a file being edited, or one\n+ * consulted again later in the run, is not one of them, and that sentence is here\n+ * rather than left to be inferred — a description that only ever says \"delegate\n+ * more\" is how a run ends up editing a file it has never read.\n  */\n function delegateDescription(def: ResolvedDelegate, shared: string): string {\n   return (\n-    \"Do one small piece of work in a separate run and return what it found. Use it for reading \" +\n-    \"and searching — the work whose transcript you do not want in this session. \" +\n-    \"The investigation you do not know how to start is the case it is most for: it does have \" +\n-    \"its own `grep`, `glob` and `read`, so \\\"find where X is defined and everywhere it is \" +\n-    \"called\\\" is a task you can hand over rather than a search you have to do first. Say what \" +\n-    \"an answer looks like and when to stop looking, and read `task` before calling. \" +\n-    \"It starts with NO memory of this conversation: put everything it needs in `task` and \" +\n-    \"`context`. Name the files when you already know them; when you do not, say so and give \" +\n-    \"it the ground to cover. \" +\n-    \"It CANNOT reach GitHub — no issues, no pull requests, no comments — cannot dispatch anything, \" +\n-    \"and cannot delegate further. \" +\n+    \"Do one small piece of work in a separate run and return what it found. Use it for the \" +\n+    \"reading you will not use again — the transcript you do not want in this session. It is for \" +\n+    \"a large file, or several, opened for one thing you will not edit (a signature, a config \" +\n+    \"value, a line); for candidate files opened in turn to narrow down, when only the last one \" +\n+    \"is kept; for grep hits you would otherwise read one by one, when the few that match are \" +\n+    \"enough; and for a question whose answer is one line, such as whether something still \" +\n+    \"exists. What it saves is the transcript: what you read here is resent on every later turn, \" +\n+    \"and one report comes back. The file you are about to edit, and anything you will consult \" +\n+    \"again during this run, stay here. \" +\n+    \"It has its own `grep`, `glob` and `read`, and no memory of this conversation: put everything \" +\n+    \"it needs in `task` and `context`, name the files you know and the ground to cover, and say \" +\n+    \"what a useful answer looks like. \" +\n+    \"It CANNOT reach GitHub, dispatch an agent, or delegate again. \" +\n     (def.canWrite\n-      ? \"Use it for changing files too: it works in the same tree, so a change it makes is a \" +\n-        \"change you will commit. \"\n-      : \"It CANNOT change anything: it reads and searches only, and a change it was asked to make \" +\n-        \"comes back as a description rather than as an edit. \") +\n+      ? \"It can also change files in the same tree, so what it writes is what you commit. \"\n+      : \"It CANNOT change anything: a change it was asked to make comes back as a description, \" +\n+        \"not an edit. \") +\n     (def.hasShell\n-      ? \"It can also run one command to answer a question — the measurement a static reading of \" +\n-        \"the code cannot give you. \"\n-      : \"It CANNOT run commands: it has no shell, so a task that needs a measured result — stdout, \" +\n-        \"an exit code, a test run — comes back as a reading, not a measurement. Ask a run that has \" +\n-        \"a shell, or a person, for that. \") +\n-    \"It has a ten-minute limit and no session: it runs once and returns one report, and nothing \" +\n-    \"resumes it. If the task is larger than that, or needs a decision, do it here instead.\" +\n+      ? \"It can also run one command to answer a question — a measurement no reading can give you. \"\n+      : \"It CANNOT run commands: no shell, so a measurement — stdout, an exit code, a test run — \" +\n+        \"comes back as a reading. Ask a run with a shell, or a person, for that. \") +\n+    \"Ten minutes, one report, no session: if the task is larger, or needs a decision, do it here.\" +\n     shared\n   );\n }\ndiff --git a/src/entrypoints/tools/mcp/mcp.test.ts b/src/entrypoints/tools/mcp/mcp.test.ts\nindex 735f260..15f1766 100644\n--- a/src/entrypoints/tools/mcp/mcp.test.ts\n+++ b/src/entrypoints/tools/mcp/mcp.test.ts\n@@ -3714,6 +3714,65 @@ describe(\"mcp/delegate.ts\", () => {\n     }\n   });\n \n+  /**\n+   * The four reads worth delegating, and the boundary that keeps them from being read\n+   * as \"delegate everything\".\n+   *\n+   * #216, measured: the trigger (\"reading you will not use again\") was already in the\n+   * caller's prompt and in this description, and delegate calls were still 55 of 17,278\n+   * tool calls over 185 sessions — 1 call in the 67 sessions of the two days before this\n+   * was written. A rule whose edge a model cannot see is a rule it does not act on, so\n+   * the description names four shapes a caller can match against the tree in front of\n+   * it, each a read whose product is a line, a shortlist, or a yes.\n+   *\n+   * The boundary is pinned with them because the four alone read as an instruction to\n+   * delegate more: the file being edited, and anything consulted again during the run,\n+   * have to stay in the caller's own reading, or a run edits a file it never read.\n+   *\n+   * And a ceiling is pinned with both. A tool description is resent on every turn of\n+   * every run holding the tool, so the examples had to be paid for out of the budget the\n+   * old text already spent — the old one measured 1,918 characters, this one 1,982 — and\n+   * the ceiling is what stops the next good example from being added on top of it.\n+   */\n+  test(\"the delegate description names the four reads worth delegating, and the boundary\", async () => {\n+    const r = await sendRequest(\n+      \"delegate.ts\",\n+      { jsonrpc: \"2.0\", id: 7, method: \"tools/list\", params: {} },\n+      {},\n+      process.cwd(),\n+      [\"--roster\", \"delegate\", \"--delegates-dir\", ROSTER_DIR],\n+    );\n+    const d = (r.result.tools as { name: string; description: string }[]).find(\n+      (t) => t.name === \"delegate\",\n+    )!.description;\n+\n+    // The trigger, unchanged, so the examples extend it rather than replace it.\n+    expect(d, \"the trigger\").toContain(\"reading you will not use again\");\n+    // One thing out of a file that is not being edited.\n+    expect(d, \"a single answer out of a large read\").toContain(\n+      \"opened for one thing you will not edit\",\n+    );\n+    // Candidates opened to narrow down, where only the last one is kept.\n+    expect(d, \"narrowing down by opening candidates\").toContain(\n+      \"candidate files opened in turn to narrow down\",\n+    );\n+    // Search hits that would otherwise be read one by one.\n+    expect(d, \"grep hits read in turn\").toContain(\"grep hits you would otherwise read one by one\");\n+    // A question whose answer is one line.\n+    expect(d, \"an existence question\").toContain(\"a question whose answer is one line\");\n+    // What it buys, said once.\n+    expect(d, \"the saving is named\").toContain(\"What it saves is the transcript\");\n+    // The boundary: the edits stay here, and so does anything read twice.\n+    expect(d, \"the file being edited is read here\").toContain(\"The file you are about to edit\");\n+    expect(d, \"and so is anything the run returns to\").toContain(\"consult again during this run\");\n+    // The limits are a tail, not a paragraph of their own.\n+    expect(d, \"the limits are one short tail\").toContain(\"Ten minutes, one report, no session\");\n+    expect(\n+      d.length,\n+      \"a tool description is prompt cost on every turn: reword inside this, do not append\",\n+    ).toBeLessThan(2100);\n+  });\n+\n   /**\n    * `task` is one text for both rosters, so it may promise only what every delegate\n    * can do. It used to say \"make one change, run one command\" — neither of which the\ndiff --git a/tests/contract/agent-prompts.test.ts b/tests/contract/agent-prompts.test.ts\nindex ebc610e..9b3acc6 100644\n--- a/tests/contract/agent-prompts.test.ts\n+++ b/tests/contract/agent-prompts.test.ts\n@@ -631,6 +631,29 @@ describe(\"agent prompt contracts\", () => {\n     }\n   });\n \n+  /**\n+   * The delegate paragraph keeps the boundary that makes the examples safe to sharpen.\n+   *\n+   * #216 asked the delegate descriptions to name the reads worth delegating, and they\n+   * now do (`mcp/delegate.ts`). What must not travel with them is breadth: a file about\n+   * to be edited, or one consulted again during the run, is read here. Without that\n+   * sentence the description's examples read as an instruction to delegate more, and a\n+   * run that delegates one of those edits a file it has never read — a worse outcome\n+   * than the reading it saved.\n+   */\n+  test(\"the shared prompt says which reads stay inline\", () => {\n+    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\").replace(/\\s+/g, \" \");\n+    expect(prompt, \"the trigger the examples extend\").toContain(\n+      \"Reading you will not use again belongs in a sub-run\",\n+    );\n+    expect(prompt, \"the file being edited is read here\").toContain(\n+      \"What stays here is the file you are about to edit\",\n+    );\n+    expect(prompt, \"and so is anything the run returns to\").toContain(\n+      \"anything you will read again during this run\",\n+    );\n+  });\n+\n   /**\n    * The tree, in the shared prompt, because every role acts on a node and means the work\n    * under it.\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-10-26T00:55:13Z",
+        "event_type": "pr_diff",
+        "id": "pr-406-diff",
+        "layer": "github-context",
+        "sha": "fd6c15f7",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "PR #406 is merged, and the delegate half of #216 now has in it every element the decision named.\n\n**What I concluded.** No merge-blocking defect: the four reads, the boundary sentence, the shortened description, the one prompt sentence and the tests are all present and consistent with the tool's real reach, so what the decision asked for is on `main`.\n\n**How you know.**\n- The four patterns and the saving are in `src/entrypoints/tools/mcp/delegate.ts:644-652`, and the boundary — \"The file you are about to edit, and anything you will consult again during this run, stay here\" — is on `:651`, inside the same paragraph rather than after it; the limits are one tail at `:665`.\n- The shape is preserved where a rewrite could have broken it: `delegate.ts:657-664` still branches on `canWrite`/`hasShell`, so `mcp.test.ts:3688`'s per-roster promise holds — `\"run one command to answer a question\"` for the writing pair (`:3706`), `\"CANNOT run commands\"` + `\"no shell\"` for the read-only pair (`:3711-3712`), and `:3676`'s `\"CANNOT change anything\"` is still in the text at `delegate.ts:659`.\n- Nothing pinned was deleted: the only strings the old text carried that are gone — `\"no issues, no pull requests, no comments\"`, `\"the investigation you do not know how to start\"`, `\"read \\`task\\` before calling\"`, `\"when to stop looking\"` — appear in no test (`grep` over `tests/` and `mcp.test.ts` returns only docs prose and the deployed `.github/atomaton-runtime/` copy), and the \"when to stop\" instruction survives in the `task` parameter's own description at `delegate.ts:387-389`.\n- The prompt sentence is at `src/content/prompt-template.md:53-54`, one sentence, generic prose, after the three example bullets; the contract pin is `tests/contract/agent-prompts.test.ts:644`.\n- `atomaton-check` concluded `success` on the head commit and `check_merge_readiness(406)` returned `ready: true`, `blockers: []`.\n\n**What I could not establish.**\n- I could not re-measure the length table (`delegate` 1,918 → 1,982) or run `bun run test`; this run has no shell. The ceiling test asserts `< 2100` at `mcp.test.ts:3773` and CI runs it, so the bound is enforced even though the exact numbers are the engineer's.\n- Whether the four examples move the delegate rate. By the decision this is deliberately unmeasured (案Y), so the effect stays a judgement for `@yuma-seno` over the coming weeks.\n- One gap I found and judged not worth blocking on, so the next reader does not have to rediscover it: the ceiling at `mcp.test.ts:3773` measures only the `delegate` rendering (1,982), while the longest of the four is `delegate_readonly` at 2,086 — 14 characters under the limit it is not tested against. The guard therefore tolerates about +118 characters before firing, by which point the read-only text is over 2,200. It is a test narrower than its docblock, not an uncovered behaviour; the fix, if someone wants it, is to assert the ceiling over all four renderings from `tools/list` in the same test.\n- The decision named `tests/contract/agent-prompts.test.ts:486` and `:556` as the place to update description pins; those lines are a note about tool descriptions and the \"How much to change\" test, not description pins. The engineer put the description pin where they actually live (`mcp.test.ts`, alongside `:3668`, `:3688`, `:3723`) and added the prompt pin to `agent-prompts.test.ts`. That is a deviation in the means, correctly derived — worth knowing only so the decision's wording is not read as an unmet instruction.\n\n**What happens next.** The merge re-invoked `engineer` on #216, and what remains there is a judgement only `@yuma-seno` can make: whether the delegate half is now delivered — measured only by the rate over the coming weeks — or whether #216 should be closed with this change in place and any further lever left as its own issue.\n\n\n---\n_Tokens: 767331 total (755392 prompt + 11939 completion, 677120 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/40251463086) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T00:55:13Z",
+        "event_type": "pr_comment",
+        "id": 6405825578,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_53sgdlrd8svb168wf9gzzkmy",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -2 && echo \\\"=== desc ===\\\" && sed -n '642,666p' src/entrypoints/tools/mcp/delegate.ts && echo \\\"=== prompt ===\\\" && sed -n '50,56p' src/content/prompt-template.md && echo \\\"=== version ===\\\" && grep -n '\\\"version\\\"' package.json\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297614489400000000000000000000ffffc0a8426df4be96",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "I've been re-invoked on #216 after PR #406 merged. The question: does what merged satisfy what the issue asked for?\n\nTwo halves of #216:\n1. Prompt philosophy section (\"How much to change\") — delivered in PR #402 (merged), verified earlier.\n2. Delegate adjustment — the decision (2026-10-26) specified: add 4 examples to the delegate trigger, keep description short, keep the boundary, one sentence in prompt-template if it fits, update pins, no version bump, no re-measurement. PR #406 implemented exactly that and merged.\n\nSo both halves are now delivered. The outcome per my role contract: \"A pull request you opened has merged and what merged satisfies the issue → request_close_issue\".\n\nBefore closing, I should verify the merged state on main — I have a shell this run. Let me check:\n- `git log` head includes the merge of #406.\n- The description text on main contains the four patterns and boundary.\n- prompt-template has the sentence at :53.\n- tests present and pass.\n- version untouched.\n\nThe reviewer flagged one thing: the ceiling test only measures `delegate` (1,982), while `delegate_readonly` is 2,086 — 14 chars under the limit but not tested. Is that a merge-blocking defect for #216's acceptance? It's a test narrower than its docblock; not a defect in the delivered behaviour. My judgement: it doesn't block closing #216; but should I fix it as \"carry on with the work\"? The role says: \"Where they are not [met], say which one is not met and carry on with the work\". Is the ceiling-on-all-four part of what the issue asked? The decision asked: \"同時に説明を短く保つ\" — the description should be short. It is: +3.3%. The test guard was my own addition, not requested. An imperfect guard doesn't make the requirement unmet.\n\nHowever — a reviewer raised a concrete finding: \"the ceiling at mcp.test.ts:3773 measures only the delegate rendering... The fix, if someone wants it, is to assert the ceiling over all four renderings\". Should I address it? The reviewer merged anyway (they said \"No merge-blocking defect\"). It is a small, cheap fix (assert over all four) — and it does improve the guard that protects the owner's stated constraint (\"説明を短く保つ\") for the longest variant. But the role contract says after merge: \"make no further code changes to what merged. Judge what merged against what the issue asked for\".\n\nHmm: \"If the pull request merged, make no further code changes to what merged.\" So I should not reopen and change the test. Unless the issue is unsatisfied. Is it? No.\n\nSo: `request_close_issue`.\n\nBut before that, verify on main with the shell. Let me check the merged state quickly:\n1. `git log --oneline -3` → merge of #406.\n2. grep the four patterns in delegate.ts and the boundary in prompt-template.md.\n3. version untouched.\n4. Run the two focused test files (fast) to confirm the merged tree passes: `bun test src/entrypoints/tools/mcp/mcp.test.ts -t delegate` requires dist; synth first. Maybe just run `bun test tests/contract/agent-prompts.test.ts` and the delegate subset after synth.\n\nThen call request_close_issue with a summary that carries: what's met, and the residual (the guard's narrowness; effect unmeasured by decision).\n\nLet me verify.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"34646b9 Merge pull request #406 from yuma-seno/atomaton/issue-216\\n=== desc ===\\nfunction delegateDescription(def: ResolvedDelegate, shared: string): string {\\n  return (\\n    \\\"Do one small piece of work in a separate run and return what it found. Use it for the \\\" +\\n    \\\"reading you will not use again — the transcript you do not want in this session. It is for \\\" +\\n    \\\"a large file, or several, opened for one thing you will not edit (a signature, a config \\\" +\\n    \\\"value, a line); for candidate files opened in turn to narrow down, when only the last one \\\" +\\n    \\\"is kept; for grep hits you would otherwise read one by one, when the few that match are \\\" +\\n    \\\"enough; and for a question whose answer is one line, such as whether something still \\\" +\\n    \\\"exists. What it saves is the transcript: what you read here is resent on every later turn, \\\" +\\n    \\\"and one report comes back. The file you are about to edit, and anything you will consult \\\" +\\n    \\\"again during this run, stay here. \\\" +\\n    \\\"It has its own `grep`, `glob` and `read`, and no memory of this conversation: put everything \\\" +\\n    \\\"it needs in `task` and `context`, name the files you know and the ground to cover, and say \\\" +\\n    \\\"what a useful answer looks like. \\\" +\\n    \\\"It CANNOT reach GitHub, dispatch an agent, or delegate again. \\\" +\\n    (def.canWrite\\n      ? \\\"It can also change files in the same tree, so what it writes is what you commit. \\\"\\n      : \\\"It CANNOT change anything: a change it was asked to make comes back as a description, \\\" +\\n        \\\"not an edit. \\\") +\\n    (def.hasShell\\n      ? \\\"It can also run one command to answer a question — a measurement no reading can give you. \\\"\\n      : \\\"It CANNOT run commands: no shell, so a measurement — stdout, an exit code, a test run — \\\" +\\n        \\\"comes back as a reading. Ask a run with a shell, or a person, for that. \\\") +\\n    \\\"Ten minutes, one report, no session: if the task is larger, or needs a decision, do it here.\\\" +\\n    shared\\n=== prompt ===\\n- *\\\"Read `docs/y.md` and tell me which of these five claims it actually supports.\\\"*\\n- *\\\"Does this repository already have anything that does `Z`? Name the files.\\\"*\\n\\nWhat stays here is the file you are about to edit, and anything you will read again\\nduring this run.\\n\\n**Which delegate to call is in the tool descriptions, and it is not always the\\n=== version ===\\n5:  \\\"version\\\": \\\"0.21.50\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":190}",
+      "tool_call_id": "call_00_53sgdlrd8svb168wf9gzzkmy"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_cjqobxhhzt91y5vsu7q206vs",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth >/dev/null 2>&1 && echo \\\"synth ok\\\" && bun test tests/contract/agent-prompts.test.ts 2>&1 | tail -3 && bun test src/entrypoints/tools/mcp/mcp.test.ts -t \\\"delegate\\\" 2>&1 | tail -4 && grep -n \\\"toBeLessThan(2100)\\\" src/entrypoints/tools/mcp/mcp.test.ts\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297615234400000000000000000000ffffc0a888ed577141",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Interesting: version is now 0.21.50 — the release workflow bumped it after the merge (that's the tag-release path, and it's a person's/release's call — not my PR). Good: my PR didn't bump; the release tag flow did (that's the configured `deploy.on_merge: tag-release`). Wait — tag-release tags the version; does it bump? The config said \"Bump the version, merge, and this tags.\" So there's an automated version bump workflow that opens a PR (Atomaton Release). 0.21.50 may be from that release PR merged. Not my concern.\n\nNow run focused tests on the merged tree to confirm the state passes, and check the ceiling test line numbers. Then close.\n\nNote: dist may be missing again; run synth first.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"synth ok\\n 0 fail\\n 138 expect() calls\\nRan 30 tests across 1 file. [8.00ms]\\n 109 filtered out\\n 0 fail\\n 53 expect() calls\\nRan 12 tests across 1 file. [1065.00ms]\\n3773:    ).toBeLessThan(2100);\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1472}",
+      "tool_call_id": "call_00_cjqobxhhzt91y5vsu7q206vs"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_yym4feopuwel0vn68t8xqn9g",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run /tmp/atomaton-workspace/desc-length.ts src/entrypoints/tools/mcp/delegate.ts src/content/delegates; grep -n \\\"What stays here is the file\\\" dist/.github/atomaton/prompt-template.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297615758500000000000000000000ffffc0a8804bde33b8",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "On main: 30 pass in agent-prompts, 12 delegate tests pass. The ceiling is at `mcp.test.ts:3773`.\n\nLet me also measure the current rendered lengths on main to confirm the numbers (1,982 etc.) — quick reuse of my measurement script. And confirm `dist` carries the prompt sentence.\n\nThen close with request_close_issue.\n\nLet me also double-check whether the four patterns named by the decision are each present:\n1. 大きいファイル（や複数ファイル）から1点の答えを取り出す読み → \"a large file, or several, opened for one thing you will not edit (a signature, a config value, a line)\" ✓ and \"that you will not edit\" ✓\n2. 当たりをつけて候補ファイルを順に開いて絞り込む → \"candidate files opened in turn to narrow down, when only the last one is kept\" ✓\n3. grep のヒットを順に全部読む → \"grep hits you would otherwise read one by one, when the few that match are enough\" ✓\n4. 存在確認 → \"a question whose answer is one line, such as whether something still exists\" ✓\nBoundary ✓, short ✓, one prompt sentence ✓, tests ✓, no version bump by PR ✓ (version moved via release flow, which is the normal path — hmm, actually the release path bumps version on merge? config says deploy.on_merge runs tag-release.sh which \"Bump the version, merge, and this tags\". So 0.21.50 exists because tag-release bumped and merged? That means my merge published to adopters. That's the configured behaviour for every merge... The conventions say \"Never touch version in package.json. The version is the release declaration: merging an edit to it publishes to adopters, and that decision belongs to a person, made on the pull request the Atomaton Release workflow opens\". So the release workflow opens a PR; someone merged it. Either way, not mine to fix, and my PR did not include a version change.\n\nHmm wait — should I flag that the version moved? It's expected machinery. Fine, and if relevant I can mention it as \"version now 0.21.50, moved by the release flow, not by this work\" — worth one line so the reader doesn't think the convention was violated.\n\nNow: is there anything left unmet? The reviewer's note about the ceiling test being narrow (only `delegate`, not `delegate_readonly` at 2,086). Is that a defect I should fix? Post-merge: \"make no further code changes to what merged\". So no. But should the issue be considered satisfied? The requirement \"keep description short\" is met (measured +3.3%); the guard's narrowness is a testing imperfection, not an unmet requirement. I'll note it in the report and close.\n\nLet me measure lengths on main for accurate report numbers.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"delegate\\t1982\\t390w\\ndelegate_large\\t1642\\t322w\\ndelegate_readonly\\t2086\\t410w\\ndelegate_readonly_large\\t1746\\t342w\\n53:What stays here is the file you are about to edit, and anything you will read again\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":223}",
+      "tool_call_id": "call_00_yym4feopuwel0vn68t8xqn9g"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_mbsi8kwb2xrapnwpis77nyng",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"summary\": \"Both halves of #216 are on `main` and each matches what was decided for it: the code-quality philosophy section (PR #402) and the delegate trigger's four example reads, its boundary sentence, the one prompt sentence, and the pins (PR #406).\\n\\n**How I know.**\\n- `src/content/prompt-template.md:139` — `# How much to change`, merged as `59db73f` (#402), pinned by `tests/contract/agent-prompts.test.ts:583`.\\n- `src/entrypoints/tools/mcp/delegate.ts:644-652` — the four reads the decision named, each present: one thing out of a file you will not edit; candidates opened in turn to narrow down; grep hits read one by one; a one-line answer. The boundary is `:651`, inside the same paragraph.\\n- `src/content/prompt-template.md:53-54` — the one added sentence; it reaches the deliverable, confirmed at `dist/.github/atomaton/prompt-template.md:53`.\\n- Shortness, measured from a running server against the deployed pre-change text: `delegate` 1,918 → 1,982, `delegate_large` 1,578 → 1,642, `delegate_readonly` 2,066 → 2,086, `delegate_readonly_large` 1,726 → 1,746; **+3.3% with four examples added**, and the old paragraph paid for them.\\n- On merged `main`: `bun test tests/contract/agent-prompts.test.ts` → `30 pass, 0 fail`; `bun test src/entrypoints/tools/mcp/mcp.test.ts -t delegate` → `12 pass, 0 fail`; the ceiling guard is at `mcp.test.ts:3773`.\\n- `package.json:5` reads `0.21.50`, moved by the release flow after the merge — this work's commits changed no version.\\n\\n**What I could not establish, and it is not a gap in the delivery.**\\n- Whether the four shapes move the delegate rate. The decision left this to judgement (案Y), so no re-measurement was run; the numbers to watch are the delegate rows of the per-tool table in `metrics/report.md`.\\n- When those numbers become observable here at all: `src/**` is the deliverable, and this repository's own agents read `.github/atomaton/**`, which arrives from a release plus `self/`. So a rate change can only follow a release applied with **Atomaton Self Deploy** — nothing in this merge reconfigures the live agents.\\n- One imperfection I chose not to act on, per the post-merge rule that merged work is not edited again: the ceiling guard at `mcp.test.ts:3773` asserts only the `delegate` rendering (1,982), while `delegate_readonly` is the longest at 2,086 — inside the same 2,100 limit but untested against it. The guard tolerates about +118 characters before firing, at which point the read-only text passes 2,200. The constraint the decision asked for is met; what is narrow is the test protecting it.\\n\\n**What happens next.** Nothing follows from this run — the work is delivered. If the delegate rate has not moved by the next metrics window after a self-deploy, the remaining lever is where the prompt asks for a delegate at the moment of choosing (`src/content/prompt-template.md:43`), not what the tool says about itself.\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297616412100000000000000000000ffffc0a86f617dfdd5",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Confirmed on main: lengths as reported (1,982 / 1,642 / 2,086 / 1,746), prompt sentence at `dist/.github/atomaton/prompt-template.md:53`.\n\nBoth halves of #216 delivered. Conclusion: satisfied → request_close_issue.\n\nThe summary must carry: what was concluded, why it's complete, with anchors. And request_close_issue posts it as the comment and ends the session. So write the report in the summary argument.\n\nLet me draft the summary (it's the issue's closing comment):\n\n- Conclusion: both halves of #216 are on main; the philosophy section (PR #402) and the delegate examples + boundary + prompt sentence + pins (PR #406).\n- How I know (anchors).\n- Could not establish: delegate usage effect (deliberately unmeasured, 案Y); the ceiling test's narrowness (only `delegate`, readonly at 2,086).\n- What happens next: nothing follows from me; the effect shows in future metrics; if the rate doesn't move, the next lever is the moment-of-choice prompting.\n\nNote printed earlier: the issue's `atomaton/in-progress` label — closing will handle.\n\nAlso: my earlier statement that \"delegate half needs your call\" — now resolved.\n\nOne more consideration: the effect \"measured only by rate over the coming weeks\" — the person should know how to check: metrics/report.md per-tool table (delegate rows), which now exists. Good to name: `atomaton-data:metrics/report.md` per-tool table — after the next release deploys to this repo, the rows would show. But note: this repository's agents run from `.github/atomaton/` deployed via release; the merge doesn't change live agents until self-deploy. That's important! The conventions say: `src/**` affects adopters after release; `.github/**` comes from a release plus self/. So my description change reaches *this* repo's running agents only after a release + self-deploy. So \"the effect shows over the coming weeks\" is conditional on a self-deploy applying the release.\n\nThat's a genuinely useful note for the next reader. Let me include it: the new description is in the deliverable; this repository's own agents pick it up when a release is applied via Atomaton Self Deploy (`.github/atomaton/**` is governed and arrives from a release plus `self/`), so a rate change is only observable after that.\n\nLet me check whether that's accurate: `src/content/delegates/` → dist → release → self-deploy copies into `.github/atomaton/delegates/`; the runtime tool `delegate.js` comes from `.github/atomaton-runtime/tools/mcp/delegate.js` which is also generated and replaced on upgrade. Right.\n\nSo: to observe the effect, a release must be applied. Version is 0.21.50 now, which is ≥ the release carrying #406? Actually the version bump to 0.21.50 might predate #406's merge (it may be the release of #402). Hmm — careful, don't over-claim. I'll say: it reaches this repository's own agents when the next release is applied with Atomaton Self Deploy, and the numbers to watch are the delegate rows in `metrics/report.md`.\n\nLet me confirm the current release tag/version ordering? Not necessary; keep it conditional.\n\nNow write the request_close_issue summary. Keep it within the report contract: conclusion (≤2 sentences), how you know (≤5 anchors), what I could not establish, what happens next (≤3 sentences). Fold the evidence? Fine to fold the detail.\n\nAlso mention the philosophy half briefly since the issue's first half.\n\nWrite it.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #216 is concluded: your conclusion is on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "call_00_mbsi8kwb2xrapnwpis77nyng"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 8,
+      "event_count": 12,
       "session_number": "216",
-      "snapshot_hash": "7a6e66e49f9c7abfdd45997bb087ec812f37109bc16325135f8fabd99bb88f90",
+      "snapshot_hash": "9de68bc16ee6f5e5e2a732fb927ad3d5820532f4487c5af4fdcd9c4485119adb",
       "type": "issue",
       "version": 1
     }
@@ -2673,6 +2854,23 @@
         }
       },
       "started": "2026-10-26T00:42:49Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-26T00:56:16Z",
+      "ended_because": "completed",
+      "iterations": 4,
+      "messages": 207,
+      "seconds": 35,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "shell": {
+          "bash": 3
+        }
+      },
+      "started": "2026-10-26T00:55:41Z"
     }
   ]
 }
