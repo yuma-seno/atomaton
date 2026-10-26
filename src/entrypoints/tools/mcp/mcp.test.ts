@@ -3715,6 +3715,65 @@ describe("mcp/delegate.ts", () => {
   });
 
   /**
+   * The four reads worth delegating, and the boundary that keeps them from being read
+   * as "delegate everything".
+   *
+   * #216, measured: the trigger ("reading you will not use again") was already in the
+   * caller's prompt and in this description, and delegate calls were still 55 of 17,278
+   * tool calls over 185 sessions — 1 call in the 67 sessions of the two days before this
+   * was written. A rule whose edge a model cannot see is a rule it does not act on, so
+   * the description names four shapes a caller can match against the tree in front of
+   * it, each a read whose product is a line, a shortlist, or a yes.
+   *
+   * The boundary is pinned with them because the four alone read as an instruction to
+   * delegate more: the file being edited, and anything consulted again during the run,
+   * have to stay in the caller's own reading, or a run edits a file it never read.
+   *
+   * And a ceiling is pinned with both. A tool description is resent on every turn of
+   * every run holding the tool, so the examples had to be paid for out of the budget the
+   * old text already spent — the old one measured 1,918 characters, this one 1,982 — and
+   * the ceiling is what stops the next good example from being added on top of it.
+   */
+  test("the delegate description names the four reads worth delegating, and the boundary", async () => {
+    const r = await sendRequest(
+      "delegate.ts",
+      { jsonrpc: "2.0", id: 7, method: "tools/list", params: {} },
+      {},
+      process.cwd(),
+      ["--roster", "delegate", "--delegates-dir", ROSTER_DIR],
+    );
+    const d = (r.result.tools as { name: string; description: string }[]).find(
+      (t) => t.name === "delegate",
+    )!.description;
+
+    // The trigger, unchanged, so the examples extend it rather than replace it.
+    expect(d, "the trigger").toContain("reading you will not use again");
+    // One thing out of a file that is not being edited.
+    expect(d, "a single answer out of a large read").toContain(
+      "opened for one thing you will not edit",
+    );
+    // Candidates opened to narrow down, where only the last one is kept.
+    expect(d, "narrowing down by opening candidates").toContain(
+      "candidate files opened in turn to narrow down",
+    );
+    // Search hits that would otherwise be read one by one.
+    expect(d, "grep hits read in turn").toContain("grep hits you would otherwise read one by one");
+    // A question whose answer is one line.
+    expect(d, "an existence question").toContain("a question whose answer is one line");
+    // What it buys, said once.
+    expect(d, "the saving is named").toContain("What it saves is the transcript");
+    // The boundary: the edits stay here, and so does anything read twice.
+    expect(d, "the file being edited is read here").toContain("The file you are about to edit");
+    expect(d, "and so is anything the run returns to").toContain("consult again during this run");
+    // The limits are a tail, not a paragraph of their own.
+    expect(d, "the limits are one short tail").toContain("Ten minutes, one report, no session");
+    expect(
+      d.length,
+      "a tool description is prompt cost on every turn: reword inside this, do not append",
+    ).toBeLessThan(2100);
+  });
+
+  /**
    * `task` is one text for both rosters, so it may promise only what every delegate
    * can do. It used to say "make one change, run one command" — neither of which the
    * read-only half could do — and what else a delegate takes now lives in the

@@ -632,6 +632,29 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * The delegate paragraph keeps the boundary that makes the examples safe to sharpen.
+   *
+   * #216 asked the delegate descriptions to name the reads worth delegating, and they
+   * now do (`mcp/delegate.ts`). What must not travel with them is breadth: a file about
+   * to be edited, or one consulted again during the run, is read here. Without that
+   * sentence the description's examples read as an instruction to delegate more, and a
+   * run that delegates one of those edits a file it has never read — a worse outcome
+   * than the reading it saved.
+   */
+  test("the shared prompt says which reads stay inline", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8").replace(/\s+/g, " ");
+    expect(prompt, "the trigger the examples extend").toContain(
+      "Reading you will not use again belongs in a sub-run",
+    );
+    expect(prompt, "the file being edited is read here").toContain(
+      "What stays here is the file you are about to edit",
+    );
+    expect(prompt, "and so is anything the run returns to").toContain(
+      "anything you will read again during this run",
+    );
+  });
+
+  /**
    * The tree, in the shared prompt, because every role acts on a node and means the work
    * under it.
    *

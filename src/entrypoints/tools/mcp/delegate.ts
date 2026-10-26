@@ -621,33 +621,48 @@ async function handleDelegateRun(def: ResolvedDelegate, args: z.infer<typeof DEL
  *
  * So the caller's prompt says "delegate this" and this text says "which one", and
  * the roster is what keeps the second sentence honest.
+ *
+ * ## The four kinds of reading, because "reading you will not use again" named none
+ *
+ * The trigger was already here and in the caller's prompt, and delegate calls were
+ * still 0.32% of all tool calls over 185 sessions — 1 call in the 67 sessions of the
+ * two days before this was written. A rule stated twice and obeyed by nobody is a
+ * rule a model cannot see the edge of: "will I use this again?" has no obvious answer
+ * at the moment a file is opened, so the cheap answer is to read it. The four cases
+ * below are the ones an owner of this project read as unambiguously delegate-able,
+ * and they are stated as shapes rather than as examples about a particular file,
+ * because the shape is what a caller can match against the tree in front of it.
+ *
+ * They are also chosen so the boundary survives them. Every one of the four is a read
+ * whose *product* is a line, a shortlist, or a yes; a file being edited, or one
+ * consulted again later in the run, is not one of them, and that sentence is here
+ * rather than left to be inferred — a description that only ever says "delegate
+ * more" is how a run ends up editing a file it has never read.
  */
 function delegateDescription(def: ResolvedDelegate, shared: string): string {
   return (
-    "Do one small piece of work in a separate run and return what it found. Use it for reading " +
-    "and searching — the work whose transcript you do not want in this session. " +
-    "The investigation you do not know how to start is the case it is most for: it does have " +
-    "its own `grep`, `glob` and `read`, so \"find where X is defined and everywhere it is " +
-    "called\" is a task you can hand over rather than a search you have to do first. Say what " +
-    "an answer looks like and when to stop looking, and read `task` before calling. " +
-    "It starts with NO memory of this conversation: put everything it needs in `task` and " +
-    "`context`. Name the files when you already know them; when you do not, say so and give " +
-    "it the ground to cover. " +
-    "It CANNOT reach GitHub — no issues, no pull requests, no comments — cannot dispatch anything, " +
-    "and cannot delegate further. " +
+    "Do one small piece of work in a separate run and return what it found. Use it for the " +
+    "reading you will not use again — the transcript you do not want in this session. It is for " +
+    "a large file, or several, opened for one thing you will not edit (a signature, a config " +
+    "value, a line); for candidate files opened in turn to narrow down, when only the last one " +
+    "is kept; for grep hits you would otherwise read one by one, when the few that match are " +
+    "enough; and for a question whose answer is one line, such as whether something still " +
+    "exists. What it saves is the transcript: what you read here is resent on every later turn, " +
+    "and one report comes back. The file you are about to edit, and anything you will consult " +
+    "again during this run, stay here. " +
+    "It has its own `grep`, `glob` and `read`, and no memory of this conversation: put everything " +
+    "it needs in `task` and `context`, name the files you know and the ground to cover, and say " +
+    "what a useful answer looks like. " +
+    "It CANNOT reach GitHub, dispatch an agent, or delegate again. " +
     (def.canWrite
-      ? "Use it for changing files too: it works in the same tree, so a change it makes is a " +
-        "change you will commit. "
-      : "It CANNOT change anything: it reads and searches only, and a change it was asked to make " +
-        "comes back as a description rather than as an edit. ") +
+      ? "It can also change files in the same tree, so what it writes is what you commit. "
+      : "It CANNOT change anything: a change it was asked to make comes back as a description, " +
+        "not an edit. ") +
     (def.hasShell
-      ? "It can also run one command to answer a question — the measurement a static reading of " +
-        "the code cannot give you. "
-      : "It CANNOT run commands: it has no shell, so a task that needs a measured result — stdout, " +
-        "an exit code, a test run — comes back as a reading, not a measurement. Ask a run that has " +
-        "a shell, or a person, for that. ") +
-    "It has a ten-minute limit and no session: it runs once and returns one report, and nothing " +
-    "resumes it. If the task is larger than that, or needs a decision, do it here instead." +
+      ? "It can also run one command to answer a question — a measurement no reading can give you. "
+      : "It CANNOT run commands: no shell, so a measurement — stdout, an exit code, a test run — " +
+        "comes back as a reading. Ask a run with a shell, or a person, for that. ") +
+    "Ten minutes, one report, no session: if the task is larger, or needs a decision, do it here." +
     shared
   );
 }
