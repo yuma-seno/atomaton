@@ -3556,6 +3556,65 @@ describe("mcp/atomaton.ts", () => {
   });
 
   /**
+   * The close is one way to end a run, and the description no longer says it is the
+   * only one (#209).
+   *
+   * It read "This is the ONLY correct way to finish an issue -- do NOT just stop
+   * responding without calling this", while the orchestrator's own contract had
+   * grown the opposite boundary (`What the person asked for`): asked for an opinion or
+   * an investigation, the report is the deliverable and the issue stays open. Both are
+   * read before a run decides how to end, and the tool's text is the one that says what
+   * calling it means -- so an investigation that had delivered its report through the
+   * close had the tool agreeing with it.
+   *
+   * Pinned in pieces rather than whole, because both halves have to survive a reword:
+   * what the tool is for, and the plain exit named beside it. The ceiling is what the
+   * replaced text measured, 651 characters: a tool description is resent on every turn
+   * of every run holding the tool, so a clause goes inside that budget, not on top.
+   */
+  test("request_close_issue is for delivered work, and names the exit it is not", async () => {
+    const r = await sendRequest("atomaton.ts", { jsonrpc: "2.0", id: 50, method: "tools/list", params: {} });
+    const d = (r.result.tools as { name: string; description: string }[]).find(
+      (t) => t.name === "request_close_issue",
+    )!.description;
+
+    expect(d, "no claim to be the only way a run may end").not.toContain("ONLY");
+    expect(d, "and no warning against ending without it").not.toContain("stop responding");
+    expect(d, "what it is for").toContain("work has been delivered");
+    // A sub-issue's report is delivered work, not the answer a person is waiting on --
+    // leave it out of this list and the child never closes, so its parent never wakes.
+    expect(d, "including a child's report on its way back").toContain(
+      "a child's report on its way back to its parent",
+    );
+    expect(d, "and what it is not for").toContain(
+      "Not for a question a person asked or an investigation they are waiting on",
+    );
+    // The exit it must not crowd out: the closing message, posted by the machinery.
+    expect(d, "the report and end, named so it is reachable").toContain(
+      "posting the report as your closing message",
+    );
+    expect(d, "with the issue left to the person who asked").toContain(
+      "leaving the issue open for them",
+    );
+    // The mechanism, which the rewrite was not allowed to lose.
+    expect(d, "the session ends on the call").toContain("your session ends when it returns");
+    expect(d, "the close is the tool's call, not the agent's").toContain(
+      "this tool's decision, not yours",
+    );
+    expect(d, "the summary is the comment it ends on").toContain(
+      "posted as the comment this call ends on",
+    );
+    expect(d, "a sub-issue's conclusion fires its parent's gate").toContain(
+      "a sub-issue's close fires its parent's phase-gating",
+    );
+    expect(d, "refused on a pull request run").toContain("Refused on a pull request run");
+    expect(
+      d.length,
+      "a tool description is prompt cost on every turn: reword inside this, do not append",
+    ).toBeLessThan(760);
+  });
+
+  /**
    * The retired arguments are refused, and the refusal says where the sentence goes.
    *
    * A run restored from a session written before this change holds the call it was

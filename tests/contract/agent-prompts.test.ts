@@ -25,7 +25,9 @@ describe("agent prompt contracts", () => {
    *
    * The close rule is the same boundary seen from the end of the run: an issue whose
    * deliverable is the answer is not the issue `request_close_issue` was written for,
-   * and the issue stays open for the person who asked.
+   * and the issue stays open for the person who asked. The tool half -- its description
+   * stopped calling itself the only correct way -- is pinned in `mcp/mcp.test.ts` as
+   * "request_close_issue is for delivered work, and names the exit it is not".
    *
    * Pinned as single-line fragments, because these files are wrapped prose and a phrase
    * spanning a line break also picks up whatever indentation wraps it.
