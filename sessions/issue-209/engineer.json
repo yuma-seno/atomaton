@@ -1199,7 +1199,7 @@
     },
     {
       "role": "user",
-      "content": "PR #407: Scope request_close_issue's description to issues whose work was delivered\n**Labels:** atomaton/in-progress\n**Linked Issue:** #209\n\n/reviewer\n\nPart of #209\n## What was wrong\n\n`request_close_issue`'s description said:\n\n> This is the ONLY correct way to finish an issue -- do NOT just stop responding without calling this.\n\nThe orchestrator's contract says the opposite for one class of issue (`src/content/agent-definitions/atomaton.md:145`, \"What the person asked for\", live since #220): asked for an opinion or an investigation, the report is the deliverable and the issue stays open. Both texts are read before a run chooses how to end, and the tool's own description is the one that says what calling the tool means — so a run that had delivered its report through the close had the tool agreeing with it.\n\n## What changed\n\n`src/entrypoints/tools/mcp/atomaton.ts:497` — the description now names:\n\n- **what it is for**: an issue whose work has been delivered — a merged pull request, a published document, a child's report on its way back to its parent;\n- **what it is not for**: a question a person asked, or an investigation they are waiting on — those end by posting the report as the closing message, without the call, leaving the issue open;\n- **the mechanism, unchanged**: the summary is the comment the call ends on, a sub-issue's close fires its parent's phase-gating, whether it closes now or asks the author is the tool's decision, your session ends when it returns, refused on a pull request run.\n\nThe old text measured 651 characters; this one measures 702, so the clause was paid for out of the same budget rather than appended.\n\n## Why the child case is in the list\n\n\"Not for an investigation\" read on its own would also forbid a sub-issue created to answer one — and there the close *is* the delivery: the parent is re-invoked only when its children close. That exception is stated first (a child's report on its way back) rather than left to be inferred, and it is pinned.\n\n## Verification\n\n- `bun run test` — 2150 pass, 0 fail (169 files)\n- `bun run typecheck` — clean\n- `bun run synth` — clean, no generated file in the diff\n- `bun run src/entrypoints/machinery/scan_secrets.ts` — exit 0 (gitleaks could not resolve its latest release, so the diff itself was not scanned; warning printed by the script)\n\nNew test: `src/entrypoints/tools/mcp/mcp.test.ts`, \"request_close_issue is for delivered work, and names the exit it is not\" — pins the absence of \"ONLY\"/\"stop responding\", both halves of the scope, the child's-report case, each mechanism sentence, and a 760-character ceiling (the reply-text cost is resent on every turn of every run holding the tool).\n\n`tests/contract/agent-prompts.test.ts:26` — the comment that recorded #209 now names where the tool half is pinned.\n\nNo version bump: reaching adopters is a release, not this merge.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40252096445)_\n",
+      "content": "PR #407: Scope request_close_issue's description to issues whose work was delivered\n**Linked Issue:** #209\n\n/reviewer\n\nPart of #209\n## What was wrong\n\n`request_close_issue`'s description said:\n\n> This is the ONLY correct way to finish an issue -- do NOT just stop responding without calling this.\n\nThe orchestrator's contract says the opposite for one class of issue (`src/content/agent-definitions/atomaton.md:145`, \"What the person asked for\", live since #220): asked for an opinion or an investigation, the report is the deliverable and the issue stays open. Both texts are read before a run chooses how to end, and the tool's own description is the one that says what calling the tool means — so a run that had delivered its report through the close had the tool agreeing with it.\n\n## What changed\n\n`src/entrypoints/tools/mcp/atomaton.ts:497` — the description now names:\n\n- **what it is for**: an issue whose work has been delivered — a merged pull request, a published document, a child's report on its way back to its parent;\n- **what it is not for**: a question a person asked, or an investigation they are waiting on — those end by posting the report as the closing message, without the call, leaving the issue open;\n- **the mechanism, unchanged**: the summary is the comment the call ends on, a sub-issue's close fires its parent's phase-gating, whether it closes now or asks the author is the tool's decision, your session ends when it returns, refused on a pull request run.\n\nThe old text measured 651 characters; this one measures 702, so the clause was paid for out of the same budget rather than appended.\n\n## Why the child case is in the list\n\n\"Not for an investigation\" read on its own would also forbid a sub-issue created to answer one — and there the close *is* the delivery: the parent is re-invoked only when its children close. That exception is stated first (a child's report on its way back) rather than left to be inferred, and it is pinned.\n\n## Verification\n\n- `bun run test` — 2150 pass, 0 fail (169 files)\n- `bun run typecheck` — clean\n- `bun run synth` — clean, no generated file in the diff\n- `bun run src/entrypoints/machinery/scan_secrets.ts` — exit 0 (gitleaks could not resolve its latest release, so the diff itself was not scanned; warning printed by the script)\n\nNew test: `src/entrypoints/tools/mcp/mcp.test.ts`, \"request_close_issue is for delivered work, and names the exit it is not\" — pins the absence of \"ONLY\"/\"stop responding\", both halves of the scope, the child's-report case, each mechanism sentence, and a 760-character ceiling (the reply-text cost is resent on every turn of every run holding the tool).\n\n`tests/contract/agent-prompts.test.ts:26` — the comment that recorded #209 now names where the tool half is pinned.\n\nNo version bump: reaching adopters is a release, not this merge.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/40252096445)_\n",
       "atoma_metadata": {
         "author": "github-actions[bot]",
         "created_at": "2026-10-26T01:08:42Z",
@@ -1223,14 +1223,14 @@
     },
     {
       "role": "user",
-      "content": "```diff\ndiff --git a/src/entrypoints/tools/mcp/atomaton.ts b/src/entrypoints/tools/mcp/atomaton.ts\nindex a8b8eba..7d49821 100644\n--- a/src/entrypoints/tools/mcp/atomaton.ts\n+++ b/src/entrypoints/tools/mcp/atomaton.ts\n@@ -495,17 +495,23 @@ const { tools: TOOLS, dispatch } = buildMcpTools([\n   }),\n   defineMcpTool({\n     name: \"request_close_issue\",\n+    // Scoped to the issue whose work has been delivered, not to every issue a run\n+    // ends on (#209). It used to claim this was the ONLY way to finish a run, which\n+    // is exactly the reading a run asked for an opinion or an investigation acted on:\n+    // with the report having no exit of its own, the close was the only one left. The\n+    // exit it must not crowd out is the plain one the machinery already posts -- the\n+    // closing message becomes the comment -- so the description names it rather than\n+    // warning against silence.\n     description:\n-      \"Conclude work on YOUR CURRENT issue and end your session. This is the ONLY \" +\n-      \"correct way to finish an issue -- do NOT just stop responding without calling \" +\n-      \"this. Your summary is posted to the issue as the comment this call ends on, and \" +\n-      \"phase-gating/aggregation is triggered for its parent when this is a sub-issue. \" +\n-      \"Whether the \" +\n-      \"close happens now or the issue's author is asked to make it is this tool's \" +\n-      \"decision and not yours -- it is the same call either way, and your session \" +\n-      \"ends when it returns. The call is refused on a pull request run: a pull \" +\n-      \"request has no issue to conclude, and its outcome is merge_pr and the \" +\n-      \"post-merge dispatch, not this tool.\",\n+      \"Conclude work on YOUR CURRENT issue and end your session. Use it for an issue whose \" +\n+      \"work has been delivered -- a merged pull request, a published document, a child's \" +\n+      \"report on its way back to its parent. Not for a question a person asked or an \" +\n+      \"investigation they are waiting on: those end by posting the report as your closing \" +\n+      \"message, without this call, leaving the issue open for them. Your summary is posted \" +\n+      \"as the comment this call ends on, and a sub-issue's close fires its parent's \" +\n+      \"phase-gating. Whether it closes now or asks the author to is this tool's decision, \" +\n+      \"not yours; your session ends when it returns. Refused on a pull request run, whose \" +\n+      \"outcome is merge_pr and the post-merge dispatch.\",\n     schema: REQUEST_CLOSE_ISSUE_SCHEMA,\n     handler: handleRequestCloseIssue,\n     // `reason` was retired (#15): it was the same judgement `summary` carries, printed\ndiff --git a/src/entrypoints/tools/mcp/mcp.test.ts b/src/entrypoints/tools/mcp/mcp.test.ts\nindex 15f1766..e3c9a01 100644\n--- a/src/entrypoints/tools/mcp/mcp.test.ts\n+++ b/src/entrypoints/tools/mcp/mcp.test.ts\n@@ -3555,6 +3555,65 @@ describe(\"mcp/atomaton.ts\", () => {\n     expect(Object.keys(launch.properties)).toEqual([\"tasks\"]);\n   });\n \n+  /**\n+   * The close is one way to end a run, and the description no longer says it is the\n+   * only one (#209).\n+   *\n+   * It read \"This is the ONLY correct way to finish an issue -- do NOT just stop\n+   * responding without calling this\", while the orchestrator's own contract had\n+   * grown the opposite boundary (`What the person asked for`): asked for an opinion or\n+   * an investigation, the report is the deliverable and the issue stays open. Both are\n+   * read before a run decides how to end, and the tool's text is the one that says what\n+   * calling it means -- so an investigation that had delivered its report through the\n+   * close had the tool agreeing with it.\n+   *\n+   * Pinned in pieces rather than whole, because both halves have to survive a reword:\n+   * what the tool is for, and the plain exit named beside it. The ceiling is what the\n+   * replaced text measured, 651 characters: a tool description is resent on every turn\n+   * of every run holding the tool, so a clause goes inside that budget, not on top.\n+   */\n+  test(\"request_close_issue is for delivered work, and names the exit it is not\", async () => {\n+    const r = await sendRequest(\"atomaton.ts\", { jsonrpc: \"2.0\", id: 50, method: \"tools/list\", params: {} });\n+    const d = (r.result.tools as { name: string; description: string }[]).find(\n+      (t) => t.name === \"request_close_issue\",\n+    )!.description;\n+\n+    expect(d, \"no claim to be the only way a run may end\").not.toContain(\"ONLY\");\n+    expect(d, \"and no warning against ending without it\").not.toContain(\"stop responding\");\n+    expect(d, \"what it is for\").toContain(\"work has been delivered\");\n+    // A sub-issue's report is delivered work, not the answer a person is waiting on --\n+    // leave it out of this list and the child never closes, so its parent never wakes.\n+    expect(d, \"including a child's report on its way back\").toContain(\n+      \"a child's report on its way back to its parent\",\n+    );\n+    expect(d, \"and what it is not for\").toContain(\n+      \"Not for a question a person asked or an investigation they are waiting on\",\n+    );\n+    // The exit it must not crowd out: the closing message, posted by the machinery.\n+    expect(d, \"the report and end, named so it is reachable\").toContain(\n+      \"posting the report as your closing message\",\n+    );\n+    expect(d, \"with the issue left to the person who asked\").toContain(\n+      \"leaving the issue open for them\",\n+    );\n+    // The mechanism, which the rewrite was not allowed to lose.\n+    expect(d, \"the session ends on the call\").toContain(\"your session ends when it returns\");\n+    expect(d, \"the close is the tool's call, not the agent's\").toContain(\n+      \"this tool's decision, not yours\",\n+    );\n+    expect(d, \"the summary is the comment it ends on\").toContain(\n+      \"posted as the comment this call ends on\",\n+    );\n+    expect(d, \"a sub-issue's conclusion fires its parent's gate\").toContain(\n+      \"a sub-issue's close fires its parent's phase-gating\",\n+    );\n+    expect(d, \"refused on a pull request run\").toContain(\"Refused on a pull request run\");\n+    expect(\n+      d.length,\n+      \"a tool description is prompt cost on every turn: reword inside this, do not append\",\n+    ).toBeLessThan(760);\n+  });\n+\n   /**\n    * The retired arguments are refused, and the refusal says where the sentence goes.\n    *\ndiff --git a/tests/contract/agent-prompts.test.ts b/tests/contract/agent-prompts.test.ts\nindex 9b3acc6..6ef5ee9 100644\n--- a/tests/contract/agent-prompts.test.ts\n+++ b/tests/contract/agent-prompts.test.ts\n@@ -25,7 +25,9 @@ describe(\"agent prompt contracts\", () => {\n    *\n    * The close rule is the same boundary seen from the end of the run: an issue whose\n    * deliverable is the answer is not the issue `request_close_issue` was written for,\n-   * and the issue stays open for the person who asked.\n+   * and the issue stays open for the person who asked. The tool half -- its description\n+   * stopped calling itself the only correct way -- is pinned in `mcp/mcp.test.ts` as\n+   * \"request_close_issue is for delivered work, and names the exit it is not\".\n    *\n    * Pinned as single-line fragments, because these files are wrapped prose and a phrase\n    * spanning a line break also picks up whatever indentation wraps it.\n```",
+      "content": "```diff\ndiff --git a/src/content/agent-definitions/atomaton.md b/src/content/agent-definitions/atomaton.md\nindex a5bbc4b..cd11e3c 100644\n--- a/src/content/agent-definitions/atomaton.md\n+++ b/src/content/agent-definitions/atomaton.md\n@@ -209,7 +209,7 @@ On re-entry:\n 5. Deliver the accumulated work. Each child merged into this issue's own branch rather than into the base, so the base has none of it yet — call `create_pr(title=..., body=...)` to open that branch's pull request, or hand the delivery to `/engineer` when it needs work first. Skip this only when no child produced code.\n 6. Once that pull request has merged, judge what merged against what this issue asked for, and take whichever of the two post-merge outcomes above that judgement reaches.\n \n-`request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. Never replace the call with a plain final response.\n+`request_close_issue` carries the consolidated result in `summary`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. For those two post-merge outcomes, never replace the call with a plain final response — the ending for a question or an investigation is the other one, stated in `What the person asked for` above.\n \n **The conclusion is written once.** Whatever this run was waiting on is on the\n thread above it — a child's report, a merged pull request, the comment the issue\ndiff --git a/src/entrypoints/tools/mcp/atomaton.ts b/src/entrypoints/tools/mcp/atomaton.ts\nindex a8b8eba..7d49821 100644\n--- a/src/entrypoints/tools/mcp/atomaton.ts\n+++ b/src/entrypoints/tools/mcp/atomaton.ts\n@@ -495,17 +495,23 @@ const { tools: TOOLS, dispatch } = buildMcpTools([\n   }),\n   defineMcpTool({\n     name: \"request_close_issue\",\n+    // Scoped to the issue whose work has been delivered, not to every issue a run\n+    // ends on (#209). It used to claim this was the ONLY way to finish a run, which\n+    // is exactly the reading a run asked for an opinion or an investigation acted on:\n+    // with the report having no exit of its own, the close was the only one left. The\n+    // exit it must not crowd out is the plain one the machinery already posts -- the\n+    // closing message becomes the comment -- so the description names it rather than\n+    // warning against silence.\n     description:\n-      \"Conclude work on YOUR CURRENT issue and end your session. This is the ONLY \" +\n-      \"correct way to finish an issue -- do NOT just stop responding without calling \" +\n-      \"this. Your summary is posted to the issue as the comment this call ends on, and \" +\n-      \"phase-gating/aggregation is triggered for its parent when this is a sub-issue. \" +\n-      \"Whether the \" +\n-      \"close happens now or the issue's author is asked to make it is this tool's \" +\n-      \"decision and not yours -- it is the same call either way, and your session \" +\n-      \"ends when it returns. The call is refused on a pull request run: a pull \" +\n-      \"request has no issue to conclude, and its outcome is merge_pr and the \" +\n-      \"post-merge dispatch, not this tool.\",\n+      \"Conclude work on YOUR CURRENT issue and end your session. Use it for an issue whose \" +\n+      \"work has been delivered -- a merged pull request, a published document, a child's \" +\n+      \"report on its way back to its parent. Not for a question a person asked or an \" +\n+      \"investigation they are waiting on: those end by posting the report as your closing \" +\n+      \"message, without this call, leaving the issue open for them. Your summary is posted \" +\n+      \"as the comment this call ends on, and a sub-issue's close fires its parent's \" +\n+      \"phase-gating. Whether it closes now or asks the author to is this tool's decision, \" +\n+      \"not yours; your session ends when it returns. Refused on a pull request run, whose \" +\n+      \"outcome is merge_pr and the post-merge dispatch.\",\n     schema: REQUEST_CLOSE_ISSUE_SCHEMA,\n     handler: handleRequestCloseIssue,\n     // `reason` was retired (#15): it was the same judgement `summary` carries, printed\ndiff --git a/src/entrypoints/tools/mcp/mcp.test.ts b/src/entrypoints/tools/mcp/mcp.test.ts\nindex 15f1766..146db5f 100644\n--- a/src/entrypoints/tools/mcp/mcp.test.ts\n+++ b/src/entrypoints/tools/mcp/mcp.test.ts\n@@ -3555,6 +3555,69 @@ describe(\"mcp/atomaton.ts\", () => {\n     expect(Object.keys(launch.properties)).toEqual([\"tasks\"]);\n   });\n \n+  /**\n+   * The close is one way to end a run, and the description no longer says it is the\n+   * only one (#209).\n+   *\n+   * It read \"This is the ONLY correct way to finish an issue -- do NOT just stop\n+   * responding without calling this\", while the orchestrator's own contract had\n+   * grown the opposite boundary (`What the person asked for`): asked for an opinion or\n+   * an investigation, the report is the deliverable and the issue stays open. Both are\n+   * read before a run decides how to end, and the tool's text is the one that says what\n+   * calling it means -- so an investigation that had delivered its report through the\n+   * close had the tool agreeing with it.\n+   *\n+   * Pinned in pieces rather than whole, because both halves have to survive a reword:\n+   * what the tool is for, and the plain exit named beside it.\n+   *\n+   * The ceiling is 760, and it is a limit rather than a target. The text this replaces\n+   * measured 651 characters and this one measures 702 -- 51 the scope costs, paid by\n+   * tightening the mechanism sentences it already had, not by adding to them. A tool\n+   * description is resent on every turn of every run holding the tool, so the next\n+   * clause goes inside that, not on top of it.\n+   */\n+  test(\"request_close_issue is for delivered work, and names the exit it is not\", async () => {\n+    const r = await sendRequest(\"atomaton.ts\", { jsonrpc: \"2.0\", id: 50, method: \"tools/list\", params: {} });\n+    const d = (r.result.tools as { name: string; description: string }[]).find(\n+      (t) => t.name === \"request_close_issue\",\n+    )!.description;\n+\n+    expect(d, \"no claim to be the only way a run may end\").not.toContain(\"ONLY\");\n+    expect(d, \"and no warning against ending without it\").not.toContain(\"stop responding\");\n+    expect(d, \"what it is for\").toContain(\"work has been delivered\");\n+    // A sub-issue's report is delivered work, not the answer a person is waiting on --\n+    // leave it out of this list and the child never closes, so its parent never wakes.\n+    expect(d, \"including a child's report on its way back\").toContain(\n+      \"a child's report on its way back to its parent\",\n+    );\n+    expect(d, \"and what it is not for\").toContain(\n+      \"Not for a question a person asked or an investigation they are waiting on\",\n+    );\n+    // The exit it must not crowd out: the closing message, posted by the machinery.\n+    expect(d, \"the report and end, named so it is reachable\").toContain(\n+      \"posting the report as your closing message\",\n+    );\n+    expect(d, \"with the issue left to the person who asked\").toContain(\n+      \"leaving the issue open for them\",\n+    );\n+    // The mechanism, which the rewrite was not allowed to lose.\n+    expect(d, \"the session ends on the call\").toContain(\"your session ends when it returns\");\n+    expect(d, \"the close is the tool's call, not the agent's\").toContain(\n+      \"this tool's decision, not yours\",\n+    );\n+    expect(d, \"the summary is the comment it ends on\").toContain(\n+      \"posted as the comment this call ends on\",\n+    );\n+    expect(d, \"a sub-issue's conclusion fires its parent's gate\").toContain(\n+      \"a sub-issue's close fires its parent's phase-gating\",\n+    );\n+    expect(d, \"refused on a pull request run\").toContain(\"Refused on a pull request run\");\n+    expect(\n+      d.length,\n+      \"a tool description is prompt cost on every turn: reword inside this, do not append\",\n+    ).toBeLessThan(760);\n+  });\n+\n   /**\n    * The retired arguments are refused, and the refusal says where the sentence goes.\n    *\ndiff --git a/tests/contract/agent-prompts.test.ts b/tests/contract/agent-prompts.test.ts\nindex 9b3acc6..4e3640d 100644\n--- a/tests/contract/agent-prompts.test.ts\n+++ b/tests/contract/agent-prompts.test.ts\n@@ -25,7 +25,9 @@ describe(\"agent prompt contracts\", () => {\n    *\n    * The close rule is the same boundary seen from the end of the run: an issue whose\n    * deliverable is the answer is not the issue `request_close_issue` was written for,\n-   * and the issue stays open for the person who asked.\n+   * and the issue stays open for the person who asked. The tool half -- its description\n+   * stopped calling itself the only correct way -- is pinned in `mcp/mcp.test.ts` as\n+   * \"request_close_issue is for delivered work, and names the exit it is not\".\n    *\n    * Pinned as single-line fragments, because these files are wrapped prose and a phrase\n    * spanning a line break also picks up whatever indentation wraps it.\n@@ -55,6 +57,19 @@ describe(\"agent prompt contracts\", () => {\n     expect(atomaton, \"a person's question stays open until they decide\").toContain(\n       \"It is not for a question a person asked\",\n     );\n+    // #209's absolute, one file over: `Re-entry and Aggregation` said \"Never replace the\n+    // call with a plain final response\", which is the ending the tool's description now\n+    // names for a question or an investigation. A run reads both, so the rule is scoped\n+    // to the two post-merge outcomes the section is about, and points at the other\n+    // ending rather than leaving a reader to find it.\n+    expect(\n+      atomaton,\n+      \"the never-end-plainly rule is scoped to the post-merge outcomes it is about\",\n+    ).toContain(\"For those two post-merge outcomes, never replace the call\");\n+    expect(\n+      atomaton,\n+      \"and the unconditional form, which is what produced #209, cannot come back\",\n+    ).not.toContain(\"Never replace the call with a plain final response\");\n   });\n \n   /**\n```",
       "atoma_metadata": {
         "author": "github",
-        "created_at": "2026-10-26T01:14:24Z",
+        "created_at": "2026-10-26T01:24:39Z",
         "event_type": "pr_diff",
         "id": "pr-407-diff",
         "layer": "github-context",
-        "sha": "f3f6e6cc",
+        "sha": "d953b933",
         "source": "github"
       }
     },
@@ -1944,6 +1944,10 @@
     {
       "role": "assistant",
       "content": "Both findings are fixed on `atomaton/issue-209`, CI is green on the new head `d953b93`, and the branch is ready for the second review.\n\n**What I concluded.** The unqualified \"never end with a plain response\" is now scoped to the two post-merge outcomes it was written for, with the other ending pointed at (`src/content/agent-definitions/atomaton.md:212`), and the tool test's comment now records the measurements it actually pins.\n\n**How I know.**\n\n- `src/content/agent-definitions/atomaton.md:212` reads \"For those two post-merge outcomes, never replace the call with a plain final response — the ending for a question or an investigation is the other one, stated in `What the person asked for` above.\" The unqualified sentence survives nowhere in `src/`; `.github/atomaton/agent-definitions/atomaton.md:212` still carries it, because that is the deployed copy a release replaces (below).\n- Pinned at `tests/contract/agent-prompts.test.ts:68` (the qualified form is present) and `:72` (the unconditional form is absent), inside the existing \"an opinion asked of the orchestrator is answered rather than acted on\" test.\n- The ceiling comment at `src/entrypoints/tools/mcp/mcp.test.ts:3574` now says old 651 / new 702 / ceiling 760, against `toBeLessThan(760)` at `:3618`.\n- Measured this run, not taken from the body: extracting the description literals from `src/entrypoints/tools/mcp/atomaton.ts` gives **702** characters; the replaced text was 651. So the PR body's \"paid for out of the same budget rather than appended\" was wrong and should read \"51 characters more, paid for by tightening the mechanism sentences it already had\" — that body line is still wrong, see below.\n- `bun run test` — `2150 pass, 0 fail` across 169 files; `bun run typecheck` clean; `bun run synth` clean with no generated file in the diff; `bun run src/entrypoints/machinery/scan_secrets.ts` exit 0 (it printed `could not resolve the latest gitleaks release, so this branch was not scanned for credentials`).\n- Checks on `d953b93`: `atomaton-check` success, `pull-request-checks (verify)` success, `atomaton-tools` success.\n\n<details><summary>What I could not establish, and why the PR body is still wrong</summary>\n\n- **No tool updates a pull request body.** The review asked for the \"same budget\" sentence to be replaced in the PR body; there is no such call among the tools I have (`create_pr` creates, nothing edits), so the correction is stated here and the body still carries the wrong sentence. Flagging rather than working around it.\n- **The live effect is not deployed.** `.github/atomaton/agent-definitions/atomaton.md:212` still holds the unqualified sentence, and that is the file running agents read. It changes when a release is cut and Atomaton Self Deploy is dispatched — both a person's actions, not this merge's.\n- **Did not re-verify the pre-#206 occurrences.** Whether the earlier cases in this issue came through `engineer.md`'s post-merge close rather than the orchestrator path is still unconfirmed from the thread.\n\n</details>\n\n**What happens next.** The reviewer re-reads `d953b93` against the two findings; both are corrected in the diff, so the remaining judgement is whether to merge. Merging publishes nothing — reaching adopters is the release plus self-deploy.\n\n/reviewer\n\nRe-review pull request #407 at head `d953b93`. Both findings from the last review are addressed: `src/content/agent-definitions/atomaton.md:212` scopes the never-end-plainly rule to the two post-merge outcomes and points at `What the person asked for`, pinned at `tests/contract/agent-prompts.test.ts:68` and `:72`; the ceiling comment at `src/entrypoints/tools/mcp/mcp.test.ts:3574` now states old 651 / new 702 / ceiling 760 alongside `toBeLessThan(760)` at `:3618`. If it merges, #209's remaining decision is whether a release is cut so `.github/atomaton/agent-definitions/atomaton.md` stops carrying the unqualified sentence.\n\n<details><summary>Grounds: what changed, what was verified, what is still open</summary>\n\n- Fixed in `src/content/agent-definitions/atomaton.md:212`: \"For those two post-merge outcomes, never replace the call with a plain final response — the ending for a question or an investigation is the other one, stated in `What the person asked for` above.\"\n- Fixed the test comment: it claimed 651 was the ceiling while the assertion pins 760; it now names all three numbers, matching the delegate test's precedent at `src/entrypoints/tools/mcp/mcp.test.ts:3791`.\n- Verified on `d953b93`: `bun run test` 2150 pass / 0 fail (169 files), `bun run typecheck` clean, `bun run synth` clean, `scan_secrets.ts` exit 0 with the gitleaks-unavailable warning. Checks: `atomaton-check`, `pull-request-checks (verify)`, `atomaton-tools` all success.\n- The description measures 702 characters against the 651 it replaced, measured this run from the source literals — the PR body's \"same budget\" line is inaccurate; the corrected statement is in my report on the thread, since no tool edits a PR body.\n- Open, not this pull request's to close: the deployed `.github/atomaton/agent-definitions/atomaton.md:212` still has the unqualified sentence until a release and self-deploy.\n\n</details>",
+      "atoma_metadata": {
+        "agent": "engineer",
+        "github_comment_id": 6406138526
+      },
       "provider_items": [
         {
           "id": "rs_02179297774764900000000000000000000ffffc0a887b5353118",
@@ -1957,21 +1961,283 @@
           "type": "reasoning"
         }
       ],
-      "finish_reason": "stop",
+      "finish_reason": "stop"
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
       "atoma_metadata": {
-        "github_comment_id": 6406138526,
-        "agent": "engineer"
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T01:24:17Z",
+        "event_type": "issue_comment",
+        "id": 6406156538,
+        "layer": "github-context",
+        "source": "github"
       }
+    },
+    {
+      "role": "user",
+      "content": "Merged. PR #407 is in `main`, no linked issue was closed with it, and the merge re-invoked `engineer` on #209 (`parent_outcome: reinvoked`), so the issue continues rather than concluding.\n\n**What I concluded.**\nThe two prompt texts that made an investigation issue reach for the close now agree, and the change is merged; what remains on #209 is a release decision and a body-text correction, not code.\n\n**How I know.**\n`merge_pr` returned `{\"merged\":true,\"closed_issue\":null,\"parent_issue\":209,\"parent_outcome\":\"reinvoked\",\"reinvoked_agent\":\"engineer\"}`; the head that merged is `d953b93`, whose checks and review are recorded in the round-2 review above.\n\n**What I could not establish.**\nNothing beyond what the round-2 review already states: the suite was not run from this session (no shell here), and the deployed copy `.github/atomaton/agent-definitions/atomaton.md:212` is unchanged by this merge because `.github/**` follows a release plus self-deploy.\n\n**What happens next.**\n`engineer` has been re-invoked on #209 to judge the merged change against what the issue asked for. A person still owns two steps: correcting the pull request body's \"same budget\" sentence, and cutting a release with self-deploy so the running agents read the new definition.\n\n\n---\n_Tokens: 338512 total (334643 prompt + 3869 completion, 282496 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/40253938636) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-26T01:24:24Z",
+        "event_type": "pr_comment",
+        "id": 6406157891,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_v3qf56fvoaudlhvqv7qzt0dc",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git branch --show-current && git log --oneline -3 && git status --short && grep -c \\\"For those two post-merge outcomes\\\" src/content/agent-definitions/atomaton.md && grep -n \\\"Use it for an issue whose\\\" src/entrypoints/tools/mcp/atomaton.ts | head -2\"}"
+          }
+        },
+        {
+          "id": "call_01_pwnzuc1jxbzv4vkmnl1615p3",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 209}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297789985100000000000000000000ffffc0a89a48d547f6",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "I'm on #209 again (engineer, post-merge). PR #407 merged into main. Wait — #209 is an issue without a parent? Let me check the issue state and whether the branch is main. PR #407's base: create_pr returned base \"\" in the first call... The merge went into `main` per the message.\n\nMy job: judge whether what merged satisfies what #209 asked for.\n\nWhat did #209 ask for? The original issue: 調査タスクをエージェントに依頼するとその結果と共にIssueをクローズする — prompt adjustment. Then the directive (yuma-seno, 2026-10-26) narrowed engineer's task: \"`request_close_issue` のツール説明を、#220 で入った新規則（v0.21.50 で live）に揃える。 #209 の残り。\" with implementation instructions 1-4:\n1. rewrite the description\n2. align other copies of the same claim\n3. update pinned tests\n4. no version bump\n\nThat's the leaf I was assigned. All four done and merged. So do I conclude the issue with request_close_issue? Careful — this is exactly the thing #209 is about! But here the deliverable was code, merged. The issue's remaining decision (release) belongs to a person.\n\nBut careful: what merged satisfies the engineering task I was directly instructed to do. The issue #209 as a whole: the original complaint is about investigations closing issues; the resolution #220 added the rule in the orchestrator definition, and this PR aligned the tool description. Is the issue satisfied? Acceptance criteria from the directive: description rewritten, others aligned, tests updated, no version bump — met, in main.\n\nRemaining: the release/self-deploy is a person's decision (version bump is never an agent's — conventions: \"Never touch version\"; a release PR is opened by the Atomaton Release workflow). So the code work is done; effective in running agents after release.\n\nPer role outcome table: \"A pull request you opened has merged and what merged satisfies the issue → request_close_issue\". This is code delivery, merged — not a report. So concluding is right.\n\nBut wait: does concluding risk the very defect #209 reports? No — the issue's own rule: \"It is not for a question a person asked or an investigation they are waiting on\". Here the work was code, merged, acceptance criteria met. That's the \"delivered\" case.\n\nHowever, there's a nuance: is there something left undone that a person's next reply would advance? The release is a person's action but not something they'd ask me to do — a version-bump PR is opened by the Release workflow on merge of a version change; nobody asked. Hmm, actually: \"the deliverable reaches adopters only after a release\" — conventions say merging a version change publishes; not my call.\n\nAlso the PR body correction — impossible (no tool). Documented.\n\nLet me verify the merged state first: check the issue, whether main has the change, whether any further work is needed. Let me check: does `src/content/agent-definitions/atomaton.md:212` on main have it? Working tree is probably on main after merge. Let's check git state and get_issue for #209 state and comments to see if anything new arrived.\n\nAlso I should double check whether the acceptance criteria of #209 (the whole issue, not just my directive) are met. Let me read the issue and its comments.\n\nActually there's one more thing worth checking: the issue mentions \"206以外にも何回かあった\" — the diagnosis. And #220 handled the orchestrator side. The directive said \"#209 の残り\" is only the tool description. So the issue's remaining scope was exactly that.\n\nLet me inspect the current state of main to confirm the merged content, then decide.\n\nOne important check: `.github/atomaton/agent-definitions/atomaton.md:212` (deployed) still has the unqualified sentence — meaning the live orchestrator (this very agent's peers) still reads it. Does that mean the issue is not satisfied? The deliverable of this repo is `src/`; the deployment lag is by design (\"That lag is the point\"). The issue asked for the change in the source; delivery to adopters and to this repo's own deployment is a release, a person's decision.\n\nHmm, but here's a subtle thing: the defect lives in this repo's own running agents too. #209's symptom was observed in *this* repository's agents. So until self-deploy, the fix is not live here. But cutting a release is exactly the \"a decision not mine\" — the conventions say version is the release declaration and belongs to a person on the Release workflow's PR.\n\nSo: what merged satisfies the issue's engineering ask; the release is a person's step. Per role, `request_close_issue` — and the tool will ask the author to close (yuma-seno opened it), which posts a comment with my summary.\n\nWait — but is `request_close_issue` correct here given the issue's own rule that a person's issue stays open until they decide? The rule is about an issue whose deliverable is an answer. Here the deliverable is merged code. So yes.\n\nBut hold on: should I instead leave it open so the person can verify after release? The role contract says: \"A pull request you opened has merged and what merged satisfies the issue → request_close_issue\". And #209 additionally might still be \"not satisfied\" because the live deployment hasn't happened... but that criterion can never be met from here (release is a person's action), and my instruction says close conditions naming unreachable states shouldn't be waited on.\n\nHmm, careful: is there a genuine remaining engineering piece? Let me check if there's anything else carrying the same claim: `.github/atomaton/agent-definitions/atomaton.md` is deployed copy. Also `dist/` generated. Nothing else.\n\nLet me verify state on main and read #209's thread for any new instruction. Then request_close_issue with a summary.\n\nLet me first confirm: git branch main, merged commit present, and grep the source.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"main\\n03e2cf0 Merge pull request #407 from yuma-seno/atomaton/issue-209\\n1\\n506:      \\\"Conclude work on YOUR CURRENT issue and end your session. Use it for an issue whose \\\" +\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":304}",
+      "tool_call_id": "call_00_v3qf56fvoaudlhvqv7qzt0dc"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":null,\"createdAt\":\"2026-10-17T14:02:48Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"}],\"number\":209,\"state\":\"OPEN\",\"title\":\"調査タスクをエージェントに依頼するとその結果と共にIssueをクローズする\",\"body\":\"/atomaton\\n\\n#206 にて、atomatonに調査を依頼したらその結果を返すのと一緒にIssueをクローズしようとする。\\n最初にエージェントに指示した内容を完了したら、そのIssueが常に完了になるわけではないので、プロンプトを調整したい。\\n206以外にも何回かあった。\\n\\nまず意見を聞かせて。\",\"total_comments\":7,\"children\":[],\"pull_requests\":[{\"number\":407,\"title\":\"Scope request_close_issue's description to issues whose work was delivered\",\"state\":\"done\"}]}",
+      "tool_call_id": "call_01_pwnzuc1jxbzv4vkmnl1615p3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_r6dkewmmqqbmrxn0hd21kk0w",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\": 5, \"issue_number\": 209}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297791484500000000000000000000ffffc0a85b7deebd65",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The merge is on main: `03e2cf0 Merge pull request #407`. Source has both changes.\n\nNow read #209's comments (7) to check for anything still asked, particularly the last few.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":209,\"kind\":\"issue\",\"title\":\"調査タスクをエージェントに依頼するとその結果と共にIssueをクローズする\",\"state\":\"OPEN\",\"total_comments\":7,\"children\":[],\"pull_requests\":[{\"number\":407,\"title\":\"Scope request_close_issue's description to issues whose work was delivered\",\"state\":\"done\"}]},\"showing\":\"comment(s) 5-5 of 7; pass from/to to read the rest\",\"comments\":[{\"index\":5,\"id\":\"IC_kwDOUudl8s8AAAABfdYw-g\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.\",\"createdAt\":\"2026-10-26T01:24:17Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/209#issuecomment-6406156538\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_00_r6dkewmmqqbmrxn0hd21kk0w"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_uqwuig3mqnlb4mm4mpk114vy",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\": 6, \"issue_number\": 209}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":209,\"kind\":\"issue\",\"title\":\"調査タスクをエージェントに依頼するとその結果と共にIssueをクローズする\",\"state\":\"OPEN\",\"total_comments\":7,\"children\":[],\"pull_requests\":[{\"number\":407,\"title\":\"Scope request_close_issue's description to issues whose work was delivered\",\"state\":\"done\"}]},\"showing\":\"comment(s) 6-6 of 7; pass from/to to read the rest\",\"comments\":[{\"index\":6,\"id\":\"IC_kwDOUudl8s8AAAABfdYxkA\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: `engineer` starting on this issue.\",\"createdAt\":\"2026-10-26T01:24:17Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/209#issuecomment-6406156688\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_00_uqwuig3mqnlb4mm4mpk114vy"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_082ag45y97xba8l0x48rhawq",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && echo \\\"--- absolutes left in src/:\\\"; grep -rn \\\"only correct way\\\\|ONLY correct\\\\|stop responding\\\\|Never replace the call with a plain final response\\\" src/ || echo \\\"(none)\\\"; echo \\\"--- version:\\\"; grep '\\\"version\\\"' package.json; echo \\\"--- files in merge:\\\"; git diff --stat 34646b9 03e2cf0\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297792206000000000000000000000ffffc0a8426db13bb0",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "No new human instruction. Comment 7 is my run's? It says total 7 and showing 6-6, so comment 7 exists (probably this run's start). Fine.\n\nNow judge acceptance criteria from the directive (yuma-seno, 2026-10-26) — the four implementation points:\n\n1. description rewritten (no absolute; aligned purpose; mechanism kept; not conflicting with plain report ending) — met at `src/entrypoints/tools/mcp/atomaton.ts:506`.\n2. same claim elsewhere aligned — met: `src/content/agent-definitions/atomaton.md:212` scoped; grep confirms no other copy in src/.\n3. tests updated/pinned — met (mcp.test.ts + agent-prompts.test.ts).\n4. no version bump — met (package.json untouched? verify: git show merge for package.json).\n\nLet me verify #2 and #4 concretely: grep \"only correct way\"/\"stop responding\"/\"Never replace the call with a plain final response\" in src/ on main, and confirm package.json version unchanged (0.21.50 still, and not in the diff of the merge).\n\nAlso verify no remaining \"plain final response\" in src/.\n\nThen check whether the deployed copy lag needs saying.\n\nLet me run these checks.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"failed\",\"exit_code\":128,\"stdout\":\"--- absolutes left in src/:\\nsrc/entrypoints/tools/mcp/mcp.test.ts:3562:   * It read \\\"This is the ONLY correct way to finish an issue -- do NOT just stop\\nsrc/entrypoints/tools/mcp/mcp.test.ts:3586:    expect(d, \\\"and no warning against ending without it\\\").not.toContain(\\\"stop responding\\\");\\n--- version:\\n  \\\"version\\\": \\\"0.21.50\\\",\\n--- files in merge:\\n\",\"stderr\":\"fatal: ambiguous argument '34646b9': unknown revision or path not in the working tree.\\nUse '--' to separate paths from revisions, like this:\\n'git <command> [<revision>...] -- [<file>...]'\\n\",\"output_truncated\":false,\"execution_time_ms\":127}",
+      "tool_call_id": "call_00_082ag45y97xba8l0x48rhawq"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_k1is370u1ba3mj2m2r614rdd",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git diff --stat 03e2cf0^1 03e2cf0; echo \\\"--- atomaton.md:212:\\\"; sed -n '212p' src/content/agent-definitions/atomaton.md | tail -c 400\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297792789500000000000000000000ffffc0a86a1ed027ac",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "The two remaining hits are in the test file: one is the quoted old text in the comment (history) and one is a negative assertion. Both expected.\n\nVersion still 0.21.50 — no bump. Let me verify the merge commit's diff files (use the merge commit and its first parent). `git show --stat 03e2cf0` maybe. Let me get the diff of the PR: `git diff 03e2cf0^1 03e2cf0 --stat`.\n\nAlso confirm the `src/` grep for the qualified sentence at atomaton.md:212 and that `src/content/` has exactly one occurrence. And check package.json wasn't in the PR diff.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"--- atomaton.md:212:\\nry`. Whether it closes the issue itself or asks the person who opened it to close it is the tool's own decision, taken from who opened it — not something to check first, and not something to report. For those two post-merge outcomes, never replace the call with a plain final response — the ending for a question or an investigation is the other one, stated in `What the person asked for` above.\\n\",\"stderr\":\"fatal: ambiguous argument '03e2cf0^1': unknown revision or path not in the working tree.\\nUse '--' to separate paths from revisions, like this:\\n'git <command> [<revision>...] -- [<file>...]'\\n\",\"output_truncated\":false,\"execution_time_ms\":115}",
+      "tool_call_id": "call_00_k1is370u1ba3mj2m2r614rdd"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_01_iycd7q5423o39ih9rab3zyb4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck 2>&1 | tail -2 && bun run synth >/dev/null 2>&1 && echo synth-ok && bun run test 2>&1 | tail -5\", \"timeout_seconds\": 1800}"
+          }
+        },
+        {
+          "id": "call_00_kc0n2lzfhaks1sod2us9zx1o",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"request_close_issue is for delivered work\\\" src/entrypoints/tools/mcp/mcp.test.ts && grep -n \\\"For those two post-merge outcomes\\\" tests/contract/agent-prompts.test.ts && echo \\\"--- version in merged tree:\\\" && git log -1 --format=%H\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297793170000000000000000000000ffffc0a872d2df8a62",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Interesting: the merge commit `03e2cf0` is the local HEAD but `03e2cf0^1` unknown — maybe shallow clone (depth 1). `git log --oneline -3` printed only one line, so shallow. Fine — I don't need the diff; I verified the content on main directly.\n\nLet me verify the four criteria on main:\n1. `src/entrypoints/tools/mcp/atomaton.ts:506` — new description: verified via grep \"Use it for an issue whose\".\n2. No absolute left in src/ except the test's historical quote/negative assertion: verified.\n3. Tests: `src/entrypoints/tools/mcp/mcp.test.ts` has the new test; `tests/contract/agent-prompts.test.ts:68` pins the scoped sentence. Verify present on main.\n4. No version bump: package.json still 0.21.50 (and my PR didn't touch it — I can confirm via `git log --oneline`? shallow. But I know my commits touched 3 files: atomaton.ts, mcp.test.ts, agent-prompts.test.ts, then atomaton.md, mcp.test.ts, agent-prompts.test.ts. No package.json).\n\nLet me verify 3 quickly and also run the suite on main to confirm the merged tree is green (I have shell; cheap enough? ~90s). Worth doing: the post-merge judgement should be on what is now on the branch. Run `bun run test` on merged main? It's the same content as my validated head plus nothing else, but let me confirm the merged tree passes — that's the strongest claim. Given time budget fine.\n\nActually, is it necessary? The head d953b93 passed CI and merged. A re-run confirms nothing new. But cheap: ~95s. I'll run it to be able to say \"the merged tree passes\". Meanwhile check the test pins.\n\nThen the decision: request_close_issue.\n\nBut wait — think carefully about whether the issue is really satisfied, and whether closing is right given this issue's own subject matter. #209's ask: \"調査タスクをエージェントに依頼するとその結果と共にIssueをクローズする ... プロンプトを調整したい\". Two halves: (a) orchestrator contract rule (#220, merged, live at v0.21.50), (b) tool description alignment (this PR, merged into src/, not yet released → not yet live in this repo's own agents or any adopter).\n\nSo as of now, in *this* repository's running agents, the live text still says \"This is the ONLY correct way...\" because `.github/atomaton-runtime/tools/mcp/atomaton.ts` is the deployed runtime and `.github/atomaton/agent-definitions/atomaton.md` is the deployed definition. That means the behaviour #209 complains about is still possible in this repo until a release + self-deploy. And the issue's own report (#206) came from this repo's agents.\n\nSo is \"what merged satisfies the issue\"? The engineering deliverable satisfies the instruction; the observable behaviour change requires a release. The directive explicitly said: \"これは `src/**` の変更なのでリリース + self-deploy が必要です (v0.21.7 と同じ経路で実効確認できます)\" — i.e. the directive acknowledged and accepted the release as a separate step (\"実効確認\" — verify effectiveness after release, with the same kind of investigation task as #206). Hmm! The original proposal said: \"ツール説明文の変更はリリース後に #206 と同型の調査タスクで実効確認します。\" The final directive said \"version bump はしない\" and \"#209 の残り。コード変更は説明文言のみの小修正になる想定\".\n\nSo the user's own words anticipated a post-release verification. Does that mean the issue should stay open until verified after release? The issue is a person's issue and the release is theirs. If I call request_close_issue, the tool asks yuma-seno to close (person-opened issue), posting the summary + \"please close it yourself if you agree\". That is a reasonable outcome: work merged, release is theirs, they decide whether it's done.\n\nBut per the role: \"A pull request you opened has merged and what merged satisfies the issue → request_close_issue\". Does it satisfy? The acceptance criteria I was given (4 items) are met. The issue's broader goal (agents stop closing investigation issues) is met in source, pending release — which only a person can do.\n\nAlternatively: should I leave it open with a hand-back report, because \"返信で進むものが残っている\" (release + post-release verification)? Under the new rule: \"It is not for a question a person asked or an investigation they are waiting on\" — this isn't that; it's delivered code work. The engineering work is done; what remains is a release decision and a verification that belongs to a person. The close request asks them \"if you agree the work below is done\" — which is exactly the right ask: it leaves the decision with them, and if they want to keep it open until release, they just don't close it.\n\nHmm, but that's precisely the pattern this issue complains about: creating a \"close request\" asking a person to judge. No — #209 complained that an *investigation* got a close request. Here, the deliverable is merged code; asking the author to close is the designed ending.\n\nThere's a real tension. Let me weigh: which serves yuma-seno better? They said the remaining work is \"request_close_issue のツール説明を...揃える\" and \"version bump はしない\". They know the release is separate. The engineering task is complete. Concluding with a summary that states (i) criteria met, (ii) release + self-deploy is theirs, (iii) post-release verification is a suggestion they can do — leaves the decision with them via CLOSE_REQUEST_LINE.\n\nBut careful: is there anything else in the issue still unmet that I could implement? \"206以外にも何回かあった\" — I noted we didn't trace the other occurrences. Could add value? Not code.\n\nAlso: should I verify the effective re-entry behaviour after release? Can't — no release.\n\nDecision: request_close_issue with a summary that names each criterion met and the one thing that is not this merge's to do (release/self-deploy), so the person decides.\n\nWait — one more consideration in this repo's machinery: closing this issue (bot-opened? no, person-opened) → tool asks the person to close. Good.\n\nBefore that, run the merged tree's checks to make a checkable claim. Let me run `bun run test` on main.\n\nAlso `git log --oneline -3` showed only one commit (shallow clone), so the working tree is the merged main content — good.\n\nRun tests + typecheck on merged main.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\nsynth-ok\\n\\n 2150 pass\\n 0 fail\\n 6397 expect() calls\\nRan 2150 tests across 169 files. [90.42s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":96070}",
+      "tool_call_id": "call_01_iycd7q5423o39ih9rab3zyb4"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"3579:  test(\\\"request_close_issue is for delivered work, and names the exit it is not\\\", async () => {\\n68:    ).toContain(\\\"For those two post-merge outcomes, never replace the call\\\");\\n--- version in merged tree:\\n03e2cf0716a304c003aef81a0a2823e65e79700f\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":116}",
+      "tool_call_id": "call_00_kc0n2lzfhaks1sod2us9zx1o"
+    },
+    {
+      "role": "assistant",
+      "content": "The merged tree is green on `main` (`03e2cf0`): typecheck clean, synth clean, 2150 pass / 0 fail. Both halves of the issue are now in `src/`, so I'll conclude it.",
+      "tool_calls": [
+        {
+          "id": "call_00_33wj5aadioj123f9ekyc9qnk",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"summary\": \"**結論: 指示された4点は���べて `main` に入り、満たされています。** 残るのはリリース + self-deploy で、それは人の操作です。\\n\\n## 受け入れ条件\\n\\n| 指示（2026-10-26） | 判定 | 根拠 |\\n| --- | --- | --- |\\n| description を新規則に揃え、「唯一の正しい終わり方」を外す | 満たす | `src/entrypoints/tools/mcp/atomaton.ts:505` — \\\"ONLY correct way\\\" と \\\"do NOT just stop responding\\\" は消え、用途（マージ済み PR・公開文書・子の report）と、質問・調査は「報告を最終メッセージとして投稿し、この呼び出しなしで終える」を明記。702文字（旧 651） |\\n| 同じ主張が他に残っていないか揃える | 満たす | `src/content/agent-definitions/atomaton.md:212` の無条件 \\\"Never replace the call with a plain final response.\\\" を post-merge の2つの結果に限定し、`What the person asked for` を指すよう変更。`src/` に無条件形は残っていない（`grep` で残る2件はテスト内の旧文引用と否定アサーション） |\\n| 説明文を pin しているテストの更新 | 満たす | `src/entrypoints/tools/mcp/mcp.test.ts:3579`（新規: ONLY / stop responding の不在、用途と非用途、子の report、機構文、760 ceiling）、`tests/contract/agent-prompts.test.ts:68` と `:72` |\\n| version bump はしない | 満たす | `package.json` は `0.21.50` のまま |\\n\\n## 検証（マージ後の main `03e2cf0` で実行）\\n\\n`bun run typecheck` クリーン、`bun run synth` クリーン、`bun run test` = 2150 pass / 0 fail（169ファイル）。マージ前の head `d953b93` でも `atomaton-check` / `pull-request-checks (verify)` / `atomaton-tools` すべて success でした。\\n\\n## 満たしていないもの: 実効化\\n\\nデプロイ済みの `.github/atomaton/agent-definitions/atomaton.md:212` と `.github/atomaton-runtime/tools/mcp/atomaton.ts` はまだ旧文言で、**このリポジトリで走るエージェントが読むのはこちらです**。`src/**` の変更はリリース（version PR）→ Self Deploy を経て初めて届くので、#206 と同型の調査タスクでの実効確認はその後になります。\\n\\n## 確定できなかったこと\\n\\n- 「206以外にも何回かあった」の各事例が `engineer` の post-merge 経由だったかは未確認（診断は機構レベル）。\\n- PR #407 本文の \\\"same budget\\\" の一文は誤り（実際は旧 651 / 新 702 / ceiling 760）。PR 本文を編集するツールがないため、訂正はスレッドのコメントに残しています。\\n\\n## 次\\n\\nリリースを切るかどうかは人が決めることです。切れば `src/**` の変更が adopters とこのリポジトリの両方に届きます。\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "id": "rs_02179297804159300000000000000000000ffffc0a85390a372e9",
+          "status": "completed",
+          "summary": [
+            {
+              "text": "Merged tree (03e2cf0) is green: typecheck clean, synth clean, 2150 pass / 0 fail.\n\nNow the judgement. Let me also double check there is nothing else in the issue that needs code: the issue's fix was prompt text in two places, both done. #220 handled the definition half (already live at v0.21.50 per the directive). So the only paths left: release.\n\nDecision: request_close_issue with a summary stating criteria met, what remains (release + self-deploy, a person's action), and that the post-release check is available.\n\nNow: the request_close_issue tool's summary — the comment posted on the issue; it becomes the record. Write it well, in the style of a report but as a close summary. Since the issue is person-opened, the tool will post the CLOSE_REQUEST_LINE + my summary and ask yuma-seno to close.\n\nHmm, wait. Consider: is it better to keep the issue open until the release actually lands so the deployed behaviour is verified? The user's directive said \"version bump はしない\" and described the release path. The person may want to cut a release from this merge (release workflow opens a version PR when...? \"Atomaton Release\" workflow opens a PR bumping version — probably triggered manually). The merge published nothing.\n\nWhich ending does the machinery expect? The role table: PR merged + satisfies → request_close_issue. The directive's scope was exactly the PR's content; it's merged; tests confirm. I'll conclude, and be explicit in the summary that the running agents still read the old text until release+self-deploy, so the person knows what closing does and does not mean.\n\nCareful phrasing: don't claim the issue's symptom is fixed live. Say: source fixed; live effect requires release + self-deploy.\n\nWrite the closing summary. Keep to the report structure? request_close_issue's summary is the comment body on the issue — it should be a proper conclusion, with acceptance criteria met/unmet. Include file anchors.\n\nLet me draft:\n\n---\n**結論: 指示された4点はすべて main に入っており、満たされています。** Issue全体としては残るのは「リリース + self-deploy」だけで、これは人（@yuma-seno）の操作です。\n\n**受け入れ条件の判定** (yuma-seno, 2026-10-26 の実装指示に対する判定):\n| 指示 | 判定 | 根拠 |\n1. description 書き直し — 満たす: `src/entrypoints/tools/mcp/atomaton.ts:505` ... \"ONLY correct way\"/\"do NOT just stop responding\" は消え、delivered の範囲と question/investigation の別の終わり方を名指し。702 chars (旧 651)。\n2. 同じ主張を他でも揃える — 満たす: `src/content/agent-definitions/atomaton.md:212` の無条件の \"Never replace the call with a plain final response.\" を post-merge の2つの結果に限定し、`What the person asked for` を指すように変更（レビュー指摘）。src/ に無条件形は残っていない（`grep` で唯一のヒットは mcp.test.ts の歴史コメントと否定アサーション）。\n3. テスト — 満たす: `src/entrypoints/tools/mcp/mcp.test.ts:3579` 新テスト（ONLY/stop responding の不在、用途/非用途、child の report、機構文、760 ceiling）、`tests/contract/agent-prompts.test.ts:68` と `:72`。\n4. version bump なし — 満たす: package.json は 0.21.50 のまま。\n\n**検証**: マージ後の main `03e2cf0` で `bun run typecheck` clean, `bun run synth` clean, `bun run test` 2150 pass / 0 fail (169 files)。\n\n**満たしていないもの — リリース。** デプロイ済みの `.github/atomaton/agent-definitions/atomaton.md:212` と `.github/atomaton-runtime/tools/mcp/atomaton.ts` はまだ旧文言で、このリポジトリで走っているエージェントが読むのはこちらです。version bump はしない指示だったので、`src/**` の変更はリリース（Atomaton Release の version PR）と Self Deploy を経て初めて実効になります。実効確認は #206 と同型の調査タスクを1回走らせれば済みます。\n\n**確定できなかったこと**: \"206以外にも何回かあった\" の各事例が engineer 経由だったかは未確認（機構レベルの診断のみ）。PR 本文の \"same budget\" の一文は誤り（実際は旧651/新702/ceiling760）で、PR 本文を編集するツールがないため訂正はスレッドのコメントに残っている。\n\n**次**: リリースを切るかどうかは @yuma-seno の判断です。\n---\n\nBut careful — this is the summary for request_close_issue, which is person-authored issue → the tool prepends \"please close it yourself\". So my summary should not itself \"@yuma-seno\" mention... Actually mention would be redundant/loud because CLOSE_REQUEST_LINE already includes a mention prefix (resolveNotify). Writing @yuma-seno inside would insert a second mention. Also, the machinery may backtick mentions in messages it did not accept as calls — request_close_issue's summary isn't a \"call\", so a mention might be wrapped in backticks. Avoid mentions inside the summary.\n\nNow, per instruction: \"the report goes in that call's own argument\" — request_close_issue ends the session, so summary is my report. Structure: conclusion first, evidence, unmet, next. No mention lines.\n\nKeep it tight but with the anchors. Also note the issue's own subject: this is the delivered-code case, not the investigation case — worth one sentence? Not necessary.\n\nLet me write the summary in Japanese-friendly mixed? The issue is Japanese but my thread comments have been in English mostly. The repo's agents write in the language of... The user wrote Japanese in the issue and directives in Japanese. The reviewer wrote English. I'll write bilingual? Better: write in Japanese since the issue author writes Japanese and this is the issue's closing record for them. Hmm, earlier #209's first comment (atomaton) was Japanese. My subsequent comments (engineer) were... the first one was Japanese! The #209 initial report was Japanese. The PR/issue 209 directive was Japanese. So write the summary in Japanese, keeping code/paths as-is.\n\nLet me write it in Japanese, concise, with anchors.\n\nDraft:\n\n**結論: 指示された4点はすべて `main` に入り、満たされています。** 残るのはリリース + self-deploy で、それは人の操作です。\n\n**受け入れ条件**\n\n| 指示（yuma-seno, 2026-10-26） | 判定 | 根拠 |\n| --- | --- | --- |\n| description を新規則に揃える／「唯一の正しい終わり方」を外す | 満たす | `src/entrypoints/tools/mcp/atomaton.ts:505` — \"ONLY correct way\" と \"do NOT just stop responding\" は消え、用途（マージ済み PR・公開文書・子の report）と、質問・調査は「報告を最終メッセージとして投稿し、この呼び出しなしで終える」を明記。702文字（旧651） |\n| 同じ主張が残っていないか揃える | 満たす | `src/content/agent-definitions/atomaton.md:212` の無条件 \"Never replace the call with a plain final response.\" を post-merge の2結果に限定し、`What the person asked for` を指すよう変更。`src/` に無条件形は残っていない（`grep` の残り2件はテスト内の引用と否定アサーション） |\n| 説明文を pin しているテストの更新 | 満たす | `src/entrypoints/tools/mcp/mcp.test.ts:3579`（新規: ONLY/stop responding の不在、用途と非用途、子の report、機構文、760 ceiling）、`tests/contract/agent-prompts.test.ts:68` と `:72` |\n| version bump はしない | 満たす | `package.json` は `0.21.50` のまま |\n\n**検証（マージ後の main `03e2cf0` で実行）**: `bun run typecheck` クリーン、`bun run synth` クリーン、`bun run test` = 2150 pass / 0 fail（169ファイル）。CI も `d953b93` で `atomaton-check` / `pull-request-checks (verify)` / `atomaton-tools` すべて success。\n\n**満たしていないもの: 実効化。** デプロイ済みの `.github/atomaton/agent-definitions/atomaton.md:212` と `.github/atomaton-runtime/tools/mcp/atomaton.ts` はまだ旧文言で、このリポジトリで走るエージェントが読むのはこちらです。`src/**` の変更はリリース（version PR）→ Self Deploy を経て初めて届くので、#206 と同型の調査タスクでの実効確認はその後になります。\n\n**確定できなかったこと**: 「206以外にも何回かあった」の各事例が `engineer` の post-merge 経由だったかは未確認（診断は機構レベル）。PR #407 本文の \"same budget\" は誤り（実際は旧651 / 新702 / ceiling 760）で、PR 本文を編集するツールがないため訂正はスレッドに残しています。\n\n**次**: リリースを切るかは人が決めることです。切る場合は `src/**` が adopters とこのリポジトリの両方に届きます。\n\nThat's good. Length moderate.\n\nOne question: should the last line avoid calling anyone (since request_close_issue is the call)? Yes — request_close_issue is the tool call ending the session; no `/agent` or `@person` line in the summary text.\n\nLet me double check the description text line number: earlier grep said line 506 is `\"Use it for an issue whose \"`, and the description block starts at 505. Use `src/entrypoints/tools/mcp/atomaton.ts:505`.\n\nAlso verify the exact absence claim: grep showed 2 hits in src/, both in mcp.test.ts (comment quote + negative assertion). Accurate.\n\nMake the call.",
+              "type": "summary_text"
+            }
+          ],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #209 is concluded: your conclusion is on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "call_00_33wj5aadioj123f9ekyc9qnk"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 6,
-      "snapshot_hash": "5b4bbec837b15310091ed9906a9bc9405e12efae12a606a72ceba33574bf097b",
-      "version": 1,
+      "event_count": 8,
+      "session_number": "209",
+      "snapshot_hash": "9a42a972cda4e743730338bce7ffeff31c157a5300589237e2ed074fd64df3a0",
       "type": "issue",
-      "session_number": "209"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -2018,6 +2284,27 @@
         }
       },
       "started": "2026-10-26T01:15:06Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-10-26T01:27:43Z",
+      "ended_because": "completed",
+      "iterations": 7,
+      "messages": 165,
+      "seconds": 167,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "github": {
+          "get_issue": 1,
+          "get_issue_comments": 2
+        },
+        "shell": {
+          "bash": 5
+        }
+      },
+      "started": "2026-10-26T01:24:56Z"
     }
   ]
 }
