@@ -1,6 +1,0 @@
-sessions=185 used_a_delegate=30 delegate_calls=55 all_calls=17278 share=0.32%
-data window: 2026-09-27 .. 2026-10-25
-2026-10-23 {"sessions":11,"withDel":1,"delCalls":6,"calls":992}
-2026-10-24 {"sessions":11,"withDel":1,"delCalls":1,"calls":510}
-2026-10-25 {"sessions":56,"withDel":0,"delCalls":0,"calls":3584}
-no-date {"sessions":2,"withDel":0,"delCalls":0,"calls":0}
