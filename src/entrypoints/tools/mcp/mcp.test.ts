@@ -3568,9 +3568,13 @@ describe("mcp/atomaton.ts", () => {
    * close had the tool agreeing with it.
    *
    * Pinned in pieces rather than whole, because both halves have to survive a reword:
-   * what the tool is for, and the plain exit named beside it. The ceiling is what the
-   * replaced text measured, 651 characters: a tool description is resent on every turn
-   * of every run holding the tool, so a clause goes inside that budget, not on top.
+   * what the tool is for, and the plain exit named beside it.
+   *
+   * The ceiling is 760, and it is a limit rather than a target. The text this replaces
+   * measured 651 characters and this one measures 702 -- 51 the scope costs, paid by
+   * tightening the mechanism sentences it already had, not by adding to them. A tool
+   * description is resent on every turn of every run holding the tool, so the next
+   * clause goes inside that, not on top of it.
    */
   test("request_close_issue is for delivered work, and names the exit it is not", async () => {
     const r = await sendRequest("atomaton.ts", { jsonrpc: "2.0", id: 50, method: "tools/list", params: {} });
