@@ -13839,6 +13839,49 @@
     ]
   },
   {
+    "path": "sessions/issue-410/atomaton.json",
+    "agent": "atomaton",
+    "messages": 68,
+    "calls": 47,
+    "failed": 1,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "bash": 7,
+      "grep": 12,
+      "delegate": 2,
+      "read": 26
+    },
+    "acts": {
+      "other": 5,
+      "search": 2
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-10-26T13:26:49Z",
+        "ended_because": "completed",
+        "iterations": 17,
+        "messages": 68,
+        "seconds": 320,
+        "server_calls": {
+          "delegate": {
+            "delegate": 2
+          },
+          "files": {
+            "grep": 12,
+            "read": 26
+          },
+          "shell": {
+            "bash": 7
+          }
+        },
+        "started": "2026-10-26T13:21:29Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
