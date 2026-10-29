@@ -2,8 +2,10 @@
 /**
  * aggregate_sub_issues.ts — Called after a PR merges and its linked
  * sub-issue's atomaton parent is known. If any sibling sub-issues are
- * still open, just posts a progress comment. Once all siblings are done, it
- * re-dispatches the atomaton.
+ * still open, says so in one line — edited into the child's report when the report
+ * is already on the parent's thread, posted as its own comment when it is not (see
+ * `mergeProgressIntoReport`). Once all siblings are done, it re-dispatches the
+ * atomaton.
  *
  * It carries nothing into the parent's session, and that is the point (#149).
  * It used to read every child's title, state and "linked pull requests" and overwrite
@@ -63,7 +65,7 @@ async function main(): Promise<void> {
     // GITHUB_TOKEN) -- excluding it makes this check reliably correct on
     // its first (and normally only) run instead of depending on that timing.
     exclude: true,
-    progressMessage: (remaining) => `Atomaton: Sub-task #${closedNum} completed. ${remaining} sub-task(s) still in progress.`,
+    progress: true,
   });
 
   console.error(describeGateResult(result, Number(closedNum), Number(parent)));

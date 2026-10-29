@@ -38,6 +38,7 @@ import { parentIssueOf } from "../adapters/github/parent-issue.ts";
 import { mostRecentAgentOn } from "../adapters/github/agent-on-issue.ts";
 import { commentBodies } from "../adapters/github/thread.ts";
 import { commentOnWithId } from "../adapters/github/work-tree.ts";
+import { mergeProgressIntoReport, subIssueProgressLine } from "../adapters/github/sub-issue-report.ts";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -94,8 +95,17 @@ export interface DispatchGateOptions {
    * "Closes #N" auto-close is unreliable under the Actions GITHUB_TOKEN).
    */
   exclude?: boolean;
-  /** Progress-comment text posted when siblings remain. Omit to post nothing in that case (matches the manual-close fallback's original silent behavior). */
-  progressMessage?: (remaining: number) => string;
+  /**
+   * Post the "N sub-task(s) still in progress" line when siblings remain. Omit to
+   * post nothing in that case, which is the manual-close fallback's behaviour: a
+   * person who closed an issue knows there is other work.
+   *
+   * Where the line goes is `sub-issue-report.ts`'s business, and it is edited into
+   * the child's report when that report is already on the thread — one completion,
+   * one comment. A boolean rather than the sentence itself, so that the writer and
+   * the merger cannot describe the same line in two different shapes.
+   */
+  progress?: boolean;
   /**
    * The dispatch this gate is about to start is the calling run's own conclusion
    * continuing on the parent — not work started under the caller's node. Passed
@@ -246,11 +256,20 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   }
 
   if (remaining > 0) {
-    if (opts.progressMessage) {
-      gh(
-        "issue", "comment", String(opts.parent), "--repo", opts.repo,
-        "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${SUB_RESULT_TAG.write(opts.closedNum)}\n${opts.progressMessage(remaining)}`,
-      );
+    if (opts.progress) {
+      const line = subIssueProgressLine(opts.closedNum, remaining);
+      // The report the child's closing run posted on this thread is where this belongs:
+      // one completion is one comment, and an edit notifies nobody while a second
+      // comment notifies everyone watching. The POST below is the fallback, unchanged
+      // from when it was the only route — no report on the thread yet (a person merging
+      // a pull request is not a run with anything to say), or an edit that did not land.
+      // Either way the fallback costs a comment and never information.
+      if (!mergeProgressIntoReport(opts.repo, opts.parent, opts.closedNum, line)) {
+        gh(
+          "issue", "comment", String(opts.parent), "--repo", opts.repo,
+          "--body", `${LLM_CONTEXT_TAG.write("exclude")}\n${SUB_RESULT_TAG.write(opts.closedNum)}\n${line}`,
+        );
+      }
     }
     return { kind: "waiting", remaining };
   }
