@@ -13841,7 +13841,7 @@
   {
     "path": "sessions/issue-410/atomaton.json",
     "agent": "atomaton",
-    "messages": 141,
+    "messages": 146,
     "calls": 89,
     "failed": 2,
     "refused": 0,
@@ -13918,6 +13918,16 @@
           }
         },
         "started": "2026-10-29T05:11:46Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-10-29T06:37:51Z",
+        "ended_because": "failed",
+        "iterations": 0,
+        "messages": 146,
+        "seconds": 248,
+        "server_calls": {},
+        "started": "2026-10-29T06:33:43Z"
       }
     ]
   },
