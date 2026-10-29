@@ -3,6 +3,16 @@
  * notify_limit_reached.ts — Post a "the run reached its limit" comment on an
  * issue/PR, mentioning the notify login when known.
  *
+ * ## The fallback, not the first word
+ *
+ * `post_result_comment.ts` posts the run's ending comment and already says the run
+ * stopped and how to continue — including the mention, and now the tool tally. The
+ * runner asks that comment whether it named the person (its `notified` output) and
+ * runs this notice only when it did not: when the comment was skipped, when nobody
+ * is configured to mention, and when the mention was silenced by design (a closed
+ * sub-issue). This used to run on every limit, so the common case was two comments
+ * and two notifications for one event.
+ *
  * Usage: notify_limit_reached.ts --number N --agent AGENT [--notify LOGIN]
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -84,8 +94,8 @@ function main(): void {
   // posted the run's report and written the ending (`limit`), and that is what answers
   // "whose turn is this node". A second ending here would say the same thing twice, and
   // a second `ENDED_TAG` is a lie about how many turns ended. This is a notice ABOUT the
-  // ending, addressed to the person the report could not reach — the one thing it adds
-  // is the tally of what the run spent its budget on.
+  // ending, for the cases where the report could not reach the person — the tally is
+  // carried on the report's footer now, so it is not repeated here.
   gh(
     "issue",
     "comment",
