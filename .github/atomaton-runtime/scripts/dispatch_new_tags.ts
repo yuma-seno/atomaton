@@ -153,6 +153,116 @@ function fenceSegments(text) {
   return segments;
 }
 
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/comment-command.ts
+var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
+function parseCommentCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    const parsed = parseCommandLine(rawLine);
+    if (parsed !== undefined)
+      return parsed;
+  }
+  return NOTHING;
+}
+function parseCommandLine(rawLine) {
+  const line = rawLine.trim();
+  const commandMatch = COMMAND_RE.exec(line);
+  if (commandMatch) {
+    const name = commandMatch[1];
+    const modifier = commandMatch[2]?.trim() ?? "";
+    if (isControlCommand(name)) {
+      if (!modifier)
+        return { ...NOTHING, control: name };
+      return {
+        ...NOTHING,
+        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+      };
+    }
+    if (!modifier)
+      return { ...NOTHING, agent: name };
+    if (modifier === "recover")
+      return { ...NOTHING, agent: name, sessionMode: "recover" };
+    return {
+      ...NOTHING,
+      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
+    };
+  }
+  const dispatchMatch = DISPATCH_RE.exec(line);
+  if (dispatchMatch)
+    return { ...NOTHING, agent: dispatchMatch[1] };
+  return;
+}
+function lineForms(rawLine) {
+  let line = rawLine.trim();
+  if (!line)
+    return [];
+  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
+  const variants = [line];
+  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
+    variants.push(line.slice(1, -1).trim());
+  }
+  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
+    variants.push("/" + line.slice(2, -1).trim());
+  }
+  return variants;
+}
+function parseMangledCommand(body) {
+  if (!body)
+    return NOTHING;
+  for (const rawLine of body.split(`
+`)) {
+    for (const form of lineForms(rawLine)) {
+      const parsed = parseCommentCommand(form);
+      if (parsed.agent !== "" || parsed.control !== "")
+        return parsed;
+    }
+  }
+  return NOTHING;
+}
+
+// src/adapters/github/thread.ts
+var readers = {
+  ending: (body) => {
+    const ended = ENDED_TAG.readProse(body)?.verb;
+    if (ended === "handoff")
+      return "handed-off";
+    if (ended === "waiting")
+      return "waiting";
+    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
+      return "returned";
+    return "";
+  },
+  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
+  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
+  claim: (body) => TOOK_TAG.readProse(body),
+  answeredAsk: (body) => {
+    const answers = ENDED_TAG.readProse(body)?.answers;
+    return answers !== undefined && answers > 0 ? answers : undefined;
+  },
+  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var askReaders = {
+  ...readers,
+  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
+  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
+};
+var endingWalkReaders = {
+  ending: readers.ending,
+  quoted: isQuotation,
+  claim: (body) => TOOK_TAG.readProse(body),
+  ended: (body) => ENDED_TAG.readProse(body)
+};
+
 // src/adapters/runner/config.ts
 import { readFileSync } from "fs";
 
@@ -273,116 +383,6 @@ function getWorkflowName(kind, fallback = "") {
 
 // src/adapters/runner/ops-log.ts
 var OPS_LOG_PATH = process.env.ATOMATON_OPS_LOG ?? "/tmp/atomaton_ops.log";
-
-// src/domain/work/control-commands.ts
-var CONTROL_COMMAND_NAMES = ["stop", "resume"];
-function isControlCommand(name) {
-  return CONTROL_COMMAND_NAMES.includes(name);
-}
-
-// src/domain/work/comment-command.ts
-var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
-var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
-var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
-function parseCommentCommand(body) {
-  if (!body)
-    return NOTHING;
-  for (const rawLine of body.split(`
-`)) {
-    const parsed = parseCommandLine(rawLine);
-    if (parsed !== undefined)
-      return parsed;
-  }
-  return NOTHING;
-}
-function parseCommandLine(rawLine) {
-  const line = rawLine.trim();
-  const commandMatch = COMMAND_RE.exec(line);
-  if (commandMatch) {
-    const name = commandMatch[1];
-    const modifier = commandMatch[2]?.trim() ?? "";
-    if (isControlCommand(name)) {
-      if (!modifier)
-        return { ...NOTHING, control: name };
-      return {
-        ...NOTHING,
-        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
-      };
-    }
-    if (!modifier)
-      return { ...NOTHING, agent: name };
-    if (modifier === "recover")
-      return { ...NOTHING, agent: name, sessionMode: "recover" };
-    return {
-      ...NOTHING,
-      error: `Unknown command syntax: '/${name} ${modifier}'. Put instructions on the lines after '/${name}', or use '/${name} recover'.`
-    };
-  }
-  const dispatchMatch = DISPATCH_RE.exec(line);
-  if (dispatchMatch)
-    return { ...NOTHING, agent: dispatchMatch[1] };
-  return;
-}
-function lineForms(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
-function parseMangledCommand(body) {
-  if (!body)
-    return NOTHING;
-  for (const rawLine of body.split(`
-`)) {
-    for (const form of lineForms(rawLine)) {
-      const parsed = parseCommentCommand(form);
-      if (parsed.agent !== "" || parsed.control !== "")
-        return parsed;
-    }
-  }
-  return NOTHING;
-}
-
-// src/adapters/github/thread.ts
-var readers = {
-  ending: (body) => {
-    const ended = ENDED_TAG.readProse(body)?.verb;
-    if (ended === "handoff")
-      return "handed-off";
-    if (ended === "waiting")
-      return "waiting";
-    if (ended === "stopped" || ended === "limit" || ended === "done" || ended === "refused")
-      return "returned";
-    return "";
-  },
-  requestedAgent: (body) => parseCommentCommand(proseOnly(body)).agent,
-  isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
-  claim: (body) => TOOK_TAG.readProse(body),
-  answeredAsk: (body) => {
-    const answers = ENDED_TAG.readProse(body)?.answers;
-    return answers !== undefined && answers > 0 ? answers : undefined;
-  },
-  endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
-};
-var askReaders = {
-  ...readers,
-  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
-  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
-};
-var endingWalkReaders = {
-  ending: readers.ending,
-  quoted: isQuotation,
-  claim: (body) => TOOK_TAG.readProse(body),
-  ended: (body) => ENDED_TAG.readProse(body)
-};
 // src/adapters/github/branch-placement.ts
 var NO_BRANCH_MESSAGE = "This run is on a detached checkout with no local branch, so there is no branch to push: " + "commit_and_push and create_pr cannot publish this run's work. Report the work on the issue instead.";
 

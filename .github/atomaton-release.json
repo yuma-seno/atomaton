@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.51",
+  "version": "v0.21.52",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",

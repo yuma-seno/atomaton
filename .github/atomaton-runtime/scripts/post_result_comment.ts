@@ -419,6 +419,32 @@ function toolTroubleLine(session, from) {
   return `Counted from the session: ${parts.join(", ")}.`;
 }
 
+// src/domain/record/tool-tally.ts
+var NAMED2 = 4;
+function toolCallTally(session) {
+  const names = [];
+  for (const message of session?.messages ?? []) {
+    for (const call of message.tool_calls ?? []) {
+      const name = call.function?.name;
+      if (typeof name === "string" && name !== "")
+        names.push(name);
+    }
+  }
+  if (names.length === 0)
+    return;
+  const counts = new Map;
+  for (const name of names)
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const shown = ranked.slice(0, NAMED2).map(([name, n]) => `\`${name}\` ${n}`);
+  const rest = ranked.slice(NAMED2);
+  if (rest.length > 0) {
+    const restCalls = rest.reduce((sum, [, n]) => sum + n, 0);
+    shown.push(`and ${rest.length} other tool${rest.length === 1 ? "" : "s"} ${restCalls}`);
+  }
+  return `Spent on: ${names.length} tool calls \u2014 ${shown.join(", ")}.`;
+}
+
 // src/domain/work/comment-command.ts
 var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
 var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
@@ -580,6 +606,9 @@ function endedTag(ending) {
 function cutShort(endedBecause) {
   return endedBecause === "stopped" || endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop";
 }
+function reachedLimit(endedBecause) {
+  return endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop";
+}
 function howItWasCutShort(endedBecause) {
   if (endedBecause === "stopped")
     return "was stopped";
@@ -606,6 +635,16 @@ function endingHere(args) {
     reported: args.reported === true
   });
 }
+function makesCompletionMention(signals) {
+  return shouldMentionOnCompletion({
+    ending: endingHere(signals),
+    chainContinues: isTrue(signals.chainContinues),
+    notify: signals.notify,
+    agentCalledHuman: signals.agentCalledHuman === true,
+    isSubIssue: signals.isSubIssue ?? false,
+    issueClosed: signals.issueClosed ?? false
+  });
+}
 function buildCommentBody(args) {
   const ending = endingHere(args);
   const lines = [
@@ -628,14 +667,7 @@ function buildCommentBody(args) {
   const escapedNotice = escapedMentionNotice(args.escapedMentions ?? [], args.escapedMentionsReason ?? "unknown");
   if (escapedNotice !== undefined)
     lines.push("", escapedNotice, "");
-  if (shouldMentionOnCompletion({
-    ending,
-    chainContinues: isTrue(args.chainContinues),
-    notify: args.notify,
-    agentCalledHuman: args.agentCalledHuman === true,
-    isSubIssue: args.isSubIssue ?? false,
-    issueClosed: args.issueClosed ?? false
-  })) {
+  if (makesCompletionMention(args)) {
     lines.push(mentionLine(ending, args), "");
   }
   lines.push(buildFooter({
@@ -644,7 +676,8 @@ function buildCommentBody(args) {
     repo: args.repo,
     tokenLine: args.tokenLine,
     toolTrouble: args.toolTrouble,
-    endedBecause: args.endedBecause
+    endedBecause: args.endedBecause,
+    spentOn: args.spentOn
   }));
   return lines.join(`
 `);
@@ -662,6 +695,8 @@ function buildFooter(args) {
   } else if (cutShort(args.endedBecause)) {
     lines.push(`\u26A0\uFE0F _The run ${howItWasCutShort(args.endedBecause)}. Comment \`/${args.agent}\` to continue._`);
   }
+  if (args.spentOn !== undefined)
+    lines.push(`_${args.spentOn}_`);
   return lines.join(`
 `);
 }
@@ -772,17 +807,22 @@ function main() {
     console.error(`escaped ${checked.escaped.length} mention(s): ${checked.escaped.join(", ")}`);
   }
   const called = calledHumans(output, callable);
-  const body = buildCommentBody({
-    agent: values.agent,
-    salvaged,
-    wroteNothing,
-    endingInvalid,
-    agentCalledHuman: called.length === 1,
+  const issueState = subIssueState(values.number, values.type);
+  const mentionSignals = {
     notify: values.notify,
     directive: values.directive,
     chainContinues: values["chain-continues"],
     endedBecause: values["ended-because"],
     reported: isTrue(values.reported),
+    agentCalledHuman: called.length === 1,
+    ...issueState
+  };
+  const body = buildCommentBody({
+    ...mentionSignals,
+    agent: values.agent,
+    salvaged,
+    wroteNothing,
+    endingInvalid,
     runUrl: values["run-url"],
     ask: values.ask,
     "run-id": values["run-id"],
@@ -793,7 +833,7 @@ function main() {
     changed: isTrue(values.changed),
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
     tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
-    ...subIssueState(values.number, values.type)
+    spentOn: reachedLimit(values["ended-because"]) ? toolCallTally(readSession(values.session)) : undefined
   });
   const { code, stdout, stderr } = gh("api", `repos/${process.env.GITHUB_REPOSITORY}/issues/${values.number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
   if (code !== 0) {
@@ -801,9 +841,12 @@ function main() {
   }
   const commentId = stdout.trim();
   const githubOutput = process.env.GITHUB_OUTPUT;
-  if (githubOutput)
+  if (githubOutput) {
     appendFileSync(githubOutput, `comment_id=${commentId}
 `);
+    appendFileSync(githubOutput, `notified=${makesCompletionMention(mentionSignals) ? "true" : "false"}
+`);
+  }
   console.error(`Posted comment ID: ${commentId}`);
 }
 if (import.meta.main)
@@ -813,5 +856,6 @@ export {
   buildFooter,
   endedWithToolCalls,
   lastAgentText,
+  makesCompletionMention,
   ref
 };

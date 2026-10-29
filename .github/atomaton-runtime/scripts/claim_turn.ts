@@ -78,6 +78,12 @@ function splitConcatenatedJson(text) {
   return results;
 }
 
+// src/domain/work/actor.ts
+var BOT_TYPE = "Bot";
+function isHumanActor(type) {
+  return (type ?? "").trim().toLowerCase() !== BOT_TYPE.toLowerCase();
+}
+
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
@@ -347,13 +353,24 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/claim_turn.ts
 var ref = defineScript(import.meta.url);
 var READ_DELAYS_MS = [1000, 2000, 4000];
-function listBodies(repo, number) {
-  return listComments(repo, number).map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
+function readComments(repo, number) {
+  return listComments(repo, number).map((comment) => ({
+    id: comment.id,
+    body: comment.body ?? "",
+    human: isHumanActor(comment.user?.type)
+  }));
 }
 var CLAIM_NOTICE = "Atomaton: claimed this turn.";
 function claimCommentBody(args) {
   return [LLM_CONTEXT_TAG.write("exclude"), TOOK_TAG.write(args), CLAIM_NOTICE].join(`
 `);
+}
+function claimOnMarkerBody(original, args) {
+  return `${original.replace(/\s+$/, "")}
+${TOOK_TAG.write(args)}`;
+}
+function patchCommentBody(repo, commentId, body) {
+  return gh("api", `repos/${repo}/issues/comments/${commentId}`, "--method", "PATCH", "-f", `body=${body}`);
 }
 function raceOutcome(comments, mine) {
   for (const comment of comments) {
@@ -396,6 +413,51 @@ async function main() {
   }
   if (!Number.isInteger(runId) || runId <= 0)
     throw new Error("--run-id must be a positive number");
+  const comments = readComments(repo, number);
+  const askComment = comments.find((comment) => comment.id === ask);
+  const isMarker = askComment !== undefined && !askComment.human && DISPATCH_TAG.hasProse(askComment.body);
+  if (askComment !== undefined && isMarker) {
+    const original = askComment.body;
+    const existing = TOOK_TAG.readProse(original);
+    if (existing !== undefined) {
+      record(false);
+      return;
+    }
+    const edited = patchCommentBody(repo, ask, claimOnMarkerBody(original, { ask, run: runId }));
+    if (edited.code !== 0) {
+      throw new Error(`could not claim the dispatch marker on #${number}: ${edited.stderr || edited.stdout}`);
+    }
+    let held;
+    for (let attempt = 0;attempt <= READ_DELAYS_MS.length; attempt += 1) {
+      const current = readComments(repo, number).find((comment) => comment.id === ask);
+      const claim = current === undefined ? undefined : TOOK_TAG.readProse(current.body);
+      if (claim !== undefined) {
+        held = claim.run === runId;
+        break;
+      }
+      const delay = READ_DELAYS_MS[attempt];
+      if (delay === undefined)
+        break;
+      await Bun.sleep(delay);
+    }
+    if (held === undefined)
+      throw new Error(`the claim on #${number} never became visible, so the race check cannot be trusted`);
+    if (!held) {
+      record(false);
+      return;
+    }
+    const outcome = raceOutcome(readComments(repo, number), { id: ask, ask });
+    if (outcome === "held") {
+      record(true);
+      return;
+    }
+    const restored = patchCommentBody(repo, ask, original);
+    if (restored.code !== 0) {
+      throw new Error(`could not take back the claim on #${number}: ${restored.stderr || restored.stdout}`);
+    }
+    record(false);
+    return;
+  }
   const posted = gh("api", `repos/${repo}/issues/${number}/comments`, "--method", "POST", "-f", `body=${claimCommentBody({ ask, run: runId })}`, "--jq", ".id");
   if (posted.code !== 0)
     throw new Error(`could not post the claim on #${number}: ${posted.stderr || posted.stdout}`);
@@ -404,7 +466,7 @@ async function main() {
     throw new Error(`the claim's id came back unreadable: ${posted.stdout.trim()}`);
   let visible = false;
   for (let attempt = 0;attempt <= READ_DELAYS_MS.length; attempt += 1) {
-    if (listBodies(repo, number).some((comment) => comment.id === claimId)) {
+    if (readComments(repo, number).some((comment) => comment.id === claimId)) {
       visible = true;
       break;
     }
@@ -415,7 +477,7 @@ async function main() {
   }
   if (!visible)
     throw new Error(`the claim on #${number} never became visible, so the race check cannot be trusted`);
-  const outcome = raceOutcome(listBodies(repo, number), { id: claimId, ask });
+  const outcome = raceOutcome(readComments(repo, number), { id: claimId, ask });
   if (outcome === "held") {
     record(true);
     return;
@@ -430,6 +492,7 @@ if (import.meta.main)
   main();
 export {
   claimCommentBody,
+  claimOnMarkerBody,
   raceOutcome,
   ref
 };

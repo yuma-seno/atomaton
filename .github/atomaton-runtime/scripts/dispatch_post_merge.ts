@@ -225,119 +225,6 @@ function fenceSegments(text) {
   return segments;
 }
 
-// src/domain/delivery/merge-readiness.ts
-var CI_WOULD_BE_WASTED = new Set([
-  "not-open",
-  "draft",
-  "conflicting",
-  "behind",
-  "mergeability-unknown",
-  "checks-pending",
-  "checks-failing"
-]);
-var PASSING = new Set(["success", "neutral", "skipped"]);
-
-// src/domain/machinery/machinery-layout.ts
-var USER_ROOT = ".github/atomaton";
-var RUNTIME_ROOT = ".github/atomaton-runtime";
-var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
-var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
-var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
-var SKILLS_DIR = `${USER_ROOT}/skills`;
-var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
-var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
-var DELEGATES_DIR = `${USER_ROOT}/delegates`;
-var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
-var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
-var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
-var RULESETS_DIR = `${USER_ROOT}/rulesets`;
-var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
-var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
-
-// src/domain/delivery/declared-secrets.ts
-var RUN_CREDENTIALS = [
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "ORCAROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "ATOMA_COPILOT_TOKEN",
-  "GH_TOKEN"
-];
-var AGENT_ENV_NAMES = [
-  "HOME",
-  "PATH",
-  "AGENT",
-  MACHINERY_ROOT_VAR,
-  "GITHUB_REPOSITORY",
-  "BRANCH",
-  "NUMBER",
-  "NOTIFY",
-  "TYPE",
-  "ATOMATON_RELOAD_COUNT",
-  "ATOMATON_OPS_LOG",
-  "ATOMATON_RUN_DIR",
-  "ATOMATON_RUN_URL",
-  "ATOMATON_DISPATCHED_BY",
-  "ATOMATON_ASK_ID",
-  "GITHUB_RUN_ID",
-  "XDG_CACHE_HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-  "BUN_INSTALL_CACHE_DIR",
-  "npm_config_cache",
-  "PIP_CACHE_DIR",
-  "CARGO_HOME",
-  "OPENAI_BASE_URL",
-  "ATOMA_PROVIDER"
-];
-var RUN_STEP_NAMES = [
-  "OPENROUTER_BASE_URL",
-  "ORCAROUTER_BASE_URL",
-  "ANTHROPIC_BASE_URL",
-  "COPILOT_BASE_URL",
-  "ATOMA_PROVIDER_IN",
-  "OPENAI_BASE_URL_IN"
-];
-var TOOL_SECRETS = {
-  field: "tools.secrets",
-  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
-};
-var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
-var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
-var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
-
-// src/domain/delivery/check-jobs.ts
-var CHECKS_FROM_PULL_REQUEST = {
-  where: "checks.from_pull_request",
-  secrets: {
-    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
-  }
-};
-var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
-
-// src/adapters/runner/ops-log.ts
-import { appendFileSync } from "fs";
-var OPS_LOG_PATH = process.env.ATOMATON_OPS_LOG ?? "/tmp/atomaton_ops.log";
-function logOp(op, payload = {}) {
-  const entry = { ts: new Date().toISOString(), op, ...payload };
-  try {
-    appendFileSync(OPS_LOG_PATH, JSON.stringify(entry) + `
-`);
-  } catch (e) {
-    console.error(`[ops-log] WARN: failed to write op log: ${e}`);
-  }
-}
-function logDispatch(target, agent, extra = {}) {
-  const { elsewhere, ...rest } = extra;
-  logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
-}
-
-// src/adapters/runner/run-node.ts
-function nodeNumber() {
-  const parsed = Number((process.env.NUMBER ?? "").trim());
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
 // src/adapters/github/outcome.ts
 function issueOutcome(reason) {
   const said = (reason ?? "").toLowerCase();
@@ -345,36 +232,6 @@ function issueOutcome(reason) {
 }
 function pullRequestOutcome(merged) {
   return merged ? "done" : "abandoned";
-}
-
-// src/adapters/github/target-state.ts
-function readTargetState(number, repo) {
-  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
-  const { code, stdout, stderr } = ghRead("api", path);
-  if (code !== 0) {
-    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
-`)[0] ?? "" };
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return { known: false, why: "the response was not JSON" };
-  }
-  const isPr = parsed.pull_request !== undefined;
-  const kind = isPr ? "pull-request" : "issue";
-  const labels = (parsed.labels ?? []).map((label) => label.name ?? "").filter((name) => name !== "");
-  if (parsed.state === "open")
-    return { known: true, kind, state: "open", labels };
-  if (parsed.state === "closed") {
-    return {
-      known: true,
-      kind,
-      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason),
-      labels
-    };
-  }
-  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
 // src/domain/work/control-commands.ts
@@ -635,6 +492,157 @@ function isAskSuperseded(repo, number, args) {
   };
 }
 
+// src/adapters/github/work-tree.ts
+function commentOnWithId(repo, number, body) {
+  const { code, stdout } = gh("api", `repos/${repo}/issues/${number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
+  if (code !== 0)
+    return null;
+  return stdout.trim() || null;
+}
+
+// src/domain/delivery/merge-readiness.ts
+var CI_WOULD_BE_WASTED = new Set([
+  "not-open",
+  "draft",
+  "conflicting",
+  "behind",
+  "mergeability-unknown",
+  "checks-pending",
+  "checks-failing"
+]);
+var PASSING = new Set(["success", "neutral", "skipped"]);
+
+// src/domain/machinery/machinery-layout.ts
+var USER_ROOT = ".github/atomaton";
+var RUNTIME_ROOT = ".github/atomaton-runtime";
+var CONFIG_FILE = `${USER_ROOT}/config.yaml`;
+var AGENT_DEFINITIONS_DIR = `${USER_ROOT}/agent-definitions`;
+var PROMPT_TEMPLATE = `${USER_ROOT}/prompt-template.md`;
+var SKILLS_DIR = `${USER_ROOT}/skills`;
+var TOOLS_DIR = `${RUNTIME_ROOT}/tools`;
+var TOOL_DEFAULTS_FILE = `${TOOLS_DIR}/defaults.yaml`;
+var DELEGATES_DIR = `${USER_ROOT}/delegates`;
+var DELEGATES_FILE = `${DELEGATES_DIR}/delegates.yaml`;
+var TOOL_HOOKS_DIR = `${TOOLS_DIR}/hooks`;
+var TOOL_PACKAGES_FILE = `${TOOLS_DIR}/packages.json`;
+var RULESETS_DIR = `${USER_ROOT}/rulesets`;
+var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
+var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
+
+// src/domain/delivery/declared-secrets.ts
+var RUN_CREDENTIALS = [
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "ORCAROUTER_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "ATOMA_COPILOT_TOKEN",
+  "GH_TOKEN"
+];
+var AGENT_ENV_NAMES = [
+  "HOME",
+  "PATH",
+  "AGENT",
+  MACHINERY_ROOT_VAR,
+  "GITHUB_REPOSITORY",
+  "BRANCH",
+  "NUMBER",
+  "NOTIFY",
+  "TYPE",
+  "ATOMATON_RELOAD_COUNT",
+  "ATOMATON_OPS_LOG",
+  "ATOMATON_RUN_DIR",
+  "ATOMATON_RUN_URL",
+  "ATOMATON_DISPATCHED_BY",
+  "ATOMATON_ASK_ID",
+  "GITHUB_RUN_ID",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "BUN_INSTALL_CACHE_DIR",
+  "npm_config_cache",
+  "PIP_CACHE_DIR",
+  "CARGO_HOME",
+  "OPENAI_BASE_URL",
+  "ATOMA_PROVIDER"
+];
+var RUN_STEP_NAMES = [
+  "OPENROUTER_BASE_URL",
+  "ORCAROUTER_BASE_URL",
+  "ANTHROPIC_BASE_URL",
+  "COPILOT_BASE_URL",
+  "ATOMA_PROVIDER_IN",
+  "OPENAI_BASE_URL_IN"
+];
+var TOOL_SECRETS = {
+  field: "tools.secrets",
+  reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
+};
+var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
+
+// src/domain/delivery/check-jobs.ts
+var CHECKS_FROM_PULL_REQUEST = {
+  where: "checks.from_pull_request",
+  secrets: {
+    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
+  }
+};
+var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
+
+// src/adapters/runner/ops-log.ts
+import { appendFileSync } from "fs";
+var OPS_LOG_PATH = process.env.ATOMATON_OPS_LOG ?? "/tmp/atomaton_ops.log";
+function logOp(op, payload = {}) {
+  const entry = { ts: new Date().toISOString(), op, ...payload };
+  try {
+    appendFileSync(OPS_LOG_PATH, JSON.stringify(entry) + `
+`);
+  } catch (e) {
+    console.error(`[ops-log] WARN: failed to write op log: ${e}`);
+  }
+}
+function logDispatch(target, agent, extra = {}) {
+  const { elsewhere, ...rest } = extra;
+  logOp(elsewhere === true ? "dispatch-elsewhere" : "dispatch", { target, agent, ...rest });
+}
+
+// src/adapters/runner/run-node.ts
+function nodeNumber() {
+  const parsed = Number((process.env.NUMBER ?? "").trim());
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+// src/adapters/github/target-state.ts
+function readTargetState(number, repo) {
+  const path = repo ? `repos/${repo}/issues/${number}` : `repos/{owner}/{repo}/issues/${number}`;
+  const { code, stdout, stderr } = ghRead("api", path);
+  if (code !== 0) {
+    return { known: false, why: (stderr || stdout || `gh exited ${code}`).trim().split(`
+`)[0] ?? "" };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return { known: false, why: "the response was not JSON" };
+  }
+  const isPr = parsed.pull_request !== undefined;
+  const kind = isPr ? "pull-request" : "issue";
+  const labels = (parsed.labels ?? []).map((label) => label.name ?? "").filter((name) => name !== "");
+  if (parsed.state === "open")
+    return { known: true, kind, state: "open", labels };
+  if (parsed.state === "closed") {
+    return {
+      known: true,
+      kind,
+      state: isPr ? pullRequestOutcome(Boolean(parsed.pull_request?.merged_at)) : issueOutcome(parsed.state_reason),
+      labels
+    };
+  }
+  return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
+}
+
 // src/domain/work/closed-target.ts
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
@@ -735,7 +743,7 @@ ${DISPATCH_TAG.write(d.agent)}
   }
   return stdout.trim();
 }
-function refuseOutstandingRequest(d, markerId) {
+function refuseOutstandingRequest(d, markerId, ownMarker) {
   const log = d.log ?? ((message) => console.error(message));
   const repoPath = d.repo ?? "{owner}/{repo}";
   const removeMarker = () => {
@@ -764,17 +772,19 @@ function refuseOutstandingRequest(d, markerId) {
     Bun.sleepSync(delay);
   }
   if (check === undefined || !check.markerVisible) {
-    const reposted = postDispatchMarker(d);
-    if (reposted !== undefined) {
-      try {
-        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
-          removeMarker();
-          return;
+    if (ownMarker) {
+      const reposted = postDispatchMarker(d);
+      if (reposted !== undefined) {
+        try {
+          if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
+            removeMarker();
+            return;
+          }
+        } catch (e) {
+          log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
         }
-      } catch (e) {
-        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+        gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
       }
-      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     removeMarker();
@@ -857,8 +867,9 @@ function dispatchRunner(d) {
       return refusal;
     ask = d.ask;
   } else {
-    markerId = postDispatchMarker(d);
-    const refusal = refuseOutstandingRequest(d, markerId);
+    const provided = d.markerCommentId === undefined ? "" : String(d.markerCommentId).trim();
+    markerId = provided === "" ? postDispatchMarker(d) : provided;
+    const refusal = refuseOutstandingRequest(d, markerId, provided === "");
     if (refusal !== undefined)
       return refusal;
     ask = d.ask ?? markerId;
@@ -1065,10 +1076,12 @@ function log3(message) {
 }
 function dispatchPostMergeAgent(repo, subIssueNum, agent) {
   const notify = resolveNotify(repo, subIssueNum);
-  const { code, stdout, stderr } = gh("issue", "comment", String(subIssueNum), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("include")}
-` + "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.");
-  if (code) {
-    log3(`dispatchPostMergeAgent: could not post trigger comment on #${subIssueNum}: ${stderr || stdout}`);
+  const directive = `${LLM_CONTEXT_TAG.write("include")}
+${DISPATCH_TAG.write(agent)}
+` + "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.";
+  const markerCommentId = commentOnWithId(repo, subIssueNum, directive);
+  if (markerCommentId === null) {
+    log3(`dispatchPostMergeAgent: could not post the restart directive on #${subIssueNum}, so nothing was dispatched`);
     return false;
   }
   return dispatchRunner({
@@ -1078,6 +1091,7 @@ function dispatchPostMergeAgent(repo, subIssueNum, agent) {
     number: subIssueNum,
     notify,
     repo,
+    markerCommentId,
     continuesChain: true,
     log: log3
   }) === "dispatched";

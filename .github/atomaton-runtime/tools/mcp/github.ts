@@ -8208,7 +8208,7 @@ ${DISPATCH_TAG.write(d.agent)}
   }
   return stdout.trim();
 }
-function refuseOutstandingRequest(d, markerId) {
+function refuseOutstandingRequest(d, markerId, ownMarker) {
   const log = d.log ?? ((message) => console.error(message));
   const repoPath = d.repo ?? "{owner}/{repo}";
   const removeMarker = () => {
@@ -8237,17 +8237,19 @@ function refuseOutstandingRequest(d, markerId) {
     Bun.sleepSync(delay);
   }
   if (check === undefined || !check.markerVisible) {
-    const reposted = postDispatchMarker(d);
-    if (reposted !== undefined) {
-      try {
-        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
-          removeMarker();
-          return;
+    if (ownMarker) {
+      const reposted = postDispatchMarker(d);
+      if (reposted !== undefined) {
+        try {
+          if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
+            removeMarker();
+            return;
+          }
+        } catch (e) {
+          log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
         }
-      } catch (e) {
-        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+        gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
       }
-      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     removeMarker();
@@ -8330,8 +8332,9 @@ function dispatchRunner(d) {
       return refusal;
     ask = d.ask;
   } else {
-    markerId = postDispatchMarker(d);
-    const refusal = refuseOutstandingRequest(d, markerId);
+    const provided = d.markerCommentId === undefined ? "" : String(d.markerCommentId).trim();
+    markerId = provided === "" ? postDispatchMarker(d) : provided;
+    const refusal = refuseOutstandingRequest(d, markerId, provided === "");
     if (refusal !== undefined)
       return refusal;
     ask = d.ask ?? markerId;
@@ -8409,6 +8412,105 @@ function commentOnWithId(repo, number, body) {
   return stdout.trim() || null;
 }
 
+// src/adapters/github/sub-issue-report.ts
+function subIssueReportBody(report) {
+  const said = withoutCommands(withoutTags(report.report.trim()));
+  const lines = [
+    ...subIssueReportHeaderLines(report.child),
+    "",
+    ...said === "" ? ["Its closing run wrote no summary."] : [said],
+    ""
+  ];
+  if (report.pullRequests === undefined) {
+    lines.push("Its pull requests could not be read.");
+  } else if (report.pullRequests.length === 0) {
+    lines.push("No pull requests are linked to it.");
+  } else {
+    lines.push("Linked pull requests:", ...report.pullRequests.map((pr) => `- #${pr.number} ${pr.title} (${pr.state})`));
+  }
+  lines.push("", "</details>");
+  return lines.join(`
+`);
+}
+var REPORT_FOLD_OPEN = "<details><summary>Report</summary>";
+function subIssueReportHeaderLines(child) {
+  return [LLM_CONTEXT_TAG.write("include"), REPORT_FOLD_OPEN, "", `**Sub-issue #${child}**`];
+}
+function subIssueProgressLine(child, remaining) {
+  return `Atomaton: Sub-task #${child} completed. ${remaining} sub-task(s) still in progress.`;
+}
+var PROGRESS_OPENING = "Atomaton: Sub-task #";
+function withProgressLine(body, line) {
+  const kept = body.split(`
+`).filter((text) => !text.trimStart().startsWith(PROGRESS_OPENING));
+  return `${kept.join(`
+`).replace(/\s+$/, "")}
+
+${line}`;
+}
+function findSubIssueReport(repo, parent, child) {
+  const header = subIssueReportHeaderLines(child).join(`
+`);
+  for (const comment of listComments(repo, parent)) {
+    const body = comment.body ?? "";
+    if (isHumanActor(comment.user?.type))
+      continue;
+    if (!body.trimStart().startsWith(header))
+      continue;
+    return { id: String(comment.id), body };
+  }
+  return;
+}
+function mergeProgressIntoReport(repo, parent, child, line) {
+  let found;
+  try {
+    found = findSubIssueReport(repo, parent, child);
+  } catch (error) {
+    console.error(`[atomaton-report] could not look for #${child}'s report on #${parent}: ${error.message}`);
+    return false;
+  }
+  if (found === undefined)
+    return false;
+  const body = withProgressLine(found.body, line);
+  if (body === found.body)
+    return true;
+  const { code, stdout, stderr } = gh("api", `repos/${repo}/issues/comments/${found.id}`, "--method", "PATCH", "-f", `body=${body}`);
+  if (code !== 0) {
+    console.error(`[atomaton-report] WARN could not add the progress line to #${child}'s report on #${parent}: ${stderr || stdout}`);
+    return false;
+  }
+  return true;
+}
+function reportSubIssueToParent(repo, child, report) {
+  const links = issueLinks(repo, child);
+  if (links.unavailable) {
+    console.error(`[atomaton-report] WARN could not read #${child}'s parent, so nothing was posted there: ${links.unavailable}`);
+    return false;
+  }
+  const parent = links.parent?.number ?? 0;
+  if (parent === 0)
+    return false;
+  const body = subIssueReportBody({ child, report, pullRequests: links.pullRequests });
+  const { code, stdout, stderr } = gh("issue", "comment", String(parent), "--repo", repo, "--body", body);
+  if (code !== 0) {
+    console.error(`[atomaton-report] WARN could not post #${child}'s report on #${parent}: ${stderr || stdout}`);
+    return false;
+  }
+  return true;
+}
+function withoutCommands(text) {
+  const commandLines = new Set(commandLinesIn(text));
+  if (commandLines.size === 0)
+    return text;
+  return text.split(`
+`).map((line) => commandLines.has(line.trim()) ? defuseCommandStart(line) : line).join(`
+`);
+}
+function defuseCommandStart(line) {
+  const at = line.search(/[<\/]/);
+  return at < 0 ? line : `${line.slice(0, at)}\\${line.slice(at)}`;
+}
+
 // src/app/aggregation.ts
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -8458,10 +8560,13 @@ async function dispatchOrchestratorIfReady(opts) {
     return withNotice(opts, { kind: "undetermined", why });
   }
   if (remaining > 0) {
-    if (opts.progressMessage) {
-      gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
+    if (opts.progress) {
+      const line = subIssueProgressLine(opts.closedNum, remaining);
+      if (!mergeProgressIntoReport(opts.repo, opts.parent, opts.closedNum, line)) {
+        gh("issue", "comment", String(opts.parent), "--repo", opts.repo, "--body", `${LLM_CONTEXT_TAG.write("exclude")}
 ${SUB_RESULT_TAG.write(opts.closedNum)}
-${opts.progressMessage(remaining)}`);
+${line}`);
+      }
     }
     return { kind: "waiting", remaining };
   }
@@ -20157,10 +20262,12 @@ function dispatchPrValidation(repo, prNumber, branch, options = {}) {
 }
 function dispatchPostMergeAgent(repo, subIssueNum, agent) {
   const notify = resolveNotify(repo, subIssueNum);
-  const { code, stdout, stderr } = gh("issue", "comment", String(subIssueNum), "--repo", repo, "--body", `${LLM_CONTEXT_TAG.write("include")}
-` + "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.");
-  if (code) {
-    log6(`dispatchPostMergeAgent: could not post trigger comment on #${subIssueNum}: ${stderr || stdout}`);
+  const directive = `${LLM_CONTEXT_TAG.write("include")}
+${DISPATCH_TAG.write(agent)}
+` + "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " + "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " + "issue when they are met, and carry on with the work when they are not.";
+  const markerCommentId = commentOnWithId(repo, subIssueNum, directive);
+  if (markerCommentId === null) {
+    log6(`dispatchPostMergeAgent: could not post the restart directive on #${subIssueNum}, so nothing was dispatched`);
     return false;
   }
   return dispatchRunner({
@@ -20170,6 +20277,7 @@ function dispatchPostMergeAgent(repo, subIssueNum, agent) {
     number: subIssueNum,
     notify,
     repo,
+    markerCommentId,
     continuesChain: true,
     log: log6
   }) === "dispatched";
@@ -20199,59 +20307,6 @@ function dispatchDeploy(context, trigger, ref, repo) {
     ...configured ? [] : ["-f", `trigger=${trigger}`]
   ];
   return dispatchWorkflow(context, configured || DEFAULT_CD_WORKFLOW, args, log6);
-}
-
-// src/adapters/github/sub-issue-report.ts
-function subIssueReportBody(report) {
-  const said = withoutCommands(withoutTags(report.report.trim()));
-  const lines = [
-    LLM_CONTEXT_TAG.write("include"),
-    "<details><summary>Report</summary>",
-    "",
-    `**Sub-issue #${report.child}**`,
-    "",
-    ...said === "" ? ["Its closing run wrote no summary."] : [said],
-    ""
-  ];
-  if (report.pullRequests === undefined) {
-    lines.push("Its pull requests could not be read.");
-  } else if (report.pullRequests.length === 0) {
-    lines.push("No pull requests are linked to it.");
-  } else {
-    lines.push("Linked pull requests:", ...report.pullRequests.map((pr) => `- #${pr.number} ${pr.title} (${pr.state})`));
-  }
-  lines.push("", "</details>");
-  return lines.join(`
-`);
-}
-function reportSubIssueToParent(repo, child, report) {
-  const links = issueLinks(repo, child);
-  if (links.unavailable) {
-    console.error(`[atomaton-report] WARN could not read #${child}'s parent, so nothing was posted there: ${links.unavailable}`);
-    return false;
-  }
-  const parent = links.parent?.number ?? 0;
-  if (parent === 0)
-    return false;
-  const body = subIssueReportBody({ child, report, pullRequests: links.pullRequests });
-  const { code, stdout, stderr } = gh("issue", "comment", String(parent), "--repo", repo, "--body", body);
-  if (code !== 0) {
-    console.error(`[atomaton-report] WARN could not post #${child}'s report on #${parent}: ${stderr || stdout}`);
-    return false;
-  }
-  return true;
-}
-function withoutCommands(text) {
-  const commandLines = new Set(commandLinesIn(text));
-  if (commandLines.size === 0)
-    return text;
-  return text.split(`
-`).map((line) => commandLines.has(line.trim()) ? defuseCommandStart(line) : line).join(`
-`);
-}
-function defuseCommandStart(line) {
-  const at = line.search(/[<\/]/);
-  return at < 0 ? line : `${line.slice(0, at)}\\${line.slice(at)}`;
 }
 
 // src/adapters/github/branch-rules.ts
