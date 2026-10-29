@@ -13839,6 +13839,19 @@
     ]
   },
   {
+    "path": "sessions/issue-410/archive/engineer-1.json",
+    "agent": "engineer",
+    "messages": 12,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
+  },
+  {
     "path": "sessions/issue-410/atomaton.json",
     "agent": "atomaton",
     "messages": 157,
@@ -13943,6 +13956,55 @@
           }
         },
         "started": "2026-10-29T06:41:42Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/issue-410/engineer.json",
+    "agent": "engineer",
+    "messages": 159,
+    "calls": 79,
+    "failed": 2,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "bash": 54,
+      "commit_and_push": 3,
+      "read": 11,
+      "get_issue": 1,
+      "get_issue_comments": 2,
+      "edit": 7,
+      "create_pr": 1
+    },
+    "acts": {
+      "other": 44,
+      "edit": 10
+    },
+    "runs": [
+      {
+        "compactions": 1,
+        "ended": "2026-10-29T07:46:07Z",
+        "ended_because": "completed",
+        "iterations": 184,
+        "messages": 159,
+        "seconds": 2509,
+        "server_calls": {
+          "files": {
+            "edit": 28,
+            "read": 50
+          },
+          "github": {
+            "commit_and_push": 5,
+            "create_pr": 1,
+            "get_issue": 1,
+            "get_issue_comments": 2
+          },
+          "shell": {
+            "bash": 119
+          }
+        },
+        "started": "2026-10-29T07:04:18Z"
       }
     ]
   },
