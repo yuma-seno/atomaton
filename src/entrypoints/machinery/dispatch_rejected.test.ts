@@ -42,9 +42,12 @@ const BODY = [
   "<!-- atomaton:origin-agent=engineer -->",
 ].join("\n");
 
-/** The argv of the `gh issue comment` call that posts the rejection directive. */
+/** The argv of the API write that posts the rejection directive (also its marker). */
 function directiveComment(ghCalls: string[][]): string[] | undefined {
-  return ghCalls.find((c) => c[0] === "issue" && c[1] === "comment");
+  return ghCalls.find(
+    (c) => c.some((a) => a.includes("issues/17/comments")) && c.includes("POST") &&
+      (c[c.indexOf("-f") + 1] ?? "").includes("closed without merging"),
+  );
 }
 
 describe("dispatch_rejected.ts", () => {
@@ -71,8 +74,9 @@ describe("dispatch_rejected.ts", () => {
     // it -- and it names the situation, not the verdict.
     const comment = directiveComment(r.ghCalls);
     expect(comment, "the rejection directive is posted before anything is dispatched").toBeDefined();
-    const body = comment?.[comment.indexOf("--body") + 1] ?? "";
+    const body = comment?.[comment.indexOf("-f") + 1] ?? "";
     expect(body).toContain("atomaton:llm-context=include");
+    expect(body).toContain("atomaton:dispatch=engineer");
     expect(body).toContain("closed without merging");
     expect(body).toContain("#20");
 
@@ -80,13 +84,17 @@ describe("dispatch_rejected.ts", () => {
     expect(dispatch.join(" ")).toContain("agent=engineer");
     expect(dispatch.join(" ")).toContain("type=issue");
     expect(dispatch.join(" ")).toContain("number=17");
+    // The directive's id is the ask: one comment serves as the first user message,
+    // the dispatch marker, and the turn the run claims.
+    expect(dispatch.join(" ")).toContain("ask=555");
+    expect(r.ghCalls.filter((c) => c.some((a) => a.includes("issues/17/comments")) && c.includes("POST"))).toHaveLength(1);
     // The thread walk names nobody in this fixture, so the field is sent empty
     // -- the point is that notify travels with the dispatch, not who it is here.
     expect(dispatch.join(" ")).toContain("notify=");
   });
 
   test("dispatches nothing when posting the directive fails, and fails the job", () => {
-    const r = run(BODY, [{ match: ["issue", "comment"], code: 1 }, open]);
+    const r = run(BODY, [{ match: ["api", "issues/17/comments", "POST"], code: 1 }, open]);
     // No fallback exists on this side. The merge route stands the aggregate job
     // up; here a hand-off that did not happen must be visible, so the job goes
     // red rather than ending silently.

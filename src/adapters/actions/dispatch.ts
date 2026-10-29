@@ -155,6 +155,23 @@ export interface RunnerDispatch {
    */
   freshnessProbeId?: number | string;
   /**
+   * A comment the CALLER posted moments before this dispatch, which is to be this
+   * dispatch's marker and its run's ask instead of one posted here.
+   *
+   * The post-merge and rejection directives are already a comment on the node — the
+   * first user message the re-invoked run reads — so posting a second marker beside
+   * them left every restart as two comments saying one thing. Passing the directive's
+   * id makes it both: `refuseOutstandingRequest` excludes it from the outstanding read
+   * and uses it as the freshness probe exactly as it used the marker, and the run
+   * claims that comment at start.
+   *
+   * A refusal removes it, as it removes a marker posted here: the directive would
+   * otherwise stay on the thread as an ask nobody took up, and no run will read it
+   * because none was started. A marker that never became visible is not re-posted —
+   * the caller's comment already IS the post, so there is nothing to retry here.
+   */
+  markerCommentId?: number | string;
+  /**
    * Whether the verdict this dispatch rides on judged the work `passed` — for
    * validation, `contextsPassed` of the verdict it wrote the checks from; for every
    * other caller, unsupplied.
@@ -408,7 +425,7 @@ function postDispatchMarker(d: RunnerDispatch): string | undefined {
  *
  * Returns the refusal, or `undefined` when the dispatch may proceed.
  */
-function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefined): "refused-outstanding" | "unconfirmed" | undefined {
+function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefined, ownMarker: boolean): "refused-outstanding" | "unconfirmed" | undefined {
   const log = d.log ?? ((message: string) => console.error(message));
   // The repository as a `gh` path segment, the same way `postDispatchMarker` writes it.
   // A caller that did not name one (the runner's own hand-off, via `dispatch_agent.ts`)
@@ -450,21 +467,25 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
 
   if (check === undefined || !check.markerVisible) {
     // The marker never became visible. The post may have failed, so try once more before
-    // giving up -- a second post is safe, because the first is not in the thread.
-    const reposted = postDispatchMarker(d);
-    if (reposted !== undefined) {
-      try {
-        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
-          // The repost is visible, so the thread has caught up. The first marker, if it
-          // exists at all, is a duplicate of this one -- remove it so the thread does not
-          // say two agents were asked for.
-          removeMarker();
-          return undefined;
+    // giving up -- a second post is safe, because the first is not in the thread. Only
+    // for a marker this module posted: a caller-supplied marker already IS the caller's
+    // write, and re-posting would put a second comment where the caller wrote one.
+    if (ownMarker) {
+      const reposted = postDispatchMarker(d);
+      if (reposted !== undefined) {
+        try {
+          if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
+            // The repost is visible, so the thread has caught up. The first marker, if it
+            // exists at all, is a duplicate of this one -- remove it so the thread does not
+            // say two agents were asked for.
+            removeMarker();
+            return undefined;
+          }
+        } catch (e) {
+          log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
         }
-      } catch (e) {
-        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+        gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
       }
-      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(
       `${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` +
@@ -643,9 +664,11 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
   // The marker goes out before the check, so the check has something to be ordered
   // against. A dispatch that answers a request posts no marker — the request it would
   // find is its own — so instead of the ordering check its claim is verified the
-  // other way: the ask it names must still be waiting (#285). Either way the run
-  // starts with an `ask` to claim: the marker's id where the marker is the ask, the
-  // caller's where the dispatch answers a request.
+  // other way: the ask it names must still be waiting (#285). A dispatch whose caller
+  // already wrote the directive comment (`markerCommentId`) uses that comment as the
+  // marker rather than posting a second one. Either way the run starts with an `ask`
+  // to claim: the marker's id where the marker is the ask, the caller's where the
+  // dispatch answers a request.
   let ask: number | string | undefined;
   let markerId: string | undefined;
   if (d.answersRequest) {
@@ -653,8 +676,9 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
     if (refusal !== undefined) return refusal;
     ask = d.ask;
   } else {
-    markerId = postDispatchMarker(d);
-    const refusal = refuseOutstandingRequest(d, markerId);
+    const provided = d.markerCommentId === undefined ? "" : String(d.markerCommentId).trim();
+    markerId = provided === "" ? postDispatchMarker(d) : provided;
+    const refusal = refuseOutstandingRequest(d, markerId, provided === "");
     if (refusal !== undefined) return refusal;
     ask = d.ask ?? markerId;
   }

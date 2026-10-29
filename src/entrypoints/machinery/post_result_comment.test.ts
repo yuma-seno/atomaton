@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildCommentBody, buildFooter, endedWithToolCalls, lastAgentText } from "./post_result_comment.ts";
+import { buildCommentBody, buildFooter, endedWithToolCalls, lastAgentText, makesCompletionMention } from "./post_result_comment.ts";
 import type { Session } from "../../domain/work/session.ts";
 import { runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
@@ -1142,6 +1142,48 @@ describe("the metrics link in the footer", () => {
   });
 });
 
+describe("the run that reached a limit", () => {
+  /**
+   * One comment, one notification. The result comment already tells the person the
+   * run stopped and how to continue; the tally that decides whether retrying is
+   * worth it used to arrive in a second comment that mentioned the same login again.
+   */
+  test("the tool tally is in the footer, under the line saying what to do", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      endedBecause: "runtime",
+      runUrl: "https://example.com/run",
+      output: "I was reading the callers.",
+      spentOn: "Spent on: 3 tool calls — `bash` 3.",
+    });
+    expect(body).toContain("_The run ran out of time. Comment `/engineer` to continue._");
+    expect(body).toContain("_Spent on: 3 tool calls — `bash` 3._");
+    expect(body.indexOf("Spent on:")).toBeGreaterThan(body.indexOf("ran out of time. Comment"));
+  });
+
+  test("the tally is absent on a run that did not reach a limit", () => {
+    const body = buildCommentBody({ agent: "engineer", runUrl: "https://example.com/run", output: "All done." });
+    expect(body).not.toContain("Spent on:");
+  });
+
+  /**
+   * The output the runner gates the separate limit notice on. `true` means this
+   * comment already named the person, and the notice would be a second notification
+   * for one event; `false` is the cases where the notice still has to speak.
+   */
+  test("says which runs named the person", () => {
+    expect(makesCompletionMention({ notify: "octocat", endedBecause: "runtime" })).toBe(true);
+    expect(makesCompletionMention({ notify: "octocat", endedBecause: "iterations" })).toBe(true);
+    // Nobody configured to mention: neither this comment nor the notice names anyone.
+    expect(makesCompletionMention({ endedBecause: "runtime" })).toBe(false);
+    // A closed sub-issue is silent by design here, so the notice still speaks.
+    expect(makesCompletionMention({ notify: "octocat", endedBecause: "runtime", isSubIssue: true, issueClosed: true })).toBe(false);
+    // A tool call already started the next run.
+    expect(makesCompletionMention({ notify: "octocat", endedBecause: "runtime", chainContinues: "true" })).toBe(false);
+  });
+});
+
 describe("buildFooter", () => {
   test("assembles every piece the run knows, in one block", () => {
     const footer = buildFooter({
@@ -1317,5 +1359,60 @@ describe("post_result_comment.ts on a closing message", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * The wiring the runner reads: `notified` is what keeps the separate limit notice
+ * from repeating this comment's mention, and the tally has to reach this comment
+ * because that notice no longer carries it.
+ */
+describe("post_result_comment.ts on a run that reached its limit", () => {
+  function run(extra: string[] = [], session?: string) {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      const output = join(dir, "atomaton_output.txt");
+      const githubOutput = join(dir, "github_output");
+      writeFileSync(output, "I was part-way through the callers.");
+      if (session !== undefined) writeFileSync(join(dir, "session.json"), session);
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        [
+          "--number", "5", "--agent", "engineer", "--ended-because", "runtime",
+          "--run-url", "http://example.com/run/1", "--output", output,
+          ...(session === undefined ? [] : ["--session", join(dir, "session.json")]),
+          ...extra,
+        ],
+        {
+          cwd: dir,
+          env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: githubOutput },
+          rules: [{ match: ["api", "comments"], stdout: "42" }],
+        },
+      );
+      return { ...r, output: readFileSync(githubOutput, "utf8"), body: r.ghCalls.find((c) => c.includes("-f"))?.join(" ") ?? "" };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const session = JSON.stringify({
+    messages: [{ tool_calls: [{ function: { name: "bash" } }, { function: { name: "bash" } }] }],
+  });
+
+  test("writes notified=true and carries the tally when the comment mentioned the person", () => {
+    const r = run(["--notify", "octocat"], session);
+    expect(r.status).toBe(0);
+    expect(r.output).toContain("notified=true");
+    expect(r.body).toContain("@octocat");
+    expect(r.body).toContain("Spent on: 2 tool calls");
+  });
+
+  test("writes notified=false when nobody was configured to mention", () => {
+    const r = run([], session);
+    expect(r.status).toBe(0);
+    expect(r.output).toContain("notified=false");
+    expect(r.body).not.toContain("@");
+    // The tally is still there: it is this comment's now, not the notice's.
+    expect(r.body).toContain("Spent on: 2 tool calls");
   });
 });

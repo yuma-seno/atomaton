@@ -3,6 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
+import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { readers } from "../../adapters/github/thread.ts";
+import { latestAsk, wasLaunched, type AskReaders } from "../../domain/work/thread.ts";
 
 /**
  * `dispatch_post_merge.ts` is the workflow half of the post-merge judgement: it reads
@@ -70,6 +73,37 @@ describe("dispatch_post_merge.ts", () => {
     const dispatch = r.ghCalls.find((c) => c[0] === "workflow" && c[1] === "run") ?? [];
     expect(dispatch.join(" ")).toContain("agent=engineer");
     expect(dispatch.join(" ")).toContain("number=17");
+    // One comment, two roles: the directive the re-invoked run reads is also the
+    // dispatch marker, and its id is the ask the run claims. No second marker was
+    // posted beside it, and the directive stays `include`.
+    const comments = r.ghCalls.filter((c) => c.some((a) => a.includes("issues/17/comments")) && c.includes("POST"));
+    expect(comments).toHaveLength(1);
+    const body = comments[0]?.[comments[0].indexOf("-f") + 1] ?? "";
+    expect(body).toContain("atomaton:llm-context=include");
+    expect(body).toContain("atomaton:dispatch=engineer");
+    expect(body).toContain("merged");
+    expect(dispatch.join(" ")).toContain("ask=555");
+
+    // The same body through the readers a restarting run meets it with, rather than
+    // through the assertion above alone. Both halves of the one comment have to hold
+    // at once: the machinery has to see a dispatch marker (that is what makes the
+    // restart recorded, and what keeps `latestAsk` from taking the directive for an
+    // unanswered request a later push is supposed to answer), and the context reader
+    // has to see `include` (that is what makes it the run's first user message).
+    // `latestAsk` steps over a marker by definition -- `domain/work/thread.ts`, the
+    // `readers.isDispatchMarker` line in it -- which is why this does not need a second
+    // comment to keep the two roles apart.
+    const entry = [{ body, isHuman: false }];
+    expect(readers.isDispatchMarker(body)).toBe(true);
+    expect(wasLaunched(entry, readers)).toBe(true);
+    expect(LLM_CONTEXT_TAG.readProse(body)).toBe("include");
+    // The marker names the agent, so `requestedAgent` answers "engineer" for this
+    // body -- which is why `latestAsk` has to step over a marker before returning it.
+    // Pinned here as the property a push relies on: the directive is not an ask a
+    // later push is supposed to answer, and there is no second comment carrying one.
+    expect(readers.requestedAgent(body)).toBe("engineer");
+    const askReaders: AskReaders = { ...readers, authoringAgent: () => "" };
+    expect(latestAsk("", entry, askReaders)).toBeUndefined();
   });
 
   test("does not re-invoke anyone when the pull request has no parent", () => {

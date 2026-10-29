@@ -2,13 +2,15 @@
 /**
  * claim_turn.ts — claim the turn: which run took up which ask (#285).
  *
- * The runner writes one comment at start —
+ * The runner records the turn at start — either by appending a claim line to the
+ * ask comment when the ask is the machinery's own dispatch marker, or by writing
+ * one comment when it is somebody else's:
  *
  *     <!-- atomaton:llm-context=exclude -->
  *     <!-- atomaton:took=<ask comment id> run=<run id> -->
  *     Atomaton: claimed this turn.
  *
- * — and that comment is the turn's identity from the taking side. The run watch
+ * That comment (or that line) is the turn's identity from the taking side. The run watch
  * compares it against the endings by run id ("did THIS run take a turn", "did THIS
  * run report"), and the guard's shaping reads it as the ball being with an agent.
  * What the claim replaces is estimation: a marker or a command inside a run's
@@ -26,10 +28,38 @@
  * mistakes are made: post the claim, wait until the listing shows it (GitHub does
  * not guarantee read-after-write — the same instrument `postDispatchMarker` runs),
  * then read the thread again and look for ANOTHER claim on the same ask with a
- * smaller comment id. Found one, this run backs off: it deletes its own claim and
+ * smaller comment id. Found one, this run backs off: it removes its own claim and
  * writes `claimed=false`, and the workflow steps that would take the turn are
  * gated off it. The other run — its claim is older — holds the turn, and a backed
  * off run leaves no ending, because it took no turn the thread names.
+ *
+ * ## Why a marker is claimed in place
+ *
+ * A dispatch marker is the machinery's own comment, and its id IS the ask
+ * (`dispatch.ts` passes `ask = markerId`). The claim used to be a second comment
+ * beside it, which left every dispatch as two comments on the same node — one
+ * saying "an agent is starting" and one saying "the agent took it". Appending
+ * the took line to the marker says both in one comment, and every reader of the
+ * claim (`shapedThread`'s holder, `askSuperseded`'s claimed-ask set, the race
+ * check below) reads it off the body exactly as before.
+ *
+ * The one thing that changes is how two claims on one marker are separated. A
+ * separate claim had its own comment id and the smaller id held; a marker has one
+ * id for both runs, so the marker can carry only one took line. Two runs on one
+ * ask are already prevented by the dispatch-level checks and serialised by the
+ * runner's per-node concurrency, so the second finds the marker claimed and backs
+ * off there; the pre-check below is what makes that the same answer the id
+ * comparison gave.
+ *
+ * A claim already on the marker is never taken back, whichever run id it names.
+ * The separate-claim path backs off by deleting the comment it had just posted and
+ * leaving every older claim standing, and that answer carries over unchanged: a
+ * line of the same run id is an EARLIER ATTEMPT of this run (a re-run keeps
+ * `github.run_id`), and it is the only record that a run took the ask and never
+ * reported — the state `reconcile_run_ending.ts` heals. Removing it would delete
+ * the claim of a dead attempt on the way in. And a line another run wrote was
+ * never this run's to touch: the read-back below shows whose the marker holds, and
+ * the answer is to stand down.
  *
  * ## The exit code
  *
@@ -45,7 +75,8 @@
  */
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG, TOOK_TAG } from "../../adapters/github/tags.ts";
+import { isHumanActor } from "../../domain/work/actor.ts";
+import { DISPATCH_TAG, LLM_CONTEXT_TAG, TOOK_TAG } from "../../adapters/github/tags.ts";
 import { listComments } from "../../adapters/github/thread.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
@@ -63,14 +94,19 @@ export const ref = defineScript<ClaimTurnArgs>(import.meta.url);
 const READ_DELAYS_MS = [1_000, 2_000, 4_000];
 
 /**
- * Every comment on the node, oldest first, as the race check reads them.
+ * Every comment on the node, oldest first, as the claim reads them.
  *
- * The read is the shared `listComments`; the projection to ids and bodies is this
- * caller's, and a failed read THROWS here: the claim is the turn's identity, and a
- * run that could not see the older claims must not decide it holds the turn.
+ * The read is the shared `listComments`; the projection to ids, bodies and
+ * authorship is this caller's, and a failed read THROWS here: the claim is the
+ * turn's identity, and a run that could not see the older claims must not decide
+ * it holds the turn.
  */
-function listBodies(repo: string, number: number): { id: number; body: string }[] {
-  return listComments(repo, number).map((comment) => ({ id: comment.id, body: comment.body ?? "" }));
+function readComments(repo: string, number: number): { id: number; body: string; human: boolean }[] {
+  return listComments(repo, number).map((comment) => ({
+    id: comment.id,
+    body: comment.body ?? "",
+    human: isHumanActor(comment.user?.type),
+  }));
 }
 
 /**
@@ -87,6 +123,25 @@ const CLAIM_NOTICE = "Atomaton: claimed this turn.";
 
 export function claimCommentBody(args: { ask: number; run: number }): string {
   return [LLM_CONTEXT_TAG.write("exclude"), TOOK_TAG.write(args), CLAIM_NOTICE].join("\n");
+}
+
+/**
+ * The claim line appended to a dispatch marker, which is this run's ask.
+ *
+ * Only the took line is added, and nothing else is rewritten: the marker's own
+ * `llm-context` tag stays exactly as its writer set it. Turning a marker
+ * `include` (the post-merge and rejection directives, which are the first user
+ * message the re-invoked run reads) into `exclude` here would remove that
+ * directive from the run's context — the claim would delete the instruction it
+ * exists to let the run take up.
+ */
+export function claimOnMarkerBody(original: string, args: { ask: number; run: number }): string {
+  return `${original.replace(/\s+$/, "")}\n${TOOK_TAG.write(args)}`;
+}
+
+/** Write a comment's body in place, as the footer append does. */
+function patchCommentBody(repo: string, commentId: number, body: string): { code: number; stdout: string; stderr: string } {
+  return gh("api", `repos/${repo}/issues/comments/${commentId}`, "--method", "PATCH", "-f", `body=${body}`);
 }
 
 /**
@@ -147,6 +202,81 @@ async function main(): Promise<void> {
   }
   if (!Number.isInteger(runId) || runId <= 0) throw new Error("--run-id must be a positive number");
 
+  const comments = readComments(repo, number);
+  const askComment = comments.find((comment) => comment.id === ask);
+  // The machinery's own dispatch marker: it is not a person's comment, and its
+  // body carries the dispatch tag that makes it the ask. Edited in place rather
+  // than answered with a second comment — see the module comment.
+  const isMarker = askComment !== undefined && !askComment.human && DISPATCH_TAG.hasProse(askComment.body);
+  if (askComment !== undefined && isMarker) {
+    const original = askComment.body;
+    const existing = TOOK_TAG.readProse(original);
+    if (existing !== undefined) {
+      // The marker already carries a claim, and only one can (the marker has one id,
+      // so the older-id comparison the separate claim used cannot apply here). This
+      // run backs off and leaves the line alone, whoever wrote it.
+      //
+      // Including a claim of the SAME run id, which is an earlier attempt of this
+      // run: a re-run keeps `github.run_id`, and the line is then the only record
+      // that a run took this ask and never reported. The watch heals exactly that
+      // (`reconcile_run_ending.ts`), so removing it here would drop a dead attempt's
+      // claim on the thread — the states the claim exists to make readable. The
+      // separate-claim path below never had this problem: it deleted the comment IT
+      // had just posted and left every older one standing.
+      record(false);
+      return;
+    }
+
+    const edited = patchCommentBody(repo, ask, claimOnMarkerBody(original, { ask, run: runId }));
+    if (edited.code !== 0) {
+      throw new Error(`could not claim the dispatch marker on #${number}: ${edited.stderr || edited.stdout}`);
+    }
+
+    // GitHub does not guarantee read-after-write, and that now applies to the
+    // EDIT: until the listing shows this run's took line, the read may predate
+    // it. A claim that never appeared is the same untrustworthy read the posted
+    // claim refuses to judge a race on.
+    let held: boolean | undefined;
+    for (let attempt = 0; attempt <= READ_DELAYS_MS.length; attempt += 1) {
+      const current = readComments(repo, number).find((comment) => comment.id === ask);
+      const claim = current === undefined ? undefined : TOOK_TAG.readProse(current.body);
+      if (claim !== undefined) {
+        // Somebody else's claim overwrote this run's between the PATCH and this
+        // read: the marker holds one claim, and it is not this run's.
+        held = claim.run === runId;
+        break;
+      }
+      const delay = READ_DELAYS_MS[attempt];
+      if (delay === undefined) break;
+      await Bun.sleep(delay);
+    }
+    if (held === undefined) throw new Error(`the claim on #${number} never became visible, so the race check cannot be trusted`);
+    if (!held) {
+      record(false);
+      return;
+    }
+
+    // The separate-claim comparison still runs: a claim posted on this ask
+    // BEFORE the marker could carry one (the shape this replaced, or a claim
+    // somebody wrote) is older and holds, and this run takes its line back.
+    const outcome = raceOutcome(readComments(repo, number), { id: ask, ask });
+    if (outcome === "held") {
+      record(true);
+      return;
+    }
+    const restored = patchCommentBody(repo, ask, original);
+    if (restored.code !== 0) {
+      // Leaving the line would name a run that never worked the ask — the
+      // open-claim state the watch reads as an unanswered request. A failed
+      // restore is the one back-off that cannot stay quiet: red, so it is
+      // re-run, and the re-run's own claim either holds or is taken back by the
+      // comparison above.
+      throw new Error(`could not take back the claim on #${number}: ${restored.stderr || restored.stdout}`);
+    }
+    record(false);
+    return;
+  }
+
   const posted = gh("api", `repos/${repo}/issues/${number}/comments`, "--method", "POST", "-f", `body=${claimCommentBody({ ask, run: runId })}`, "--jq", ".id");
   if (posted.code !== 0) throw new Error(`could not post the claim on #${number}: ${posted.stderr || posted.stdout}`);
   const claimId = Number(posted.stdout.trim());
@@ -158,7 +288,7 @@ async function main(): Promise<void> {
   // marker runs before its ordering check is trusted.
   let visible = false;
   for (let attempt = 0; attempt <= READ_DELAYS_MS.length; attempt += 1) {
-    if (listBodies(repo, number).some((comment) => comment.id === claimId)) {
+    if (readComments(repo, number).some((comment) => comment.id === claimId)) {
       visible = true;
       break;
     }
@@ -168,7 +298,7 @@ async function main(): Promise<void> {
   }
   if (!visible) throw new Error(`the claim on #${number} never became visible, so the race check cannot be trusted`);
 
-  const outcome = raceOutcome(listBodies(repo, number), { id: claimId, ask });
+  const outcome = raceOutcome(readComments(repo, number), { id: claimId, ask });
   if (outcome === "held") {
     record(true);
     return;

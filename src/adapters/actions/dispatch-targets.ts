@@ -43,8 +43,9 @@
  * `scripts/dispatch_new_tags.ts` fails its job, because a deployment nobody starts
  * is one nobody notices.
  */
-import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { dispatchWorkflow } from "../../adapters/github/gh.ts";
+import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { commentOnWithId } from "../../adapters/github/work-tree.ts";
 import { getDeploySection, getWorkflowName } from "../../adapters/runner/config.ts";
 import { dispatchRunner } from "./dispatch.ts";
 import { resolveNotify } from "../../adapters/github/notify.ts";
@@ -143,16 +144,20 @@ export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent:
   // Tagged `include`: this is the first user message the re-invoked agent reads, and
   // it is the thing that tells it what to do. It is the one comment here that MUST
   // reach the model -- the opposite decision from the notices addressed to a person.
-  const { code, stdout, stderr } = gh(
-    "issue", "comment", String(subIssueNum), "--repo", repo,
-    "--body",
-    `${LLM_CONTEXT_TAG.write("include")}\n` +
-      "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
-      "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " +
-      "issue when they are met, and carry on with the work when they are not.",
-  );
-  if (code) {
-    log(`dispatchPostMergeAgent: could not post trigger comment on #${subIssueNum}: ${stderr || stdout}`);
+  //
+  // It is also this dispatch's marker and the run's ask: the tag that makes it a
+  // dispatch marker is written after the `include` line (the context reader takes the
+  // FIRST llm-context tag, so the directive stays included), and the comment's id is
+  // passed back rather than a second marker being posted beside it. Every restart
+  // used to leave two comments saying one thing.
+  const directive =
+    `${LLM_CONTEXT_TAG.write("include")}\n${DISPATCH_TAG.write(agent)}\n` +
+    "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
+    "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " +
+    "issue when they are met, and carry on with the work when they are not.";
+  const markerCommentId = commentOnWithId(repo, subIssueNum, directive);
+  if (markerCommentId === null) {
+    log(`dispatchPostMergeAgent: could not post the restart directive on #${subIssueNum}, so nothing was dispatched`);
     return false;
   }
   return (
@@ -163,6 +168,7 @@ export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent:
       number: subIssueNum,
       notify,
       repo,
+      markerCommentId,
       // This dispatch is the merging run's own conclusion. The run sits on the pull
       // request and the run it wakes sits on this issue, so the node comparison alone
       // would log `dispatch-elsewhere` — and the merged pull request's result comment
@@ -227,17 +233,18 @@ export function dispatchRejectedPrAgent(repo: string, issueNumber: number, agent
   // message the re-invoked agent reads, and the one comment here that MUST
   // reach the model -- the opposite decision from the notices addressed to a
   // person.
-  const { code, stdout, stderr } = gh(
-    "issue", "comment", String(issueNumber), "--repo", repo,
-    "--body",
-    `${LLM_CONTEXT_TAG.write("include")}\n` +
-      `Atomaton: pull request #${prNumber} for this issue was closed without merging. Nobody has decided ` +
-      "whether what this issue asked for is settled by that. Decide which acceptance criteria the closed " +
-      "pull request met; conclude the issue when closing it settled them, and carry on from where the " +
-      "pull request left off when the work is still needed.",
-  );
-  if (code) {
-    log(`dispatchRejectedPrAgent: could not post rejection comment on #${issueNumber}: ${stderr || stdout}`);
+  //
+  // It carries the dispatch tag and its id travels back as the marker, exactly as
+  // the merge directive does: one comment is the situation, the marker, and the ask.
+  const directive =
+    `${LLM_CONTEXT_TAG.write("include")}\n${DISPATCH_TAG.write(agent)}\n` +
+    `Atomaton: pull request #${prNumber} for this issue was closed without merging. Nobody has decided ` +
+    "whether what this issue asked for is settled by that. Decide which acceptance criteria the closed " +
+    "pull request met; conclude the issue when closing it settled them, and carry on from where the " +
+    "pull request left off when the work is still needed.";
+  const markerCommentId = commentOnWithId(repo, issueNumber, directive);
+  if (markerCommentId === null) {
+    log(`dispatchRejectedPrAgent: could not post the rejection directive on #${issueNumber}, so nothing was dispatched`);
     return false;
   }
   return (
@@ -248,6 +255,7 @@ export function dispatchRejectedPrAgent(repo: string, issueNumber: number, agent
       number: issueNumber,
       notify,
       repo,
+      markerCommentId,
       // Same reason as the post-merge restart: the run that closed the pull
       // request is over, the run this wakes sits on the issue, and the dispatch
       // is the close's own outcome. See `RunnerDispatch.continuesChain`.

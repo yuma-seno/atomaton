@@ -3,9 +3,14 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FAKE_GH_IMPL } from "../../entrypoints/machinery/testing/fake-gh-env.ts";
-import { subIssueReportBody } from "./sub-issue-report.ts";
+import {
+  mergeProgressIntoReport,
+  subIssueProgressLine,
+  subIssueReportBody,
+  withProgressLine,
+} from "./sub-issue-report.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
-import { AGGREGATED_TAG, AGENT_TAG, DISPATCH_TAG, proseOnly } from "./tags.ts";
+import { AGGREGATED_TAG, AGENT_TAG, DISPATCH_TAG, LLM_CONTEXT_TAG, SUB_RESULT_TAG, proseOnly } from "./tags.ts";
 import type { LinkedPr } from "../../domain/work/issue-links.ts";
 
 const MERGED: LinkedPr = { number: 34, title: "the fix", state: "done" };
@@ -131,45 +136,56 @@ describe("subIssueReportBody", () => {
  * without an explicit `env` does not see one set after this runtime started — the same
  * reason `thread.test.ts` reaches its fake this way.
  */
-describe("reportSubIssueToParent", () => {
-  const SRC = join(import.meta.dir, "sub-issue-report.ts");
+const SRC = join(import.meta.dir, "sub-issue-report.ts");
 
+/**
+ * Run one call of this module in a child process against the fake `gh`, and hand back
+ * what it answered plus every command it issued.
+ */
+function childRun(script: string, responses: unknown[]): { out: string; calls: string[][]; stderr: string } {
+  const dir = mkdtempSync(join(tmpdir(), "atomaton-sub-report-"));
+  const log = join(dir, "gh.log");
+  try {
+    const proc = Bun.spawnSync({
+      cmd: [process.execPath, "-e", script],
+      stdout: "pipe",
+      stderr: "pipe",
+      env: {
+        ...process.env,
+        ATOMATON_FAKE_GH: FAKE_GH_IMPL,
+        FAKE_GH_RESPONSES: JSON.stringify(responses),
+        FAKE_GH_LOG: log,
+        GH_TOKEN: "fake-gh-must-be-used",
+        GITHUB_TOKEN: "fake-gh-must-be-used",
+      },
+    });
+    const out = proc.stdout.toString();
+    if (proc.exitCode !== 0) throw new Error(`child failed: ${proc.stderr.toString() || out}`);
+    let calls: string[][] = [];
+    try {
+      calls = readFileSync(log, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as string[]);
+    } catch {
+      // No `gh` call at all is an answer, not a failure.
+    }
+    return { out, calls, stderr: proc.stderr.toString() };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("reportSubIssueToParent", () => {
   function report(child: number, said: string, responses: unknown[]): { posted: boolean; calls: string[][]; stderr: string } {
-    const dir = mkdtempSync(join(tmpdir(), "atomaton-sub-report-"));
-    const log = join(dir, "gh.log");
-    const script = `
+    const r = childRun(
+      `
       const { reportSubIssueToParent } = await import(${JSON.stringify(SRC)});
       process.stdout.write(JSON.stringify(reportSubIssueToParent("o/r", ${child}, ${JSON.stringify(said)})));
-    `;
-    try {
-      const proc = Bun.spawnSync({
-        cmd: [process.execPath, "-e", script],
-        stdout: "pipe",
-        stderr: "pipe",
-        env: {
-          ...process.env,
-          ATOMATON_FAKE_GH: FAKE_GH_IMPL,
-          FAKE_GH_RESPONSES: JSON.stringify(responses),
-          FAKE_GH_LOG: log,
-          GH_TOKEN: "fake-gh-must-be-used",
-          GITHUB_TOKEN: "fake-gh-must-be-used",
-        },
-      });
-      const out = proc.stdout.toString();
-      if (proc.exitCode !== 0) throw new Error(`child failed: ${proc.stderr.toString() || out}`);
-      let calls: string[][] = [];
-      try {
-        calls = readFileSync(log, "utf8")
-          .split("\n")
-          .filter(Boolean)
-          .map((line) => JSON.parse(line) as string[]);
-      } catch {
-        // No `gh` call at all is an answer, not a failure.
-      }
-      return { posted: JSON.parse(out) as boolean, calls, stderr: proc.stderr.toString() };
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    `,
+      responses,
+    );
+    return { posted: JSON.parse(r.out) as boolean, calls: r.calls, stderr: r.stderr };
   }
 
   const links = (parent: number | null, prs: unknown[] = []): unknown => ({
@@ -209,5 +225,157 @@ describe("reportSubIssueToParent", () => {
     expect(unreadable.posted).toBe(false);
     expect(unreadable.calls.some((c) => c.includes("comment"))).toBe(false);
     expect(unreadable.stderr).toContain("nothing was posted there");
+  });
+});
+
+/**
+ * The line the gate adds while siblings are still open, and the body it lands in.
+ *
+ * It used to be a comment of its own; it is edited into the child's report now, which
+ * is why the two pure halves below are tested together: which sentence, and what a
+ * second run over the same completion produces.
+ */
+describe("the progress line", () => {
+  test("says which child finished and how many are left, and is not a command", () => {
+    const line = subIssueProgressLine(12, 3);
+    expect(line).toContain("#12");
+    expect(line).toContain("3 sub-task(s)");
+    // The report it is edited into is `llm-context=include`, so a line that read as a
+    // command would be somebody asking the parent for an agent — and an ask nothing
+    // claimed makes the gate answer `parent-busy` and take its marker back.
+    expect(line.startsWith("/")).toBe(false);
+    expect(parseCommentCommand(line).agent).toBe("");
+    expect(parseMangledCommand(line).agent).toBe("");
+    expect(DISPATCH_TAG.has(line)).toBe(false);
+  });
+
+  test("adds itself to a report without touching what the report says", () => {
+    const report = subIssueReportBody({ child: 12, report: "It landed in #34.", pullRequests: [MERGED] });
+    const merged = withProgressLine(report, subIssueProgressLine(12, 3));
+
+    expect(merged).toContain("It landed in #34.");
+    expect(merged.trimEnd().endsWith("3 sub-task(s) still in progress.")).toBe(true);
+    // Still context the parent's aggregation reads: the line is added to an include
+    // comment and does not change that.
+    expect(LLM_CONTEXT_TAG.readProse(merged)).toBe("include");
+    // Neither half became a command by being put next to the other.
+    expect(parseCommentCommand(proseOnly(merged)).agent).toBe("");
+    expect(parseMangledCommand(proseOnly(merged)).agent).toBe("");
+  });
+
+  test("replaces its own previous line rather than adding a second one", () => {
+    // The gate can run twice over the same completion — a retried event, two racing
+    // callers — and the count can have moved in between as siblings closed. A second
+    // run must produce the body the second count asks for, not a body carrying both.
+    const once = withProgressLine(subIssueReportBody({ child: 12, report: "Done.", pullRequests: [] }), subIssueProgressLine(12, 2));
+    const twice = withProgressLine(once, subIssueProgressLine(12, 1));
+
+    expect(twice).not.toContain("2 sub-task(s)");
+    expect(twice).toContain("1 sub-task(s) still in progress.");
+    expect(twice.split("Atomaton: Sub-task #").length - 1).toBe(1);
+    // Same input, same body: an edit that has already landed is a no-op, not a rewrite.
+    expect(withProgressLine(once, subIssueProgressLine(12, 2))).toBe(once);
+  });
+});
+
+/**
+ * Which comment the line is edited into — the half a pure body test cannot answer.
+ *
+ * A report is found by the shape `subIssueReportBody` writes, never by the
+ * `sub-result` tag alone: the fallback progress comment carries that tag as well, and
+ * rewriting it into a fold would put a report where a person-facing sentence was
+ * while the child's own run posts its report after it — two comments again.
+ */
+describe("mergeProgressIntoReport", () => {
+  const parentThread = (comments: unknown[]): unknown => ({
+    match: ["api", "issues/5/comments"],
+    stdout: JSON.stringify(comments),
+  });
+  const patchRule: unknown = { match: ["--method", "PATCH"], stdout: "{}" };
+
+  function merge(child: number, remaining: number, responses: unknown[]): { merged: boolean; calls: string[][]; stderr: string } {
+    const r = childRun(
+      `
+      const { mergeProgressIntoReport, subIssueProgressLine } = await import(${JSON.stringify(SRC)});
+      process.stdout.write(JSON.stringify(
+        mergeProgressIntoReport("o/r", 5, ${child}, subIssueProgressLine(${child}, ${remaining})),
+      ));
+    `,
+      responses,
+    );
+    return { merged: JSON.parse(r.out) as boolean, calls: r.calls, stderr: r.stderr };
+  }
+
+  const reportComment = (child: number): { id: number; user: { type: string }; body: string } => ({
+    id: 88,
+    user: { type: "Bot" },
+    body: subIssueReportBody({ child, report: "It landed in #34.", pullRequests: [MERGED] }),
+  });
+
+  test("edits the child's report in place, and posts nothing", () => {
+    const r = merge(12, 3, [parentThread([reportComment(12)]), patchRule]);
+
+    expect(r.merged).toBe(true);
+    const patches = r.calls.filter((c) => c.includes("PATCH"));
+    expect(patches.length).toBe(1);
+    // The comment it edits, not the issue: one POST on the parent would be the second
+    // comment this exists to avoid.
+    expect(patches[0]?.join(" ")).toContain("repos/o/r/issues/comments/88");
+    const body = patches[0]?.find((a) => a.startsWith("body=")) ?? "";
+    expect(body).toContain("It landed in #34.");
+    expect(body).toContain("3 sub-task(s) still in progress.");
+    expect(body).toContain("atomaton:llm-context=include");
+    // Never a new comment, and never a delete: the report is the child's only record
+    // on the parent's thread.
+    expect(r.calls.filter((c) => c.slice(0, 2).join(" ") === "issue comment").length).toBe(0);
+    expect(r.calls.filter((c) => c.includes("DELETE")).length).toBe(0);
+  });
+
+  test("leaves the bare progress comment alone, so the gate still posts its own", () => {
+    // The fallback shape: the tag, no fold. Taking it for a report would rewrite a
+    // sentence a person is reading into a fold nobody asked for.
+    const progress = {
+      id: 12,
+      user: { type: "Bot" },
+      body: `${LLM_CONTEXT_TAG.write("exclude")}\n${SUB_RESULT_TAG.write(12)}\n${subIssueProgressLine(12, 3)}`,
+    };
+    const r = merge(12, 2, [parentThread([progress]), patchRule]);
+
+    expect(r.merged).toBe(false);
+    expect(r.calls.some((c) => c.includes("PATCH"))).toBe(false);
+  });
+
+  test("does not edit a person's comment, and does not edit another child's report", () => {
+    const theirs = { id: 90, user: { type: "User" }, body: reportComment(12).body };
+    const other = reportComment(11);
+    const r = merge(12, 3, [parentThread([theirs, other]), patchRule]);
+
+    expect(r.merged).toBe(false);
+    expect(r.calls.some((c) => c.includes("PATCH"))).toBe(false);
+  });
+
+  test("does not take a report quoting another child's heading for that child", () => {
+    // Both halves the finder might have keyed on can appear inside a child's own words.
+    // The opening cannot: the machinery writes it before the child says anything.
+    const quoting = {
+      id: 91,
+      user: { type: "Bot" },
+      body: subIssueReportBody({ child: 11, report: "**Sub-issue #12** was the one that landed.", pullRequests: [] }),
+    };
+    const r = merge(12, 3, [parentThread([quoting]), patchRule]);
+
+    expect(r.merged).toBe(false);
+    expect(r.calls.some((c) => c.includes("PATCH"))).toBe(false);
+  });
+
+  test("says nothing it cannot vouch for when the thread cannot be read", () => {
+    // No matching rule: the fake refuses, `listComments` throws, and the gate falls
+    // back to posting its own comment — a comment lost to a failed read, never a
+    // decision made on one.
+    const r = merge(12, 3, [patchRule]);
+
+    expect(r.merged).toBe(false);
+    expect(r.calls.some((c) => c.includes("PATCH"))).toBe(false);
+    expect(r.stderr).toContain("could not look for #12's report");
   });
 });

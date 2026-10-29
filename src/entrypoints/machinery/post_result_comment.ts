@@ -25,6 +25,7 @@ import { endingOf, type TurnEnding } from "../../domain/work/turn.ts";
 import { redact } from "../../shared/redaction.ts";
 import { renderTokenLine } from "../../domain/record/token-line.ts";
 import { toolTroubleLine } from "../../domain/record/tool-trouble.ts";
+import { toolCallTally } from "../../domain/record/tool-tally.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../domain/work/mention.ts";
 import { calledHumans } from "../../domain/work/ending-calls.ts";
 import { readCalleesFile } from "./lib/callees.ts";
@@ -372,6 +373,15 @@ function cutShort(endedBecause: string | undefined): boolean {
 }
 
 /**
+ * The three ways a run stops itself at a limit: the clock, an iteration ceiling, or
+ * the repetition circuit breaker. The same three `notify_limit_reached.ts` names; the
+ * tally it carried is this file's now.
+ */
+function reachedLimit(endedBecause: string | undefined): boolean {
+  return endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop";
+}
+
+/**
  * How it was cut short, in the words for the person reading the comment.
  *
  * `runtime` and `iterations` are one ending to `turn.ts` — the decisions below it
@@ -434,6 +444,35 @@ function endingHere(args: {
     chainContinues: isTrue(args.chainContinues),
     directive: args.directive ?? "",
     reported: args.reported === true,
+  });
+}
+
+/**
+ * Whether this comment names the person nothing else will reach.
+ *
+ * One function because two places ask it: the comment's own mention, and the
+ * runner's decision whether the separate "the run reached its limit" notice has
+ * anything left to say. The limit notice used to repeat this sentence and the same
+ * `@login` immediately after the comment that already contained it — two
+ * notifications for one event.
+ */
+export function makesCompletionMention(signals: {
+  notify?: string;
+  directive?: string;
+  chainContinues?: string;
+  endedBecause?: string;
+  reported?: boolean;
+  agentCalledHuman?: boolean;
+  isSubIssue?: boolean;
+  issueClosed?: boolean;
+}): boolean {
+  return shouldMentionOnCompletion({
+    ending: endingHere(signals),
+    chainContinues: isTrue(signals.chainContinues),
+    notify: signals.notify,
+    agentCalledHuman: signals.agentCalledHuman === true,
+    isSubIssue: signals.isSubIssue ?? false,
+    issueClosed: signals.issueClosed ?? false,
   });
 }
 
@@ -521,6 +560,15 @@ export function buildCommentBody(args: {
    * Absent when there was none, which is the ordinary run.
    */
   toolTrouble?: string;
+  /**
+   * What the run spent its budget on, for a run that stopped itself at a limit.
+   *
+   * A person reading a cut-short comment has to decide whether to retry or to re-scope,
+   * and the tally is what tells them apart; it used to live in a second comment
+   * posted right after this one, which repeated this comment's mention to the same
+   * person. It is the footer's now, where every other fact about the run already is.
+   */
+  spentOn?: string;
 }): string {
   // Once, and asked twice below. It was derived twice, which is one derivation more
   // than there are facts.
@@ -586,16 +634,7 @@ export function buildCommentBody(args: {
   const escapedNotice = escapedMentionNotice(args.escapedMentions ?? [], args.escapedMentionsReason ?? "unknown");
   if (escapedNotice !== undefined) lines.push("", escapedNotice, "");
 
-  if (
-    shouldMentionOnCompletion({
-      ending,
-      chainContinues: isTrue(args.chainContinues),
-      notify: args.notify,
-      agentCalledHuman: args.agentCalledHuman === true,
-      isSubIssue: args.isSubIssue ?? false,
-      issueClosed: args.issueClosed ?? false,
-    })
-  ) {
+  if (makesCompletionMention(args)) {
     lines.push(mentionLine(ending, args), "");
   }
 
@@ -609,6 +648,7 @@ export function buildCommentBody(args: {
     tokenLine: args.tokenLine,
     toolTrouble: args.toolTrouble,
     endedBecause: args.endedBecause,
+    spentOn: args.spentOn,
   }));
 
   return lines.join("\n");
@@ -645,6 +685,8 @@ export function buildFooter(args: {
   toolTrouble?: string;
   /** How the run ended, for the cut-short notices. Empty in the appended footer. */
   endedBecause?: string;
+  /** What a run that hit a limit spent its budget on, from `tool-tally.ts`. */
+  spentOn?: string;
 }): string {
   const lines: string[] = ["---"];
   if (args.tokenLine !== undefined) lines.push(args.tokenLine);
@@ -675,6 +717,9 @@ export function buildFooter(args: {
   } else if (cutShort(args.endedBecause)) {
     lines.push(`⚠️ _The run ${howItWasCutShort(args.endedBecause)}. Comment \`/${args.agent}\` to continue._`);
   }
+  // Under the line that says what to do, because it is the fact that decides
+  // whether that is the right thing to do — see `tool-tally.ts`.
+  if (args.spentOn !== undefined) lines.push(`_${args.spentOn}_`);
 
   return lines.join("\n");
 }
@@ -951,17 +996,25 @@ function main(): void {
   // Read off the unescaped text, against the people the run was told it may call.
   const called = calledHumans(output, callable);
 
-  const body = buildCommentBody({
-    agent: values.agent,
-    salvaged,
-    wroteNothing,
-    endingInvalid,
-    agentCalledHuman: called.length === 1,
+  // One read of the state, because the mention decision is asked twice: for the
+  // comment's own sentence, and for the output the runner gates the limit notice on.
+  const issueState = subIssueState(values.number, values.type);
+  const mentionSignals = {
     notify: values.notify,
     directive: values.directive,
     chainContinues: values["chain-continues"],
     endedBecause: values["ended-because"],
     reported: isTrue(values.reported),
+    agentCalledHuman: called.length === 1,
+    ...issueState,
+  };
+
+  const body = buildCommentBody({
+    ...mentionSignals,
+    agent: values.agent,
+    salvaged,
+    wroteNothing,
+    endingInvalid,
     runUrl: values["run-url"],
     ask: values.ask,
     "run-id": values["run-id"],
@@ -977,7 +1030,10 @@ function main(): void {
     // under this one's comment.
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
     tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
-    ...subIssueState(values.number, values.type),
+    // The tally a person needs to decide between retrying and re-scoping. The
+    // separate limit notice used to be the only place it appeared; it belongs on
+    // the comment that already tells them the run stopped, and this is that comment.
+    spentOn: reachedLimit(values["ended-because"]) ? toolCallTally(readSession(values.session)) : undefined,
   });
 
   const { code, stdout, stderr } = gh(
@@ -996,7 +1052,13 @@ function main(): void {
 
   const commentId = stdout.trim();
   const githubOutput = process.env.GITHUB_OUTPUT;
-  if (githubOutput) appendFileSync(githubOutput, `comment_id=${commentId}\n`);
+  if (githubOutput) {
+    appendFileSync(githubOutput, `comment_id=${commentId}\n`);
+    // Whether the comment named the person. The runner posts the separate limit
+    // notice only when it did not: that notice says the same thing and mentions the
+    // same login, and one event does not need two of them.
+    appendFileSync(githubOutput, `notified=${makesCompletionMention(mentionSignals) ? "true" : "false"}\n`);
+  }
   console.error(`Posted comment ID: ${commentId}`);
 }
 

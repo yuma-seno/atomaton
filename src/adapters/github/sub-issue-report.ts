@@ -31,10 +31,25 @@
  * merging its pull request — have no summary to carry: no agent ran, and nothing wrote
  * down what it found. There is nothing to say beyond what GitHub already shows, so
  * nothing is said. That is the existing behaviour of both gates, unchanged.
+ *
+ * ## The one comment a completion gets
+ *
+ * The report is not the only thing the machinery wants to say about a finished child: a
+ * gate that finds siblings still open posts a "N sub-task(s) still in progress" line.
+ * That line used to be a comment of its own, next to the report the same completion had
+ * already left on the same thread — two comments, and two notifications to everyone
+ * watching, for one event. It is edited into the report now (`mergeProgressIntoReport`
+ * below), because an edit reaches the same readers and notifies nobody. The line itself
+ * is prose, never a command: the report is `llm-context=include`, so a line beginning
+ * with `/` would read to the parent's own thread readers as somebody asking that node
+ * for an agent — and an ask nothing claimed is what makes the gate answer `parent-busy`
+ * and take its marker back.
  */
 import { gh } from "./gh.ts";
 import { issueLinks } from "./issue-links.ts";
+import { listComments } from "./thread.ts";
 import { LLM_CONTEXT_TAG, withoutTags } from "./tags.ts";
+import { isHumanActor } from "../../domain/work/actor.ts";
 import { commandLinesIn } from "../../domain/work/comment-command.ts";
 import type { LinkedPr } from "../../domain/work/issue-links.ts";
 
@@ -70,10 +85,7 @@ export function subIssueReportBody(report: SubIssueReport): string {
   // below, so it cannot be stripped by either.
   const said = withoutCommands(withoutTags(report.report.trim()));
   const lines = [
-    LLM_CONTEXT_TAG.write("include"),
-    "<details><summary>Report</summary>",
-    "",
-    `**Sub-issue #${report.child}**`,
+    ...subIssueReportHeaderLines(report.child),
     "",
     ...(said === "" ? ["Its closing run wrote no summary."] : [said]),
     "",
@@ -89,6 +101,122 @@ export function subIssueReportBody(report: SubIssueReport): string {
 
   lines.push("", "</details>");
   return lines.join("\n");
+}
+
+/**
+ * The opening of a report, which is the one thing that says "this child's report".
+ *
+ * Written by `subIssueReportBody` and matched by `findSubIssueReport` from this one
+ * function, so the writer and the finder cannot drift. It is a PREFIX and not the
+ * fold or the heading on their own, because both of those can appear later inside the
+ * child's own words: a report whose text quotes `**Sub-issue #9**` must not be taken
+ * for #9's report. Nothing the child wrote can precede this opening — the machinery
+ * writes it first.
+ *
+ * The `sub-result` tag is deliberately not what the finder keys on either: the
+ * fallback progress comment carries that tag too, and taking it for a report would
+ * rewrite a person-facing sentence into a fold nobody asked for — while the child's
+ * own run then posts its report after it, which is the two comments this exists to
+ * avoid.
+ */
+const REPORT_FOLD_OPEN = "<details><summary>Report</summary>";
+
+function subIssueReportHeaderLines(child: number): string[] {
+  return [LLM_CONTEXT_TAG.write("include"), REPORT_FOLD_OPEN, "", `**Sub-issue #${child}**`];
+}
+
+/**
+ * The line a parent's thread gets while its subtree is still open.
+ *
+ * Wording unchanged from the comment it replaces, because this is what a person reads
+ * about a finished child that is not the last one. No leading `/` and no tag: see the
+ * module comment for the one this lands in.
+ */
+export function subIssueProgressLine(child: number, remaining: number): string {
+  return `Atomaton: Sub-task #${child} completed. ${remaining} sub-task(s) still in progress.`;
+}
+
+/** How every line of that family starts, which is how a later run recognises its own. */
+const PROGRESS_OPENING = "Atomaton: Sub-task #";
+
+/**
+ * `body` with the progress line replaced by `line`.
+ *
+ * Replaced, not appended. The gate can run more than once over the same completion — a
+ * retried event, two callers racing — and it is idempotent only if the second run
+ * produces the same body as the first, while the count it carries can have changed in
+ * between as siblings closed. The line is recognised by the opening of the sentence
+ * family this module writes, so a body with no such line is simply appended to.
+ */
+export function withProgressLine(body: string, line: string): string {
+  const kept = body.split("\n").filter((text) => !text.trimStart().startsWith(PROGRESS_OPENING));
+  return `${kept.join("\n").replace(/\s+$/, "")}\n\n${line}`;
+}
+
+/** A comment on the parent's thread, as the merger below needs it. */
+export interface SubIssueComment {
+  /** What `--method PATCH repos/{repo}/issues/comments/{id}` takes. */
+  id: string;
+  body: string;
+}
+
+/**
+ * `child`'s report on its parent, if the child's closing run has posted it yet.
+ *
+ * Throws when the thread cannot be read, like every other reader of it: "there is no
+ * report" and "the report could not be looked for" lead to the same fallback here, and
+ * the caller reports that in the log rather than deciding on a read that failed.
+ */
+export function findSubIssueReport(repo: string, parent: number, child: number): SubIssueComment | undefined {
+  const header = subIssueReportHeaderLines(child).join("\n");
+  for (const comment of listComments(repo, parent)) {
+    const body = comment.body ?? "";
+    // A person's words are their own, even when they quote this shape.
+    if (isHumanActor(comment.user?.type)) continue;
+    if (!body.trimStart().startsWith(header)) continue;
+    return { id: String(comment.id), body };
+  }
+  return undefined;
+}
+
+/**
+ * `child`'s report comment on `parent`, edited to carry `line`. True when the thread
+ * has no second comment for this completion to make.
+ *
+ * False when there is no report to edit yet, or the edit did not land, and the gate then
+ * posts the line as its own comment exactly as it did before. Losing the race costs a
+ * comment and never information: the line says the same thing either way, and no
+ * decision anywhere reads it.
+ */
+export function mergeProgressIntoReport(repo: string, parent: number, child: number, line: string): boolean {
+  let found: SubIssueComment | undefined;
+  try {
+    found = findSubIssueReport(repo, parent, child);
+  } catch (error) {
+    console.error(`[atomaton-report] could not look for #${child}'s report on #${parent}: ${(error as Error).message}`);
+    return false;
+  }
+  if (found === undefined) return false;
+
+  const body = withProgressLine(found.body, line);
+  // Already carrying this exact line (the second run over the same completion).
+  if (body === found.body) return true;
+
+  const { code, stdout, stderr } = gh(
+    "api",
+    `repos/${repo}/issues/comments/${found.id}`,
+    "--method",
+    "PATCH",
+    "-f",
+    `body=${body}`,
+  );
+  if (code !== 0) {
+    console.error(
+      `[atomaton-report] WARN could not add the progress line to #${child}'s report on #${parent}: ${stderr || stdout}`,
+    );
+    return false;
+  }
+  return true;
 }
 
 /**

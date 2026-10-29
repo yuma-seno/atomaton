@@ -1346,7 +1346,9 @@ const postResultCommentStep = new TypedOutputsStep(
       "run-id": "${{ github.run_id }}",
     })}\n`,
   },
-  ["comment_id"] as const,
+  // `notified` is the mention decision the comment just made: the limit notice
+  // below reads it so one event is not announced twice to the same person.
+  ["comment_id", "notified"] as const,
 );
 
 const recordRunMetadataStep = new TypedOutputsStep({
@@ -2347,7 +2349,15 @@ echo "tool servers will run as ${TOOL_USER} (no sudo), caches in ${TOOL_CACHE}"
     // own, the session survives, and a person has to decide whether to retry. It is
     // also the one of the three where retrying is most likely to work, which is why
     // the notice names it rather than saying "ran out of time".
-    if: `${runAgentStep.rawOutputs.ended_because} == 'runtime' || ${runAgentStep.rawOutputs.ended_because} == 'iterations' || ${runAgentStep.rawOutputs.ended_because} == 'loop'`,
+    //
+    // And only when the result comment did NOT name the person. For a runtime or
+    // iteration limit that comment already mentions the same login and says to
+    // resume or retry, and this notice then repeated both — two notifications for
+    // one event. The tally it used to be the only carrier of is on that comment's
+    // footer now. When the comment was skipped, or stayed silent by design (a
+    // closed sub-issue), `notified` is empty or false and this notice still speaks:
+    // the fallback is unchanged.
+    if: `(${runAgentStep.rawOutputs.ended_because} == 'runtime' || ${runAgentStep.rawOutputs.ended_because} == 'iterations' || ${runAgentStep.rawOutputs.ended_because} == 'loop') && ${postResultCommentStep.rawOutputs.notified} != 'true'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
@@ -2360,10 +2370,6 @@ echo "tool servers will run as ${TOOL_USER} (no sudo), caches in ${TOOL_CACHE}"
       agent: "\${AGENT}",
       notify: "\${NOTIFY}",
       "ended-because": runAgentStep.outputs.ended_because,
-      // Read for the tally: which tools the run spent its budget on. Its own
-      // notice is what tells a person to retry, and a tally is what tells them
-      // whether retrying is the right move -- see domain/record/tool-tally.ts.
-      session: `${RUN_DIR}/session.json`,
     })}
 `,
   }),
