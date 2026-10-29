@@ -70,6 +70,16 @@ describe("dispatch_post_merge.ts", () => {
     const dispatch = r.ghCalls.find((c) => c[0] === "workflow" && c[1] === "run") ?? [];
     expect(dispatch.join(" ")).toContain("agent=engineer");
     expect(dispatch.join(" ")).toContain("number=17");
+    // One comment, two roles: the directive the re-invoked run reads is also the
+    // dispatch marker, and its id is the ask the run claims. No second marker was
+    // posted beside it, and the directive stays `include`.
+    const comments = r.ghCalls.filter((c) => c.some((a) => a.includes("issues/17/comments")) && c.includes("POST"));
+    expect(comments).toHaveLength(1);
+    const body = comments[0]?.[comments[0].indexOf("-f") + 1] ?? "";
+    expect(body).toContain("atomaton:llm-context=include");
+    expect(body).toContain("atomaton:dispatch=engineer");
+    expect(body).toContain("merged");
+    expect(dispatch.join(" ")).toContain("ask=555");
   });
 
   test("does not re-invoke anyone when the pull request has no parent", () => {
