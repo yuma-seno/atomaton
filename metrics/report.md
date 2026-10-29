@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 226 | 4.9% | 190 | 9,689 | 15 | 11.6 |
-| Last 30 days | 406 | 6.2% | 257 | 9,859 | 16 | 17.0 |
-| Last year | 426 | 5.9% | 268 | 10,246 | 16 | 17.6 |
-| All time | 426 | 5.9% | 268 | 10,246 | 16 | 17.6 |
+| Last 7 days | 227 | 5.3% | 190 | 9,689 | 15 | 11.6 |
+| Last 30 days | 407 | 6.4% | 256 | 9,859 | 16 | 17.0 |
+| Last year | 427 | 6.1% | 265 | 10,246 | 16 | 17.6 |
+| All time | 427 | 6.1% | 265 | 10,246 | 16 | 17.6 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,14 +22,14 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 401 |
-| `failed` | 15 |
+| `failed` | 16 |
 | `stopped` | 10 |
 
 ## Last 7 days
 
 100 sessions.
 
-**Ran to an end without a report:** 20 of 96 sessions whose last run the core recorded as `completed` — 20.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 20 of 95 sessions whose last run the core recorded as `completed` — 21.1%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
 **206,503,286 tokens** over 121 runs that reported them, **98.7% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,111,996 | 4,038,003 | 8,398,691 | 8,676,293 | 206,503,286 |
-| messages per session | 98 | 266 | 731 | 731 | 12,881 |
+| messages per session | 98 | 266 | 731 | 731 | 12,886 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -109,7 +109,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 177 sessions.
 
-**Ran to an end without a report:** 38 of 171 sessions whose last run the core recorded as `completed` — 22.2%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 38 of 170 sessions whose last run the core recorded as `completed` — 22.4%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
 **585,148,294 tokens** over 223 runs that reported them, **97.9% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
@@ -118,7 +118,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,211,508 | 5,246,133 | 28,119,706 | 73,718,100 | 585,148,294 |
-| messages per session | 111 | 327 | 715 | 731 | 28,898 |
+| messages per session | 111 | 327 | 715 | 731 | 28,903 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -221,7 +221,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 189 sessions.
 
-**Ran to an end without a report:** 42 of 183 sessions whose last run the core recorded as `completed` — 23%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 42 of 182 sessions whose last run the core recorded as `completed` — 23.1%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
 **639,092,810 tokens** over 233 runs that reported them, **97.8% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
@@ -230,7 +230,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,286,863 | 5,530,003 | 28,119,706 | 73,718,100 | 639,092,810 |
-| messages per session | 119 | 327 | 715 | 731 | 31,034 |
+| messages per session | 119 | 327 | 715 | 731 | 31,039 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -338,7 +338,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 191 sessions.
 
-**Ran to an end without a report:** 42 of 183 sessions whose last run the core recorded as `completed` — 23%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
+**Ran to an end without a report:** 42 of 182 sessions whose last run the core recorded as `completed` — 23.1%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
 Neither figure covers 2 sessions with no run record at all — without one, neither question can be asked. Everything from before atoma recorded its runs is in there.
 
@@ -349,7 +349,7 @@ Neither figure covers 2 sessions with no run record at all — without one, neit
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,286,863 | 5,530,003 | 28,119,706 | 73,718,100 | 639,092,810 |
-| messages per session | 117 | 327 | 715 | 731 | 31,038 |
+| messages per session | 117 | 327 | 715 | 731 | 31,043 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
