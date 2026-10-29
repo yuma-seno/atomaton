@@ -2370,10 +2370,6 @@ echo "tool servers will run as ${TOOL_USER} (no sudo), caches in ${TOOL_CACHE}"
       agent: "\${AGENT}",
       notify: "\${NOTIFY}",
       "ended-because": runAgentStep.outputs.ended_because,
-      // Read for the tally: which tools the run spent its budget on. Its own
-      // notice is what tells a person to retry, and a tally is what tells them
-      // whether retrying is the right move -- see domain/record/tool-tally.ts.
-      session: `${RUN_DIR}/session.json`,
     })}
 `,
   }),

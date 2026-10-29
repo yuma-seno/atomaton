@@ -49,9 +49,17 @@
  * ask are already prevented by the dispatch-level checks and serialised by the
  * runner's per-node concurrency, so the second finds the marker claimed and backs
  * off there; the pre-check below is what makes that the same answer the id
- * comparison gave. A backed-off run that wrote the line itself (the read-back
- * shows somebody else's run) leaves the marker alone rather than restoring it —
- * the other run's claim is the one that landed.
+ * comparison gave.
+ *
+ * A claim already on the marker is never taken back, whichever run id it names.
+ * The separate-claim path backs off by deleting the comment it had just posted and
+ * leaving every older claim standing, and that answer carries over unchanged: a
+ * line of the same run id is an EARLIER ATTEMPT of this run (a re-run keeps
+ * `github.run_id`), and it is the only record that a run took the ask and never
+ * reported — the state `reconcile_run_ending.ts` heals. Removing it would delete
+ * the claim of a dead attempt on the way in. And a line another run wrote was
+ * never this run's to touch: the read-back below shows whose the marker holds, and
+ * the answer is to stand down.
  *
  * ## The exit code
  *
@@ -131,21 +139,6 @@ export function claimOnMarkerBody(original: string, args: { ask: number; run: nu
   return `${original.replace(/\s+$/, "")}\n${TOOK_TAG.write(args)}`;
 }
 
-/**
- * The marker's body with a took line removed — what a run's own earlier attempt
- * added, taken back.
- *
- * By line and `has`, not `readProse` over the whole body: only the line the claim
- * wrote is the claim, and a marker never carries a second took tag.
- */
-function withoutClaimLine(body: string): string {
-  return body
-    .split("\n")
-    .filter((line) => !TOOK_TAG.has(line))
-    .join("\n")
-    .replace(/\s+$/, "");
-}
-
 /** Write a comment's body in place, as the footer append does. */
 function patchCommentBody(repo: string, commentId: number, body: string): { code: number; stdout: string; stderr: string } {
   return gh("api", `repos/${repo}/issues/comments/${commentId}`, "--method", "PATCH", "-f", `body=${body}`);
@@ -219,17 +212,17 @@ async function main(): Promise<void> {
     const original = askComment.body;
     const existing = TOOK_TAG.readProse(original);
     if (existing !== undefined) {
-      // The marker already carries a claim, and only one can (the marker has one
-      // id, so the older-id comparison the separate claim used cannot apply
-      // here). This run backs off, exactly as it did when an older claim comment
-      // existed — and if the claim is this run's own earlier attempt, it is
-      // taken back the way that attempt's comment used to be deleted.
-      if (existing.run === runId) {
-        const restored = patchCommentBody(repo, ask, withoutClaimLine(original));
-        if (restored.code !== 0) {
-          throw new Error(`could not take back this run's claim on #${number}: ${restored.stderr || restored.stdout}`);
-        }
-      }
+      // The marker already carries a claim, and only one can (the marker has one id,
+      // so the older-id comparison the separate claim used cannot apply here). This
+      // run backs off and leaves the line alone, whoever wrote it.
+      //
+      // Including a claim of the SAME run id, which is an earlier attempt of this
+      // run: a re-run keeps `github.run_id`, and the line is then the only record
+      // that a run took this ask and never reported. The watch heals exactly that
+      // (`reconcile_run_ending.ts`), so removing it here would drop a dead attempt's
+      // claim on the thread — the states the claim exists to make readable. The
+      // separate-claim path below never had this problem: it deleted the comment IT
+      // had just posted and left every older one standing.
       record(false);
       return;
     }

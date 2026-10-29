@@ -206,6 +206,21 @@ describe("claim_turn.ts on a dispatch marker", () => {
     expect(r.ghCalls.some((c) => c.includes("PATCH"))).toBe(false);
   });
 
+  test("leaves an earlier attempt's claim in place when the same run is re-run", () => {
+    // A re-run keeps `github.run_id` (a re-execution is a new attempt of the SAME run),
+    // so the took line already on the marker names this run and is an earlier attempt's.
+    // It is the only record that a run took this ask and never reported, which is the
+    // state the run watch heals; taking it back here would delete it on the way in.
+    // The separate-claim path never did this — it deleted the comment IT had posted and
+    // left every older claim standing.
+    const r = run([
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 1, stdout: listing(claimOnMarkerBody(MARKER, { ask: 55, run: 7 })) },
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.output).toContain("claimed=false");
+    expect(r.ghCalls.some((c) => c.includes("PATCH"))).toBe(false);
+  });
+
   test("backs off when another run's claim overwrote this one between the edit and the read", () => {
     const r = run([
       { match: ["api", "issues/5/comments", "--paginate"], attempt: 1, stdout: listing(MARKER) },
