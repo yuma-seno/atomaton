@@ -3,6 +3,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
+import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { readers } from "../../adapters/github/thread.ts";
+import { latestAsk, wasLaunched, type AskReaders } from "../../domain/work/thread.ts";
 
 /**
  * `dispatch_post_merge.ts` is the workflow half of the post-merge judgement: it reads
@@ -80,6 +83,27 @@ describe("dispatch_post_merge.ts", () => {
     expect(body).toContain("atomaton:dispatch=engineer");
     expect(body).toContain("merged");
     expect(dispatch.join(" ")).toContain("ask=555");
+
+    // The same body through the readers a restarting run meets it with, rather than
+    // through the assertion above alone. Both halves of the one comment have to hold
+    // at once: the machinery has to see a dispatch marker (that is what makes the
+    // restart recorded, and what keeps `latestAsk` from taking the directive for an
+    // unanswered request a later push is supposed to answer), and the context reader
+    // has to see `include` (that is what makes it the run's first user message).
+    // `latestAsk` steps over a marker by definition -- `domain/work/thread.ts`, the
+    // `readers.isDispatchMarker` line in it -- which is why this does not need a second
+    // comment to keep the two roles apart.
+    const entry = [{ body, isHuman: false }];
+    expect(readers.isDispatchMarker(body)).toBe(true);
+    expect(wasLaunched(entry, readers)).toBe(true);
+    expect(LLM_CONTEXT_TAG.readProse(body)).toBe("include");
+    // The marker names the agent, so `requestedAgent` answers "engineer" for this
+    // body -- which is why `latestAsk` has to step over a marker before returning it.
+    // Pinned here as the property a push relies on: the directive is not an ask a
+    // later push is supposed to answer, and there is no second comment carrying one.
+    expect(readers.requestedAgent(body)).toBe("engineer");
+    const askReaders: AskReaders = { ...readers, authoringAgent: () => "" };
+    expect(latestAsk("", entry, askReaders)).toBeUndefined();
   });
 
   test("does not re-invoke anyone when the pull request has no parent", () => {
