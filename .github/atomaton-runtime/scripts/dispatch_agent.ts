@@ -633,7 +633,7 @@ ${DISPATCH_TAG.write(d.agent)}
   }
   return stdout.trim();
 }
-function refuseOutstandingRequest(d, markerId) {
+function refuseOutstandingRequest(d, markerId, ownMarker) {
   const log = d.log ?? ((message) => console.error(message));
   const repoPath = d.repo ?? "{owner}/{repo}";
   const removeMarker = () => {
@@ -662,17 +662,19 @@ function refuseOutstandingRequest(d, markerId) {
     Bun.sleepSync(delay);
   }
   if (check === undefined || !check.markerVisible) {
-    const reposted = postDispatchMarker(d);
-    if (reposted !== undefined) {
-      try {
-        if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
-          removeMarker();
-          return;
+    if (ownMarker) {
+      const reposted = postDispatchMarker(d);
+      if (reposted !== undefined) {
+        try {
+          if (checkDispatchMarker(repoPath, d.number, reposted).markerVisible) {
+            removeMarker();
+            return;
+          }
+        } catch (e) {
+          log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
         }
-      } catch (e) {
-        log(`${d.context}: could not read the thread on #${d.number} after reposting the marker: ${e}`);
+        gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
       }
-      gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
     }
     log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     removeMarker();
@@ -755,8 +757,9 @@ function dispatchRunner(d) {
       return refusal;
     ask = d.ask;
   } else {
-    markerId = postDispatchMarker(d);
-    const refusal = refuseOutstandingRequest(d, markerId);
+    const provided = d.markerCommentId === undefined ? "" : String(d.markerCommentId).trim();
+    markerId = provided === "" ? postDispatchMarker(d) : provided;
+    const refusal = refuseOutstandingRequest(d, markerId, provided === "");
     if (refusal !== undefined)
       return refusal;
     ask = d.ask ?? markerId;

@@ -1199,8 +1199,8 @@ jobs:
           NOTIFY: ${{ steps.notify.outputs.notify }}
           AGENT: ${{ inputs.agent }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/notify_limit_reached.ts" --number "${NUMBER}" --agent "${AGENT}" --notify "${NOTIFY}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --session "${RUNNER_TEMP}/atomaton-run/session.json"
-        if: steps.atoma.outputs.ended_because == 'runtime' || steps.atoma.outputs.ended_because == 'iterations' || steps.atoma.outputs.ended_because == 'loop'
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/notify_limit_reached.ts" --number "${NUMBER}" --agent "${AGENT}" --notify "${NOTIFY}" --ended-because "${{ steps.atoma.outputs.ended_because }}"
+        if: (steps.atoma.outputs.ended_because == 'runtime' || steps.atoma.outputs.ended_because == 'iterations' || steps.atoma.outputs.ended_because == 'loop') && steps.post-result.outputs.notified != 'true'
       - name: Manage auto-dispatch loop control
         id: loop-control
         shell: bash
