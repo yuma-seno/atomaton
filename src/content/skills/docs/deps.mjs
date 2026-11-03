@@ -14,9 +14,9 @@
  * the caller still produces what it can and says which dependency is missing.
  */
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /**
  * A directory that survives a run, so "first run installs, later runs skip" holds
@@ -76,6 +76,44 @@ const DEBS = [
 ];
 
 /**
+ * The interpreter that can `import uno` for a given office, or undefined.
+ *
+ * UNO's Python ships with LibreOffice — the pyuno deb brings `program/python`,
+ * `uno.py` and `pyuno.so` beside the binary — so the interpreter is the one
+ * *beside the office the caller is about to use*: the cached tarball's, or the
+ * sibling of the `soffice` the PATH resolves to, which a distro package keeps in
+ * the same layout. Never a mix of the two: a bridge driven from another build's
+ * interpreter fails in the bridge, naming nothing that points here.
+ *
+ * The candidate is probed rather than assumed. A distro can ship the office
+ * without an interpreter that sees `uno`, and then unpacking the tarball is what
+ * has to happen.
+ */
+export function unoPython(sofficePath) {
+  let program;
+  try {
+    program = dirname(sofficePath === "soffice" ? realpathSync(onPath("soffice") ?? "soffice") : sofficePath);
+  } catch {
+    // A PATH `soffice` that vanished or resolves through a broken link: there is no
+    // interpreter to name, and the caller installs the tarball instead of throwing.
+    return undefined;
+  }
+  const interpreter = join(program, "python");
+  if (!existsSync(interpreter)) return undefined;
+  return spawnSync(interpreter, ["-c", "import uno"], { encoding: "utf8" }).status === 0 ? interpreter : undefined;
+}
+
+/** Where `name` resolves to on the PATH, without a shell and without `which`. */
+function onPath(name) {
+  for (const dir of (process.env.PATH ?? "").split(":")) {
+    if (!dir) continue;
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * LibreOffice, unpacked under the cache; the `soffice` path, or undefined.
  *
  * `program/python` is half of the completeness marker rather than `soffice`
@@ -83,10 +121,21 @@ const DEBS = [
  * run that only converted documents has `soffice` without it. Checking one
  * binary would call that cache `cached` and fail later, in the bridge, naming
  * nothing that points here.
+ *
+ * With `uno` the office and its interpreter are chosen together, and a PATH
+ * office counts only when the `python` beside it can `import uno`. Answering
+ * `"soffice"` on the strength of `--version` alone is how `deps` came to report
+ * LibreOffice present on a machine where the UNO leg could never run — and where
+ * the fix it printed ("run `deps`") took the same early return and installed
+ * nothing.
  */
-export function libreOffice() {
-  const onPath = spawnSync("soffice", ["--version"], { encoding: "utf8" });
-  if (onPath.status === 0) return "soffice";
+export function libreOffice({ uno = false } = {}) {
+  const onPathOffice = spawnSync("soffice", ["--version"], { encoding: "utf8" });
+  const onPathUsable = onPathOffice.status === 0;
+  // A conversion needs only the binary. The UNO leg needs the pair, so there the
+  // unpacked tarball is preferred — it is one build end to end, and it is already
+  // on disk for every run after the first.
+  if (onPathUsable && !uno) return "soffice";
   const t0 = Date.now();
   const sofficePath = join(LO_PROGRAM, "soffice");
   if (existsSync(sofficePath) && existsSync(join(LO_PROGRAM, "python"))) {
@@ -94,6 +143,7 @@ export function libreOffice() {
     return sofficePath;
   }
 
+  if (uno && onPathUsable && unoPython("soffice")) return "soffice";
   const tgz = join(CACHE_DIR, "lo.tar.gz");
   if (!existsSync(tgz)) {
     const dl = spawnSync("curl", ["-sSL", "-o", tgz, LO_LINK], { encoding: "utf8" });
@@ -223,11 +273,11 @@ export function python(packages) {
  * Everything a caller needs, in the order the failures matter: LibreOffice, then
  * the fonts it renders with, then the interpreter.
  */
-export function ensure({ lo = false, cjk = false, packages = [] } = {}) {
-  const soffice = lo ? libreOffice() : undefined;
+export function ensure({ lo = false, cjk = false, packages = [], uno = false } = {}) {
+  const soffice = lo || uno ? libreOffice({ uno }) : undefined;
   if (cjk) cjkFonts();
   const interpreter = packages.length > 0 ? python(packages) : undefined;
-  return { soffice, python: interpreter };
+  return { soffice, python: interpreter, unoPython: uno && soffice ? unoPython(soffice) : undefined };
 }
 
 // ------------------------------------------------------------------ conversion

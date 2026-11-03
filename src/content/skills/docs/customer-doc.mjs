@@ -76,8 +76,9 @@ function fail(message) {
   process.exit(1);
 }
 
+/** The one line a caller reads: one JSON object, no indent, so the last line of stdout is the summary. */
 function emit(result) {
-  console.log(JSON.stringify({ ...result, deps }, null, 2));
+  console.log(JSON.stringify({ ...result, deps }));
 }
 
 const extensionOf = (path) => (/\.[^.\\/]+$/.exec(path)?.[0] ?? "").slice(1).toLowerCase();
@@ -86,15 +87,16 @@ const extensionOf = (path) => (/\.[^.\\/]+$/.exec(path)?.[0] ?? "").slice(1).toL
 
 /** Install and report everything the other subcommands use, so a run can time it once. */
 function commandDeps() {
-  const { soffice, python } = ensure({
+  const { soffice, python, unoPython } = ensure({
     lo: true,
     cjk: true,
     packages: [
       { pip: "pypdfium2", module: "pypdfium2" },
       { pip: "pillow", module: "PIL" },
     ],
+    uno: true,
   });
-  emit({ soffice, python });
+  emit({ soffice, python, unoPython });
 }
 
 // ------------------------------------------------------------------- template
@@ -172,6 +174,13 @@ const PLACEHOLDER = /\{\{[A-Z0-9_]+\}\}/g;
  */
 function fillFlat({ template, data, out }) {
   const t0 = Date.now();
+  // The flat file lands beside the output, and the caller's `--out` names a
+  // directory that need not exist yet: the skill's own first example is
+  // `--out out/report.docx` on a tree with no `out/`, and the UNO leg already
+  // creates it (`fillUno`). Without this the write below throws ENOENT before any
+  // conversion has happened, which reads as a broken script rather than a missing
+  // directory.
+  mkdirSync(dirname(resolve(out)), { recursive: true });
   let text = readFileSync(template, "utf8");
   const missing = [];
   for (const [key, value] of Object.entries(data)) {
@@ -308,13 +317,6 @@ print(json.dumps({"hits": hits, "fill_seconds": round(time.time() - t0, 2)}))
 
 const PORT = process.env.CUSTOMER_DOC_PORT ?? "2002";
 
-/** The bundled interpreter: UNO ships with LibreOffice, not with the runner's python. */
-function unoPython() {
-  const program = join(CACHE_DIR, "lo-root/opt/libreoffice25.8/program/python");
-  if (!existsSync(program)) fail("LibreOffice's `program/python` is missing; run `customer-doc.mjs deps`");
-  return program;
-}
-
 /**
  * A live LibreOffice listener, the caller's UNO program run against it, and the
  * office shut down again.
@@ -331,8 +333,12 @@ function unoPython() {
  * a copy in a directory it then deletes rather than the caller's file.
  */
 async function withListener(scriptPath, scriptArgs) {
-  const soffice = ensure({ lo: true }).soffice;
+  // `uno: true` asks for an office *and* an interpreter that can import `uno`.
+  // Asking only for the office accepted a PATH binary the bridge could never be
+  // driven from, and then failed here naming `deps` as the fix.
+  const { soffice, unoPython: interpreter } = ensure({ uno: true });
   if (!soffice) fail("LibreOffice is not available, so there is nothing to drive over UNO");
+  if (!interpreter) fail("no LibreOffice interpreter can `import uno`; run `customer-doc.mjs deps`");
   const child = spawn(
     soffice,
     [
@@ -344,7 +350,7 @@ async function withListener(scriptPath, scriptArgs) {
     ],
     { stdio: ["ignore", "ignore", "pipe"], env: { ...process.env, HOME: CACHE_DIR } },
   );
-  const run = spawnSync(unoPython(), [scriptPath, ...scriptArgs], {
+  const run = spawnSync(interpreter, [scriptPath, ...scriptArgs], {
     encoding: "utf8",
     timeout: 300_000,
     env: { ...process.env, CUSTOMER_DOC_PORT: PORT, HOME: CACHE_DIR },

@@ -21,8 +21,8 @@ The scripts, both beside this file in the shipped tree:
 Dependencies are installed on demand into the cache directory and never into
 `environment.setup_commands`. `bun customer-doc.mjs deps` installs and reports
 everything the other subcommands use, so a first run on a machine pays once:
-measured 39 s for LibreOffice (a 213 MB tarball, 15 `.deb`s extracted, 584 MB
-unpacked), 3.4 s for the CJK fonts, 2.4 s for the venv, and under a second each
+measured 9–39 s for LibreOffice (a 213 MB tarball, 15 `.deb`s extracted, 584 MB
+unpacked, the difference being the download), 3.4 s for the CJK fonts, 2.4 s for the venv, and under a second each
 for the two pip packages. Every later run says `cached` for all of them and takes
 under a second.
 
@@ -142,8 +142,11 @@ bun customer-doc.mjs render out/deck.pptx --outdir out/render --dpi 110 --pages 
 ```
 
 The render goes file → PDF → one PNG per page, and its JSON line carries each
-page's path, pixel size and byte size. Read the images with the `read` tool; a
-path under the run's checkout or `/tmp` is readable that way.
+page's path, pixel size and byte size. Read the images with the `read` tool, which
+resolves a path under the run's checkout or under `/tmp/atomaton-workspace` — the
+workspace is the only writable directory a run has that survives into the next
+one, and `/tmp` outside it is not readable back. Render into the workspace or
+beside the output, not into `/tmp`.
 
 **Budget: pages × pixels, not tokens.** One A4 page at 120 dpi is 993 × 1404 px
 and 40–190 KB; a 16:9 slide at 110 dpi is 1213 × 683. Three pages of report, three
@@ -166,15 +169,16 @@ What a render shows, and what only the file shows:
 So the loop is two checks, not one: read the pages, then confirm the rules in
 §3 for any attribute that cannot be seen.
 
-**Who can run it.** The loop needs an agent that can read an image. `engineer`
-and `reviewer` have vision and run it as written. `atomaton` and `architect` do
-not: the loop is not theirs to run, and a fill without a look is a half-finished
-job. Hand the reading to an agent that can see — `delegate` with the image paths,
-the page count, the format and what to look for ("is any text cut at an edge, is
-any heading alone at the bottom, is the table split"), asking for a defect list
-with page numbers — and put the delegate's list in the report. If no
-vision-capable agent is reachable, say in the report that the visual loop was not
-run and what is therefore unverified; do not describe a page you have not seen.
+**Who can run it.** The loop needs an agent that can read an image, and `vision`
+is a property of the agent definition, not of the model underneath it: `engineer`
+(`vision: true`) and `reviewer` (`vision: true`) run it as written. `atomaton` and
+`architect` are `vision: false`, so the loop is not theirs to run and a fill
+without a look is a half-finished job: they hand the document work to `engineer`,
+which is where a document that has to be looked at belongs. Do not hand the images
+to a delegate — every shipped delegate is `vision: false` too, so a delegate
+receives no picture and answers about a page it never saw. If no vision-capable
+agent is reachable, say in the report that the visual loop was not run and what is
+therefore unverified; do not describe a page you have not seen.
 
 ## 6. What the report carries
 
@@ -183,8 +187,8 @@ One table, in this order, then the open items:
 | Step | Command | Duration | Result |
 | --- | --- | --- | --- |
 | dependencies | `bun customer-doc.mjs deps` | 46 s first run, <1 s after | `installed` / `cached` per dependency |
-| fill | `bun customer-doc.mjs fill …` | 0.27–0.30 s flat, ~1.1 s UNO | `keysNotInTemplate` / `leftInTemplate` / `unfilled` |
-| render | `bun customer-doc.mjs render …` | 0.6–0.7 s for 3–4 pages | page count and pixel size per page |
+| fill | `bun customer-doc.mjs fill …` | about 0.3 s flat, 0.5–1.5 s UNO | `keysNotInTemplate` / `leftInTemplate` / `unfilled` |
+| render | `bun customer-doc.mjs render …` | 0.6–0.8 s for 3–4 pages | page count and pixel size per page |
 | visual loop | (the agent reading the images) | | what was wrong, what was changed, what is still wrong |
 
 Then: the paths of the produced files, the page count, and a **"what still needs
