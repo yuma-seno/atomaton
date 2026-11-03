@@ -188,13 +188,19 @@ function fillFlat({ template, data, out }) {
     if (!text.includes(placeholder)) missing.push(key);
     text = text.replaceAll(placeholder, xmlEscape(value));
   }
-  const flat = join(dirname(out), `${basename(out, extensionOf(out)).replace(/\.$/, "")}.${extensionOf(template)}`);
+  const target = extensionOf(out);
+  // Asked for the template's own format, the filled file *is* the output: naming it
+  // a second way from `out` gave two names for one file, and the copy that followed
+  // was a file onto itself — which leaves the bytes alone here and is not something
+  // to rest on. One name, written once.
+  const sameFormat = target === extensionOf(template);
+  const flat = sameFormat
+    ? resolve(out)
+    : join(dirname(resolve(out)), `${basename(out, `.${target}`)}.${extensionOf(template)}`);
   writeFileSync(flat, text);
   const leftover = [...new Set(text.match(PLACEHOLDER) ?? [])];
 
-  const target = extensionOf(out);
-  if (target === extensionOf(template)) {
-    if (flat !== resolve(out)) copyFileSync(flat, resolve(out));
+  if (sameFormat) {
     return {
       leg: "flat-odf",
       template,

@@ -138,7 +138,11 @@ export function libreOffice({ uno = false } = {}) {
   if (onPathUsable && !uno) return "soffice";
   const t0 = Date.now();
   const sofficePath = join(LO_PROGRAM, "soffice");
-  if (existsSync(sofficePath) && existsSync(join(LO_PROGRAM, "python"))) {
+  // `program/python` present is the completeness marker, and for UNO it is not the
+  // whole question: an interpreter left by a half-finished extraction exists and
+  // cannot `import uno`. The probe runs only when UNO is asked for, because a
+  // conversion should not pay for it.
+  if (existsSync(sofficePath) && existsSync(join(LO_PROGRAM, "python")) && (!uno || unoPython(sofficePath))) {
     record("libreoffice", "cached", secondsSince(t0));
     return sofficePath;
   }
