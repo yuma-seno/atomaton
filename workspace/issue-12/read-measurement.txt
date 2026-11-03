@@ -1,0 +1,58 @@
+# measured 2026-11-03T06:56:11Z — probe mode=read, source src/entrypoints/tools/mcp/attachments.ts
+
+## anon / no-follow
+{
+  "mode": "read",
+  "sent": "https://github.com/user-attachments/files/34306035/default.docx",
+  "credential": "anonymous",
+  "redirects": "not followed",
+  "final_url": null,
+  "status": 302,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": "0",
+  "content_encoding": null,
+  "location": "https://objects.githubusercontent.com/github-production-repository-file-5c1aeb/1390896626/34306035?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20261103%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261103T065550Z&X-Amz-Expires=300&X-Amz-Signature=e96930d92d97ca37295020e468d354cb70c98a35c2eebef5cfade5da2ca655cc&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3Bfilename%3Ddefault.docx&response-content-type=application%2Fvnd.openxmlformats-officedocument.wordprocessingml.document",
+  "bytes": 0,
+  "body_truncated": false,
+  "head_hex": "",
+  "body_excerpt": null,
+  "interpretation": "the asset host answers 302 rather than the bytes, to https://objects.githubusercontent.com/github-production-repository-file-5c1aeb/1390896626/34306035?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20261103%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261103T065550Z&X-Amz-Expires=300&X-Amz-Signature=e96930d92d97ca37295020e468d354cb70c98a35c2eebef5cfade5da2ca655cc&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3Bfilename%3Ddefault.docx&response-content-type=application%2Fvnd.openxmlformats-officedocument.wordprocessingml.document. An attachment is served through a redirect to a signed URL, and a target on `*.githubusercontent.com` carrying a `jwt` or signature query is that shape — the signature, not the token this probe sends, is what the target accepts, and it expires (measured: five minutes), so the redirect is followed when the read is made rather than stored and followed later. Run the same URL with `follow_redirects` for the bytes, and keep this row: it is the answer for whoever has to know that a redirect must be followed."
+}
+
+## anon / follow
+{
+  "mode": "read",
+  "sent": "https://github.com/user-attachments/files/34306035/default.docx",
+  "credential": "anonymous",
+  "redirects": "followed",
+  "final_url": "https://objects.githubusercontent.com/github-production-repository-file-5c1aeb/1390896626/34306035?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20261103%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261103T065550Z&X-Amz-Expires=300&X-Amz-Signature=e96930d92d97ca37295020e468d354cb70c98a35c2eebef5cfade5da2ca655cc&X-Amz-SignedHeaders=host&response-content-disposition=attachment%3Bfilename%3Ddefault.docx&response-content-type=application%2Fvnd.openxmlformats-officedocument.wordprocessingml.document",
+  "status": 200,
+  "content_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "content_length": "5867214",
+  "content_encoding": null,
+  "location": null,
+  "bytes": 5867214,
+  "body_truncated": false,
+  "head_hex": "504b0304140008080800e5b4625d0000",
+  "body_excerpt": null,
+  "interpretation": "served 5867214 bytes as application/vnd.openxmlformats-officedocument.wordprocessingml.document to a GET anonymously. This is the baseline the authenticated row is read against. The byte count is what makes this the asset rather than a login page."
+}
+
+## anon / nonexistent id / no-follow
+{
+  "mode": "read",
+  "sent": "https://github.com/user-attachments/files/1/does-not-exist.docx",
+  "credential": "anonymous",
+  "redirects": "not followed",
+  "final_url": null,
+  "status": 404,
+  "content_type": "text/plain; charset=utf-8",
+  "content_length": "40",
+  "content_encoding": "gzip",
+  "location": null,
+  "bytes": 9,
+  "body_truncated": false,
+  "head_hex": "4e6f7420466f756e64",
+  "body_excerpt": "Not Found",
+  "interpretation": "not found, to a GET anonymously: either nothing is at that URL, or this request may not see it. For an asset on a private repository an anonymous GET answers 404 while the authenticated one answers a redirect to `private-user-images.githubusercontent.com`, so a 404 on the anonymous row is not evidence the asset is gone. Run the authenticated row before recording an absence."
+}
