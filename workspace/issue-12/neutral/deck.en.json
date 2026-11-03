@@ -1,0 +1,19 @@
+{
+  "TITLE": "Inventory Platform Redesign",
+  "SUBTITLE": "A design proposal",
+  "CLIENT": "Acme Corporation",
+  "AUTHOR": "Alex Morgan",
+  "DATE": "4 November 2026",
+  "BRAND": "Example Corp",
+  "AGENDA_HEADING": "Agenda",
+  "SECTION_1": "Where we are",
+  "SECTION_2": "The proposed design",
+  "SECTION_3": "Schedule",
+  "SECTION_4": "Cost and team",
+  "SLIDE_TITLE": "Where we are",
+  "BULLET_1": "Stock discrepancies surface only monthly",
+  "BULLET_2": "Each site counts stock differently",
+  "BULLET_3": "40 hours a month of manual reconciliation",
+  "BULLET_4": "Reservations are invisible to the floor",
+  "NOTE": "Next: walk through the proposed architecture"
+}
