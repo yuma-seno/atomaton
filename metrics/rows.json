@@ -897,7 +897,7 @@
   {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
-    "messages": 109,
+    "messages": 112,
     "calls": 39,
     "failed": 0,
     "refused": 2,
@@ -1103,6 +1103,16 @@
           }
         },
         "started": "2026-11-03T11:41:44Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T12:43:05Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 112,
+        "seconds": 240,
+        "server_calls": {},
+        "started": "2026-11-03T12:39:05Z"
       }
     ]
   },
