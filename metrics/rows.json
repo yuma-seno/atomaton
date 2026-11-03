@@ -16025,6 +16025,55 @@
     ]
   },
   {
+    "path": "sessions/issue-432/engineer.json",
+    "agent": "engineer",
+    "messages": 80,
+    "calls": 44,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions",
+      "docs/customer-doc"
+    ],
+    "reported": false,
+    "tools": {
+      "atoma_builtin__load_skill": 2,
+      "bash": 32,
+      "read": 6,
+      "edit": 2,
+      "commit_and_push": 1,
+      "create_pr": 1
+    },
+    "acts": {
+      "other": 25,
+      "edit": 7
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T14:09:03Z",
+        "ended_because": "completed",
+        "iterations": 32,
+        "messages": 80,
+        "seconds": 405,
+        "server_calls": {
+          "files": {
+            "edit": 2,
+            "read": 6
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1
+          },
+          "shell": {
+            "bash": 32
+          }
+        },
+        "started": "2026-11-03T14:02:18Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
