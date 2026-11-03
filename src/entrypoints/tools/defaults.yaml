@@ -149,28 +149,28 @@ servers:
       GH_TOKEN: "${GH_TOKEN}"
     hooks:
       {}
-  # The user-asset upload endpoint — what `gh --attach` posts to — is reached
-  # only from here. `gh` refuses the Actions token client-side before any
-  # request is built (`gho_`/`ghp_`/`github_pat_` are its allowlist; a `ghs_`
-  # is not on it, measured on the cli/cli source at v2.101.0), and `curl` is
-  # routed away from the shell, which holds no credential to send anyway. So
-  # the POST lives where the token lives, and `probe` is the endpoint check
-  # that could not run anywhere else — the check `engineering/secrets-in-a-check`
-  # says belongs after a merge, in the tool that a merge puts into runs.
+  # Where a document a person attached to an issue comes in, and where a document
+  # that leaves the building goes out. Neither direction can run through the shell:
+  # `curl` and `wget` are routed away from it, and every mutating `git` subcommand
+  # is refused. So `fetch_attachment` GETs the attachment URL and writes the bytes
+  # under `/tmp`, and `publish_draft` builds a commit out of objects and pushes one
+  # raw refspec onto an orphan branch.
   #
-  # Added as its own server rather than a tool on `github`: an agent that
-  # reaches for an upload should have to name it, because `upload` stores a
-  # permanent file on GitHub's CDN with no documented way to delete it.
+  # Added as its own server rather than a tool on `github`: a published document
+  # leaves the reviewed tree, and an agent that does that should have to name the
+  # server it does it with.
   #
-  # `publish_draft` is here for the same credential reason, one layer over: the
-  # shell cannot run `git push` (the guard refuses it) and `commit_and_push` names
-  # a branch from the work-branch convention and can build no other, so the process
-  # that can reach an orphan branch is one that runs `git` itself. That process
-  # inherits the checkout's own `.git/config`, where `actions/checkout` left the
-  # credential — no token is read here and none is passed. The server also reads
-  # `AGENT` (for the commit identity), which the runner passes to it already.
+  # `publish_draft` runs `git` in this process, which inherits the checkout's own
+  # `.git/config` -- where `actions/checkout` left the credential. No token is read
+  # here and none is passed. The server also reads `AGENT` (for the commit
+  # identity), which the runner passes to it already.
+  #
+  # `GH_TOKEN` is still declared below, and neither tool sends it: the fetch reads
+  # anonymously and the push uses the credential already in `.git/config`. Dropping
+  # the declaration is a change of its own, because `docs/tools/reference.md` states
+  # per server which credential it holds.
   attachments:
-    description: "Probes GitHub's user-asset upload endpoint (the one `gh --attach` posts to) and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; its `read` mode does the same for a GET of an asset URL — the other direction, on a different host — and only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. `fetch_attachment` saves a file attached to an issue under /tmp, so a document can be opened and edited — and then published — instead of being pasted into the conversation."
+    description: "Fetches a file a person attached to an issue and publishes documents onto an orphan branch. `fetch_attachment` saves the file under /tmp, so a document can be opened and edited — and then published — instead of being pasted into the conversation; it reads only GitHub's two attachment hosts and carries no credential. `publish_draft` puts drafts on a branch and returns a blob URL for each."
     unprefixed: true
     command: bun
     args:
@@ -178,18 +178,17 @@ servers:
       - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/attachments.ts"
     env:
       GH_TOKEN: "${GH_TOKEN}"
-    # Above the server's own 120-second abort, so a POST that never answers is
+    # Above the server's own 120-second abort, so a call that never answers is
     # reported BY the server rather than cut off here. At the 60-second default the
-    # `tools/call` is discarded while the server keeps working -- and in `upload`
-    # mode it may still store the file, retiring exactly the one outcome this probe
-    # must never produce without saying so. The same shape as `delegate`'s 660 over
-    # its sub-run's 600-second limit.
+    # `tools/call` is discarded while the server keeps working and nobody is waiting
+    # for the answer. The same shape as `delegate`'s 660 over its sub-run's
+    # 600-second limit.
     #
-    # `publish_draft` is served by the same value. Its work is a handful of `git`
-    # commands over the network (two `ls-remote`s, a `fetch`, a `push`), which is
-    # seconds on a repository of any ordinary size -- and unlike `upload` it is
-    # safe to be cut off, because a push either happened or did not and the answer
-    # is in the ref. The number is not raised again for it.
+    # Both tools are served by the same value: `fetch_attachment` moves up to 25MB
+    # over the network, and `publish_draft` runs a handful of `git` commands (two
+    # `ls-remote`s, a `fetch`, a `push`), which is seconds on a repository of any
+    # ordinary size -- and unlike a download a push is safe to be cut off, because it
+    # either happened or did not and the answer is in the ref.
     request_timeout_secs: 180
     hooks:
       {}

@@ -1,13 +1,12 @@
 #!/usr/bin/env bun
 /**
- * deps.mjs — the on-demand install the two docs skills share.
+ * deps.mjs — the on-demand install that `docs/customer-doc` runs.
  *
- * `docs/design-doc` turns a document into a PDF; `docs/customer-doc` writes all
- * three Office formats, drives LibreOffice over UNO and renders pages as images.
- * Both need the same LibreOffice unpacked under a cache directory with
- * `dpkg-deb -x` — no root, and nothing added to `environment.setup_commands` —
- * and the release tarball is the same 213MB download for either of them. So the
- * install is here once, and one cache serves whichever skill runs second.
+ * `docs/customer-doc` writes all three Office formats, drives LibreOffice over
+ * UNO and renders pages as images. Every leg of it needs the same LibreOffice
+ * unpacked under a cache directory with `dpkg-deb -x` — no root, and nothing
+ * added to `environment.setup_commands` — and the release tarball is a 213MB
+ * download, so the install is here once and one cache serves every call after it.
  *
  * `ensure()` records every step in `deps` and on stderr, and a caller prints that
  * array as the `deps` of its JSON summary. A failed install is not a failed run:

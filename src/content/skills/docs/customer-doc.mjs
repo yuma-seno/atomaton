@@ -22,8 +22,8 @@
  *   headless LibreOffice is started, the template opened, the placeholders
  *   replaced, and the result stored in the same format.
  *
- * Every subcommand ends with one JSON line on stdout and progress on stderr, the
- * shape `docs/design-doc`'s `generate.mjs` uses so a run reads both the same way.
+ * Every subcommand ends with one JSON line on stdout and progress on stderr, so a
+ * run reads the result the same way every time.
  */
 import { spawn, spawnSync } from "node:child_process";
 import {

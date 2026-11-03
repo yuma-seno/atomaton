@@ -42,12 +42,11 @@ mcp_servers:
   - web
   - search
   - atomaton
-  # Where a file becomes an attachment on an issue. GitHub's upload endpoint answers
-  # only from a server holding the run's token, and `shell` is not one -- `curl` and
-  # `gh` are refused there besides. A server nobody names is never started, so this
-  # line is what makes `probe` callable at all on an issue a person
-  # dispatches here. Kept as a name of its own rather than a tool on `github` because
-  # `upload` stores a permanent file.
+  # Where a document a person attached to an issue comes in, and where a produced one
+  # goes out. `shell` can do neither: `curl` and `wget` are refused there, and so is
+  # every mutating `git` subcommand. A server nobody names is never started, so this
+  # line is what makes `fetch_attachment` callable at all on an issue a person
+  # dispatches here.
   - attachments
   # The writing delegate: a sub-run holding `files` and `shell`, for the reading
   # and searching that would otherwise fill this session with transcripts. See
