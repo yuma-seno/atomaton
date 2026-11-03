@@ -69,6 +69,13 @@ no credential, so an attachment on a private repository comes back refused rathe
 saved — as a 404 or as a page, which of the two has not been measured. That saved path
 is then what `--template` takes in §4: a customer's `.docx` is the UNO leg.
 
+**A template too big to attach.** GitHub caps a chat attachment at 25 MB, so a
+heavier template cannot be attached at all. Ask the person to compress it first —
+Office's built-in picture compression (図の圧縮) usually brings a media-heavy
+template down by an order of magnitude — and re-attach. A template that will not
+fit even compressed goes into the tree by git, and `--template` takes that path
+directly.
+
 A placeholder is `{{UPPER_SNAKE}}` and is substituted everywhere it appears,
 including inside table cells. Values are XML-escaped, so a name with `&` or `<`
 in it is safe. The data file is one JSON object, one key per placeholder.
