@@ -1076,27 +1076,20 @@
   {
     "path": "sessions/issue-12/reviewer.json",
     "agent": "reviewer",
-    "messages": 188,
-    "calls": 93,
-    "failed": 2,
+    "messages": 23,
+    "calls": 11,
+    "failed": 0,
     "refused": 0,
-    "skills": [
-      "project/conventions"
-    ],
+    "skills": [],
     "reported": true,
     "tools": {
-      "get_pr": 3,
-      "get_pr_diff": 2,
-      "atoma_builtin__load_skill": 1,
-      "grep": 45,
-      "list": 3,
-      "read": 16,
-      "glob": 2,
-      "fetch": 13,
-      "get_issue_comments": 2,
-      "get_check_runs": 3,
-      "check_merge_readiness": 2,
-      "delegate_readonly": 1
+      "read": 1,
+      "fetch": 2,
+      "get_branch": 1,
+      "check_merge_readiness": 3,
+      "get_check_runs": 2,
+      "get_pr": 1,
+      "merge_pr": 1
     },
     "acts": {},
     "runs": [
@@ -1176,6 +1169,30 @@
           }
         },
         "started": "2026-11-03T10:03:22Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-03T10:13:10Z",
+        "ended_because": "completed",
+        "iterations": 9,
+        "messages": 23,
+        "seconds": 78,
+        "server_calls": {
+          "files_readonly": {
+            "read": 1
+          },
+          "github": {
+            "check_merge_readiness": 3,
+            "get_branch": 1,
+            "get_check_runs": 2,
+            "get_pr": 1,
+            "merge_pr": 1
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-03T10:11:52Z"
       }
     ]
   },
@@ -16613,6 +16630,112 @@
           }
         },
         "started": "2026-10-29T07:49:21Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/pr-426/archive/reviewer-1.json",
+    "agent": "reviewer",
+    "messages": 190,
+    "calls": 93,
+    "failed": 2,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "get_pr": 3,
+      "get_pr_diff": 2,
+      "atoma_builtin__load_skill": 1,
+      "grep": 45,
+      "list": 3,
+      "read": 16,
+      "glob": 2,
+      "fetch": 13,
+      "get_issue_comments": 2,
+      "get_check_runs": 3,
+      "check_merge_readiness": 2,
+      "delegate_readonly": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "ended": "2026-10-24T21:52:08Z",
+        "ended_because": "completed",
+        "iterations": 24,
+        "messages": 93,
+        "seconds": 214,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 18,
+            "list": 1,
+            "read": 11
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          },
+          "web": {
+            "fetch": 6
+          }
+        },
+        "started": "2026-10-24T21:48:34Z"
+      },
+      {
+        "ended": "2026-10-24T22:35:44Z",
+        "ended_because": "completed",
+        "iterations": 16,
+        "messages": 140,
+        "seconds": 148,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 15,
+            "list": 1,
+            "read": 3
+          },
+          "github": {
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1
+          },
+          "web": {
+            "fetch": 6
+          }
+        },
+        "started": "2026-10-24T22:33:16Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T10:05:24Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "messages": 188,
+        "seconds": 122,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1
+          },
+          "files_readonly": {
+            "grep": 12,
+            "list": 1,
+            "read": 2
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_pr": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-03T10:03:22Z"
       }
     ]
   }
