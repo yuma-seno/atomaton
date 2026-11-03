@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 40 | 2.5% | 283 | 2,509 | 12 | 15.2 |
-| Last 30 days | 444 | 5.9% | 257 | 9,859 | 16 | 16.9 |
-| Last year | 464 | 5.6% | 265 | 10,246 | 16 | 17.5 |
-| All time | 464 | 5.6% | 265 | 10,246 | 16 | 17.5 |
+| Last 7 days | 41 | 2.4% | 258 | 2,509 | 12 | 19.0 |
+| Last 30 days | 445 | 5.8% | 256 | 9,859 | 16 | 16.9 |
+| Last year | 465 | 5.6% | 261 | 10,246 | 16 | 17.5 |
+| All time | 465 | 5.6% | 261 | 10,246 | 16 | 17.5 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 438 |
+| `completed` | 439 |
 | `failed` | 16 |
 | `stopped` | 10 |
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,495,022 | 5,175,119 | 8,959,867 | 8,959,867 | 46,085,928 |
-| messages per session | 97 | 239 | 292 | 292 | 1,971 |
+| messages per session | 97 | 239 | 292 | 292 | 1,979 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -70,9 +70,9 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `get_pr_diff` | 5 | 0 | 0 | 0% |
 | `get_pr_reviews` | 5 | 0 | 0 | 0% |
 | `merge_pr` | 5 | 0 | 0 | 0% |
+| `create_sub_issue` | 4 | 0 | 0 | 0% |
+| `launch_sub_agent` | 4 | 0 | 0 | 0% |
 | `request_close_issue` | 4 | 0 | 0 | 0% |
-| `create_sub_issue` | 3 | 0 | 0 | 0% |
-| `launch_sub_agent` | 3 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 3 | 0 | 0 | 0% |
 | `search_code` | 3 | 0 | 0 | 0% |
 | `delegate` | 2 | 0 | 0 | 0% |
@@ -112,7 +112,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,221,174 | 5,246,133 | 28,119,706 | 73,718,100 | 628,250,925 |
-| messages per session | 111 | 323 | 715 | 731 | 30,728 |
+| messages per session | 111 | 323 | 715 | 731 | 30,736 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -161,16 +161,16 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `delegate` | 20 | 0 | 0 | 0% |
 | `github__list_prs` | 19 | 0 | 0 | 0% |
 | `github__get_branch` | 17 | 0 | 0 | 0% |
-| `launch_sub_agent` | 16 | 2 | 0 | 12.5% |
+| `launch_sub_agent` | 17 | 2 | 0 | 11.8% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__get_pr` | 15 | 1 | 0 | 6.7% |
 | `list_issues` | 14 | 0 | 0 | 0% |
 | `sync_branch` | 11 | 3 | 0 | 27.3% |
 | `github__check_merge_readiness` | 10 | 0 | 0 | 0% |
 | `github__create_issue` | 10 | 0 | 0 | 0% |
+| `create_sub_issue` | 8 | 0 | 0 | 0% |
 | `github__get_pr_reviews` | 8 | 0 | 0 | 0% |
 | `probe` | 8 | 0 | 0 | 0% |
-| `create_sub_issue` | 7 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 7 | 0 | 3 | 0% |
 | `github__commit_and_push` | 7 | 1 | 0 | 14.3% |
 | `github__get_pr_diff` | 6 | 0 | 0 | 0% |
@@ -224,7 +224,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,307,949 | 5,484,738 | 28,119,706 | 73,718,100 | 682,195,441 |
-| messages per session | 113 | 323 | 705 | 731 | 32,864 |
+| messages per session | 113 | 323 | 705 | 731 | 32,872 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -275,7 +275,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `delegate_readonly` | 22 | 0 | 0 | 0% |
 | `delegate` | 20 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
-| `launch_sub_agent` | 16 | 2 | 0 | 12.5% |
+| `launch_sub_agent` | 17 | 2 | 0 | 11.8% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
 | `list_issues` | 14 | 0 | 0 | 0% |
@@ -284,10 +284,10 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `sync_branch` | 11 | 3 | 0 | 27.3% |
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
+| `create_sub_issue` | 8 | 0 | 0 | 0% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
 | `probe` | 8 | 0 | 0 | 0% |
-| `create_sub_issue` | 7 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 7 | 0 | 3 | 0% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
@@ -343,7 +343,7 @@ Neither figure covers 4 sessions with no run record at all — without one, neit
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,307,949 | 5,484,738 | 28,119,706 | 73,718,100 | 682,195,441 |
-| messages per session | 111 | 323 | 705 | 731 | 32,883 |
+| messages per session | 111 | 323 | 705 | 731 | 32,891 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -394,7 +394,7 @@ Neither figure covers 4 sessions with no run record at all — without one, neit
 | `delegate_readonly` | 22 | 0 | 0 | 0% |
 | `delegate` | 20 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
-| `launch_sub_agent` | 16 | 2 | 0 | 12.5% |
+| `launch_sub_agent` | 17 | 2 | 0 | 11.8% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
 | `list_issues` | 14 | 0 | 0 | 0% |
@@ -403,10 +403,10 @@ Neither figure covers 4 sessions with no run record at all — without one, neit
 | `sync_branch` | 11 | 3 | 0 | 27.3% |
 | `github__commit_and_push` | 10 | 1 | 0 | 10% |
 | `github__get_pr_reviews` | 10 | 0 | 0 | 0% |
+| `create_sub_issue` | 8 | 0 | 0 | 0% |
 | `github__create_pr` | 8 | 2 | 0 | 25% |
 | `github__list_pr_review_comments` | 8 | 0 | 0 | 0% |
 | `probe` | 8 | 0 | 0 | 0% |
-| `create_sub_issue` | 7 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 7 | 0 | 3 | 0% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
