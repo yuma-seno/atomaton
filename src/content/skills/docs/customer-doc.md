@@ -118,8 +118,22 @@ found by rendering a draft that looked fine in the XML:
   the reader treats Japanese as English for line breaking and fallback. The
   second defect is invisible in a render and only shows in the XML, which is the
   argument for checking both.
-- **docx:** a heading needs `fo:keep-with-next="always"` (otherwise it strands at
-  the foot of a page) and a table needs `style:may-break-between-rows="false"`.
+- **docx:** a heading needs `fo:keep-with-next="always"`, or it strands at the
+  foot of a page.
+- **docx, a table longer than one page:** the table property
+  `style:may-break-between-rows="false"` keeps a table that *fits* on one page
+  there, and does nothing for one that does not — it exports as `w:keepNext` on
+  the row paragraphs, never as `w:cantSplit`. A 150-row table with it alone
+  measured 0 `w:cantSplit`, 0 `w:tblHeader`, and split across 4 pages at a data
+  row. A row is held whole by `fo:keep-together="always"` on its own
+  `style:table-row-properties` (that is what exports `w:cantSplit`), and a header
+  row repeats on the next page only when it sits inside
+  `table:table-header-rows` (that is `w:tblHeader`) — with both, the same table
+  measured 150 `w:cantSplit` and 1 `w:tblHeader`, and every page after the first
+  began at the header row. Both styles must be in `office:automatic-styles`: the
+  same table-row style in `office:styles` exported neither attribute.
+  `style:row-height`, and `fo:keep-together` on the table properties, changed
+  nothing.
 - **pptx:** the page is 28 × 15.75 cm — LibreOffice's own 16:9 — and a
   `style:page-layout` naming any other 16:9 size is ignored, which misplaces every
   frame laid out for it. Text styles must be `style:family="paragraph"` with names
@@ -193,6 +207,7 @@ What a render shows, and what only the file shows:
 | overflow past a cell or a frame edge, `###` where a number does not fit | a formula whose value is cached and never recalculated |
 | a font that is not the one intended (serif where sans was asked for) | `w:lang w:eastAsia="en-US"` under a Japanese paragraph |
 | a heading stranded at the foot of a page, a table split across two | a page layout that was dropped, so the print margins are the default |
+| a table continuing onto the next page | a docx with no `w:cantSplit`, so a row may split mid-row, and no `w:tblHeader`, so no header repeats |
 | an empty footer, a missing page number, a colour on the wrong background | a placeholder left as `{{KEY}}` inside a field result |
 
 So the loop is two checks, not one: read the pages, then confirm the rules in
