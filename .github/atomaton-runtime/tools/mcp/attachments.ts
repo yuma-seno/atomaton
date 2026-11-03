@@ -6601,9 +6601,9 @@ var require_dist = __commonJS(function(exports, module) {
 });
 
 // src/entrypoints/tools/mcp/attachments.ts
-import { readFileSync as readFileSync2, mkdtempSync, rmSync, statSync as statSync2 } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync as statSync2, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { basename, isAbsolute, join, resolve, sep } from "path";
+import { dirname, isAbsolute, join, resolve, sep } from "path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -10415,16 +10415,6 @@ var optionalType = ZodOptional.create;
 var nullableType = ZodNullable.create;
 var preprocessType = ZodEffects.createWithPreprocess;
 var pipelineType = ZodPipeline.create;
-var coerce = {
-  string: (arg) => ZodString.create({ ...arg, coerce: true }),
-  number: (arg) => ZodNumber.create({ ...arg, coerce: true }),
-  boolean: (arg) => ZodBoolean.create({
-    ...arg,
-    coerce: true
-  }),
-  bigint: (arg) => ZodBigInt.create({ ...arg, coerce: true }),
-  date: (arg) => ZodDate.create({ ...arg, coerce: true })
-};
 // node_modules/zod-to-json-schema/dist/esm/Options.js
 var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
@@ -17645,9 +17635,6 @@ class StdioServerTransport {
 }
 
 // src/adapters/mcp/mcp-tool.ts
-function positiveInt(description) {
-  return coerce.number().int().positive().describe(description);
-}
 function normalizeResult(result) {
   return typeof result === "string" ? { text: result } : result;
 }
@@ -17859,13 +17846,6 @@ function run(cmd) {
     stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : ""
   };
 }
-function ghCommand() {
-  const fake = (process.env.ATOMATON_FAKE_GH ?? "").trim();
-  return fake ? [process.execPath, fake] : ["gh"];
-}
-function gh(...args) {
-  return run([...ghCommand(), ...args]);
-}
 function gitRun(...args) {
   return run(["git", ...args]);
 }
@@ -18009,11 +17989,11 @@ function log2(message) {
   console.error(`[atomaton-attachments] ${message}`);
 }
 hardenCredentialHolder(log2);
-var UPLOAD_ENDPOINT = "https://uploads.github.com/user-attachments/assets";
 var UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 var MAX_READ_BYTES = 128 * 1024 * 1024;
 var REQUEST_ABORT_MS = 120000;
-var BODY_EXCERPT_CHARS = 2000;
+var TMP_ROOT = "/tmp";
+var ATTACHMENT_DIR = "/tmp/atomaton-workspace/attachments";
 var DRAFT_FILE_MODE = "100644";
 function commitIdentity() {
   const agent = (process.env.AGENT ?? "").trim() || "engineer";
@@ -18028,6 +18008,11 @@ var PUBLISH_DRAFT_SCHEMA = objectType({
   files: arrayType(DRAFT_FILE_SCHEMA).min(1).describe("The drafts to publish, each as a local `path` and the `target` it takes on the branch."),
   message: stringType().min(1).describe("Commit message for this publication.")
 });
+var FETCH_ATTACHMENT_SCHEMA = objectType({
+  url: stringType().min(1).describe("The attachment URL to fetch: `https://github.com/user-attachments/files/<id>/<name>`, or a " + "`private-user-images.githubusercontent.com` URL. Every other host is refused."),
+  filename: stringType().min(1).optional().describe("What to save it as, such as `\u30DA\u30C0\u30EB.docx`. Defaults to the URL's last segment, which is often a generic " + "`default.docx` rather than the name the comment shows. A file name, not a path."),
+  dir: stringType().min(1).optional().describe(`The directory to save into. Defaults to \`${ATTACHMENT_DIR}\`, which survives into the next run on this ` + `issue; an absolute path under ${TMP_ROOT} only.`)
+});
 function blobUrlFor(repo, branch, target) {
   const path = target.split("/").map((segment) => encodeURIComponent(segment)).join("/");
   return `https://github.com/${repo}/blob/${encodeURIComponent(branch)}/${path}`;
@@ -18037,7 +18022,7 @@ function indexInfoFor(entries) {
 }
 function resolveDraftFiles(files) {
   const base = resolve(process.cwd());
-  const roots = [base, "/tmp"];
+  const roots = [base, TMP_ROOT];
   const seen = new Set;
   const out = [];
   for (const file of files) {
@@ -18100,20 +18085,6 @@ function gitInIndex(indexPath, args) {
 function gitInIndexStdin(indexPath, args, input) {
   return gitRunWith({ ...indexEnv(indexPath), stdin: input }, ...args);
 }
-var PROBE_SCHEMA = objectType({
-  mode: enumType(["routing", "endpoint", "oversize", "upload"]).optional().default("endpoint").describe("What to measure. `endpoint` (default): POST with repository_id and an empty name \u2014 a request that cannot store, measured to answer 400 with the `name` parameter named in the body. That answer says something parsed the request; it is not proof the route exists. " + "`routing`: the same without repository_id \u2014 the 404 shape gh's source predicts. " + "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " + "`upload`: the only mode that stores \u2014 one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent."),
-  file: stringType().optional().describe("Path to the file to send. Required for oversize and upload; ignored by the other two."),
-  content_type: stringType().optional().default("application/octet-stream").describe("Content-Type declared for the body. Defaults to application/octet-stream, which is what gh sends."),
-  repository_id: positiveInt("Numeric REST id of the repository to upload against. Looked up from the current repository when omitted.").optional(),
-  name: stringType().optional().describe("The `name` parameter to send, when a probe needs a specific one. Omitted entirely leaves the name the mode " + "decides: empty for `routing` and `endpoint` \u2014 which is what makes their 400 the endpoint's answer rather " + "than a missing parameter \u2014 and the file's basename for `oversize` and `upload`. Set it on `routing` to " + "measure the route with a valid name and no `repository_id`, which is the only way that measurement is " + "reachable: a non-empty name on the other modes is the file's, and those modes require one.")
-});
-function credential() {
-  const token = (process.env.GH_TOKEN ?? "").trim();
-  if (!token) {
-    throw new Error("GH_TOKEN was not delivered to this server. It reaches the server only through its `env:` entry " + '(`GH_TOKEN: "${GH_TOKEN}"` under tools.servers) \u2014 check the entry this server is declared by.');
-  }
-  return { token, kind: token.slice(0, 4) };
-}
 function resolveRepo() {
   const fromEnv = (process.env.GITHUB_REPOSITORY ?? "").trim();
   if (fromEnv)
@@ -18124,160 +18095,111 @@ function resolveRepo() {
     if (match)
       return match[1];
   }
-  throw new Error("GITHUB_REPOSITORY is unset and no GitHub remote could be read, so there is no repository to upload against.");
+  throw new Error("GITHUB_REPOSITORY is unset and no GitHub remote could be read, so there is no repository to report a published draft against.");
 }
-function resolveRepositoryId(repo) {
-  const { code, stdout, stderr } = gh("api", `repos/${repo}`, "--jq", ".id");
-  if (code !== 0) {
-    throw new Error(`could not read the repository id for ${repo}: ${stderr || stdout}`);
-  }
-  const id = Number(stdout.trim());
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new Error(`could not read the repository id for ${repo}: got ${stdout.trim().slice(0, 80)}`);
-  }
-  return id;
+function attachmentUrlAllowed(url) {
+  if (url.protocol !== "https:")
+    return false;
+  if (url.hostname === "github.com")
+    return url.pathname.startsWith("/user-attachments/");
+  return url.hostname === "private-user-images.githubusercontent.com";
 }
-function requestUrlFor(mode, parts) {
-  const query = new URLSearchParams;
-  query.set("name", parts.name ?? "");
-  query.set("content_type", parts.contentType);
-  if (parts.repositoryId !== undefined)
-    query.set("repository_id", String(parts.repositoryId));
-  return `${UPLOAD_ENDPOINT}?${query.toString()}`;
-}
-function readFileFor(mode, path) {
-  let size;
+function attachmentUrlFrom(raw) {
+  let url;
   try {
-    size = statSync2(path).size;
+    url = new URL(raw);
   } catch {
-    throw new Error(`could not read ${path}: no such file`);
+    throw new Error(`${raw} is not an absolute URL.`);
   }
-  if (mode === "upload" && size > UPLOAD_LIMIT_BYTES) {
-    throw new Error(`${path} is ${size} bytes, over the ${UPLOAD_LIMIT_BYTES}-byte attachment ceiling. ` + "upload mode is for a file that fits; run probe with mode oversize to measure how the endpoint refuses a larger one.");
+  if (!attachmentUrlAllowed(url)) {
+    throw new Error(`${raw} is not an attachment this tool fetches. It reads ` + "`https://github.com/user-attachments/files/<id>/<name>` and " + "`https://private-user-images.githubusercontent.com/...`, and refuses every other host: what it does with " + "the answer is write a file, and the URL is the caller's.");
   }
-  if (mode === "oversize" && size <= UPLOAD_LIMIT_BYTES) {
-    throw new Error(`${path} is ${size} bytes, at or under the ${UPLOAD_LIMIT_BYTES}-byte ceiling, so an oversize run would measure nothing. ` + "Make a file over the limit first, or run probe with mode upload.");
-  }
-  if (size > MAX_READ_BYTES) {
-    throw new Error(`${path} is ${size} bytes, past the ${MAX_READ_BYTES}-byte ceiling this tool reads into memory.`);
-  }
-  const bytes = new Uint8Array(readFileSync2(path));
-  return { bytes, size };
+  return url;
 }
-function interpret(mode, status, body, location) {
-  if (status >= 300 && status < 400) {
-    return `redirected (${status}): the endpoint did not answer the POST directly${location ? ` \u2014 Location: ${location}` : ""}. Record this as a route that moves rather than one that answers.`;
+function attachmentPathFor(url, parts = {}) {
+  const root = resolve(TMP_ROOT);
+  const requested = parts.dir ?? ATTACHMENT_DIR;
+  const dir = resolve(requested);
+  if (!(dir === root || dir.startsWith(root + sep))) {
+    throw new Error(`'${requested}' resolves to '${dir}', outside ${TMP_ROOT}. An attachment is written under ${TMP_ROOT} only: ` + "a file inside the checkout would be committed as this run's work.");
   }
-  if (status === 429) {
-    return "rate limited: wait and run the same probe again. The answer it exists for has not arrived yet.";
+  const name = parts.filename ?? decodeSegment(url.pathname.split("/").filter(Boolean).pop() ?? "");
+  if (!name) {
+    throw new Error(`${url.href} names no file, so pass \`filename\` to say what to save it as.`);
   }
-  if (mode === "routing") {
-    if (status === 404) {
-      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists, and endpoint mode's 400 is no proof either \u2014 it says something parsed the request.";
-    }
-    if (status === 400 && body.includes("Invalid name for request")) {
-      return "the request was rejected for its name before it ever routed, so this measured nothing about routing. " + "Measured: an empty `name` is answered 400 this way whether or not repository_id is present. Send this mode " + "with a non-empty `name` to reach the routing question.";
-    }
-    return "unexpected: the measured expectation for a request without repository_id is 404. Record the status and body.";
+  if (name === "." || name === ".." || /[/\\\0]/.test(name)) {
+    throw new Error(`'${name}' is not a file name. Pass the name alone \u2014 the directory is \`dir\`.`);
   }
-  if (mode === "endpoint") {
-    if (status === 400) {
-      const exact = body.includes("Invalid name for request") ? " \u2014 the body matches the message measured by hand" : "";
-      return `the request was read and rejected for its name, and nothing was stored: name was empty${exact}. ` + "This is the observation, not proof the route exists: a validation error says something parsed the parameters, " + "and a proxy or an authentication layer in front of a different route answers one too. " + "A rejected credential would be 401, and gh's source says a token without write access gets 404 rather than 403 \u2014 " + "record this status and body with the next call instead of settling the route on this one.";
-    }
-    if (status === 401) {
-      return "the credential was rejected by the endpoint. gh already refuses a ghs_ token client-side; an endpoint-side " + "rejection closes the direct-POST path too. The design does not reopen on this: the attachment route was " + "narrowed to the orphan branch (publish_draft), which reaches the repository with the credential the run " + "already has, and #12's attachment question is settled on that route. A different credential (a PAT in " + "tools.secrets) would be a new design question, not a reopening of this one.";
-    }
-    if (status === 403) {
-      return "the credential is recognised but forbidden. gh's source says a token without write access gets 404 here, so a 403 points at policy \u2014 an app not authorised, or SSO \u2014 rather than at the repository role.";
-    }
-    if (status === 404) {
-      return "the endpoint did not route for this credential. gh's source says READ and TRIAGE roles get 404 \u2014 check the token's permission on the repository before concluding the endpoint is gone.";
-    }
-    if (status === 201) {
-      return "the endpoint ignored the empty name and stored an asset anyway. There is no documented deletion API for a user-attachment asset \u2014 record the URL and treat the file as permanent.";
-    }
-    return "unexpected: the measured expectation is 400. Record the status and body.";
-  }
-  if (mode === "upload") {
-    if (status === 201) {
-      return "stored: the URL in the result is the attachment reference for markdown. There is no documented API to delete a user-attachment asset, so this URL is permanent \u2014 weigh that before the next upload.";
-    }
-    if (status === 413) {
-      return "over the size ceiling: the upload was refused and nothing was stored.";
-    }
-    if (status === 404) {
-      return "the endpoint refuses real uploads from this credential kind: measured, a `ghs_` token with write access " + "gets 404 on every body-bearing POST, whatever the size or MIME type (issues #111 and #164). The gh-source " + "reading of a low role is ruled out by that write access, and the route is real \u2014 the same session's " + "`endpoint` 400 proved the credential was accepted. Deliver the file another way: `publish_draft` onto the " + "orphan branch, which is the route the attachment design settled on. Whether a different token kind would " + "be stored is a trial with that token, not a question this mode can answer.";
-    }
-    if (status === 401) {
-      return "the credential was rejected by the endpoint. The design does not reopen on this: the attachment route is " + "the orphan branch (publish_draft), which does not POST here at all. A credential that would make this " + "mode work is a PAT \u2014 a new credential in tools.secrets, a decision taken on its own if a requirement " + "ever demands it (#164 chose not to).";
-    }
-    if (status === 403) {
-      return "the credential is recognised but forbidden \u2014 policy rather than role, since a low role gets 404 here.";
-    }
-    if (status === 422) {
-      return "refused as unprocessable \u2014 the endpoint's own message is in the body. This is the shape a validation rule (a format the endpoint rejects) takes.";
-    }
-    return "unexpected: the measured expectation is 404 with nothing stored \u2014 this credential kind is refused at the body stage. Record the status and body.";
-  }
-  if (status === 413) {
-    return "the ceiling is enforced server-side: a body over 25MB is not attached whole. That is a fact about this endpoint alone \u2014 the upload route carries no files any more, so nothing delivered is weighed against it. A published document is bounded by `publish_draft`'s own read ceiling instead.";
-  }
-  if (status === 201) {
-    return "the over-limit file WAS stored: the documented 25MB ceiling did not fire for this content type. Record the URL \u2014 the premise is contradicted, and the finding goes to the attachment design's thread rather than reopening it.";
-  }
-  if (status === 422 || status === 400) {
-    return `refused with ${status}: the ceiling may be reported as a validation message rather than 413. The body is the record; either way the file was not stored whole.`;
-  }
-  if (status === 404) {
-    return "the credential kind, not the size: measured, every body-bearing POST from a `ghs_` token is refused with " + "404 `Not Found` \u2014 over the ceiling (this mode) and under it (issues #111 and #164) alike \u2014 so the " + "permission reading and the size reading are both ruled out. The route and the credential were proven by " + "the same session's `endpoint` 400. Nothing was stored. Deliver the file by `publish_draft` onto the " + "orphan branch; the 25MB ceiling is a fact about the upload route, which no longer carries files.";
-  }
-  if (status === 401) {
-    return "the credential was rejected before the size question was reached. The design does not reopen on this: the " + "attachment route is the orphan branch (publish_draft), which does not POST here at all. A credential that " + "would be accepted here is a PAT \u2014 a new credential in tools.secrets, a decision taken on its own if a " + "requirement ever demands it (#164 chose not to).";
-  }
-  return "unexpected: the measured expectation is a refusal (413, or 422 carrying the ceiling as a validation message). Record the status and body.";
+  return join(dir, name);
 }
-async function probe(a) {
-  const { token, kind } = credential();
-  const mode = a.mode;
-  const contentType = a.content_type ?? "application/octet-stream";
-  const needsRepo = mode !== "routing";
-  const repositoryId = a.repository_id ?? (needsRepo ? resolveRepositoryId(resolveRepo()) : undefined);
-  const name = a.name ?? (mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined);
-  let body;
-  if (mode === "upload" || mode === "oversize") {
-    if (!a.file)
-      throw new Error(`mode ${mode} needs a file to send`);
-    ({ bytes: body } = readFileFor(mode, a.file));
+function decodeSegment(segment) {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
   }
-  const url = requestUrlFor(mode, { repositoryId, name, contentType });
+}
+async function downloadAttachment(source, dest) {
   const started = Date.now();
-  log2(`probe ${mode} ${body ? `${body.length}B` : "(no body)"}`);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `token ${token}`,
-      "Content-Type": contentType,
-      Accept: "application/vnd.github+json"
-    },
-    ...body ? { body } : {},
-    redirect: "manual",
+  log2(`fetch_attachment ${source} -> ${dest}`);
+  const response = await fetch(source, {
+    method: "GET",
+    redirect: "follow",
     signal: AbortSignal.timeout(REQUEST_ABORT_MS)
   });
-  const responseText = await response.text();
-  const location = response.headers.get("location") ?? undefined;
-  log2(`probe ${mode} -> ${response.status} in ${Date.now() - started}ms`);
-  const interpretation = interpret(mode, response.status, responseText, location);
-  return JSON.stringify({
-    mode,
-    sent: url,
-    content_length: body ? body.length : 0,
-    credential: `present, prefix ${kind}`,
-    status: response.status,
-    location: location ?? null,
-    body_excerpt: responseText.slice(0, BODY_EXCERPT_CHARS) || null,
-    interpretation
-  }, null, 2);
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(refusalFor(response.status, source));
+  }
+  const contentType = response.headers.get("content-type");
+  if (isMarkup(contentType)) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(markupRefusal(source, contentType));
+  }
+  const declared = Number(response.headers.get("content-length") ?? "");
+  if (declared > UPLOAD_LIMIT_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(overTheCeiling(source, declared));
+  }
+  const chunks = [];
+  let bytes = 0;
+  const stream = response.body;
+  if (stream) {
+    for await (const chunk of stream) {
+      bytes += chunk.length;
+      if (bytes > UPLOAD_LIMIT_BYTES)
+        throw new Error(overTheCeiling(source, bytes));
+      chunks.push(chunk);
+    }
+  }
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, Buffer.concat(chunks));
+  log2(`fetch_attachment ${bytes}B ${contentType ?? "(no content-type)"} in ${Date.now() - started}ms`);
+  return { bytes, contentType };
+}
+function isMarkup(contentType) {
+  return /^(text\/html|application\/xhtml\+xml)\b/i.test((contentType ?? "").trim());
+}
+function markupRefusal(source, contentType) {
+  return `${source} answered 200 as ${contentType}, which is a page rather than a document, and nothing was written. ` + "A login wall answers that way, and a path to it would be a path to a web page. Whether an attachment on a private " + "repository answers this page or a 404 has not been measured. Check the URL opens in a browser that is signed " + "in, or attach the file to the issue again.";
+}
+function overTheCeiling(source, bytes) {
+  return `${source} is ${bytes} bytes, over the ${UPLOAD_LIMIT_BYTES}-byte limit an attachment is saved at, so the read ` + "stopped there and nothing was written. A partial file would be indistinguishable from a whole one.";
+}
+function refusalFor(status, source) {
+  if (status === 404) {
+    return `${source} answered 404 and nothing was written. The case this tool does not cover is an attachment on a ` + "private repository: it sends no credential, and whether an anonymous GET of a private asset is refused has " + "not been measured \u2014 so a 404 here may be a visibility answer rather than an absence.";
+  }
+  if (status === 401 || status === 403) {
+    return `${source} answered ${status} and nothing was written. That is a refusal rather than an absence, and an ` + "attachment on a private repository read without a credential is the likely cause: this tool sends none.";
+  }
+  return `${source} answered ${status} and nothing was written.`;
+}
+async function fetchAttachment(a) {
+  const url = attachmentUrlFrom(a.url);
+  const dest = attachmentPathFor(url, { filename: a.filename, dir: a.dir });
+  const { bytes, contentType } = await downloadAttachment(url.href, dest);
+  return JSON.stringify({ path: dest, bytes, content_type: contentType, source_url: url.href }, null, 2);
 }
 function remoteTip(branch) {
   const read = readOriginBranch(branch);
@@ -18378,18 +18300,19 @@ async function publishDraft(a) {
   }
 }
 var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " + "The branch is this repository's own setting \u2014 `tools.servers.attachments.settings.branch` in config.yaml, " + "default `business-docs` \u2014 and is deliberately not an argument: naming a branch from the outside is what let a " + "publish land on somebody's work branch. " + "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " + "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " + "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " + "refused \u2014 an orphan branch is safe because it is not the reviewed one.";
+var FETCH_ATTACHMENT_DESCRIPTION = "Fetch one file a person attached to an issue and save it under /tmp, so a document can be opened, edited and " + "delivered (`publish_draft`) instead of pasted into the conversation. It reads " + "`https://github.com/user-attachments/files/<id>/<name>` and `https://private-user-images.githubusercontent.com/...` " + "and refuses every other host. It carries no credential \u2014 what it fetches is what an anonymous reader gets \u2014 and " + "the 302 GitHub answers is followed inside this call, because the signed URL it points at expires in five minutes " + "and a Location kept for a second call would already be dead. Returns the saved `path`, the decoded `bytes`, the " + "`content_type` and the `source_url`. A body over 25MB \u2014 the attachment ceiling \u2014 is refused and nothing is " + "written: `content-length` is checked first and the count is kept as the body streams, so up to the ceiling is held " + "in memory and the read is abandoned at the first chunk past it. A 200 carrying HTML is refused the same way \u2014 a " + "page rather than a document, and a path to it would be a path to a web page. `filename` names the saved file, since " + "an asset URL's last segment is often a generic `default.docx` while the comment shows the name it was attached as. " + "An attachment on a private repository is not measured: no credential is sent, so it comes back refused, and whether " + "GitHub answers a 404 or a page is unknown.";
 var { tools, dispatch } = buildMcpTools([
-  defineMcpTool({
-    name: "probe",
-    description: "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " + "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it reports what came back for the request and the credential \u2014 without saving a file. A status is an observation, not proof that the route exists; the body is what says which parameter or layer answered. " + "Mode `routing` omits repository_id \u2014 an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL \u2014 though measured, the Actions token this run carries is refused at the body stage (404, nothing stored), so delivering a file is `publish_draft`'s job and this tool's job is to measure. " + "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
-    schema: PROBE_SCHEMA,
-    handler: probe
-  }),
   defineMcpTool({
     name: "publish_draft",
     description: PUBLISH_DRAFT_DESCRIPTION,
     schema: PUBLISH_DRAFT_SCHEMA,
     handler: publishDraft
+  }),
+  defineMcpTool({
+    name: "fetch_attachment",
+    description: FETCH_ATTACHMENT_DESCRIPTION,
+    schema: FETCH_ATTACHMENT_SCHEMA,
+    handler: fetchAttachment
   })
 ]);
 async function main() {
@@ -18398,13 +18321,16 @@ async function main() {
 if (import.meta.main)
   main();
 export {
+  ATTACHMENT_DIR,
+  FETCH_ATTACHMENT_SCHEMA,
   PUBLISH_DRAFT_SCHEMA,
   REQUEST_ABORT_MS,
   UPLOAD_LIMIT_BYTES,
+  attachmentPathFor,
+  attachmentUrlAllowed,
+  attachmentUrlFrom,
   blobUrlFor,
+  downloadAttachment,
   indexInfoFor,
-  interpret,
-  readFileFor,
-  requestUrlFor,
   resolveDraftFiles
 };

@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.52",
+  "version": "v0.21.53",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -98,8 +98,12 @@
     ".github/atomaton/prompt-template.md",
     ".github/atomaton/rulesets/main.json",
     ".github/atomaton/skills/delivery/pipeline-setup.md",
-    ".github/atomaton/skills/docs/design-doc.md",
-    ".github/atomaton/skills/docs/generate.mjs",
+    ".github/atomaton/skills/docs/customer-doc.md",
+    ".github/atomaton/skills/docs/customer-doc.mjs",
+    ".github/atomaton/skills/docs/deps.mjs",
+    ".github/atomaton/skills/docs/templates/book.fods",
+    ".github/atomaton/skills/docs/templates/deck.fodp",
+    ".github/atomaton/skills/docs/templates/report.fodt",
     ".github/atomaton/skills/engineering/environment.md",
     ".github/atomaton/skills/engineering/secrets-in-a-check.md",
     ".github/atomaton/skills/research/web-search.md",
