@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   ATTACHMENT_DIR,
   FETCH_ATTACHMENT_SCHEMA,
+  REQUEST_ABORT_MS,
   attachmentPathFor,
   attachmentUrlAllowed,
   attachmentUrlFrom,
@@ -14,14 +15,14 @@ import {
  * `fetch_attachment`, held to what it saves, where it saves it, and what it will not
  * be aimed at.
  *
- * The far end is measured on the issue, not here: a pull request has no credential and
- * the deployed server has no `fetch_attachment` until this merges. What a pull request
- * CAN hold is everything that does not need GitHub to answer — the allowlist, the
- * destination rule, the ceiling, and that a redirect is followed inside the one call —
- * and those are exactly the parts that decide whether a real fetch saves a document
- * or something else entirely. The redirect and the ceiling are driven against a local
- * server, so the shapes are real: a 302 in the same call, and a body that is not
- * buffered past the limit.
+ * The far end is measured on the issue, not here: a pull request has no guarantee that
+ * a real asset URL is reachable. What a pull request CAN hold is everything that does
+ * not need GitHub to answer — the allowlist, the destination rule, the ceiling, that a
+ * redirect is followed inside the one call, and that a page is not saved as a document
+ * — and those are exactly the parts that decide whether a real fetch saves a document
+ * or something else entirely. The redirect, the ceiling and the content type are driven
+ * against a local server, so the shapes are real: a 302 in the same call, a body that
+ * is not buffered past the limit, and a 200 that carries HTML.
  *
  * The measured facts this rests on are #415's, recorded on #12's thread: an anonymous
  * GET of the real asset URL is 302 to a signed `objects.githubusercontent.com` URL that
@@ -116,6 +117,13 @@ describe("fetch_attachment's redirect and ceiling", () => {
       if (path === "/signed/asset") {
         return new Response(body, { headers: { "content-type": "application/octet-stream" } });
       }
+      if (path === "/login") {
+        // What GitHub answers a request for something the run cannot see: 200, and a
+        // page. Saving it would report a path to a document that is a web page.
+        return new Response("<!DOCTYPE html><html><body>Sign in</body></html>", {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
       if (path === "/big") {
         const chunk = new Uint8Array(1024 * 1024);
         let sent = 0;
@@ -183,5 +191,35 @@ describe("fetch_attachment's redirect and ceiling", () => {
     const dest = join(dir, "missing.docx");
     await expect(downloadAttachment(`${origin}/nothing`, dest)).rejects.toThrow(/answered 404/);
     expect(existsSync(dest)).toBe(false);
+  });
+
+  test("a 200 that carries a page is refused, and nothing is written", async () => {
+    const dir = scratch();
+    const dest = join(dir, "login.docx");
+    await expect(downloadAttachment(`${origin}/login`, dest)).rejects.toThrow(/a page rather than a document/);
+    expect(existsSync(dest), "the saved file would be a web page with a document's name").toBe(false);
+  });
+});
+
+/**
+ * This server's own abort has to be the one that fires.
+ *
+ * atoma cuts a `tools/call` off at the server entry's `request_timeout_secs`, and a
+ * call cut off there is DISCARDED — the server keeps working and nobody is waiting
+ * for the answer. So the entry must allow more time than the network calls this
+ * server makes, which is the same relationship `delegate`'s 660 has to its sub-run's
+ * 600-second limit.
+ */
+describe("the network call gets to time out before atoma gives up on it", () => {
+  test("the shipped entry allows longer than the server's own abort", () => {
+    const defaults = Bun.YAML.parse(readFileSync("src/entrypoints/tools/defaults.yaml", "utf8")) as {
+      servers?: Record<string, { request_timeout_secs?: number }>;
+    };
+    const allowed = defaults.servers?.attachments?.request_timeout_secs;
+    expect(allowed, "the attachments entry declares no request_timeout_secs, so atoma's 60-second default applies").toBeDefined();
+    expect(
+      allowed! * 1000,
+      "atoma would discard the call before this server's own abort",
+    ).toBeGreaterThan(REQUEST_ABORT_MS);
   });
 });

@@ -15,17 +15,15 @@ import { DEFAULT_DOCS_BRANCH } from "../../src/adapters/runner/config.ts";
 /**
  * `publish_draft`, held to what it puts on a branch.
  *
- * The contract tests in `attachments-shape.test.ts` check the request a probe builds,
- * because that is all a pull request can check about the upload endpoint. This one is
- * different: publishing runs `git` and nothing else, so a real remote can be built in
- * a temporary directory and the whole thing driven end to end. That matters more here
+ * Publishing runs `git` and nothing else, so a real remote can be built in a
+ * temporary directory and the whole thing driven end to end. That matters more here
  * than anywhere — the tool's promise is that the run's own checkout is NOT disturbed,
  * and that promise is only checkable by looking at a checkout afterwards.
  *
  * No `gh` and no credential are involved. `publish_draft` authenticates by being a
  * server rather than a shell: it runs `git` in a process that inherited the checkout's
- * own `.git/config`. That is why this test can run on a pull request while the upload
- * endpoint's cannot.
+ * own `.git/config`. That is why this test can run on a pull request while a real
+ * fetch of an attachment cannot.
  *
  * ## Windows: nine tests here are expected to fail there
  *
@@ -176,7 +174,7 @@ function payloadOf(response: any): any {
 }
 
 describe("the tool the agents are handed", () => {
-  test("tools/list offers publish_draft beside probe", async () => {
+  test("tools/list offers publish_draft and fetch_attachment, and nothing else", async () => {
     const response = await sendRequest("attachments.ts", {
       jsonrpc: "2.0",
       id: 1,
@@ -184,8 +182,7 @@ describe("the tool the agents are handed", () => {
       params: {},
     });
     const names = (response.result.tools as { name: string }[]).map((tool) => tool.name);
-    expect(names).toContain("probe");
-    expect(names).toContain("publish_draft");
+    expect(names.sort()).toEqual(["fetch_attachment", "publish_draft"]);
   }, 30_000);
 
   /** The interface #111's skill is written against, pin names and all. */

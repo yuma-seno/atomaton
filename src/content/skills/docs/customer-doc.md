@@ -16,7 +16,7 @@ The scripts, both beside this file in the shipped tree:
 | Script | What it is for |
 | --- | --- |
 | `customer-doc.mjs` | `deps`, `template`, `fill`, `render`, `uno` — this procedure |
-| `deps.mjs` | the one dependency install both this and `docs/design-doc`'s `generate.mjs` use |
+| `deps.mjs` | the LibreOffice, CJK-font and venv install both legs below use |
 
 Dependencies are installed on demand into the cache directory and never into
 `environment.setup_commands`. `bun "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton/skills/docs/customer-doc.mjs" deps` installs and reports
@@ -41,8 +41,7 @@ bun "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton/skills/docs/customer-doc.mjs
 
 The full path matters: the scripts are not in a run's working directory, so every
 example spells the shipped location — `${ATOMATON_MACHINERY_ROOT:-.}` is where the
-run's copy of the machinery lives, with the checkout as the `:-.` fallback — exactly
-as `docs/design-doc` does for `generate.mjs`.
+run's copy of the machinery lives, with the checkout as the `:-.` fallback.
 
 Prefer the flat leg. Its source is text, so a fix is an edit in a diff and one
 more conversion — not a round trip through a binary that rewrites everything it
@@ -59,6 +58,16 @@ that states what was measured about it:
 | `report.fodt` | docx | A4 portrait, title page, 概要 / システム構成 / スケジュール / 費用 / 体制・連絡先, footer with page numbers |
 | `deck.fodp` | pptx | 16:9, three slides: title, agenda, content-with-bullets |
 | `book.fods` | xlsx | two sheets: 見積 (itemised, formulas for 小計/消費税/合計) and 前提条件 |
+
+**A template a person attached to the issue.** The customer's own template usually
+arrives as a file on the issue rather than as a path in the tree. `fetch_attachment`
+turns it into one: pass the URL from the comment it was posted in
+(`https://github.com/user-attachments/files/<id>/<name>`), and the bytes are saved
+under `/tmp/atomaton-workspace/attachments` — the one `/tmp` directory that survives
+into the next run on the issue. It reads only GitHub's two attachment hosts and sends
+no credential, so an attachment on a private repository comes back refused rather than
+saved — as a 404 or as a page, which of the two has not been measured. That saved path
+is then what `--template` takes in §4: a customer's `.docx` is the UNO leg.
 
 A placeholder is `{{UPPER_SNAKE}}` and is substituted everywhere it appears,
 including inside table cells. Values are XML-escaped, so a name with `&` or `<`
@@ -212,12 +221,11 @@ the run that ran it, not from this page.
 ## 7. Where the files go
 
 The produced docx/pptx/xlsx are **published, not committed** — `publish_draft`
-onto the orphan branch, the same route and the same rules as `docs/design-doc`:
-no `branch` argument, one call per publication, `blob_url` per file in the
-report. The upload endpoint is closed for this credential and was measured so
-(a `ghs_` Actions token gets 404 for every body-bearing POST); that measurement
-is `docs/design-doc`'s, it is not repeated here, and it is not re-measured to
-re-derive it.
+onto the orphan branch: no `branch` argument, one call per publication,
+`blob_url` per file in the report. Putting the file into a comment instead would
+mean the endpoint `gh issue comment --attach` posts to, and an Actions token is
+not on that endpoint's allowlist — measured, a body-bearing POST answers 404 — so
+the orphan branch is the route there is.
 
 What *is* committed is the template and the scripts: they are text, they diff,
 and they are the thing the next run changes. Never commit a generated `.docx`,
