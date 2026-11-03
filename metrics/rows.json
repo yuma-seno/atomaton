@@ -897,8 +897,8 @@
   {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
-    "messages": 63,
-    "calls": 22,
+    "messages": 71,
+    "calls": 24,
     "failed": 0,
     "refused": 2,
     "skills": [],
@@ -913,8 +913,8 @@
       "grep": 4,
       "search_code": 1,
       "fetch": 2,
-      "create_sub_issue": 2,
-      "launch_sub_agent": 2
+      "create_sub_issue": 3,
+      "launch_sub_agent": 3
     },
     "acts": {
       "other": 2
@@ -1010,6 +1010,23 @@
           }
         },
         "started": "2026-11-03T07:28:43Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T09:25:50Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 71,
+        "seconds": 174,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_sub_issue": 1
+          }
+        },
+        "started": "2026-11-03T09:22:56Z"
       }
     ]
   },
