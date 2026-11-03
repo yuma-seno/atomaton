@@ -1,61 +1,48 @@
 #!/usr/bin/env bun
 /**
- * attachments.ts — the one server that reaches GitHub's user-asset upload
- * endpoint, and the probe that answers what that endpoint accepts.
+ * attachments.ts — the two things about files a run cannot do through the shell:
+ * read a document a person attached to an issue (`fetch_attachment`), and put a
+ * document where a person can open it (`publish_draft`, onto an orphan branch).
  *
- * ## Why a server, when `gh --attach` exists
+ * ## Why a server, and not the shell
  *
- * `gh issue comment --attach` refuses the Actions token client-side: the
- * allowlist in `internal/attachments/client.go` at v2.101.0 is
- * `gho_`/`ghp_`/`github_pat_`, so a `ghs_` token never reaches the wire. And
- * the shell cannot make the POST either — `curl` is refused by `shell_guard`,
- * and the shell server declares no credentials, so there would be nothing to
- * send. Measured, not reasoned: three runs each hit a refusal before any
- * request was built.
+ * Both are refused there. `curl` and `wget` are routed away from the shell by
+ * `shell_guard`, so a GET has no way to run at all — measured, the command is
+ * refused before a request is built. Every mutating `git` subcommand is refused
+ * the same way, and `commit_and_push` names a branch from the work-branch
+ * convention and can build no other.
  *
- * What is left is the shape every credentialed check here takes: the token
- * lives in a tool server (`env: GH_TOKEN`), the agent calls the tool, and the
- * tool reports what the far end said. The check runs where the credential
- * runs — which is after a person merged the change that declares the server,
- * never inside the pull request that proposes it.
+ * ## `fetch_attachment` writes the bytes instead of the conversation
  *
- * ## `probe` stores nothing by default
+ * Handing a document back through the conversation does not work: measured, one
+ * pasted that way arrives as 8,000 characters of mojibake and is cut off. So the
+ * body is written under `/tmp` and the answer is a path, which the run can then
+ * open, edit and publish.
  *
- * Three of its four modes send requests the endpoint cannot fulfil into an
- * asset: `routing` omits `repository_id`, `endpoint` empties `name`, and
- * `oversize` sends past the size ceiling. Each answer is an observation to
- * record — the status, the body, and whether anything was stored — and none of
- * them is proof the route exists: a `400` naming a parameter says something
- * parsed the request, a `404` says something did not route it, and a layer in
- * front of a different route answers both. `upload` is the one mode that stores,
- * because a `201` is only obtainable by storing, and it is opt-in by name.
- *
- * A stored user-attachment asset has no documented deletion API. The URL is
- * the artifact and it is permanent; that is part of why storing is not the
- * default.
+ * It sends no credential. A public asset answers an anonymous GET with the bytes,
+ * and there a token accepted and a token ignored are the same response — so there
+ * is no observation the credential buys here, and one fewer place it goes. What
+ * that costs is in the refusal a `404` produces: "not there" and "not visible to
+ * this run" are the same answer. The redirect GitHub answers with is followed
+ * inside the same call, because the signed URL behind it expires in five minutes
+ * and a `Location` handed back would be dead by the second call.
  *
  * ## Why an orphan branch is published from here too
  *
- * The other half of the same design question — where a document that is not a
- * deliverable lives — is an orphan branch, and it is reached from here for the
- * same reason the POST is: the shell cannot do it. `git switch`, `git push` and
- * every other mutating subcommand are refused by `shell_guard`, and
- * `commit_and_push` names a branch from the work-branch convention and can
- * build no other. Measured, both, rather than reasoned about.
- *
- * What makes it a *credential* question at all is that this server is a tool
- * server: it runs `git` in its own process, and the checkout it inherits
- * already carries the credential `actions/checkout` wrote into `.git/config`.
- * No token is read here and none is passed — the point is that the command
- * runs where the run's own credential is, rather than in a shell that has
- * none. `GH_TOKEN` is declared for `probe` alone.
+ * The other half of the same question — where a document that is not a
+ * deliverable lives — is an orphan branch, and it is reached from here because
+ * the shell cannot do it either. What makes it a *credential* question is that
+ * this is a tool server: it runs `git` in its own process, and the checkout it
+ * inherits already carries what `actions/checkout` wrote into `.git/config`. No
+ * token is read here and none is passed — the point is that the command runs
+ * where the run's own credential is, rather than in a shell that has none.
  */
-import { readFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
-import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z } from "../../../adapters/mcp/mcp-tool.ts";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { buildMcpTools, defineMcpTool, serveMcpServer, z } from "../../../adapters/mcp/mcp-tool.ts";
 import { getDocsBranch } from "../../../adapters/runner/config.ts";
-import { gh, gitRun, gitRunWith } from "../../../adapters/github/gh.ts";
+import { gitRun, gitRunWith } from "../../../adapters/github/gh.ts";
 import {
   checkedOutBranch,
   readOriginBranch,
@@ -77,35 +64,38 @@ function log(message: string): void {
 // writable directories from its PATH. See `../lib/harden.ts`.
 hardenCredentialHolder(log);
 
-/** The endpoint gh's `internal/attachments/client.go` posts to, on github.com. */
-const UPLOAD_ENDPOINT = "https://uploads.github.com/user-attachments/assets";
-
 /** The documented ceiling for Office, PDF and zip attachments; images and video are lower. */
 export const UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 
 /**
- * The largest file either tool will handle at all.
+ * The largest draft this server will hand to `git`.
  *
- * For `probe` it is the point past which the file is not read into memory; for
- * `publish_draft` it is the point past which it is not handed to `git`. Both are far
- * above the 25MB attachment ceiling, so this bound is about not being handed an
- * accident — a log, an image dump — rather than about either limit.
+ * Far above the 25MB attachment ceiling, so this bound is about not being handed an
+ * accident — a log, an image dump — rather than about that limit.
  */
 const MAX_READ_BYTES = 128 * 1024 * 1024;
 
 /**
- * How long this server waits for the endpoint before giving up.
+ * How long this server waits on the network before giving up.
  *
  * Exported because it is only useful in relation to something outside this file:
  * `defaults.yaml` must allow a longer `tools/call` than this, or atoma discards the
- * call first and the server's own answer arrives after nobody is waiting for it —
- * and in `upload` mode the file may already have been stored. `attachments-shape.test.ts`
- * reads both and holds them in that order.
+ * call first and the server's own answer arrives after nobody is waiting for it.
+ * `attachments-fetch.test.ts` reads both and holds them in that order.
  */
 export const REQUEST_ABORT_MS = 120_000;
 
-/** How much of a response body reaches the result. The status decides the design; the body records why. */
-const BODY_EXCERPT_CHARS = 2_000;
+/**
+ * The one directory outside the checkout a run may write to.
+ *
+ * `/tmp/atomaton-workspace` is the part of it that survives into the next run on an
+ * issue, and nothing else here survives at all — which is why a fetched attachment is
+ * written under this and not beside the code.
+ */
+const TMP_ROOT = "/tmp";
+
+/** Where a fetched attachment lands when the caller names no directory. */
+export const ATTACHMENT_DIR = "/tmp/atomaton-workspace/attachments";
 
 /** The blob mode every published draft gets: an ordinary, non-executable file. */
 const DRAFT_FILE_MODE = "100644";
@@ -150,6 +140,32 @@ export const PUBLISH_DRAFT_SCHEMA = z.object({
     .min(1)
     .describe("The drafts to publish, each as a local `path` and the `target` it takes on the branch."),
   message: z.string().min(1).describe("Commit message for this publication."),
+});
+
+export const FETCH_ATTACHMENT_SCHEMA = z.object({
+  url: z
+    .string()
+    .min(1)
+    .describe(
+      "The attachment URL to fetch: `https://github.com/user-attachments/files/<id>/<name>`, or a " +
+        "`private-user-images.githubusercontent.com` URL. Every other host is refused.",
+    ),
+  filename: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "What to save it as, such as `ペダル.docx`. Defaults to the URL's last segment, which is often a generic " +
+        "`default.docx` rather than the name the comment shows. A file name, not a path.",
+    ),
+  dir: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      `The directory to save into. Defaults to \`${ATTACHMENT_DIR}\`, which survives into the next run on this ` +
+        `issue; an absolute path under ${TMP_ROOT} only.`,
+    ),
 });
 
 /**
@@ -211,7 +227,7 @@ export function resolveDraftFiles(files: { path: string; target: string }[]): Dr
   // The work tree and /tmp — the pinned interface: a draft is either a file in the
   // checkout or an absolute path under /tmp, which is where a conversion step puts its
   // output. `/tmp/atomaton-workspace` is the one subdirectory of it that survives a run.
-  const roots = [base, "/tmp"];
+  const roots = [base, TMP_ROOT];
   const seen = new Set<string>();
   const out: DraftFile[] = [];
 
@@ -297,62 +313,7 @@ function gitInIndexStdin(indexPath: string, args: string[], input: string): Retu
   return gitRunWith({ ...indexEnv(indexPath), stdin: input }, ...args);
 }
 
-export type ProbeMode = "routing" | "endpoint" | "oversize" | "upload";
-
-const PROBE_SCHEMA = z.object({
-  mode: z
-    .enum(["routing", "endpoint", "oversize", "upload"])
-    .optional()
-    .default("endpoint")
-    .describe(
-      "What to measure. `endpoint` (default): POST with repository_id and an empty name — a request that cannot store, measured to answer 400 with the `name` parameter named in the body. That answer says something parsed the request; it is not proof the route exists. " +
-        "`routing`: the same without repository_id — the 404 shape gh's source predicts. " +
-        "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " +
-        "`upload`: the only mode that stores — one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent.",
-    ),
-  file: z
-    .string()
-    .optional()
-    .describe("Path to the file to send. Required for oversize and upload; ignored by the other two."),
-  content_type: z
-    .string()
-    .optional()
-    .default("application/octet-stream")
-    .describe("Content-Type declared for the body. Defaults to application/octet-stream, which is what gh sends."),
-  repository_id: positiveInt(
-    "Numeric REST id of the repository to upload against. Looked up from the current repository when omitted.",
-  ).optional(),
-  name: z
-    .string()
-    .optional()
-    .describe(
-      "The `name` parameter to send, when a probe needs a specific one. Omitted entirely leaves the name the mode " +
-        "decides: empty for `routing` and `endpoint` — which is what makes their 400 the endpoint's answer rather " +
-        "than a missing parameter — and the file's basename for `oversize` and `upload`. Set it on `routing` to " +
-        "measure the route with a valid name and no `repository_id`, which is the only way that measurement is " +
-        "reachable: a non-empty name on the other modes is the file's, and those modes require one.",
-    ),
-});
-
-/**
- * The credential, and the four characters that say what kind it is.
- *
- * A prefix is not a secret — it is the identifier of the token's kind, and it
- * is what makes a 401 readable: `ghs_` refused by the endpoint is a different
- * design answer from `gho_` refused for being expired.
- */
-function credential(): { token: string; kind: string } {
-  const token = (process.env.GH_TOKEN ?? "").trim();
-  if (!token) {
-    throw new Error(
-      "GH_TOKEN was not delivered to this server. It reaches the server only through its `env:` entry " +
-        '(`GH_TOKEN: "${GH_TOKEN}"` under tools.servers) — check the entry this server is declared by.',
-    );
-  }
-  return { token, kind: token.slice(0, 4) };
-}
-
-/** The repository to upload against, as `owner/name`. */
+/** The repository whose blob URLs a published draft is reported against, as `owner/name`. */
 function resolveRepo(): string {
   const fromEnv = (process.env.GITHUB_REPOSITORY ?? "").trim();
   if (fromEnv) return fromEnv;
@@ -363,283 +324,217 @@ function resolveRepo(): string {
     if (match) return match[1]!;
   }
   throw new Error(
-    "GITHUB_REPOSITORY is unset and no GitHub remote could be read, so there is no repository to upload against.",
+    "GITHUB_REPOSITORY is unset and no GitHub remote could be read, so there is no repository to report a published draft against.",
   );
 }
 
-/** The repository's numeric REST id, which is what the endpoint routes by. */
-function resolveRepositoryId(repo: string): number {
-  const { code, stdout, stderr } = gh("api", `repos/${repo}`, "--jq", ".id");
-  if (code !== 0) {
-    throw new Error(`could not read the repository id for ${repo}: ${stderr || stdout}`);
-  }
-  const id = Number(stdout.trim());
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new Error(`could not read the repository id for ${repo}: got ${stdout.trim().slice(0, 80)}`);
-  }
-  return id;
+/**
+ * The hosts `fetch_attachment` reads.
+ *
+ * It is not a token guard — this tool sends no credential. It keeps a tool whose
+ * whole job is to write a file under `/tmp` from being aimed at any host on the
+ * internet: the caller chooses the URL, and the answer is written to disk. The two
+ * addresses that carry a chat attachment are
+ * `github.com/user-attachments/files/<id>/<name>` and the `private-user-images` host
+ * a private repository's asset redirects through.
+ */
+export function attachmentUrlAllowed(url: URL): boolean {
+  if (url.protocol !== "https:") return false;
+  if (url.hostname === "github.com") return url.pathname.startsWith("/user-attachments/");
+  return url.hostname === "private-user-images.githubusercontent.com";
 }
 
-/**
- * The request each mode sends, as a URL.
- *
- * Separate from the send so the shape a mode produces is testable without a
- * credential — this is the "verify the shape here, the far end there" half of
- * a check that can only mean something after a merge.
- */
-export function requestUrlFor(
-  mode: ProbeMode,
-  parts: { repositoryId?: number; name?: string; contentType: string },
-): string {
-  const query = new URLSearchParams();
-  // The order gh uses: name, content_type, repository_id. An empty `name` is a
-  // value, not an omission — it is what makes the 400 the endpoint's own
-  // answer rather than a missing parameter.
-  query.set("name", parts.name ?? "");
-  query.set("content_type", parts.contentType);
-  if (parts.repositoryId !== undefined) query.set("repository_id", String(parts.repositoryId));
-  return `${UPLOAD_ENDPOINT}?${query.toString()}`;
-}
-
-/**
- * Read the file a mode sends, or say which rule refused it.
- *
- * The refusals are the measurement's own guardrails: an `upload` over the
- * documented ceiling would measure nothing but a longer wait, and an `oversize`
- * under it would measure nothing at all.
- */
-export function readFileFor(mode: "oversize" | "upload", path: string): { bytes: Uint8Array; size: number } {
-  let size: number;
+/** The URL as an attachment address, or the refusal naming what this tool does read. */
+export function attachmentUrlFrom(raw: string): URL {
+  let url: URL;
   try {
-    size = statSync(path).size;
+    url = new URL(raw);
   } catch {
-    throw new Error(`could not read ${path}: no such file`);
+    throw new Error(`${raw} is not an absolute URL.`);
   }
-  if (mode === "upload" && size > UPLOAD_LIMIT_BYTES) {
+  if (!attachmentUrlAllowed(url)) {
     throw new Error(
-      `${path} is ${size} bytes, over the ${UPLOAD_LIMIT_BYTES}-byte attachment ceiling. ` +
-        "upload mode is for a file that fits; run probe with mode oversize to measure how the endpoint refuses a larger one.",
+      `${raw} is not an attachment this tool fetches. It reads ` +
+        "`https://github.com/user-attachments/files/<id>/<name>` and " +
+        "`https://private-user-images.githubusercontent.com/...`, and refuses every other host: what it does with " +
+        "the answer is write a file, and the URL is the caller's.",
     );
   }
-  if (mode === "oversize" && size <= UPLOAD_LIMIT_BYTES) {
-    throw new Error(
-      `${path} is ${size} bytes, at or under the ${UPLOAD_LIMIT_BYTES}-byte ceiling, so an oversize run would measure nothing. ` +
-        "Make a file over the limit first, or run probe with mode upload.",
-    );
-  }
-  if (size > MAX_READ_BYTES) {
-    throw new Error(`${path} is ${size} bytes, past the ${MAX_READ_BYTES}-byte ceiling this tool reads into memory.`);
-  }
-  const bytes = new Uint8Array(readFileSync(path));
-  return { bytes, size };
+  return url;
 }
 
 /**
- * What a status means, per mode — the probe's whole output beyond the raw
- * numbers. The expected values are the ones measured by hand on #12's thread
- * and settled by the contrast trial on #111's: 404 for a request without
- * repository_id, 400 "Invalid name for request" for one with an empty name,
- * against a token the endpoint accepted — and 404 with nothing stored for any
- * body-bearing POST from an Actions token, which is why the file route is
- * `publish_draft` onto the orphan branch rather than this endpoint.
+ * The file to save into — the caller's name, or the URL's last segment.
+ *
+ * `filename` is an argument because the two names differ: an asset URL's last segment
+ * is a generic `default.docx`, while the comment the file was attached in shows the
+ * name the person gave it (`ペダル.docx`). `dir` is an argument for the same kind of
+ * reason: the default is the one directory under `/tmp` that survives into the next
+ * run on an issue, and a caller that means a different one says so.
+ *
+ * Nothing outside `/tmp` is written, and the refusal says why: a file inside the
+ * checkout is this run's work and would be committed as part of it.
  */
-export function interpret(mode: ProbeMode, status: number, body: string, location?: string): string {
-  if (status >= 300 && status < 400) {
-    return `redirected (${status}): the endpoint did not answer the POST directly${location ? ` — Location: ${location}` : ""}. Record this as a route that moves rather than one that answers.`;
-  }
-  if (status === 429) {
-    return "rate limited: wait and run the same probe again. The answer it exists for has not arrived yet.";
-  }
-
-  if (mode === "routing") {
-    if (status === 404) {
-      return "matches the measured expectation: without repository_id the endpoint does not route. On its own a 404 does not prove the endpoint exists, and endpoint mode's 400 is no proof either — it says something parsed the request.";
-    }
-    if (status === 400 && body.includes("Invalid name for request")) {
-      return (
-        "the request was rejected for its name before it ever routed, so this measured nothing about routing. " +
-        "Measured: an empty `name` is answered 400 this way whether or not repository_id is present. Send this mode " +
-        "with a non-empty `name` to reach the routing question."
-      );
-    }
-    return "unexpected: the measured expectation for a request without repository_id is 404. Record the status and body.";
-  }
-
-  if (mode === "endpoint") {
-    if (status === 400) {
-      const exact = body.includes("Invalid name for request") ? " — the body matches the message measured by hand" : "";
-      return (
-        `the request was read and rejected for its name, and nothing was stored: name was empty${exact}. ` +
-        "This is the observation, not proof the route exists: a validation error says something parsed the parameters, " +
-        "and a proxy or an authentication layer in front of a different route answers one too. " +
-        "A rejected credential would be 401, and gh's source says a token without write access gets 404 rather than 403 — " +
-        "record this status and body with the next call instead of settling the route on this one."
-      );
-    }
-    if (status === 401) {
-      return (
-        "the credential was rejected by the endpoint. gh already refuses a ghs_ token client-side; an endpoint-side " +
-        "rejection closes the direct-POST path too. The design does not reopen on this: the attachment route was " +
-        "narrowed to the orphan branch (publish_draft), which reaches the repository with the credential the run " +
-        "already has, and #12's attachment question is settled on that route. A different credential (a PAT in " +
-        "tools.secrets) would be a new design question, not a reopening of this one."
-      );
-    }
-    if (status === 403) {
-      return "the credential is recognised but forbidden. gh's source says a token without write access gets 404 here, so a 403 points at policy — an app not authorised, or SSO — rather than at the repository role.";
-    }
-    if (status === 404) {
-      return "the endpoint did not route for this credential. gh's source says READ and TRIAGE roles get 404 — check the token's permission on the repository before concluding the endpoint is gone.";
-    }
-    if (status === 201) {
-      return "the endpoint ignored the empty name and stored an asset anyway. There is no documented deletion API for a user-attachment asset — record the URL and treat the file as permanent.";
-    }
-    return "unexpected: the measured expectation is 400. Record the status and body.";
-  }
-
-  if (mode === "upload") {
-    if (status === 201) {
-      return "stored: the URL in the result is the attachment reference for markdown. There is no documented API to delete a user-attachment asset, so this URL is permanent — weigh that before the next upload.";
-    }
-    if (status === 413) {
-      return "over the size ceiling: the upload was refused and nothing was stored.";
-    }
-    if (status === 404) {
-      // Measured on #111's run, the contrast trial that settled what this answer
-      // means. The same session, the same `ghs_` token — one with write on the
-      // repository — and a correct repository_id: the empty-name request came
-      // back 400 (route real, credential accepted) and every body-bearing POST
-      // came back 404 — a 20,898-byte pdf, the same bytes as octet-stream, a
-      // 5-byte text. Size and MIME are ruled out by the spread; the role reading
-      // is ruled out by the write access. What a 404 on a body-bearing POST
-      // means here is therefore settled as far as a single credential kind can
-      // settle it: the endpoint refuses real uploads from Actions tokens, and
-      // whether it would refuse another kind is a trial with a different token
-      // — a person's procedure, not this tool's.
-      return (
-        "the endpoint refuses real uploads from this credential kind: measured, a `ghs_` token with write access " +
-        "gets 404 on every body-bearing POST, whatever the size or MIME type (issues #111 and #164). The gh-source " +
-        "reading of a low role is ruled out by that write access, and the route is real — the same session's " +
-        "`endpoint` 400 proved the credential was accepted. Deliver the file another way: `publish_draft` onto the " +
-        "orphan branch, which is the route the attachment design settled on. Whether a different token kind would " +
-        "be stored is a trial with that token, not a question this mode can answer."
-      );
-    }
-    if (status === 401) {
-      return (
-        "the credential was rejected by the endpoint. The design does not reopen on this: the attachment route is " +
-        "the orphan branch (publish_draft), which does not POST here at all. A credential that would make this " +
-        "mode work is a PAT — a new credential in tools.secrets, a decision taken on its own if a requirement " +
-        "ever demands it (#164 chose not to)."
-      );
-    }
-    if (status === 403) {
-      return "the credential is recognised but forbidden — policy rather than role, since a low role gets 404 here.";
-    }
-    if (status === 422) {
-      return "refused as unprocessable — the endpoint's own message is in the body. This is the shape a validation rule (a format the endpoint rejects) takes.";
-    }
-    return "unexpected: the measured expectation is 404 with nothing stored — this credential kind is refused at the body stage. Record the status and body.";
-  }
-
-  // oversize
-  if (status === 413) {
-    // A fact about this endpoint, and only this one: the upload route carries no
-    // files any more (`upload` mode's 404 says why), so the ceiling bounds
-    // nothing a run delivers. Sizes are bounded where the files actually go —
-    // `publish_draft`'s own read ceiling, MAX_READ_BYTES.
-    return "the ceiling is enforced server-side: a body over 25MB is not attached whole. That is a fact about this endpoint alone — the upload route carries no files any more, so nothing delivered is weighed against it. A published document is bounded by `publish_draft`'s own read ceiling instead.";
-  }
-  if (status === 201) {
-    return "the over-limit file WAS stored: the documented 25MB ceiling did not fire for this content type. Record the URL — the premise is contradicted, and the finding goes to the attachment design's thread rather than reopening it.";
-  }
-  if (status === 422 || status === 400) {
-    return `refused with ${status}: the ceiling may be reported as a validation message rather than 413. The body is the record; either way the file was not stored whole.`;
-  }
-  if (status === 404) {
-    // Measured on #109's run, and settled by #111's: a 27MB body came back 404
-    // `Not Found` and nothing was stored — and #111's contrast trial then
-    // established the cause. The same `ghs_` token, same session, correct
-    // repository_id, bodies UNDER the ceiling (a 20KB pdf, the same bytes as
-    // octet-stream, a 5-byte text) also came back 404, so size is not the
-    // cause: the credential's kind is. The endpoint refuses body-bearing POSTs
-    // from Actions tokens at any size, which is the same refusal `upload`
-    // mode's 404 describes, and the same answer's consequence: the file goes
-    // by `publish_draft` onto the orphan branch, not by POST here.
-    return (
-      "the credential kind, not the size: measured, every body-bearing POST from a `ghs_` token is refused with " +
-      "404 `Not Found` — over the ceiling (this mode) and under it (issues #111 and #164) alike — so the " +
-      "permission reading and the size reading are both ruled out. The route and the credential were proven by " +
-      "the same session's `endpoint` 400. Nothing was stored. Deliver the file by `publish_draft` onto the " +
-      "orphan branch; the 25MB ceiling is a fact about the upload route, which no longer carries files."
+export function attachmentPathFor(url: URL, parts: { filename?: string; dir?: string } = {}): string {
+  const root = resolve(TMP_ROOT);
+  const requested = parts.dir ?? ATTACHMENT_DIR;
+  const dir = resolve(requested);
+  if (!(dir === root || dir.startsWith(root + sep))) {
+    throw new Error(
+      `'${requested}' resolves to '${dir}', outside ${TMP_ROOT}. An attachment is written under ${TMP_ROOT} only: ` +
+        "a file inside the checkout would be committed as this run's work.",
     );
   }
-  if (status === 401) {
-    return (
-      "the credential was rejected before the size question was reached. The design does not reopen on this: the " +
-      "attachment route is the orphan branch (publish_draft), which does not POST here at all. A credential that " +
-      "would be accepted here is a PAT — a new credential in tools.secrets, a decision taken on its own if a " +
-      "requirement ever demands it (#164 chose not to)."
-    );
+  const name = parts.filename ?? decodeSegment(url.pathname.split("/").filter(Boolean).pop() ?? "");
+  if (!name) {
+    throw new Error(`${url.href} names no file, so pass \`filename\` to say what to save it as.`);
   }
-  return "unexpected: the measured expectation is a refusal (413, or 422 carrying the ceiling as a validation message). Record the status and body.";
+  if (name === "." || name === ".." || /[/\\\0]/.test(name)) {
+    throw new Error(`'${name}' is not a file name. Pass the name alone — the directory is \`dir\`.`);
+  }
+  return join(dir, name);
 }
 
-async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
-  const { token, kind } = credential();
-  const mode = a.mode as ProbeMode;
-  const contentType = a.content_type ?? "application/octet-stream";
-
-  const needsRepo = mode !== "routing";
-  const repositoryId = a.repository_id ?? (needsRepo ? resolveRepositoryId(resolveRepo()) : undefined);
-  // A caller's own `name` wins; without one the mode decides, which is what keeps
-  // every existing call identical. `routing` with a name and no repository_id is the
-  // measurement the empty-name form could not reach — measured, the endpoint answers
-  // `Invalid name for request` 400 for an empty one before it ever routes, so the
-  // routing question was never asked.
-  const name = a.name ?? (mode === "upload" || mode === "oversize" ? basename(a.file ?? "") : undefined);
-
-  let body: Uint8Array | undefined;
-  if (mode === "upload" || mode === "oversize") {
-    if (!a.file) throw new Error(`mode ${mode} needs a file to send`);
-    ({ bytes: body } = readFileFor(mode, a.file));
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
   }
+}
 
-  const url = requestUrlFor(mode, { repositoryId, name, contentType });
-
+/**
+ * GET one attachment and write it to `dest`.
+ *
+ * ## The redirect is followed inside this call
+ *
+ * Measured on #415's thread: `github.com/user-attachments/files/<id>/<name>` answers
+ * 302 to a signed `objects.githubusercontent.com` URL whose `X-Amz-Expires` is 300
+ * seconds. A tool that reported the `Location` and left the second call to its caller
+ * would hand back an address that is dead by the time anyone uses it, so the hop
+ * happens here — and the body written is the target's, which is also why
+ * `content_type` is read off the final response.
+ *
+ * ## Why the ceiling is enforced on the bytes and not on the header
+ *
+ * `content-length` is checked first because it is free. It is not sufficient: it is the
+ * ENCODED length — measured on #415's thread as 40 bytes declaring a 9-byte body — so
+ * a header under the ceiling does not mean a body under it. The count is therefore
+ * kept as the body streams, the read stops at the ceiling rather than after it, and
+ * nothing is written when it is crossed: a truncated document at the destination is
+ * worse than none, because the caller cannot tell it from a whole one.
+ */
+export async function downloadAttachment(
+  source: string,
+  dest: string,
+): Promise<{ bytes: number; contentType: string | null }> {
   const started = Date.now();
-  log(`probe ${mode} ${body ? `${body.length}B` : "(no body)"}`);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      // `token`, not `Bearer` — the prefix gh's own client sends, so the probe
-      // measures the endpoint against the credential shape gh would have used.
-      Authorization: `token ${token}`,
-      "Content-Type": contentType,
-      Accept: "application/vnd.github+json",
-    },
-    ...(body ? { body } : {}),
-    // A redirect is a finding, not a route to follow: following one would turn
-    // the POST into a GET and report the wrong endpoint's answer as the answer.
-    redirect: "manual",
+  log(`fetch_attachment ${source} -> ${dest}`);
+  const response = await fetch(source, {
+    method: "GET",
+    // No Authorization header, and no argument that would add one. Measured on #415's
+    // thread: a public asset answers an anonymous GET with the bytes, and on a public
+    // asset a token that was accepted and one that was ignored are the same response —
+    // so there is no observation this credential buys here, and one fewer place it goes.
+    redirect: "follow",
     signal: AbortSignal.timeout(REQUEST_ABORT_MS),
   });
-  const responseText = await response.text();
-  const location = response.headers.get("location") ?? undefined;
-  log(`probe ${mode} -> ${response.status} in ${Date.now() - started}ms`);
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(refusalFor(response.status, source));
+  }
 
-  const interpretation = interpret(mode, response.status, responseText, location);
+  // The content type before the bytes, because a `200` is not by itself a document.
+  // A page is served with HTML, and saving one would report a path to a document that
+  // is a web page. Which answer a private repository's asset gives — that page or a
+  // `404` — has not been measured.
+  const contentType = response.headers.get("content-type");
+  if (isMarkup(contentType)) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(markupRefusal(source, contentType));
+  }
+
+  const declared = Number(response.headers.get("content-length") ?? "");
+  if (declared > UPLOAD_LIMIT_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(overTheCeiling(source, declared));
+  }
+
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  const stream = response.body as unknown as AsyncIterable<Uint8Array> | null;
+  if (stream) {
+    for await (const chunk of stream) {
+      bytes += chunk.length;
+      // Leaving the loop this way cancels the body: the rest of it is not wanted, and
+      // this is the point the ceiling exists for rather than a limit checked at the end.
+      if (bytes > UPLOAD_LIMIT_BYTES) throw new Error(overTheCeiling(source, bytes));
+      chunks.push(chunk);
+    }
+  }
+
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, Buffer.concat(chunks));
+
+  log(`fetch_attachment ${bytes}B ${contentType ?? "(no content-type)"} in ${Date.now() - started}ms`);
+  return { bytes, contentType };
+}
+
+/** The types that say "a page rather than a file": what a refusal has to catch. */
+function isMarkup(contentType: string | null): boolean {
+  return /^(text\/html|application\/xhtml\+xml)\b/i.test((contentType ?? "").trim());
+}
+
+/**
+ * The refusal, and why the rule is a list of what is not a document rather than of
+ * what is.
+ *
+ * The set of files a person attaches is open — flat ODF arrives as XML, a template as
+ * `application/octet-stream` — so an allowlist would refuse the formats this project's
+ * own templates use. The wrong answer is narrower than that: it is a web page served
+ * with `200`, which is what a login wall answers with. Whether an attachment on a
+ * private repository gets that page or a `404` has not been measured, so this refuses
+ * the page without claiming to know which one arrives.
+ */
+function markupRefusal(source: string, contentType: string | null): string {
+  return (
+    `${source} answered 200 as ${contentType}, which is a page rather than a document, and nothing was written. ` +
+    "A login wall answers that way, and a path to it would be a path to a web page. Whether an attachment on a private " +
+    "repository answers this page or a 404 has not been measured. Check the URL opens in a browser that is signed " +
+    "in, or attach the file to the issue again."
+  );
+}
+
+function overTheCeiling(source: string, bytes: number): string {
+  return (
+    `${source} is ${bytes} bytes, over the ${UPLOAD_LIMIT_BYTES}-byte limit an attachment is saved at, so the read ` +
+    "stopped there and nothing was written. A partial file would be indistinguishable from a whole one."
+  );
+}
+
+function refusalFor(status: number, source: string): string {
+  if (status === 404) {
+    return (
+      `${source} answered 404 and nothing was written. The case this tool does not cover is an attachment on a ` +
+      "private repository: it sends no credential, and whether an anonymous GET of a private asset is refused has " +
+      "not been measured — so a 404 here may be a visibility answer rather than an absence."
+    );
+  }
+  if (status === 401 || status === 403) {
+    return (
+      `${source} answered ${status} and nothing was written. That is a refusal rather than an absence, and an ` +
+      "attachment on a private repository read without a credential is the likely cause: this tool sends none."
+    );
+  }
+  return `${source} answered ${status} and nothing was written.`;
+}
+
+async function fetchAttachment(a: z.infer<typeof FETCH_ATTACHMENT_SCHEMA>): Promise<string> {
+  const url = attachmentUrlFrom(a.url);
+  const dest = attachmentPathFor(url, { filename: a.filename, dir: a.dir });
+  const { bytes, contentType } = await downloadAttachment(url.href, dest);
   return JSON.stringify(
-    {
-      mode,
-      sent: url,
-      content_length: body ? body.length : 0,
-      credential: `present, prefix ${kind}`,
-      status: response.status,
-      location: location ?? null,
-      body_excerpt: responseText.slice(0, BODY_EXCERPT_CHARS) || null,
-      interpretation,
-    },
+    { path: dest, bytes, content_type: contentType, source_url: url.href },
     null,
     2,
   );
@@ -693,9 +588,9 @@ function commitAt(treeish: string): string {
  * `main` would be a way around every rule that guards it.
  */
 async function publishDraft(a: z.infer<typeof PUBLISH_DRAFT_SCHEMA>): Promise<string> {
-  // The same resolution `probe` uses, and used here only to spell the URLs: `git`
-  // finds its own remote. `GITHUB_REPOSITORY` is what the runner sets; the fallback
-  // reads the checkout's remote for a hand-run server.
+  // Only to spell the URLs the result carries: `git` finds its own remote.
+  // `GITHUB_REPOSITORY` is what the runner sets; the fallback reads the checkout's
+  // remote for a hand-run server.
   const repo = resolveRepo();
   // The branch is the repository's own setting (`getDocsBranch`), not an argument:
   // naming a branch from the outside is what let a publish land on somebody's work
@@ -844,22 +739,33 @@ const PUBLISH_DRAFT_DESCRIPTION =
   "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " +
   "refused — an orphan branch is safe because it is not the reviewed one.";
 
+const FETCH_ATTACHMENT_DESCRIPTION =
+  "Fetch one file a person attached to an issue and save it under /tmp, so a document can be opened, edited and " +
+  "delivered (`publish_draft`) instead of pasted into the conversation. It reads " +
+  "`https://github.com/user-attachments/files/<id>/<name>` and `https://private-user-images.githubusercontent.com/...` " +
+  "and refuses every other host. It carries no credential — what it fetches is what an anonymous reader gets — and " +
+  "the 302 GitHub answers is followed inside this call, because the signed URL it points at expires in five minutes " +
+  "and a Location kept for a second call would already be dead. Returns the saved `path`, the decoded `bytes`, the " +
+  "`content_type` and the `source_url`. A body over 25MB — the attachment ceiling — is refused and nothing is " +
+  "written: `content-length` is checked first and the count is kept as the body streams, so up to the ceiling is held " +
+  "in memory and the read is abandoned at the first chunk past it. A 200 carrying HTML is refused the same way — a " +
+  "page rather than a document, and a path to it would be a path to a web page. `filename` names the saved file, since " +
+  "an asset URL's last segment is often a generic `default.docx` while the comment shows the name it was attached as. " +
+  "An attachment on a private repository is not measured: no credential is sent, so it comes back refused, and whether " +
+  "GitHub answers a 404 or a page is unknown.";
+
 const { tools, dispatch } = buildMcpTools([
-  defineMcpTool({
-    name: "probe",
-    description:
-      "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " +
-      "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it reports what came back for the request and the credential — without saving a file. A status is an observation, not proof that the route exists; the body is what says which parameter or layer answered. " +
-      "Mode `routing` omits repository_id — an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL — though measured, the Actions token this run carries is refused at the body stage (404, nothing stored), so delivering a file is `publish_draft`'s job and this tool's job is to measure. " +
-      "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
-    schema: PROBE_SCHEMA,
-    handler: probe,
-  }),
   defineMcpTool({
     name: "publish_draft",
     description: PUBLISH_DRAFT_DESCRIPTION,
     schema: PUBLISH_DRAFT_SCHEMA,
     handler: publishDraft,
+  }),
+  defineMcpTool({
+    name: "fetch_attachment",
+    description: FETCH_ATTACHMENT_DESCRIPTION,
+    schema: FETCH_ATTACHMENT_SCHEMA,
+    handler: fetchAttachment,
   }),
 ]);
 

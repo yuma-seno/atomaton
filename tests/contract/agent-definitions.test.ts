@@ -113,11 +113,11 @@ describe("agent definitions", () => {
  * starts.
  *
  * `attachments` was added to `tools/defaults.yaml` with a test file of its own and
- * named by no definition, so `probe` was uncallable and the post-merge
- * measurement the server exists for could not be taken at all. Nothing reported it,
- * and that is the shape: `atoma` starts only the servers a definition's
- * `mcp_servers` names, so an unreferenced server is not an error anywhere — it is a
- * tool that answers "Unknown tool" the first time an agent reaches for it.
+ * named by no definition, so its tools were uncallable and the work the server
+ * exists for could not be done at all. Nothing reported it, and that is the shape:
+ * `atoma` starts only the servers a definition's `mcp_servers` names, so an
+ * unreferenced server is not an error anywhere — it is a tool that answers
+ * "Unknown tool" the first time an agent reaches for it.
  *
  * Named for the server rather than written as "every shipped server must be named by
  * somebody", because that is not the rule: `README.md` says a server nobody names
@@ -126,19 +126,19 @@ describe("agent definitions", () => {
  * exist is a call some agent is meant to make.
  */
 describe("a server that exists for a call an agent must make", () => {
-  test("`attachments` is named by a definition, or its probe is uncallable", () => {
+  test("`attachments` is named by a definition, or its tools are uncallable", () => {
     const namers = agentFiles.filter((file) => requestedServers(file).includes("attachments"));
     expect(
       namers,
       "no agent definition lists `attachments` in mcp_servers, so the server never starts and " +
-        "`probe` cannot be called by any run. Name it in the definition(s) that need it.",
+        "`fetch_attachment` and `publish_draft` cannot be called by any run. Name it in the definition(s) that need it.",
     ).not.toEqual([]);
-    // And in the one a person dispatches a measurement on: the probe is run from an
-    // issue, and `atomaton` is the agent a `/atomaton` on that issue starts.
+    // And in the one a document is delivered from: the attachment a person posts is on
+    // an issue, and `atomaton` is the agent a `/atomaton` on that issue starts.
     expect(
       namers,
-      "`atomaton` does not list `attachments`, so a run started by a person on an issue cannot call " +
-        "`probe` — the run this server was added to make the measurement possible in.",
+      "`atomaton` does not list `attachments`, so a run started by a person on an issue cannot fetch the " +
+        "document that person attached.",
     ).toContain("atomaton.md");
   });
 });

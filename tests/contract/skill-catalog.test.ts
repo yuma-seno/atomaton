@@ -43,13 +43,13 @@ describe("skill catalog", () => {
    * A skill names its tools the way a run reaches them, and that means bare.
    *
    * Every server in `tools/defaults.yaml` sets `unprefixed: true`, so a tool is
-   * registered under its own name — `probe`, `create_pr`, `bash` — and
+   * registered under its own name — `publish_draft`, `create_pr`, `bash` — and
    * `server__tool` names nothing. This is not a style rule: a skill that says
    * `attachments__publish_draft` tells an agent to call a tool that does not
    * exist, the call comes back unknown, and the skill's own "if this tool is not
    * among yours, the layer is not deployed" branch then reports a deployment gap
-   * about a tool that is right there. Measured on `docs/design-doc`'s first
-   * draft, which spelled all six of its tool references that way.
+   * about a tool that is right there. A skill here once spelled all six of its tool
+   * references that way.
    *
    * The `atoma_builtin__` prefix is the core's own and is not covered: it names
    * the tools atoma adds itself, whose spelling no skill here decides.

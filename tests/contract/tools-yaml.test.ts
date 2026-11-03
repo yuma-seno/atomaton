@@ -218,10 +218,10 @@ describe("tools.yaml is valid YAML with the shape atoma expects", () => {
       // their timeouts are the same number for the same reason.
       "delegate",
       "delegate_readonly",
-      // The one server whose work is a network POST of up to 25MB. Its own abort
-      // fires at 120 seconds, and it has to sit below this value to be the thing
-      // that answers: a call cut off here is discarded, and in `upload` mode the
-      // server may still have stored the file.
+      // The one server that moves a document of up to 25MB over the network. Its own
+      // abort fires at 120 seconds, and it has to sit below this value to be the thing
+      // that answers: a call cut off here is discarded and the answer arrives after
+      // nobody is waiting for it.
       "attachments",
     ]);
     for (const [name, entry] of Object.entries(parse(SOURCE))) {
