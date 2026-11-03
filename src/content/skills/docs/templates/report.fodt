@@ -39,15 +39,19 @@
       <style:paragraph-properties fo:text-align="center"/>
       <style:text-properties style:font-name="Noto Sans CJK JP" fo:font-size="8pt" style:font-size-asian="8pt" style:font-name-asian="Noto Sans CJK JP" fo:color="#8a8a8a" fo:language="en" fo:country="US" style:language-asian="ja" style:country-asian="JP"/>
     </style:style>
+  </office:styles>
 
+  <office:automatic-styles>
+    <!-- This must live in office:automatic-styles, not in office:styles above: a
+         layout outside it is not bound to the master page, and the docx export then
+         writes LibreOffice's own margins — 1134 twips left/right/top and 1417 bottom,
+         measured — instead of the ones below (1361/1247/1530). -->
     <style:page-layout style:name="pm1">
       <style:page-layout-properties
         fo:page-width="21cm" fo:page-height="29.7cm" style:print-orientation="portrait"
         fo:margin-top="2.2cm" fo:margin-bottom="2.2cm" fo:margin-left="2.4cm" fo:margin-right="2.4cm"/>
     </style:page-layout>
-  </office:styles>
 
-  <office:automatic-styles>
     <style:style style:name="P_Title" style:family="paragraph">
       <style:paragraph-properties fo:margin-top="4cm" fo:margin-bottom="0.3cm"/>
       <style:text-properties style:font-name="Noto Sans CJK JP" fo:font-size="26pt" style:font-size-asian="26pt" style:font-name-asian="Noto Sans CJK JP" fo:font-weight="bold" fo:color="#12324f" fo:language="en" fo:country="US" style:language-asian="ja" style:country-asian="JP"/>
