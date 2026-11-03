@@ -170,7 +170,7 @@ servers:
   # credential — no token is read here and none is passed. The server also reads
   # `AGENT` (for the commit identity), which the runner passes to it already.
   attachments:
-    description: "Probes GitHub's user-asset upload endpoint (the one `gh --attach` posts to) and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; its `read` mode does the same for a GET of an asset URL — the other direction, on a different host — and only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each."
+    description: "Probes GitHub's user-asset upload endpoint (the one `gh --attach` posts to) and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; its `read` mode does the same for a GET of an asset URL — the other direction, on a different host — and only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. `fetch_attachment` saves a file attached to an issue under /tmp, so a document can be opened and edited — and then published — instead of being pasted into the conversation."
     unprefixed: true
     command: bun
     args:

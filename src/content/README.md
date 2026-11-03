@@ -107,7 +107,7 @@ added.
 | `web` | Fetches a URL. Searching the web is a skill, not a tool. |
 | `search` | Ranked search over this repository's issues and code. |
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. |
-| `attachments` | Probes GitHub's user-asset upload endpoint, the one `gh --attach` posts to, and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; its `read` mode does the same for a GET of an asset URL — the other direction, on a different host — and only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. |
+| `attachments` | Probes GitHub's user-asset upload endpoint, the one `gh --attach` posts to, and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; its `read` mode does the same for a GET of an asset URL — the other direction, on a different host — and only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. `fetch_attachment` saves a file attached to an issue under /tmp, so a document can be opened and edited — and then published — instead of being pasted into the conversation. |
 | `atomaton_env` | Rebuilding the run's environment, and concluding the run's own issue. |
 | `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers the writing folders from `delegates.yaml`. |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. |
