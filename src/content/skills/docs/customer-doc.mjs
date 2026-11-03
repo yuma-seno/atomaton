@@ -14,8 +14,9 @@
  * - a `.fodt`/`.fodp`/`.fods` template (the shipped ones under `templates/`, or
  *   the agent's copy of one) is filled **as text** — placeholders substituted in
  *   the XML, then `--convert-to` the requested binary format. The filled flat
- *   file is kept next to the output because it is the diffable source: a fix is
- *   an edit there and one more conversion, not a round trip through a binary.
+ *   file is kept next to the output as the diffable record of what was filled —
+ *   a fix is an edit to a copy of the template (`template <fmt> --out DIR`) and
+ *   one more fill, not a round trip through a binary.
  * - any other template (a customer's `.docx`, `.pptx`, `.xlsx` — the ones with a
  *   theme, content controls and mail-merge fields) is filled **over UNO**: a
  *   headless LibreOffice is started, the template opened, the placeholders
@@ -168,9 +169,11 @@ const PLACEHOLDER = /\{\{[A-Z0-9_]+\}\}/g;
 /**
  * The flat ODF leg: substitute in the XML, then convert.
  *
- * The filled flat file stays in the output directory. It is the version a diff
- * shows and the one a fix edits — the binary is a rendering of it, not the thing
- * to edit — so deleting it would leave the next round with nothing readable.
+ * The filled flat file stays in the output directory as the diffable record of
+ * what was filled. It is not the thing a fix edits: this function re-reads its
+ * `--template` and rewrites the record on every run, so an edit there is
+ * discarded with no error. The fix loop the skill documents edits a copy of the
+ * template (`template <fmt> --out DIR`) and passes that copy as `--template`.
  */
 function fillFlat({ template, data, out }) {
   const t0 = Date.now();
@@ -186,7 +189,13 @@ function fillFlat({ template, data, out }) {
   for (const [key, value] of Object.entries(data)) {
     const placeholder = `{{${key}}}`;
     if (!text.includes(placeholder)) missing.push(key);
-    text = text.replaceAll(placeholder, xmlEscape(value));
+    // A function replacement, not a string one: in a string replacement, a
+    // dollar sign followed by an ampersand or a quote in the replacement text
+    // is a pattern — it can re-insert the placeholder or the rest of the
+    // document — so a currency value written as USD with a thousands
+    // apostrophe after the dollar sign would duplicate the document tail. The
+    // function form inserts the escaped value literally.
+    text = text.replaceAll(placeholder, () => xmlEscape(value));
   }
   const target = extensionOf(out);
   // Asked for the template's own format, the filled file *is* the output: naming it
