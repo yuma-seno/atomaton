@@ -2,10 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  PROBE_SCHEMA,
   REQUEST_ABORT_MS,
   UPLOAD_LIMIT_BYTES,
+  excerptOf,
   interpret,
+  interpretRead,
   readFileFor,
+  readHostAllowed,
   requestUrlFor,
 } from "../../src/entrypoints/tools/mcp/attachments.ts";
 
@@ -97,6 +101,81 @@ describe("the endpoint POST gets to time out before atoma gives up on it", () =>
       allowed! * 1000,
       "atoma would discard the call before this server's own abort, and in upload mode the file may already be stored",
     ).toBeGreaterThan(REQUEST_ABORT_MS);
+  });
+});
+
+/**
+ * The read direction: what it may address, what it keeps, and what a status means
+ * there.
+ *
+ * Its premise is a failure already measured — a document handed back through the
+ * conversation arrives as 8,000 characters of mojibake and is cut off — so the mode
+ * reports a byte count and a binary body's first bytes rather than the body itself.
+ * The split is otherwise the same as the POST modes': the shape is checked here, and
+ * the far end is measured by the run that has the credential.
+ */
+describe("the probe's read mode", () => {
+  test("the advertised schema takes a url, and an anonymous read asks for no credential", () => {
+    const parsed = PROBE_SCHEMA.parse({ mode: "read", url: "https://github.com/user-attachments/files/1/a.docx" });
+    expect(parsed.mode).toBe("read");
+    expect(parsed.authenticate).toBeUndefined();
+    expect(parsed.follow_redirects).toBeUndefined();
+  });
+
+  /**
+   * The allowlist is not decoration: `authenticate` puts this run's token on the
+   * request, so a read of an arbitrary host would hand that token to whoever named
+   * the URL. It is a separate rule from the host check a `fetch_attachment` will
+   * need, and it is the narrower of the two.
+   */
+  test("only GitHub's asset hosts are read, and a lookalike host is not one of them", () => {
+    expect(readHostAllowed(new URL("https://github.com/user-attachments/files/1/a.docx"))).toBe(true);
+    expect(readHostAllowed(new URL("https://objects.githubusercontent.com/x"))).toBe(true);
+    expect(readHostAllowed(new URL("https://private-user-images.githubusercontent.com/x"))).toBe(true);
+    expect(readHostAllowed(new URL("https://example.com/a.docx"))).toBe(false);
+    expect(readHostAllowed(new URL("https://notgithubusercontent.com/x"))).toBe(false);
+    expect(readHostAllowed(new URL("https://githubusercontent.com.evil.example/x"))).toBe(false);
+  });
+
+  test("a binary body is counted and given a signature, never pasted", () => {
+    // The head this probe measured on a real .docx: the zip signature, then a
+    // length byte that is not a UTF-8 continuation.
+    const measuredDocxHead = Buffer.from("504b0304140008080800e5b4625d0000", "hex");
+    expect(excerptOf(measuredDocxHead)).toBeNull();
+    expect(excerptOf(new TextEncoder().encode('{"message":"Not Found"}'))).toContain("Not Found");
+  });
+});
+
+describe("what a read's status means", () => {
+  test("a 200 while authenticated does not claim the token was accepted", () => {
+    const authed = interpretRead({ status: 200, contentType: "application/pdf", bytes: 10, authenticated: true });
+    expect(authed).toContain("Not yet an answer about the token");
+    expect(authed, "the row that settles it is named").toContain("anonymous row");
+    const anonymous = interpretRead({ status: 200, contentType: "application/pdf", bytes: 10, authenticated: false });
+    expect(anonymous).toContain("baseline");
+  });
+
+  test("a redirect is a row to record, and following it is the other call", () => {
+    const text = interpretRead({
+      status: 302,
+      bytes: 0,
+      location: "https://objects.githubusercontent.com/x",
+      authenticated: false,
+    });
+    expect(text).toContain("redirect to a signed URL");
+    expect(text).toContain("follow_redirects");
+  });
+
+  test("a 404 anonymously is not evidence the asset is gone", () => {
+    const text = interpretRead({ status: 404, bytes: 9, authenticated: false });
+    expect(text).toContain("not evidence the asset is gone");
+    expect(text).toContain("private-user-images");
+  });
+
+  test("a 401 is the read direction refusing this credential, which is an answer in itself", () => {
+    const text = interpretRead({ status: 401, bytes: 0, authenticated: true });
+    expect(text).toContain("rejected by the asset host");
+    expect(text).toContain("readable anonymously");
   });
 });
 

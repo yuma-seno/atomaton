@@ -15,7 +15,7 @@ already starts with.
 | `web` | Fetches a URL, and returns what it fetched. Searching the web is a skill rather than a tool — see [change or remove web fetching and search](tasks/change-or-remove-web-fetching-and-search.md). | none |
 | `search` | Ranked search over your repository's issues and code. | the run's GitHub token |
 | `atomaton` | Atomaton's own operations: sub-issues, handoffs, stopping a run. | the run's GitHub token |
-| `attachments` | Probes GitHub's user-asset upload endpoint, the one `gh --attach` posts to, and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. | the run's GitHub token |
+| `attachments` | Probes GitHub's user-asset upload endpoint, the one `gh --attach` posts to, and publishes documents onto an orphan branch. `probe` reports the status and body the endpoint returned; its `read` mode does the same for a GET of an asset URL — the other direction, on a different host — and only its `upload` mode stores anything, and a stored asset has no documented deletion. `publish_draft` puts drafts on a branch and returns a blob URL for each. | the run's GitHub token |
 | `atomaton_env` | Rebuilding the run's environment, and concluding the run's own issue. | the run's GitHub token |
 | `delegate` | Runs one small piece of work in a sub-run and returns what it found. Offers `delegate` and `delegate_large`. | the run's provider key |
 | `delegate_readonly` | The same, with a sub-run that reads and searches and cannot change anything. Offers `delegate_readonly` and `delegate_readonly_large`. | the run's provider key |
