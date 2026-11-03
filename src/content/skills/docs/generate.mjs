@@ -20,19 +20,10 @@
  * "deps": [{"name", "state": "cached"|"installed"|"failed"|"skipped", "seconds"}]}.
  */
 import { spawnSync } from "node:child_process";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { convert, deps, ensure, record } from "./deps.mjs";
 
 // ---------------------------------------------------------------- arguments
 
@@ -56,170 +47,22 @@ if (!statSync(draft).isFile()) fail(`${draft} is not a file`);
 mkdirSync(outdir, { recursive: true });
 
 const slug = basename(draft).replace(/\.md$/i, "");
-const deps = [];
-function record(name, state, seconds) {
-  deps.push({ name, state, seconds: Math.round(seconds * 10) / 10 });
-  console.error(`generate: ${name}: ${state} (${Math.round(seconds * 10) / 10}s)`);
-}
 
 // ------------------------------------------------------- dependency installs
 
-/** A directory that survives a run, so "first run installs, later runs skip" holds across runs too. */
-const CACHE = process.env.XDG_CACHE_HOME ?? join(process.env.HOME ?? tmpdir(), ".cache");
-const DOCGEN_CACHE = join(CACHE, "atomaton-docgen");
-mkdirSync(DOCGEN_CACHE, { recursive: true });
-
-function secondsSince(t) {
-  return (Date.now() - t) / 1000;
-}
-
-/** python3 with a venv module, or the record of its absence. */
-function pythonBin() {
-  for (const bin of ["python3", "python"]) {
-    const p = spawnSync(bin, ["-c", "import venv"], { encoding: "utf8" });
-    if (p.status === 0) return bin;
-  }
-  return undefined;
-}
-
 const needPy = formats.includes("docx") || formats.includes("xlsx") || wantPptx;
-let venvPython;
-if (needPy) {
-  const t0 = Date.now();
-  const py = pythonBin();
-  if (!py) {
-    record("python3-venv", "failed", secondsSince(t0));
-  } else {
-    venvPython = join(DOCGEN_CACHE, "venv", "bin", "python");
-    if (existsSync(venvPython)) {
-      record("python-docgen-venv", "cached", secondsSince(t0));
-    } else {
-      const made = spawnSync(py, ["-m", "venv", join(DOCGEN_CACHE, "venv")], { encoding: "utf8" });
-      if (made.status !== 0) {
-        record("python-docgen-venv", "failed", secondsSince(t0));
-        venvPython = undefined;
-      } else {
-        record("python-docgen-venv", "installed", secondsSince(t0));
-      }
-    }
-  }
-  if (venvPython) {
-    // The distribution name pip installs is not the name the module imports under, and
-    // for these three the two never agree: `python-docx` imports as `docx` and
-    // `python-pptx` as `pptx`. Deriving the import from the pip name by replacing `-`
-    // with `_` therefore probes `python_docx`, which is not importable even when the
-    // package is installed -- so the probe failed every run and the package was
-    // reinstalled every run. Measured: the second run reported `python-docx: installed
-    // (0.2s)` where the whole point of the install step is that it says `cached`.
-    const packages = [
-      { pip: "openpyxl", module: "openpyxl" },
-      { pip: "python-docx", module: "docx" },
-      ...(wantPptx ? [{ pip: "python-pptx", module: "pptx" }] : []),
-    ];
-    for (const { pip: pkg, module } of packages) {
-      const t1 = Date.now();
-      const probe = spawnSync(venvPython, ["-c", `import ${module}`], { encoding: "utf8" });
-      if (probe.status === 0) {
-        record(pkg, "cached", secondsSince(t1));
-        continue;
-      }
-      const installed = spawnSync(join(DOCGEN_CACHE, "venv", "bin", "pip"), ["install", "--quiet", pkg], {
-        encoding: "utf8",
-      });
-      record(pkg, installed.status === 0 ? "installed" : "failed", secondsSince(t1));
-    }
-  }
-}
-
-/** LibreOffice, extracted under the cache; returns the soffice path or undefined. */
-function soffice() {
-  const onPath = spawnSync("soffice", ["--version"], { encoding: "utf8" });
-  if (onPath.status === 0) return "soffice";
-  if (!formats.includes("pdf")) return undefined;
-  const t0 = Date.now();
-  const loRoot = join(DOCGEN_CACHE, "lo-root");
-  const sofficePath = join(loRoot, "opt/libreoffice25.8/program/soffice");
-  if (existsSync(sofficePath)) {
-    record("libreoffice", "cached", secondsSince(t0));
-    return sofficePath;
-  }
-  const url = "https://download.documentfoundation.org/libreoffice/stable/25.8.7/deb/x86_64/LibreOffice_25.8.7_Linux_x86-64_deb.tar.gz";
-  const tgz = join(DOCGEN_CACHE, "lo.tar.gz");
-  const dl = spawnSync("curl", ["-sSL", "-o", tgz, url], { encoding: "utf8" });
-  if (dl.status !== 0 || !existsSync(tgz)) {
-    record("libreoffice", "failed", secondsSince(t0));
-    return undefined;
-  }
-  const extractDir = mkdtempSync(join(tmpdir(), "lo-debs-"));
-  try {
-    const wanted = [
-      "libreoffice25.8_*.deb", // the program
-      "libreoffice25.8-ure_*.deb", // libuno_sal
-      "libreoffice25.8-en-us_*.deb", // UI language
-      "libobasis25.8-en-us_*.deb", // the en-US langpack; without it startup dies on "The user interface language cannot be determined."
-      "libobasis25.8-core_*.deb",
-      "libobasis25.8-writer_*.deb",
-      "libobasis25.8-graphicfilter_*.deb",
-      "libobasis25.8-ooofonts_*.deb",
-      "libobasis25.8-images_*.deb",
-    ];
-    for (const pattern of wanted) {
-      spawnSync("tar", ["-xzf", tgz, "-C", extractDir, "--wildcards", `LibreOffice_*/DEBS/${pattern}`]);
-    }
-    for (const deb of readdirSync(join(extractDir, readdirSync(extractDir)[0], "DEBS"))) {
-      spawnSync("dpkg-deb", ["-x", join(extractDir, readdirSync(extractDir)[0], "DEBS", deb), loRoot]);
-    }
-  } finally {
-    rmSync(extractDir, { recursive: true, force: true });
-  }
-  const ok = existsSync(sofficePath);
-  record("libreoffice", ok ? "installed" : "failed", secondsSince(t0));
-  return ok ? sofficePath : undefined;
-}
-const sofficePath = soffice();
-
-/**
- * CJK fonts, best effort: without them a Japanese PDF is tofu, which is a quality
- * problem, not a delivery problem.
- *
- * They go into `$DOCGEN_CACHE/.fonts`, which is `~/.fonts` for the conversion below --
- * the one place LibreOffice is guaranteed to look. It also reads
- * `$XDG_DATA_HOME/fonts`, and that is the path this used to install into; a live run
- * sets `XDG_DATA_HOME` to the runner's own cache (`atomaton-runner.yml`), where nothing
- * here writes, so the fonts were installed, reported `installed`, and never read.
- * Measured on a draft with Japanese text: all 74 CJK characters came out through a
- * single glyph code of `BAAAAA+NotoSans-Bold`, a Latin-only face, where the same
- * conversion with the fonts on the path LibreOffice reads embeds
- * `NotoSansCJKhk-Regular`. Text still extracted correctly -- the glyphs are what broke.
- */
-function cjkFonts() {
-  if (!formats.includes("pdf")) return;
-  const fontsDir = join(DOCGEN_CACHE, ".fonts");
-  if (existsSync(fontsDir)) {
-    record("fonts-noto-cjk", "cached", 0);
-    return;
-  }
-  if (existsSync("/usr/share/fonts/opentype/noto")) {
-    record("fonts-noto-cjk", "system", 0);
-    return;
-  }
-  const t0 = Date.now();
-  const dl = spawnSync("apt-get", ["download", "fonts-noto-cjk"], { cwd: DOCGEN_CACHE, encoding: "utf8" });
-  const deb = readdirSync(DOCGEN_CACHE).find((f) => f.startsWith("fonts-noto-cjk") && f.endsWith(".deb"));
-  if (dl.status !== 0 || !deb) {
-    record("fonts-noto-cjk", "failed", secondsSince(t0));
-    return;
-  }
-  const root = join(DOCGEN_CACHE, "font-root");
-  spawnSync("dpkg-deb", ["-x", join(DOCGEN_CACHE, deb), root]);
-  mkdirSync(fontsDir, { recursive: true });
-  for (const f of readdirSync(join(root, "usr/share/fonts/opentype/noto"))) {
-    copyFileSync(join(root, "usr/share/fonts/opentype/noto", f), join(fontsDir, f));
-  }
-  rmSync(root, { recursive: true, force: true });
-  record("fonts-noto-cjk", "installed", secondsSince(t0));
-}
-cjkFonts();
+const { soffice: sofficePath, python: venvPython } = ensure({
+  lo: formats.includes("pdf"),
+  cjk: formats.includes("pdf"),
+  packages: needPy
+    ? [
+        { pip: "openpyxl", module: "openpyxl" },
+        { pip: "python-docx", module: "docx" },
+        ...(wantPptx ? [{ pip: "python-pptx", module: "pptx" }] : []),
+      ]
+    : [],
+});
+if (!needPy) record("python-venv", "skipped", 0);
 
 // ------------------------------------------------------------------ builders
 
@@ -325,28 +168,9 @@ function convertToPdf() {
   if (!formats.includes("pdf") || !sofficePath) return false;
   const docx = join(outdir, `${slug}.docx`);
   if (!existsSync(docx)) return false;
-  const t0 = Date.now();
-  // `HOME` is `$DOCGEN_CACHE`, which is where `cjkFonts` above puts the fonts. Nothing
-  // else is redirected: the caller's `XDG_DATA_HOME` and `XDG_CACHE_HOME` are inherited,
-  // because a run sets them to directories it owns and LibreOffice's own profile is
-  // already pinned by `-env:UserInstallation` below.
-  const r = spawnSync(
-    sofficePath,
-    [
-      "--headless",
-      "--norestore",
-      `-env:UserInstallation=file://${join(DOCGEN_CACHE, "lo-home")}`,
-      "--convert-to",
-      "pdf",
-      "--outdir",
-      outdir,
-      docx,
-    ],
-    { encoding: "utf8", env: { ...process.env, HOME: DOCGEN_CACHE } },
-  );
-  const ok = r.status === 0 && existsSync(join(outdir, `${slug}.pdf`));
-  record("pdf-convert", ok ? "done" : "failed", secondsSince(t0));
-  return ok;
+  const converted = convert(sofficePath, { file: docx, to: "pdf", outdir });
+  record("pdf-convert", converted.ok ? "done" : "failed", converted.seconds);
+  return converted.ok;
 }
 
 function buildPptx() {
