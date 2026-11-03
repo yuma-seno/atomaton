@@ -55,9 +55,27 @@ that states what was measured about it:
 
 | File | Format | Shape |
 | --- | --- | --- |
-| `report.fodt` | docx | A4 portrait, title page, 概要 / システム構成 / スケジュール / 費用 / 体制・連絡先, footer with page numbers |
-| `deck.fodp` | pptx | 16:9, three slides: title, agenda, content-with-bullets |
-| `book.fods` | xlsx | two sheets: 見積 (itemised, formulas for 小計/消費税/合計) and 前提条件 |
+| `report.fodt` | docx | A4 portrait; title page with a three-row metadata table; five numbered sections, the first starting a new page; three two-column tables with a repeating header row; footer with organisation, title and page numbers |
+| `deck.fodp` | pptx | 16:9; three slides: title with subtitle and one metadata line, agenda with four numbered items, content with a heading, four bullets and a note |
+| `book.fods` | xlsx | two sheets: an itemised quotation (header block, four line items, formula subtotal / tax / grand total, terms) and an assumptions sheet |
+
+**The defaults hold structure and formatting only; the language comes from the data.**
+Every word a reader sees is a placeholder — section headings, metadata labels,
+column headers, the footer's organisation name, the tax label, the currency in the
+number format and the sheet names included — so the same template sets a Japanese
+document and an English one, and a language nobody has used yet, from the data
+alone. What deliberately stays in the template is structure and typography: the
+ordinal in a heading (`1.`), an agenda's `01`..`04`, the bullet glyph, an ASCII
+separator between two values, and the fact that a label placeholder carries its own
+punctuation with it, so `件名：` and `Subject: ` are both data rather than one
+template with a colon glued on.
+
+**The font is `Noto Sans CJK JP` on every style, and that is not a language
+constraint.** It is a multi-script coverage choice: one family carries Latin and CJK,
+so the same template sets data in either without naming a second font. Keeping it
+also keeps §3's first trap at bay — leave the East Asian face unstated and
+LibreOffice derives one from the document language, landing on a Simplified-Chinese
+serif whose Japanese glyphs are the wrong shapes.
 
 **A template a person attached to the issue.** The customer's own template usually
 arrives as a file on the issue rather than as a path in the tree. `fetch_attachment`
@@ -89,7 +107,7 @@ by filling and re-rendering:
   no number format, no right alignment, and a formula pointing at it computes
   nothing;
 - a **formula** cell must not carry a cached `office:value`: LibreOffice trusts a
-  cached value and never recalculates, so every total came back 0 円 until the
+  cached value and never recalculates, so every total came back 0 until the
   attribute was removed;
 - `style:page-layout` must live in `office:automatic-styles`. Placed in
   `office:styles` it is not bound to the master page — the export carries
@@ -107,8 +125,9 @@ by filling and re-rendering:
 ## 3. The flat leg, and the rules that cost a render each
 
 Substituting text is trivial; making the *conversion* keep the document's
-intent is not. These are the rules a Japanese document template needs, each one
-found by rendering a draft that looked fine in the XML:
+intent is not. These rules were each found by rendering a draft that looked fine in
+the XML, and they are kept as measurements, not as an assumption about language:
+they apply whenever the data that flows through a template hits the trap.
 
 - **State the East Asian font, size and language on every text style.** Without
   `style:font-name-asian` the exported docx carries
@@ -142,6 +161,13 @@ found by rendering a draft that looked fine in the XML:
   no built-in Impress style uses (`Title` resolves to the built-in `Title` and the
   styling is lost). Paragraph spacing inside a slide's text box does not survive
   the export; use `fo:line-height`.
+- **A numeric column is sized for a number, not for a number plus a currency.**
+  The default quotation's amount column is 3.2 cm, which holds `1,200,000`; the
+  same value with the currency suffix behind it runs past the right border and
+  touches the notes column — measured with ` 円` and with ` JPY`, and identically
+  on the template before the currency became data, so it is the column's width and
+  not the placeholder. Keep the amounts shorter than seven digits, or widen the
+  column in your copy while the five still add up to 16.5 cm.
 - **Fix a copy of the template, never the filled file.** `fill` writes
   `<out>.fodt`/`.fodp`/`.fods` beside the output — the diffable record of what was
   filled — but `fill` re-reads its `--template` and rewrites that record on every

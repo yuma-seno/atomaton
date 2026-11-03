@@ -18,9 +18,9 @@
     automatic style is ignored — the text renders at Impress' default size and
     colour — and a name like `Title` resolves to the built-in style of that
     name instead.
-  - every style states the East Asian font and size beside the Latin one, in a
-    Japanese document: without them LibreOffice derives the CJK face from the
-    document language and picks a serif one.
+  - every style states the East Asian font and size beside the Latin one: without
+    them LibreOffice derives the CJK face from the document language and picks a
+    serif one, and the deck no longer matches the report it accompanies.
 
   Adding a slide means copying a draw:page block and its draw:layer-set. Every
   frame states its own geometry in cm, so nothing depends on a layout the
@@ -29,6 +29,11 @@
   The footer carries the brand and no page number: one data object fills the
   whole deck, so a key has one value and a number that differs per slide cannot
   come from it. Slide numbering is left to the master the deck is opened in.
+
+  The template holds structure and formatting only: every word a reader sees is a
+  placeholder, so the language of the deck is the data's choice, not this file's.
+  The agenda's "01".."04" and the bullet glyph in front of each content line are
+  layout, not language, and stay here.
 -->
 <office:document
   xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
@@ -126,7 +131,7 @@
         </draw:frame>
         <draw:frame draw:style-name="grPlain" draw:name="Meta" svg:x="2.4cm" svg:y="8.1cm" svg:width="23.4cm" svg:height="1.1cm" draw:layer="layout">
           <draw:text-box>
-            <text:p text:style-name="TxMeta">{{CLIENT}} ／ {{AUTHOR}} ／ {{DATE}}</text:p>
+            <text:p text:style-name="TxMeta">{{CLIENT}} / {{AUTHOR}} / {{DATE}}</text:p>
           </draw:text-box>
         </draw:frame>
         <draw:frame draw:style-name="grPlain" draw:name="Brand" svg:x="1.8cm" svg:y="13.2cm" svg:width="24.4cm" svg:height="0.9cm" draw:layer="layout">
@@ -139,7 +144,7 @@
       <draw:page draw:name="agenda" draw:master-page-name="Default">
         <draw:frame draw:style-name="grPlain" draw:name="AgendaHead" svg:x="1.8cm" svg:y="1.2cm" svg:width="24.4cm" svg:height="1.3cm" draw:layer="layout">
           <draw:text-box>
-            <text:p text:style-name="TxSlideHead">目次</text:p>
+            <text:p text:style-name="TxSlideHead">{{AGENDA_HEADING}}</text:p>
           </draw:text-box>
         </draw:frame>
         <draw:rect draw:style-name="grAccent" svg:x="1.8cm" svg:y="2.7cm" svg:width="24.4cm" svg:height="0.07cm" draw:layer="layout"/>
