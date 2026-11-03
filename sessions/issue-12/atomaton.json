@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #12: 設計書を Issue に添付する経路を検討する\n**Labels:** atomaton/waiting-for-person\n\n開発者以外が Issue を操作して業務を行うことで、**業務の履歴とナレッジを Issue に貯めていける土壌**を用意したい。エクセルやワードのような設計書をエージェントに作らせ、git 管理ファイルとして追加するのではなく、**Issue に添付する**形にできないか。\n\n## 分かっている制約\n\n**GitHub の API には Issue へ添付をアップロードする口がない。** 添付はブラウザからのアップロードで、コメント本文にはその URL だけが入る。つまり「コメントに添付」をそのままの形で実装する道は、トークンからは無い（着手時に最新の API を確認すること）。\n\nしたがって決めるのは、**Issue から辿れる場所にファイルをどう置くか**になる。\n\n| 置き場所 | 性質 |\n|---|---|\n| リリース asset | 期限なしで残る。ただしリリースという概念を業務文書に使うことになる |\n| 専用ブランチ（orphan） | git には入るが**メインの履歴は汚さない**。差分も追える |\n| Actions の artifact | 最も自然だが**保持期限がある**ので、ナレッジを貯める用途とは合わない |\n\n「git 管理ファイルとして追加しない」という要望の実質は、**メインのツリーと履歴を業務文書で埋めたくない**ことだと読んでいる。orphan ブランチはその条件を満たす。\n\n## 決めるべきこと\n\n1. 置き場所（上の3つ、または別の形）\n2. 生成形式 — エクセル／ワードそのものか、Markdown で書いて変換するか。**後者なら差分が読める**\n3. エージェントに与える手段 — ツールを足すのか、`shell` の中でスクリプトとして走らせるのか\n\n## 関連する既知の影響\n\nこれは**エージェントが長文を書く経路そのもの**で、いまのセッション圧縮が「ツール結果だけが大きい」という測定に乗っていることの前提を崩す側にある。セッションの圧縮方針を決める Issue と一緒に見ること。\n",
+      "content": "Issue #12: 設計書を Issue に添付する経路を検討する\n**Labels:** atomaton/in-progress\n\n開発者以外が Issue を操作して業務を行うことで、**業務の履歴とナレッジを Issue に貯めていける土壌**を用意したい。エクセルやワードのような設計書をエージェントに作らせ、git 管理ファイルとして追加するのではなく、**Issue に添付する**形にできないか。\n\n## 分かっている制約\n\n**GitHub の API には Issue へ添付をアップロードする口がない。** 添付はブラウザからのアップロードで、コメント本文にはその URL だけが入る。つまり「コメントに添付」をそのままの形で実装する道は、トークンからは無い（着手時に最新の API を確認すること）。\n\nしたがって決めるのは、**Issue から辿れる場所にファイルをどう置くか**になる。\n\n| 置き場所 | 性質 |\n|---|---|\n| リリース asset | 期限なしで残る。ただしリリースという概念を業務文書に使うことになる |\n| 専用ブランチ（orphan） | git には入るが**メインの履歴は汚さない**。差分も追える |\n| Actions の artifact | 最も自然だが**保持期限がある**ので、ナレッジを貯める用途とは合わない |\n\n「git 管理ファイルとして追加しない」という要望の実質は、**メインのツリーと履歴を業務文書で埋めたくない**ことだと読んでいる。orphan ブランチはその条件を満たす。\n\n## 決めるべきこと\n\n1. 置き場所（上の3つ、または別の形）\n2. 生成形式 — エクセル／ワードそのものか、Markdown で書いて変換するか。**後者なら差分が読める**\n3. エージェントに与える手段 — ツールを足すのか、`shell` の中でスクリプトとして走らせるのか\n\n## 関連する既知の影響\n\nこれは**エージェントが長文を書く経路そのもの**で、いまのセッション圧縮が「ツール結果だけが大きい」という測定に乗っていることの前提を崩す側にある。セッションの圧縮方針を決める Issue と一緒に見ること。\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-09-27T14:44:04Z",
@@ -590,14 +590,81 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#415→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_d37e801c88294df788de6acd"
+    },
+    {
+      "role": "user",
+      "content": "<details><summary>Report</summary>\n\n**Sub-issue #415**\n\n**結論**: #415 を閉じます。PR #416（`atomaton/issue-12` に MERGED、base 確認済み）が「probe への read モード追加 + 契約テスト + 説明文 3 か所」を届け、閉じ条件のうちコードの親ブランチ到達・実測表・結論 1 行は engineer のコメント（上）に揃っています。`ghs_` の 2 行は未測定のまま記録しますが、これを待って開き続ける根拠はありません — スコープ内の対象では、この 2 行は測っても信号が出ないためです。\n\n**未測定 2 行を待たない判断の根拠**: 公開 asset では認証付き GET の 200 は「トークンが受理された」と「無視された」が同一応答で、マージされたコード自身が `interpretRead` にその旨を書いています（PR #416 の差分、200 の解釈「Not yet an answer about the token」）。区別できるのは 401（= no）だけで、「受容」を肯定する信号は公開 asset には存在しません。private asset（anon 404 vs 認証 302 → `private-user-images` + JWT）なら区別できる対象ですが、private リポの用意はこの issue の「やらないこと」です。つまり self-deploy 後に埋まる 2 行は「no」か「未確定」しか返さず、閉じ条件が意図したトークン受容の確定には至りません。トークン受容の確定が必要になったら、private リポの asset を対象にした別の測定で行うのが正しい場所です。\n\n**検証で確認したこと**: PR #416 の state と base（`get_pr(416)` → MERGED / `atomaton/issue-12`）、#415 が未閉鎖で子を持たないこと（`get_issue(415)`）。CI 緑・2180 pass は reviewer run が裏付け済み。実測の生データは `/tmp/atomaton-workspace/read-measurement.txt` に残っており、次の run から追試できます。\n\n**次に何が起きるか**: #12 が再起動されたら、次の子 `fetch_attachment` を **#415 の兄弟（#12 直下）で切ってください** — #415 のスコープは測定までで、実装は明示的に「やらないこと」です。設計 basis は測定済みで、engineer コメントの「前提の精密化」1–4 がそのまま使えます: トークンは既定で載せない（公開 asset では有無で差が出ない）、anon GET が 302 → 署名付き `objects.githubusercontent.com`（`X-Amz-Expires=300`）を返すので redirect は同じ呼び出しで追跡する（Location を保存して後で取る形は不可）、保存先は /tmp、サイズは復号後の `bytes`。probe の read モードは削除しない（`fetch_attachment` が入った後の子で）。\n\nLinked pull requests:\n- #416 probe: read モードを足し、chat 添付 URL への GET を実測する (done)\n\n</details>",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-03T07:28:04Z",
+        "event_type": "issue_comment",
+        "id": 6597929782,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #415). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-03T07:28:06Z",
+        "event_type": "issue_comment",
+        "id": 6597930281,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_bh6s5qjhj2w3emtnomp917n0",
+          "type": "function",
+          "function": {
+            "name": "create_sub_issue",
+            "arguments": "{\"body\": \"# 実装: attachments サーバーに `fetch_attachment` を足す — チャット添付 URL から /tmp へ保存する\\n\\n**Sub-issue of:** #12。#415（probe read モード + 実測、PR #416 merged into `atomaton/issue-12`）の直後の子。#415 の実測と engineer コメントの「前提の精密化」が設計 basis。\\n\\n## 目的\\n\\n人の簡素化方針（#12、2026-11-03 確定）の最初の部品: **チャット（Issue コメント）に添付されたファイルをエージェントがデ��スクに取れる**ようにする。流れは「取得（本 issue）→ 編集 → 送信（= `publish_draft`、続投）→ スキル（#232 配下）」。\\n\\n## 実測済みの前提（#415 / PR #416 — 調べ直さない）\\n\\n- **anon GET は通る**: 実物 URL `https://github.com/user-attachments/files/34306035/default.docx`（#12 に添付された ペダル.docx）に credential 無しで ZIP 実体が返る。\\n- **302 → 署名付き URL**: `github.com/user-attachments/files/...` は `objects.githubusercontent.com` の署名付き URL（`X-Amz-Expires=300`）へ 302 する。**署名は 5 分で切れるので、リダイレクトは同一呼び出し内で追跡する**（Location を返して 2 回目の呼び出しで取る、は不可）。\\n- **トークンは既定で載せない**: 公開 asset では認証の有無で応答が変わらず（200 が「受理」と「無視」で同一）、載せる意味が観測できない。`ghs_` の private asset での挙動は未測定（#415 が記録済み）なので、本 issue では送らない設計にする。\\n- **fetch ツールでは代替できない**: 結果が会話に来るだけでディスクに置けない（8000 文字で打ち切られるバイナリ文字化けとして実測済み）。\\n- **書き込み方向は死んでいる**: uploads endpoint への POST は `ghs_` で全面 404（#164）。だから送信は `publish_draft`（orphan ブランチ）が続投する — 本 issue では触れない。\\n- attachments サーバーは `GH_TOKEN` を env で受ける（`src/entrypoints/tools/defaults.yaml` の attachments エントリ）。shell から curl / gh / git fetch は拒否される（shell guard）— ツールとして作る意味そのもの。\\n\\n## 契約\\n\\n- **ツール名**: `fetch_attachment`（attachments サーバー、`src/entrypoints/tools/mcp/attachments.ts` に追加）。\\n- **引数**: `url`（必須）、`filename`（任意 — URL 末尾セグメントは `default.docx` のように汎用名になりがちで、コメント本文の表示名は ペダル.docx のように別にある。ツールは表示名を知らないので、呼び出し側が指定するか URL セグメントを使う）。\\n- **ホスト allowlist**: `github.com/user-attachments/` と `private-user-images.githubusercontent.com` のみ。他は拒否（probe / publish_draft と同じ guard の面）。\\n- **動作**: GET → リダイレクト追跡（同一呼び出し内）→ /tmp に保存（既定 `/tmp/atomaton-workspace/attachments/` 配下。パス指定は任意で可）→ `{ path, bytes, content_type, source_url }` を返す。`bytes` は**復号後（最終レスポンス本文）のサイズ**。\\n- **サイズ上限**: 25MB（添付の上限と同じ。超過は明確なエラーにする — メモリを食う前に切る）。\\n- **トークンは送らない**（上記の通り）。private リポの添付が anon で 404 になる可能性は残る — それは未測定のまま、エラーメッセージに「private リポの添付は未対応の可能性」と書く程度でよい。\\n\\n## スコープ\\n\\n1. `fetch_attachment` の実装（上の契約どおり）。\\n2. 契約テスト: allowlist 拒否、リダイレクト追跡（ローカルテストサーバーで 302 → 実体）、サイズ上限、`filename` 指定。既存 `tests/contract/attachments-*.test.ts` の作法に合わせる。\\n3. サーバー description の更新（`src/entrypoints/tools/defaults.yaml` の attachments エントリ — probe read モードのときと同じ箇所）。\\n4. **実物での通し確認**をこの issue のコメントに載せる: 実 URL に対してツールを呼び、保存されたファイルの先頭が `PK` であること（file magic か read で確認）、bytes と content_type を報告。\\n\\n## やらないこと\\n\\n- **probe の削除**（`fetch_attachment` が入って安定した後の子で消す。#415 の指示どおり本 issue では触れない）\\n- `docs/design-doc` スキル・`generate.mjs` の変更（#232 配下）\\n- private リポ（`ghs_` × private asset）の測定 — #415 が「別の測定で行うのが正しい場所」と記録済み\\n- `publish_draft`、orphan ブランチ、business-docs への変更\\n\\n## 検証\\n\\n- `bun run typecheck`、`bun run test`（contract test 含む）。\\n- スコープ 4 の実物通し確認がコメントに載ること。\\n\\n## 閉じ条件\\n\\nPR が `atomaton/issue-12`（親ブランチ）に merged になり、merged head から: 実 URL（`https://github.com/user-attachments/files/34306035/default.docx`）でツールが /tmp に保存し戻り値の `path` のファイル先頭が `PK` であること、allowlist 外の URL が拒否されることが、この issue のコメントの通し確認で示されていること。\", \"title\": \"実装: attachments サーバーに fetch_attachment — チャット添付 URL → /tmp 保存（allowlist・リダイレクト同追跡・25MB 上限）\"}"
+          }
+        }
+      ],
+      "reasoning_content": "#415 is done: probe got a read mode, PR #416 merged into `atomaton/issue-12`. The measurement: anon GET works on public assets (302 → signed objects.githubusercontent.com with X-Amz-Expires=300, must follow redirect in same call), `ghs_` token rows unmeasurable on public assets (200 indistinguishable between accepted/ignored), private asset would be needed to distinguish — out of scope.\n\nNow as the parent (#12) agent, I should aggregate: create the next child — `fetch_attachment` implementation — as a sibling under #12, with the design basis from #415's findings, and dispatch it.\n\nKey design basis for fetch_attachment (from #415's report):\n- URL argument, host allowlist (`github.com/user-attachments/` and `private-user-images.githubusercontent.com`), save to /tmp, return {path, size (bytes after decode), content_type}\n- Token: do NOT attach by default (public asset: no difference); redirect must be followed in the same call (302 → signed objects.githubusercontent.com, X-Amz-Expires=300 — can't save Location for later)\n- attachments server placement (decided earlier)\n- probe read mode: don't delete yet — deletion comes after fetch_attachment lands (in a later child)\n\nAlso there's a bigger picture: the person's plan was 簡素化: 取得ツール + 添付(=publish_draft)ツール + スキル. The remaining roadmap after fetch_attachment:\n1. fetch_attachment tool (next child, now)\n2. #232 (customer-quality doc generation: UNO/flat ODF + visual loop + new skill) — already open, waiting\n3. Then cleanup child: delete probe, delete docs/design-doc skill, trim generate.mjs to keep only dependency bootstrap + PDF conversion\n4. Also the #12 original deliverable (the e2e on #166) — the whole issue can then close.\n\nDependencies: fetch_attachment is independent of #232? The #232 skill will reference the fetch flow (\"取得 → 配置 → 利用\"). #232 is phase 1 verification (UNO, flat ODF, PNG, visual loop) — independent of fetch_attachment. Can run in parallel. #232 was left unlaunched (pending). Its phase 1 doesn't need fetch_attachment. So I could launch both now.\n\nWait — should I? #232 was created and left unlaunched deliberately (\"未起動、指示待ち\"). The person then redirected several times. Current confirmed direction: the simple flow. #232's scope is consistent with the confirmed direction (3 formats, user templates + default flat ODF templates, visual loop). It's a sub-issue of #12 already. Phase 1 is verification only. Launching it now is consistent with \"起動せずに\" — no wait, the person said \"サブIssueを起票して、起動せずにここまでの修整を再度簡潔にまとめて\" — that was about that particular run (don't launch, just summarize). Later the person said \"この方針で進めて\" (proceed with this direction). The 方針 being: 取得 → 配置 → 利用 with fetch tool + publish_draft + skill.\n\nHmm, but also \"ここまで実装したサーバーの扱いを決めたい\" — cleanup after. The cleanup (deleting probe, design-doc skill, trimming generate.mjs) should wait until fetch_attachment + new skill land. #232 phase 2 includes the new skill (docs/customer-doc). So order:\n\n1. fetch_attachment (now, sibling under #12)\n2. #232 phase 1 (verification — could run in parallel; it's independent)\n3. #232 phase 2 (new skill + templates) — depends on 1 and 2\n4. cleanup — depends on 3\n\nShould I launch #232 phase 1 now in parallel? It was created 2026-10-19 and deliberately not launched. The instruction at that time: person wanted to review the 修正 list first. Since then, direction confirmed (2026-11-03): \"この方針で進めて\". That covers the whole plan including #232? The 方針 statement included: \"チャットあるいはテンプレートの配置場所からテンプレートを取得して、自作のスクリプトでそれを編集しながら画像を取得して確認し、最終的にチャットで送信する\" — the visual verification loop is part of the confirmed image. #232 is exactly the verification + skill for that. So yes, #232 phase 1 is within the confirmed direction and independent → launch it in parallel with the new fetch_attachment child.\n\nBut caution: every launch costs. Two parallel children: fetch_attachment (engineer) and #232 phase 1 (engineer). Both are engineer-ready leaves? \n\nfetch_attachment: yes — concrete, contract known, acceptance observable (test with the real URL #34306035, saves to /tmp, returns path/size/content_type; allowlist enforcement; redirect followed in same call; no token by default).\n\n#232 phase 1: verification task with 4 measured points and close condition — it's a leaf (investigation/deliverable = measurements on the issue thread). It was written as one phase. OK.\n\nOne consideration: #232's phase 1 needs a fresh checkout from main and LibreOffice tarball work — that's fine, engineer can do it.\n\nAlso note: #415's report says \"次の子 fetch_attachment を #415 の兄弟（#12 直下）で切ってください\" — exactly what I'll do.\n\nDesign details for fetch_attachment issue body — incorporate the engineer's \"前提の精密化\" 1–4:\n1. Token not attached by default (no observable difference on public assets; avoids sending ghs_ to third-party-ish hosts unnecessarily). Maybe allow opt-in? Keep simple: no token. But private-user-images (private repos) would need... actually private-user-images URLs carry a JWT in the query itself, so anon might work there too. Keep: no token by default; document that private repo templates pasted from a private repo may 404 — future measurement (#415 noted). Don't overbuild.\n2. Follow redirects within the same call (302 → signed S3 URL with 5-min expiry; do NOT return Location for a second call).\n3. Save to /tmp (e.g. /tmp/atomaton-workspace/attachments/ or /tmp — prefer /tmp/atomaton-workspace so it survives? No — /tmp/atomaton-workspace is shared and persists; attachment files are scratch. Either is fine; the /tmp/atomaton-workspace is a good spot so the next run can reuse. Let the tool take a `path` or default under /tmp. Keep simple: default `/tmp/atomaton-workspace/attachments/<name>`, or path argument. Engineer decides the detail — but the issue should state the contract: returns {path, bytes, content_type, source_url}.\n4. Size: bytes after decode (final response body size). Enforce the 25MB ceiling? Uploads cap at 25MB, so anything bigger isn't attachable anyway; guard anyway with a max size to avoid memory blowup — engineer detail, mention as constraint.\n5. Host allowlist: `github.com/user-attachments/` + `private-user-images.githubusercontent.com`. Reject others.\n6. Name: the URL's last segment is often generic (`default.docx`) — the display name is in the comment markdown (`ペダル.docx`). The tool can't know that; caller can rename after download via `write`/mv? Simplest: tool takes optional `name` or derives from URL; caller may copy to a better name. Mention: allow optional `filename` argument.\n7. Contract tests: allowlist rejections, redirect handling (local test server), size cap.\n8. Server description update in defaults.yaml (3 places were updated for read mode; add fetch_attachment).\n9. Validation: typecheck + test; manual verification against the real URL https://github.com/user-attachments/files/34306035/default.docx → the tool call saves and `read`/file magic shows PK... — as part of the issue comment report.\n\nAlso: probe deletion explicitly NOT in this child (after everything lands, cleanup child). generate.mjs/design-doc unchanged.\n\nClose condition for fetch_attachment child: PR merged into atomaton/issue-12; from the merged head, a tool call on the real URL saves a file whose bytes start with `PK`; allowlist rejects a non-allowlisted host; contract tests pass in CI.\n\nDispatch: launch_sub_agent with both #415-sibling (new issue number, engineer) and #232 (engineer, phase 1 only — the issue body already scopes phase 1 and says phase 2 waits for children; dispatching engineer on #232 means the engineer will do phase 1 and report; it shouldn't do phase 2 since the body says \"フェーズ 2 — スキル + スクリプト + 既定テンプレート（フェーズ 1 の後に子 issue で）\" — the body itself fences it. Good.\n\nHmm — wait. Should phase 1 of #232 go to engineer or atomaton? It's verification/measurement — engineer is fine and has vision... Actually phase 1 item 4 needs image reading (visual loop 1 lap) — engineer has vision: true. atomaton does not. So engineer is the right dispatcher for #232. Good.\n\nAlso the summary/parent report should note the unmeasured 2 rows (ghs_ on public assets) and the private-repo caveat, and that the deploy of these changes to the live machinery still requires self-deploy (governed). Note: PR #416 merged into atomaton/issue-12 — not main — so the probe read mode isn't deployed yet; that's consistent with sub-issue stacking.\n\nNow create the sub-issue for fetch_attachment, then launch both in one launch_sub_agent call.\n\nThe issue body for fetch_attachment must include: context (parent #12, decisions), 確定事項 (URL arg, allowlist, no token by default, redirect same-call, /tmp save, attachments server placement), scope, やらないこと (probe deletion, design-doc/generate.mjs changes, private-repo token measurement), validation, close condition. Also the \"前提の精密化\" 1–4 from #415's engineer comment — I should quote them since they're the design basis. I have them from the #415 report summary: token default off, redirect same-call (X-Amz-Expires=300), save to /tmp, bytes after decode. Good.\n\nAlso mention the real test URL and that the display filename may differ from URL segment (ペダル.docx vs default.docx) — optional filename arg.\n\nAlso note: where does the tool live — attachments.ts; register in defaults.yaml description; contract test file tests/contract/attachments-shape.test.ts conventions; and since .github is generated, source of truth is src/entrypoints/tools/defaults.yaml (the earlier grep showed src/entrypoints/tools/defaults.yaml exists with attachments entry).\n\nWrite the sub-issue now.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":418,\"url\":\"https://github.com/yuma-seno/atomaton/issues/418\",\"parent\":12}",
+      "tool_call_id": "call_bh6s5qjhj2w3emtnomp917n0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_va64hzigct5a26g3vyhctk2f",
+          "type": "function",
+          "function": {
+            "name": "launch_sub_agent",
+            "arguments": "{\"tasks\": [{\"agent\": \"engineer\", \"issue\": 418}, {\"agent\": \"engineer\", \"issue\": 232}]}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"dispatched\":[\"#418→engineer\",\"#232→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
+      "tool_call_id": "call_va64hzigct5a26g3vyhctk2f"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 17,
+      "event_count": 19,
       "session_number": "12",
-      "snapshot_hash": "8eb0ad84804e376f554bcf7a6c7dc0a2328767f242e0a21e0f66e8e6ea6db43c",
+      "snapshot_hash": "ccc052c2e21d462419bd472d9b4af8d6f53cd947de75eaaa1752960c56c89a19",
       "type": "issue",
       "version": 1
     }
@@ -676,6 +743,23 @@
         }
       },
       "started": "2026-11-03T06:42:26Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-03T07:30:08Z",
+      "ended_because": "completed",
+      "iterations": 2,
+      "messages": 63,
+      "seconds": 85,
+      "server_calls": {
+        "atomaton": {
+          "launch_sub_agent": 1
+        },
+        "github": {
+          "create_sub_issue": 1
+        }
+      },
+      "started": "2026-11-03T07:28:43Z"
     }
   ]
 }
