@@ -24,13 +24,12 @@ mcp_servers:
   - github
   - web
   - search
-  # Where a file this run produced becomes an attachment: the POST goes to GitHub's
-  # upload endpoint from here, because the shell holds no token and both `curl` and
-  # `gh` are refused there. Not a delegate's job either -- a sub-run is handed
-  # `files` and `shell` and reaches no GitHub API. This is also the definition a
-  # merged pull request's own agent is re-invoked under, which is the run that takes
-  # the endpoint measurement. `upload` stores a file with no documented deletion, so
-  # the read-only agents do not name this server.
+  # Where a document a person attached to an issue comes in, and where a produced one
+  # goes out. `shell` can do neither: `curl` and `wget` are refused there, and so is
+  # every mutating `git` subcommand. Not a delegate's job either -- a sub-run is
+  # handed `files` and `shell` and reaches no GitHub API. A server nobody names is
+  # never started, so this line is what makes `fetch_attachment` callable at all on
+  # an issue a person dispatches here.
   - attachments
   # `reload_environment` and `request_close_issue` -- the same server the atomaton
   # has, with `launch_sub_agent` withheld, so an engineer cannot dispatch an agent.
