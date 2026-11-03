@@ -120,20 +120,22 @@ found by rendering a draft that looked fine in the XML:
   argument for checking both.
 - **docx:** a heading needs `fo:keep-with-next="always"`, or it strands at the
   foot of a page.
-- **docx, a table longer than one page:** the table property
-  `style:may-break-between-rows="false"` keeps a table that *fits* on one page
-  there, and does nothing for one that does not — it exports as `w:keepNext` on
-  the row paragraphs, never as `w:cantSplit`. A 150-row table with it alone
-  measured 0 `w:cantSplit`, 0 `w:tblHeader`, and split across 4 pages at a data
-  row. A row is held whole by `fo:keep-together="always"` on its own
+- **docx, a table across a page break:** what stops a row splitting is a row
+  property, not the table's. `style:may-break-between-rows="false"` on the table
+  decides only whether a table that would fit moves whole — measured on a 6-row
+  table with 30 filler paragraphs above it, without it rows 1–3 stayed on page 1
+  and 4–6 went to page 2, and with it all six moved to page 2. It exports as
+  `w:keepNext` on the row paragraphs and never as `w:cantSplit`, so on a table
+  too long for one page it decides nothing: 150 rows with it alone split across 3
+  pages at a data row, with 0 `w:cantSplit`, 0 `w:tblHeader`, and the header row
+  on page 1 only. A row is held whole by `fo:keep-together="always"` on its own
   `style:table-row-properties` (that is what exports `w:cantSplit`), and a header
   row repeats on the next page only when it sits inside
-  `table:table-header-rows` (that is `w:tblHeader`) — with both, the same table
-  measured 150 `w:cantSplit` and 1 `w:tblHeader`, and every page after the first
-  began at the header row. Both styles must be in `office:automatic-styles`: the
-  same table-row style in `office:styles` exported neither attribute.
-  `style:row-height`, and `fo:keep-together` on the table properties, changed
-  nothing.
+  `table:table-header-rows` (that is `w:tblHeader`) — the same 150-row table with
+  both measured 150 `w:cantSplit`, 1 `w:tblHeader`, and the header row on all 3
+  pages. The row style must be in `office:automatic-styles`: the same style moved
+  to `office:styles` exported 0 `w:cantSplit`. `style:row-height`, and
+  `fo:keep-together` on the table properties, changed nothing.
 - **pptx:** the page is 28 × 15.75 cm — LibreOffice's own 16:9 — and a
   `style:page-layout` naming any other 16:9 size is ignored, which misplaces every
   frame laid out for it. Text styles must be `style:family="paragraph"` with names
