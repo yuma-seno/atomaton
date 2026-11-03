@@ -47,6 +47,13 @@
  * came back" without putting a document into the conversation: measured, a document
  * pasted that way arrives as 8,000 characters of mojibake and is cut off.
  *
+ * `fetch_attachment` is that measurement put to use: the same host and the same
+ * redirect, except the body is written to `/tmp` rather than counted, so a document
+ * attached to an issue can be opened, edited and delivered — `publish_draft` is the
+ * other half — instead of being pasted. It sends no token either, for the reason
+ * `read`'s anonymous row exists: a public asset answers an anonymous GET with the
+ * bytes, and there an accepted token and an ignored one are the same response.
+ *
  * ## Why an orphan branch is published from here too
  *
  * The other half of the same design question — where a document that is not a
@@ -63,9 +70,9 @@
  * runs where the run's own credential is, rather than in a shell that has
  * none. `GH_TOKEN` is declared for `probe` alone.
  */
-import { readFileSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { buildMcpTools, defineMcpTool, positiveInt, serveMcpServer, z } from "../../../adapters/mcp/mcp-tool.ts";
 import { getDocsBranch } from "../../../adapters/runner/config.ts";
 import { gh, gitRun, gitRunWith } from "../../../adapters/github/gh.ts";
@@ -121,6 +128,18 @@ export const REQUEST_ABORT_MS = 120_000;
 /** How much of a response body reaches the result. The status decides the design; the body records why. */
 const BODY_EXCERPT_CHARS = 2_000;
 
+/**
+ * The one directory outside the checkout a run may write to.
+ *
+ * `/tmp/atomaton-workspace` is the part of it that survives into the next run on an
+ * issue, and nothing else here survives at all — which is why a fetched attachment is
+ * written under this and not beside the code.
+ */
+const TMP_ROOT = "/tmp";
+
+/** Where a fetched attachment lands when the caller names no directory. */
+export const ATTACHMENT_DIR = "/tmp/atomaton-workspace/attachments";
+
 /** The blob mode every published draft gets: an ordinary, non-executable file. */
 const DRAFT_FILE_MODE = "100644";
 
@@ -164,6 +183,32 @@ export const PUBLISH_DRAFT_SCHEMA = z.object({
     .min(1)
     .describe("The drafts to publish, each as a local `path` and the `target` it takes on the branch."),
   message: z.string().min(1).describe("Commit message for this publication."),
+});
+
+export const FETCH_ATTACHMENT_SCHEMA = z.object({
+  url: z
+    .string()
+    .min(1)
+    .describe(
+      "The attachment URL to fetch: `https://github.com/user-attachments/files/<id>/<name>`, or a " +
+        "`private-user-images.githubusercontent.com` URL. Every other host is refused.",
+    ),
+  filename: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "What to save it as, such as `ペダル.docx`. Defaults to the URL's last segment, which is often a generic " +
+        "`default.docx` rather than the name the comment shows. A file name, not a path.",
+    ),
+  dir: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      `The directory to save into. Defaults to \`${ATTACHMENT_DIR}\`, which survives into the next run on this ` +
+        `issue; an absolute path under ${TMP_ROOT} only.`,
+    ),
 });
 
 /**
@@ -225,7 +270,7 @@ export function resolveDraftFiles(files: { path: string; target: string }[]): Dr
   // The work tree and /tmp — the pinned interface: a draft is either a file in the
   // checkout or an absolute path under /tmp, which is where a conversion step puts its
   // output. `/tmp/atomaton-workspace` is the one subdirectory of it that survives a run.
-  const roots = [base, "/tmp"];
+  const roots = [base, TMP_ROOT];
   const seen = new Set<string>();
   const out: DraftFile[] = [];
 
@@ -920,6 +965,184 @@ async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
   );
 }
 
+/**
+ * The hosts `fetch_attachment` reads.
+ *
+ * Narrower than `readHostAllowed`, on purpose, and it is a different question. This
+ * tool sends no credential, so this is not a token guard: it keeps a tool whose whole
+ * job is to write a file under `/tmp` from being aimed at any host on the internet.
+ * The two addresses that carry a chat attachment are
+ * `github.com/user-attachments/files/<id>/<name>` and the `private-user-images` host
+ * a private repository's asset redirects through.
+ */
+export function attachmentUrlAllowed(url: URL): boolean {
+  if (url.protocol !== "https:") return false;
+  if (url.hostname === "github.com") return url.pathname.startsWith("/user-attachments/");
+  return url.hostname === "private-user-images.githubusercontent.com";
+}
+
+/** The URL as an attachment address, or the refusal naming what this tool does read. */
+export function attachmentUrlFrom(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${raw} is not an absolute URL.`);
+  }
+  if (!attachmentUrlAllowed(url)) {
+    throw new Error(
+      `${raw} is not an attachment this tool fetches. It reads ` +
+        "`https://github.com/user-attachments/files/<id>/<name>` and " +
+        "`https://private-user-images.githubusercontent.com/...`, and refuses every other host: what it does with " +
+        "the answer is write a file, and the URL is the caller's.",
+    );
+  }
+  return url;
+}
+
+/**
+ * The file to save into — the caller's name, or the URL's last segment.
+ *
+ * `filename` is an argument because the two names differ: an asset URL's last segment
+ * is a generic `default.docx`, while the comment the file was attached in shows the
+ * name the person gave it (`ペダル.docx`). `dir` is an argument for the same kind of
+ * reason: the default is the one directory under `/tmp` that survives into the next
+ * run on an issue, and a caller that means a different one says so.
+ *
+ * Nothing outside `/tmp` is written, and the refusal says why: a file inside the
+ * checkout is this run's work and would be committed as part of it.
+ */
+export function attachmentPathFor(url: URL, parts: { filename?: string; dir?: string } = {}): string {
+  const root = resolve(TMP_ROOT);
+  const requested = parts.dir ?? ATTACHMENT_DIR;
+  const dir = resolve(requested);
+  if (!(dir === root || dir.startsWith(root + sep))) {
+    throw new Error(
+      `'${requested}' resolves to '${dir}', outside ${TMP_ROOT}. An attachment is written under ${TMP_ROOT} only: ` +
+        "a file inside the checkout would be committed as this run's work.",
+    );
+  }
+  const name = parts.filename ?? decodeSegment(url.pathname.split("/").filter(Boolean).pop() ?? "");
+  if (!name) {
+    throw new Error(`${url.href} names no file, so pass \`filename\` to say what to save it as.`);
+  }
+  if (name === "." || name === ".." || /[/\\\0]/.test(name)) {
+    throw new Error(`'${name}' is not a file name. Pass the name alone — the directory is \`dir\`.`);
+  }
+  return join(dir, name);
+}
+
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/**
+ * GET one attachment and write it to `dest`.
+ *
+ * ## The redirect is followed inside this call
+ *
+ * Measured on #415's thread: `github.com/user-attachments/files/<id>/<name>` answers
+ * 302 to a signed `objects.githubusercontent.com` URL whose `X-Amz-Expires` is 300
+ * seconds. A tool that reported the `Location` and left the second call to its caller
+ * would hand back an address that is dead by the time anyone uses it, so the hop
+ * happens here — and the body written is the target's, which is also why
+ * `content_type` is read off the final response.
+ *
+ * ## Why the ceiling is enforced on the bytes and not on the header
+ *
+ * `content-length` is checked first because it is free. It is not sufficient: it is the
+ * ENCODED length — measured on #415's thread as 40 bytes declaring a 9-byte body — so
+ * a header under the ceiling does not mean a body under it. The count is therefore
+ * kept as the body streams, the read stops at the ceiling rather than after it, and
+ * nothing is written when it is crossed: a truncated document at the destination is
+ * worse than none, because the caller cannot tell it from a whole one.
+ */
+export async function downloadAttachment(
+  source: string,
+  dest: string,
+): Promise<{ bytes: number; contentType: string | null }> {
+  const started = Date.now();
+  log(`fetch_attachment ${source} -> ${dest}`);
+  const response = await fetch(source, {
+    method: "GET",
+    // No Authorization header, and no argument that would add one. Measured on #415's
+    // thread: a public asset answers an anonymous GET with the bytes, and on a public
+    // asset a token that was accepted and one that was ignored are the same response —
+    // so there is no observation this credential buys here, and one fewer place it goes.
+    redirect: "follow",
+    signal: AbortSignal.timeout(REQUEST_ABORT_MS),
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(refusalFor(response.status, source));
+  }
+
+  const declared = Number(response.headers.get("content-length") ?? "");
+  if (declared > UPLOAD_LIMIT_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(overTheCeiling(source, declared));
+  }
+
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  const stream = response.body as unknown as AsyncIterable<Uint8Array> | null;
+  if (stream) {
+    for await (const chunk of stream) {
+      bytes += chunk.length;
+      // Leaving the loop this way cancels the body: the rest of it is not wanted, and
+      // this is the point the ceiling exists for rather than a limit checked at the end.
+      if (bytes > UPLOAD_LIMIT_BYTES) throw new Error(overTheCeiling(source, bytes));
+      chunks.push(chunk);
+    }
+  }
+
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, Buffer.concat(chunks));
+
+  const contentType = response.headers.get("content-type");
+  log(`fetch_attachment ${bytes}B ${contentType ?? "(no content-type)"} in ${Date.now() - started}ms`);
+  return { bytes, contentType };
+}
+
+function overTheCeiling(source: string, bytes: number): string {
+  return (
+    `${source} is ${bytes} bytes, over the ${UPLOAD_LIMIT_BYTES}-byte limit an attachment is saved at, so the read ` +
+    "stopped there and nothing was written. A partial file would be indistinguishable from a whole one."
+  );
+}
+
+function refusalFor(status: number, source: string): string {
+  if (status === 404) {
+    return (
+      `${source} answered 404 and nothing was written. The case this tool does not cover is an attachment on a ` +
+      "private repository: it sends no credential, and whether an anonymous GET of a private asset is refused has " +
+      "not been measured — so a 404 here may be a visibility answer rather than an absence."
+    );
+  }
+  if (status === 401 || status === 403) {
+    return (
+      `${source} answered ${status} and nothing was written. That is a refusal rather than an absence, and an ` +
+      "attachment on a private repository read without a credential is the likely cause: this tool sends none."
+    );
+  }
+  return `${source} answered ${status} and nothing was written.`;
+}
+
+async function fetchAttachment(a: z.infer<typeof FETCH_ATTACHMENT_SCHEMA>): Promise<string> {
+  const url = attachmentUrlFrom(a.url);
+  const dest = attachmentPathFor(url, { filename: a.filename, dir: a.dir });
+  const { bytes, contentType } = await downloadAttachment(url.href, dest);
+  return JSON.stringify(
+    { path: dest, bytes, content_type: contentType, source_url: url.href },
+    null,
+    2,
+  );
+}
+
 /** The branch's current tip on the remote, or `undefined` when it does not exist yet. */
 function remoteTip(branch: string): string | undefined {
   // `branch-reads.ts`'s read, so "origin has no such branch" and "origin could not be
@@ -1119,6 +1342,18 @@ const PUBLISH_DRAFT_DESCRIPTION =
   "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " +
   "refused — an orphan branch is safe because it is not the reviewed one.";
 
+const FETCH_ATTACHMENT_DESCRIPTION =
+  "Fetch one file a person attached to an issue and save it under /tmp, so a document can be opened, edited and " +
+  "delivered (`publish_draft`) instead of pasted into the conversation. It reads " +
+  "`https://github.com/user-attachments/files/<id>/<name>` and `https://private-user-images.githubusercontent.com/...` " +
+  "and refuses every other host. It carries no credential — what it fetches is what an anonymous reader gets — and " +
+  "the 302 GitHub answers is followed inside this call, because the signed URL it points at expires in five minutes " +
+  "and a Location kept for a second call would already be dead. Returns the saved `path`, the decoded `bytes`, the " +
+  "`content_type` and the `source_url`. A body over 25MB — the attachment ceiling — is refused rather than buffered, " +
+  "and nothing is written. `filename` names the saved file, since an asset URL's last segment is often a generic " +
+  "`default.docx` while the comment shows the name it was attached as. A 404 may mean an attachment on a private " +
+  "repository, which this tool has not been measured against.";
+
 const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "probe",
@@ -1136,6 +1371,12 @@ const { tools, dispatch } = buildMcpTools([
     description: PUBLISH_DRAFT_DESCRIPTION,
     schema: PUBLISH_DRAFT_SCHEMA,
     handler: publishDraft,
+  }),
+  defineMcpTool({
+    name: "fetch_attachment",
+    description: FETCH_ATTACHMENT_DESCRIPTION,
+    schema: FETCH_ATTACHMENT_SCHEMA,
+    handler: fetchAttachment,
   }),
 ]);
 
