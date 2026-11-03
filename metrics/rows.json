@@ -1342,20 +1342,23 @@
   {
     "path": "sessions/issue-12/reviewer.json",
     "agent": "reviewer",
-    "messages": 23,
-    "calls": 11,
+    "messages": 76,
+    "calls": 15,
     "failed": 0,
     "refused": 0,
-    "skills": [],
+    "skills": [
+      "project/conventions"
+    ],
     "reported": true,
     "tools": {
-      "read": 1,
+      "read": 2,
       "fetch": 2,
       "get_branch": 1,
-      "check_merge_readiness": 3,
+      "check_merge_readiness": 4,
       "get_check_runs": 2,
       "get_pr": 1,
-      "merge_pr": 1
+      "merge_pr": 2,
+      "atoma_builtin__load_skill": 1
     },
     "acts": {},
     "runs": [
@@ -1459,6 +1462,24 @@
           }
         },
         "started": "2026-11-03T10:11:52Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T13:00:25Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 76,
+        "seconds": 50,
+        "server_calls": {
+          "files_readonly": {
+            "read": 1
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "merge_pr": 1
+          }
+        },
+        "started": "2026-11-03T12:59:35Z"
       }
     ]
   },
