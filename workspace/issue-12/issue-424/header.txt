@@ -1,0 +1,38 @@
+/**
+ * attachments.ts — the two things about files a run cannot do through the shell:
+ * read a document a person attached to an issue (`fetch_attachment`), and put a
+ * document where a person can open it (`publish_draft`, onto an orphan branch).
+ *
+ * ## Why a server, and not the shell
+ *
+ * Both are refused there. `curl` and `wget` are routed away from the shell by
+ * `shell_guard`, so a GET has no way to run at all — measured, the command is
+ * refused before a request is built. Every mutating `git` subcommand is refused
+ * the same way, and `commit_and_push` names a branch from the work-branch
+ * convention and can build no other.
+ *
+ * ## `fetch_attachment` writes the bytes instead of the conversation
+ *
+ * Handing a document back through the conversation does not work: measured, one
+ * pasted that way arrives as 8,000 characters of mojibake and is cut off. So the
+ * body is written under `/tmp` and the answer is a path, which the run can then
+ * open, edit and publish.
+ *
+ * It sends no credential. A public asset answers an anonymous GET with the bytes,
+ * and there a token accepted and a token ignored are the same response — so there
+ * is no observation the credential buys here, and one fewer place it goes. What
+ * that costs is in the refusal a `404` produces: "not there" and "not visible to
+ * this run" are the same answer. The 302 GitHub replies is followed inside the
+ * same call, because the signed URL behind it expires in five minutes and a
+ * `Location` handed back would be dead by the second call.
+ *
+ * ## Why an orphan branch is published from here too
+ *
+ * The other half of the same question — where a document that is not a
+ * deliverable lives — is an orphan branch, and it is reached from here because
+ * the shell cannot do it either. What makes it a *credential* question is that
+ * this is a tool server: it runs `git` in its own process, and the checkout it
+ * inherits already carries what `actions/checkout` wrote into `.git/config`. No
+ * token is read here and none is passed — the point is that the command runs
+ * where the run's own credential is, rather than in a shell that has none.
+ */
