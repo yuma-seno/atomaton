@@ -65,9 +65,9 @@ turns it into one: pass the URL from the comment it was posted in
 (`https://github.com/user-attachments/files/<id>/<name>`), and the bytes are saved
 under `/tmp/atomaton-workspace/attachments` — the one `/tmp` directory that survives
 into the next run on the issue. It reads only GitHub's two attachment hosts and sends
-no credential, so an attachment on a private repository answers 404 and nothing is
-written. That saved path is then what `--template` takes in §4: a customer's `.docx`
-is the UNO leg.
+no credential, so an attachment on a private repository comes back refused rather than
+saved — as a 404 or as a page, which of the two has not been measured. That saved path
+is then what `--template` takes in §4: a customer's `.docx` is the UNO leg.
 
 A placeholder is `{{UPPER_SNAKE}}` and is substituted everywhere it appears,
 including inside table cells. Values are XML-escaped, so a name with `&` or `<`

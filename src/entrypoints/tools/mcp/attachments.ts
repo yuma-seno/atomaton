@@ -445,8 +445,9 @@ export async function downloadAttachment(
   }
 
   // The content type before the bytes, because a `200` is not by itself a document.
-  // A GitHub page answers 200 with HTML — a repository the run cannot see, a login
-  // wall — and saving that would report a path to a document that is a web page.
+  // A page is served with HTML, and saving one would report a path to a document that
+  // is a web page. Which answer a private repository's asset gives — that page or a
+  // `404` — has not been measured.
   const contentType = response.headers.get("content-type");
   if (isMarkup(contentType)) {
     await response.body?.cancel().catch(() => {});
@@ -491,13 +492,16 @@ function isMarkup(contentType: string | null): boolean {
  * The set of files a person attaches is open — flat ODF arrives as XML, a template as
  * `application/octet-stream` — so an allowlist would refuse the formats this project's
  * own templates use. The wrong answer is narrower than that: it is a web page served
- * with `200`, which is how GitHub answers a request for something the run cannot see.
+ * with `200`, which is what a login wall answers with. Whether an attachment on a
+ * private repository gets that page or a `404` has not been measured, so this refuses
+ * the page without claiming to know which one arrives.
  */
 function markupRefusal(source: string, contentType: string | null): string {
   return (
     `${source} answered 200 as ${contentType}, which is a page rather than a document, and nothing was written. ` +
-    "A URL the run cannot read is served as HTML — a private repository, a login wall — so a path to it would be a " +
-    "path to a web page. Check the URL opens in a browser that is signed in, or attach the file to the issue again."
+    "A login wall answers that way, and a path to it would be a path to a web page. Whether an attachment on a private " +
+    "repository answers this page or a 404 has not been measured. Check the URL opens in a browser that is signed " +
+    "in, or attach the file to the issue again."
   );
 }
 
@@ -744,10 +748,11 @@ const FETCH_ATTACHMENT_DESCRIPTION =
   "and a Location kept for a second call would already be dead. Returns the saved `path`, the decoded `bytes`, the " +
   "`content_type` and the `source_url`. A body over 25MB — the attachment ceiling — is refused and nothing is " +
   "written: `content-length` is checked first and the count is kept as the body streams, so up to the ceiling is held " +
-  "in memory and the read is abandoned at the first chunk past it. A 200 carrying HTML is refused the same way — that " +
-  "is a page rather than a document, which is how GitHub answers a URL the run cannot see. `filename` names the saved " +
-  "file, since an asset URL's last segment is often a generic `default.docx` while the comment shows the name it was " +
-  "attached as. A 404 may mean an attachment on a private repository, which this tool has not been measured against.";
+  "in memory and the read is abandoned at the first chunk past it. A 200 carrying HTML is refused the same way — a " +
+  "page rather than a document, and a path to it would be a path to a web page. `filename` names the saved file, since " +
+  "an asset URL's last segment is often a generic `default.docx` while the comment shows the name it was attached as. " +
+  "An attachment on a private repository is not measured: no credential is sent, so it comes back refused, and whether " +
+  "GitHub answers a 404 or a page is unknown.";
 
 const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
