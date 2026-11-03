@@ -21,18 +21,31 @@
  *
  * ## `probe` stores nothing by default
  *
- * Three of its four modes send requests the endpoint cannot fulfil into an
- * asset: `routing` omits `repository_id`, `endpoint` empties `name`, and
- * `oversize` sends past the size ceiling. Each answer is an observation to
- * record — the status, the body, and whether anything was stored — and none of
- * them is proof the route exists: a `400` naming a parameter says something
- * parsed the request, a `404` says something did not route it, and a layer in
- * front of a different route answers both. `upload` is the one mode that stores,
- * because a `201` is only obtainable by storing, and it is opt-in by name.
+ * Four of its five modes cannot store anything: `routing` omits `repository_id`,
+ * `endpoint` empties `name`, `oversize` sends past the size ceiling, and `read`
+ * sends no POST at all. Each answer is an observation to record — the status, the
+ * body, and whether anything was stored — and none of them is proof the route
+ * exists: a `400` naming a parameter says something parsed the request, a `404`
+ * says something did not route it, and a layer in front of a different route
+ * answers both. `upload` is the one mode that stores, because a `201` is only
+ * obtainable by storing, and it is opt-in by name.
  *
  * A stored user-attachment asset has no documented deletion API. The URL is
  * the artifact and it is permanent; that is part of why storing is not the
  * default.
+ *
+ * ## The read direction is a different host, and `read` is what measures it
+ *
+ * Storing an attachment is refused for this credential kind (`upload` mode's 404).
+ * Reading one is not the same question: an asset URL is
+ * `github.com/user-attachments/files/<id>/<name>`, not `uploads.github.com`, so it
+ * is a different gate and nothing has measured whether it opens for a run. `read`
+ * is that measurement — a URL, whether to send `GH_TOKEN`, and whether to follow
+ * the redirect GitHub answers with — and it reports the status, the three headers
+ * that decide the design (content-type, content-length, location) and the byte
+ * count. The count is what distinguishes "the asset came back" from "a login page
+ * came back" without putting a document into the conversation: measured, a document
+ * pasted that way arrives as 8,000 characters of mojibake and is cut off.
  *
  * ## Why an orphan branch is published from here too
  *
@@ -84,12 +97,13 @@ const UPLOAD_ENDPOINT = "https://uploads.github.com/user-attachments/assets";
 export const UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 
 /**
- * The largest file either tool will handle at all.
+ * The largest body either tool will handle at all.
  *
- * For `probe` it is the point past which the file is not read into memory; for
- * `publish_draft` it is the point past which it is not handed to `git`. Both are far
- * above the 25MB attachment ceiling, so this bound is about not being handed an
- * accident — a log, an image dump — rather than about either limit.
+ * For `probe` it is the point past which a file is not read into memory and a
+ * `read` mode's body stops being counted; for `publish_draft` it is the point past
+ * which a draft is not handed to `git`. Both are far above the 25MB attachment
+ * ceiling, so this bound is about not being handed an accident — a log, an image
+ * dump — rather than about either limit.
  */
 const MAX_READ_BYTES = 128 * 1024 * 1024;
 
@@ -297,23 +311,51 @@ function gitInIndexStdin(indexPath: string, args: string[], input: string): Retu
   return gitRunWith({ ...indexEnv(indexPath), stdin: input }, ...args);
 }
 
-export type ProbeMode = "routing" | "endpoint" | "oversize" | "upload";
+/** The modes that POST to the upload endpoint. `read` GETs an asset URL instead. */
+export type PostProbeMode = "routing" | "endpoint" | "oversize" | "upload";
+export type ProbeMode = PostProbeMode | "read";
 
-const PROBE_SCHEMA = z.object({
+export const PROBE_SCHEMA = z.object({
   mode: z
-    .enum(["routing", "endpoint", "oversize", "upload"])
+    .enum(["routing", "endpoint", "oversize", "upload", "read"])
     .optional()
     .default("endpoint")
     .describe(
       "What to measure. `endpoint` (default): POST with repository_id and an empty name — a request that cannot store, measured to answer 400 with the `name` parameter named in the body. That answer says something parsed the request; it is not proof the route exists. " +
         "`routing`: the same without repository_id — the 404 shape gh's source predicts. " +
         "`oversize`: send a file over the 25MB ceiling and record how the endpoint refuses it. " +
-        "`upload`: the only mode that stores — one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent.",
+        "`upload`: the only mode that stores — one file up to 25MB, returning the asset URL. A stored user-attachment has no documented deletion API, so treat the URL as permanent. " +
+        "`read`: GET `url` — an asset URL such as `https://github.com/user-attachments/files/<id>/<name>` — and report its status, content-type, content-length, location and byte count. This is the other direction from the four POST modes and a different host: whether reading an attachment works is not settled by whether writing one does. Run it twice, anonymous and with `authenticate`, before reading the answer.",
     ),
   file: z
     .string()
     .optional()
-    .describe("Path to the file to send. Required for oversize and upload; ignored by the other two."),
+    .describe("Path to the file to send. Required for oversize and upload; ignored by the rest."),
+  url: z
+    .string()
+    .optional()
+    .describe(
+      "The URL to GET. Required for `read` and ignored by the POST modes: they build their own. An https URL on " +
+        "`github.com` or `*.githubusercontent.com` — anywhere else is refused, because `authenticate` sends the " +
+        "run's token and a GET to a caller-chosen host would post it wherever the caller names.",
+    ),
+  authenticate: z
+    .boolean()
+    .optional()
+    .describe(
+      "For `read`: send this run's `GH_TOKEN` as an `Authorization: token` header. Defaults to false, so an " +
+        "anonymous reading needs no credential at all — which is what makes the read direction measurable " +
+        "before the credential is known to be accepted.",
+    ),
+  follow_redirects: z
+    .boolean()
+    .optional()
+    .describe(
+      "For `read`: follow a redirect to its target. Defaults to false, so a redirect is reported as an answer " +
+        "rather than replaced by whichever host it points at. Measure both: an asset on a private repository " +
+        "answers a redirect to `private-user-images.githubusercontent.com` carrying a signed query, and the bytes " +
+        "only arrive by following it.",
+    ),
   content_type: z
     .string()
     .optional()
@@ -381,14 +423,15 @@ function resolveRepositoryId(repo: string): number {
 }
 
 /**
- * The request each mode sends, as a URL.
+ * The request each POST mode sends, as a URL.
  *
  * Separate from the send so the shape a mode produces is testable without a
  * credential — this is the "verify the shape here, the far end there" half of
- * a check that can only mean something after a merge.
+ * a check that can only mean something after a merge. `read` is not here: it
+ * GETs the URL it is given, and this builds the upload endpoint's own.
  */
 export function requestUrlFor(
-  mode: ProbeMode,
+  mode: PostProbeMode,
   parts: { repositoryId?: number; name?: string; contentType: string },
 ): string {
   const query = new URLSearchParams();
@@ -435,6 +478,141 @@ export function readFileFor(mode: "oversize" | "upload", path: string): { bytes:
 }
 
 /**
+ * How much of a read body is kept, in bytes.
+ *
+ * Enough for the signature (`PK`, `%PDF`, `{`) and an excerpt a comment can quote,
+ * not enough to matter for a 25MB asset. The rest streams past and is only counted.
+ */
+const READ_HEAD_BYTES = 8_192;
+
+/**
+ * A body's first bytes as text, or `null` where they are not text.
+ *
+ * Fatal UTF-8: a body that decodes can be quoted, and one that does not is a
+ * document, an image or a zip — quoting it is exactly the 8,000-character mojibake
+ * this mode exists to replace. The boundary is "decodes as UTF-8", not "is not a
+ * file": a short all-ASCII binary head does decode and is pasted, which costs a few
+ * readable characters, where guessing wrong the other way costs the conversation.
+ * A head that stops mid-character makes a text body read as binary; the hex head is
+ * then still an answer and the byte count is untouched.
+ */
+export function excerptOf(head: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(head.subarray(0, BODY_EXCERPT_CHARS)) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** The first bytes in hex, which is how a binary body says what it is without being pasted. */
+function headHexOf(head: Uint8Array): string {
+  return Buffer.from(head.subarray(0, 16)).toString("hex");
+}
+
+/**
+ * A response body, streamed to its end and kept only at the front.
+ *
+ * The count is the measurement and it is the whole body's; the head is the part a
+ * reader can use. Nothing past `READ_HEAD_BYTES` is buffered, so a large asset
+ * costs a wait rather than memory, and `MAX_READ_BYTES` stops a body that is not an
+ * asset at all — `body_truncated` says the count stopped there and is a floor.
+ */
+async function readBodyCapped(response: Response): Promise<{
+  bytes: number;
+  bodyTruncated: boolean;
+  headHex: string;
+  text: string | null;
+}> {
+  const head = new Uint8Array(READ_HEAD_BYTES);
+  let kept = 0;
+  let bytes = 0;
+  let bodyTruncated = false;
+  const stream = response.body as unknown as AsyncIterable<Uint8Array> | null;
+  if (stream) {
+    for await (const chunk of stream) {
+      bytes += chunk.length;
+      const room = READ_HEAD_BYTES - kept;
+      if (room > 0) {
+        head.set(chunk.subarray(0, room), kept);
+        kept += Math.min(room, chunk.length);
+      }
+      if (bytes >= MAX_READ_BYTES) {
+        bodyTruncated = true;
+        break;
+      }
+    }
+  }
+  const headBytes = head.subarray(0, kept);
+  return { bytes, bodyTruncated, headHex: headHexOf(headBytes), text: excerptOf(headBytes) };
+}
+
+/**
+ * What a read's status means.
+ *
+ * The question is narrower than "did it work": does the read direction accept this
+ * run's token? A `200` cannot answer it on its own — an asset on a public
+ * repository answers the anonymous row with the same bytes, so a success is
+ * indistinguishable from the token being ignored. A refusal is what is visible, as
+ * a `401` or as a `404` where the anonymous row gets a redirect, which is why the
+ * two rows are measured and read together.
+ */
+export function interpretRead(read: {
+  status: number;
+  contentType?: string | null;
+  bytes: number;
+  location?: string | null;
+  authenticated: boolean;
+}): string {
+  const who = read.authenticated ? "with this run's token" : "anonymously";
+  if (read.status === 429) {
+    return "rate limited: wait and run the same read again. The answer it exists for has not arrived yet.";
+  }
+  if (read.status >= 300 && read.status < 400) {
+    return (
+      `the asset host answers ${read.status} rather than the bytes${read.location ? `, to ${read.location}` : ""}. ` +
+      "An attachment is served through a redirect to a signed URL, and a target on `*.githubusercontent.com` carrying " +
+      "a `jwt` or signature query is that shape — the signature, not the token this probe sends, is what the target " +
+      "accepts, and it expires (measured: five minutes), so the redirect is followed when the read is made rather " +
+      "than stored and followed later. Run the same URL with `follow_redirects` for the bytes, and keep this row: it " +
+      "is the answer for whoever has to know that a redirect must be followed."
+    );
+  }
+  if (read.status === 200 || read.status === 206) {
+    return (
+      `served ${read.bytes} bytes${read.contentType ? ` as ${read.contentType}` : ""} to a GET ${who}. ` +
+      (read.authenticated
+        ? "Not yet an answer about the token: an asset on a public repository answers the anonymous row with the " +
+          "same bytes, so a success is what a token that was ignored also looks like. Run the anonymous row and read " +
+          "the two together — a rejection is what differs. "
+        : "This is the baseline the authenticated row is read against. ") +
+      (read.bytes === 0
+        ? "Zero bytes is a body, not a success: nothing was served."
+        : "The byte count is what makes this the asset rather than a login page.")
+    );
+  }
+  if (read.status === 404) {
+    return (
+      `not found, to a GET ${who}: either nothing is at that URL, or this request may not see it. For an asset on a ` +
+      "private repository an anonymous GET answers 404 while the authenticated one answers a redirect to " +
+      "`private-user-images.githubusercontent.com`, so a 404 on the anonymous row is not evidence the asset is gone. " +
+      "Run the authenticated row before recording an absence."
+    );
+  }
+  if (read.status === 401) {
+    return (
+      `the credential was rejected by the asset host, to a GET ${who}. This is the read direction's answer for this ` +
+      "token kind, and it is what a reader of a `fetch_attachment` design needs: a GET that cannot carry this token " +
+      "reaches only what is readable anonymously. A different credential is a decision taken on its own, not a " +
+      "re-measurement of this one."
+    );
+  }
+  if (read.status === 403) {
+    return "the credential is recognised but refused: policy, SSO or rate limiting rather than the asset's absence. The body is the record.";
+  }
+  return "unexpected: the measured shape for a GET of an attachment is a redirect or a 200. Record the status, the headers and the body.";
+}
+
+/**
  * What a status means, per mode — the probe's whole output beyond the raw
  * numbers. The expected values are the ones measured by hand on #12's thread
  * and settled by the contrast trial on #111's: 404 for a request without
@@ -443,7 +621,7 @@ export function readFileFor(mode: "oversize" | "upload", path: string): { bytes:
  * body-bearing POST from an Actions token, which is why the file route is
  * `publish_draft` onto the orphan branch rather than this endpoint.
  */
-export function interpret(mode: ProbeMode, status: number, body: string, location?: string): string {
+export function interpret(mode: PostProbeMode, status: number, body: string, location?: string): string {
   if (status >= 300 && status < 400) {
     return `redirected (${status}): the endpoint did not answer the POST directly${location ? ` — Location: ${location}` : ""}. Record this as a route that moves rather than one that answers.`;
   }
@@ -585,9 +763,106 @@ export function interpret(mode: ProbeMode, status: number, body: string, locatio
   return "unexpected: the measured expectation is a refusal (413, or 422 carrying the ceiling as a validation message). Record the status and body.";
 }
 
+/**
+ * The hosts a `read` may address, and why it is not "any URL".
+ *
+ * `authenticate` sends the run's token, and a GET to a caller-chosen host would hand
+ * that token to whoever the caller names. It goes to GitHub's asset machinery and
+ * nowhere else: `github.com` serves `/user-attachments/*`, and the redirect those
+ * answers point at lives on `*.githubusercontent.com` (`private-user-images`,
+ * `objects`, `raw`). Anything else is refused outright rather than measured.
+ */
+export function readHostAllowed(url: URL): boolean {
+  return url.hostname === "github.com" || /(^|\.)githubusercontent\.com$/.test(url.hostname);
+}
+
+/**
+ * A GET of one asset URL, which is the read direction the POST modes cannot reach.
+ *
+ * Anonymous by default, because that is the half measurable before any question
+ * about the credential is settled; `authenticate` adds the run's token in the same
+ * `token <t>` form the POST modes use, so the two directions are compared against
+ * the same credential shape.
+ */
+async function probeRead(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
+  if (!a.url) throw new Error("mode read needs the url to GET");
+  let url: URL;
+  try {
+    url = new URL(a.url);
+  } catch {
+    throw new Error(`${a.url} is not an absolute URL.`);
+  }
+  if (url.protocol !== "https:") {
+    throw new Error(`read mode GETs https URLs only; ${url.protocol} would carry the token in the clear or nowhere.`);
+  }
+  if (!readHostAllowed(url)) {
+    throw new Error(
+      `${url.hostname} is not a host this probe reads. It GETs GitHub's asset hosts — \`github.com\` and ` +
+        "`*.githubusercontent.com` — because `authenticate` puts this run's token on the request.",
+    );
+  }
+
+  const authenticated = a.authenticate ?? false;
+  const followRedirects = a.follow_redirects ?? false;
+  const headers: Record<string, string> = {};
+  let kind: string | null = null;
+  if (authenticated) {
+    const auth = credential();
+    headers.Authorization = `token ${auth.token}`;
+    kind = auth.kind;
+  }
+
+  const started = Date.now();
+  log(`probe read ${url.href} ${kind ? `token ${kind}` : "anonymous"} redirect=${followRedirects ? "follow" : "manual"}`);
+  const response = await fetch(url, {
+    method: "GET",
+    headers,
+    // Not following is the measurement, not a caution: the redirect target is where a
+    // private asset's visibility is decided, and its `Location` is the answer to
+    // whether this host redirects at all.
+    redirect: followRedirects ? "follow" : "manual",
+    signal: AbortSignal.timeout(REQUEST_ABORT_MS),
+  });
+  const read = await readBodyCapped(response);
+  const contentType = response.headers.get("content-type");
+  const location = response.headers.get("location");
+  log(`probe read -> ${response.status} ${read.bytes}B in ${Date.now() - started}ms`);
+
+  return JSON.stringify(
+    {
+      mode: "read",
+      sent: url.href,
+      credential: kind ? `present, prefix ${kind}` : "anonymous",
+      redirects: followRedirects ? "followed" : "not followed",
+      final_url: followRedirects ? response.url : null,
+      status: response.status,
+      content_type: contentType,
+      // The header, which is the encoded length where the body is compressed. `bytes`
+      // is what arrived decoded, so the two differing is the encoding rather than a bug.
+      content_length: response.headers.get("content-length"),
+      content_encoding: response.headers.get("content-encoding"),
+      location,
+      bytes: read.bytes,
+      body_truncated: read.bodyTruncated,
+      head_hex: read.headHex,
+      body_excerpt: read.text,
+      interpretation: interpretRead({
+        status: response.status,
+        contentType,
+        bytes: read.bytes,
+        location,
+        authenticated,
+      }),
+    },
+    null,
+    2,
+  );
+}
+
 async function probe(a: z.infer<typeof PROBE_SCHEMA>): Promise<string> {
-  const { token, kind } = credential();
   const mode = a.mode as ProbeMode;
+  if (mode === "read") return probeRead(a);
+  const { token, kind } = credential();
   const contentType = a.content_type ?? "application/octet-stream";
 
   const needsRepo = mode !== "routing";
@@ -851,6 +1126,7 @@ const { tools, dispatch } = buildMcpTools([
       "Measure GitHub's user-asset upload endpoint (the one `gh --attach` uses) and report what it said, as data. " +
       "Default mode `endpoint` sends a request that cannot store anything (empty name) and distinguishes 404/400/401/201, so it reports what came back for the request and the credential — without saving a file. A status is an observation, not proof that the route exists; the body is what says which parameter or layer answered. " +
       "Mode `routing` omits repository_id — an empty name is rejected before it routes, so pass `name` as well for that measurement; mode `oversize` sends a file over the 25MB ceiling and records the refusal; mode `upload` is the only mode that stores, sends one file at or under 25MB, and returns the permanent asset URL — though measured, the Actions token this run carries is refused at the body stage (404, nothing stored), so delivering a file is `publish_draft`'s job and this tool's job is to measure. " +
+      "Mode `read` is the other direction and a different host: it GETs an asset URL (`github.com/user-attachments/files/<id>/<name>`, or `*.githubusercontent.com`) and reports status, content-type, content-length, location and byte count, anonymous by default and with this run's token when `authenticate` is set, following the redirect only when `follow_redirects` is. Whether an attachment can be READ is not settled by whether one can be written, so measure both rows before reading either. " +
       "The status, the response body and what the status means for the design are all in the result; nothing is stored unless mode is `upload`.",
     schema: PROBE_SCHEMA,
     handler: probe,
