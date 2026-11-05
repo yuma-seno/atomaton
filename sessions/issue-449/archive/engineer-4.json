@@ -1,0 +1,88 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #449: マージ済み PR が永久に「実行中」と読まれる — マージ後の handoff を PR スレッドに残している\n**Labels:** bug, atomaton/waiting-for-person\n\n## 観測\n\n#443 をクローズしたとき、何も走っていないのに停止通知が投稿された。\n\n> Atomaton: this issue was closed while an agent was working on it, so the run has been asked to stop.\n> Runs were going on #446, #445, and each has been asked to stop.\n> （#443 の comment 6658743717、2026-11-05 13:06:07）\n\n同じ時刻、#443・#445・#446 のどれにも run は存在しない（Actions の run 一覧で 12:26〜13:06 に run 0 件）。#445/#446 には `stop=requested` が個別にも投稿されている（6658744681 / 6658744141）。\n\n## 実測 — マージ済み PR が `handoff` のまま残る\n\n| PR | マージ | 最後の ending | その後その PR で走った run |\n|---|---|---|---|\n| #442 | 08:40:23 | `ended=handoff` @ 08:41:35 | なし |\n| #445 | 09:20:36 | `ended=handoff` @ 09:20:54 | なし |\n| #446 | 10:02:30 | `ended=handoff` @ 10:03:08 | なし |\n\n（#440 は `ended=done`。#442 以降のマージ経路で再現している）\n\n## 機構\n\n1. `mergePr` はマージ後、**親 issue** の origin agent を dispatch する（`src/entrypoints/tools/mcp/github.ts` の `mergePr`、`parent_outcome: \"reinvoked\"`）。この dispatch に `continuesChain: true` を渡す\n2. `dispatchRunner` は `continuesChain` のとき ops log に `\"op\":\"dispatch\"` を書く（`src/adapters/actions/dispatch.ts` の `continuesChain` の説明と `logDispatch`）。`dispatch-elsewhere`（＝別ノード）にしないのは意図的で、「マージされた PR の結果コメントが『次は何も走らない』と言わないため」\n3. runner は ops log の `\"op\":\"dispatch\"` から `chain_continues=true` を出す（`.github/workflows/atomaton-runner.yml`）\n4. `endingOf` は `chain_continues` を `handed-off` と解釈する（`src/domain/work/turn.ts:211`）→ **PR の結果コメント**に `atomaton:ended=handoff`\n5. thread の fold は `handed-off` を「**このノード**で次の agent が走る」と読む（`src/domain/work/thread.ts` の `whoseTurn`）。実際に走ったのは親 issue なので、PR の handoff は誰にも答えられない\n6. `runInFlight` は `holder===\"agent\"` または最新イベントが `asked|handed-off|waiting` で true（`src/adapters/github/thread.ts`）→ マージ済み PR が永久に「実行中」\n7. `stop_on_close` は `nodesToStop`（= `runInFlight`）で停止対象を決める（`src/entrypoints/machinery/stop_on_close.ts`、`src/domain/work/work-tree.ts`）→ 上の誤報\n\n補足: `dispatch.ts` のコメント自体が「PR の run は PR に、起きる run は親に載る」と認識している。問題は、その dispatch を `handoff` として PR のスレッドに書くことで、`handoff` の定義（次の agent は THIS node で走る）と矛盾した記録が残ること。\n\n## 影響\n\n- **クローズのたびに誤った停止通知**: 親の下にマージ済み PR があると、`Runs were going on ...` と `stop=requested` が必ず出る（#443 で観測）。実際には止めるものが無い\n- **`runInFlight` を読む全経路が「このノードは稼働中」と誤認**: subtree の resume 候補除外、停止対象の判定、ガード類。マージ済み PR は永久に動き続けている扱い\n- **`ended=handoff` の意味の破壊**: タグの定義は「次の agent がこのノードで走る」。マージ済み PR ではその run は存在しない\n- 二次的な不正確さ: root の停止通知は、root 自身が走っていなくても「an agent was working on it」と言い切る（今回は #443 自身は走っていない）\n\n## 提案\n\n`handoff`（このノードをエージェントが保持）と `chain_continues`（どこかで run が始まったので「次は何も走らない」とは言わない）を分離する。\n\n1. **本命**: マージ後の親 dispatch を「このノードの保持」として書かない。PR の結果コメントは `ended=done`（人に返った）にしつつ、「直後に run が始まった」ことは別の signal（例: `continues` マーカー、または `completion-mention` に渡す別フラグ）で表現する。`handoff` は reload や同一ノードの継続だけに残す\n2. 代替: 親 dispatch の結果が PR の handoff を閉じる（親 run の完了時に PR へ ending を書く）。ただしノードをまたぐ結合になるので、1 の方が単純\n3. `stop_on_close` の通知文: root 自身が running でない場合は「an agent was working on it」と言わない。停止対象は「実際に run が進行中」を確認してから列挙する（`runInFlight` だけでなく、run の存在を Actions API で照合する）\n4. 既存データの扱い: #442/#445/#446 のようなマージ済み PR の `handoff` は、読み手側で「closed かつ merge 済みなら running ではない」と解釈するか、一度きりの修復を行う\n\n## 受け入れ条件（案）\n\n1. reviewer がマージした PR の結果コメントが `ended=handoff` にならず、`runInFlight(PR)` が false になる（マージ後の親 dispatch があっても）\n2. マージ済み PR を含む親をクローズしても、`Runs were going on ...` も `stop=requested` も出ない（偽 gh でのテスト）\n3. root 自身が走っていない close では、root の通知が「an agent was working on it」と言わない\n4. 上記を固定する thread / stop_on_close / post_result_comment のテストがある\n",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-449",
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T15:05:21Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n\n#449 の修正をお願いします。方針は本文の提案1で確定です（`handoff` と `chain_continues` を分離する）。\n\n- マージ後の親 dispatch は「このノードの保持」ではないので、PR の結果コメントを `ended=handoff` にしない\n- 「直後に run が始まった」ことは別の signal で表現し、`runInFlight` がマージ済み PR を実行中と読まないようにする\n- `stop_on_close` の root 通知は、root 自身が running のときだけ「an agent was working on it」と言う\n- 既存の #442 / #445 / #446 の `handoff` も、読み手側で running と読まれないようにする\n- thread / stop_on_close / post_result_comment のテストで固定（偽 gh を使う）\n- 作業 PR で version bump はしない\n- 挙動の劣化は許容しない。成立しない施策は落として報告すること",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6661665234,
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T15:17:05Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "検証が揃いました。#449 のコード地図は現行ツリーと一致しており、確定済みの方針（提案1）でこの issue は 1 枚の engineer-ready leaf です。`/engineer` に引き継ぎます。\n\n<details>\n<summary>検証で確認したこと（現行ツリーとの照合）</summary>\n\n- `src/domain/work/turn.ts:211` — `endingOf` が `chainContinues` を `handed-off` に畳み込む（`if (next || signals.chainContinues) return { ended: \"handed-off\" ... }`）。分離の継ぎ目はここ。`chainContinues` の定義は `turn.ts:141`（ops log の `dispatch` op から読む。`parked` は `dispatch-elsewhere` と対になる別物）\n- `src/domain/work/thread.ts:307` — `whoseTurn` が `asked|handed-off|waiting` を「このノードを agent が保持」と読む\n- `src/adapters/github/thread.ts:439` — `runInFlight`。`:83` がタグ `atomaton:ended=handoff` → イベント `handed-off` の解釈。`work-tree.ts:97`・`prune_atomaton_data.ts:131`・`resume_subtree`・`request_stop` は全て `runInFlight` 経由なので、ここを直せば読み手側は一箇所で直る\n- マージ後の親 dispatch で `continuesChain: true` を渡すのは `src/entrypoints/tools/mcp/github.ts:2232`（close フォールバック）と `src/adapters/actions/dispatch-targets.ts:177,262`、`src/app/aggregation.ts:351` 経由。ops log の `dispatch` op を書くのは `src/adapters/actions/dispatch.ts:726-731`\n- runner の `chain_continues` 出力のソースは `src/workflows/atomaton-runner.wac.ts:1201,1246,1306,1591`（`.github/workflows/` はここから生成される配置物）\n- root 通知の文面は `src/domain/work/closed-target.ts:121`（「closed while an agent was working on it」）\n- 現状の（誤った）挙動を固定する既存テスト: `src/entrypoints/tools/mcp/mcp.test.ts:2352`（マージ済み PR の結果コメントと chain_continues を直接扱う）、`src/domain/work/turn.test.ts:113-114`、`src/domain/work/completion-mention.test.ts:147`、`src/adapters/actions/dispatch.test.ts:99`\n\n</details>\n\n<details>\n<summary>確立できなかったこと</summary>\n\n- 無料 delegate の枠が尽きていた（402 `free_quota_exhausted`）ため、検証はこの run 内で grep/read で実施。コード変更とテスト実行はまだ何もしていない\n- 提案1の「別 signal」が runner 生成物（`chain_continues` 出力）の変更を要する場合の成立可否は検証していない — engineer が `src/workflows/atomaton-runner.wac.ts` で確立する。ops log の `dispatch` op 自体は変えない前提（下の制約）\n\n</details>\n\n/engineer\n\n#449 を提案1（`handoff` と `chain_continues` の分離）で修正してください。マージ後の親 dispatch を「このノードの保持」として記録しないようにし、マージ済み PR が永久に実行中と読まれる状態を止めます。\n\n**スコープ**\n\n1. マージ後の親 dispatch が、PR の結果コメントを `ended=handoff` にしない。PR の run の自身の結論（reported → done 相当）がそのままタグになる。ディレクティブで次の agent を THIS node に指した場合の `handed-off` は従来通り残す。分離すべきは「次が別ノード（親）で始まった」ケース — 現在は `turn.ts:211` で両者が崩れて畳まれている\n2. 「直後に run が始まった」ことは別の signal で表現する。ops log の `dispatch` op と runner の `chain_continues` は**変えない**（`shouldReleaseGuard` と aggregation の二重 signal が読むため）。結果コメントが「次は何も走らない」と偽らない、という元の意図は保ったまま、その signal を `runInFlight` / `whoseTurn` が保持と読まない形にする\n3. 読み手側で既存データを扱う: マージ済み PR（closed + merged）に古い `ended=handoff` が残っていても `runInFlight` が false を返す（#442/#445/#446 の live データをこれでカバー）。**merged PR に限定**すること — close 時に run が本当に進行中の issue や未マージ PR を止める `stop_on_close` の本来の機能は劣化させない\n4. `stop_on_close` の root 通知（`closed-target.ts:121`）: root 自身に進行中の run があるときだけ「an agent was working on it」と言う。マージ済み PR のみを含む親の close で「Runs were going on ...」も `stop=requested` も出さない\n\n**受け入れ条件**（issue 本文の案をそのまま採用）\n\n1. マージ + 親 dispatch の後、PR の結果コメントが `ended=handoff` にならず、`runInFlight(PR)` が false\n2. マージ済み PR を含む親をクローズしても「Runs were going on ...」も `stop=requested` も出ない（偽 gh テスト）\n3. root 自身が走っていない close では root の通知が「an agent was working on it」と言わない\n4. 上記と「進行中 run は close で今まで通り停止される」を thread / stop_on_close / post_result_comment のテストで固定（偽 gh）\n\n**制約**\n\n- version bump はしない（`package.json` の version 変更は work PR では merge-blocking の defect という規約）\n- 変更は `src/**` のみ。`.github/workflows/**` と `.github/atomaton-runtime/**` は配置物で、self-deploy が release から適用するので手で編集しない（runner ロジックのソースは `src/workflows/atomaton-runner.wac.ts`）。`dist/` は gitignore 済みで `bun run synth` で検査できる\n- 挙動の劣化は許容しない。成立しない施策は落として PR で報告すること。維持すべき既存挙動: `parked` / `shouldReleaseGuard`（`turn.ts:90,152`）、同一ノードの reload handoff（`dispatch.test.ts:334`）、aggregation の二重 `chain_continues` signal（`aggregation.ts:321`）、ディレクティブ handoff\n- 現状の挙動を固定している既存テスト（`mcp.test.ts:2352`、`turn.test.ts:113-114`、`completion-mention.test.ts:147`、`dispatch.test.ts:99`）は意図的に更新すること — 偶発的な崩れとしてではなく\n\n**検証**\n\n- `bun run typecheck` と `bun test` が exit 0（`pretest` で `bun run synth` が走る）\n- 新規テストの名前かコメントに、どの bug を固定するかを書くこと\n\n\n---\n_Tokens: 149194 total (131680 prompt + 17514 completion, 89856 of the prompt cached)_\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/42053405706) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6661852867,
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-05T15:25:00Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6662459129,
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T15:50:17Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer recover",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6662928508,
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T16:11:51Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer recover",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6664162937,
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T17:05:41Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "b686658a11a871efdb99d1a69607560b999921414468bb267f4c776f7f373850",
+      "event_count": 6,
+      "agent": "engineer"
+    }
+  }
+}
