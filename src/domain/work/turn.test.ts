@@ -75,14 +75,27 @@ describe("endingOf", () => {
   });
 
   /**
-   * A tool call already started the follow-up, so work continues and the guard has
-   * to stay held — but there is nobody left to dispatch, because the run is already
-   * going.
+   * A tool call already started a run — ON ANOTHER NODE — so the guard stays held and
+   * the mention stays silent, but this node has handed back (#449).
+   *
+   * This test used to assert `ended: "handed-off"`, and that is what wrote a promise
+   * onto merged pull requests that nothing could ever keep: a merged pull request
+   * re-invokes the issue it delivers, and every reader of `atomaton:ended=handoff`
+   * took it as "the next agent runs HERE". The node's own conclusion is what the
+   * ending now says; whether a run started is `continues`.
    */
-  test("a tool call having already dispatched is a hand-off with nobody to start", () => {
+  test("a tool call having already dispatched does not make this node a hand-off", () => {
     const ending = endingFor({ chainContinues: true });
-    expect(ending.ended).toBe("handed-off");
+    expect(ending.ended).toBe("finished");
     expect(ending.next).toBeUndefined();
+    expect(ending.continues).toBe(true);
+  });
+
+  /** A directive still is: the agent it names runs on THIS node. */
+  test("and a directive beside it is still a hand-off", () => {
+    const ending = endingFor({ chainContinues: true, directive: "reviewer" });
+    expect(ending.ended).toBe("handed-off");
+    expect(ending.next).toEqual({ agent: "reviewer" });
   });
 
   test("nothing continuing at all is finished", () => {
@@ -110,8 +123,11 @@ describe("endingOf", () => {
    * a run that reported nothing.
    */
   test("a hand-off is a hand-off whether or not the agent wrote a closing line", () => {
-    expect(endingFor({ reported: false, chainContinues: true }).ended).toBe("handed-off");
     expect(endingFor({ reported: false, directive: "reviewer" }).ended).toBe("handed-off");
+    // And a dispatch elsewhere is still silence — `no-report` with the run it started
+    // recorded beside it, rather than a hand-off nobody on this node can answer.
+    expect(endingFor({ reported: false, chainContinues: true }).ended).toBe("no-report");
+    expect(endingFor({ reported: false, chainContinues: true }).continues).toBe(true);
   });
 
   /** Every ending above it is a different sentence, and each still wins. */
@@ -158,6 +174,24 @@ describe("shouldReleaseGuard", () => {
     // this node, and the aggregation re-invocation is the collection of the turn,
     // not a new one.
     expect(shouldReleaseGuard(endingFor({ parked: true }))).toBe(false);
+  });
+
+  /**
+   * The arm #449 added, and the reason it is an arm rather than a consequence: the
+   * ending became `finished` so the THREAD stops promising a successor, while the
+   * label behaviour every existing consumer relies on is deliberately unchanged.
+   * Removing this would make a merged pull request release a guard the aggregation
+   * and the release rule were written against.
+   */
+  test("a run started elsewhere still holds the guard, though the ending handed back", () => {
+    const ending = endingFor({ chainContinues: true });
+    expect(ending.ended).toBe("finished");
+    expect(shouldReleaseGuard(ending)).toBe(false);
+  });
+
+  /** And `nextToDispatch` reads the ending, so nothing is started twice. */
+  test("nothing to dispatch for a run that is already going elsewhere", () => {
+    expect(nextToDispatch(endingFor({ chainContinues: true }))).toBeUndefined();
   });
 
   /** A ceiling reached mid-chain ends the turn even though something was in flight. */

@@ -85,9 +85,11 @@ export interface CompletionSignals {
  * ## The one ending that outranks the silencers
  *
  * `no-report` — a run that ended of its own accord having said nothing — is told
- * about whatever else is true, and the only silencer it can actually meet is the
- * closed sub-issue. (It cannot carry a `next`, and a `chainContinues` run is
- * `handed-off` before it ever gets here.)
+ * about whatever else is true, and the silencers it can actually meet are the
+ * closed sub-issue and the human call. (It cannot carry a `next: naming an agent
+ * is a hand-off before it ever gets here — and a `chainContinues` run is silenced
+ * ahead of this override, because the run it started is who collects what the
+ * parent would otherwise be called about.)
  *
  * Overriding that one is the point rather than an oversight. The sub-issue rule says
  * the parent is what is waiting, not a person — and that holds because the parent's
@@ -103,9 +105,14 @@ export interface CompletionSignals {
  */
 export function shouldMentionOnCompletion(signals: CompletionSignals): boolean {
   if (!signals.notify) return false;
+  // Before the `no-report` override, because that override is about a silence nobody
+  // will come and collect — and a run this one started is exactly who comes. This used
+  // to be reached later only by accident: a chain-continuing run ended `handed-off`,
+  // so it never fell as far as `no-report` (#449). `handed-off` no longer stands for
+  // "a run started somewhere", so the ordering is now explicit.
+  if (signals.chainContinues || signals.ending.continues === true) return false;
   if (signals.ending.ended === "no-report") return true;
   if (signals.ending.next) return false;
-  if (signals.chainContinues) return false;
   if (signals.agentCalledHuman && signals.ending.ended === "finished") return false;
   if (signals.isSubIssue && signals.issueClosed) return false;
   return true;

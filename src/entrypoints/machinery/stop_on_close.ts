@@ -55,18 +55,27 @@ export const ref = defineScript<StopOnCloseArgs>(import.meta.url);
  * `STOP_TAG` is what the running job reads; `LLM_CONTEXT_TAG` keeps this out of the
  * session, for the same reason `/stop`'s own notice is excluded — it is addressed to
  * a person, and an agent reading it would take it as something it was told.
+ *
+ * The tag goes on only when the root itself is running (#449). A stop tag is a request
+ * to a job polling THIS node's thread; posted on a parent with no run of its own it
+ * requests nothing, and — with the merged-pull-request defect — it was posted on every
+ * close of a parent that had ever merged a pull request, saying `stop=requested` about
+ * work nobody was doing. The descendant that IS running gets its own tag on its own
+ * node, which is where its job is watching.
  */
-export function stopOnCloseBody(
-  number: number,
-  closed: readonly number[],
-  stopped: readonly number[],
-): string {
-  return [
-    LLM_CONTEXT_TAG.write("exclude"),
-    STOP_TAG.write("requested"),
-    stopOnCloseNotice(number),
-    closedTheTreeNotice(closed, stopped),
-  ].join("\n");
+export function stopOnCloseBody(args: {
+  number: number;
+  /** The root itself has a run in flight, as the tree read it. */
+  rootRunning: boolean;
+  /** The nodes under the root that were closed. */
+  closed: readonly number[];
+  /** The nodes under the root a stop was posted on. */
+  stopped: readonly number[];
+}): string {
+  const lines = [LLM_CONTEXT_TAG.write("exclude")];
+  if (args.rootRunning) lines.push(STOP_TAG.write("requested"));
+  lines.push(stopOnCloseNotice(args.number, args.rootRunning), closedTheTreeNotice(args.closed, args.stopped));
+  return lines.join("\n");
 }
 
 function main(): void {
@@ -112,6 +121,7 @@ function main(): void {
 
   const all = subtree(nodes, root);
   const under = descendants(all, root);
+  const rootRunning = all.find((node) => node.number === root)?.running === true;
   const toStop = nodesToStop(all);
   const toClose = nodesToClose(under);
   if (toStop.length === 0 && toClose.length === 0) {
@@ -122,7 +132,14 @@ function main(): void {
   const result = closeSubtreeUnder(
     repo,
     root,
-    stopOnCloseBody(root, toClose.map((n) => n.number), nodesToStop(under).map((n) => n.number)),
+    stopOnCloseBody({
+      number: root,
+      rootRunning,
+      closed: toClose.map((n) => n.number),
+      // The descendants only: the root is what the notice's own sentence is about, and
+      // listing it among "runs were going on" as well would say it twice.
+      stopped: nodesToStop(under).map((n) => n.number),
+    }),
   );
   result.problems.push(...readProblems);
 

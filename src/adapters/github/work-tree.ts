@@ -91,10 +91,17 @@ function parseListed(stdout: string): Listed[] | null {
  *
  * A read that fails is a problem, not "nothing is running": a stop that read a failed
  * read as idle would leave a live run going, and a resume would start a second one.
+ *
+ * `merged` is passed straight through to `runInFlight`, and every caller in this file
+ * knows it: whether the node merged is in the same response that named it. It is what
+ * makes a MERGED pull request stop reading as a run in flight forever (#449) — see
+ * `runInFlight` for why a merge's promise is not a run coming. Deliberately not "is
+ * closed" folded in here: an issue closed by the run working it is still holding that
+ * run, and a pull request closed unmerged can be reopened and dispatched.
  */
-function runningOn(repo: string, number: number): { running: boolean; problem?: string } {
+function runningOn(repo: string, number: number, merged: boolean): { running: boolean; problem?: string } {
   try {
-    return { running: runInFlight(repo, number) };
+    return { running: runInFlight(repo, number, { merged }) };
   } catch (e) {
     return { running: false, problem: `could not read the thread on #${number}: ${(e as Error).message}` };
   }
@@ -130,7 +137,8 @@ function readNode(repo: string, number: number): { node?: WorkNode; problem?: st
         ? pullRequestOutcome(Boolean(raw.pull_request?.merged_at))
         : issueOutcome(raw.state_reason);
 
-  const { running, problem } = runningOn(repo, number);
+  const merged = isPr && raw.state !== "open" && Boolean(raw.pull_request?.merged_at);
+  const { running, problem } = runningOn(repo, number, merged);
   if (problem) return { problem };
 
   return {
@@ -186,7 +194,10 @@ function readChildren(repo: string, parent: number): { nodes: WorkNode[]; proble
     // tag text inside a fence too, and the read is the confirmation that a listed body
     // actually carries the link (#304).
     if (PARENT_ISSUE_TAG.readProse(found.body ?? "") !== parent) continue;
-    const { running, problem } = runningOn(repo, found.number);
+    // Whether it merged is `gh`'s own word on this row, so the thread read can be told
+    // the one fact that makes its promise meaningless (#449).
+    const merged = !saysOpen(found.state) && found.state === "MERGED";
+    const { running, problem } = runningOn(repo, found.number, merged);
     if (problem) {
       problems.push(problem);
       continue;
@@ -215,7 +226,9 @@ function readChildren(repo: string, parent: number): { nodes: WorkNode[]; proble
   const already = new Set(nodes.map((node) => node.number));
   for (const child of links.children) {
     if (already.has(child.number)) continue;
-    const { running, problem } = runningOn(repo, child.number);
+    // An issue, so nothing about it can be "merged": closing is how a run finishes,
+    // and the run working a closed issue is still in flight. See `runInFlight`.
+    const { running, problem } = runningOn(repo, child.number, false);
     if (problem) {
       problems.push(problem);
       continue;

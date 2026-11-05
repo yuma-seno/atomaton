@@ -33,8 +33,12 @@ describe("decide_turn_ending.ts", () => {
   });
 
   test("stays held when the chain already continues via a tool-triggered dispatch", () => {
-    const { out } = run(["--outcome", "success", "--chain-continues", "true"]);
+    const { out } = run(["--outcome", "success", "--chain-continues", "true", "--reported", "true"]);
     expect(out.should_release).toBe("false");
+    // Held, and deliberately so: the label is this node's lock, not a claim about the
+    // node. But the ending is not `handed-off` (#449) -- the dispatch went elsewhere,
+    // so nothing was handed over HERE, and `atomaton:ended` must not say `handoff`.
+    expect(out.ended).toBe("finished");
   });
 
   test("releases when the run reached its limit even mid-chain", () => {
@@ -115,10 +119,20 @@ describe("decide_turn_ending.ts", () => {
       expect(out.chain_over_to).toBe("");
     });
 
+    /**
+     * `chain-continues` means a run started somewhere else — the post-merge dispatch of
+     * a delivered issue, most often. It must still suppress the "who runs next" output,
+     * but it is no longer an ending that holds THIS node (#449): the old `handed-off`
+     * here is what left merged pull requests reading as "an agent is working here"
+     * forever, because `atomaton:ended=handoff` is a promise about the node it is
+     * written on. The guard flag is unchanged on purpose — the label is the node's lock
+     * and releasing it is a separate decision from what the ending is called.
+     */
     test("a tool call having already dispatched starts nobody a second time", () => {
-      const { out } = run(["--outcome", "success", "--chain-continues", "true"]);
-      expect(out.ended).toBe("handed-off");
+      const { out } = run(["--outcome", "success", "--chain-continues", "true", "--reported", "true"]);
+      expect(out.ended).toBe("finished");
       expect(out.dispatch_to).toBe("");
+      expect(out.should_release).toBe("false");
     });
   });
 });

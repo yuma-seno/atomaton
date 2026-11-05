@@ -115,8 +115,24 @@ function mentionList(logins: readonly string[]): string {
  * No mention, for the same reason. A mention means "your turn"; the person who just
  * closed the issue has taken theirs, and what they have to do now is wait. The turn
  * comes back to them when the run reports, and that comment mentions them.
+ *
+ * ## Whether the root itself was working (#449)
+ *
+ * The first sentence used to be unconditional, and that made it a claim about the root
+ * that was often false: a parent issue is closed all the time with nothing running on
+ * it and work going on under it — and, with the merged-pull-request defect, with nothing
+ * running anywhere. A person was told a run was being stopped on the very issue they
+ * closed, and then saw no such run report. So `running` decides which receipt this is,
+ * and it is read from the same tree the stop itself is aimed by.
  */
-export function stopOnCloseNotice(number: number): string {
+export function stopOnCloseNotice(number: number, running: boolean): string {
+  if (!running) {
+    return [
+      "Atomaton: this issue was closed. Nothing was running on it, so no run here had to be stopped.",
+      "",
+      `#${number} stays closed.`,
+    ].join("\n");
+  }
   return [
     "Atomaton: this issue was closed while an agent was working on it, so the run has been asked to stop.",
     "",

@@ -435,9 +435,42 @@ export function openClaimOn(
  *
  * Throws when the thread cannot be read. A caller deciding whether to stop or resume
  * work must not read a failed read as "nothing is running".
+ *
+ * ## A merged pull request cannot have a run coming (#449)
+ *
+ * `merged` says the node is a pull request that landed. Nothing can be started on one —
+ * a merge is final, and a hand-off aimed at it is refused — so the event rule's "a
+ * request or a hand-off is the newest word" stops being evidence of anything there: it
+ * is a promise nobody can keep. And one was made, systematically: a merged pull request
+ * re-invokes the issue it delivers, and until #449 that dispatch was written onto the
+ * pull request as `ended=handoff`. Every such pull request has read as "a run is working
+ * or coming" ever since, which is what made a close report stopping runs that did not
+ * exist (#443).
+ *
+ * The claim still answers, and only the claim: `atomaton:took` is written by a run that
+ * has actually started, so the run that performs the merge — the ordinary reviewer case,
+ * which merges its own pull request and then reports — is still in flight while it
+ * finishes, and a stop still reaches it. What is dropped is exactly the "coming" half,
+ * which is the half a merged pull request cannot have.
+ *
+ * Deliberately NOT `closed`. An issue closed by the run working it is still holding that
+ * run (closing is how a run finishes), and a pull request closed unmerged can in
+ * principle be reopened and dispatched. Only the merge is final enough to say "no run
+ * will ever start here" — and only the merge is what #449's bad data is made of.
  */
-export function runInFlight(repo: string, number: string | number): boolean {
+export function runInFlight(
+  repo: string,
+  number: string | number,
+  options: {
+    /**
+     * The node is a merged pull request. Default false: a caller that does not know the
+     * node's outcome keeps the wider answer, which is the safe direction for a stop.
+     */
+    merged?: boolean;
+  } = {},
+): boolean {
   const shaped = readComments(repo, number);
+  if (options.merged === true) return shaped.holder === "agent";
   return shaped.holder === "agent" || whoseTurn(shaped.events) === "agent";
 }
 
