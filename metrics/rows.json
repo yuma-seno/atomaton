@@ -1873,15 +1873,15 @@
   {
     "path": "sessions/issue-12/atomaton.json",
     "agent": "atomaton",
-    "messages": 89,
-    "calls": 23,
+    "messages": 96,
+    "calls": 24,
     "failed": 2,
     "refused": 0,
     "skills": [],
     "reported": true,
     "tools": {
       "get_issue": 2,
-      "get_pr": 1,
+      "get_pr": 2,
       "get_branch": 2,
       "list_prs": 1,
       "bash": 4,
@@ -1931,6 +1931,20 @@
           }
         },
         "started": "2026-11-05T08:15:59Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-05T08:43:59Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 96,
+        "seconds": 163,
+        "server_calls": {
+          "github": {
+            "get_pr": 1
+          }
+        },
+        "started": "2026-11-05T08:41:16Z"
       }
     ]
   },
