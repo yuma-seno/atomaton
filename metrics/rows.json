@@ -271,7 +271,7 @@
   {
     "path": "sessions/issue-11/atomaton.json",
     "agent": "atomaton",
-    "messages": 31,
+    "messages": 34,
     "calls": 10,
     "failed": 0,
     "refused": 0,
@@ -333,6 +333,16 @@
           }
         },
         "started": "2026-10-19T01:26:48Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-05T08:25:45Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 34,
+        "seconds": 14,
+        "server_calls": {},
+        "started": "2026-11-05T08:25:31Z"
       }
     ]
   },
@@ -1475,6 +1485,388 @@
           }
         },
         "started": "2026-11-03T14:56:54Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/issue-12/archive/atomaton-4.json",
+    "agent": "atomaton",
+    "messages": 156,
+    "calls": 55,
+    "failed": 4,
+    "refused": 1,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "read": 4,
+      "edit": 10,
+      "commit_and_push": 3,
+      "create_pr": 3,
+      "request_close_issue": 2,
+      "create_root_issue": 2,
+      "create_sub_issue": 4,
+      "launch_sub_agent": 3,
+      "fetch": 11,
+      "bash": 5,
+      "get_branch": 1,
+      "list_prs": 1,
+      "get_pr_diff": 4,
+      "sync_branch": 1,
+      "write": 1
+    },
+    "acts": {
+      "other": 3,
+      "search": 1,
+      "edit": 1
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-02T15:16:49Z",
+        "ended_because": "completed",
+        "iterations": 7,
+        "messages": 36,
+        "seconds": 673,
+        "server_calls": {
+          "files": {
+            "glob": 1,
+            "grep": 4,
+            "read": 3
+          },
+          "github": {
+            "get_issue": 1,
+            "get_issue_comments": 1,
+            "list_issues": 1
+          },
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-11-02T15:05:36Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-02T15:43:08Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 44,
+        "seconds": 246,
+        "server_calls": {
+          "files": {
+            "glob": 1
+          },
+          "github": {
+            "get_issue_comments": 1
+          },
+          "search": {
+            "search_code": 1
+          }
+        },
+        "started": "2026-11-02T15:39:02Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T06:29:49Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 47,
+        "seconds": 213,
+        "server_calls": {},
+        "started": "2026-11-03T06:26:16Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T06:46:44Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 56,
+        "seconds": 258,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_sub_issue": 1
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-03T06:42:26Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T07:30:08Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 63,
+        "seconds": 85,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_sub_issue": 1
+          }
+        },
+        "started": "2026-11-03T07:28:43Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T09:25:50Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 71,
+        "seconds": 174,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_sub_issue": 1
+          }
+        },
+        "started": "2026-11-03T09:22:56Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T09:59:47Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 79,
+        "seconds": 102,
+        "server_calls": {
+          "github": {
+            "create_pr": 1,
+            "get_branch": 1
+          },
+          "shell": {
+            "bash": 1
+          }
+        },
+        "started": "2026-11-03T09:58:05Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T10:10:45Z",
+        "ended_because": "completed",
+        "iterations": 4,
+        "messages": 92,
+        "seconds": 257,
+        "server_calls": {
+          "files": {
+            "edit": 1,
+            "read": 2
+          },
+          "github": {
+            "commit_and_push": 1
+          }
+        },
+        "started": "2026-11-03T10:06:28Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T10:15:15Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 97,
+        "seconds": 79,
+        "server_calls": {
+          "atomaton": {
+            "request_close_issue": 1
+          }
+        },
+        "started": "2026-11-03T10:13:56Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T11:45:34Z",
+        "ended_because": "completed",
+        "iterations": 4,
+        "messages": 109,
+        "seconds": 230,
+        "server_calls": {
+          "files": {
+            "grep": 3,
+            "read": 2
+          },
+          "shell": {
+            "bash": 1
+          }
+        },
+        "started": "2026-11-03T11:41:44Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T12:43:05Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 112,
+        "seconds": 240,
+        "server_calls": {},
+        "started": "2026-11-03T12:39:05Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-03T12:55:59Z",
+        "ended_because": "completed",
+        "iterations": 4,
+        "messages": 16,
+        "seconds": 337,
+        "server_calls": {
+          "files": {
+            "edit": 1
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1
+          }
+        },
+        "started": "2026-11-03T12:50:22Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T13:03:16Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 54,
+        "seconds": 131,
+        "server_calls": {
+          "atomaton": {
+            "request_close_issue": 1
+          }
+        },
+        "started": "2026-11-03T13:01:05Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T13:46:34Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 61,
+        "seconds": 248,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_root_issue": 1,
+            "create_sub_issue": 1
+          }
+        },
+        "started": "2026-11-03T13:42:26Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T14:01:39Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 70,
+        "seconds": 171,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_sub_issue": 2
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-03T13:58:48Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T14:38:52Z",
+        "ended_because": "completed",
+        "iterations": 18,
+        "messages": 125,
+        "seconds": 618,
+        "server_calls": {
+          "files": {
+            "edit": 9,
+            "read": 3,
+            "write": 1
+          },
+          "github": {
+            "commit_and_push": 2,
+            "create_pr": 2,
+            "create_root_issue": 1,
+            "get_branch": 1,
+            "get_pr_diff": 2,
+            "list_prs": 1,
+            "sync_branch": 1
+          },
+          "shell": {
+            "bash": 4
+          },
+          "web": {
+            "fetch": 6
+          }
+        },
+        "started": "2026-11-03T14:28:34Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T14:44:39Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 132,
+        "seconds": 36,
+        "server_calls": {
+          "atomaton": {
+            "request_close_issue": 1
+          }
+        },
+        "started": "2026-11-03T14:44:03Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T14:53:39Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 135,
+        "seconds": 116,
+        "server_calls": {},
+        "started": "2026-11-03T14:51:43Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T15:00:39Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 141,
+        "seconds": 225,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "github": {
+            "create_sub_issue": 1
+          }
+        },
+        "started": "2026-11-03T14:56:54Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-03T16:49:04Z",
+        "ended_because": "failed",
+        "iterations": 5,
+        "messages": 156,
+        "seconds": 494,
+        "server_calls": {
+          "github": {
+            "get_pr_diff": 2
+          },
+          "shell": {
+            "bash": 1
+          },
+          "web": {
+            "fetch": 4
+          }
+        },
+        "started": "2026-11-03T16:40:50Z"
       }
     ]
   },
