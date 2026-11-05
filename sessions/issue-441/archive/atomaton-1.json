@@ -1,0 +1,40 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #441: run 失敗時に ending が投稿されない経路がある（#12 のセッション上限死で観測）\n\n## 観測\n\n2026-11-03 16:39 の親集約 run（`atomaton on #12`、https://github.com/yuma-seno/atomaton/actions/runs/41676398871）で、run が**失敗し、かつ終了コメントが1件も投稿されない**まま終わった。スレッドは dispatch マーカーの後で無言になり、label だけ `waiting-for-person` に替わった。Actions の結論は success。以下が実測:\n\n1. 集約セッションは長寿（事前メッセージ 143 件）。iteration 5 で `prompt=200430` / 上限 200,000\n2. compaction 不可能: `the recent turns already fill the context budget, so there is nothing to compact away` → `Session exceeded its context limit (200430 of 200000 tokens) and could not be compacted`\n3. `read_run_ending: ended_because=failed reported=false`\n4. **`post_result_comment.ts`: `atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment`** — 結果コメントをスキップ\n5. 「Report failure」step は skipped（post_result_comment が step 成功で終わったため）。decide_turn_ending は `ended=failed should_release=true` で label 替えのみ\n\n## 欠陥（契約との矛盾）\n\n「1 run = 1 ending」契約に対して、**失敗 run が ending を残せない経路が存在する**:\n\n- `--ended-because failed --reported false` かつ output が空（tool call で終わった）のとき、post_result_comment は ending を書かない\n- 失敗通知の代役（`report_run_failure.ts`）は job 失敗時のみで、この経路は対応しない\n- 結果: thread に機械の痕跡が残らず、人には run を開いてログを読むまで状況が分からない。watch/reconcile（死んだ run の補完）も無反応（job は success のため）\n\n## 提案\n\n1. `ended_because=failed` かつ output が空のとき、machinery 自身が失敗 ending を投稿する。内容は既存の「did not finish」形式（セッション保存済みの案内、`/agent recover` の案内、`atomaton:ended=` マーカー、notify で人に届く）相当に揃える。ログ末尾の要因（本件では ctx 上限死の WARN 2行）を引用に含めると人への届き方が最も良い\n2. ついでに欠陥の上位原因: **200k 上限に届いた長寿セッションが「compact 不能」で死ぬ**。直近の turns が予算を満たしていると何も落ちない、という設計は长期 issue（親の集約など数日またぐノード）で再発する。最低でも「最古の側を落としつつ直近を維持」か、閾値到達時の早期 recover 案内（ending に書く）のどちらかを検討してほしい。同じ長寿セッションでは、上限到達まで次の run が毎回同点で死ぬ恐れがある\n\n## 受け入れ条件の草案（machinery 側で調整可）\n\n- ctx 上限死相当の run（output 空・failed・reported=false）で、ending コメントが必ず1件投稿される\n- その ending には `atomaton:ended=` マーカーがある（watcher が検出できる）\n- 並行して既存の契約テストが壊れない\n",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-441",
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T08:05:03Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n上記の見解が間違っている可能性もあるので、調査から始めてください。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6653002395,
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T08:07:56Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "dec8f6514fd07c6ec16f8443c70e4b5122cc97800d4dacc87320a0c7b829900f",
+      "event_count": 2,
+      "agent": "atomaton"
+    }
+  }
+}
