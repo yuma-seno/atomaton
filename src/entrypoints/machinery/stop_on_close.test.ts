@@ -27,6 +27,24 @@ describe("stop_on_close.ts", () => {
   ]);
   /** A thread with nothing asked for: no run is in flight. */
   const IDLE_THREAD = "[]";
+  /**
+   * The thread a merged pull request was left holding (#449, measured on #442/#445/#446).
+   *
+   * A merged pull request re-invokes the issue it delivers; the runner wrote that
+   * dispatch onto the PULL REQUEST as `ended=handoff`, a promise that the next agent
+   * runs here — on a node nothing can ever run on again. Every such pull request read
+   * as "a run is working or coming" forever, and a close listed it among the runs it
+   * was stopping.
+   */
+  const MERGED_PR_HANDOFF_THREAD = JSON.stringify([
+    { id: 10, body: "/engineer", user: { type: "User" } },
+    { id: 11, body: "<!-- atomaton:took=10 run=5 -->", user: { type: "Bot" } },
+    {
+      id: 12,
+      body: "<!-- atomaton:agent=reviewer -->\n<!-- atomaton:ended=handoff answers=10 run=5 -->\nMerged.",
+      user: { type: "Bot" },
+    },
+  ]);
 
   /**
    * The sub-issues under a node, as GitHub's own links report them.
@@ -188,6 +206,102 @@ describe("stop_on_close.ts", () => {
     ]);
     expect(r.status).toBe(0);
     expect(r.ghCalls.some((c) => c[0] === "pr" && c[1] === "close")).toBe(false);
+  });
+
+  /**
+   * The observed defect (#443, 2026-11-05): a parent whose work had all landed was
+   * closed and the machinery announced stopping two runs — on #445 and #446, pull
+   * requests that had merged hours before and had had no run since.
+   *
+   * The cause was a reader, not a racer: every merged pull request's thread ended
+   * `ended=handoff` (the post-merge dispatch of the issue it delivers, written onto the
+   * pull request), and `runInFlight` reads a hand-off as a run working or coming. So
+   * the assertion is the whole criterion — neither the sentence about runs nor the
+   * stop request appears, because there was nothing to stop.
+   */
+  describe("closing a parent whose only children are merged pull requests", () => {
+    const MERGED_PR = {
+      number: 817,
+      body: "<!-- atomaton:parent-issue=803 -->",
+      state: "MERGED",
+      labels: [] as string[],
+    };
+
+    test("says nothing about stopping runs, and does not ask anything to stop", () => {
+      const r = run(CLOSED_ARGS, [
+        { match: ["api", "issues/803/comments"], stdout: IDLE_THREAD },
+        // The pull request's own thread, still carrying the hand-off the old shape wrote.
+        { match: ["api", "issues/817/comments"], stdout: MERGED_PR_HANDOFF_THREAD },
+        { match: ["api", "issues/803"], stdout: JSON.stringify({ state: "closed", labels: [] }) },
+        {
+          match: ["pr", "list", "parent-issue="],
+          stdout: JSON.stringify([MERGED_PR]),
+        },
+        NO_NATIVE_LINKS,
+        { match: ["issue", "comment"] },
+      ]);
+      expect(r.status).toBe(0);
+      const commented = r.ghCalls.filter((c) => c.includes("comment")).map((c) => c.join(" "));
+      expect(commented, JSON.stringify(commented)).toEqual([]);
+      expect(r.ghCalls.some((c) => c.join(" ").includes("atomaton:stop=requested"))).toBe(false);
+    });
+
+    /**
+     * And the same close, where something under it IS open and does need closing: the
+     * comment that gets posted is about the close, not about a run. This is the pair
+     * that matters — the fix must not silence a close that has real work to report, it
+     * must stop inventing runs.
+     */
+    test("with an open sub-issue, the receipt is about the close and not about a run", () => {
+      const r = run(CLOSED_ARGS, [
+        { match: ["api", "issues/803/comments"], stdout: IDLE_THREAD },
+        { match: ["api", "issues/807/comments"], stdout: IDLE_THREAD },
+        { match: ["api", "issues/817/comments"], stdout: MERGED_PR_HANDOFF_THREAD },
+        { match: ["api", "issues/803"], stdout: JSON.stringify({ state: "closed", labels: [] }) },
+        {
+          match: ["pr", "list", "parent-issue="],
+          stdout: JSON.stringify([MERGED_PR]),
+        },
+        subIssues({ number: 807 }),
+        { match: ["issue", "comment"] },
+        { match: ["issue", "close"] },
+      ]);
+      expect(r.status).toBe(0);
+      const toRoot = r.ghCalls.find((c) => c.includes("comment") && c.includes("803"))?.join(" ") ?? "";
+      expect(toRoot).toContain("#803 stays closed");
+      // The two claims #443 got wrong: nothing was running on the root, and #817 was
+      // not a run being stopped.
+      expect(toRoot).not.toContain("an agent was working on it");
+      expect(toRoot).not.toContain("Runs were going on");
+      expect(toRoot).not.toContain("atomaton:stop=requested");
+      // The close itself still reaches the open child.
+      expect(r.ghCalls.some((c) => c[0] === "issue" && c[1] === "close" && c.includes("807"))).toBe(true);
+    });
+  });
+
+  /**
+   * A close whose root is idle while a CHILD is live. The root's receipt is about the
+   * root, so it must not claim a run was working there; the child is what gets the
+   * stop request, and it gets it on its own node.
+   */
+  test("an idle root and a running child: the receipt is the root's, the stop is the child's", () => {
+    const r = run(CLOSED_ARGS, [
+      { match: ["api", "issues/803/comments"], stdout: IDLE_THREAD },
+      { match: ["api", "issues/807/comments"], stdout: RUNNING_THREAD },
+      { match: ["api", "issues/803"], stdout: JSON.stringify({ state: "closed", labels: [] }) },
+      { match: ["pr", "list", "parent-issue="], stdout: "[]" },
+      subIssues({ number: 807 }),
+      { match: ["issue", "comment"] },
+      { match: ["issue", "close"] },
+    ]);
+    expect(r.status).toBe(0);
+    const toRoot = r.ghCalls.find((c) => c.includes("comment") && c.includes("803"))?.join(" ") ?? "";
+    expect(toRoot).not.toContain("an agent was working on it");
+    expect(toRoot).not.toContain("atomaton:stop=requested");
+    // The child is named as what was stopped, and the tag is where its job polls.
+    expect(toRoot).toContain("Runs were going on #807");
+    const toChild = r.ghCalls.find((c) => c.includes("comment") && c.includes("807"))?.join(" ") ?? "";
+    expect(toChild).toContain("atomaton:stop=requested");
   });
 
   /** An open pull request is a node like any other, and closes with its issue. */

@@ -143,13 +143,33 @@ describe("shouldMentionOnCompletion", () => {
   });
 
   /**
-   * The override cannot reach a run that handed off, because such a run never carries
-   * this ending -- `endingOf` answers `handed-off` first. Asserted through the real
-   * derivation so the ordering is what is being held, not a hand-built ending.
+   * A run that started elsewhere still silences the mention, and since #449 that had
+   * to be said explicitly rather than falling out of the ending.
+   *
+   * It used to hold because `endingOf` answered `handed-off` for a chain-continuing
+   * run, so the `no-report` override below could never be reached. That was the same
+   * conflation the ticket is about — and with the ending now reporting what happened
+   * to THIS node, a run that dispatched elsewhere and wrote nothing arrives as
+   * `no-report`. It must still be silent: the run it started is who collects the
+   * result, so fetching a person would ask them about work somebody is doing.
    */
   test("silence does not wake anybody when a tool call already dispatched the next run", () => {
     expect(
       shouldMentionOnCompletion({ ...base, chainContinues: true, ending: ended({ reported: false, chainContinues: true }) }),
+    ).toBe(false);
+    // The ending is `no-report` here, which is what makes the ordering load-bearing.
+    expect(ended({ reported: false, chainContinues: true }).ended).toBe("no-report");
+    expect(ended({ reported: false, chainContinues: true }).continues).toBe(true);
+  });
+
+  /**
+   * And the ending carries the same fact, so a caller that builds a `TurnEnding` and
+   * forgets the raw signal beside it is still right. The two cannot disagree: both are
+   * read from the one signal that produced the ending.
+   */
+  test("the ending's own `continues` silences it too", () => {
+    expect(
+      shouldMentionOnCompletion({ ...base, ending: ended({ reported: false, chainContinues: true }) }),
     ).toBe(false);
   });
 });

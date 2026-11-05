@@ -191,6 +191,14 @@ describe("post_result_comment.ts buildCommentBody", () => {
     expect(body).not.toContain("@octocat");
   });
 
+  /**
+   * A run that dispatched somewhere else did not hand THIS node to anyone (#449). The
+   * old tag said `handoff` for any chain that continued, which is how merged pull
+   * requests came to read as "an agent is working here" forever: their post-merge
+   * dispatch of the issue they delivered was written onto the pull request. The tag
+   * describes the node it is written on, so it is `done` — `handoff` is for a
+   * directive that names the next agent HERE.
+   */
   test("omits the mention when the chain already continues", () => {
     const body = buildCommentBody({
       agent: "atomaton",
@@ -200,6 +208,20 @@ describe("post_result_comment.ts buildCommentBody", () => {
       output: "Dispatched.",
     });
     expect(body).not.toContain("@octocat");
+    expect(body).toContain("ended=done");
+    expect(body).not.toContain("ended=handoff");
+  });
+
+  /** The contrast: a directive naming the next agent on this node still holds it. */
+  test("tags a directive handoff as one, on the node it hands over", () => {
+    const body = buildCommentBody({
+      agent: "atomaton",
+      directive: "engineer",
+      chainContinues: "true",
+      runUrl: "http://example.com/run/1",
+      output: "Handing off.",
+    });
+    expect(body).toContain("ended=handoff");
   });
 
   // Closing a sub-issue is what wakes its parent, in a later workflow run that

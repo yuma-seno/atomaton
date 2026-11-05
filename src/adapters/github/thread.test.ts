@@ -63,10 +63,10 @@ function comment(id: number, createdAt: string, body: string, type = "Bot"): unk
 }
 
 /** Whether `runInFlight` says a run is working or coming on #7, read through the adapter. */
-function inFlight(comments: unknown[]): boolean {
+function inFlight(comments: unknown[], options: { merged?: boolean } = {}): boolean {
   const script = `
     const { runInFlight } = await import(${JSON.stringify(SRC)});
-    process.stdout.write(JSON.stringify(runInFlight("o/r", 7)));
+    process.stdout.write(JSON.stringify(runInFlight("o/r", 7, ${JSON.stringify(options)})));
   `;
   const proc = Bun.spawnSync({
     cmd: [process.execPath, "-e", script],
@@ -114,6 +114,63 @@ describe("runInFlight", () => {
       ),
     ];
     expect(inFlight(refused)).toBe(false);
+  });
+
+  /**
+   * The data the old shape left behind, and the reason a reader had to change (#449).
+   *
+   * A merged pull request re-invoked the issue it delivers, and the runner wrote that
+   * dispatch onto the PULL REQUEST as `ended=handoff` — a promise that the next agent
+   * runs here, on a node where nothing can ever run again. Six of them accumulated
+   * (#442, #445, #446 among them) and every one read as "a run is working or coming",
+   * which is what made closing a parent report stopping runs that did not exist.
+   *
+   * These threads are not repaired, they are READ: `merged` says the node can no longer
+   * host a run, so a request or a hand-off as the newest word is a promise nobody can
+   * keep rather than a run on its way.
+   */
+  describe("on a merged pull request", () => {
+    test("the leftover hand-off is not a run in flight", () => {
+      expect(inFlight(handoff, { merged: true })).toBe(false);
+    });
+
+    /** The same thread on an OPEN node is in flight — the fix is the merge, not the tag. */
+    test("while the same thread on an open node still is", () => {
+      expect(inFlight(handoff)).toBe(true);
+    });
+
+    /**
+     * The "working" half still answers, and it has to: a reviewer merges its own pull
+     * request and then carries on to report. The claim is written by a run that has
+     * actually started, so a merge does not hide the run that performed it — which a
+     * stop still has to reach.
+     */
+    test("a run that has taken the turn is still in flight — the merge alone does not hide it", () => {
+      const claiming = [
+        comment(10, "2026-10-24T09:00:00Z", "/engineer", "User"),
+        comment(11, "2026-10-24T09:00:10Z", "<!-- atomaton:took=10 run=5 -->"),
+      ];
+      expect(inFlight(claiming, { merged: true })).toBe(true);
+    });
+
+    /** And the merge does not resurrect anything a later ending already closed. */
+    test("a thread that handed back stays handed back", () => {
+      const done = [
+        ...handoff,
+        comment(13, "2026-10-24T09:15:00Z", "<!-- atomaton:ended=done answers=10 run=5 -->\nMerged."),
+      ];
+      expect(inFlight(done, { merged: true })).toBe(false);
+    });
+  });
+
+  /**
+   * A closed ISSUE is not this. Closing is how a run finishes — an agent closes the
+   * issue it was working on and keeps going — so the wider answer is kept for it, and
+   * only a merge (which is final) narrows anything. This is asserted without the flag,
+   * because that is exactly what the tree reader passes for an issue.
+   */
+  test("a closed issue keeps the wider answer", () => {
+    expect(inFlight(handoff)).toBe(true);
   });
 });
 

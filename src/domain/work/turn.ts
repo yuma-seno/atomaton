@@ -75,7 +75,15 @@ export type Ending =
   | "spent"
   /** The chain of runs reached ITS limit, so a named hand-off is refused rather than taken. */
   | "chain-over"
-  /** Work continues: it named the next agent, or a tool call already started one. */
+  /**
+   * Work continues ON THIS NODE: it named the next agent, and that agent runs here.
+   *
+   * Deliberately not "a run started somewhere". A tool call that dispatches onto
+   * ANOTHER node — a merged pull request re-invoking the issue it delivers — starts a
+   * run that answers nothing on this node, and writing that as a hand-off leaves the
+   * node permanently promising a successor nobody will send (#449). What that run did
+   * is `TurnEnding.continues`.
+   */
   | "handed-off"
   /**
    * The run ended inside a child-starting tool call: `launch_sub_agent` or
@@ -114,6 +122,24 @@ export interface TurnEnding {
    * the run is already going.
    */
   readonly next?: NextTurn;
+  /**
+   * A run started during this turn on ANOTHER node, so "nothing runs next" is not
+   * true even though this node has handed back.
+   *
+   * Its own signal rather than an ending (#449). The two facts are different
+   * questions and one word for both wrote a lie onto the thread: a merged pull
+   * request re-invokes the issue it delivers, and calling that a hand-off said
+   * "the next agent runs HERE", which nothing was ever going to do — so every
+   * reader of `atomaton:ended=handoff` treated the merged pull request as a node
+   * with work in flight, forever.
+   *
+   * So `ended` says what became of THIS node (it handed back — `finished`, or a
+   * person was fetched), and this says what happened elsewhere. Read by exactly the
+   * two consumers that need it: `shouldReleaseGuard` (the dispatch's own label
+   * behaviour is unchanged) and `completion-mention.ts` (a started run still
+   * silences the "no agent will run next" sentence).
+   */
+  readonly continues?: true;
 }
 
 /** The raw signals a finished run leaves behind, as the workflow reads them. */
@@ -208,9 +234,17 @@ export function endingOf(signals: TurnSignals): TurnEnding {
   // parent instead.
   if (signals.parked) return { ended: "parked" };
   if (signals.loopLimitReached) return { ended: "chain-over", ...(next ? { next } : {}) };
-  if (next || signals.chainContinues) return { ended: "handed-off", ...(next ? { next } : {}) };
-  if (!signals.reported) return { ended: "no-report" };
-  return { ended: "finished" };
+  // A directive is a hand-off: the agent it names runs on THIS node, so the node is
+  // still somebody's and the thread must say so.
+  if (next) return { ended: "handed-off", next, ...(signals.chainContinues ? { continues: true as const } : {}) };
+  // A dispatch somewhere else is NOT. The two were one branch (#449): a merged pull
+  // request re-invokes the issue it delivers, that dispatch is recorded as the chain
+  // continuing, and filing it as `handed-off` wrote "the next agent runs here" onto a
+  // thread where nothing ever would. `finished` is what happened to THIS node — it
+  // handed back — and `continues` carries the other fact to the two readers of it.
+  const continues = signals.chainContinues ? ({ continues: true } as const) : {};
+  if (!signals.reported) return { ended: "no-report", ...continues };
+  return { ended: "finished", ...continues };
 }
 
 /**
@@ -222,11 +256,19 @@ export function endingOf(signals: TurnSignals): TurnEnding {
  * is what continues it (#208). Every other ending has handed back — to a person,
  * or to nobody — and a node nothing is working on must not stay locked.
  *
+ * `continues` holds it too, and that arm is deliberately the same answer as before
+ * #449 rather than a new opinion: a run this one started is a run somebody has to
+ * account for, and the label's own moving is not what that issue was about. What
+ * changed is only what the THREAD says — the ending is `finished`, so a merged pull
+ * request stops promising a successor — while the label behaviour the aggregation
+ * and the release rule already depend on is untouched.
+ *
  * The mechanism that enacts this is the `atomaton/in-progress` label, in
  * `entrypoints/machinery/manage_turn_labels.ts`. It is deliberately not named
  * here: the rule is about turns and the label is one way to persist it.
  */
 export function shouldReleaseGuard(ending: TurnEnding): boolean {
+  if (ending.continues === true) return false;
   return ending.ended !== "handed-off" && ending.ended !== "parked";
 }
 

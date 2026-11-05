@@ -93,7 +93,8 @@ describe("canBeReopened", () => {
  * saying things it could not know yet.
  */
 describe("stopOnCloseNotice", () => {
-  const notice = stopOnCloseNotice(803);
+  /** A root that a run was holding when the person closed it: the running case. */
+  const notice = stopOnCloseNotice(803, true);
 
   /**
    * Two facts the person cannot get from what they can see: the run did not stop
@@ -128,6 +129,32 @@ describe("stopOnCloseNotice", () => {
    */
   test("notifies nobody", () => {
     expect(notice).not.toContain("@");
+  });
+
+  /**
+   * The other receipt, and the defect it closes (#449). A parent issue is closed all
+   * the time with nothing running on it — its work is under it, or it is simply over —
+   * and this used to say "an agent was working on it" regardless, then nothing reported
+   * because nothing had been running. A receipt that names a run the person can go and
+   * look for has to be about a run that exists.
+   */
+  describe("when nothing was running on the root itself", () => {
+    const idle = stopOnCloseNotice(803, false);
+
+    test("does not claim an agent was working on it", () => {
+      expect(idle).not.toContain("an agent was working on it");
+      expect(idle).not.toContain("asked to stop");
+    });
+
+    /** Still a receipt: the person did something, and this answers it. */
+    test("still says the issue stays closed", () => {
+      expect(idle).toContain("#803 stays closed");
+    });
+
+    /** Nothing is coming, so the advice about a run reporting would be a second lie. */
+    test("does not promise a run will report", () => {
+      expect(idle).not.toContain("report here");
+    });
   });
 });
 

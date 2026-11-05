@@ -2354,6 +2354,14 @@ describe("mcp/github.ts", () => {
      * started. Before the node env was renamed the node comparison stumbled into
      * this by accident (#259); the flag makes it explicit, and this test is the
      * route's only coverage.
+     *
+     * The ops log is the assertion because it is the signal `chain_continues` reads,
+     * and #449 deliberately left it alone: the fix separates "a run started
+     * somewhere" from "this node is held", and this is the former. What changed is
+     * the pull request's own tag, which is now `done` rather than `handoff` — the
+     * run dispatched to a different node, so nothing is working HERE. Both halves
+     * are pinned: see `post_result_comment.test.ts` for the tag and
+     * `stop_on_close.test.ts` for the close that used to read it as a live run.
      */
     test("merge_pr's post-merge restart is recorded as the chain continuing", async () => {
       const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-chain-"));
