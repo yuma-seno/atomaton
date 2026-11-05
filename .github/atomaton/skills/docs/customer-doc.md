@@ -55,9 +55,27 @@ that states what was measured about it:
 
 | File | Format | Shape |
 | --- | --- | --- |
-| `report.fodt` | docx | A4 portrait, title page, 概要 / システム構成 / スケジュール / 費用 / 体制・連絡先, footer with page numbers |
-| `deck.fodp` | pptx | 16:9, three slides: title, agenda, content-with-bullets |
-| `book.fods` | xlsx | two sheets: 見積 (itemised, formulas for 小計/消費税/合計) and 前提条件 |
+| `report.fodt` | docx | A4 portrait; title page with a three-row metadata table; five numbered sections, the first starting a new page; three two-column tables with a repeating header row; footer with organisation, title and page numbers |
+| `deck.fodp` | pptx | 16:9; three slides: title with subtitle and one metadata line, agenda with four numbered items, content with a heading, four bullets and a note |
+| `book.fods` | xlsx | two sheets: an itemised quotation (header block, four line items, formula subtotal / tax / grand total, terms) and an assumptions sheet |
+
+**The defaults hold structure and formatting only; the language comes from the data.**
+Every word a reader sees is a placeholder — section headings, metadata labels,
+column headers, the footer's organisation name, the tax label, the currency in the
+number format and the sheet names included — so the same template sets a Japanese
+document and an English one, and a language nobody has used yet, from the data
+alone. What deliberately stays in the template is structure and typography: the
+ordinal in a heading (`1.`), an agenda's `01`..`04`, the bullet glyph, an ASCII
+separator between two values, and the fact that a label placeholder carries its own
+punctuation with it, so `件名：` and `Subject: ` are both data rather than one
+template with a colon glued on.
+
+**The font is `Noto Sans CJK JP` on every style, and that is not a language
+constraint.** It is a multi-script coverage choice: one family carries Latin and CJK,
+so the same template sets data in either without naming a second font. Keeping it
+also keeps §3's first trap at bay — leave the East Asian face unstated and
+LibreOffice derives one from the document language, landing on a Simplified-Chinese
+serif whose Japanese glyphs are the wrong shapes.
 
 **A template a person attached to the issue.** The customer's own template usually
 arrives as a file on the issue rather than as a path in the tree. `fetch_attachment`
@@ -89,7 +107,7 @@ by filling and re-rendering:
   no number format, no right alignment, and a formula pointing at it computes
   nothing;
 - a **formula** cell must not carry a cached `office:value`: LibreOffice trusts a
-  cached value and never recalculates, so every total came back 0 円 until the
+  cached value and never recalculates, so every total came back 0 until the
   attribute was removed;
 - `style:page-layout` must live in `office:automatic-styles`. Placed in
   `office:styles` it is not bound to the master page — the export carries
@@ -107,8 +125,9 @@ by filling and re-rendering:
 ## 3. The flat leg, and the rules that cost a render each
 
 Substituting text is trivial; making the *conversion* keep the document's
-intent is not. These are the rules a Japanese document template needs, each one
-found by rendering a draft that looked fine in the XML:
+intent is not. These rules were each found by rendering a draft that looked fine in
+the XML, and they are kept as measurements, not as an assumption about language:
+they apply whenever the data that flows through a template hits the trap.
 
 - **State the East Asian font, size and language on every text style.** Without
   `style:font-name-asian` the exported docx carries
@@ -118,14 +137,37 @@ found by rendering a draft that looked fine in the XML:
   the reader treats Japanese as English for line breaking and fallback. The
   second defect is invisible in a render and only shows in the XML, which is the
   argument for checking both.
-- **docx:** a heading needs `fo:keep-with-next="always"` (otherwise it strands at
-  the foot of a page) and a table needs `style:may-break-between-rows="false"`.
+- **docx:** a heading needs `fo:keep-with-next="always"`, or it strands at the
+  foot of a page.
+- **docx, a table across a page break:** what stops a row splitting is a row
+  property, not the table's. `style:may-break-between-rows="false"` on the table
+  decides only whether a table that would fit moves whole — measured on a 6-row
+  table with 30 filler paragraphs above it, without it rows 1–3 stayed on page 1
+  and 4–6 went to page 2, and with it all six moved to page 2. It exports as
+  `w:keepNext` on the row paragraphs and never as `w:cantSplit`, so on a table
+  too long for one page it decides nothing: 150 rows with it alone split across 3
+  pages at a data row, with 0 `w:cantSplit`, 0 `w:tblHeader`, and the header row
+  on page 1 only. A row is held whole by `fo:keep-together="always"` on its own
+  `style:table-row-properties` (that is what exports `w:cantSplit`), and a header
+  row repeats on the next page only when it sits inside
+  `table:table-header-rows` (that is `w:tblHeader`) — the same 150-row table with
+  both measured 150 `w:cantSplit`, 1 `w:tblHeader`, and the header row on all 3
+  pages. The row style must be in `office:automatic-styles`: the same style moved
+  to `office:styles` exported 0 `w:cantSplit`. `style:row-height`, and
+  `fo:keep-together` on the table properties, changed nothing.
 - **pptx:** the page is 28 × 15.75 cm — LibreOffice's own 16:9 — and a
   `style:page-layout` naming any other 16:9 size is ignored, which misplaces every
   frame laid out for it. Text styles must be `style:family="paragraph"` with names
   no built-in Impress style uses (`Title` resolves to the built-in `Title` and the
   styling is lost). Paragraph spacing inside a slide's text box does not survive
   the export; use `fo:line-height`.
+- **A numeric column is sized for a number, not for a number plus a currency.**
+  The default quotation's amount column is 3.2 cm, which holds `1,200,000`; the
+  same value with the currency suffix behind it runs past the right border and
+  touches the notes column — measured with ` 円` and with ` JPY`, and identically
+  on the template before the currency became data, so it is the column's width and
+  not the placeholder. Keep the amounts shorter than seven digits, or widen the
+  column in your copy while the five still add up to 16.5 cm.
 - **Fix a copy of the template, never the filled file.** `fill` writes
   `<out>.fodt`/`.fodp`/`.fods` beside the output — the diffable record of what was
   filled — but `fill` re-reads its `--template` and rewrites that record on every
@@ -193,6 +235,7 @@ What a render shows, and what only the file shows:
 | overflow past a cell or a frame edge, `###` where a number does not fit | a formula whose value is cached and never recalculated |
 | a font that is not the one intended (serif where sans was asked for) | `w:lang w:eastAsia="en-US"` under a Japanese paragraph |
 | a heading stranded at the foot of a page, a table split across two | a page layout that was dropped, so the print margins are the default |
+| a table continuing onto the next page | a docx with no `w:cantSplit`, so a row may split mid-row, and no `w:tblHeader`, so no header repeats |
 | an empty footer, a missing page number, a colour on the wrong background | a placeholder left as `{{KEY}}` inside a field result |
 
 So the loop is two checks, not one: read the pages, then confirm the rules in

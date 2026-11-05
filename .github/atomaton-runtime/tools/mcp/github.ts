@@ -20721,6 +20721,13 @@ function checkedIssueBody(body, instead) {
   refuseCommandLines(body, "issue body", instead);
   return notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
 }
+function refuseTurnLabels(labels, what) {
+  const turnLabels = [getLabel("in_progress"), getLabel("waiting_for_person")];
+  const offending = labels.find((label) => turnLabels.includes(label));
+  if (offending === undefined)
+    return;
+  mcpFail(`${what} may not be created carrying \`${offending}\`. \`${turnLabels[0]}\` and ` + `\`${turnLabels[1]}\` are turn labels: the machinery applies them as a pair when a run takes a node's ` + "turn and this node has not had one, so a new issue carries neither. Pass no turn label \u2014 the " + "hand-off to a person is the notify tag already written into the body \u2014 and use ordinary " + "project labels if this issue needs triaging.");
+}
 async function createSubIssue(a) {
   const title = a.title;
   if (isPrRun()) {
@@ -20732,6 +20739,7 @@ async function createSubIssue(a) {
   }
   const body = checkedIssueBody(a.body ?? "", "Use `launch_sub_agent` to start an agent on a sub-issue.");
   let labels = a.labels ?? [];
+  refuseTurnLabels(labels, "A sub-issue");
   const subIssueLabel = getLabel("sub_issue");
   const ensured = gh("label", "create", subIssueLabel, "--repo", REPO, "--force", "--color", "8250df", "--description", "Child delivery task managed by Atomaton");
   if (ensured.code)
@@ -20772,6 +20780,7 @@ async function createRootIssue(a) {
   if (labels.includes(subIssueLabel)) {
     mcpFail(`create_root_issue creates an issue with no parent, so \`${subIssueLabel}\` -- the label a ` + "parent's aggregation counts its children by -- may not be applied to it. Call " + "create_sub_issue to file a child under this run's issue, or drop the label.");
   }
+  refuseTurnLabels(labels, "A root issue");
   const cmd = ["issue", "create", "--repo", REPO, "--title", title];
   if (body)
     cmd.push("--body", body);
@@ -21575,13 +21584,13 @@ async function closeParentAndReport(parentIssue, extra = {}) {
 var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
     name: "create_sub_issue",
-    description: "Create a GitHub issue and link it under the issue THIS RUN is working on, as a child of it. Use this for durable work items and for the sub-issues a decomposition is made of; the new issue is always linked under the current issue and always carries the sub-issue label, and the call is refused on a pull request run and on a run with no current issue. To file an issue that is nobody's child -- a defect in the tools, or a decision somebody has to make -- use create_root_issue. This mutates GitHub and records the operation in Atomaton's audit log.",
+    description: "Create a GitHub issue and link it under the issue THIS RUN is working on, as a child of it. Use this for durable work items and for the sub-issues a decomposition is made of; the new issue is always linked under the current issue and always carries the sub-issue label, and the call is refused on a pull request run and on a run with no current issue. To file an issue that is nobody's child -- a defect in the tools, or a decision somebody has to make -- use create_root_issue. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. This mutates GitHub and records the operation in Atomaton's audit log.",
     schema: ISSUE_ARGS_SCHEMA,
     handler: createSubIssue
   }),
   defineMcpTool({
     name: "create_root_issue",
-    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. Returns {number, url, parent: null, root: true} and mutates GitHub.",
+    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. Returns {number, url, parent: null, root: true} and mutates GitHub.",
     schema: ISSUE_ARGS_SCHEMA,
     handler: createRootIssue
   }),
