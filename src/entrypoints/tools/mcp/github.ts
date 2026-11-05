@@ -391,6 +391,36 @@ function checkedIssueBody(body: string, instead: string): string {
   return notifyTagPrefix(body, "Issue") + withCheckedMentions(body);
 }
 
+/**
+ * The two turn labels, refused on both creating tools once the caller wrote one itself.
+ *
+ * `atomaton/in-progress` and `atomaton/waiting-for-person` are not vocabulary: they are
+ * the two halves of one state, moved as a pair by `turn-labels.ts` between "a run holds
+ * this node's turn" and "the turn came back to a person". They record that a turn
+ * HAPPENED on the node, so the one node that cannot carry either is a node created
+ * during a turn somewhere else -- which is every issue these two tools create. An
+ * agent that applies one by hand writes a turn that never took place, and the
+ * machinery reads its own state wrong for as long as that label survives.
+ *
+ * What an agent hands a person across is prose and the notify tag, both of which are in
+ * the body by the time the issue is created; neither is a label.
+ *
+ * `getLabel` rather than the literal, so a project that renames the labels under
+ * `chain.labels` refuses the names it actually uses.
+ */
+function refuseTurnLabels(labels: readonly string[], what: string): void {
+  const turnLabels = [getLabel("in_progress"), getLabel("waiting_for_person")];
+  const offending = labels.find((label) => turnLabels.includes(label));
+  if (offending === undefined) return;
+  mcpFail(
+    `${what} may not be created carrying \`${offending}\`. \`${turnLabels[0]}\` and ` +
+      `\`${turnLabels[1]}\` are turn labels: the machinery applies them as a pair when a run takes a node's ` +
+      "turn and this node has not had one, so a new issue carries neither. Pass no turn label — the " +
+      "hand-off to a person is the notify tag already written into the body — and use ordinary " +
+      "project labels if this issue needs triaging.",
+  );
+}
+
 async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<string> {
   const title = a.title;
 
@@ -429,6 +459,9 @@ async function createSubIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<str
   // aggregation waits on.
   const body = checkedIssueBody(a.body ?? "", "Use `launch_sub_agent` to start an agent on a sub-issue.");
   let labels = a.labels ?? [];
+  // The caller's own labels, before the sub-issue label is appended: that one is the
+  // machinery's and is not a turn, so it is not what this refusal is about.
+  refuseTurnLabels(labels, "A sub-issue");
   const subIssueLabel = getLabel("sub_issue");
   const ensured = gh(
     "label", "create", subIssueLabel,
@@ -539,6 +572,8 @@ async function createRootIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<st
         "create_sub_issue to file a child under this run's issue, or drop the label.",
     );
   }
+
+  refuseTurnLabels(labels, "A root issue");
 
   const cmd = ["issue", "create", "--repo", REPO, "--title", title];
   if (body) cmd.push("--body", body);
@@ -2235,13 +2270,13 @@ async function closeParentAndReport(
 const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   defineMcpTool({
     name: "create_sub_issue",
-    description: "Create a GitHub issue and link it under the issue THIS RUN is working on, as a child of it. Use this for durable work items and for the sub-issues a decomposition is made of; the new issue is always linked under the current issue and always carries the sub-issue label, and the call is refused on a pull request run and on a run with no current issue. To file an issue that is nobody's child -- a defect in the tools, or a decision somebody has to make -- use create_root_issue. This mutates GitHub and records the operation in Atomaton's audit log.",
+    description: "Create a GitHub issue and link it under the issue THIS RUN is working on, as a child of it. Use this for durable work items and for the sub-issues a decomposition is made of; the new issue is always linked under the current issue and always carries the sub-issue label, and the call is refused on a pull request run and on a run with no current issue. To file an issue that is nobody's child -- a defect in the tools, or a decision somebody has to make -- use create_root_issue. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. This mutates GitHub and records the operation in Atomaton's audit log.",
     schema: ISSUE_ARGS_SCHEMA,
     handler: createSubIssue,
   }),
   defineMcpTool({
     name: "create_root_issue",
-    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. Returns {number, url, parent: null, root: true} and mutates GitHub.",
+    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. Returns {number, url, parent: null, root: true} and mutates GitHub.",
     schema: ISSUE_ARGS_SCHEMA,
     handler: createRootIssue,
   }),
