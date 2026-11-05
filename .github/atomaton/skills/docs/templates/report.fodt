@@ -10,6 +10,12 @@
 
   Sections are part of the template — edit them here. The content of each is a
   placeholder, so nothing in the output is a paragraph this file did not ask for.
+
+  The template holds structure and formatting only: every word a reader sees is a
+  placeholder, so the language of the document is the data's choice, not this
+  file's. The ordinal in a heading ("1.") and an ASCII separator between two
+  values are structure and stay here; a label placeholder carries its own
+  punctuation, so a locale supplies "Client:" or its own word and colon together.
 -->
 <office:document
   xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
@@ -39,15 +45,19 @@
       <style:paragraph-properties fo:text-align="center"/>
       <style:text-properties style:font-name="Noto Sans CJK JP" fo:font-size="8pt" style:font-size-asian="8pt" style:font-name-asian="Noto Sans CJK JP" fo:color="#8a8a8a" fo:language="en" fo:country="US" style:language-asian="ja" style:country-asian="JP"/>
     </style:style>
+  </office:styles>
 
+  <office:automatic-styles>
+    <!-- This must live in office:automatic-styles, not in office:styles above: a
+         layout outside it is not bound to the master page, and the docx export then
+         writes LibreOffice's own margins — 1134 twips left/right/top and 1417 bottom,
+         measured — instead of the ones below (1361/1247/1530). -->
     <style:page-layout style:name="pm1">
       <style:page-layout-properties
         fo:page-width="21cm" fo:page-height="29.7cm" style:print-orientation="portrait"
         fo:margin-top="2.2cm" fo:margin-bottom="2.2cm" fo:margin-left="2.4cm" fo:margin-right="2.4cm"/>
     </style:page-layout>
-  </office:styles>
 
-  <office:automatic-styles>
     <style:style style:name="P_Title" style:family="paragraph">
       <style:paragraph-properties fo:margin-top="4cm" fo:margin-bottom="0.3cm"/>
       <style:text-properties style:font-name="Noto Sans CJK JP" fo:font-size="26pt" style:font-size-asian="26pt" style:font-name-asian="Noto Sans CJK JP" fo:font-weight="bold" fo:color="#12324f" fo:language="en" fo:country="US" style:language-asian="ja" style:country-asian="JP"/>
@@ -104,6 +114,12 @@
       <style:table-column-properties style:column-width="13cm"/>
     </style:style>
 
+    <!-- This is what makes the docx carry w:cantSplit; style:may-break-between-rows
+         on the table does not (it exports as w:keepNext). -->
+    <style:style style:name="R_Keep" style:family="table-row">
+      <style:table-row-properties fo:keep-together="always"/>
+    </style:style>
+
     <style:style style:name="CellHead" style:family="table-cell">
       <style:table-cell-properties fo:background-color="#12324f" fo:border="0.5pt solid #12324f" fo:padding="0.16cm"/>
     </style:style>
@@ -124,7 +140,7 @@
   <office:master-styles>
     <style:master-page style:name="Standard" style:page-layout-name="pm1">
       <style:footer>
-        <text:p text:style-name="Footer">株式会社サンプル ｜ {{TITLE}} ｜ <text:page-number text:select-page="current">1</text:page-number> / <text:page-count>1</text:page-count></text:p>
+        <text:p text:style-name="Footer">{{ORG_NAME}} | {{TITLE}} | <text:page-number text:select-page="current">1</text:page-number> / <text:page-count>1</text:page-count></text:p>
       </style:footer>
     </style:master-page>
   </office:master-styles>
@@ -137,96 +153,102 @@
       <table:table table:name="Meta" table:style-name="T_Meta">
         <table:table-column table:style-name="C_Meta1"/>
         <table:table-column table:style-name="C_Meta2"/>
-        <table:table-row>
-          <table:table-cell table:style-name="CellMetaLabel" office:value-type="string"><text:p text:style-name="P_CellLabel">顧客</text:p></table:table-cell>
+        <table:table-row table:style-name="R_Keep">
+          <table:table-cell table:style-name="CellMetaLabel" office:value-type="string"><text:p text:style-name="P_CellLabel">{{META_LABEL_CLIENT}}</text:p></table:table-cell>
           <table:table-cell table:style-name="CellMetaValue" office:value-type="string"><text:p text:style-name="P_CellValue">{{CLIENT}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
-          <table:table-cell table:style-name="CellMetaLabel" office:value-type="string"><text:p text:style-name="P_CellLabel">作成</text:p></table:table-cell>
+        <table:table-row table:style-name="R_Keep">
+          <table:table-cell table:style-name="CellMetaLabel" office:value-type="string"><text:p text:style-name="P_CellLabel">{{META_LABEL_AUTHOR}}</text:p></table:table-cell>
           <table:table-cell table:style-name="CellMetaValue" office:value-type="string"><text:p text:style-name="P_CellValue">{{AUTHOR}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
-          <table:table-cell table:style-name="CellMetaLabel" office:value-type="string"><text:p text:style-name="P_CellLabel">版 / 日付</text:p></table:table-cell>
-          <table:table-cell table:style-name="CellMetaValue" office:value-type="string"><text:p text:style-name="P_CellValue">{{VERSION}} ／ {{DATE}}</text:p></table:table-cell>
+        <table:table-row table:style-name="R_Keep">
+          <table:table-cell table:style-name="CellMetaLabel" office:value-type="string"><text:p text:style-name="P_CellLabel">{{META_LABEL_VERSION_DATE}}</text:p></table:table-cell>
+          <table:table-cell table:style-name="CellMetaValue" office:value-type="string"><text:p text:style-name="P_CellValue">{{VERSION}} / {{DATE}}</text:p></table:table-cell>
         </table:table-row>
       </table:table>
 
-      <text:p text:style-name="P_SectionStart">1. 概要</text:p>
+      <text:p text:style-name="P_SectionStart">1. {{SECTION_1_HEADING}}</text:p>
       <text:p text:style-name="P_Body">{{SUMMARY}}</text:p>
 
-      <text:p text:style-name="P_H1">2. システム構成</text:p>
+      <text:p text:style-name="P_H1">2. {{SECTION_2_HEADING}}</text:p>
       <text:p text:style-name="P_Body">{{ARCHITECTURE}}</text:p>
       <table:table table:name="Components" table:style-name="T_Grid">
         <table:table-column table:style-name="C_Grid1"/>
         <table:table-column table:style-name="C_Grid2"/>
-        <table:table-row>
-          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">構成要素</text:p></table:table-cell>
-          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">役割</text:p></table:table-cell>
-        </table:table-row>
-        <table:table-row>
+        <table:table-header-rows>
+          <table:table-row table:style-name="R_Keep">
+            <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{COL_HEAD_COMPONENT}}</text:p></table:table-cell>
+            <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{COL_HEAD_ROLE}}</text:p></table:table-cell>
+          </table:table-row>
+        </table:table-header-rows>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{COMPONENT_1}}</text:p></table:table-cell>
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{ROLE_1}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="CellAlt" office:value-type="string"><text:p text:style-name="P_Cell">{{COMPONENT_2}}</text:p></table:table-cell>
           <table:table-cell table:style-name="CellAlt" office:value-type="string"><text:p text:style-name="P_Cell">{{ROLE_2}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{COMPONENT_3}}</text:p></table:table-cell>
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{ROLE_3}}</text:p></table:table-cell>
         </table:table-row>
       </table:table>
 
-      <text:p text:style-name="P_H1">3. スケジュール</text:p>
+      <text:p text:style-name="P_H1">3. {{SECTION_3_HEADING}}</text:p>
       <table:table table:name="Schedule" table:style-name="T_Grid">
         <table:table-column table:style-name="C_Grid1"/>
         <table:table-column table:style-name="C_Grid2"/>
-        <table:table-row>
-          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">工程</text:p></table:table-cell>
-          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">期間 / 成果物</text:p></table:table-cell>
-        </table:table-row>
-        <table:table-row>
+        <table:table-header-rows>
+          <table:table-row table:style-name="R_Keep">
+            <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{COL_HEAD_PHASE}}</text:p></table:table-cell>
+            <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{COL_HEAD_PERIOD_DELIVERABLE}}</text:p></table:table-cell>
+          </table:table-row>
+        </table:table-header-rows>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{PHASE_1}}</text:p></table:table-cell>
-          <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{PERIOD_1}} ／ {{DELIVERABLE_1}}</text:p></table:table-cell>
+          <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{PERIOD_1}} / {{DELIVERABLE_1}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="CellAlt" office:value-type="string"><text:p text:style-name="P_Cell">{{PHASE_2}}</text:p></table:table-cell>
-          <table:table-cell table:style-name="CellAlt" office:value-type="string"><text:p text:style-name="P_Cell">{{PERIOD_2}} ／ {{DELIVERABLE_2}}</text:p></table:table-cell>
+          <table:table-cell table:style-name="CellAlt" office:value-type="string"><text:p text:style-name="P_Cell">{{PERIOD_2}} / {{DELIVERABLE_2}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{PHASE_3}}</text:p></table:table-cell>
-          <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{PERIOD_3}} ／ {{DELIVERABLE_3}}</text:p></table:table-cell>
+          <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{PERIOD_3}} / {{DELIVERABLE_3}}</text:p></table:table-cell>
         </table:table-row>
       </table:table>
 
-      <text:p text:style-name="P_H1">4. 費用</text:p>
+      <text:p text:style-name="P_H1">4. {{SECTION_4_HEADING}}</text:p>
       <text:p text:style-name="P_Body">{{COST_NOTE}}</text:p>
       <table:table table:name="Cost" table:style-name="T_Grid">
         <table:table-column table:style-name="C_Grid1"/>
         <table:table-column table:style-name="C_Grid2"/>
-        <table:table-row>
-          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">項目</text:p></table:table-cell>
-          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">金額</text:p></table:table-cell>
-        </table:table-row>
-        <table:table-row>
+        <table:table-header-rows>
+          <table:table-row table:style-name="R_Keep">
+            <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{COL_HEAD_ITEM}}</text:p></table:table-cell>
+            <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{COL_HEAD_AMOUNT}}</text:p></table:table-cell>
+          </table:table-row>
+        </table:table-header-rows>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{COST_ITEM_1}}</text:p></table:table-cell>
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{COST_1}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="CellAlt" office:value-type="string"><text:p text:style-name="P_Cell">{{COST_ITEM_2}}</text:p></table:table-cell>
           <table:table-cell table:style-name="CellAlt" office:value-type="string"><text:p text:style-name="P_Cell">{{COST_2}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
+        <table:table-row table:style-name="R_Keep">
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{COST_ITEM_3}}</text:p></table:table-cell>
           <table:table-cell table:style-name="Cell" office:value-type="string"><text:p text:style-name="P_Cell">{{COST_3}}</text:p></table:table-cell>
         </table:table-row>
-        <table:table-row>
-          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">合計</text:p></table:table-cell>
+        <table:table-row table:style-name="R_Keep">
+          <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{TOTAL_LABEL}}</text:p></table:table-cell>
           <table:table-cell table:style-name="CellHead" office:value-type="string"><text:p text:style-name="P_CellHead">{{COST_TOTAL}}</text:p></table:table-cell>
         </table:table-row>
       </table:table>
 
-      <text:p text:style-name="P_H1">5. 体制・連絡先</text:p>
+      <text:p text:style-name="P_H1">5. {{SECTION_5_HEADING}}</text:p>
       <text:p text:style-name="P_Body">{{TEAM}}</text:p>
     </office:text>
   </office:body>
