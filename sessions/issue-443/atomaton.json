@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #443: エージェントが起票したIssueにwaitingラベルがつく\n\nエージェントが環境の不具合を発見したときなどに起票する別のツリーの根となるIssueで、起票したタイミングでラベルがついてしまう。\n改めてラベルの意味と利用者がIssueを絞り込む具体的なユースケースを考えて、それぞれのラベルが必要なタイミングでついてそれ以外のタイミングではついていない状態にしたい。",
+      "content": "Issue #443: エージェントが起票したIssueにwaitingラベルがつく\n**Labels:** atomaton/in-progress\n\nエージェントが環境の不具合を発見したときなどに起票する別のツリーの根となるIssueで、起票したタイミングでラベルがついてしまう。\n改めてラベルの意味と利用者がIssueを絞り込む具体的なユースケースを考えて、それぞれのラベルが必要なタイミングでついてそれ以外のタイミングではついていない状態にしたい。",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-05T08:32:01Z",
@@ -1294,13 +1294,143 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#444→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_9c6ff02b0ee25310"
+    },
+    {
+      "role": "user",
+      "content": "<details><summary>Report</summary>\n\n**Sub-issue #444**\n\n## 結論\n\nPR #445 がマージされた `atomaton/issue-443`(merge commit `64189ce`)の上で、#444 の受け入れ基準5点はすべて満たされています。ターンラベル2つは両起票ツールで `getLabel` 経由の名前で拒否され、通常のプロジェクトラベルは通り、mcp.test.ts に拒否テストが5件増え、docs に「誰が書く/いつ付く/いつ外れる/何のため」の4列と新規ノード規則が載っています。\n\n## 根拠\n\n1. **拒否の実装** — `src/entrypoints/tools/mcp/github.ts` に `refuseTurnLabels(labels, what)` が追加され、名前は `getLabel(\"in_progress\")` / `getLabel(\"waiting_for_person\")` で読まれます(差分ハンク `@@ -391,6 +391,36 @@`)。呼び出しは `createSubIssue`(ハンク `@@ -429,6 +459,9 @@`、`atomaton/sub-issue` の自動追記より前)と `createRootIssue`(`@@ -540,6 +573,8 @@`)の2箇所、どちらも `gh` 呼び出しより前なので拒否時にIssueは作られません。\n2. **テスト** — `src/entrypoints/tools/mcp/mcp.test.ts` の既存 sub-issue ラベル拒否テスト直後に、`create_root_issue` × `{in-progress, waiting-for-person}`、`create_sub_issue` × 同2つ、`chain.labels` で改名した名前(`custom/waiting` を `makeConfigDir` + `ATOMATON_MACHINERY_ROOT` で与える)、`bug` がそのまま `gh issue create` に届く、の5ケースが入りました(マージ前の同一ツリーで実行した出力: `bun test src/entrypoints/tools/mcp/mcp.test.ts` → **128 pass, 0 fail**、`bun run test` → **2175 pass, 0 fail**、`bun run typecheck` exit 0)。\n3. **CI** — PR head `fd0f88f` の check runs: `pull-request-checks (verify)` **success**、`atomaton-check` **success**、`atomaton-tools` **success**。マージ commit の stats は 157 additions / 10 deletions で PR の差分と一致しており、マージで内容が変わっていません。\n4. **docs** — `docs/work/how-it-works/the-labels-atomaton-applies.md:8` の表が `who writes it / when it goes on / when it comes off / what it is for` の4列になり、`:17` の「## A turn label records a turn that happened」が相補移動の不変条件と `:28` の「ターンが存在しなかったノードはどちらも持たない」規則を述べ、起票ツールが両ラベルを拒否することと代替(本文の prose + notify タグ)を名指ししています。マージ後の head の raw を取得して内容を確認しました。\n5. **prompt-template** — `src/content/prompt-template.md` はラベル語彙に触れておらず(`create_root_issue` は 193 行の「不具合の起票先」としてのみ登場)、issue の条件どおり description(3)だけがエージェントへの到達点です。\n\n<details><summary>確認したが問題なしと判断した点、および本PRが導入していない既存の不整合</summary>\n\n- 拒否メッセージは「ラベル名・理由(ターンは機構が対で動かす状態で、新規ノードはターンを持たない)・代替(ラベルを渡さない。人への引継ぎは本文の notify タグ)」の3要素を含み、テストもその3点を assert しています。\n- `atomaton/sub-issue` の自動付与は無変更:拒否は呼び出し元配列に対して行われ、追記はその後にあります。\n- `docs/work/reference.md:86` と `docs/work/tasks/use-your-own-label-names.md:3` は今も `chain.labels` の3キー例(\"Three names\")しか載せていません。これは本PR以前からの記載で差分外、`chain.labels` は追加キーを受け付けるので merge-blocking ではありませんが、後日の docs パスで1行直せる不整合です。\n- #430 / #437 に残る `atomaton/waiting-for-person` は issue の「やらないこと」どおり手作業(`gh issue edit --remove-label`)のままです。\n</details>\n\n## 確定できなかったこと\n\n- マージ後の head(`64189ce`)のツリーで `bun test` を自分で実行してはいません。この run の作業ツリーは `main` の `70f9cf8`(マージ前)にあり、`git fetch` はシェルガードで拒否されました。代わりに、マージ前の同一内容のツリーでの実行結果と、PR head `fd0f88f` の CI(verify success)を根拠にしています。\n- `get_check_runs` をマージ commit `64189ce` に対して呼ぶと空配列が返りました(マージ commit には check run が付いていません)。緑の判定は PR head のものを使っています。\n- `search_remote_code` は `refuseTurnLabels` で空を返しました。GitHub のコード検索はデフォルトブランチのみを索引するため、この変更がまだ `main` に降りていない(親ブランチ止まり)ことと整合します。ツールの不具合とは判断していません。\n\n## 次に何が起きるか\n\n#444 はこれで閉じられ、親 #443 の集約が起動します。#443 に残る未決事項は「起票時点で付けてよい triage ラベルを新設するか」で、これは #443 側の判断です。\n\nLinked pull requests:\n- #445 Refuse turn labels on create_root_issue and create_sub_issue (done)\n\n</details>",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-05T09:31:28Z",
+        "event_type": "issue_comment",
+        "id": 6654528169,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #444). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-05T09:31:30Z",
+        "event_type": "issue_comment",
+        "id": 6654528807,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "集約フェーズです。まず子 #444 の状態と親ブランチの実測を確認してから配達PRを出します。",
+      "tool_calls": [
+        {
+          "id": "call_c0ac97bb9fe9473a885ca442",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\":444}"
+          }
+        },
+        {
+          "id": "call_dcb3f72bb8794524b725a07e",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\":\"atomaton/issue-443\"}"
+          }
+        },
+        {
+          "id": "call_eb2fa649783544719d8e889f",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git branch --show-current; echo ---; git status --porcelain | head -5; echo ---; git log --oneline -4\"}"
+          }
+        }
+      ],
+      "reasoning_content": "I'm back on issue #443 for aggregation. Child #444's engineer reports PR #445 merged into `atomaton/issue-443` (merge commit `64189ce`), acceptance criteria met.\n\nPer my role contract (Re-entry and Aggregation):\n\n1. Verify children are closed and their work satisfies the parent outcome — I should not rely purely on the report; verify key facts on GitHub.\n2. If no pending work remains, deliver the accumulated work: `create_pr` for this issue's branch (#443's branch → main), or hand to /engineer if it needs work first.\n3. After that PR merges, judge what merged against what this issue asked for.\n\nThe child's report says:\n- #444 acceptance criteria all satisfied at merged head of `atomaton/issue-443` (merge commit 64189ce).\n- CI on PR head `fd0f88f`: verify success, atomaton-check success, atomaton-tools success.\n- #444 closes, aggregation fires.\n\nWhat I should verify myself:\n1. #444 is closed (and #445 merged).\n2. The branch `atomaton/issue-443` exists and carries the merge.\n3. The docs table / refusal tests exist at the merged head — spot check by reading the files in the local worktree? My local worktree: which branch is checked out? Earlier the engineer said the run's working tree is on `main` at `70f9cf8` (before merge). My own local checkout — let me check git status/log.\n\nThen, for #443's delivery: `create_pr` — this issue's branch → main. The work tree (atomaton/issue-443) now has the child's merged work. The PR from `atomaton/issue-443` to `main` delivers the machinery change.\n\nAlso — the issue #443 asked for TWO things effectively: (a) rethink label semantics + use cases (the decision — now landed in docs via #444), (b) labels attach when needed / absent otherwise (machinery enforcement — landed via #444's refusals). My own analysis is in the thread (the machinery's report comment on #443 from my earlier run — actually my closing message before launch_sub_agent was the report; the machinery posted it).\n\nThere's also the open question I deliberately left for the person: whether to create a triage label that MAY be applied at creation. That's theirs to decide — I should surface it in my final aggregation report with my recommendation.\n\nAnd the data cleanup: strip `atomaton/waiting-for-person` from #430 and #437 — manual `gh` work for the person. I can't run gh. Should I ask the person to do it? Or could I do it... no tool for label removal in my MCP surface. It stays a person's manual step; name it precisely in my report.\n\nPlan for this run:\n1. Verify: get_issue #444 (closed?), get_check_runs on `atomaton/issue-443` head (or the merge commit), local git state (git log on the current branch).\n2. Create the delivery PR: `create_pr` from this issue's branch to main, with reviewer.\n3. End — the machinery handles post-merge re-invocation; when the PR merges I'll be re-invoked to judge satisfaction and close.\n\nWait — actually, on a re-entry as parent: \"Deliver the accumulated work. Each child merged into this issue's own branch... call create_pr(title=..., body=...) to open that branch's pull request.\" Then after merge, judge and request_close_issue.\n\nBefore create_pr: it requires a clean worktree and exact local/remote HEAD equality — \"Call commit_and_push first\". My local worktree might be on `main`?? The engineer said THEIR run's tree was on main at 70f9cf8. Hmm — but merge_base_into_branch/commit_and_push work on \"the checked-out branch\". Let me check the local git state first.\n\nActually — important subtlety: for issue #443 (a root issue, not a sub-issue), the branch is `atomaton/issue-443`, cut from... the base branch. The engineer's PR #445 merged INTO `atomaton/issue-443`. So remote `atomaton/issue-443` now has the work. My local checkout may be stale or on another branch. sync_branch can fast-forward the checked-out branch. Let me look.\n\nSteps (batched where possible):\n1. get_issue(444) — verify closed. get_branch(\"atomaton/issue-443\") — verify exists + sha. bash: git status + git branch --show-current + git log -2.\n2. Then sync_branch / commit_and_push as needed, then create_pr with reviewer.\n\nLet me start.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":\"2026-11-05T09:31:26Z\",\"createdAt\":\"2026-11-05T08:45:00Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":444,\"state\":\"CLOSED\",\"title\":\"起票系ツールがターンラベル(in-progress / waiting-for-person)を拒否するようにし、ラベル意味論(書き手・タイミング・絞り込みユースケース)をdocsに固定する\",\"body\":\"## 背景: 現象と因果(実測済み)\\n\\nエージェントが `create_root_issue` で起票した根Issue(#430, #437)に、起票直後から `atomaton/waiting-for-person` が付いている。\\n\\n**因果は機構ではなくエージェント自身** — 起票ツールの `labels` 引数にエージェントが自分で `atomaton/waiting-for-person` を渡していた。証拠:\\n\\n- main `677a13a` の `sessions/issue-12/archive/atomaton-3.json` と `atomaton-4.json`(2026-11-03 13:41–13:47 の #12 run のセッショントランスクリプト)内の 2 つの `create_root_issue` 呼び出しが、どちらも `arguments: {\\\"labels\\\": [\\\"atomaton/waiting-for-person\\\"], ...}` を含む。\\n- 同セッションの思考記録: 「For the root issue: labels — maybe none, or \\\"atomaton/waiting-for-person\\\"? #12 had that label. The big-file issue awaits the person's go.」→ 機構のルールではなく、既存Issueに付いていたラベルの模倣(習慣)。\\n- 排除済み: 機構のどの writer も新規起票ノードには waiting-for-person を書かない(`src/entrypoints/machinery/lib/turn-labels.ts` の全呼び出し元 = runner リリース(`inputs.number`のみ) / pr-closed・sub-issue-closed の閉じストリップ / `request_stop.ts` / `dispatch_agent.ts` の dispatch 拒否時 / `reconcile_run_ending.ts`)。`atomaton-entry` は本文1行目が `/agent` のときだけ dispatch する(`src/entrypoints/machinery/resolve_entry_agent.ts:67`)。#430/#437 は comment 0・claim 無しで、`labeled` イベントは起票 +2 秒(github-actions[bot]) — `labels` 引数つきの作成と整合。\\n- 対照の正常例: #436 は `/atomaton` 本文で人が起票したノードで実 run がターンを持ち(14:28:45 に in-progress)、handback で waiting-for-person が正しく付いた(14:39:44)。#224, #11 も同じ正常パターン。\\n\\n## 決めたこと: ラベル意味論(コードと文書の両面で固定する)\\n\\n`atomaton/*` 4ラベルは**機構が管理する作業状態**であり、人やエージェントが直接付け外しする語彙ではない。各ラベルの意味・書き手・タイミング・絞り込みユースケース:\\n\\n| label | 誰が書く | 付くタイミング | 外れるタイミング | 絞り込みユースケース |\\n| --- | --- | --- | --- | --- |\\n| `atomaton/in-progress` | 機構のみ(claim) | run がそのノードのターンを取る直前 | ターンが人に返る時 / ノードが閉じる時 | 「今動いている仕事」(ガードを兼ねる — コメント指示を書かない) |\\n| `atomaton/waiting-for-person` | 機構のみ(release / dispatch 拒否 / park 解除) | ノードのターンが人の手に返った時 | 次の run がターンを取る時(相補移動) / ノードが閉じる時 | 「機構が止まり、人の応答だけが前進させるノード」 |\\n| `atomaton/sub-issue` | 機構のみ(create_sub_issue が自動付与) | 子Issue作成時(1回) | なし(親集約 `countOpenSiblings` が読む) | 「配達タスクとして生まれた子」の構造識別 |\\n| `atomaton/launched` | 機構のみ(dispatch) | 実際に agent が dispatched された時 | なし | 「起動済み vs 未起動の子」の区別 |\\n\\n新規に追加される規則: **ターンラベル(in-progress / waiting-for-person)は「そのノードでターンが存在した」ことの記録であり、存在しなかったノードには決して付かない。** ターンの途中で起票されたIssueはラベル0で生まれる(`atomaton/sub-issue` の自動付与を除く)。起票したエージェントが人にボールを渡す経路は本文の prose と `atomaton:notify=` タグ(既存の notify 機構)であり、ラベルではない。エージェントは `atomaton/*` を指定しに行わない。\\n\\n## やること(1 PR)\\n\\n1. `src/entrypoints/tools/mcp/github.ts` — `createRootIssue`(~515-545行): 既存の sub-issue ラベル拒否(534-541行)に倣い、`getLabel(\\\"in_progress\\\")` と `getLabel(\\\"waiting_for_person\\\")` の値を含む `labels` を `mcpFail` で拒否する。文字列リテラルではなく `getLabel`(`chain.labels` での改名に追随; import は既にある)。拒否メッセージには理由(turn label は機構が対で動かす状態。ターンを持たないノードには付かない)と代替(ラベルは渡さない。人への引継ぎは notify 機構が担う)を書く。\\n2. 同ファイル — `createSubIssue`(~394-450行): 呼び出し元が渡した 元の labels 配列(441行の自動追記**前**)に対し同じ拒否。自動付与される `atomaton/sub-issue` の挙動は変えない。\\n3. 同ファイル — 両ツールの description 文字列に1文追加: `atomaton/in-progress` / `atomaton/waiting-for-person`(`chain.labels` の keys)は機構だけが動かすターン状態であり、起票したIssueはどちらのラベルも持たないので引数に渡さないこと。\\n4. `src/entrypoints/tools/mcp/mcp.test.ts` — 既存の `create_root_issue refuses the sub-issue label` テスト(~1866-1881行)に倣う追加テスト: create_root_issue が `atomaton/waiting-for-person`、`atomaton/in-progress` をそれぞれ拒否し、非機構ラベル(例: `bug`)は通る; create_sub_issue にも同型のケース(同ファイル ~1566-1630行のハーネス、親HINGえの env NUMBER 必須に注意)。\\n5. `docs/work/how-it-works/the-labels-atomaton-applies.md` — 上の意味論表(書き手/タイミング/絞り込みユースケース列)を反映し、「ターンの途中で起票されたノードは両ターンラベルを持たない」「エージェントは `atomaton/*` を書かない」規則と、相補移動の不変条件の説明(`turn-labels.ts` 参照)を追記。ファイルの既存言語(英語)で書く。\\n6. `src/content/prompt-template.md` — テンプレート内で label/notify に触れている箇所があれば1行追加(機構ラベルは渡さない、起票時は omit)。触れていない箇所しかなければ、ツール description(3)だけがエージェントコンテキストへの到達点として十分 — 無理に節を増やさないこと。\\n\\n## 受け入れ基準(observable)\\n\\n1. `create_root_issue` と `create_sub_issue` が、2つのターンラベルを(改名設定を尊重して)拒否し、メッセージがラベル名と理由と代替を名指す。\\n2. 普通のプロジェクトラベル(`bug` 等)は今まで通り通る。\\n3. `bun test src/entrypoints/tools/mcp/mcp.test.ts` が緑(新規拒否テストを含む)。\\n4. docs 表の更新が上の決定と一致する。\\n5. PR の verify チェック(`bun run typecheck`, `synth`, `test`)が緑。\\n\\n## 閉じ条件\\n\\n本Issue(#443)の親ブランチに子のPRがマージされた後、merged head で: (1) 拒否テストが mcp.test.ts に存在し `bun test` で通る、(2) docs に 書き手/タイミング/ユースケース の表と 新規ノード規則が載る、(3) 子PRの verify チェックが緑。この3点のエビデンス(テスト出力と docs 差分の要点)を本子Issueのコメントに貼って閉じる。\\n\\n## やらないこと\\n\\n- `atomaton/*` の改名・新設、`chain.labels` の変更、`turn-labels.ts` の機構側挙動の変更 — なし。\\n- 既存Issue(#430, #437)からのラベル剥がし — コードではない。人の手で `gh issue edit 430 --remove-label atomaton/waiting-for-person`(437 も同様)。子Issueでは実施しない。\\n- 「起票時点で付けてよい triage ラベルを新設するか」— #443 側の開かれた質問なので実装しない。\",\"total_comments\":4,\"parent\":{\"number\":443,\"title\":\"エージェントが起票したIssueにwaitingラベルがつく\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":445,\"title\":\"Refuse turn labels on create_root_issue and create_sub_issue\",\"state\":\"done\"}]}",
+      "tool_call_id": "call_c0ac97bb9fe9473a885ca442"
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"atomaton/issue-443\",\"exists\":true,\"sha\":\"64189ce49b5dd2420477355b9a073ac1a6da426d\",\"protected\":false}",
+      "tool_call_id": "call_dcb3f72bb8794524b725a07e"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"atomaton/issue-443\\n---\\n---\\n64189ce Merge pull request #445 from yuma-seno/atomaton/issue-444\\nfd0f88f Refuse the turn labels on both issue-creating tools\\n70f9cf8 Merge pull request #442 from yuma-seno/atomaton/issue-12-2\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":278}",
+      "tool_call_id": "call_eb2fa649783544719d8e889f"
+    },
+    {
+      "role": "assistant",
+      "content": "子は閉じ済み(PR #445 merged)、ローカルツリーは `atomaton/issue-443` の merge commit `64189ce` と一致・クリーンです。マージ済み head の中身をスポット確認してから配達PRを出します。",
+      "tool_calls": [
+        {
+          "id": "call_8c31e84cae974e8db2860322",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":3,\"max_matches\":25,\"path\":\"src/entrypoints/tools/mcp/github.ts\",\"pattern\":\"refuseTurnLabels\"}"
+          }
+        },
+        {
+          "id": "call_ddae669b65c84984a3db3b9d",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":40,\"path\":\"docs/work/how-it-works/the-labels-atomaton-applies.md\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Verified:\n- #444 CLOSED, PR #445 state \"done\" (merged).\n- Remote `atomaton/issue-443` at `64189ce` = merge of #445.\n- Local worktree: ON `atomaton/issue-443`, clean, HEAD = 64189ce — local/remote equal, worktree clean. \n\nSpot-check the delivered work at the merged head (verify what the child reported — don't take it purely on trust): \n1. The refusal code in github.ts (refuseTurnLabels + call sites).\n2. The docs table.\n\nThen create the delivery PR from `atomaton/issue-443` → main with reviewer. After merge, I'll be re-invoked to judge and close.\n\nQuick spot check with grep (fast, local) then create_pr.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "23 line(s), match and context, under src/entrypoints/tools/mcp/github.ts:\n\n408- * `getLabel` rather than the literal, so a project that renames the labels under\n409- * `chain.labels` refuses the names it actually uses.\n410- */\n411:function refuseTurnLabels(labels: readonly string[], what: string): void {\n412-  const turnLabels = [getLabel(\"in_progress\"), getLabel(\"waiting_for_person\")];\n413-  const offending = labels.find((label) => turnLabels.includes(label));\n414-  if (offending === undefined) return;\n--\n461-  let labels = a.labels ?? [];\n462-  // The caller's own labels, before the sub-issue label is appended: that one is the\n463-  // machinery's and is not a turn, so it is not what this refusal is about.\n464:  refuseTurnLabels(labels, \"A sub-issue\");\n465-  const subIssueLabel = getLabel(\"sub_issue\");\n466-  const ensured = gh(\n467-    \"label\", \"create\", subIssueLabel,\n--\n573-    );\n574-  }\n575-\n576:  refuseTurnLabels(labels, \"A root issue\");\n577-\n578-  const cmd = [\"issue\", \"create\", \"--repo\", REPO, \"--title\", title];\n579-  if (body) cmd.push(\"--body\", body);",
+      "tool_call_id": "call_8c31e84cae974e8db2860322"
+    },
+    {
+      "role": "tool",
+      "content": "docs/work/how-it-works/the-labels-atomaton-applies.md lines 1-40 of 63\n\n1\t# The labels Atomaton applies\n2\t\n3\tFour labels, and they are one thing: the machinery's record of a node's work\n4\tstate. None of them is a vocabulary a person or an agent reaches for. **The\n5\tmachinery is the only writer, and an agent never applies one of these labels to\n6\tan issue it creates.**\n7\t\n8\t| label | who writes it | when it goes on | when it comes off | what it is for |\n9\t| --- | --- | --- | --- | --- |\n10\t| `atomaton/in-progress` | the machinery only, as the node's claim | just before a run takes this node's turn | when the turn goes back to a person, or when the node closes | \"work moving right now\" — and it doubles as the guard that keeps two runs off one node, so a comment telling an agent to do something does not become a second run |\n11\t| `atomaton/waiting-for-person` | the machinery only: a release, a refused dispatch, a park coming undone | the node's turn came back into a person's hands | when the next run takes the turn (the two move together), or when the node closes | \"the machinery has stopped and only a person's reply moves this on\" |\n12\t| `atomaton/sub-issue` | the machinery only — `create_sub_issue` adds it automatically | once, when the child is created | never; `countOpenSiblings` reads it when the parent aggregates | structural: this issue was born as a delivery task under a parent |\n13\t| `atomaton/launched` | the machinery only, on dispatch | when an agent has actually been dispatched on this child | never | distinguishes a child that was started from one that was only planned |\n14\t\n15\tRename any of them under [`chain.labels`](../reference.md#chainlabels).\n16\t\n17\t## A turn label records a turn that happened\n18\t\n19\t`in-progress` and `waiting-for-person` are the two halves of one state, and the\n20\tmachinery moves them as a pair — a writer that remembered one half would leave a\n21\tnode wearing both or neither, and neither is readable. That complement is the\n22\tinvariant: at any moment an open node with a live turn carries exactly one of the\n23\ttwo, and a closed node carries neither, because a closed issue cannot be replied\n24\tto and a label naming whose ball it is names nobody.\n25\t\n26\tWhat follows from the pair being a record rather than a setting is the rule:\n27\t\n28\t> A turn label says a turn existed on this node. A node on which no turn has ever\n29\t> run carries neither, and an issue created in the middle of somebody else's turn\n30\t> is exactly such a node.\n31\t\n32\tSo an issue filed by `create_sub_issue` or `create_root_issue` is born with no\n33\tturn label at all — the only label either tool adds on its own is\n34\t`atomaton/sub-issue`, and that one is structural. Both tools refuse a `labels`\n35\targument that names either turn label, and say why, rather than creating the\n36\tissue and leaving the machinery reading a turn that never took place.\n37\t\n38\tThe route for an agent that wants to hand a person the ball is not a label: it is\n39\tprose in the body, and the notify tag the body already carries. The labels are\n40\tapplied when the run holding the node ends, by the machinery, to the node it was\n\n[23 more lines. Read again with offset: 41.]",
+      "tool_call_id": "call_ddae669b65c84984a3db3b9d"
+    },
+    {
+      "role": "assistant",
+      "content": "実装とドキュメントがマージ済みのヘッドで期待通りの内容になっていることを確認しました。#443 の配達PRを切ります。",
+      "tool_calls": [
+        {
+          "id": "call_908a9be0e80d4bc591124aa2",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\":\"## 何を解決したか\\n\\nIssue #443「エージェントが起票したIssueにwaitingラベルがつく」の解決。\\n\\n### 原因(実測)\\n\\n機構ではなく**エージェント自身**が `create_root_issue` の `labels` 引数に `atomaton/waiting-for-person` を渡していた(#430, #437 の起票 run のセッショントランスクリプト `677a13a:sessions/issue-12/archive/atomaton-3.json` に実物の呼び出しと思考記録あり)。機構のどの writer もターンの無い新規ノードにはターンラベルを書かない。\\n\\n### 決めたこと(ラベル意味論)\\n\\n`atomaton/*` 4ラベルは機構だけが書く作業状態:\\n\\n- `in-progress` — run がターンを取っている(ガード兼用)\\n- `waiting-for-person` — ターンが人の手に返った(相補の対として移動)\\n- `sub-issue` — 配達タスクとして生まれた子(構造ラベル、集約が読む)\\n- `launched` — 子に実際に agent が dispatched された\\n\\n**ターンラベルは「そのノードでターンが存在した」ことの記録**であり、ターンの途中で起票されたIssueはラベル0で生まれる。人への引継ぎは本文の prose と `atomaton:notify=` タグが担う。\\n\\n### 変更\\n\\n- `create_root_issue` / `create_sub_issue` が 2 つのターンラベルを拒否(`refuseTurnLabels`, 名前は `chain.labels` の改名に追随)— #445 で実装済み\\n- `docs/work/how-it-works/the-labels-atomaton-applies.md` に 書き手/付く/外れる/ユースケース の表と不変条件を固定 — 同PR\\n\\n詳細は子Issue #444 とマージ済み PR #445(`atomaton/issue-443` に merge 済み、verify/check 緑)を参照。\\n\\n### 残る開かれた質問(本PRの対象外)\\n\\n「起票時点で付けてよい triage ラベルを新設するか」は人の判断として残してある。推奨は「新設しない」: 人が見るべき経路は通知機構であり、機構ラベルと triage 語彙を混ぜない。\\n\\n### 既存データの後始末(手作業)\\n\\n誤って付いたままの `atomaton/waiting-for-person` の除去はコードではないので行っていない:\\n\\n```\\ngh issue edit 430 --remove-label atomaton/waiting-for-person\\ngh issue edit 437 --remove-label atomaton/waiting-for-person\\n```\\n\\n(#436, #224, #11 は実ターンの handback による正しい付与なので触らない。)\",\"reviewer\":\"reviewer\",\"title\":\"起票ツールがターンラベルを拒否する + ラベル意味論をdocsに固定 (#443)\"}"
+          }
+        }
+      ],
+      "reasoning_content": "The delivered work checks out at the merged head:\n- `refuseTurnLabels` in github.ts, called in both `createSubIssue` (line 464, before the auto sub-issue append) and `createRootIssue` (line 576), reading names via `getLabel`.\n- Docs rewritten with the 4-column table, the \"A turn label records a turn that happened\" invariant section, and the fresh-node rule.\n\nAll consistent with the child's report. Now deliver #443: `create_pr` from `atomaton/issue-443` → main. The worktree is clean, local HEAD == remote HEAD — create_pr should work directly.\n\nPR body: summarize what this delivers (the semantics decision + enforcement + docs), link #444/#445, note what this issue's analysis concluded and the open question for the person. Then reviewer — engineer? No: reviewer is the right reviewer agent. create_pr with reviewer: \"reviewer\" as named in the colleague list.\n\nBody should be in the repo's PR style (Japanese issues/PRs here — PR #445 title was English; PR bodies mixed). I'll write Japanese with code references.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":446,\"url\":\"https://github.com/yuma-seno/atomaton/pull/446\",\"base\":\"\",\"validation_dispatched\":true}",
+      "tool_call_id": "call_908a9be0e80d4bc591124aa2"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 2,
-      "snapshot_hash": "3632910b5b60d7e8c0fb1185f8749414f2753e9619ba83040a6c770f3c6d48e2",
+      "event_count": 4,
+      "snapshot_hash": "0f523c8ecfcab32a06b44ff7095396ccdf65acd45503255a82e9132b22abadb7",
       "version": 1
     }
   },
@@ -1338,6 +1468,29 @@
         }
       },
       "started": "2026-11-05T08:32:53Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-05T09:33:51Z",
+      "ended_because": "completed",
+      "iterations": 3,
+      "messages": 133,
+      "seconds": 96,
+      "server_calls": {
+        "files": {
+          "grep": 1,
+          "read": 1
+        },
+        "github": {
+          "create_pr": 1,
+          "get_branch": 1,
+          "get_issue": 1
+        },
+        "shell": {
+          "bash": 1
+        }
+      },
+      "started": "2026-11-05T09:32:15Z"
     }
   ]
 }
