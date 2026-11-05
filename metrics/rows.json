@@ -17636,6 +17636,77 @@
     ]
   },
   {
+    "path": "sessions/issue-449/archive/engineer-2.json",
+    "agent": "engineer",
+    "messages": 115,
+    "calls": 69,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "bash": 31,
+      "atoma_builtin__load_skill": 1,
+      "read": 35,
+      "grep": 1,
+      "edit": 1
+    },
+    "acts": {
+      "other": 5,
+      "search": 19,
+      "open": 7
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-05T16:23:00Z",
+        "ended_because": "failed",
+        "iterations": 39,
+        "messages": 115,
+        "seconds": 608,
+        "server_calls": {
+          "files": {
+            "edit": 1,
+            "grep": 1,
+            "read": 35
+          },
+          "shell": {
+            "bash": 31
+          }
+        },
+        "started": "2026-11-05T16:12:52Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/issue-449/archive/engineer-3.json",
+    "agent": "engineer",
+    "messages": 7,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
+  },
+  {
+    "path": "sessions/issue-449/archive/engineer-4.json",
+    "agent": "engineer",
+    "messages": 7,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
+  },
+  {
     "path": "sessions/issue-449/atomaton.json",
     "agent": "atomaton",
     "messages": 18,
@@ -17679,45 +17750,53 @@
   {
     "path": "sessions/issue-449/engineer.json",
     "agent": "engineer",
-    "messages": 115,
-    "calls": 69,
-    "failed": 0,
-    "refused": 0,
+    "messages": 89,
+    "calls": 44,
+    "failed": 4,
+    "refused": 1,
     "skills": [
-      "project/conventions"
+      "delivery/pipeline-setup",
+      "project/conventions",
+      "project/conventions",
+      "delivery/pipeline-setup"
     ],
     "reported": false,
     "tools": {
-      "bash": 31,
-      "atoma_builtin__load_skill": 1,
-      "read": 35,
-      "grep": 1,
-      "edit": 1
+      "read": 4,
+      "edit": 8,
+      "bash": 25,
+      "load_skill": 2,
+      "atoma_builtin__load_skill": 2,
+      "commit_and_push": 1,
+      "create_pr": 2
     },
     "acts": {
-      "other": 5,
-      "search": 19,
-      "open": 7
+      "other": 25
     },
     "runs": [
       {
-        "compactions": 0,
-        "ended": "2026-11-05T16:23:00Z",
-        "ended_because": "failed",
-        "iterations": 39,
-        "messages": 115,
-        "seconds": 608,
+        "compactions": 2,
+        "ended": "2026-11-05T18:18:04Z",
+        "ended_because": "completed",
+        "iterations": 184,
+        "messages": 89,
+        "seconds": 4277,
         "server_calls": {
           "files": {
-            "edit": 1,
-            "grep": 1,
-            "read": 35
+            "edit": 33,
+            "read": 44
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 2,
+            "get_issue": 1,
+            "get_issue_comments": 2
           },
           "shell": {
-            "bash": 31
+            "bash": 163
           }
         },
-        "started": "2026-11-05T16:12:52Z"
+        "started": "2026-11-05T17:06:47Z"
       }
     ]
   },
