@@ -79,14 +79,16 @@ are in
 chain:
   labels:
     in_progress: atomaton/in-progress
+    waiting_for_person: atomaton/waiting-for-person
     sub_issue: atomaton/sub-issue
     launched: atomaton/launched
 ```
 
-Three names, and they are the ones Atomaton reads: `in_progress` while a run
-holds an issue, `launched` once it has handed work on, and `sub_issue` on the
-issues it opened. They are created on first use. What each one means to the
-machinery that reads it is in
+Four names, and the machinery is their only writer: `in_progress` while a run
+holds an issue, `waiting_for_person` once that run has handed the turn back to
+a person, `sub_issue` on the issues it opened, and `launched` on the children a
+parent agent started through `launch_sub_agent`. They are created on first use.
+What each one means, and which of them the machinery actually reads, is in
 [the labels Atomaton applies](how-it-works/the-labels-atomaton-applies.md).
 
 They are in this section rather than somewhere presentational because that is

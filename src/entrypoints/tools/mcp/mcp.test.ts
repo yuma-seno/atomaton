@@ -1886,6 +1886,85 @@ describe("mcp/github.ts", () => {
     expect(r.result.content[0].text).toContain("create_sub_issue");
   });
 
+  // Both creating tools, both turn labels. Neither label records anything an agent can
+  // know: they are the machinery's record that a turn happened on the node, and a node
+  // created during somebody else's turn has not had one (#444 -- two root issues were
+  // filed wearing `waiting-for-person`, copied from issues that had genuinely been
+  // handed back).
+  for (const tool of ["create_root_issue", "create_sub_issue"] as const) {
+    for (const label of ["atomaton/in-progress", "atomaton/waiting-for-person"]) {
+      test(`${tool} refuses ${label}`, async () => {
+        const r = await sendRequest(
+          "github.ts",
+          {
+            jsonrpc: "2.0", id: 44, method: "tools/call",
+            params: { name: tool, arguments: { title: "A turn that never happened", labels: [label] } },
+          },
+          {
+            ...fakeGhSeam(),
+            // A sub-issue needs a parent; a root issue ignores the number. The refusal
+            // comes before either tool creates anything, so no gh response is needed.
+            NUMBER: "1",
+          },
+        );
+        expect(r.result.isError).toBe(true);
+        const text = r.result.content[0].text;
+        // The label it actually refused, so a message naming the wrong key is caught.
+        expect(text).toContain(label);
+        // The reason: a turn is what the pair records, and a new node has not had one.
+        expect(text).toContain("turn");
+        // The alternative, so the caller knows what to do instead of retrying.
+        expect(text).toContain("notify");
+      });
+    }
+  }
+
+  // The labels are named through `chain.labels`, so a project that renamed them is
+  // refused the names it actually uses rather than the shipped defaults.
+  test("create_root_issue refuses a turn label under the name this project gave it", async () => {
+    const configDir = makeConfigDir({ chain: { labels: { waiting_for_person: "custom/waiting" } } });
+    try {
+      const r = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 46, method: "tools/call",
+          params: { name: "create_root_issue", arguments: { title: "Renamed", labels: ["custom/waiting"] } },
+        },
+        { ...fakeGhSeam(), ATOMATON_MACHINERY_ROOT: configDir },
+      );
+      expect(r.result.isError).toBe(true);
+      expect(r.result.content[0].text).toContain("custom/waiting");
+    } finally {
+      removeTemp(configDir);
+    }
+  });
+
+  // The refusal is about the two turn labels and nothing else: ordinary project labels
+  // are how an issue gets triaged, and a tool that refused them would be unusable.
+  test("create_root_issue still accepts an ordinary project label", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-root-label-"));
+    const log = join(dir, "gh.log");
+    try {
+      const r = await sendRequest(
+        "github.ts",
+        {
+          jsonrpc: "2.0", id: 45, method: "tools/call",
+          params: { name: "create_root_issue", arguments: { title: "A defect", labels: ["bug"] } },
+        },
+        {
+          ...fakeGhSeam(),
+          FAKE_GH_LOG: log,
+          FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/o/r/issues/9" }]),
+        },
+      );
+      expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      expect(calls.find((argv) => argv[0] === "issue" && argv[1] === "create")).toContain("bug");
+    } finally {
+      removeTemp(dir);
+    }
+  });
+
   test("create_root_issue refuses a body that already names who to notify", async () => {
     const r = await sendRequest(
       "github.ts",
