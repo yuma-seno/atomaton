@@ -10,7 +10,7 @@ an issue it creates.**
 | `atomaton/in-progress` | the machinery only, as the node's claim | just before a run takes this node's turn | when the turn goes back to a person, or when the node closes | "work moving right now" — and it doubles as the guard that keeps two runs off one node, so a comment telling an agent to do something does not become a second run |
 | `atomaton/waiting-for-person` | the machinery only: a release, a refused dispatch, a park coming undone | the node's turn came back into a person's hands | when the next run takes the turn (the two move together), or when the node closes | "the machinery has stopped and only a person's reply moves this on" |
 | `atomaton/sub-issue` | the machinery only — `create_sub_issue` adds it automatically | once, when the child is created | never; `countOpenSiblings` reads it when the parent aggregates | structural: this issue was born as a delivery task under a parent |
-| `atomaton/launched` | the machinery only, on dispatch | when an agent has actually been dispatched on this child | never | distinguishes a child that was started from one that was only planned |
+| `atomaton/launched` | the machinery only, at the end of a `launch_sub_agent` dispatch | when the parent agent started this child through `launch_sub_agent` — not when a person's `/agent` comment or the aggregation flow started one | never | a record for a person of which children their parent started itself. Nothing in the machinery reads it: the sibling count reads the dispatch marker in the child's thread, which every starting path writes |
 
 Rename any of them under [`chain.labels`](../reference.md#chainlabels).
 
@@ -47,10 +47,13 @@ this page.
 
 ## How a parent learns its children are done
 
-The last two labels are read together, and that is why there are two. A parent is
-re-invoked once no open sibling carries **both**: a sub-issue created as a later
-phase of a plan and never launched must not hold the parent back, or the count
-could never reach zero.
+The count that re-invokes the parent is made of the `sub-issue` label and the
+dispatch marker in each child's thread, read together by `countOpenSiblings`:
+the label says this issue was born a delivery task, the marker says an agent was
+actually started on it. A child created as a later phase of a plan and never
+launched carries no marker, and must not hold the parent back, or the count
+could never reach zero. `launched` is not part of this count — it is the
+person-facing record of the same fact the marker carries, and nothing reads it.
 
 Two paths reach that count. The merged pull request is the primary one — a child's
 delivery landing is what makes the question worth asking — and a person closing the

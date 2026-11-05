@@ -4,6 +4,7 @@
 chain:
   labels:
     in_progress: atomaton/in-progress
+    waiting_for_person: atomaton/waiting-for-person
     sub_issue: atomaton/sub-issue
     launched: atomaton/launched
 ```
