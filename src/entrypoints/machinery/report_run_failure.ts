@@ -38,30 +38,24 @@
  * the run stays red, and a future rename that loses the output turns every failure
  * red again, which is the conservative direction.
  *
- * ## Why the excerpt is last
+ * ## Where the words come from
  *
- * It is usually about the infrastructure — "MCP server closed connection",
- * "Unexpected while resolving package" — which no agent and often no person can
- * act on. It is kept because occasionally it is the answer, and put below the
- * part that always matters.
- *
- * Redacted before it becomes a comment: the log holds every MCP server's stderr,
- * and `unauthorized` is exactly the line a provider emits WITH the credential in
- * it. Actions masks registered secrets in the workflow log and does nothing for
- * an issue comment.
+ * The prose is `lib/failure-notice.ts`'s, shared with `post_result_comment.ts`,
+ * which says the same thing for a run the core filed `failed` — the failures this
+ * step never sees, because the step the agent ran in succeeded. Two spellings of
+ * "what became of the run and what you can do next" would be two answers free to
+ * drift. What is HERE is only the part this caller owns: the turn header, and the
+ * person this notice opens by naming.
  *
  * Usage:
  *   report_run_failure.ts --number N --agent NAME [--notify LOGIN]
  *     --run-url URL [--logs-file FILE] [--atoma-failed true]
  *     [--ask ID] [--run-id ID]
  */
-import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { redact } from "../../shared/redaction.ts";
 import { turnHeader } from "../../adapters/github/turn-comment.ts";
-import { mentionPrefix } from "../../domain/work/mention.ts";
-import { recoveryLines } from "../../domain/work/comment-command.ts";
+import { failureLines, logExcerptFrom } from "./lib/failure-notice.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ReportRunFailureArgs {
@@ -90,26 +84,6 @@ export interface ReportRunFailureArgs {
 
 export const ref = defineScript<ReportRunFailureArgs>(import.meta.url);
 
-/** Lines from the run's log that might say what went wrong. */
-const INTERESTING = /error|fail|panic|exception|unauthorized/i;
-const EXCERPT_LINES = 5;
-
-/**
- * The excerpt, redacted, or nothing.
- *
- * Silent on every failure. The notice is the thing that has to go out; an excerpt
- * is an improvement to it, not a precondition for it.
- */
-export function logExcerpt(text: string): string {
-  return text
-    .split("\n")
-    .filter((line) => INTERESTING.test(line))
-    .slice(0, EXCERPT_LINES)
-    .map((line) => redact(line))
-    .join("\n")
-    .trim();
-}
-
 /** The comment, as the person watching the issue will read it. */
 export function failureNotice(
   agent: string,
@@ -118,7 +92,6 @@ export function failureNotice(
   excerpt: string,
   identity: { ask?: number; runId?: number } = {},
 ): string {
-  const mention = mentionPrefix(notify);
   const lines = [
     // The turn's ending, through the one place that writes turn headers. A failed run
     // gave the node back to a person -- it is not processing anything -- but without
@@ -149,23 +122,9 @@ export function failureNotice(
       answers: identity.ask ?? 0,
       run: identity.runId ?? 0,
     }),
-    // No "the run failed": the run's colour is decided by whether THIS comment
-    // posted. A notice that landed leaves the run green, and "the run failed"
-    // underneath it would contradict the run the reader can see.
-    `${mention}Atomaton: \`${agent}\` did not finish.`,
-    "",
-    "**The session was saved.** What this run worked out is still there.",
-    "",
-    // The two ways forward, worded beside the one definition of the command syntax
-    // they spell -- shared with the run watch's notice, which says them for a run
-    // that never got far enough to report anything at all.
-    ...recoveryLines(agent),
-    "",
-    `Workflow logs: ${runUrl}`,
+    // Everything below the header, including why it does not say "the run failed".
+    ...failureLines({ agent, notify, excerpt, runUrl }),
   ];
-  if (excerpt) {
-    lines.push("", "From the log, which is often about the infrastructure rather than the work:", "```", excerpt, "```");
-  }
   return lines.join("\n");
 }
 
@@ -194,15 +153,7 @@ function main(): void {
     return;
   }
 
-  let excerpt = "";
-  const logs = values["logs-file"];
-  if (logs && existsSync(logs)) {
-    try {
-      excerpt = logExcerpt(readFileSync(logs, "utf8"));
-    } catch {
-      excerpt = "";
-    }
-  }
+  const excerpt = logExcerptFrom(values["logs-file"]);
 
   const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt, {
     ask: Number(values.ask ?? 0) || 0,

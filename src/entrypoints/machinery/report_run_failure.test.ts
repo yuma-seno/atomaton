@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { failureNotice, logExcerpt } from "./report_run_failure.ts";
+import { failureNotice } from "./report_run_failure.ts";
+import { logExcerpt } from "./lib/failure-notice.ts";
 import { ENDED_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
@@ -106,6 +107,25 @@ describe("the excerpt", () => {
   test("stops at five, because a comment is not a log viewer", () => {
     const log = Array.from({ length: 20 }, (_, i) => `error ${i}`).join("\n");
     expect(logExcerpt(log).split("\n")).toHaveLength(5);
+  });
+
+  /**
+   * The LAST five, not the first. A log opens with start-up chatter and ends with why
+   * it stopped, so the head of the matching set is the least likely part to answer.
+   */
+  test("keeps the end of the matching set, where the reason is", () => {
+    const log = ["error: connecting", "reading files", "error: still reading", "WARN: gave up"].join("\n");
+    expect(logExcerpt(log)).toBe("error: connecting\nerror: still reading\nWARN: gave up");
+  });
+
+  /**
+   * #441's only explanation was two WARN lines about a context budget, and an excerpt
+   * keyed to errors alone was empty in exactly the case it was needed.
+   */
+  test("a warning counts as something that might say what went wrong", () => {
+    expect(logExcerpt("starting\nWARN: Session exceeded its context limit (200430 of 200000 tokens)")).toContain(
+      "Session exceeded its context limit",
+    );
   });
 
   /**
