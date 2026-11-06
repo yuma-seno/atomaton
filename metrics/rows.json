@@ -17176,15 +17176,15 @@
   {
     "path": "sessions/issue-441/atomaton.json",
     "agent": "atomaton",
-    "messages": 42,
-    "calls": 19,
+    "messages": 49,
+    "calls": 22,
     "failed": 0,
     "refused": 0,
     "skills": [],
     "reported": true,
     "tools": {
       "grep": 10,
-      "read": 3,
+      "read": 6,
       "bash": 4,
       "get_issue_comments": 1,
       "glob": 1
@@ -17241,6 +17241,20 @@
           }
         },
         "started": "2026-11-06T01:52:11Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-06T13:09:37Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 49,
+        "seconds": 208,
+        "server_calls": {
+          "files": {
+            "read": 3
+          }
+        },
+        "started": "2026-11-06T13:06:09Z"
       }
     ]
   },
