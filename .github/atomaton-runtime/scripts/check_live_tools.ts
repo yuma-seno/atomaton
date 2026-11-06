@@ -9,6 +9,7 @@ import { join } from "path";
 
 // src/domain/machinery/effective-tools.ts
 var CORE_TOOL_PREFIX = "atoma_builtin__";
+var CORE_TOOLS = ["load_skill"];
 var EXACT_TOOL_SETS = [
   {
     server: "files_readonly",
@@ -22,7 +23,7 @@ var EXACT_TOOL_SETS = [
   }
 ];
 function serverContributed(advertised) {
-  return advertised.filter((name) => !name.startsWith(CORE_TOOL_PREFIX));
+  return advertised.filter((name) => !name.startsWith(CORE_TOOL_PREFIX) && !CORE_TOOLS.includes(name));
 }
 function compareToolSet(expected, advertised) {
   const seen = new Set(serverContributed(advertised));
