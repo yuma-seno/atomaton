@@ -61,7 +61,16 @@
  */
 
 /**
- * The namespace the core keeps for the tools it adds itself — `load_skill` today.
+ * The tools the core adds itself, so they are not read back as a server's.
+ *
+ * Two spellings hold the same tool. The prefix `atoma_builtin__` was the namespace
+ * every built-in carried; the current core names its built-ins bare — `load_skill`
+ * — because a name a model has to be taught to decorate is a name it calls wrong
+ * (six all-time failed calls were exactly that guess). Runs against an atoma that
+ * has not shipped the rename still advertise the prefixed spelling, so both are
+ * recognized here. The bare list stays exact rather than endswith: the core refuses
+ * an external server carrying the bare name at construction, so a bare `load_skill`
+ * in an advertised set can only be the core's own.
  *
  * Filtered out before comparing, because nothing in this repository's configuration
  * decides whether they are there: they arrive with the binary, and a check that
@@ -69,6 +78,9 @@
  * asserted is what the SERVER contributes.
  */
 export const CORE_TOOL_PREFIX = "atoma_builtin__";
+
+/** The built-ins whose names the current core spells without a namespace. */
+export const CORE_TOOLS: readonly string[] = ["load_skill"];
 
 /** A server whose advertised tools are fixed, and the reason they are. */
 export interface ExactToolSet {
@@ -131,7 +143,9 @@ export interface ToolSetMismatch {
  * caught by once already.
  */
 export function serverContributed(advertised: readonly string[]): string[] {
-  return advertised.filter((name) => !name.startsWith(CORE_TOOL_PREFIX));
+  return advertised.filter(
+    (name) => !name.startsWith(CORE_TOOL_PREFIX) && !CORE_TOOLS.includes(name),
+  );
 }
 
 /**

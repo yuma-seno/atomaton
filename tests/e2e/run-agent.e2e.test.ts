@@ -191,7 +191,7 @@ You are a test agent.
         toolCalls: [
           {
             id: "skill_1",
-            name: "atoma_builtin__load_skill",
+            name: "load_skill",
             // `skill_name`, which is the only spelling the pinned binary takes:
             // v0.1.45 names the argument and drops the four aliases, so `name` is
             // refused before the skill is loaded (see `atoma-cli.ts`'s pin comment).
@@ -234,14 +234,14 @@ You are a test agent.
 
       if (exitCode !== 0) console.error("atoma stderr:", stderr);
       expect(exitCode).toBe(0);
-      expect(mock.requests[0]!.tools?.some((tool) => tool.function?.name === "atoma_builtin__load_skill")).toBe(true);
+      expect(mock.requests[0]!.tools?.some((tool) => tool.function?.name === "load_skill")).toBe(true);
       // Whitespace collapsed before asserting, because these files are wrapped prose:
       // the sentence is broken across lines at a column, so an assertion written
       // against the sentence only holds until the paragraph around it is re-flowed --
       // which one edit here did, and this test then failed over where a line ended
       // rather than over anything it is about.
       const initialPrompt = String(mock.requests[0]!.messages[0]?.content).replace(/\s+/g, " ");
-      expect(initialPrompt).toContain("load it with `atoma_builtin__load_skill`");
+      expect(initialPrompt).toContain("load it with `load_skill`");
       expect(initialPrompt).toContain("`engineering/environment`");
 
       const toolMessage = mock.requests[1]!.messages.find((message) => message.role === "tool");

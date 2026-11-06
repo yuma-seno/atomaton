@@ -214,9 +214,11 @@ function shellAct(command: string): CallRecord["act"] {
  *
  * The two names are asked for in the two ways each is actually known:
  *
- * - `load_skill` is atoma's own tool, registered as `atoma_builtin__load_skill`. The
- *   prefix belongs to the core, so this matches on the suffix; the core renaming it is
- *   the core's business and this keeps working if it does.
+ * - `load_skill` is atoma's own tool. Its name changed — `atoma_builtin__load_skill`
+ *   before the built-in dropped its namespace, `load_skill` after — and both appear in
+ *   stored sessions: the old ones because they happened, the new ones because that is
+ *   the name. The suffix match is what folds the two into one row without teaching
+ *   this file both spellings forever.
  * - `bash` is this repository's shell server's tool, and every shipped server sets
  *   `unprefixed: true`, so the call arrives as exactly `bash`. An equality, because
  *   there is no prefix to straddle and a looser test is what let the old one rot.

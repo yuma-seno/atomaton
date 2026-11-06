@@ -204,7 +204,8 @@ describe("agent prompt contracts", () => {
    */
   test("loads procedures as skills without requesting visible chain of thought", () => {
     const prompt = readFileSync("src/content/prompt-template.md", "utf8");
-    expect(prompt).toContain("atoma_builtin__load_skill");
+    expect(prompt).toContain("load_skill");
+    expect(prompt).not.toContain("atoma_builtin__load_skill");
     expect(prompt).toContain("in place of your own approach");
     expect(prompt).toContain("Check the catalog again");
     expect(prompt).toContain("Reason privately");
