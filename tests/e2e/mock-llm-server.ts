@@ -26,6 +26,13 @@
 
 export interface QueuedToolCall {
   id: string;
+  /**
+   * The name the model calls the tool by. Write `advertised:<suffix>` to defer to
+   * the binary: the server substitutes the function the request's own tools list
+   * advertises whose name ends with `<suffix>`, which is what a model that read
+   * the list would call. A spelled-out name is left alone, for tests that mean a
+   * specific name to be exact.
+   */
   name: string;
   arguments: Record<string, unknown>;
 }
@@ -56,23 +63,36 @@ export function startMockLlmServer(responses: QueuedResponse[]): MockLlmServer {
       if (req.method !== "POST" || !req.url.endsWith("/chat/completions")) {
         return new Response("not found", { status: 404 });
       }
-      requests.push((await req.json()) as MockLlmServer["requests"][number]);
+      const request = (await req.json()) as MockLlmServer["requests"][number];
+      requests.push(request);
 
       const next = queue.shift();
       if (!next) {
         return Response.json({ error: { message: "mock-llm-server: no more queued responses" } }, { status: 500 });
       }
 
+      // Resolve `advertised:<suffix>` names against the request that produced them.
+      // A call named this way is scripted before the request exists, so the
+      // substitution happens here, where the tools list is in hand.
+      const toolCalls = next.toolCalls?.map((tc) => {
+        const [verb, suffix] = tc.name.split(":");
+        if (verb !== "advertised" || suffix === undefined) return tc;
+        const found = request.tools
+          ?.map((tool) => tool.function?.name ?? "")
+          .find((name) => name.endsWith(suffix));
+        return found ? { ...tc, name: found } : tc;
+      });
+
       // One chunk carrying the whole step, because that is what the tests script: what
       // is being exercised is the inference loop and the tool boundary, not chunk
       // reassembly, which has its own unit tests in the core. The fields are the same
       // ones the non-streaming message would carry, inside the `delta` object the
       // accumulator folds in.
-      const delta = next.toolCalls
+      const delta = toolCalls
         ? {
             role: "assistant",
             content: null,
-            tool_calls: next.toolCalls.map((tc, index) => ({
+            tool_calls: toolCalls.map((tc, index) => ({
               index,
               id: tc.id,
               type: "function",

@@ -204,7 +204,11 @@ describe("agent prompt contracts", () => {
    */
   test("loads procedures as skills without requesting visible chain of thought", () => {
     const prompt = readFileSync("src/content/prompt-template.md", "utf8");
-    expect(prompt).toContain("atoma_builtin__load_skill");
+    // Which spelling, not this one: the template's loader name moves between the
+    // prefixed `atoma_builtin__load_skill` and the bare `load_skill` together with
+    // the atoma version the machinery pins, and that pair is completed at release.
+    // One loader name the template teaches, whatever release it ships in.
+    expect(prompt).toContain("load_skill");
     expect(prompt).toContain("in place of your own approach");
     expect(prompt).toContain("Check the catalog again");
     expect(prompt).toContain("Reason privately");

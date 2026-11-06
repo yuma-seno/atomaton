@@ -51,8 +51,10 @@ describe("skill catalog", () => {
    * about a tool that is right there. A skill here once spelled all six of its tool
    * references that way.
    *
-   * The `atoma_builtin__` prefix is the core's own and is not covered: it names
-   * the tools atoma adds itself, whose spelling no skill here decides.
+   * The built-in `load_skill` is named bare like the rest now. The `atoma_builtin__`
+   * spelling it carried before answers to nothing — the core dropped the namespace —
+   * so a skill writing it teaches a tool that has been removed, and it is treated as
+   * the dead name it is rather than exempted as the core's own.
    */
   test("a skill does not write a shipped server's tool as `server__tool`", () => {
     const servers = Object.keys(toolDefaults().servers);
@@ -73,6 +75,12 @@ describe("skill catalog", () => {
         for (const match of document.matchAll(new RegExp(`\`${server}__([a-z_]+)\``, "g"))) {
           wrong.push(`${file}: \`${server}__${match[1]}\` — call it \`${match[1]}\``);
         }
+      }
+      // The built-in's own spelling. The old namespace name names nothing after the
+      // rename, so it fails a skill the way a dead `server__tool` does; the bare
+      // `load_skill` passes what is above and needs saying nothing extra here.
+      for (const match of document.matchAll(/`atoma_builtin__[a-z_]+`/g)) {
+        wrong.push(`${file}: ${match[0]} — the built-in is called \`load_skill\``);
       }
     }
     expect(

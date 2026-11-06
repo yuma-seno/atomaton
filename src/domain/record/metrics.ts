@@ -35,7 +35,7 @@ export interface CallRecord {
   agent: string;
   /** Whether the result came back as an error. */
   failed: boolean;
-  /** For `atoma_builtin__load_skill`, the skill named. */
+  /** For the skill-loader call — `load_skill`, whose earlier records carry the prefixed name — the skill named. */
   skill?: string;
   /** For a shell call, what the command was doing. */
   act?: ShellAct;

@@ -53,9 +53,15 @@ describe("compareToolSet", () => {
 
   // The tools the core adds itself arrive with the binary, not with the
   // configuration. Listing them would make an atoma upgrade fail a check about
-  // this repository.
+  // this repository. Both spellings are pinned: the bare name is what the
+  // current core advertises, the prefixed one what cores before the rename
+  // advertised and what an upgrade window still will.
   test("the core's own tools are not the server's", () => {
-    expect(compareToolSet(READONLY, ["atoma_builtin__load_skill", "read", "grep", "glob", "list"])).toBeUndefined();
+    expect(compareToolSet(READONLY, ["load_skill", "read", "grep", "glob", "list"])).toBeUndefined();
+    expect(serverContributed(["load_skill", "read"])).toEqual(["read"]);
+    expect(
+      compareToolSet(READONLY, ["atoma_builtin__load_skill", "read", "grep", "glob", "list"]),
+    ).toBeUndefined();
     expect(serverContributed(["atoma_builtin__load_skill", "read"])).toEqual(["read"]);
   });
 
