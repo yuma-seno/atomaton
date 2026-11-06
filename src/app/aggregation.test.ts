@@ -12,22 +12,11 @@ const LIB_DIR = import.meta.dir;
  *
  * The subprocess is not optional: mutating PATH and calling a `gh`-shelling
  * function in the long-lived bun:test process has given wrong results before.
- * See this file's sibling, `lib.test.ts`, for the same harness and the same rule.
+ * See this file's sibling, `lib.test.ts` for the same harness and the same rule.
+ *
+ * `kind` is `DispatchGateResult`'s discriminant, printed by the shim.
  */
 function runGate(rules: FakeGhRule[]): { kind: string; ghCalls: string[][]; stderr: string } {
-  return runGateDetailed(rules);
-}
-
-/**
- * The same run, keeping the field this file mostly calls `kind` out of its other name.
- *
- * `dispatchOrchestratorIfReady` returns a `DispatchGateResult` whose discriminant is
- * `kind`; the shim prints it, and `runGate` calls the printed value `kind` because that
- * is what every test asserts against. Named twice because the closed-parent test reads
- * a call log AND an outcome, and calling both `kind` there would be one name for two
- * things.
- */
-function runGateDetailed(rules: FakeGhRule[]): { outcome: string; kind: string; ghCalls: string[][]; stderr: string } {
   const configDir = makeConfigDir({});
   const dir = mkdtempSync(join(tmpdir(), "atomaton-gate-"));
   const file = join(dir, "shim.ts");
@@ -40,8 +29,7 @@ console.log(result.kind);
   );
   try {
     const r = runWithFakeGh(file, [], { cwd: configDir, rules });
-    const kind = r.stdout.trim().split("\n").pop() ?? "";
-    return { outcome: kind, kind, ghCalls: r.ghCalls, stderr: r.stderr };
+    return { kind: r.stdout.trim().split("\n").pop() ?? "", ghCalls: r.ghCalls, stderr: r.stderr };
   } finally {
     rmSync(configDir, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -438,7 +426,7 @@ describe("aggregation.ts dispatch gate", () => {
    * dealt with" is true, "an agent is coming" is not.
    */
   test("a closed parent's marker keeps the aggregation claim and loses the dispatch tag", () => {
-    const { outcome, ghCalls } = runGateDetailed([
+    const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
       PARENT_AGENT,
       NO_MARKER,
@@ -448,7 +436,7 @@ describe("aggregation.ts dispatch gate", () => {
       { match: ["api", "issues/5/comments/777"], stdout: "{}" },
       { match: ["issue", "comment"], stdout: "" },
     ]);
-    expect(outcome).toBe("parent-closed");
+    expect(kind).toBe("parent-closed");
 
     // Written with both tags, then edited to just the claim.
     const write = ghCalls.find(
