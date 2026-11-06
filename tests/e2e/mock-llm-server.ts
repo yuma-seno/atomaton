@@ -76,7 +76,7 @@ export function startMockLlmServer(responses: QueuedResponse[]): MockLlmServer {
       // substitution happens here, where the tools list is in hand.
       const toolCalls = next.toolCalls?.map((tc) => {
         const [verb, suffix] = tc.name.split(":");
-        if (verb !== "advertised") return tc;
+        if (verb !== "advertised" || suffix === undefined) return tc;
         const found = request.tools
           ?.map((tool) => tool.function?.name ?? "")
           .find((name) => name.endsWith(suffix));
