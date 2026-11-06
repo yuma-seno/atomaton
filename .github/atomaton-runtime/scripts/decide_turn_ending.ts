@@ -21,13 +21,16 @@ function endingOf(signals) {
     return { ended: "parked" };
   if (signals.loopLimitReached)
     return { ended: "chain-over", ...next ? { next } : {} };
-  if (next || signals.chainContinues)
-    return { ended: "handed-off", ...next ? { next } : {} };
+  if (next)
+    return { ended: "handed-off", next, ...signals.chainContinues ? { continues: true } : {} };
+  const continues = signals.chainContinues ? { continues: true } : {};
   if (!signals.reported)
-    return { ended: "no-report" };
-  return { ended: "finished" };
+    return { ended: "no-report", ...continues };
+  return { ended: "finished", ...continues };
 }
 function shouldReleaseGuard(ending) {
+  if (ending.continues === true)
+    return false;
   return ending.ended !== "handed-off" && ending.ended !== "parked";
 }
 function nextToDispatch(ending) {

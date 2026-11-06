@@ -130,7 +130,15 @@ function isHumanActor(type) {
 }
 
 // src/domain/work/closed-target.ts
-function stopOnCloseNotice(number) {
+function stopOnCloseNotice(number, running) {
+  if (!running) {
+    return [
+      "Atomaton: this issue was closed. Nothing was running on it, so no run here had to be stopped.",
+      "",
+      `#${number} stays closed.`
+    ].join(`
+`);
+  }
   return [
     "Atomaton: this issue was closed while an agent was working on it, so the run has been asked to stop.",
     "",
@@ -580,8 +588,10 @@ function readComments(repo, number, excludeCommentId) {
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
   return shapedThread(comments, readers);
 }
-function runInFlight(repo, number) {
+function runInFlight(repo, number, options = {}) {
   const shaped = readComments(repo, number);
+  if (options.merged === true)
+    return shaped.holder === "agent";
   return shaped.holder === "agent" || whoseTurn(shaped.events) === "agent";
 }
 
@@ -593,9 +603,9 @@ function parseListed(stdout) {
     return null;
   }
 }
-function runningOn(repo, number) {
+function runningOn(repo, number, merged) {
   try {
-    return { running: runInFlight(repo, number) };
+    return { running: runInFlight(repo, number, { merged }) };
   } catch (e) {
     return { running: false, problem: `could not read the thread on #${number}: ${e.message}` };
   }
@@ -617,7 +627,8 @@ function readNode(repo, number) {
     return { problem: `#${number} reported an unrecognised state ${JSON.stringify(raw.state ?? null)}` };
   }
   const state = raw.state === "open" ? "open" : isPr ? pullRequestOutcome(Boolean(raw.pull_request?.merged_at)) : issueOutcome(raw.state_reason);
-  const { running, problem } = runningOn(repo, number);
+  const merged = isPr && raw.state !== "open" && Boolean(raw.pull_request?.merged_at);
+  const { running, problem } = runningOn(repo, number, merged);
   if (problem)
     return { problem };
   return {
@@ -642,7 +653,8 @@ function readChildren(repo, parent) {
   for (const found of listedPrs ?? []) {
     if (PARENT_ISSUE_TAG.readProse(found.body ?? "") !== parent)
       continue;
-    const { running, problem } = runningOn(repo, found.number);
+    const merged = !saysOpen(found.state) && found.state === "MERGED";
+    const { running, problem } = runningOn(repo, found.number, merged);
     if (problem) {
       problems.push(problem);
       continue;
@@ -663,7 +675,7 @@ function readChildren(repo, parent) {
   for (const child of links.children) {
     if (already.has(child.number))
       continue;
-    const { running, problem } = runningOn(repo, child.number);
+    const { running, problem } = runningOn(repo, child.number, false);
     if (problem) {
       problems.push(problem);
       continue;
@@ -775,13 +787,12 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/stop_on_close.ts
 var ref = defineScript(import.meta.url);
-function stopOnCloseBody(number, closed, stopped) {
-  return [
-    LLM_CONTEXT_TAG.write("exclude"),
-    STOP_TAG.write("requested"),
-    stopOnCloseNotice(number),
-    closedTheTreeNotice(closed, stopped)
-  ].join(`
+function stopOnCloseBody(args) {
+  const lines = [LLM_CONTEXT_TAG.write("exclude")];
+  if (args.rootRunning)
+    lines.push(STOP_TAG.write("requested"));
+  lines.push(stopOnCloseNotice(args.number, args.rootRunning), closedTheTreeNotice(args.closed, args.stopped));
+  return lines.join(`
 `);
 }
 function main() {
@@ -812,13 +823,19 @@ function main() {
   }
   const all = subtree(nodes, root);
   const under = descendants(all, root);
+  const rootRunning = all.find((node) => node.number === root)?.running === true;
   const toStop = nodesToStop(all);
   const toClose = nodesToClose(under);
   if (toStop.length === 0 && toClose.length === 0) {
     console.error(`Nothing is running under #${root} and nothing under it is open. Nothing to do.`);
     return;
   }
-  const result = closeSubtreeUnder(repo, root, stopOnCloseBody(root, toClose.map((n) => n.number), nodesToStop(under).map((n) => n.number)));
+  const result = closeSubtreeUnder(repo, root, stopOnCloseBody({
+    number: root,
+    rootRunning,
+    closed: toClose.map((n) => n.number),
+    stopped: nodesToStop(under).map((n) => n.number)
+  }));
   result.problems.push(...readProblems);
   for (const problem of result.problems)
     console.error(`::warning::${problem}`);

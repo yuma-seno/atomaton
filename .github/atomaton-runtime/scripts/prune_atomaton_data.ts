@@ -408,8 +408,10 @@ function readComments(repo, number, excludeCommentId) {
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
   return shapedThread(comments, readers);
 }
-function runInFlight(repo, number) {
+function runInFlight(repo, number, options = {}) {
   const shaped = readComments(repo, number);
+  if (options.merged === true)
+    return shaped.holder === "agent";
   return shaped.holder === "agent" || whoseTurn(shaped.events) === "agent";
 }
 
