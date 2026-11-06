@@ -33,7 +33,7 @@ import { gh } from "../adapters/github/gh.ts";
 import { countOpenSiblings } from "../adapters/github/sibling-check.ts";
 import { dispatchRunner } from "../adapters/actions/dispatch.ts";
 import { resolveNotify } from "../adapters/github/notify.ts";
-import { AGGREGATED_TAG, LLM_CONTEXT_TAG, SUB_RESULT_TAG } from "../adapters/github/tags.ts";
+import { AGGREGATED_TAG, DISPATCH_TAG, LLM_CONTEXT_TAG, SUB_RESULT_TAG } from "../adapters/github/tags.ts";
 import { parentIssueOf } from "../adapters/github/parent-issue.ts";
 import { mostRecentAgentOn } from "../adapters/github/agent-on-issue.ts";
 import { commentBodies } from "../adapters/github/thread.ts";
@@ -329,10 +329,31 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   // `--jq` belongs to `gh api` and the list commands, and `gh issue comment` exits on
   // the unknown flag before writing anything — so every later caller's idempotency
   // read found nothing and the parent aggregated twice (#143).
+  //
+  // The body carries the dispatch tag as well, because this comment is now also the
+  // dispatch's marker and the run's ask — see the dispatch below. The id is what the
+  // dispatch's ordering check probes for, and the TAG is what keeps this one comment
+  // being one comment: `claim_turn.ts` appends its `atomaton:took` line to a comment
+  // carrying `atomaton:dispatch`, and posts a separate claim for any other. Without it
+  // every aggregation would be two new comments, which is the thing this is here to
+  // stop. `mostRecentAgentOn` reads the agent's name off it too, which is the same
+  // answer it already took from the previous dispatch marker.
+  //
+  // Written from the agent the gate is about to re-invoke, and omitted when the thread
+  // names none — an empty `atomaton:dispatch=` is a tag no reader matches, and the
+  // dispatch below refuses an empty agent anyway.
+  //
+  // The two lines without the tag are kept apart because one outcome has to write the
+  // marker WITHOUT it — see `takeBackDispatchTag` and the `parent-closed` branch below.
+  const agent = parentAgent(opts.repo, opts.parent);
+  const markerLines = [
+    AGGREGATED_TAG.write(opts.closedNum),
+    `Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`,
+  ];
   const markerId = commentOnWithId(
     opts.repo,
     opts.parent,
-    `${AGGREGATED_TAG.write(opts.closedNum)}\nAtomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`,
+    [...(agent === "" ? [] : [DISPATCH_TAG.write(agent)]), ...markerLines].join("\n"),
   );
   if (markerId === null) {
     const why =
@@ -341,14 +362,21 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
     return withNotice(opts, { kind: "undetermined", why });
   }
 
+  // The marker is the dispatch's evidence, not a comment posted beside it: it is the
+  // ask the run claims and the record every later reader accounts the run by, so
+  // `dispatchRunner` is told to use it instead of writing a second marker of its own.
+  // What that buys is one comment per completion instead of two, and a dispatch whose
+  // refusal removes the very comment the run would have claimed — so a refused
+  // aggregation leaves nothing claiming it was aggregated.
   const outcome = dispatchRunner({
     context: `all sub-issues of #${opts.parent} are complete, so the agent that was on it was to be re-invoked`,
-    agent: parentAgent(opts.repo, opts.parent),
+    agent,
     type: "issue",
     number: opts.parent,
     notify: resolveNotify(opts.repo, opts.parent),
     repo: opts.repo,
     continuesChain: opts.continuesChain,
+    markerCommentId: markerId,
   });
 
   // Reported rather than assumed. The marker is a claim that this completion has been
@@ -360,6 +388,12 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
   //
   // The removal is best-effort: if it fails too, the parent is where #7 left it, and
   // the log is the only record. Nothing here can make that worse.
+  //
+  // It runs only for `failed`, the one outcome that leaves the marker standing. Since the
+  // marker is the comment `dispatchRunner` was handed as its `markerCommentId`, its own
+  // refusals (`refused-outstanding`, `unconfirmed`) have already deleted it — see the
+  // outcomes below. `refused-closed` keeps it too, and edits it rather than deleting:
+  // `takeBackDispatchTag`.
   const takeBackMarker = (why: string): void => {
     const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);
     if (removed.code === 0) {
@@ -372,22 +406,66 @@ export async function dispatchOrchestratorIfReady(opts: DispatchGateOptions): Pr
     }
   };
 
+  /**
+   * Edit the marker back to the idempotency claim alone, without the dispatch tag.
+   *
+   * The one outcome that needs it is a closed parent, where no run will ever claim the
+   * ask the tag writes — see that branch. Best-effort like the take-back: if the edit
+   * does not land, the node is left holding a promise nothing keeps, which is worth a
+   * line in the log and no more.
+   */
+  const takeBackDispatchTag = (): void => {
+    const { code, stdout, stderr } = gh(
+      "api",
+      `repos/${opts.repo}/issues/comments/${markerId}`,
+      "--method",
+      "PATCH",
+      "-f",
+      `body=${markerLines.join("\n")}`,
+    );
+    if (code !== 0) {
+      console.error(
+        `#${opts.parent} is closed, and the dispatch tag could not be taken off its marker ` +
+          `(${stderr.trim() || stdout.trim()}): the thread will read as though a run were coming.`,
+      );
+    }
+  };
+
   if (outcome === "dispatched") return { kind: "dispatched" };
   // A closed parent is not a fault, and the person who asked for the run has already
   // been told by `dispatchRunner` itself. Kept apart from `dispatch-failed` so this
   // does not read in the log as GitHub having rejected something. The marker STAYS:
   // the parent is closed, so there is nothing a retry could start, and leaving the
   // claim says "this completion was dealt with", which is true.
-  if (outcome === "refused-closed") return { kind: "parent-closed" };
+  //
+  // The dispatch TAG comes off it, though, and this is the one outcome that edits the
+  // marker rather than deleting or keeping it whole. `atomaton:dispatch` is a promise
+  // that a run is coming; on a closed node no run will ever claim it, and `runInFlight`
+  // reads a standing request as a run working or coming — forever. That is #449's
+  // shape, which left merged pull requests reading as live runs, and `prune_atomaton_data`
+  // would never prune this node either. The idempotency line stays, because "aggregated"
+  // is the true half: this completion was dealt with as far as it can be.
+  if (outcome === "refused-closed") {
+    takeBackDispatchTag();
+    return { kind: "parent-closed" };
+  }
   // The parent already had an agent asked for on it, so this dispatch stood down. The
-  // marker is taken back for the same reason as a failure: it claims an aggregation
+  // marker has to come back for the same reason as a failure: it claims an aggregation
   // that did not happen, and the run that was asked for first is not this one. If that
   // first run finishes without aggregating, this completion must still be able to.
-  if (outcome === "refused-outstanding") {
-    takeBackMarker(`parent #${opts.parent} already had an agent asked for on it, so this aggregation did not start`);
-    return { kind: "parent-busy" };
-  }
-  takeBackMarker(`the dispatch of ${parentAgent(opts.repo, opts.parent) || "(no agent)"} onto #${opts.parent} failed`);
+  // `dispatchRunner` deleted it, because the marker it was given is the one it removes
+  // on this outcome — so there is no DELETE here, and a second one would answer 404.
+  if (outcome === "refused-outstanding") return { kind: "parent-busy" };
+  // `unconfirmed`: the marker never became visible, or never got posted, so nothing
+  // started and `dispatchRunner` has already deleted it — the same end state as a
+  // rejection, reached by the other route. No `takeBackMarker`: a second DELETE answers
+  // 404, which would be reported as "the marker could not be removed, so nothing will
+  // retry", the opposite of what happened.
+  if (outcome === "unconfirmed") return { kind: "dispatch-failed" };
+  // What is left is `failed`: GitHub rejected the dispatch itself, having been given a
+  // marker that is now a phantom ask nothing will claim. That is the one outcome whose
+  // marker is still standing, so this is the one take-back.
+  takeBackMarker(`the dispatch of ${agent || "(no agent)"} onto #${opts.parent} failed`);
   return { kind: "dispatch-failed" };
 }
 

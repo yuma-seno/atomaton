@@ -139,31 +139,40 @@ describe.skipIf(!atomaAvailable)("E2E: the aggregation branch of request_close_i
           },
         }),
       },
-      // The marker write itself: `gh api --method POST .../issues/5/comments -f body=...
-      // --jq .id`. Anchored on the AGGREGATED tag, because two different markers are
-      // written to this path — this one and the dispatch marker `dispatchRunner` posts a
-      // moment later — and each has its own id.
+      // The marker write itself: `gh api --method POST .../issues/5/comments -f body=...`
+      // --jq .id`. One comment per completion: this write is the aggregation's
+      // idempotency marker AND the dispatch's marker and ask, so its body carries both
+      // tags and `dispatchRunner` posts no second comment beside it.
       {
         match: ["api", `issues/${PARENT}/comments`, "--method", "POST", "atomaton:aggregated"],
         stdout: "777",
       },
-      // `postDispatchMarker`'s write, to the same path. Anchored on its own tag for the
-      // same reason.
-      {
-        match: ["api", `issues/${PARENT}/comments`, "--method", "POST", "atomaton:dispatch"],
-        stdout: "555",
-      },
       // The parent's comments, read THREE times — the aggregation marker check, the
       // dispatch freshness probe, and `mostRecentAgentOn` — and since the comment read
       // was unified those three are ONE call: `listComments`, `--paginate`, whole
-      // comment objects. So one rule answers all three and its bodies serve all three:
-      // the dispatch marker names the agent, and its id 555 is the comment the probe
-      // confirms GitHub's read-after-write caught up with — the gate is ordered against
-      // that, so an empty listing is a refusal rather than a pass. No `atomaton:aggregated`
-      // marker here, which is what makes this the "claim it" branch.
+      // comment objects. So one rule answers all three and its bodies serve all three.
+      //
+      // Three comments, each because a reader needs it:
+      //
+      //   - the request that named the agent, which is what `mostRecentAgentOn` reads;
+      //   - the `waiting` ending that took that request up — the parent is parked on its
+      //     children, which is the state this gate exists to end. Without it the newest
+      //     turn event is an unclaimed request and the dispatch stands down
+      //     `refused-outstanding`;
+      //   - id 777, the marker this test's own POST just returned. The freshness probe
+      //     looks for THAT id, and a listing that does not show it means GitHub's
+      //     read-after-write has not caught up — which the probe waits out and then
+      //     refuses on, so an empty or id-less listing turns this into the refusal
+      //     branch rather than the dispatch branch. Its body is deliberately untagged:
+      //     an `atomaton:aggregated` here would be the gate's own idempotency read
+      //     answering `already-aggregated` before it ever ran.
       {
         match: ["api", `issues/${PARENT}/comments`, "--paginate"],
-        stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]),
+        stdout: JSON.stringify([
+          { id: 555, body: "<!-- atomaton:dispatch=atomaton -->" },
+          { id: 556, body: "<!-- atomaton:ended=waiting answers=0 run=0 -->" },
+          { id: 777, body: "a comment with no tag on it" },
+        ]),
       },
       // `resolveNotify`'s read of PARENT, which needs a user to address and gets one
       // from the repository owner fallback. `--jq` is what that read carries and what
@@ -275,6 +284,24 @@ You are a test orchestrator agent.
       // The marker names the child that completed, so a second close of the same
       // completion is recognised as `already-aggregated`.
       expect(marker?.join(" ")).toContain(`atomaton:aggregated=${CHILD}`);
+
+      // One comment per completion. The marker this test just asserted is ALSO the
+      // dispatch's marker and the run's ask, so there is no second POST to this path —
+      // the `atomaton:dispatch` tag rides on the marker's body instead. A regression
+      // that put `postDispatchMarker` back would show up here and nowhere else in this
+      // file.
+      const threadWrites = calls.filter(
+        (c) => c.includes("api") && c.some((a) => a.includes(`issues/${PARENT}/comments`)) && c.includes("--method") && c.includes("POST"),
+      );
+      expect(threadWrites, why()).toHaveLength(1);
+      expect(marker?.join(" "), "the one comment carries the dispatch tag too").toContain(
+        "atomaton:dispatch=",
+      );
+      // And the dispatch claims that comment rather than a second one: `claim_turn.ts`
+      // appends the run's took line to a marker in place, and posts a separate comment
+      // for anything else.
+      const dispatchCall = calls.find((c) => c[0] === "workflow" && c[1] === "run") ?? [];
+      expect(dispatchCall.join(" "), "the run's ask is the marker").toContain("ask=777");
 
       // --- and the run continued into the dispatch ---
       expect(

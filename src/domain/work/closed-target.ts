@@ -268,16 +268,18 @@ export function dispatchFailedNotice(failed: {
 }
 
 /**
- * The notice posted when a dispatch marker never became visible in the thread.
+ * The notice posted when a dispatch has no marker to order against.
  *
  * A different failure from a closed target, and it says so: nothing is wrong with the
- * issue, and the person did not do anything wrong. What happened is that GitHub did not
- * show the machinery its own write, so it could not tell whether another run had already
- * been asked for — and starting one anyway risks two runs on one node.
+ * issue, and the person did not do anything wrong. What happened is that the marker the
+ * dispatch is recorded by could not be posted, or was posted and never appeared in the
+ * thread — so the machinery could not tell whether another run had already been asked
+ * for, and a run started without it would be one the thread cannot account for. Starting
+ * one anyway risks two runs on one node.
  *
- * The advice is to retry, because the condition is transient by nature: the thread
- * catches up, and the next attempt sees the marker. It names the command so the person
- * does not have to work out how to start the run again.
+ * The advice is to retry, because the condition is transient by nature: a rate limit
+ * clears, the thread catches up, and the next attempt's marker goes out. It names the
+ * command so the person does not have to work out how to start the run again.
  */
 export function dispatchUnconfirmedNotice(unconfirmed: {
   agent: string;
@@ -291,7 +293,7 @@ export function dispatchUnconfirmedNotice(unconfirmed: {
     "",
     `What was about to happen: ${context}.`,
     "",
-    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "The comment that records a dispatch could not be posted or was not visible in the thread, so the machinery could not tell whether another run had already been asked for. Starting one anyway would leave a run nothing on this issue accounts for.",
     "",
     "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue.",
   ].join("\n");
