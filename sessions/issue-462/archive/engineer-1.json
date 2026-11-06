@@ -1,0 +1,32 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #462: §4: run watch を schedule 化し claim/park を sweep、guard は lock が新鮮な間だけ人のコメントを削除\n**Labels:** atomaton/sub-issue, atomaton/launched\n**Sub-issue of:** #441\n\n親: #441(設計回答 <https://github.com/yuma-seno/atomaton/issues/441#issuecomment-6674912139> の §4)。watch と guard を「痕跡の有無」ではなく「時刻と run 実績」で判断させ、死んだ lock が人の手を奪い続けないようにする。\n\n## 観測された悪害(この子が防ぐこと)\n\n- runner run は machinery が GITHUB_TOKEN で `workflow_dispatch` するため、`workflow_run` イベントが発火しない。実際、過去の watch 実行はすべて entry run 対象で、runner run 対象は 0 件(実測)。\n- #12 の ctx 上限死 run は claim を残したまま死に、guard は人の `/atomaton recover` を 11-05 に 2 回削除した。park(`atomaton:ended=waiting`)も残り、claim+park の二重ロックからの脱出は人の手による tag PATCH しかなかった。\n\n## 済み済み(再実装しない)\n\n- §1/§2 core(atoma v0.4.5)、§3 #455 post_result_comment の skip 反転・failure-notice 共通化、#454 語彙接続、v0.21.56 リリース。\n- §5 の dispatch fail-closed 化と hard crash の単一 writer 化は、この issue の別の子が進める(重複実装しない)。\n\n## 棚卸し(現行 head 884da10 の実測。編集前に自分でも当該箇所を確認すること)\n\n1. watch 生成元: `src/workflows/atomaton-run-watch.wac.ts`。`on:` は `:64-84`(workflow_run のみ、no schedule)。steps `:87-130`。`CONCURRENCY_GROUP` は `:62` で `github.event.workflow_run.display_title` 由来 — **schedule event には workflow_run コンテキストが無い**(group が空になり得る)点を設計に織り込むこと。\n2. 生成: `bun run src/synth-workflows.ts`(package.json の `synth`;`pretest` / `lint` が回す)。header 一致チェックは `tests/contract/workflow-sources.test.ts:98`。\n3. `src/entrypowers/machinery/reconcile_run_ending.ts`: CLI は display-title/run-id/run-url/conclusion。**特定 run のスレッドを直すモードのみで、他 node の sweep は無い。** 既存能力: claimed-and-unreporting run への notice 投稿(notice が ending を兼ねる)、label release(`a waiting ending still releases the label`)、once-per-ask の healed 判定。テスト 21 件(`reconcile_run_ending.test.ts`)。\n4. claim の形: `took=<id> run=<id>`。run id は `src/adapters/github/thread.ts:142`(readers.claim)で parse されるが、`src/domain/work/thread.ts:474-489`(`shapedThread`)で捨てられ、guard まで届かない。コメントの `created_at` は entry 単位で取得済み(`thread.ts:166`/`:191`)。\n5. guard: `src/entrypoints/machinery/guard_comment_during_run.ts`。削除判断は `commentWouldBeRemoved`(`src/adapters/github/thread.ts:372`)。この経路に Actions API 読み取りは無い(actions/runs の既存 reader は `src/adapters/github/merge-signals.ts:208` 等)。\n6. `src/entrypoints/machinery/request_stop.ts:132-137`: `parkExit` は `parked && !claimed` のまま現存。\n7. 未確認(実装時に確認すること): `atomaton:ended=waiting` の park ending がどの run id を運ぶか(producer は runner の decide_turn_ending 系)。\n\n## スコープ\n\n1. **schedule 化**: watch wac に `schedule:` cron を追加(workflow_run は維持)。既定値の目安は 15 分ごと(理由を添えれば変更可)。schedule 実行では run-id/display-title が渡らないため、reconcile に sweep モード(例: `--sweep`)を渡す引数の組み立てを wac 側で行う。concurrency は schedule では直列化される group にする。\n2. **sweep**: 候補 node の列挙(in-progress label の付いた issue/PR を検索するのが自然 — 手段は engineer 選択)。各 node で: claim を読む → run id を解決 → **run が終了済み**(Actions API か data branch の jacket… session の `atoma_runs`)→ その後に release が無い → **stale**: reconcile の既存能力で release する(ending の投稿または既存 ending タグの修正、label の in-progress → waiting-for-person 遷移、open claim が解ける状態にする)。**park も同様**: 待機 ending の run が済んでいて resume が来ていない node を人に返す。\n3. **stale 判定は 1 綴り**: domain 側に共通関数を置き、sweep と guard の両方が使う。信号は run-facts 主(Run 完了 + release 無し)、タイマーは補助(claim が run id を名乗れない場合の fallback 定数 — 既定値と理由を添える)。\n4. **guard**: `shapedThread` が parse して捨てている claim の run id を guard 判断まで届け、**stale な lock のもとでは人のコメントを削除しない**。削除の代わりに、既存の引用通知の仕組みに合わせて「lock が stale である」ことを示す通知を出すか、単に削らない(どちらかを既存テストの文言体系に合わせて選ぶ)。stale でない(新鮮な)lock では現行どおり削除する。\n5. **no-op の安さ**: sweep は stale が無いとき一切書き込まない(読み取りのみ)。release の後のスレッド再読み込みでは open claim が解けていること(自己検証)。\n6. `parkExit` 自体は変更しない(schedule sweep + guard の stale 判定で遇脱経路が復活する。直接の形状変更はしなくてよい理由をコメントで書く)。\n\n## 受け入れ条件\n\n- 生成後の watch yml に `schedule:` があり、`--sweep` が配線される。header 一致テストが通る。\n- 「run が終了済みで未 release の claim」を持つ node が、sweep によって release される: machinery の ending(ENDED_TAG 付き)が残り、label が waiting-for-person に替わり、以降の sweep がそれ以上書き込まない(idempotent)。\n- 新鮮な claim(run 実行中)をもつ node に対して sweep は何もしない。\n- guard は stale な lock のもとでは人のコメントを削除しない(新テストで固定)。新鮮な lock では現行どおり削除する(既存テストが通る)。\n- 既存の reconcile / guard / run-report / request_stop のテスト群が全て通る。\n\n## 制約\n\n- 挙動の劣化禁止。既存契約テスト(stopped / limit 経路を含む)を壊さない。\n- sweep は機械起動であり人の手を奪わない: 人が自発的に解いた直後の状態を壊さない(既に release された node は no-op)。\n- version bump とリリースはしない。\n- `docs/` に自リポジトリの issue 番号(#NNN)は書かない。\n- core リポジトリには触れない。\n- 日本語を新設する場合は UTF-8 を保つ。\n\n## クローズ条件\n\nこの issue(#441)のブランチにマージされた PR の head で次が観察できること: (1) watch wac + 生成 yml に schedule がある。(2) sweep モードのコードと「stale claim → release / 新鮮 claim → 不介入 / park → 人に返す」を固定するテスト。(3) guard の「stale では削らない」を固定するテスト。(4) 既存テスト群の green 実行結果。エンジニアが PR に検証結果を残し、親(#441)側で統合確認のうえ閉じる。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-462",
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-06T14:58:52Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "user",
+      "content": "This run was started by the `atomaton` agent, which is waiting on your result. When you finish, report back to it: end your response with a line holding nothing but `/atomaton`, followed by what you concluded and what it should do next. Do not end with a plain comment and no such line -- the agent that started you would never be told the work is done."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "f8c2cb70c2f13c92d1689eec7fcc4d5f2f09e41e8b057d994ab5306021344d50",
+      "event_count": 1,
+      "agent": "engineer"
+    }
+  }
+}
