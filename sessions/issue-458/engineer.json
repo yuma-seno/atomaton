@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #458: マージ済み PR 上の in-flight run が merge を検出せず、stopped 報告が /resume 案内になる\n**Labels:** atomaton/in-progress\n\n## 起きたこと（実測）\n\nreviewer が PR を review 中（run 42232540109）に、その PR が merge されました:\n\n- 14:17:37 — claim（comment [6686958339](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6686958339)）。起動元は engineer の handoff 注記「PR created / `reviewer` follows if it passes」（#441 comment 6686892046）\n- 14:27:05 — PR merge。この時点で in-flight run はレビュー完了前。merge は run に何もしません\n- 14:36:47 — 約9分後、親 issue の close を契機に stop が伝播（comment [6687368369](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6687368369)：「this work was under it, so it is closed too」）\n- 14:37:44 — `ended=stopped` の報告が **merged PR** 上に投稿され「Resume it, or say what to do instead」（comment [6687389162](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6687389162)）\n\nrun 自身の最後の発言は \"The PR is reported as merged.\" で merge を観測していましたが、stop 伝播と ending poster は PR の merge state を考慮していません。\n\n## 問題点\n\n1. **merge が中断として検出されない**: review 対象が main に入った後も run は走り続け（約9分）、その停止は無関係な親 issue の close に依存しました。\n2. **死んだスレッド上の偽 signal**: merged PR への `/resume` 案内は、完了済みの work の再開を促します。stop 文案の「it is closed too」も「既に取り込まれた」という事実と逆向きです。\n3. 中断が中断として検出され、誰かに返る、という構造自体は正しく動作しました。壊れているのは「返り先の state 判定」と「merge 時の runaway 検知」です。\n\n## 期待する形\n\n- PR が merged された時点で、その PR 上の in-flight run に merge を伝える（停止、または「review 不要」の notice 注入）。最低限、run が無関係なイベントを待たずに merge を検知して ending に到達すること\n- merged PR 上での stopped 報告は「work は既に取り込まれた」ことを述べ、resume 案内を出さない（誘導先は親 thread へ）\n- resume 案内を出す条件に「thread の state が open」を含める\n\n## 補足\n\n- 今回の stop トリガー（親 issue close）は人の操作由来で、stop 伝播の機構自体は設計どおりに動きました。問題は merge 後の in-flight run が merge によって止まらず、別の事件に乗って止まったことです。\n- 影響例: merged PR で `/resume` を打っても review 対象は既に main にあるため、産出物は本命の work になりません（次の PR review には使えます）。\n",
+      "content": "Issue #458: マージ済み PR 上の in-flight run が merge を検出せず、stopped 報告が /resume 案内になる\n**Labels:** atomaton/waiting-for-person\n\n## 起きたこと（実測）\n\nreviewer が PR を review 中（run 42232540109）に、その PR が merge されました:\n\n- 14:17:37 — claim（comment [6686958339](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6686958339)）。起動元は engineer の handoff 注記「PR created / `reviewer` follows if it passes」（#441 comment 6686892046）\n- 14:27:05 — PR merge。この時点で in-flight run はレビュー完了前。merge は run に何もしません\n- 14:36:47 — 約9分後、親 issue の close を契機に stop が伝播（comment [6687368369](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6687368369)：「this work was under it, so it is closed too」）\n- 14:37:44 — `ended=stopped` の報告が **merged PR** 上に投稿され「Resume it, or say what to do instead」（comment [6687389162](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6687389162)）\n\nrun 自身の最後の発言は \"The PR is reported as merged.\" で merge を観測していましたが、stop 伝播と ending poster は PR の merge state を考慮していません。\n\n## 問題点\n\n1. **merge が中断として検出されない**: review 対象が main に入った後も run は走り続け（約9分）、その停止は無関係な親 issue の close に依存しました。\n2. **死んだスレッド上の偽 signal**: merged PR への `/resume` 案内は、完了済みの work の再開を促します。stop 文案の「it is closed too」も「既に取り込まれた」という事実と逆向きです。\n3. 中断が中断として検出され、誰かに返る、という構造自体は正しく動作しました。壊れているのは「返り先の state 判定」と「merge 時の runaway 検知」です。\n\n## 期待する形\n\n- PR が merged された時点で、その PR 上の in-flight run に merge を伝える（停止、または「review 不要」の notice 注入）。最低限、run が無関係なイベントを待たずに merge を検知して ending に到達すること\n- merged PR 上での stopped 報告は「work は既に取り込まれた」ことを述べ、resume 案内を出さない（誘導先は親 thread へ）\n- resume 案内を出す条件に「thread の state が open」を含める\n\n## 補足\n\n- 今回の stop トリガー（親 issue close）は人の操作由来で、stop 伝播の機構自体は設計どおりに動きました。問題は merge 後の in-flight run が merge によって止まらず、別の事件に乗って止まったことです。\n- 影響例: merged PR で `/resume` を打っても review 対象は既に main にあるため、産出物は本命の work になりません（次の PR review には使えます）。\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-06T14:49:40Z",
@@ -3498,9 +3498,330 @@
     {
       "role": "assistant",
       "content": "Now the synth and the contract test for workflow, plus new tests. First, verify synthesis:",
+      "atoma_metadata": {
+        "agent": "engineer",
+        "github_comment_id": 6689851634
+      },
+      "finish_reason": "stop"
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n続けて。このIssueの作業が終わったならクローズして。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-06T16:30:43Z",
+        "event_type": "issue_comment",
+        "id": 6689894626,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_0eox1f4g1zm082w1vl8mny16",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && git log --oneline -3\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Let me continue. I need to check what state the work is in. I had made edits. Let me verify the current state: git status, typecheck, synth, tests.\n\nI should add tests: new script's colocated test, contract test for the workflow job, and post_result_comment tests for the merged thread branch. Then run full test suite, commit, create PR.\n\nLet me check state first.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_a8e9da2c5d884ad99f1ab66ff3e97ad3",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"884da10 Merge pull request #457 from yuma-seno/self-deploy/v0.21.56\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":294}",
+      "tool_call_id": "call_00_0eox1f4g1zm082w1vl8mny16"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_mekxvkxkswvw097h2zolffd8",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && pwd && git status && ls -la src/entrypoints/machinery/stop_on_pr_close.ts && grep -c \\\"stopOnPrClose\\\" src/workflows/atomaton-pr-closed.wac.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Interesting — `git status --short` shows nothing? But I edited files. Let me check.\n\nWait, status shows empty. That's strange. Maybe the edits were to a different working directory? Let me check.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_6b85887a779b4d5b9509e9fa73358a61",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"failed\",\"exit_code\":2,\"stdout\":\"/home/runner/work/atomaton/atomaton\\nOn branch main\\nYour branch is up to date with 'origin/main'.\\n\\nnothing to commit, working tree clean\\n\",\"stderr\":\"ls: cannot access 'src/entrypoints/machinery/stop_on_pr_close.ts': No such file or directory\\n\",\"output_truncated\":false,\"execution_time_ms\":126}",
+      "tool_call_id": "call_00_mekxvkxkswvw097h2zolffd8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_anz6bwdnzdwmeq046u89ik0k",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"ls -la /tmp/atomaton-workspace 2>/dev/null | head -20\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The work tree was discarded — this is a new run (new session), and my previous session's edits were never committed. So the files are gone. I need to redo the work.\n\nLet me check whether /tmp/atomaton-workspace has anything from the previous run.\n\nActually, the previous run's edits are lost. I must redo them. The previous run had done:\n1. `closed-target.ts`: `isMerged` helper + `stopOnPullRequestCloseNotice`\n2. `thread.ts`: `openClaimStopState`\n3. New script `stop_on_pr_close.ts`\n4. `atomaton-pr-closed.wac.ts`: new `stop-run` job\n5. `post_result_comment.ts`: `mentionLine` branch + `nodeFacts`\n\nI need to redo all of it. I have the full understanding and code in context (my previous reasoning). Let me check /tmp/atomaton-workspace first.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_5818a081a34547bda32da260eec86406",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"total 12\\ndrwxrwxr-x+  2 runner runner 4096 Nov  6 16:31 .\\ndrwxrwxrwt  12 root   root   4096 Nov  6 16:31 ..\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":121}",
+      "tool_call_id": "call_00_anz6bwdnzdwmeq046u89ik0k"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_uofy8f0ouxzo3sk14swg8n4x",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git branch -a && git log --all --oneline -8\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The worktree is clean — my edits are gone. This is a new run (the previous run apparently ended without committing, and the worktree was discarded). The workspace is empty too. So I need to redo the implementation.\n\nWait — the message above says \"続けて。このIssueの作業が終わったならクローズして。\" (Continue. Close the issue when the work on it is done.) That's a continuation request from the person. But the worktree is clean: my previous edits were not committed, so they are lost. I need to redo them.\n\nLet me check whether there's a branch with my work.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_6fd3efae3b2e423db518455198fc765f",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"* main\\n  remotes/origin/atomaton-data\\n  remotes/origin/main\\n03afea6 session: archive engineer on issue 462\\n884da10 Merge pull request #457 from yuma-seno/self-deploy/v0.21.56\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":125}",
+      "tool_call_id": "call_00_uofy8f0ouxzo3sk14swg8n4x"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_3h0cp3g8fqqa8zdj749nwlg0",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\": 458}"
+          }
+        },
+        {
+          "id": "call_01_kr2ekk4d0io02u9b3u160nvz",
+          "type": "function",
+          "function": {
+            "name": "list_prs",
+            "arguments": "{\"state\": \"all\", \"limit\": 10}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The work tree is clean and my earlier edits are gone — this is a fresh run on the same issue, and the previous run's edits were never committed (the work tree is discarded when a run ends). Only /tmp/atomaton-workspace survives, and it is empty.\n\nSo I need to redo the implementation. Let me check the issue state and whether a PR exists for it.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_9f05851b90354aac91769b5826cd8da9",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":null,\"createdAt\":\"2026-11-06T14:49:40Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zcFpA\",\"name\":\"atomaton/in-progress\",\"description\":\"Issue is being worked on by an Atomaton agent\",\"color\":\"0366d6\"}],\"number\":458,\"state\":\"OPEN\",\"title\":\"マージ済み PR 上の in-flight run が merge を検出せず、stopped 報告が /resume 案内になる\",\"body\":\"## 起きたこと（実測）\\n\\nreviewer が PR を review 中（run 42232540109）に、その PR が merge されました:\\n\\n- 14:17:37 — claim（comment [6686958339](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6686958339)）。起動元は engineer の handoff 注記「PR created / `reviewer` follows if it passes」（#441 comment 6686892046）\\n- 14:27:05 — PR merge。この時点で in-flight run はレビュー完了前。merge は run に何もしません\\n- 14:36:47 — 約9分後、親 issue の close を契機に stop が伝播（comment [6687368369](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6687368369)：「this work was under it, so it is closed too」）\\n- 14:37:44 — `ended=stopped` の報告が **merged PR** 上に投稿され「Resume it, or say what to do instead」（comment [6687389162](https://github.com/yuma-seno/atomaton/issues/455#issuecomment-6687389162)）\\n\\nrun 自身の最後の発言は \\\"The PR is reported as merged.\\\" で merge を観測していましたが、stop 伝播と ending poster は PR の merge state を考慮していません。\\n\\n## 問題点\\n\\n1. **merge が中断として検出されない**: review 対象が main に入った後も run は走り続け（約9分）、その停止は無関係な親 issue の close に依存しました。\\n2. **死んだスレッド上の偽 signal**: merged PR への `/resume` 案内は、完了済みの work の再開を促します。stop 文案の「it is closed too」も「既に取り込まれた」という事実と逆向きです。\\n3. 中断が中断として検出され、誰かに返る、という構造自体は正しく動作しました。壊れているのは「返り先の state 判定」と「merge 時の runaway 検知」です。\\n\\n## 期待する形\\n\\n- PR が merged された時点で、その PR 上の in-flight run に merge を伝える（停止、または「review 不要」の notice 注入）。最低限、run が無関係なイベントを待たずに merge を検知して ending に到達すること\\n- merged PR 上での stopped 報告は「work は既に取り込まれた」ことを述べ、resume 案内を出さない（誘導先は親 thread へ）\\n- resume 案内を出す条件に「thread の state が open」を含める\\n\\n## 補足\\n\\n- 今回の stop トリガー（親 issue close）は人の操作由来で、stop 伝播の機構自体は設計どおりに動きました。問題は merge 後の in-flight run が merge によって止まらず、別の事件に乗って止まったことです。\\n- 影響例: merged PR で `/resume` を打っても review 対象は既に main にあるため、産出物は本命の work になりません（次の PR review には使えます）。\\n\",\"total_comments\":9,\"children\":[],\"pull_requests\":[]}",
+      "tool_call_id": "call_00_3h0cp3g8fqqa8zdj749nwlg0"
+    },
+    {
+      "role": "tool",
+      "content": "[{\"baseRefName\":\"main\",\"headRefName\":\"self-deploy/v0.21.56\",\"number\":457,\"state\":\"MERGED\",\"title\":\"deploy: apply v0.21.56 to .github/\"},{\"baseRefName\":\"main\",\"headRefName\":\"release/v0.21.56\",\"number\":456,\"state\":\"MERGED\",\"title\":\"release: declare 0.21.56\"},{\"baseRefName\":\"main\",\"headRefName\":\"atomaton/issue-441\",\"number\":455,\"state\":\"MERGED\",\"title\":\"post_result_comment: an empty failed run posts the failure notice (#441)\"},{\"baseRefName\":\"main\",\"headRefName\":\"fix/atoma-0.4.5-context-limit\",\"number\":454,\"state\":\"MERGED\",\"title\":\"Consume atoma v0.4.5 and name the context ceiling\"},{\"baseRefName\":\"main\",\"headRefName\":\"self-deploy/v0.21.55\",\"number\":453,\"state\":\"MERGED\",\"title\":\"deploy: apply v0.21.55 to .github/\"},{\"baseRefName\":\"main\",\"headRefName\":\"release/v0.21.55\",\"number\":452,\"state\":\"MERGED\",\"title\":\"release: declare 0.21.55\"},{\"baseRefName\":\"main\",\"headRefName\":\"atomaton/issue-449\",\"number\":450,\"state\":\"MERGED\",\"title\":\"Separate a hand-off from a chain that continues elsewhere (#449)\"},{\"baseRefName\":\"main\",\"headRefName\":\"self-deploy/v0.21.54\",\"number\":448,\"state\":\"MERGED\",\"title\":\"deploy: apply v0.21.54 to .github/\"},{\"baseRefName\":\"main\",\"headRefName\":\"release/v0.21.54\",\"number\":447,\"state\":\"MERGED\",\"title\":\"release: declare 0.21.54\"},{\"baseRefName\":\"main\",\"headRefName\":\"atomaton/issue-443\",\"number\":446,\"state\":\"MERGED\",\"title\":\"起票ツールがターンラベルを拒否する + ラベル意味論をdocsに固定 (#443)\"}]",
+      "tool_call_id": "call_01_kr2ekk4d0io02u9b3u160nvz"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_7mlnx9drkdi1xe61v70s4ncw",
+          "type": "function",
+          "function": {
+            "name": "get_issue_comments",
+            "arguments": "{\"from\": 7, \"issue_number\": 458, \"to\": 9}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The workspace has been reset — the previous run's edits were lost (the work tree was discarded since I never committed). The issue #458 is still open, no PR exists for it. Comment count is now 9 (previous run added comments).\n\nLet me check the latest comments on #458 to see what the previous run reported.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_a3b80405e85d40849ecbeee2110c3f1e",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"issue\":{\"number\":458,\"kind\":\"issue\",\"title\":\"マージ済み PR 上の in-flight run が merge を検出せず、stopped 報告が /resume 案内になる\",\"state\":\"OPEN\",\"total_comments\":9,\"children\":[],\"pull_requests\":[]},\"showing\":\"comment(s) 7-9 of 9; pass from/to to read the rest\",\"comments\":[{\"index\":7,\"id\":\"IC_kwDOUudl8s8AAAABjr8I8g\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Now the synth and the contract test for workflow, plus new tests. First, verify synthesis:\\n\\n\\n@yuma-seno — **engineer** task completed. No agent will be automatically executed next. Please review the results or provide instructions for the next step.\\n\\n---\\n_Tokens: 13477611 total (13016408 prompt + 461203 completion, 12855040 of the prompt cached)_\\n_run by [engineer](https://github.com/yuma-seno/atomaton/actions/runs/42243314965) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\\n_Counted from the session: 3 refused or errored tool calls._\",\"createdAt\":\"2026-11-06T16:28:42Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/458#issuecomment-6689851634\",\"viewerDidAuthor\":true},{\"index\":8,\"id\":\"IC_kwDOUudl8s8AAAABjr-w4g\",\"author\":{\"login\":\"yuma-seno\"},\"authorAssociation\":\"OWNER\",\"body\":\"/engineer\\n続けて。このIssueの作業が終わったならクローズして。\",\"createdAt\":\"2026-11-06T16:30:43Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/458#issuecomment-6689894626\",\"viewerDidAuthor\":false},{\"index\":9,\"id\":\"IC_kwDOUudl8s8AAAABjr_1Rw\",\"author\":{\"login\":\"github-actions\"},\"authorAssociation\":\"CONTRIBUTOR\",\"body\":\"Atomaton: claimed this turn.\",\"createdAt\":\"2026-11-06T16:31:32Z\",\"includesCreatedEdit\":false,\"isMinimized\":false,\"minimizedReason\":\"\",\"reactionGroups\":[],\"url\":\"https://github.com/yuma-seno/atomaton/issues/458#issuecomment-6689912135\",\"viewerDidAuthor\":true}]}",
+      "tool_call_id": "call_00_7mlnx9drkdi1xe61v70s4ncw"
+    },
+    {
+      "role": "assistant",
+      "content": "The previous run's edits were never committed — the worktree is clean at `884da10`. I'll redo the implementation. Starting with the domain layer:",
+      "tool_calls": [
+        {
+          "id": "call_00_a8kf7p1c1y2k5c14gfjos53g",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"path\": \"src/domain/work/closed-target.ts\", \"old_string\": \"/**\\n * Whether a person could put this target back where work can run.\\n *\\n * Merging is the one ending GitHub makes final. Everything else that ended —\\n * an issue completed or dropped, a pull request closed without merging — reopens.\\n *\\n * Derived rather than stored. This used to be a `merged: boolean` carried beside a\\n * `closed` case, which was the third place in this repository spelling the same\\n * fact its own way: `NodeState` says a pull request that is `done` is one that\\n * merged, and `kind` is already here.\\n */\\nexport function canBeReopened(target: TargetState): boolean {\\n  return target.known && !(target.kind === \\\"pull-request\\\" && target.state === \\\"done\\\");\\n}\", \"new_string\": \"/**\\n * Whether this target is a pull request that landed.\\n *\\n * The one ending GitHub makes final, and the reason the notices below read the way\\n * they do: a merged pull request cannot be reopened and nothing can be started on it,\\n * so \\\"resume it\\\" is advice nobody can follow there.\\n *\\n * Derived rather than stored. This used to be a `merged: boolean` carried beside a\\n * `closed` case, which was the third place in this repository spelling the same\\n * fact its own way: `NodeState` says a pull request that is `done` is one that\\n * merged, and `kind` is already here.\\n */\\nexport function isMerged(target: TargetState): boolean {\\n  return target.known && target.kind === \\\"pull-request\\\" && target.state === \\\"done\\\";\\n}\\n\\n/**\\n * Whether a person could put this target back where work can run.\\n *\\n * Everything that ended reopens except a merge.\\n */\\nexport function canBeReopened(target: TargetState): boolean {\\n  return target.known && !isMerged(target);\\n}\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The previous run's work was NOT committed — the worktree is clean and no branch exists. The prior run made the edits but never committed, so they are gone. I must redo the implementation from scratch.\n\nI have all the knowledge from the prior run in my context (the file contents I read). Let me redo the work efficiently. I know:\n\n1. `src/domain/work/closed-target.ts` — add `isMerged()`, `stopOnPullRequestCloseNotice()`, refactor `canBeReopened`.\n2. `src/adapters/github/thread.ts` — add `openClaimStopState()`, import STOP_TAG.\n3. New `src/entrypoints/machinery/stop_on_pr_close.ts`.\n4. `src/workflows/atomaton-pr-closed.wac.ts` — new job + import + header.\n5. `src/entrypoints/machinery/post_result_comment.ts` — `mentionLine` continuation, `nodeFacts`.\n6. Tests.\n\nSince the previous run's files are gone, I need to rewrite them. I have exact content in context for most. Let me be efficient: write the files, then typecheck, then tests.\n\nLet me start. First re-read the small relevant parts of current files to make edits precisely (they're at HEAD state, unchanged).\n\nActually all edits I did earlier were applied to files that then got discarded. So the files are at HEAD. I need to redo them. I have the exact edits in context. Let me apply them again with the same edits.\n\nPlan of edits:\n1. `closed-target.ts`: replace canBeReopened block with isMerged + canBeReopened; add stopOnPullRequestCloseNotice before commandOnClosedNotice.\n2. `thread.ts`: import STOP_TAG; add openClaimStopState.\n3. `stop_on_pr_close.ts`: write file.\n4. `atomaton-pr-closed.wac.ts`: import, header, job, jobs list.\n5. `post_result_comment.ts`: imports, nodeFacts replacing subIssueState, mentionLine + continuation, args type field, main() wiring.\n6. Tests: new `stop_on_pr_close.test.ts`; contract test in post-merge-reinvoke.test.ts or generated-workflows; post_result_comment.test.ts additions.\n\nLet me do it in batched calls.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_b3f75051e6124d979a08ff5975af05e0",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/domain/work/closed-target.ts.",
+      "tool_call_id": "call_00_a8kf7p1c1y2k5c14gfjos53g"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_euw71xptunadudra3m6uj4le",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * What a pull request's own close leaves on its thread when a run was working there.\\n *\\n * The other node kind's receipt, beside `stopOnCloseNotice`. A pull request that merges\\n * or closes out from under a run does not stop it by itself either, and the run's own\\n * thread is where that has to be said — nothing else reaches a running job.\\n *\\n * Two outcomes, two sentences, because they leave the person in different places. A\\n * merge is final: the work the pull request carried is in, so nothing here is resumable.\\n * A close that merged nothing leaves a pull request that can be reopened and dispatched.\\n * Neither offers the way back — the run's own report says what it managed and how to\\n * continue, and this says only what is true when it is posted.\\n */\\nexport function stopOnPullRequestCloseNotice(number: number, merged: boolean): string {\\n  if (merged) {\\n    return [\\n      \\\"Atomaton: this pull request was merged while an agent was working on it, so the run has been asked to stop.\\\",\\n      \\\"\\\",\\n      \\\"Merging does not reach a run by itself — it kept going until this request arrived. The run stops after its current step, so it may take a minute.\\\",\\n      \\\"\\\",\\n      \\\"The work this pull request carried is merged already, so there is nothing here to resume. The run will report on this thread when it has stopped.\\\",\\n    ].join(\\\"\\\\n\\\");\\n  }\\n  return [\\n    `Atomaton: #${number} was closed while an agent was working on it, so the run has been asked to stop.`,\\n    \\\"\\\",\\n    \\\"Closing does not reach a run by itself — it kept going until this request arrived. The run stops after its current step, so it may take a minute.\\\",\\n    \\\"\\\",\\n    \\\"The run will report on this thread when it has stopped.\\\",\\n  ].join(\\\"\\\\n\\\");\\n}\\n\\n/**\\n * The reply to a slash command on a closed issue or pull request.\", \"old_string\": \"/**\\n * The reply to a slash command on a closed issue or pull request.\", \"path\": \"src/domain/work/closed-target.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/domain/work/closed-target.ts.",
+      "tool_call_id": "call_00_euw71xptunadudra3m6uj4le"
+    },
+    {
+      "role": "assistant",
+      "content": "Now the thread adapter reader:",
+      "tool_calls": [
+        {
+          "id": "call_00_tpppbploz98pgup0ftr472af",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * What a stop aimed at an in-flight run on this node has to know before writing: whether\\n * a run holds the turn, and whether a stop is already on the thread that this run would\\n * see.\\n *\\n * ## Why the claim, and not `runInFlight`\\n *\\n * `runInFlight` answers \\\"should you expect a run here\\\", and for a merged pull request it\\n * deliberately drops half the answer (#449): nothing can be started on one, so \\\"a request\\n * is the newest word\\\" stops being evidence of anything. This asks the other question —\\n * \\\"is a run watching this thread right now\\\" — and a merge says nothing about it. The run\\n * that merges a pull request is the ordinary reviewer case: it holds the claim it wrote\\n * at start and keeps watching until it ends. Asked through `runInFlight(..., { merged:\\n * true })` that run answers \\\"no run\\\", which is exactly the run a merge-derived stop\\n * exists to reach.\\n *\\n * So the answer is the open claim alone: an `atomaton:took` with no ending answering it.\\n *\\n * ## Why a stop older than the claim does not count\\n *\\n * The watcher honours only a stop written after the run began watching\\n * (`watch_for_stop.ts` polls one page since its own start), so a stop left by an earlier\\n * run on this node is invisible to this one. Counting it would suppress the request and\\n * leave a run nobody can stop. The comparison is positional — the listing arrives oldest\\n * first — so it needs no timestamps and cannot disagree with the order the readers fold.\\n *\\n * A quotation is skipped: it carries the removed author's words, so a stop tag inside one\\n * is not the machinery asking.\\n *\\n * Throws when the thread cannot be read, like every other reader here: a caller deciding\\n * whether to post a stop must not read a failed read as \\\"nobody is running\\\".\\n */\\nexport function openClaimStopState(\\n  repo: string,\\n  number: string | number,\\n): { claimed: boolean; requested: boolean } {\\n  const entries = listComments(repo, number).map(entryOf);\\n  if (shapedThread(entries, readers).openClaim === undefined) return { claimed: false, requested: false };\\n\\n  let claimAt = -1;\\n  let stopAt = -1;\\n  entries.forEach((entry, index) => {\\n    if (entry.quoted === true) return;\\n    if (readers.claim(entry.body) !== undefined) claimAt = index;\\n    if (STOP_TAG.hasProse(entry.body)) stopAt = index;\\n  });\\n  return { claimed: true, requested: stopAt > claimAt };\\n}\\n\\n/**\\n * Whether a run is in flight on a node, read from its thread.\\n\", \"old_string\": \"/**\\n * Whether a run is in flight on a node, read from its thread.\\n\", \"path\": \"src/adapters/github/thread.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/adapters/github/thread.ts.",
+      "tool_call_id": "call_00_tpppbploz98pgup0ftr472af"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_whppigobe1etjs5o5kecgzpw",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, STOP_TAG, TOOK_TAG } from \\\"./tags.ts\\\";\", \"old_string\": \"import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, TOOK_TAG } from \\\"./tags.ts\\\";\", \"path\": \"src/adapters/github/thread.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/adapters/github/thread.ts.",
+      "tool_call_id": "call_00_whppigobe1etjs5o5kecgzpw"
+    },
+    {
+      "role": "assistant",
+      "content": "Now the script. Let me check `target-state.ts` against a stale check first, then write it:",
       "finish_reason": "stop",
       "atoma_metadata": {
-        "github_comment_id": 6689851634,
+        "github_comment_id": 6689938802,
         "agent": "engineer"
       }
     }
@@ -3508,11 +3829,11 @@
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 4,
-      "snapshot_hash": "b4352e277372855d0eb0e30eb2f44400844b82b55ad751644a9f8c5828b0b0d5",
-      "version": 1,
+      "event_count": 5,
+      "session_number": "458",
+      "snapshot_hash": "71e434a0f491168c3d449da1bcf62dd45698a4a82d8c236e94cef4390599cc13",
       "type": "issue",
-      "session_number": "458"
+      "version": 1
     }
   },
   "atoma_runs": [
@@ -3539,6 +3860,28 @@
         }
       },
       "started": "2026-11-06T15:28:52Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-06T16:32:46Z",
+      "ended_because": "completed",
+      "iterations": 11,
+      "messages": 277,
+      "seconds": 66,
+      "server_calls": {
+        "files": {
+          "edit": 4
+        },
+        "github": {
+          "get_issue": 1,
+          "get_issue_comments": 1,
+          "list_prs": 1
+        },
+        "shell": {
+          "bash": 4
+        }
+      },
+      "started": "2026-11-06T16:31:40Z"
     }
   ]
 }
