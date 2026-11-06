@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 127 | 3.9% | 229 | 4,277 | 5 | 36.0 |
-| Last 30 days | 537 | 5.4% | 240 | 9,859 | 13 | 18.1 |
-| Last year | 567 | 5.5% | 247 | 10,246 | 14 | 19.0 |
-| All time | 567 | 5.5% | 247 | 10,246 | 14 | 19.0 |
+| Last 7 days | 128 | 3.9% | 230 | 4,277 | 5 | 36.0 |
+| Last 30 days | 538 | 5.4% | 240 | 9,859 | 12 | 18.1 |
+| Last year | 568 | 5.5% | 248 | 10,246 | 14 | 19.0 |
+| All time | 568 | 5.5% | 248 | 10,246 | 14 | 19.0 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 536 |
+| `completed` | 537 |
 | `failed` | 20 |
 | `stopped` | 11 |
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 696,776 | 2,480,201 | 9,658,210 | 9,658,210 | 66,274,707 |
-| messages per session | 103 | 188 | 292 | 292 | 4,850 |
+| messages per session | 103 | 188 | 292 | 292 | 4,871 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -68,21 +68,22 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `get_branch` | 22 | 0 | 0 | 0% |
 | `get_pr_diff` | 19 | 0 | 0 | 0% |
 | `request_close_issue` | 18 | 0 | 0 | 0% |
+| `create_sub_issue` | 16 | 0 | 0 | 0% |
 | `write` | 15 | 1 | 0 | 6.7% |
 | `get_pr_reviews` | 14 | 0 | 0 | 0% |
 | `merge_pr` | 14 | 0 | 0 | 0% |
-| `create_sub_issue` | 13 | 0 | 0 | 0% |
-| `launch_sub_agent` | 11 | 0 | 0 | 0% |
+| `launch_sub_agent` | 12 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 8 | 0 | 0 | 0% |
-| `create_root_issue` | 5 | 0 | 0 | 0% |
+| `create_root_issue` | 6 | 0 | 0 | 0% |
 | `list_prs` | 5 | 0 | 0 | 0% |
 | `search_code` | 5 | 0 | 0 | 0% |
 | `search_issues` | 5 | 0 | 0 | 0% |
 | `search_remote_code` | 5 | 1 | 0 | 20% |
+| `delegate` | 4 | 0 | 0 | 0% |
 | `delegate_readonly` | 4 | 0 | 0 | 0% |
 | `load_skill` | 4 | 4 | 0 | 100% |
+| `delegate_large` | 3 | 0 | 0 | 0% |
 | `sync_branch` | 3 | 3 | 0 | 100% |
-| `delegate` | 2 | 0 | 0 | 0% |
 | `list_issues` | 2 | 0 | 0 | 0% |
 | `publish_draft` | 2 | 0 | 0 | 0% |
 
@@ -118,7 +119,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,143,930 | 4,948,355 | 28,119,706 | 73,718,100 | 648,442,255 |
-| messages per session | 110 | 292 | 705 | 731 | 32,435 |
+| messages per session | 110 | 292 | 705 | 731 | 32,456 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -156,13 +157,13 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `list_prs` | 49 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 37 | 0 | 0 | 0% |
 | `web__fetch` | 31 | 5 | 0 | 16.1% |
+| `create_root_issue` | 29 | 1 | 0 | 3.4% |
 | `search_code` | 29 | 0 | 0 | 0% |
-| `create_root_issue` | 28 | 1 | 0 | 3.6% |
 | `search_remote_code` | 28 | 7 | 0 | 25% |
 | `delegate_readonly` | 25 | 0 | 0 | 0% |
-| `launch_sub_agent` | 24 | 2 | 0 | 8.3% |
-| `delegate` | 22 | 0 | 0 | 0% |
-| `create_sub_issue` | 17 | 0 | 0 | 0% |
+| `launch_sub_agent` | 25 | 2 | 0 | 8% |
+| `delegate` | 24 | 0 | 0 | 0% |
+| `create_sub_issue` | 20 | 0 | 0 | 0% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `list_issues` | 15 | 0 | 0 | 0% |
 | `sync_branch` | 14 | 6 | 0 | 42.9% |
@@ -171,6 +172,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `probe` | 8 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 7 | 0 | 3 | 0% |
 | `github__get_check_runs` | 7 | 0 | 0 | 0% |
+| `delegate_large` | 6 | 0 | 0 | 0% |
 | `load_skill` | 6 | 6 | 0 | 100% |
 | `close_issue` | 5 | 0 | 0 | 0% |
 | `github__get_pr` | 5 | 0 | 0 | 0% |
@@ -181,7 +183,6 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_pr_reviews` | 4 | 0 | 0 | 0% |
 | `publish_draft` | 4 | 0 | 0 | 0% |
 | `search__search_issues` | 4 | 0 | 0 | 0% |
-| `delegate_large` | 3 | 0 | 0 | 0% |
 | `github__check_merge_readiness` | 3 | 0 | 0 | 0% |
 | `github__commit_and_push` | 2 | 0 | 0 | 0% |
 | `merge_base_into_branch` | 2 | 0 | 0 | 0% |
@@ -226,7 +227,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,211,508 | 5,255,408 | 28,119,706 | 73,718,100 | 724,266,370 |
-| messages per session | 113 | 303 | 705 | 731 | 36,202 |
+| messages per session | 113 | 303 | 705 | 731 | 36,223 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -270,15 +271,15 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
+| `create_root_issue` | 29 | 1 | 0 | 3.4% |
 | `search_code` | 29 | 0 | 0 | 0% |
-| `create_root_issue` | 28 | 1 | 0 | 3.6% |
 | `search_remote_code` | 28 | 7 | 0 | 25% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `delegate_readonly` | 25 | 0 | 0 | 0% |
-| `launch_sub_agent` | 24 | 2 | 0 | 8.3% |
-| `delegate` | 22 | 0 | 0 | 0% |
+| `launch_sub_agent` | 25 | 2 | 0 | 8% |
+| `delegate` | 24 | 0 | 0 | 0% |
+| `create_sub_issue` | 20 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
-| `create_sub_issue` | 17 | 0 | 0 | 0% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
 | `list_issues` | 15 | 0 | 0 | 0% |
@@ -292,12 +293,12 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `probe` | 8 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 7 | 0 | 3 | 0% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
+| `delegate_large` | 6 | 0 | 0 | 0% |
 | `load_skill` | 6 | 6 | 0 | 100% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `close_issue` | 5 | 0 | 0 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
 | `publish_draft` | 4 | 0 | 0 | 0% |
-| `delegate_large` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
@@ -346,7 +347,7 @@ Neither figure covers 9 sessions with no run record at all — without one, neit
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,211,508 | 5,255,408 | 28,119,706 | 73,718,100 | 724,266,370 |
-| messages per session | 110 | 301 | 705 | 731 | 36,255 |
+| messages per session | 110 | 301 | 705 | 731 | 36,276 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -390,15 +391,15 @@ Neither figure covers 9 sessions with no run record at all — without one, neit
 | `github__get_check_runs` | 35 | 0 | 0 | 0% |
 | `github__get_branch` | 32 | 0 | 0 | 0% |
 | `github__get_pr` | 30 | 3 | 0 | 10% |
+| `create_root_issue` | 29 | 1 | 0 | 3.4% |
 | `search_code` | 29 | 0 | 0 | 0% |
-| `create_root_issue` | 28 | 1 | 0 | 3.6% |
 | `search_remote_code` | 28 | 7 | 0 | 25% |
 | `github__list_prs` | 27 | 0 | 0 | 0% |
 | `delegate_readonly` | 25 | 0 | 0 | 0% |
-| `launch_sub_agent` | 24 | 2 | 0 | 8.3% |
-| `delegate` | 22 | 0 | 0 | 0% |
+| `launch_sub_agent` | 25 | 2 | 0 | 8% |
+| `delegate` | 24 | 0 | 0 | 0% |
+| `create_sub_issue` | 20 | 0 | 0 | 0% |
 | `github__create_issue` | 19 | 0 | 0 | 0% |
-| `create_sub_issue` | 17 | 0 | 0 | 0% |
 | `create_issue` | 15 | 4 | 0 | 26.7% |
 | `github__check_merge_readiness` | 15 | 0 | 0 | 0% |
 | `list_issues` | 15 | 0 | 0 | 0% |
@@ -412,12 +413,12 @@ Neither figure covers 9 sessions with no run record at all — without one, neit
 | `probe` | 8 | 0 | 0 | 0% |
 | `delegate_readonly_large` | 7 | 0 | 3 | 0% |
 | `atomaton__request_close_issue` | 6 | 1 | 0 | 16.7% |
+| `delegate_large` | 6 | 0 | 0 | 0% |
 | `load_skill` | 6 | 6 | 0 | 100% |
 | `atomaton__launch_sub_agent` | 5 | 0 | 0 | 0% |
 | `close_issue` | 5 | 0 | 0 | 0% |
 | `delegate_readonly__run` | 4 | 0 | 0 | 0% |
 | `publish_draft` | 4 | 0 | 0 | 0% |
-| `delegate_large` | 3 | 0 | 0 | 0% |
 | `search__search_code` | 3 | 0 | 0 | 0% |
 | `delegate__run` | 2 | 0 | 0 | 0% |
 | `github__close_issue` | 2 | 0 | 0 | 0% |
