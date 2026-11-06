@@ -18231,23 +18231,36 @@
   {
     "path": "sessions/issue-460/engineer.json",
     "agent": "engineer",
-    "messages": 336,
-    "calls": 174,
+    "messages": 253,
+    "calls": 125,
     "failed": 2,
-    "refused": 0,
-    "skills": [],
-    "reported": false,
+    "refused": 1,
+    "skills": [
+      "project/conventions",
+      "project/conventions"
+    ],
+    "reported": true,
     "tools": {
-      "bash": 120,
-      "read": 16,
-      "edit": 35,
-      "get_issue": 1,
-      "commit_and_push": 1,
-      "create_pr": 1
+      "bash": 82,
+      "get_issue": 2,
+      "read": 3,
+      "edit": 14,
+      "commit_and_push": 3,
+      "create_pr": 1,
+      "get_check_runs": 10,
+      "fetch": 1,
+      "get_pr": 2,
+      "list_pr_review_comments": 1,
+      "grep": 1,
+      "get_pr_reviews": 1,
+      "check_merge_readiness": 1,
+      "load_skill": 1,
+      "atoma_builtin__load_skill": 1,
+      "get_issue_comments": 1
     },
     "acts": {
-      "other": 118,
-      "edit": 2
+      "other": 81,
+      "edit": 1
     },
     "runs": [
       {
@@ -18274,6 +18287,37 @@
           }
         },
         "started": "2026-11-06T14:59:52Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-06T16:59:02Z",
+        "ended_because": "completed",
+        "iterations": 70,
+        "messages": 253,
+        "seconds": 1315,
+        "server_calls": {
+          "files": {
+            "edit": 4,
+            "grep": 1
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "commit_and_push": 2,
+            "get_check_runs": 10,
+            "get_issue": 1,
+            "get_issue_comments": 1,
+            "get_pr": 2,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          },
+          "shell": {
+            "bash": 45
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-06T16:37:07Z"
       }
     ]
   },
@@ -19583,5 +19627,54 @@
     "tools": {},
     "acts": {},
     "runs": []
+  },
+  {
+    "path": "sessions/pr-463/archive/engineer-1.json",
+    "agent": "engineer",
+    "messages": 341,
+    "calls": 174,
+    "failed": 2,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "bash": 120,
+      "read": 16,
+      "edit": 35,
+      "get_issue": 1,
+      "commit_and_push": 1,
+      "create_pr": 1
+    },
+    "acts": {
+      "other": 118,
+      "edit": 2
+    },
+    "runs": [
+      {
+        "compactions": 1,
+        "ended": "2026-11-06T16:33:53Z",
+        "ended_because": "completed",
+        "iterations": 210,
+        "messages": 336,
+        "seconds": 5641,
+        "server_calls": {
+          "files": {
+            "edit": 35,
+            "grep": 1,
+            "read": 35
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1,
+            "get_issue": 1,
+            "get_issue_comments": 5
+          },
+          "shell": {
+            "bash": 165
+          }
+        },
+        "started": "2026-11-06T14:59:52Z"
+      }
+    ]
   }
 ]
