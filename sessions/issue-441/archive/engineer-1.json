@@ -1,0 +1,100 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #441: run 失敗時に ending が投稿されない経路がある（#12 のセッション上限死で観測）\n**Labels:** atomaton/in-progress\n\n## 観測\n\n2026-11-03 16:39 の親集約 run（`atomaton on #12`、https://github.com/yuma-seno/atomaton/actions/runs/41676398871）で、run が**失敗し、かつ終了コメントが1件も投稿されない**まま終わった。スレッドは dispatch マーカーの後で無言になり、label だけ `waiting-for-person` に替わった。Actions の結論は success。以下が実測:\n\n1. 集約セッションは長寿（事前メッセージ 143 件）。iteration 5 で `prompt=200430` / 上限 200,000\n2. compaction 不可能: `the recent turns already fill the context budget, so there is nothing to compact away` → `Session exceeded its context limit (200430 of 200000 tokens) and could not be compacted`\n3. `read_run_ending: ended_because=failed reported=false`\n4. **`post_result_comment.ts`: `atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment`** — 結果コメントをスキップ\n5. 「Report failure」step は skipped（post_result_comment が step 成功で終わったため）。decide_turn_ending は `ended=failed should_release=true` で label 替えのみ\n\n## 欠陥（契約との矛盾）\n\n「1 run = 1 ending」契約に対して、**失敗 run が ending を残せない経路が存在する**:\n\n- `--ended-because failed --reported false` かつ output が空（tool call で終わった）のとき、post_result_comment は ending を書かない\n- 失敗通知の代役（`report_run_failure.ts`）は job 失敗時のみで、この経路は対応しない\n- 結果: thread に機械の痕跡が残らず、人には run を開いてログを読むまで状況が分からない。watch/reconcile（死んだ run の補完）も無反応（job は success のため）\n\n## 提案\n\n1. `ended_because=failed` かつ output が空のとき、machinery 自身が失敗 ending を投稿する。内容は既存の「did not finish」形式（セッション保存済みの案内、`/agent recover` の案内、`atomaton:ended=` マーカー、notify で人に届く）相当に揃える。ログ末尾の要因（本件では ctx 上限死の WARN 2行）を引用に含めると人への届き方が最も良い\n2. ついでに欠陥の上位原因: **200k 上限に届いた長寿セッションが「compact 不能」で死ぬ**。直近の turns が予算を満たしていると何も落ちない、という設計は长期 issue（親の集約など数日またぐノード）で再発する。最低でも「最古の側を落としつつ直近を維持」か、閾値到達時の早期 recover 案内（ending に書く）のどちらかを検討してほしい。同じ長寿セッションでは、上限到達まで次の run が毎回同点で死ぬ恐れがある\n\n## 受け入れ条件の草案（machinery 側で調整可）\n\n- ctx 上限死相当の run（output 空・failed・reported=false）で、ending コメントが必ず1件投稿される\n- その ending には `atomaton:ended=` マーカーがある（watcher が検出できる）\n- 並行して既存の契約テストが壊れない\n",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-441",
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T08:05:03Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n上記の見解が間違っている可能性もあるので、調査から始めてください。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6653002395,
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T08:07:56Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "ワークスペースを掃除し、調査は完遂しました。以下が #441 の調査報告です。\n\n---\n\n@yuma-seno 調査が完遂したので報告します。**結論: issue の主張3点はすべて実装どおり正しく、さらに根本原因が1段深い** — コア(yuma-seno/atoma)が context 上限死を「`failed` という ending + exit 2」という二重不一致で記録し、machinery 側の全経路が `failed` を ending として model していないため、どこも投稿せず、watch も claim 欠落で無力化されていました。\n\n## 連鎖の全体像(すべて実装/実データで確認)\n\n1. **コア**: engineer の run が iteration 5 の直後、`last_prompt_tokens 200,430 / 200,000` で budget check に掛かる。compact は要約推論まで**成功**させた後、組み立て段階で `batches <= 1` を理由に None を返して拒否 → `CompactRefusedError` → soft stop → **exit 2**(`main.rs:160-162`)。一方 `ending_of()`(`runner/mod.rs:232-244`)に `ContextBudgetExceeded` の arm が無く **fall-through で \"failed\"** を記録(`mod.rs:557`)。セッション実測: `ended_because:\"failed\", iterations:5, compactions:0, 16:40:50→16:49:04`。\n2. **workflow**: `continue-on-error: true`(`atomaton-runner.yml:748-750`)のため exit 2 でも `steps.atoma.outcome == 'success'`。→ **issue の「post_result_comment が成功で終わったため Report failure が発火しない」はやや不正確で、真因は outcome=success 自体**(`:1158-1171` の条件 `atoma.outcome == 'failure'` が永遠に偽)。\n3. **machinery**: post_result_comment は走ったが、`cutShort()` が `failed` を含まない(`post_result_comment.ts:366`)→ output 空 && `endedWithToolCalls`(最終 assistant が tool_calls — セッション末尾が `fetch,fetch` の tool_calls で終端していることを実データで確認)→ **「skipping result comment」で無言 return**(`:911-915`)。no-report 通知(`:928-957`)も `failed` を model していない。`endingHere()` は `succeeded: true` hardcode(`:434-448`)、mention 判定も同様。label は `decide_turn_ending`→`should_release=true` で waiting-for-person に遷移(観測どおり)。\n4. **claim 欠落(issue に無い新所見)**: 観測 run はスレッドに claim を書いていない。実測すると、集約マーカー 6609805388 に `atomaton:dispatch` タグ・`took` 行が無く `updated_at==created_at`(未編集)。`claim_turn.ts:199-202` は **ask<=0 なら claimed=true を出力して何も書かない**。ask が空のまま runner に渡る唯一の in-code 経路は、`aggregation.ts:344-352` の dispatchRunner 呼び出しで markerCommentId を渡しておらず、dispatchRunner 自前のマーカー POST が失敗した場合(`dispatch.ts:444-447` —「marker 無ければ ordering check を飛ばし dispatch は続行」)。\n5. **watch の沈黙**: `reconcile_run_ending.ts:237-241` は `turnClaimedBy(thread, runId)` が undefined のとき「claimed no ask; nothing to do」。**claim 無し run は watch の設計上の死角**。帰結として guard は 11-05 08:06/08:11 の人間の `/atomaton recover` を 2回削除(comments 6652979044, 6653065014)。\n6. **次に起きること**: 次の Actions 起動は exit 2 → `read_run_ending.ts` は ended_because を出力できず step 失敗 → Report failure は発火せず → **再び無言**。さらに継続モードで 200,430 トークンの session を引き継ぐため、1回の推論(200k 級プロンプト)→ 同じ budget check → 同じ None → **同点で死に続けます**(1 run につき 200k 級の推論を2発 — 本体+要約 — 支払った上で)。脱出は人が手で session を archive するしかない。\n\n## 確定できなかったこと\n\n- dispatch マーカー POST が実際に失敗した事実と HTTP 原因(レート制限等)— dispatching run の Actions ログが必要で、anonymous API では取得不可(401)。挙動は thread+session+コードから完全に再構成できていますが、ログ本文は未確認。\n- 16:39 に走っていた集約 run の ID 同定(run 開始 12秒前の \"PR #440 merged\" コメント 6609764484 からの間接根拠のみ)。\n\n## 次の一手(決定はお任せします。1と4が machinery、2と3が core)\n\n1. **machinery**: post_result_comment に `failed`+空 output+tool call 終了の投稿経路を追加。`report_run_failure.ts:114-160` の failureNotice(session 保存案内+recovery lines+ended ヘッダ)を流用し、**ENDED_TAG(run=, answers=)を必ず付ける** — これが watch を復活させる鍵。併せて mentionLine(`:424-431`)に failed 用文言(現状の fall-through は「task completed. Please review the results」)。既存テストは skip 経路を completed 前提で固定しているため壊れません。logExcerpt の INTERESTING 正規表現に `context limit`(か WARN)が無いと今回の2行は抜ける点にも注意。\n2. **core**: `ending_of()` に `ContextBudgetExceeded` の arm を追加し、exit 契約(soft stop=exit 2)と ending 語彙を揃える。read_run_ending が ended_because を読めれば workflow 側の条件も outcome から ended_because に直せます。\n3. **core**: `context_budget.rs` の None 条件(`batches <= 1`)は過剰保守です。実測では直近バッチ ≈11.7k chars(≈3k トークン)で、要約+直近バッチは 200k に対し余裕十分 — **要約推論まで成功させた後に捨てた**のが今回。要約推論の前に None 判定する順序変更か、要約成功後の None を「要約のみ差し替えて続行」できる形状(issue 提案の oldest-drop fallback 含む)への見直しを推奨。\n4. **machinery**: 集約 dispatch の fail-closed 化 — marker POST 失敗時は dispatch せず次に委ねる。ask 空のまま runner に渡らない保証があれば claim 欠落は再発しません。\n\n脇: 調査中、`delegate_readonly` が 402 free_quota_exhausted で全滅していたため、サブ run に切り出さず本 run で完遂しました(環境側の不具合として一報)。\n\n調査のため、この issue は開いたままにします。sub-issue・PR は作っていません。\n\n\n---\n_Tokens: 9658210 total (9589148 prompt + 69062 completion, 9367552 of the prompt cached)_\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/41992141319) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6653507908,
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-05T08:36:25Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n最も美しい解決策はどういう形になる？coreも自分の所有リポジトリなので、修整可能です。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6674693613,
+        "author": "yuma-seno",
+        "created_at": "2026-11-06T01:51:23Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "結論から: **最も美しい形は、5つの欠陥すべてに共通する1つの失敗形 —「ある部品が文の途中で死に、残った断片を他の全員が意志ある状態として読んだ」— を構造で潰す設計です。** claim の残骸→「agent が生きている」、park の waiting→「親が来るはず」、無言→「誰かが代わりに話した」、exit 2→成功、`failed`→語彙外→沈黙。どれも同じ読み間違いです。だから解は「ending poster を足す」ことではなく、**中断が中断として検出され、必ず誰か(機械か人)に返る**構造にすることです。追加する機構は ending の名前1つ・文言の arm 1つ・watch に schedule 1本だけで、残りはすべて既存機構の向きの反転か、失敗モードそのものの削除です。\n\n## 1. core: compaction は「要約で置き換えられるものを拒否しない」— 一次原因の消滅\n\n現状は要約推論まで**成功**させてから、組み立てが `keep_from == 0 || batches <= 1` で None を返します(`context_budget.rs:161-167`、`execution.rs:353-356` の doc も「Err when there is nothing to compact」)。実測では直近バッチ ≈3k トークンで、要約+直近は 200k に余裕があるのに、**推論を払った後に捨てた**のが観測事故です。美しい形: **notice + 要約 + 収まるだけの直近バッチ(ツールバッチ非分割の既存不変式は維持、`execution.rs:350`)を常に採用。** 要約すら収まらない場合のみ、それ自体に名前のある ending(archive 済み+recover 案内)にする。帰結は2つあります。長寿セッションは上限で死なず続くこと。そして観測事故のように 200,430 トークンの session が残留した場合も、次 run の最初の budget check が compact に成功するだけで自己治癒すること — 「毎回同点で死ぬ」再発シナリオごと消えます。\n\n## 2. core: すべての soft stop に名前を。網羅性はコンパイラに強制\n\n`ending_of()` に `ContextBudgetExceeded` の arm が無く fall-through で \"failed\"(`runner/mod.rs:232-244`、`mod.rs:557`)— **exit 2 なのに failed という嘘が全連鎖の入口**でした。美しい形: ctx 死は `context_limit` という名前を持ち、**soft stop → ending の対応表を exhaustive な match にし、新しい soft stop は名前なしではコンパイルできない**。`runtime` 再利用という更に安い手もありますが、runtime は「再実行で治る上限」、ctx は「session 自体が超過」で次の一手が違うので、語彙を増やす(=machinery に文言1行足す)価値があります。配管は既に通っています: core が session に名前を書けば read_run_ending がそれを読み(`atomaton-runner.yml:998-1010` のコメントがその契約を明記)、post_result_comment まで届く — **workflow は語彙に一切手を付けなくてよい**。workflow に残る欠陥は1つ: Report failure の条件(`:1158-1171`)が outcome を読むため soft stop では到達不能。美しい終形は「**コメントを書く step は1つ**」で、Report failure は「成果物が無い」場合の arm として単一 writer に畳みます。\n\n## 3. machinery: skip は「run が自分で話した証拠」があるときだけ。デフォルトは話す\n\nskip の gate は3シグナルの AND(output 空 && !cutShort && endedWithToolCalls、`:866`+`:911`)で、証拠(ending-comment record、`adapters/github/ending-comment.ts`)が**無くても** skip します(`:913-915`)— 今回の沈黙はここ。美しい形: **record があれば footer をそこに載せ(`:917-926` は現状維持)、無ければ無条件に no-report 枝へ落とす。** 文言は ended_because の1スイッチにして(`:937-939` に既に同じ形の switch がある)、`failed` には `report_run_failure.ts:114-160` の failureNotice 形(セッション保存案内+recover+ENDED_TAG+notify)を割り当てる。`endedWithToolCalls` という session 再読み込みの heuristic は**削除できます — 本番利用所は `:911` のみ**(src 全体検索で確認、他はテスト)。record の存在という証拠が heuristic を置き換える。「認識できない ending こそ機械が話す」という反転1つで、ctx 死以外の全 failure class も同時に治ります。\n\n## 4. watch/guard: 生存は「痕跡」でなく「時刻」で読む。janitor は schedule で回す\n\n今回読んだ watch の定義が一番の新所見です: **atomaton-run-watch.yml の起動は workflow_run のみで schedule が無い**(`:14-21`)。そして GitHub は GITHUB_TOKEN で起動された run に workflow_run を出しません — 実測も一致(#12 復旧時の実測メモ: 過去33件の watch は全て entry run 対象、runner run 対象0)。つまり**「ending を書かなかった run を外から治す」保険は、最も保険が必要な runner run を一度も見たことがない**。美しい形: janitor を schedule 起動にする(直し場は自動生成元の `src/workflows/atomaton-run-watch.wac.ts`)。sweep は open node の claim と park を列挙し、「claim した run が終わっているのに release が無い」を**時刻と run 実績**(data branch の `atoma_runs` か Actions API)で判定して解く。guard は「lock が新鮮な間だけ人を削除」に変え、stale と判定された state に対しては `parkExit`(`request_stop.ts:132-137`)の `parked && !claimed` のような「lock の形の要求」も効かなくする。死んだ claim を次の run が引き継ぐか人に返すかは policy のダイヤルで、復旧メモの提案(「次に同じ ask を扱う run が必ず閉じる」)は原因が既知な場合の機械返しそのものです。\n\n## 5. dispatch: 証跡は飛ぶ前に残す。マーカーは既にあるものを採用する\n\n集約の dispatch は markerCommentId を渡さず(`aggregation.ts:344-352`、`aggregate_sub_issues.ts:58` から呼び)、dispatch が自前 POST を ask の種にします。POST は失敗しても非 fatal(`dispatch.ts:444-447`)→ ask=0 → claim_turn は何も書かない(`claim_turn.ts:199-202`)→ watch は「claimed no ask」で無視(`reconcile_run_ending.ts:237-241`)。美しい形: **集約は既に thread にマーカーを投稿している(観測 6609805388)。その id を markerCommentId として渡し、この経路の自前 POST を削除。** 一般原則は fail-closed — 「他の部品が読むものを thread に残す」のは装飾ではなく dispatch の契約の一部で、証跡無しの dispatch はしない。\n\n## 美しさの検定\n\n5つのうち4つが**削除**です: compaction の None 拒否、`ending_of` の fall-through の嘘、3シグナル heuristic、marker 自前シード、Report failure の outcome 読み。追加は名前1つ・文言 arm 1つ・schedule 1本・引き数1つ。既存の契約テストのうち stopped 経路のもの(`post_result_comment.test.ts:416-439`)はそのまま通り、「record なしで skip」を期待するテストだけが今回の欠陥自体を固定しているので新契約に書き換わります。\n\n## 段階的に作るなら\n\n1. **machinery の反転**(§3)— 最小 diff で全 failure class の沈黙を止める\n2. **core の compaction + ending 名**(§1+§2)— 観測事故が生存可能になり、以後の死は全部名前を持つ\n3. **janitor**(§4)— 残る全経路の safety net(claim と park の両方)\n4. **dispatch adoption + Report failure 畳み**(§5+§2)— 構造清掃\n\n§1〜§3 までで「観測事故は起きない。起きても必ず見える」になります。\n\n---\n\n**この turn の報告**\n\n- **結論**: 上記が本回答です。1つの原理(中断を意志として読ませない)に5つの move がぶら下がり、そのうち4つは既存コードの削除です。採用の裁定を yuma-seno に返しました。\n- **根拠**: essay 中の `file:line` アンカーのほか、本 turn に新規確認したのは3点 — `post_result_comment.ts:911-916`(record 無しでも skip が現存)、`endedWithToolCalls` の本番利用所が `:911` のみ、`atomaton-run-watch.yml:14-21`(workflow_run のみで schedule 無し)。\n- **確定できなかったこと**: (a) GITHUB_TOKEN dispatch に workflow_run が出ない機構の帰属は GitHub の仕様知識+33件実測との整合であり、本環境での再現は未確認。(b) dispatch marker POST 失敗の HTTP 原因(runner run のログは anonymous では取得不可)。(c) `failed` を cutShort 家族に入れる場合、`:418`/`:717`/`:978` の各利用所の意図確認は実装時に必要。\n- **次の一手**: どの move をどの順で採用するかの裁定待ち。頂ければ move ごとの leaf に分解して実装に渡します。\n\n@yuma-seno\n\n\n---\n_Tokens: 461600 total (427125 prompt + 34475 completion, 332928 of the prompt cached)_\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/42146572113) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6674912139,
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-06T02:06:19Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\nOK。では、coreの修整は行うので§3の実装を進めてください。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6685482575,
+        "author": "yuma-seno",
+        "created_at": "2026-11-06T13:05:12Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "結論： **§3(machinery 側の skip 反転)は実装形状まで確定したので、engineer に渡します。** core 側の修整(§1 compaction、§2 ending 名)はお任せのままで、本 PR には含めません。設計から実装への落とし込みで今回確定したのは2点です。\n\n1. **`failed` は `cutShort` 家族に入る**。3つの利用所の意味がどれも「run 自身の closing 判断に達していない」だからです — mention 文(`:418`)、footer の警告行(`:717`)、`notACall`(`:978`)。特に `:978` は、failed run の salvaged 断片にある `@mention` が escape されず誤通知を起こすので、家族に入れないと危険です。\n2. **skip の gate から `endedWithToolCalls` は削除できる**。本番利用所は `:911` のみ(src 全体検索で確認、他はテスト)。証拠は record(`adapters/github/ending-comment.ts`)に一本化されます。\n\n/engineer\n\n**post_result_comment.ts を変更してください: 空出力の run は、session-ending tool が自分でコメントを投稿した証拠(ending-comment record)があるときだけ skip し、それ以外は必ず machinery の ending を投稿する。`failed` を cutShort 家族に入れ、failed の notice は report_run_failure.ts:114-160 の failureNotice 形(セッション保存案内+recover 案内+ENDED_TAG+notify+ログ末尾引用)に沿わせる。既存の契約テスト(stopped・limit 経路)は壊さない。**\n\n<details>\n<summary>スコープ・受け入れ条件・制約・検証(anchored)</summary>\n\n**変更内容**\n\n1. skip 構造の反転(`src/entrypoints/machinery/post_result_comment.ts:880-958`): record あり → footer をそのコメントに追記(`:917-926` は現状維持)。record なし → 無条件に endedEarly / no-report 枝へ。`endedWithToolCalls`(`:246`)は本番利用所が消えるため関数とテストごと削除。\n2. `failed` を `cutShort`(`:366`)に追加 + `howItWasCutShort`(`:395`)に failed の動詞を追加 — 現状の fall-through は \"failed\" を \"ran out of time\" と返す(`:398`)ので必須。ただし `reachedLimit`(`:380`)には入れない(failed は上限到達ではない)。\n3. failed 空 出力の文言を failureNotice 形に: セッション保存案内+recover(`/${agent} recover`)案内+`atomaton:ended=` タグ+人物 mention。ログ末尾の引用は `--logs-file`(既に受けている、`:923` 参照)から。引用判定の一致語に WARN を含めること — report_run_failure の INTERESTING は error|fail|panic|exception 系で、本件の WARN 2行(context 超過)は現状の語彙では抜けます。\n4. 「record なし skip は古い deployment のため」という免責ブロック(`:903-910`、`--ending-comment` の引数 doc `:81-87`)を新契約に書き換え: 「record なし → machinery が話す。tool が話していた場合の二重投稿は許容される雑音、ガードを推測で保持し続ける方は許されない損害」。\n5. usage doc(`:11-14`)の語彙一覧に `failed`(と欠落している `loop`)を追加。\n\n**受け入れ条件(観察可能)**\n\n- failed + 空出力(セッション形状不問)→ machinery のコメントが**必ず1件**: 失敗の文+セッション保存案内+recover 案内+ENDED_TAG+mention。`--logs-file` が読めれば理由行、読めなければクラッシュしない。\n- completed + 空出力 + tool call 終端 + record なし → no-report notice を投稿(現状は skip)。タグ付き。\n- record あり → footer 追記のみ、第2コメントは投稿しない(現状維持)。\n- stopped / runtime / iterations / loop の空出力挙動は不変。既存テスト(`post_result_comment.test.ts:416-439` stopped、`:1370` 付近 limit)が通る。「record なしで skip」を固定している既存テストのみ、新契約に書き換えてよい(issue の「契約テストが壊れない」は他の契約の維持を指す)。\n- failed run の salvaged テキスト内の `@mention` は escape される(`:978` notACall 経由)。\n\n**制約**\n\n- 純粋な machinery 修正: `post_result_comment.ts` とそのテストのみ。workflow(yml・自動生成)、core(yuma-seno/atoma、§1/§2 は所有者が実施)、watch/reconcile(§4 は後続)には触れない。\n- 失敗 notice の構築は `report_run_failure.ts:114-160` との共通化を試み、きれいに共有できない場合は PR に理由を書く(「失敗の文言は1綴り」という設計判断)。\n- `:418`/`:717`/`:978` の各所で failed の文が自然に読めることを確認し、各所の意図をコメントに残す。\n\n**検証**\n\n- repo の標準テスト一式が green(conventions に従う)。\n- 上記受け入れ条件それぞれの harness テスト(`runWithFakeGh` の既存 pattern に倣う)を追加/更新。`endedWithToolCalls` の describe ブロックは削除。\n\n</details>\n\n受け入れ後の流れは通常どおり: engineer が検証して PR を開き、CI を通って reviewer に回ります。core 側の §1/§2 が上がった後、§4(janitor)/§5(dispatch adoption)はこの issue の後続 work として改めて分解します。\n\n\n---\n_Tokens: 193450 total (174728 prompt + 18722 completion, 91648 of the prompt cached)_\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/42222657028) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6685574242,
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-06T13:09:38Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "44fdc9d5e38169ecb59af528d0358807a2c5570a4cb848f29244035a259744de",
+      "event_count": 7,
+      "agent": "engineer"
+    }
+  }
+}
