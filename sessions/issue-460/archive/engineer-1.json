@@ -1,0 +1,32 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #460: §5: 集約 dispatch の fail-closed 化 — 集約マーカーを ask として渡し、証跡なしでは dispatch しない\n**Labels:** atomaton/sub-issue, atomaton/launched\n**Sub-issue of:** #441\n\n親: #441(設計は同スレッドの「設計回答」コメント <https://github.com/yuma-seno/atomaton/issues/441#issuecomment-6674912139> の §5)。この子は machinery の dispatch 経路だけを直す。\n\n## 済み済み(再実装しない)\n- §1/§2 は core 側: yuma-seno/atoma v0.4.5(yuma-seno/atoma#17 / #18)。compaction の予算修正と `context_limit` ending 名。\n- §3 は #455 マージ済み(post_result_comment の skip 反転 + failure-notice 共通化)。#454 で `context_limit` 語彙接続済み。\n- v0.21.56 リリース & self-deploy 済み。\n\n## 棚卸し(現行 head 884da10 = #457 マージ後の実測。この一次情報を起点にし、編集前に自分でも当該箇所を開いて確認すること)\n\n1. `src/entrypoints/machinery/aggregate_sub_issues.ts:58` → `dispatchOrchestratorIfReady({repo, parent, closedNum, exclude, progress})` — `ask` も `markerCommentId` も渡していない。\n2. `src/app/aggregation.ts:332-336` — 集約は**既に** `commentOnWithId` で `<!-- atomaton:aggregated=N -->` マーカーを投稿して `markerId` 変数に保持している。`null` のときは `:337-342` で fail-closed 済み(「a failed marker write stops the dispatch rather than racing on」)。dispatch 呼び出しは `:344-352` で markerId を渡していない。take-back は `:364` と `:386-391` で markerId を再利用。\n3. `src/adapters/actions/dispatch.ts:678-684` — `markerCommentId` は**既に引数として存在**(`:173` 宣言、doc `:157-172`:「outstanding read から除外し、freshness probe に marker と同じ役目をさせる」)。caller が渡す先例: `src/adapters/actions/dispatch-targets.ts:154`/`:171`(`dispatchPostMergeAgent`)と `:240`/`:258`(`dispatchRejectedPrAgent`)。\n4. **穴**: `postDispatchMarker`(`dispatch.ts:368`)の POST が非ゼロで終わると `undefined` を返し(`:383-386`)、`refuseOutstandingRequest` は `:447` の `if (markerId === undefined) return undefined;` で**dispatch を続行**する(コメント `:444-446` が根拠)。POST は成功したが可視化が遅れた場合は `:468-515` で fail-closed(再投稿 → `removeMarker()` → `\"unconfirmed\"`)。今回塞ぐのは前者だけ。\n5. answers-request 経路は marker 無しで dispatch する設計(`:674-677`、`refuseSupersededAsk` `:577`)。ask は回答コメント自身。ここを壊さないこと。\n6. freshness probe は `checkDispatchMarker`(`dispatch.ts:455`)で marker 上の dispatch タグ(`DISPATCH_TAG = stringTag(\"dispatch\", …)`, `src/adapters/github/tags.ts:298`)を読む。採用したコメントにタグを書いておく必要があるかはこの実装で確認。\n7. テスト: `src/app/aggregation.test.ts`(18 tests — 単一 dispatch、marker 書き込み冪等、marker 書き込み失敗で停止、失敗 dispatch で marker take-back)、`src/adapters/actions/dispatch.test.ts`(529 行。`unconfirmed` 経路は tested、**POST 非ゼロ失敗経路は無テスト**)、`dispatch_agent.test.ts` / `dispatch_if_siblings_done.test.ts` / `dispatch_post_merge.test.ts` / `dispatch_rejected.test.ts`。\n\n## スコープ(設計は決済済み。議論の余地があるのは手段のみ)\n\n1. `aggregation.ts:344` の dispatch 呼び出しに `markerCommentId: markerId` を渡す。自前シード POST(`postDispatchMarker`)はこの経路から消える。\n2. 採用する集約マーカーが freshness probe が読める形、すなわち dispatch タグをそのコメントに carries するようにする(`dispatch-targets.ts` の directive-as-marker 先例に倣う。edit で追加でよいか、probe の読み方で決める)。\n3. `dispatch.ts:447` の穴を塞ぐ: caller からの ask/marker も無く marker POST も失敗した場合、**dispatch を実行しない**(refusal として返す)。answers-request のように ask が caller 提供の経路は現行どおり dispatch できること。\n4. 採用したマーカーに対する take-back(`:441` の DELETE が何を消すか)を推論してコメント/テストで固定する。DELETE なら集約マーカーの idempotency(「aggregated marker があれば再集約しない」)との関係(=失敗 dispatch を sweep/再集約が拾える、が正か)を明記。\n\n## 受け入れ条件\n\n- 集約による dispatch のたびにスレッドに新規投稿されるコメントは 1 件(集約マーカー)で、それが dispatch タグと ask を兼ねる。第 2 の marker コメントは投稿されない。\n- marker を用意できない場合(集約マーカー投稿失敗は既に fail-closed、これに加えて dispatch 側の POST 失敗経路)、`workflow_dispatch` が飛ばない(gh 呼び出しの call log で確認)。\n- answers-request 経路の既存テストが一切変わらず通る。\n- `dispatch.test.ts` に「marker POST が非ゼロで失敗 → dispatch されない」テストが追加される。\n- 上記の既存テスト群が全て通る。\n\n## 制約\n\n- 挙動の劣化禁止。既存契約テスト(stopped / limit 経路を含む)を壊さない。\n- version bump とリリースはしない(人がまとめて行う)。\n- `docs/` に自リポジトリ(atomaton)の issue 番号(#NNN)は書かない。\n- core リポジトリ(yuma-seno/atoma)には触れない。\n- workflow の yml は wac.ts から生成されるため、触る場合は `bun run synth`(生成物もコミット)。\n\n## クローズ条件\n\nこの issue(#441)のブランチにマージされた PR の head で次が観察できること: (1) aggregation がマーカー id を渡すコード+「投稿は 1 件」を固定するテスト。(2) POST 失敗時に dispatch しないコード+それを固定するテスト。(3) answers 経路を含む既存 dispatch/aggregation テストの green 実行結果。エンジニアが PR に検証結果を残し、親(#441)側で統合確認のうえ閉じる。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-460",
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-06T14:58:43Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "user",
+      "content": "This run was started by the `atomaton` agent, which is waiting on your result. When you finish, report back to it: end your response with a line holding nothing but `/atomaton`, followed by what you concluded and what it should do next. Do not end with a plain comment and no such line -- the agent that started you would never be told the work is done."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "5a88a86a7042583332763b18f30490340eb36189376d372a1055b79838f2800b",
+      "event_count": 1,
+      "agent": "engineer"
+    }
+  }
+}
