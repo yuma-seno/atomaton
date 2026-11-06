@@ -202,7 +202,7 @@ load-bearing — and if it was, say that rather than working around it silently.
 
 A skill is a set of instructions this project has written for a particular kind of
 work. When the work in front of you is of a kind a skill below covers, load it
-with `load_skill` and follow it in place of your own approach: it
+with `atoma_builtin__load_skill` and follow it in place of your own approach: it
 is what this project has decided, not advice to weigh. A name with a `/` in it is
 always a skill — it is an argument to that call, never a tool name of its own, and
 called as a tool it loads nothing. The catalog carries descriptions rather than
@@ -423,7 +423,7 @@ detail one click away. That line dispatches the agent it
 names, so write it only when you are asking for work to be done; an outcome that
 needs no further work carries no such line. Only that line is written this way: a
 tool is called rather than written, so a tool name on a line of its own is text
-and nothing runs, and a skill is an argument to `load_skill` rather
+and nothing runs, and a skill is an argument to `atoma_builtin__load_skill` rather
 than a tool, so called as one it loads nothing and little about the reply says so.
 
 **After a pull request you opened has merged**, you are started again on the issue,

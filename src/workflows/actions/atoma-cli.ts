@@ -170,7 +170,7 @@ import { TypedOutputsStep } from "./base.ts";
  * back, so the thread says the window filled instead of filing it with providers that
  * hung up.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.6";
+export const ATOMA_DEFAULT_VERSION = "v0.4.5";
 
 export const ATOMA_VERSION_DESC =
   "Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.";
