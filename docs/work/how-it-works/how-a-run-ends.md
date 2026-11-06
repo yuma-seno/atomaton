@@ -52,6 +52,23 @@ saved, names the two ways forward — continue with `/agent`, or start clean wit
 `/agent recover` — and links the run's log. The node is back with a person, so the
 next comment on the thread resumes normally.
 
+There are two ways a failed run reaches that notice, and which one runs depends on
+whether the step the agent ran in failed:
+
+- **The "Run agent" step failed.** Nothing later in the run posts, so the
+  workflow's own "Report failure" step posts the notice, and its exit code decides
+  the run's colour.
+- **The step succeeded and the core filed `failed`.** This is the shape a session
+  that died on its own limit leaves: `atoma` exits with the status of a stop it
+  handled, the step succeeds, and no failure step runs. The result comment posts
+  the same notice in these colours instead — what did not finish, that the session
+  is saved, the two ways forward, and the tail of the run's log — under the
+  `atomaton:ended` tag every ending carries.
+
+The second is not a nicety. Before it existed, a run in that shape ended with
+nothing on its thread at all: no comment, no `atomaton:ended`, and a person with
+no way to learn anything but by opening the run and reading its log.
+
 The colour follows what the comment says, because the thing that reports is a step
 inside the run:
 

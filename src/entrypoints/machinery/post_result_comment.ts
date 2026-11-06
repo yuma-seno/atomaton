@@ -10,8 +10,8 @@
  * Usage:
  *   post_result_comment.ts --number N --agent NAME [--notify LOGIN]
  *     [--directive NAME] [--chain-continues true|false]
- *     [--ended-because completed|runtime|iterations|stopped] --run-url URL
- *     [--ending-comment PATH]
+ *     [--ended-because completed|runtime|iterations|stopped|loop|failed]
+ *     --run-url URL [--ending-comment PATH]
  * Writes `comment_id=<id>` to $GITHUB_OUTPUT when a comment is posted.
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
@@ -29,6 +29,7 @@ import { toolCallTally } from "../../domain/record/tool-tally.ts";
 import { escapedMentionNotice, escapeUnknownMentions } from "../../domain/work/mention.ts";
 import { calledHumans } from "../../domain/work/ending-calls.ts";
 import { readCalleesFile } from "./lib/callees.ts";
+import { failureLines, logExcerptFrom } from "./lib/failure-notice.ts";
 import { readEndingComment } from "../../adapters/github/ending-comment.ts";
 import type { Session } from "../../domain/work/session.ts";
 import { isTrue } from "./lib/flags.ts";
@@ -80,10 +81,11 @@ export interface PostResultCommentArgs {
   "logs-file": string;
   /**
    * Where a session-ending tool recorded the comment this run ended on, when one
-   * did (`ending-comment.ts`). Read only when the output is empty and the session
-   * proves the tool call — the skip branch, which the footer is then appended onto
-   * instead of being dropped. Absent means no record was handed in, and the skip
-   * is the skip it always was.
+   * did (`ending-comment.ts`).
+   *
+   * Read only when the output is empty. That record is the ONE proof this run already
+   * has an ending on the thread — the comment a session-ending tool posted — and the
+   * footer goes onto it. Absent means nothing spoke for this run, so this script does.
    */
   "ending-comment"?: string;
   /**
@@ -221,39 +223,6 @@ function subIssueState(number: string, type?: string): { isSubIssue: boolean; is
  * is better than posting an empty comment.
  */
 /**
- * Whether the run's last assistant turn made tool calls.
- *
- * The one piece of evidence that an empty output file is a session-ending tool
- * call: atoma's loop stops the moment such a call returns, so the model's last
- * turn is a tool call with no words and nothing follows it. A run that
- * `completed` with no calls on that turn is a different shape -- the model
- * answered silence -- and its silence is its own, to be reported rather than
- * assumed covered by a tool's comment.
- *
- * Read backwards from the END of the session with no boundary: the skip this
- * decides is about the run's last act, and the messages below this run's
- * boundary cannot change what the last assistant message holds. A `tool`
- * message comes after an assistant turn's calls, so stepping over those is what
- * reaches that turn.
- *
- * `false` for a session that is missing, unreadable or empty, and for an
- * assistant message with no calls or empty ones. That direction is the point of
- * this function: `false` makes the caller post an ending comment, and the
- * failure it costs -- a second content-free comment under one a session-ending
- * tool already posted -- is the smaller one, against deleting a person's
- * ongoing thread (#194, #186).
- */
-export function endedWithToolCalls(sessionPath: string | undefined): boolean {
-  const messages = readSession(sessionPath)?.messages ?? [];
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message?.role !== "assistant") continue;
-    return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-  }
-  return false;
-}
-
-/**
  * The last thing THIS run said, if it said anything.
  *
  * `from` is where this run's own messages begin -- everything below it was written by
@@ -345,30 +314,26 @@ function endedTag(ending: TurnEnding): string {
 }
 
 /**
- * How this turn ended, as far as this comment can know.
+ * Whether the run ended before it was done, either way round.
  *
- * `succeeded` is true by construction: the workflow only runs this step when the
- * agent step succeeded, so there is no failed turn to report from here.
+ * `failed` belongs here and the three places that read this agree on why: each asks
+ * "did the run reach its own closing judgement?". A failed run did not — it died
+ * mid-work — so its salvaged text is a fragment rather than a conclusion
+ * (`buildCommentBody`'s warning), its mentions are names in a sentence rather than
+ * calls (`notACall` in `main`), and the footer says the run did not finish. Leaving
+ * it out made a failed run read as one that finished, which is how a failure filed
+ * itself with the runs that reported.
  *
- * `loopLimitReached` is NOT known yet, and cannot be. The chain's own limit is
- * counted from the thread by `manage_dispatch_loop.ts`, which runs after this
- * because the tally includes the comment this is writing. Passing `false` is
- * therefore not a guess:
- *
- *   - it can only turn a `chain-over` into a `handed-off`, and
- *   - both carry the same `next`, which is the only thing read here.
- *
- * So the one signal this cannot see is the one that does not change the answer.
- * Deriving the ending here rather than re-deriving the parts is what removes the
- * two copies this file used to hold — one for the mention, one for the tag.
+ * It is deliberately NOT in `reachedLimit`: a failure is not a ceiling, and the tool
+ * tally that explains a limit decision would be an explanation of the wrong thing.
  */
-/** Whether the run ended before it was done, either way round. */
 function cutShort(endedBecause: string | undefined): boolean {
   return (
     endedBecause === "stopped" ||
     endedBecause === "runtime" ||
     endedBecause === "iterations" ||
-    endedBecause === "loop"
+    endedBecause === "loop" ||
+    endedBecause === "failed"
   );
 }
 
@@ -395,6 +360,7 @@ function reachedLimit(endedBecause: string | undefined): boolean {
 function howItWasCutShort(endedBecause: string | undefined): string {
   if (endedBecause === "stopped") return "was stopped";
   if (endedBecause === "loop") return "got stuck repeating itself";
+  if (endedBecause === "failed") return "did not finish";
   return endedBecause === "iterations" ? "ran out of iterations" : "ran out of time";
 }
 
@@ -406,6 +372,11 @@ function howItWasCutShort(endedBecause: string | undefined): string {
  * was telling the person who had just stopped it that it had finished. "Review the
  * results" is dropped for the same reason: a run cut short may have none.
  *
+ * `failed` gets its own sentence because "did not finish before it finished" is what
+ * the cut-short wording would build from it, and because it is the one interrupted
+ * ending whose text may be a fragment of ordinary work rather than a stop landing
+ * between sentences.
+ *
  * `no-report` is the third sentence, and it is here rather than sharing the ordinary
  * one because the ordinary one is the false claim this change exists to stop making.
  * A run that produced no closing text has no results to review; what it did is in a
@@ -415,6 +386,12 @@ function mentionLine(
   ending: TurnEnding,
   args: { agent: string; notify?: string; endedBecause?: string },
 ): string {
+  if (args.endedBecause === "failed") {
+    return (
+      `@${args.notify} — **${args.agent}** stopped mid-run, and no agent will run next. ` +
+      `Resume it, or say what to do instead.`
+    );
+  }
   if (cutShort(args.endedBecause)) {
     return (
       `@${args.notify} — **${args.agent}** ${howItWasCutShort(args.endedBecause)} ` +
@@ -431,6 +408,26 @@ function mentionLine(
   return `@${args.notify} — **${args.agent}** task completed. No agent will be automatically executed next. Please review the results or provide instructions for the next step.`;
 }
 
+/**
+ * How this turn ended, as far as this comment can know.
+ *
+ * `succeeded` is true by construction: the workflow only runs this step when the
+ * agent step succeeded. That is not the same as the run succeeding — a run the core
+ * filed `failed` arrives here with the step green, which is the whole shape of #441 —
+ * so `--ended-because` is what decides, and it carries `failed` like any other word.
+ *
+ * `loopLimitReached` is NOT known yet, and cannot be. The chain's own limit is
+ * counted from the thread by `manage_dispatch_loop.ts`, which runs after this
+ * because the tally includes the comment this is writing. Passing `false` is
+ * therefore not a guess:
+ *
+ *   - it can only turn a `chain-over` into a `handed-off`, and
+ *   - both carry the same `next`, which is the only thing read here.
+ *
+ * So the one signal this cannot see is the one that does not change the answer.
+ * Deriving the ending here rather than re-deriving the parts is what removes the
+ * two copies this file used to hold — one for the mention, one for the tag.
+ */
 function endingHere(args: {
   directive?: string;
   chainContinues?: string;
@@ -569,10 +566,25 @@ export function buildCommentBody(args: {
    * person. It is the footer's now, where every other fact about the run already is.
    */
   spentOn?: string;
+  /**
+   * The lines of the run's log that might say what went wrong, for a failed run.
+   *
+   * Only `failed` reads it. The failure notice (`lib/failure-notice.ts`) is the one
+   * spelling of what a person is told about a failure, and its excerpt is usually
+   * about the infrastructure rather than the work — kept because occasionally it is
+   * the answer. Absent is a run whose log said nothing, which is not a reason to
+   * withhold the notice.
+   */
+  excerpt?: string;
 }): string {
   // Once, and asked twice below. It was derived twice, which is one derivation more
   // than there are facts.
   const ending = endingHere(args);
+  // A failed run is the one ending whose body is not the agent's text: the failure
+  // notice is (see `lib/failure-notice.ts`), because a run that died mid-work has no
+  // closing judgement to publish. #441 is the case — the step succeeded, so the
+  // workflow's own failure notice never ran, and the thread got nothing at all.
+  const failed = args.endedBecause === "failed";
 
   // This comment is the agent's own report, not a turn comment of the kind
   // `turn-comment.ts` wraps: it carries `AGENT_TAG` and `CHANGED_TAG` as bookkeeping
@@ -601,6 +613,10 @@ export function buildCommentBody(args: {
       run: Number(args["run-id"] ?? 0) || 0,
     }),
   ];
+  if (failed) {
+    lines.push(...failureLines({ agent: args.agent, excerpt: args.excerpt ?? "" }), "");
+  }
+
   if (args.endingInvalid === true) {
     lines.push(
       "> [!WARNING]",
@@ -627,7 +643,10 @@ export function buildCommentBody(args: {
       "",
     );
   }
-  lines.push(args.output, "");
+  // Nothing rather than an empty string when there is nothing to show -- a failed run
+  // that said nothing gets its body from the notice above, and a blank line in its
+  // place would be spacing pretending to be content.
+  if (args.output.trim() !== "") lines.push(args.output, "");
 
   // Directly under what the agent wrote, because that is what it is about, and
   // above the run footer, which nobody reads for this.
@@ -714,7 +733,9 @@ export function buildFooter(args: {
       `⏸️ _Stopped on request. **The session is saved.** Comment \`/resume\` to continue ` +
         `from here, or \`/${args.agent}\` with an instruction on the following lines._`,
     );
-  } else if (cutShort(args.endedBecause)) {
+  } else if (reachedLimit(args.endedBecause)) {
+    // The limits only. A failed run's footer would repeat what the failure notice above
+    // it already says -- that it did not finish, and how to continue.
     lines.push(`⚠️ _The run ${howItWasCutShort(args.endedBecause)}. Comment \`/${args.agent}\` to continue._`);
   }
   // Under the line that says what to do, because it is the fact that decides
@@ -842,32 +863,34 @@ function main(): void {
   // model ever gets a further turn to produce text. Each of those tools
   // already posts its OWN dedicated, meaningful comment (e.g. "Launched
   // sub-agent(s): ...", "PR #N created..."), so posting a second, essentially
-  // content-free "run by [agent](url)" comment here on top of that would
-  // just be noise -- skip entirely rather than post an empty wrapper.
+  // content-free "run by [agent](url)" comment on top of that would be noise.
   //
-  // But an empty file is a shape, not a fact, and it has three meanings. The
-  // session-ending tool call is one. #194 recorded a second: a run the core
-  // filed `completed` whose last assistant message was an empty string with no
-  // calls -- the model answered silence -- and the old skip fired on it,
-  // deleting the machinery's only comment AND the `atomaton:ended` tag that
-  // releases the thread's guard, which is how a guard came to delete a person's
-  // later comments forever. #186 recorded a third: no session file at all, so
-  // nothing can prove anything either way. The skip below therefore asks the
-  // session for its proof -- the last assistant turn carrying tool_calls --
-  // and posts the no-report notice wherever that proof is missing. Cutting a
-  // run off is its own case and keeps its own treatment: a stopped run's last
-  // turn carries tool_calls too, so `--ended-because` decides for those before
-  // the session is asked anything.
+  // But an empty file is a shape, not a fact, and the shapes are many: a tool that
+  // spoke and ended the session; #194's run the core filed `completed` whose last
+  // assistant message was empty (the model answered silence); #186's run with no
+  // session at all; a stop landing between turns; and #441's failed run whose
+  // session died mid-work. Every one of them looks identical from here.
   //
-  // Reaching a limit leaves the file empty too, and there nothing else speaks.
-  // Measured: a run spent 17 minutes and 154k tokens, and the thread received
-  // one notice saying the limit was reached. What it had worked out was in the
-  // session and nowhere a person would look.
-  const endedEarly = cutShort(values["ended-because"]);
-
+  // So the question is asked of EVIDENCE rather than of the file: has anything
+  // already ended this run's turn on the thread? The one thing that says yes is the
+  // record a session-ending tool writes when it posts its comment
+  // (`ending-comment.ts`, in the run's own directory) -- and where that record
+  // exists the footer is appended onto THAT comment, because it is the one that
+  // ended this run.
+  //
+  // No record means nothing spoke for this run, and this step is the only thing left
+  // that can. That direction is deliberate: a second comment under one a tool already
+  // posted is noise a person reads past, while a run that ends with nothing on its
+  // thread deletes the `atomaton:ended` tag that releases the thread's guard -- the
+  // defect that let a guard delete a person's later comments forever (#194, #186).
+  // Holding a thread's guard on a guess about another component is the larger harm.
   let output = redacted;
   let salvaged = false;
   let wroteNothing = false;
+  const endedBecause = values["ended-because"];
+  const endedEarly = cutShort(endedBecause);
+  const failed = endedBecause === "failed";
+
   if (!output.trim() && endedEarly) {
     const last = lastAgentText(values.session, Number(values["messages-before"]));
     if (last !== undefined) {
@@ -878,42 +901,8 @@ function main(): void {
   }
 
   if (!output.trim()) {
-    // The skip is right only where the session PROVES a session-ending tool call:
-    // the last assistant turn made tool calls, atoma's loop stopped the moment one
-    // returned, and that tool posted its own comment -- a second content-free one
-    // would be noise. Every other empty is a run whose silence is its own: a
-    // `completed` run whose last turn carried no calls (the model answered
-    // silence), a session that is missing or unreadable. Skipping those deletes
-    // the machinery's only comment AND the thread's `atomaton:ended` tag, which
-    // is what releases the thread's guard -- the defect that let a guard delete a
-    // person's later comments forever (#194), and the shape of #186, where no
-    // session exists to prove anything either way.
-    //
-    // The cut-short runs are told apart by `--ended-because`, not by the session:
-    // a stop lands at a turn boundary, so a stopped run's last assistant turn
-    // carries tool_calls too and the session cannot tell "ended via a tool that
-    // spoke" from "stopped mid-work with nothing said". Only the first is a skip;
-    // the second is the shape the #831 notice exists for, and there nothing has
-    // posted the machinery's sentence but this step.
-    //
-    // "toward releasing the guard, never toward holding it stuck" applies here
-    // at the comment level too: the machine must not hold a thread's guard on
-    // the strength of a guess about another component's invariant.
-    //
-    // And the tool that did the talking records its comment (`ending-comment.ts`,
-    // in the run's own directory). Where that record exists, the footer goes onto
-    // THAT comment -- the one that ended the run's turn -- instead of the run
-    // ending with none of it: tokens, run link, metrics and tool trouble, all of
-    // which the metrics report reads back off comment bodies, so a run whose
-    // footer never went out also never counted toward them. No record: the skip
-    // is the skip it always was, which is also what an older deployment sees --
-    // the tools there recorded nothing.
-    if (!endedEarly && endedWithToolCalls(values.session)) {
-      const ending = readEndingComment(values["ending-comment"]);
-      if (!ending) {
-        console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
-        return;
-      }
+    const ending = readEndingComment(values["ending-comment"]);
+    if (ending) {
       console.error(`appending the result footer onto the tool's ending comment ${ending.commentId} (on ${ending.node})`);
       appendFooter({
         repo: process.env.GITHUB_REPOSITORY ?? "",
@@ -925,7 +914,14 @@ function main(): void {
       });
       return;
     }
-    if (endedEarly) {
+    if (failed) {
+      // Nothing to show, and nothing to invent: the failure notice itself is the body
+      // (#441), so `output` stays empty rather than gaining a placeholder under it.
+      // Until this existed the run owed the thread what `report_run_failure.ts` says
+      // and delivered it silently -- this step succeeded, so that step never ran and
+      // the thread kept the `asked` that started the run.
+      console.error("the run failed with nothing to report -- posting the failure notice rather than nothing.");
+    } else if (endedEarly) {
       // It is wrong for a run that was cut short, and this is the common shape
       // rather than the odd one. A stop lands at the next turn boundary, so a run
       // reading files when it arrives has said nothing at all and there is nothing
@@ -934,28 +930,32 @@ function main(): void {
       // machinery's own sentence along with the agent's silence: that it stopped,
       // that the session survived, and how to resume.
       wroteNothing = true;
-      output = values["ended-because"] === "stopped"
+      output = endedBecause === "stopped"
         ? "_This run was stopped before it said anything._"
-        : `_This run ${howItWasCutShort(values["ended-because"])} before it said anything._`;
+        : `_This run ${howItWasCutShort(endedBecause)} before it said anything._`;
       console.error("the run was cut short with nothing to report -- posting the notice rather than nothing.");
     } else {
-      // A run that ended of its own accord without saying anything, and whose
-      // session cannot prove a session-ending tool call did the talking instead:
-      // the shape of #194 (an empty final response `completed`) and #186 (no
-      // session at all). Same treatment, no-report wording: the comment is the
-      // machinery's only sentence on this thread, the `atomaton:ended` tag under
-      // it is what releases the thread's guard, and the mention is what fetches a
-      // person -- see `completion-mention.ts`, which already forces one for a
-      // run the session shows reported nothing.
+      // A run that ended of its own accord without saying anything: the shape of
+      // #194 (an empty final response `completed`) and #186 (no session at all).
+      // Same treatment, no-report wording: the comment is the machinery's only
+      // sentence on this thread, the `atomaton:ended` tag under it is what releases
+      // the thread's guard, and the mention is what fetches a person -- see
+      // `completion-mention.ts`, which already forces one for a run the session
+      // shows reported nothing.
       wroteNothing = true;
       output = "_This run ended without saying anything._";
       console.error(
-        "atomaton_output.txt is empty and the session shows no session-ending tool call " +
-          "(last assistant turn made no tool calls, or the session is missing/unreadable) " +
+        "atomaton_output.txt is empty and no session-ending tool recorded a comment " +
           "-- posting the no-report notice rather than skipping.",
       );
     }
   }
+
+  // A failed run reached no closing judgement of its own, so whatever text it left is
+  // a fragment of the work rather than a conclusion -- the warning a salvage gets.
+  // Without it the comment would present the last thing said before the failure as a
+  // result, which is the false claim `salvaged` exists to prevent.
+  if (failed && !salvaged && output.trim() !== "") salvaged = true;
 
   // Checked on the way out for the same reason it is redacted on the way out:
   // this text is whatever the agent decided to write, and a comment is the one
@@ -1034,6 +1034,11 @@ function main(): void {
     // separate limit notice used to be the only place it appeared; it belongs on
     // the comment that already tells them the run stopped, and this is that comment.
     spentOn: reachedLimit(values["ended-because"]) ? toolCallTally(readSession(values.session)) : undefined,
+    // Only a failed run reads these, and only to say why it stopped — so the log is
+    // opened only then. Read here rather than inside `buildCommentBody` because the
+    // log is this file's input, not the body's: the same separation as the output,
+    // the tokens and the session.
+    excerpt: failed ? logExcerptFrom(values["logs-file"]) : undefined,
   });
 
   const { code, stdout, stderr } = gh(

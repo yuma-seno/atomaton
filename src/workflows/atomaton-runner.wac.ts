@@ -1328,9 +1328,11 @@ const postResultCommentStep = new TypedOutputsStep(
       output: `${RUN_DIR}/atomaton_output.txt`,
       "logs-file": `${RUN_DIR}/atomaton_logs.txt`,
       // Where a session-ending tool recorded the comment this run ended on, when
-      // one did. Read only when the output is empty and the session proves the
-      // tool call -- the skip branch, which the footer is then appended onto
-      // instead of being dropped. See `ending-comment.ts`.
+      // one did. Read only when the output is empty, and it is the ONE evidence
+      // that something already spoke for this run: where it exists the footer is
+      // appended onto that comment, and where it does not this script posts the
+      // ending itself. See `ending-comment.ts`, and #441 for what a guess about the
+      // session's shape cost instead.
       "ending-comment": `${RUN_DIR}/ending-comment.json`,
       // Written by the run above when the closing message called more than one thing
       // and was still not fixed the second time: its calls are left as text, and this
