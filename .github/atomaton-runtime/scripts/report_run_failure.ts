@@ -2,7 +2,6 @@
 // @bun
 
 // src/entrypoints/machinery/report_run_failure.ts
-import { existsSync, readFileSync } from "fs";
 import { parseArgs } from "util";
 
 // src/adapters/github/gh.ts
@@ -24,28 +23,6 @@ function ghCommand() {
 }
 function gh(...args) {
   return run([...ghCommand(), ...args]);
-}
-
-// src/shared/redaction.ts
-var PATTERNS = [
-  /\bsk-[A-Za-z0-9_-]{16,}/g,
-  /\bsk-ant-[A-Za-z0-9_-]{16,}/g,
-  /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\bASIA[0-9A-Z]{16}\b/g,
-  /\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
-  /\bAIza[0-9A-Za-z_-]{35}\b/g,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g
-];
-var REDACTED = "[redacted]";
-function redact(text, literals = []) {
-  let out = text;
-  for (const literal of literals)
-    out = out.split(literal).join(REDACTED);
-  for (const pattern of PATTERNS)
-    out = out.replace(pattern, REDACTED);
-  return out;
 }
 
 // src/domain/work/agent-name.ts
@@ -179,6 +156,9 @@ function turnHeader(h) {
   ];
 }
 
+// src/entrypoints/machinery/lib/failure-notice.ts
+import { existsSync, readFileSync } from "fs";
+
 // src/domain/work/comment-command.ts
 var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
 var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
@@ -188,6 +168,61 @@ function recoveryLines(agent) {
     `- Start clean: comment \`/${agent} recover\`, which archives this session and rebuilds`,
     "  it from the issue."
   ];
+}
+
+// src/shared/redaction.ts
+var PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bsk-ant-[A-Za-z0-9_-]{16,}/g,
+  /\bgh[pousr]_[A-Za-z0-9]{16,}/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bASIA[0-9A-Z]{16}\b/g,
+  /\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g
+];
+var REDACTED = "[redacted]";
+function redact(text, literals = []) {
+  let out = text;
+  for (const literal of literals)
+    out = out.split(literal).join(REDACTED);
+  for (const pattern of PATTERNS)
+    out = out.replace(pattern, REDACTED);
+  return out;
+}
+
+// src/entrypoints/machinery/lib/failure-notice.ts
+var INTERESTING = /error|fail|panic|exception|unauthorized|warn/i;
+var EXCERPT_LINES = 5;
+function logExcerpt(text) {
+  return text.split(`
+`).filter((line) => INTERESTING.test(line)).slice(-EXCERPT_LINES).map((line) => redact(line)).join(`
+`).trim();
+}
+function logExcerptFrom(path) {
+  if (!path || !existsSync(path))
+    return "";
+  try {
+    return logExcerpt(readFileSync(path, "utf8"));
+  } catch {
+    return "";
+  }
+}
+function failureLines(args) {
+  const lines = [
+    `${mentionPrefix(args.notify)}Atomaton: \`${args.agent}\` did not finish.`,
+    "",
+    "**The session was saved.** What this run worked out is still there.",
+    "",
+    ...recoveryLines(args.agent)
+  ];
+  if (args.runUrl)
+    lines.push("", `Workflow logs: ${args.runUrl}`);
+  if (args.excerpt) {
+    lines.push("", "From the log, which is often about the infrastructure rather than the work:", "```", args.excerpt, "```");
+  }
+  return lines;
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -217,15 +252,7 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/report_run_failure.ts
 var ref = defineScript(import.meta.url);
-var INTERESTING = /error|fail|panic|exception|unauthorized/i;
-var EXCERPT_LINES = 5;
-function logExcerpt(text) {
-  return text.split(`
-`).filter((line) => INTERESTING.test(line)).slice(0, EXCERPT_LINES).map((line) => redact(line)).join(`
-`).trim();
-}
 function failureNotice(agent, notify, runUrl, excerpt, identity = {}) {
-  const mention = mentionPrefix(notify);
   const lines = [
     ...turnHeader({
       ended: "done",
@@ -233,17 +260,8 @@ function failureNotice(agent, notify, runUrl, excerpt, identity = {}) {
       answers: identity.ask ?? 0,
       run: identity.runId ?? 0
     }),
-    `${mention}Atomaton: \`${agent}\` did not finish.`,
-    "",
-    "**The session was saved.** What this run worked out is still there.",
-    "",
-    ...recoveryLines(agent),
-    "",
-    `Workflow logs: ${runUrl}`
+    ...failureLines({ agent, notify, excerpt, runUrl })
   ];
-  if (excerpt) {
-    lines.push("", "From the log, which is often about the infrastructure rather than the work:", "```", excerpt, "```");
-  }
   return lines.join(`
 `);
 }
@@ -266,15 +284,7 @@ function main() {
     process.exitCode = 1;
     return;
   }
-  let excerpt = "";
-  const logs = values["logs-file"];
-  if (logs && existsSync(logs)) {
-    try {
-      excerpt = logExcerpt(readFileSync(logs, "utf8"));
-    } catch {
-      excerpt = "";
-    }
-  }
+  const excerpt = logExcerptFrom(values["logs-file"]);
   const body = failureNotice(values.agent ?? "", values.notify, values["run-url"] ?? "", excerpt, {
     ask: Number(values.ask ?? 0) || 0,
     runId: Number(values["run-id"] ?? 0) || 0
@@ -293,6 +303,5 @@ if (import.meta.main)
   main();
 export {
   failureNotice,
-  logExcerpt,
   ref
 };

@@ -2,7 +2,7 @@
 // @bun
 
 // src/entrypoints/machinery/post_result_comment.ts
-import { appendFileSync, existsSync as existsSync3, readFileSync as readFileSync3 } from "fs";
+import { appendFileSync, existsSync as existsSync4, readFileSync as readFileSync4 } from "fs";
 import { parseArgs } from "util";
 
 // src/adapters/github/gh.ts
@@ -83,6 +83,10 @@ function mentionsIn(text) {
     found.push(login);
   }
   return found;
+}
+function mentionPrefix(login) {
+  const name = (login ?? "").trim();
+  return name ? `@${name} ` : "";
 }
 function escapeUnknownMentions(text, known) {
   const allowed = new Set([...known].map((login) => login.trim().toLowerCase()).filter(Boolean));
@@ -314,7 +318,7 @@ function endingOf(signals) {
     return { ended: "looped" };
   if (signals.endedBecause === "stopped")
     return { ended: "stopped" };
-  if (signals.endedBecause === "iterations" || signals.endedBecause === "runtime")
+  if (signals.endedBecause === "iterations" || signals.endedBecause === "runtime" || signals.endedBecause === "context_limit")
     return { ended: "spent" };
   if (signals.parked)
     return { ended: "parked" };
@@ -449,6 +453,13 @@ function toolCallTally(session) {
 // src/domain/work/comment-command.ts
 var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
 var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
+function recoveryLines(agent) {
+  return [
+    `- Continue: comment \`/${agent}\` and put what to do next on the following lines.`,
+    `- Start clean: comment \`/${agent} recover\`, which archives this session and rebuilds`,
+    "  it from the issue."
+  ];
+}
 
 // src/domain/work/ending-calls.ts
 var DIRECTIVE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})$`);
@@ -484,13 +495,47 @@ function readCalleesFile(path) {
   }
 }
 
-// src/adapters/github/ending-comment.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2, writeFileSync } from "fs";
-function readEndingComment(path) {
+// src/entrypoints/machinery/lib/failure-notice.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+var INTERESTING = /error|fail|panic|exception|unauthorized|warn/i;
+var EXCERPT_LINES = 5;
+function logExcerpt(text) {
+  return text.split(`
+`).filter((line) => INTERESTING.test(line)).slice(-EXCERPT_LINES).map((line) => redact(line)).join(`
+`).trim();
+}
+function logExcerptFrom(path) {
   if (!path || !existsSync2(path))
+    return "";
+  try {
+    return logExcerpt(readFileSync2(path, "utf8"));
+  } catch {
+    return "";
+  }
+}
+function failureLines(args) {
+  const lines = [
+    `${mentionPrefix(args.notify)}Atomaton: \`${args.agent}\` did not finish.`,
+    "",
+    "**The session was saved.** What this run worked out is still there.",
+    "",
+    ...recoveryLines(args.agent)
+  ];
+  if (args.runUrl)
+    lines.push("", `Workflow logs: ${args.runUrl}`);
+  if (args.excerpt) {
+    lines.push("", "From the log, which is often about the infrastructure rather than the work:", "```", args.excerpt, "```");
+  }
+  return lines;
+}
+
+// src/adapters/github/ending-comment.ts
+import { existsSync as existsSync3, readFileSync as readFileSync3, writeFileSync } from "fs";
+function readEndingComment(path) {
+  if (!path || !existsSync3(path))
     return;
   try {
-    const parsed = JSON.parse(readFileSync2(path, "utf8"));
+    const parsed = JSON.parse(readFileSync3(path, "utf8"));
     if (typeof parsed.commentId !== "string" || !parsed.commentId)
       return;
     return { commentId: parsed.commentId, node: parsed.node ?? "" };
@@ -532,9 +577,9 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/post_result_comment.ts
 var ref = defineScript(import.meta.url);
 function tokenUsageLine(logsFile) {
-  if (!existsSync3(logsFile))
+  if (!existsSync4(logsFile))
     return;
-  const usageLine = readFileSync3(logsFile, "utf8").split(`
+  const usageLine = readFileSync4(logsFile, "utf8").split(`
 `).find((l) => l.includes("ATOMA_TOKEN_USAGE:"));
   if (!usageLine)
     return;
@@ -553,21 +598,11 @@ function subIssueState(number, type) {
   const found = parentIssueOf(repo, Number(number));
   return { isSubIssue: found.known && found.parent > 0, issueClosed };
 }
-function endedWithToolCalls(sessionPath) {
-  const messages = readSession(sessionPath)?.messages ?? [];
-  for (let i = messages.length - 1;i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message?.role !== "assistant")
-      continue;
-    return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
-  }
-  return false;
-}
 function readSession(path) {
-  if (!path || !existsSync3(path))
+  if (!path || !existsSync4(path))
     return;
   try {
-    return JSON.parse(readFileSync3(path, "utf8"));
+    return JSON.parse(readFileSync4(path, "utf8"));
   } catch {
     return;
   }
@@ -605,19 +640,26 @@ function endedTag(ending) {
   }
 }
 function cutShort(endedBecause) {
-  return endedBecause === "stopped" || endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop";
+  return endedBecause === "stopped" || endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop" || endedBecause === "context_limit" || endedBecause === "failed";
 }
 function reachedLimit(endedBecause) {
-  return endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop";
+  return endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop" || endedBecause === "context_limit";
 }
 function howItWasCutShort(endedBecause) {
   if (endedBecause === "stopped")
     return "was stopped";
   if (endedBecause === "loop")
     return "got stuck repeating itself";
+  if (endedBecause === "failed")
+    return "did not finish";
+  if (endedBecause === "context_limit")
+    return "ran out of context";
   return endedBecause === "iterations" ? "ran out of iterations" : "ran out of time";
 }
 function mentionLine(ending, args) {
+  if (args.endedBecause === "failed") {
+    return `@${args.notify} \u2014 **${args.agent}** stopped mid-run, and no agent will run next. ` + `Resume it, or say what to do instead.`;
+  }
   if (cutShort(args.endedBecause)) {
     return `@${args.notify} \u2014 **${args.agent}** ${howItWasCutShort(args.endedBecause)} ` + `before it finished, and no agent will run next. Resume it, or say what to do instead.`;
   }
@@ -648,6 +690,7 @@ function makesCompletionMention(signals) {
 }
 function buildCommentBody(args) {
   const ending = endingHere(args);
+  const failed = args.endedBecause === "failed";
   const lines = [
     AGENT_TAG.write(args.agent),
     CHANGED_TAG.write(args.changed === true ? "yes" : "no"),
@@ -657,6 +700,9 @@ function buildCommentBody(args) {
       run: Number(args["run-id"] ?? 0) || 0
     })
   ];
+  if (failed) {
+    lines.push(...failureLines({ agent: args.agent, excerpt: args.excerpt ?? "" }), "");
+  }
   if (args.endingInvalid === true) {
     lines.push("> [!WARNING]", "> This run's closing message called more than one thing, so none of its calls", "> was made: nothing it named is started or notified. It was asked to write the", "> message again. Below is what it wrote.", "");
   } else if (args.salvaged === true) {
@@ -664,7 +710,8 @@ function buildCommentBody(args) {
   } else if (args.wroteNothing === true) {
     lines.push("> [!WARNING]", "> This run ended before it said anything at all, so there is no report below \u2014", "> not even a partial one. What it had done is in its saved session.", "");
   }
-  lines.push(args.output, "");
+  if (args.output.trim() !== "")
+    lines.push(args.output, "");
   const escapedNotice = escapedMentionNotice(args.escapedMentions ?? [], args.escapedMentionsReason ?? "unknown");
   if (escapedNotice !== undefined)
     lines.push("", escapedNotice, "");
@@ -693,7 +740,7 @@ function buildFooter(args) {
     lines.push(`_${args.toolTrouble}_`);
   if (args.endedBecause === "stopped") {
     lines.push(`\u23F8\uFE0F _Stopped on request. **The session is saved.** Comment \`/resume\` to continue ` + `from here, or \`/${args.agent}\` with an instruction on the following lines._`);
-  } else if (cutShort(args.endedBecause)) {
+  } else if (reachedLimit(args.endedBecause)) {
     lines.push(`\u26A0\uFE0F _The run ${howItWasCutShort(args.endedBecause)}. Comment \`/${args.agent}\` to continue._`);
   }
   if (args.spentOn !== undefined)
@@ -757,11 +804,13 @@ function main() {
     console.error("post_result_comment.ts: --output is required (the agent's stdout file)");
     process.exit(2);
   }
-  const redacted = redact(existsSync3(outputFile) ? readFileSync3(outputFile, "utf8") : "");
-  const endedEarly = cutShort(values["ended-because"]);
+  const redacted = redact(existsSync4(outputFile) ? readFileSync4(outputFile, "utf8") : "");
   let output = redacted;
   let salvaged = false;
   let wroteNothing = false;
+  const endedBecause = values["ended-because"];
+  const endedEarly = cutShort(endedBecause);
+  const failed = endedBecause === "failed";
   if (!output.trim() && endedEarly) {
     const last = lastAgentText(values.session, Number(values["messages-before"]));
     if (last !== undefined) {
@@ -771,12 +820,8 @@ function main() {
     }
   }
   if (!output.trim()) {
-    if (!endedEarly && endedWithToolCalls(values.session)) {
-      const ending = readEndingComment(values["ending-comment"]);
-      if (!ending) {
-        console.error("atomaton_output.txt is empty (session ended via a tool call) -- skipping result comment.");
-        return;
-      }
+    const ending = readEndingComment(values["ending-comment"]);
+    if (ending) {
       console.error(`appending the result footer onto the tool's ending comment ${ending.commentId} (on ${ending.node})`);
       appendFooter({
         repo: process.env.GITHUB_REPOSITORY ?? "",
@@ -788,16 +833,20 @@ function main() {
       });
       return;
     }
-    if (endedEarly) {
+    if (failed) {
+      console.error("the run failed with nothing to report -- posting the failure notice rather than nothing.");
+    } else if (endedEarly) {
       wroteNothing = true;
-      output = values["ended-because"] === "stopped" ? "_This run was stopped before it said anything._" : `_This run ${howItWasCutShort(values["ended-because"])} before it said anything._`;
+      output = endedBecause === "stopped" ? "_This run was stopped before it said anything._" : `_This run ${howItWasCutShort(endedBecause)} before it said anything._`;
       console.error("the run was cut short with nothing to report -- posting the notice rather than nothing.");
     } else {
       wroteNothing = true;
       output = "_This run ended without saying anything._";
-      console.error("atomaton_output.txt is empty and the session shows no session-ending tool call " + "(last assistant turn made no tool calls, or the session is missing/unreadable) " + "-- posting the no-report notice rather than skipping.");
+      console.error("atomaton_output.txt is empty and no session-ending tool recorded a comment " + "-- posting the no-report notice rather than skipping.");
     }
   }
+  if (failed && !salvaged && output.trim() !== "")
+    salvaged = true;
   const endingInvalid = isTrue(values["ending-invalid"]);
   const notACall = endingInvalid || salvaged || cutShort(values["ended-because"]);
   const callees = readCalleesFile(values["people-file"]);
@@ -834,7 +883,8 @@ function main() {
     changed: isTrue(values.changed),
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
     tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
-    spentOn: reachedLimit(values["ended-because"]) ? toolCallTally(readSession(values.session)) : undefined
+    spentOn: reachedLimit(values["ended-because"]) ? toolCallTally(readSession(values.session)) : undefined,
+    excerpt: failed ? logExcerptFrom(values["logs-file"]) : undefined
   });
   const { code, stdout, stderr } = gh("api", `repos/${process.env.GITHUB_REPOSITORY}/issues/${values.number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
   if (code !== 0) {
@@ -855,7 +905,6 @@ if (import.meta.main)
 export {
   buildCommentBody,
   buildFooter,
-  endedWithToolCalls,
   lastAgentText,
   makesCompletionMention,
   ref
