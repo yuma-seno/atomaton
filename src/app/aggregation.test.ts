@@ -15,6 +15,19 @@ const LIB_DIR = import.meta.dir;
  * See this file's sibling, `lib.test.ts`, for the same harness and the same rule.
  */
 function runGate(rules: FakeGhRule[]): { kind: string; ghCalls: string[][]; stderr: string } {
+  return runGateDetailed(rules);
+}
+
+/**
+ * The same run, keeping the field this file mostly calls `kind` out of its other name.
+ *
+ * `dispatchOrchestratorIfReady` returns a `DispatchGateResult` whose discriminant is
+ * `kind`; the shim prints it, and `runGate` calls the printed value `kind` because that
+ * is what every test asserts against. Named twice because the closed-parent test reads
+ * a call log AND an outcome, and calling both `kind` there would be one name for two
+ * things.
+ */
+function runGateDetailed(rules: FakeGhRule[]): { outcome: string; kind: string; ghCalls: string[][]; stderr: string } {
   const configDir = makeConfigDir({});
   const dir = mkdtempSync(join(tmpdir(), "atomaton-gate-"));
   const file = join(dir, "shim.ts");
@@ -27,7 +40,8 @@ console.log(result.kind);
   );
   try {
     const r = runWithFakeGh(file, [], { cwd: configDir, rules });
-    return { kind: r.stdout.trim().split("\n").pop() ?? "", ghCalls: r.ghCalls, stderr: r.stderr };
+    const kind = r.stdout.trim().split("\n").pop() ?? "";
+    return { outcome: kind, kind, ghCalls: r.ghCalls, stderr: r.stderr };
   } finally {
     rmSync(configDir, { recursive: true, force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -92,32 +106,39 @@ const NO_SIBLINGS: FakeGhRule[] = subIssues();
  * .../issues/5/comments --paginate`. Rules are first-match, so the first comment-read
  * rule a test lists answers all three, and its bodies have to serve all three.
  *
- * `firstId` starts at the id the fake gives the dispatch marker's own write (555):
- * the freshness probe looks for THAT id, and a thread that must let a dispatch through
- * has to show it.
+ * `firstId` starts at the id the fake gives the aggregation marker's own write (777 is
+ * `MARKER_ID`, added at the end of every list): the freshness probe looks for THAT id,
+ * and a thread that must let a dispatch through has to show it. That the marker is
+ * already in the listing models the read-after-write lag resolved, and it keeps the
+ * fixture independent of how many reads the gate makes before its write.
  *
  * The `match` carries `--paginate`, never the path alone: the marker WRITE goes to the
  * same path without it, and a rule that answered the POST handed back a comment object
  * where an id belongs — the take-back then deleted a comment that does not exist while
  * the tests still passed.
  */
+const MARKER_ID = 777;
+
 function thread(bodies: string[], firstId = 555): FakeGhRule {
   return {
     match: ["api", "issues/5/comments", "--paginate"],
-    stdout: JSON.stringify(bodies.map((body, i) => ({ id: firstId + i, body }))),
+    stdout: JSON.stringify([
+      ...bodies.map((body, i) => ({ id: firstId + i, body })),
+      // The aggregation marker, as the freshness probe must find it. Neutral on
+      // purpose: a body claiming `atomaton:aggregated` here would be the gate's own
+      // idempotency read answering `already-aggregated` before the gate ever ran.
+      { id: MARKER_ID, body: "a comment with no tag on it" },
+    ]),
   };
 }
 
-// The marker POST, and nothing else: the read that has to SHOW the marker is
-// `PARENT_AGENT` (or a test's own thread fixture), because the dispatch marker is what
-// both the freshness probe and the agent read are looking for.
-const DISPATCH_MARKER: FakeGhRule[] = [
-  { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:dispatch"], stdout: "555" },
-];
-
-// The parent's own thread: the dispatch marker names the agent to re-invoke, and its
-// id is the freshness probe's comment. No aggregation marker, so the gate runs.
-const PARENT_AGENT: FakeGhRule = thread(["<!-- atomaton:dispatch=atomaton -->"]);
+// The parent's own thread as an orchestrated parent's really looks: a request that
+// named its agent, and then the run it started ending `waiting` — parked on the
+// children, which is the state the gate exists to end. A `waiting` ending is not an
+// outstanding request (the request was taken up), so the dispatch may go. Without the
+// ending the newest event would be the request and the gate would answer `parent-busy`.
+const PARKED = "<!-- atomaton:ended=waiting answers=0 run=0 -->";
+const PARENT_AGENT: FakeGhRule = thread(["<!-- atomaton:dispatch=atomaton -->", PARKED]);
 
 // The same read, answered with a thread that names nobody: `dispatchRunner` refuses an
 // empty agent, which is what `dispatch-failed` means.
@@ -137,10 +158,14 @@ const NO_MARKER: FakeGhRule = thread(["some unrelated comment"]);
  * way to learn the new comment's id -- `gh issue comment` has no `--jq` flag and exits
  * on it before posting anything (#143). The id the fake returns is 777, and the
  * take-back tests below delete exactly that.
+ *
+ * It is keyed on `atomaton:aggregated` because that is the tag the gate's marker always
+ * carries. The same body also carries `atomaton:dispatch`, which is what makes it the
+ * dispatch's marker as well — see the "one comment" tests below.
  */
 const AGGREGATION_MARKER_POST: FakeGhRule = {
   match: ["api", "issues/5/comments", "--method", "POST", "atomaton:aggregated"],
-  stdout: "777",
+  stdout: String(MARKER_ID),
   code: 0,
 };
 const DISPATCH_WORKS: FakeGhRule = { match: ["workflow", "run"], code: 0 };
@@ -153,11 +178,69 @@ const PARENT_IS_OPEN: FakeGhRule = { match: ["api", "issues"], stdout: JSON.stri
 
 describe("aggregation.ts dispatch gate", () => {
   test("dispatches once when the siblings are done and nobody claimed it", () => {
-    const { kind, ghCalls } = runGate([...NO_SIBLINGS, PARENT_AGENT, ...DISPATCH_MARKER, NO_MARKER, AGGREGATION_MARKER_POST, DISPATCH_WORKS, PARENT_IS_OPEN]);
+    const { kind, ghCalls } = runGate([...NO_SIBLINGS, PARENT_AGENT, NO_MARKER, AGGREGATION_MARKER_POST, DISPATCH_WORKS, PARENT_IS_OPEN]);
     expect(kind).toBe("dispatched");
     expect(wroteMarker(ghCalls)).toBe(true);
     expect(dispatched(ghCalls)).toBe(true);
   });
+
+  /**
+   * One completion, one comment.
+   *
+   * The gate has always written the `atomaton:aggregated` marker, and the dispatch used
+   * to post an `atomaton:dispatch` marker of its own beside it — two comments saying one
+   * thing, and the second one the run's ask. The marker is the ask now, which means the
+   * comment count is the thing to pin: a regression that put the second POST back would
+   * leave every aggregation as two comments again, and nothing else would notice.
+   */
+  test("an aggregation posts exactly one comment, and it is both the marker and the ask", () => {
+    const { kind, ghCalls } = runGate([...NO_SIBLINGS, PARENT_AGENT, NO_MARKER, AGGREGATION_MARKER_POST, DISPATCH_WORKS, PARENT_IS_OPEN]);
+    expect(kind).toBe("dispatched");
+
+    // Every write to the parent's thread, which is the whole question: reads carry
+    // `--paginate`, writes carry `--method`.
+    const writes = ghCalls.filter(
+      (c) => c.includes("api") && c.some((a) => a.includes("issues/5/comments")) && c.includes("--method"),
+    );
+    expect(writes, "one comment per completion: the marker IS the dispatch's ask").toHaveLength(1);
+
+    const body = writes[0]?.find((a) => a.startsWith("body=")) ?? "";
+    expect(body, "the idempotency claim every later caller reads").toContain("atomaton:aggregated=10");
+    expect(body, "and the tag that makes the run's claim land on this comment").toContain("atomaton:dispatch=atomaton");
+    // The dispatch's ask is this comment, so the run claims the marker rather than a
+    // second comment: `claim_turn.ts` appends its took line to a marker in place.
+    const dispatch = ghCalls.find((c) => c[0] === "workflow" && c[1] === "run") ?? [];
+    expect(dispatch.join(" ")).toContain(`ask=${MARKER_ID}`);
+  });
+
+  // The case `dispatchRunner` refuses and the gate has to report as a failure: the
+  // marker is written, but the thread never shows it, so the ordering check has nothing
+  // to be ordered against. The refusal removes the marker, so a later close retries.
+  test(
+    "a dispatch the thread cannot confirm is not sent, and the marker comes back",
+    () => {
+      const { kind, ghCalls } = runGate([
+        ...NO_SIBLINGS,
+        // A thread that never shows the marker: no `MARKER_ID` in it, so the freshness
+        // probe widens and then stands down. The read has to answer every time, or the
+        // probe refuses for the other reason (an unreadable thread).
+        { match: ["api", "issues/5/comments", "--paginate"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }, { id: 556, body: PARKED }]) },
+        AGGREGATION_MARKER_POST,
+        DISPATCH_WORKS,
+        PARENT_IS_OPEN,
+      ]);
+      expect(kind).toBe("dispatch-failed");
+      expect(dispatched(ghCalls), "no workflow_dispatch: the evidence never appeared").toBe(false);
+      // Removed by the refusal that adopted it, so the idempotency read finds nothing
+      // next time — which is what makes `dispatch-failed` a retryable answer.
+      const deletes = ghCalls.filter((c) => c.includes("DELETE") && c.join(" ").includes(`comments/${MARKER_ID}`));
+      expect(deletes, "the marker is taken back so a later close can retry").toHaveLength(1);
+      // Exactly one: the gate must not delete it a second time. A 404 there would be
+      // logged as "the marker could not be removed, so nothing will retry", which is
+      // the opposite of what happened.
+    },
+    15_000,
+  );
 
   /**
    * The case this gate walked into on #803: the last sibling lands, and the parent
@@ -171,7 +254,6 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
       PARENT_AGENT,
-      ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
@@ -212,15 +294,16 @@ describe("aggregation.ts dispatch gate", () => {
   test("a marker quoted in a fenced sample does not stop the aggregation", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
-      // Serves all three reads: the quoted sample claims nothing, and the dispatch
-      // marker names the agent and carries the freshness probe's id 555 — so it is
-      // first, or the probe would exclude the sample and see its OWN marker as an
-      // outstanding request the dispatch would refuse over.
+      // Serves all three reads: the quoted sample claims nothing, the dispatch marker
+      // names the agent, and the `waiting` ending is what makes the newest turn event
+      // "taken up" rather than an outstanding request the dispatch would refuse over.
+      // The gate's own marker is appended by `thread()` (id 777), and that is the id
+      // the freshness probe looks for.
       thread([
         "<!-- atomaton:dispatch=atomaton -->",
+        PARKED,
         ["For the record, the marker looks like:", "```html", "<!-- atomaton:aggregated=10 -->", "```"].join("\n"),
       ]),
-      ...DISPATCH_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
       PARENT_IS_OPEN,
@@ -274,7 +357,6 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
       PARENT_AGENT,
-      ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
@@ -294,7 +376,6 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
       NAMES_NOBODY,
-      ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
@@ -317,7 +398,6 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
       NAMES_NOBODY,
-      ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
@@ -336,7 +416,6 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
       PARENT_AGENT,
-      ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
@@ -344,6 +423,44 @@ describe("aggregation.ts dispatch gate", () => {
     ]);
     expect(kind).toBe("parent-closed");
     expect(ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/777"))).toBe(false);
+  });
+
+  /**
+   * The other half of that argument, and the one that only exists because the marker is
+   * now also the dispatch's ask: the KEPT marker must not keep `atomaton:dispatch` on it.
+   *
+   * The tag is a promise that a run is coming. On a closed parent no run will ever claim
+   * it, and `runInFlight` reads a standing request as a run working or coming — forever.
+   * That is the shape #449 was made of, where merged pull requests read as live runs, and
+   * it also means `prune_atomaton_data` would never prune the node.
+   *
+   * So the marker is edited back to the idempotency line alone: "this completion was
+   * dealt with" is true, "an agent is coming" is not.
+   */
+  test("a closed parent's marker keeps the aggregation claim and loses the dispatch tag", () => {
+    const { outcome, ghCalls } = runGateDetailed([
+      ...NO_SIBLINGS,
+      PARENT_AGENT,
+      NO_MARKER,
+      AGGREGATION_MARKER_POST,
+      DISPATCH_WORKS,
+      { match: ["api", "issues"], stdout: JSON.stringify({ state: "closed" }) },
+      { match: ["api", "issues/5/comments/777"], stdout: "{}" },
+      { match: ["issue", "comment"], stdout: "" },
+    ]);
+    expect(outcome).toBe("parent-closed");
+
+    // Written with both tags, then edited to just the claim.
+    const write = ghCalls.find(
+      (c) => c.some((a) => a.includes("issues/5/comments")) && c.includes("POST"),
+    );
+    expect(write?.find((a) => a.startsWith("body=")) ?? "").toContain("atomaton:dispatch=");
+
+    const edit = ghCalls.find((c) => c.includes("PATCH") && c.join(" ").includes("comments/777"));
+    expect(edit, "the tag has to come off, or the thread promises a run forever").toBeDefined();
+    const body = edit?.find((a) => a.startsWith("body=")) ?? "";
+    expect(body, "the idempotency claim stays: the completion was dealt with").toContain("atomaton:aggregated=10");
+    expect(body, "and the promise goes").not.toContain("atomaton:dispatch");
   });
 
   // The read half of the same argument, which was already guarded. Kept so the
@@ -408,7 +525,6 @@ describe("aggregation.ts dispatch gate", () => {
     const { kind, ghCalls } = runGate([
       ...NO_SIBLINGS,
       NAMES_NOBODY,
-      ...DISPATCH_MARKER,
       NO_MARKER,
       AGGREGATION_MARKER_POST,
       DISPATCH_WORKS,
