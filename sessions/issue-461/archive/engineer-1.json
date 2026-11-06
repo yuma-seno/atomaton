@@ -1,0 +1,32 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #461: Report failure step を post_result_comment の単一 writer に畳む(hard crash も1つの writer が ending を書く)\n**Labels:** atomaton/sub-issue, atomaton/launched\n**Sub-issue of:** #441\n\n親: #441(設計回答 <https://github.com/yuma-seno/atomaton/issues/441#issuecomment-6674912139> の §2 残片:「コメントを書く step は 1 つ」)。\n\n## 済み済み(再実装しない)\n- §1/§2 は core 側: yuma-seno/atoma v0.4.5(compaction 予算修正、`context_limit` ending 名)。\n- §3 は #455 マージ済み: post_result_comment が「core が `failed` を記録し step が成功した」経路を failureNotice 形で拾う。`src/entrypoints/machinery/lib/failure-notice.ts` 新設(両 caller 共通、`runUrl` は footer 無しの caller だけが渡す設計)。\n- #454 で語彙接続済み。v0.21.56 リリース & self-deploy 済み。\n\n## 棚卸し(現行 head 884da10 の実測。編集前に自分でも当該箇所を確認すること)\n\n- `src/workflows/atomaton-runner.wac.ts`(生成元): step 順序 `:2300-2383`。**post result comment** の if は `:1294`(= `steps.atoma.outcome == 'success' && steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'`)。**Report failure** は `:1466`〜(if `:1468` = `always() && steps.atoma.outcome == 'failure' && steps.post-result.outputs.comment_id == ''`、env `ATOMA_FAILED: runAgentStep.outputs.atoma_failed` `:1475`)。\n- `read_run_ending` は exit 0/2 のときだけ Run agent step 内で走り `ended_because`/`reported` を出力(`:1135-1142`);非ゼロのときは `atoma_failed=true` のみ(`:1143-1152`)。\n- `post_result_comment.ts`(post-#455): `--ended-because` 無し + session 無しでは no-report 文(`_This run ended without saying anything._`, `:961`)を投稿して exit 0。session 読み取り失敗は無音(`:247-257`)。`failureLines`/`logExcerptFrom` は `:32` で import 済み、`failed` のときのみ使用(`:587`, `:602`;excerpt は `:1056`)。gh 失敗時 throw(`:1069-1070`)。\n- `report_run_failure.ts` の exit 契約: notice が投稿できた → 0、投稿できなかった / `atoma_failed` 未設定 → 非ゼロ(`:152`,`:171`,`:174`)。\n- docs: `docs/work/how-it-works/how-a-run-ends.md` に #455 が書いた「2 ways a failed run reaches that notice」節は、畳み後に 1 writer の説明へ書き直す。\n\n## 残っている二重構造\n\nsoft stop(exit 2)は step 内で処理され outcome 成功 → post_result_comment が書く(#455 で修飈済み)。**hard crash(Run agent step が非ゼロで死んだ)** のときだけ Report failure が唯一の writer として残っている。畳みの本体はここ。\n\n## スコープ\n\n1. runner wac.ts: post result comment の条件から `outcome == 'success'` を外し、crash 形も拾う。`claimed == 'true'` は維持(claim 前 crash では沈黙 = 現行踏襲)。`new_event_count != '0'` の扱いは現行挙動の復元を壊さない形で決める(crash 時は context step の出力が無い/ある両方があり得る点に注意)。\n2. crash 判定の受け渡し: `atoma_failed`(`runAgentStep.outputs.atoma_failed`)を post_result_comment に新 flag で渡す。**`report_run_failure.ts` が今日拾う全 shape(outcome == failure・コメント未投稿・claim 済み)を網羅する判定にすること**(`atoma_failed` 未設定の step 内 crash も含む)。ただし `ended_because` が読めた場合(read_run_ending が動いた形)は既存の ended_because 主導の文言を優先。\n3. post_result_comment.ts の hard-crash arm: `failureLines` + `runUrl` + excerpt(`--logs-file` が読めれば、無くてもクラッシュしない)を投稿。`atomaton:ended` タグと mention を付ける。no-report 文 deste には落とさない。\n4. Report failure step を runner wac.ts から削除し `bun run synth`(生成 yml もコミット)。`tests/contract/workflow-sources.test.ts`(header 一致)が通ること。\n5. exit 契約の踏襲: notice を投稿できた → writer は 0(green)、投稿できなかった → 非ゼロ(job 赤)。現行の post_result_comment(:1069-1070)と report_run_failure(:152/:171/:174)の合意形を単一 writer 側でも保つ。\n6. `how-a-run-ends.md` の 2-ways 節を 1 writer の説明に書き直す。\n\n## 受け入れ条件\n\n- hard crash(Run agent 非ゼロ、claimed=true、session/ending 出力なし)→ machinery のコメント **1 件**: did-not-finish + セッション保存明示 + recovery lines(`/agent` / `/agent recover`)+ runUrl + excerpt(あれば)、`atomaton:ended` タグ付き、mention 付き。\n- soft stop / 正常完了 / stopped / limit / no-report の各経路は現行と同一(#455 の契約テストがそのまま通る)。\n- claim 未成立の crash、イベント無しの形状ではコメントを出さない(現行踏襲)。\n- workflow に Report failure step が存在しない(wac + 生成 yml の両方)。\n- job 色・label 遷移が crash/soft-stop 両形で現行同等。\n\n## 制約\n\n- 挙動の劣化禁止。既存契約テスト(stopped / limit 経路を含む)を壊さない。\n- version bump とリリースはしない。\n- `docs/` に自リポジトリの issue 番号(#NNN)は書かない。\n- core リポジトリには触れない。\n- 日本語テキストを新設する場合は UTF-8 を保つ(既存ドキュメントは英語のまま)。\n\n## クローズ条件\n\nこの issue(#441)のブランチにマージされた PR の head で次が観察できること: (1) wac + 生成 yml から Report failure が消えている。(2) crash 形を拾う post_result_comment のコードとテスト(gh call log で「1 件投稿・タグ・mention」を確認)。(3) #455 の既存 contract テスト群の green 実行結果。エンジニアが PR に検証結果を残し、親(#441)側で統合確認のうえ閉じる。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-461",
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-06T14:58:47Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "user",
+      "content": "This run was started by the `atomaton` agent, which is waiting on your result. When you finish, report back to it: end your response with a line holding nothing but `/atomaton`, followed by what you concluded and what it should do next. Do not end with a plain comment and no such line -- the agent that started you would never be told the work is done."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "0db674413e0e6bf97e87a69fb36486b772aeb0d264e6a3c7dc662a2e730ca9c3",
+      "event_count": 1,
+      "agent": "engineer"
+    }
+  }
+}
