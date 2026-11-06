@@ -349,6 +349,24 @@ describe("post_result_comment.ts buildCommentBody", () => {
   });
 
   /**
+   * The model's context window is a fourth ceiling, and it gets its own sentence for
+   * the same reason the other two did: "ran out of time" would send a person to wait
+   * or retry, when the way out is a larger `context_limit` or a smaller task.
+   */
+  test("a run cut off by its context window says so, not that it ran out of time", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      endedBecause: "context_limit",
+      notify: "alice",
+      runUrl: "http://example.com/run/1",
+      output: "Halfway through.",
+    });
+    expect(body).toContain("ran out of context");
+    expect(body).toContain("The run ran out of context");
+    expect(body).not.toContain("ran out of time");
+  });
+
+  /**
    * In the footer, where the machine's own facts about the run already are. Said
    * there rather than left to the agent because asking did not work: over 396
    * sessions, 30 runs carried a problem a server reported about itself and 3
