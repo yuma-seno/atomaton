@@ -45,6 +45,10 @@ describe("endingOf", () => {
 
   test("this run's own ceiling spends it", () => {
     expect(endingFor({ endedBecause: "runtime" }).ended).toBe("spent");
+    expect(endingFor({ endedBecause: "iterations" }).ended).toBe("spent");
+    // The model's window is a ceiling too: nobody chose to end the turn, and
+    // nothing it planned will run.
+    expect(endingFor({ endedBecause: "context_limit" }).ended).toBe("spent");
   });
 
   /**
@@ -156,6 +160,7 @@ describe("shouldReleaseGuard", () => {
       { endedBecause: "stopped" },
       { endedBecause: "runtime" },
       { endedBecause: "loop" },
+      { endedBecause: "context_limit" },
       { loopLimitReached: true },
       // Nothing is working on a node whose agent went quiet, so the node must not
       // stay locked against the person the mention is about to fetch.
@@ -216,6 +221,7 @@ describe("who runs next", () => {
       { endedBecause: "stopped", directive: "reviewer" },
       { endedBecause: "runtime", directive: "reviewer" },
       { endedBecause: "loop", directive: "reviewer" },
+      { endedBecause: "context_limit", directive: "reviewer" },
       { loopLimitReached: true, directive: "reviewer" },
       { chainContinues: true },
       { reported: false },

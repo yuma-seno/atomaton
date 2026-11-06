@@ -159,11 +159,21 @@ import { TypedOutputsStep } from "./base.ts";
  * showed it: 190 messages replaced, no hook line in the log, no archive on the data
  * branch. Every compaction this tree has recorded was against a hookless binary; the
  * archive guarantee the raise above describes holds only from v0.4.4.
+ *
+ * **Compaction keeps the recent turns, and the context stop has a name.** Written by
+ * the core from v0.4.5 (yuma-seno/atoma#17): the recent-turns budget divided by
+ * `CHARS_PER_TOKEN` instead of multiplying it, so it kept a forty-eighth of the
+ * window; a session that crossed its `context_limit` then fit only its newest batch,
+ * and the compaction was thrown away after the summary had been paid for. v0.4.5
+ * keeps a third of the window and accepts a one-batch keep. A session it cannot
+ * compact ends as `context_limit` rather than `failed` -- a soft stop the runner reads
+ * back, so the thread says the window filled instead of filing it with providers that
+ * hung up.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.4";
+export const ATOMA_DEFAULT_VERSION = "v0.4.5";
 
 export const ATOMA_VERSION_DESC =
-  "Atoma CLI version tag to install (e.g. v0.4.4). Use `source` to build from a checkout of yuma-seno/atoma@main.";
+  "Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.";
 
 /**
  * Checkout for `atoma_version: source`, which builds the CLI from `main` instead

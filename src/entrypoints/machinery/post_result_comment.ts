@@ -368,17 +368,24 @@ function cutShort(endedBecause: string | undefined): boolean {
     endedBecause === "stopped" ||
     endedBecause === "runtime" ||
     endedBecause === "iterations" ||
-    endedBecause === "loop"
+    endedBecause === "loop" ||
+    endedBecause === "context_limit"
   );
 }
 
 /**
- * The three ways a run stops itself at a limit: the clock, an iteration ceiling, or
- * the repetition circuit breaker. The same three `notify_limit_reached.ts` names; the
- * tally it carried is this file's now.
+ * The ways a run stops itself at a limit: the clock, an iteration ceiling, the
+ * repetition circuit breaker, or the model's context window. The tally these share
+ * is what a person deciding between retrying and re-scoping needs; the old limit
+ * notice named only the first three, and this comment is now the one that says it.
  */
 function reachedLimit(endedBecause: string | undefined): boolean {
-  return endedBecause === "runtime" || endedBecause === "iterations" || endedBecause === "loop";
+  return (
+    endedBecause === "runtime" ||
+    endedBecause === "iterations" ||
+    endedBecause === "loop" ||
+    endedBecause === "context_limit"
+  );
 }
 
 /**
@@ -391,10 +398,15 @@ function reachedLimit(endedBecause: string | undefined): boolean {
  * This said "ran out of iterations" for both, and the runner passes
  * `--max-runtime-secs` and no `--max-iterations`. So the ceiling it hits is always
  * the clock, and that sentence was always the wrong one.
+ *
+ * `context_limit` is the fourth ceiling and gets its own sentence rather than being
+ * folded into "ran out of time": the window filled, and the way out -- a larger
+ * `context_limit`, or a smaller task -- is different from waiting less.
  */
 function howItWasCutShort(endedBecause: string | undefined): string {
   if (endedBecause === "stopped") return "was stopped";
   if (endedBecause === "loop") return "got stuck repeating itself";
+  if (endedBecause === "context_limit") return "ran out of context";
   return endedBecause === "iterations" ? "ran out of iterations" : "ran out of time";
 }
 

@@ -148,7 +148,7 @@ export interface TurnSignals {
   succeeded: boolean;
   /**
    * How the CORE says the run ended: `completed`, `iterations`, `runtime`,
-   * `stopped`, `loop`, or `failed`.
+   * `stopped`, `loop`, `context_limit`, or `failed`.
    *
    * Its word, not a translation of it. `atoma` classifies its own ending and
    * records it in the session; `read_run_ending.ts` reads that back. This was two
@@ -157,7 +157,7 @@ export interface TurnSignals {
    * ceilings into one and raced the watcher writing the file.
    *
    * An unrecognised word lands on `finished`, which is the same place `completed`
-   * lands. A core that grows a seventh ending should be read as having finished
+   * lands. A core that grows another ending should be read as having finished
    * rather than as having failed, until somebody here decides what it means.
    */
   endedBecause: string;
@@ -207,11 +207,14 @@ export interface TurnSignals {
  * `stopped` and `spent` are one field now and cannot both hold. They were two
  * booleans guessed from outside, where they could.
  *
- * `spent` covers both of the core's ceilings, `iterations` and `runtime`, because
- * the decisions below turn on the same answer for either: the turn ended without
- * anybody choosing to end it, and nothing it planned will run. Which ceiling is a
- * sentence rather than a decision, so it stays on the word and is read by whatever
- * writes that sentence — see the result comment.
+ * `spent` covers the core's ceilings -- `iterations`, `runtime` and
+ * `context_limit` -- because the decisions below turn on the same answer for any of
+ * them: the turn ended without anybody choosing to end it, and nothing it planned
+ * will run. Which ceiling is a sentence rather than a decision, so it stays on the
+ * word and is read by whatever writes that sentence -- see the result comment.
+ * `context_limit` is a ceiling on the model's input rather than on the run's own
+ * time or churn, and it is the one a person can often clear by re-scoping or by
+ * raising the window.
  *
  * `no-report` sits BELOW `handed-off` on purpose, and that placement is most of what
  * makes it usable. A run that ends by calling `create_pr`, `launch_sub_agent` or
@@ -227,7 +230,12 @@ export function endingOf(signals: TurnSignals): TurnEnding {
   if (!signals.succeeded || signals.endedBecause === "failed") return { ended: "failed" };
   if (signals.endedBecause === "loop") return { ended: "looped" };
   if (signals.endedBecause === "stopped") return { ended: "stopped" };
-  if (signals.endedBecause === "iterations" || signals.endedBecause === "runtime") return { ended: "spent" };
+  if (
+    signals.endedBecause === "iterations" ||
+    signals.endedBecause === "runtime" ||
+    signals.endedBecause === "context_limit"
+  )
+    return { ended: "spent" };
   // A park beats the chain limits and every ordinary ending: the children it
   // started are already running, so the node is held no matter what the counters
   // say about the chain that launched them. The limits catch the re-invoked
