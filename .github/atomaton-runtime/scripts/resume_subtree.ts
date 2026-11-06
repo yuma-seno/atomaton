@@ -577,8 +577,10 @@ function readComments(repo, number, excludeCommentId) {
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
   return shapedThread(comments, readers);
 }
-function runInFlight(repo, number) {
+function runInFlight(repo, number, options = {}) {
   const shaped = readComments(repo, number);
+  if (options.merged === true)
+    return shaped.holder === "agent";
   return shaped.holder === "agent" || whoseTurn(shaped.events) === "agent";
 }
 function checkDispatchMarker(repo, number, markerId) {
@@ -974,9 +976,9 @@ function parseListed(stdout) {
     return null;
   }
 }
-function runningOn(repo, number) {
+function runningOn(repo, number, merged) {
   try {
-    return { running: runInFlight(repo, number) };
+    return { running: runInFlight(repo, number, { merged }) };
   } catch (e) {
     return { running: false, problem: `could not read the thread on #${number}: ${e.message}` };
   }
@@ -998,7 +1000,8 @@ function readNode(repo, number) {
     return { problem: `#${number} reported an unrecognised state ${JSON.stringify(raw.state ?? null)}` };
   }
   const state = raw.state === "open" ? "open" : isPr ? pullRequestOutcome(Boolean(raw.pull_request?.merged_at)) : issueOutcome(raw.state_reason);
-  const { running, problem } = runningOn(repo, number);
+  const merged = isPr && raw.state !== "open" && Boolean(raw.pull_request?.merged_at);
+  const { running, problem } = runningOn(repo, number, merged);
   if (problem)
     return { problem };
   return {
@@ -1023,7 +1026,8 @@ function readChildren(repo, parent) {
   for (const found of listedPrs ?? []) {
     if (PARENT_ISSUE_TAG.readProse(found.body ?? "") !== parent)
       continue;
-    const { running, problem } = runningOn(repo, found.number);
+    const merged = !saysOpen(found.state) && found.state === "MERGED";
+    const { running, problem } = runningOn(repo, found.number, merged);
     if (problem) {
       problems.push(problem);
       continue;
@@ -1044,7 +1048,7 @@ function readChildren(repo, parent) {
   for (const child of links.children) {
     if (already.has(child.number))
       continue;
-    const { running, problem } = runningOn(repo, child.number);
+    const { running, problem } = runningOn(repo, child.number, false);
     if (problem) {
       problems.push(problem);
       continue;
