@@ -66,7 +66,7 @@ jobs:
       - name: Install Atoma CLI
         shell: bash
         run: |
-          VERSION="v0.4.4"
+          VERSION="v0.4.5"
           if [ "$VERSION" = "source" ]; then
             echo "Building Atoma from source (atoma-src/) ..."
             cargo install --path atoma-src --force --locked

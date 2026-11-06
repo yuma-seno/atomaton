@@ -15,7 +15,7 @@ function endingOf(signals) {
     return { ended: "looped" };
   if (signals.endedBecause === "stopped")
     return { ended: "stopped" };
-  if (signals.endedBecause === "iterations" || signals.endedBecause === "runtime")
+  if (signals.endedBecause === "iterations" || signals.endedBecause === "runtime" || signals.endedBecause === "context_limit")
     return { ended: "spent" };
   if (signals.parked)
     return { ended: "parked" };
