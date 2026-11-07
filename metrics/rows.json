@@ -21045,5 +21045,56 @@
     "tools": {},
     "acts": {},
     "runs": []
+  },
+  {
+    "path": "sessions/pr-477/reviewer.json",
+    "agent": "reviewer",
+    "messages": 261,
+    "calls": 141,
+    "failed": 2,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "read": 75,
+      "grep": 56,
+      "check_merge_readiness": 1,
+      "fetch": 7,
+      "glob": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 1,
+        "ended": "2026-11-07T06:52:09Z",
+        "ended_because": "completed",
+        "iterations": 150,
+        "messages": 261,
+        "seconds": 2745,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 3,
+            "grep": 64,
+            "list": 1,
+            "read": 86
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 1,
+            "get_issue": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_prs": 1
+          },
+          "web": {
+            "fetch": 49
+          }
+        },
+        "started": "2026-11-07T06:06:24Z"
+      }
+    ]
   }
 ]
