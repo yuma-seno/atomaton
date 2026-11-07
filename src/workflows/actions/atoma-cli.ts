@@ -151,6 +151,13 @@ import { TypedOutputsStep } from "./base.ts";
  * `context_limit` and runs with the larger cap -- the shape this tree's own session
  * shrink used to cover, and why this raise rides with the removal of that shrink.
  *
+ * **A turn that stops on its own introduction is asked to make the call.** Written by
+ * the core from v0.4.7 (yuma-seno/atoma#21): a final message that ends on a colon is
+ * re-asked, bounded, to make the tool call it announced or write the report instead --
+ * the shape that had engineer runs ending on "Now the tests:" and completing with the
+ * work uncommitted. An older binary takes such a message as the run's final answer;
+ * the prompt teaches the same shape, so the degrade is the prompt's weight alone.
+ *
  * **The hooks actually reach the loop.** Written by the core from v0.4.4
  * (yuma-seno/atoma#14): v0.4.3's compaction gathered the `before_compaction` scripts
  * inside the block that builds the MCP registry and an empty vec shadowed them below,
@@ -170,7 +177,7 @@ import { TypedOutputsStep } from "./base.ts";
  * back, so the thread says the window filled instead of filing it with providers that
  * hung up.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.6";
+export const ATOMA_DEFAULT_VERSION = "v0.4.7";
 
 export const ATOMA_VERSION_DESC =
   "Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.";
