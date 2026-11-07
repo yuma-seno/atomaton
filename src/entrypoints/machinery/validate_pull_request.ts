@@ -84,7 +84,7 @@
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-validation.ts";
-import { dispatchWorkflow, gh } from "../../adapters/github/gh.ts";
+import { dispatchWorkflow, gh, ghRead } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
 import { readPullRequest } from "../../adapters/github/pull-request.ts";
 import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG, isQuotation } from "../../adapters/github/tags.ts";
@@ -181,6 +181,71 @@ interface CiRun {
 }
 
 /**
+ * The events whose run says something about this commit.
+ *
+ * `workflow_dispatch` is what this script starts. `pull_request` is what GitHub
+ * starts by itself when a person opens or pushes to a pull request -- and a person's
+ * `/reviewer` arriving while that run was already green used to dispatch a second
+ * run for the same commit, wait for it, and announce "CI is running" on a pull
+ * request whose checks were all green (#471). Reading the run GitHub had already
+ * finished is the whole fix; the announcement then has no wait left to describe.
+ *
+ * ## The two runs do not check out the same tree, and that is why this is right
+ *
+ * A `pull_request` run takes the merge of base and head; a run this script dispatches
+ * takes the head branch alone. So a green `pull_request` run is not literally the same
+ * test. Two things decide that it is still the verdict to report:
+ *
+ * - **For an agent's pull request -- the case this script exists for -- it cannot
+ *   arise.** GitHub holds the `pull_request` run a bot's pull request triggered at
+ *   `action_required`, so it never executes, and `hasVerdict` excludes that
+ *   conclusion by name. Nothing here changes what an agent's validation runs against.
+ * - **For a person's pull request, the merge tree is the one a merge produces.** That
+ *   run is not held, it executes, and it is the green the person is looking at on the
+ *   pull request. Its tree is what merging this pull request yields, so its verdict
+ *   answers the question a merge asks at least as well as the head alone -- and the
+ *   commit it is tied to is this head, which is the commit the verdict is mirrored
+ *   onto.
+ */
+const VERDICT_EVENTS = new Set(["workflow_dispatch", "pull_request"]);
+
+/**
+ * Whether a run has concluded and concluded something.
+ *
+ * `cancelled` was superseded rather than judged, and `action_required` never ran at
+ * all -- that is the hold GitHub puts on a bot's pull request. Adopting either would
+ * report a verdict for a commit CI has not judged.
+ */
+function hasVerdict(run: CiRun): boolean {
+  if (run.status !== "completed") return false;
+  const conclusion = (run.conclusion ?? "").trim();
+  return conclusion !== "" && conclusion !== "cancelled" && conclusion !== "action_required";
+}
+
+/**
+ * Whether a run is worth waiting for rather than duplicating.
+ *
+ * A run this script dispatched, and nothing else. The asymmetry is deliberate: a
+ * verdict can be read off any event, but only a run known to count down is safe to
+ * wait on.
+ *
+ * A `pull_request` run of an agent's pull request is GitHub's hold, and its listed
+ * shape is `completed`/`action_required` -- measured on `cd27fe3` of #469, run
+ * 42333586737. `hasVerdict` rejects that conclusion, so it is never read as a verdict.
+ * Waiting on it would be right only while that shape holds; if the hold is ever listed
+ * as running instead, every agent validation would sit out the full timeout and write a
+ * failing check for a commit nothing was wrong with. So a `pull_request` run
+ * contributes verdicts only.
+ *
+ * The cost is a duplicate in one narrow window -- a person pushes and comments
+ * `/reviewer` before that push's own run finishes -- and it is the cheaper mistake: a
+ * wasted runner and a real wait, against a pull request that could not merge at all.
+ */
+function waitable(run: CiRun): boolean {
+  return run.status !== "completed" && run.event === "workflow_dispatch";
+}
+
+/**
  * A CI run that already exists for this commit, if one does.
  *
  * CI is dispatched more than once for the same commit. `create_pr` starts a
@@ -189,18 +254,19 @@ interface CiRun {
  * has not changed between them, so the verdict cannot have, and the second and third
  * runs bought nothing but runner time.
  *
- * Only `workflow_dispatch` runs are considered, and only the named workflow's. A
- * `pull_request` run sits on the same commit held at `action_required` -- GitHub
- * holds a workflow a bot's pull request triggered -- and adopting it would read the
- * hold as a verdict.
+ * Anything that has concluded comes before anything still going, whatever their
+ * times: the commit already has a verdict, and a second run of the same workflow on
+ * the same commit would not change it. Among equals the newest wins, because a re-run
+ * is the one somebody just asked for.
  */
 export function findExistingCiRun(runs: CiRun[], workflow: string, headSha: string): RunRef | undefined {
-  const candidates = runs
-    .filter((run) => run.event === "workflow_dispatch")
+  const onThisCommit = runs
+    .filter((run) => VERDICT_EVENTS.has(run.event))
     .filter((run) => run.head_sha === headSha)
-    .filter((run) => run.path.endsWith(`/${workflow}`))
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  const run = candidates[0];
+    .filter((run) => run.path.endsWith(`/${workflow}`));
+  const newest = (candidates: CiRun[]): CiRun | undefined =>
+    [...candidates].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
+  const run = newest(onThisCommit.filter(hasVerdict)) ?? newest(onThisCommit.filter(waitable));
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
 
@@ -288,6 +354,11 @@ function reportFailure(
  * either: the person's own command is the record the run was asked for, the verdict
  * that reuse returns is seconds old, and the agent the verdict dispatches starts
  * seconds later. There is no wait left to describe.
+ *
+ * #471 is why the reused case has to include GitHub's own `pull_request` run: with
+ * that run out of `findExistingCiRun`'s candidates, a green pull request went on to be
+ * dispatched a second time and this comment appeared under a page of green checks.
+ * Fixing the reader is what keeps this comment off that thread at all.
  */
 function notifyCiWaiting(repo: string, number: string, askedByPerson: boolean, runUrl: string): void {
   if (!askedByPerson) return;
@@ -312,6 +383,10 @@ function notifyCiWaiting(repo: string, number: string, askedByPerson: boolean, r
  * When there is something to wait for -- a run already going, or one this call
  * dispatched -- it says so through `notifyCiWaiting`, which holds the rules for when
  * that comment is worth a person's thread and when it is noise.
+ *
+ * The wait itself only ever follows a `workflow_dispatch` run, which is what
+ * `waitable` decides and why: a `pull_request` run of an agent's pull request is a
+ * hold that never counts down. Its concluded shape is a verdict and is reused.
  *
  * A function rather than the body of `main`, so the one caller that must NOT run it
  * — a pull request whose own `.github/atomaton/` is broken — can skip it by not
@@ -338,20 +413,32 @@ function runCiAndWait(
   // just-dispatched run is not on the first page, so the poll never finds it and
   // validation reports "no conclusion" and writes a failing check. Asking for the
   // commit is both correct and bounded.
+  //
+  // No event filter, because the answer spans events: `pull_request` is where GitHub's
+  // own run for the commit lives, and asking only for `workflow_dispatch` is what made
+  // this script unable to see a green PR (#471). Which events count is
+  // `findExistingCiRun`'s decision, and putting it there keeps this call one read.
+  //
+  // `per_page=100` because the filter above no longer narrows the list as far as it
+  // did: one page is thirty runs by default, and a commit busy enough to push this
+  // script's own run off it would report "no conclusion" for a verdict that exists.
   const listRuns = (): CiRun[] => {
-    const listed = gh("api", `repos/${repo}/actions/runs?event=workflow_dispatch&head_sha=${headSha}`).stdout;
+    // `ghRead`, because this is a read: a blip here would otherwise parse as "no runs
+    // for this commit", which is the answer that dispatches a duplicate.
+    const listed = ghRead("api", `repos/${repo}/actions/runs?head_sha=${headSha}&per_page=100`).stdout;
     const { workflow_runs = [] } = JSON.parse(listed || "{}") as { workflow_runs?: CiRun[] };
     return workflow_runs;
   };
 
   // Reuse a CI run that already exists for this commit rather than starting a
-  // second one. A cancelled run is not a verdict -- it was superseded, not judged --
-  // so it is not reused and CI is dispatched again.
+  // second one. `findExistingCiRun` has already excluded the runs that are not a
+  // verdict -- cancelled, held at `action_required` -- so a completed one here
+  // concluded something. That includes GitHub's own `pull_request` run, which is what
+  // keeps a pull request already showing green from being run a second time (#471).
   const existing = findExistingCiRun(listRuns(), workflow, headSha);
-  const reusable = existing?.status === "completed" && existing.conclusion && existing.conclusion !== "cancelled";
-  if (reusable) {
+  if (existing?.status === "completed") {
     log(`reusing CI run ${existing.id} for ${headSha.slice(0, 7)}: ${existing.conclusion}`);
-    return { conclusion: existing.conclusion!, runUrl: runUrlFor(existing.id) };
+    return { conclusion: existing.conclusion ?? "", runUrl: runUrlFor(existing.id) };
   }
 
   // A run already going for this commit is waited for rather than duplicated. It is
