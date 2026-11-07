@@ -135,6 +135,50 @@ describe("generated workflows", () => {
   });
 
   /**
+   * The run watch's scheduled half (#462), and the reason it exists at all.
+   *
+   * Every runner run is dispatched by the machinery with `GITHUB_TOKEN`, and GitHub starts
+   * no workflow run for an event its own token triggered — so `workflow_run: completed`
+   * has only ever fired for ENTRY runs, and the watch was pointed away from the runs it
+   * exists for. A schedule does not depend on an event being delivered, so the generated
+   * workflow must carry one, and the two halves must be gated to their own event: a
+   * scheduled run has no `workflow_run` context, and a completion has no lock to sweep.
+   *
+   * The concurrency group is here because of the same absence. It is keyed on the watched
+   * run's display title, which is EMPTY on a schedule, so without the event in the key
+   * every scheduled run would join one group — and GitHub keeps a single PENDING run per
+   * group, so the sweeps would start cancelling each other instead of queueing.
+   */
+  test("the run watch is scheduled as well as triggered, and sweeps under its own group", () => {
+    type ScheduledWatch = {
+      on?: { schedule?: { cron?: string }[]; workflow_run?: { types?: string[] } };
+      concurrency?: { group?: string };
+      jobs?: Record<string, { if?: string; "timeout-minutes"?: number; steps?: { run?: string; env?: Record<string, string> }[] }>;
+    };
+    const watch = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-run-watch.yml", "utf8")) as ScheduledWatch;
+    // Both triggers, neither replacing the other: a delivered completion is still
+    // reconciled within seconds, and the schedule reaches what was never delivered.
+    expect(watch.on?.schedule?.[0]?.cron).toBe("*/15 * * * *");
+    expect(watch.on?.workflow_run?.types).toEqual(["completed"]);
+    // The event is in the group because a schedule has no display title to key on.
+    expect(watch.concurrency?.group).toContain("github.event_name");
+    expect(watch.concurrency?.group).toContain("github.event.workflow_run.display_title");
+
+    // Each half is gated to its own event, so neither reads the other's absent context.
+    expect(watch.jobs?.watch?.if).toContain("github.event_name == 'workflow_run'");
+    expect(watch.jobs?.sweep?.if).toContain("github.event_name == 'schedule'");
+    expect(watch.jobs?.sweep?.["timeout-minutes"]).toBeGreaterThan(0);
+
+    // The sweeps serialise against each other, which is what a group with no node needs to
+    // do: two sweeps in flight would read the same thread and both post an ending for it.
+    const sweepStep = watch.jobs?.sweep?.steps?.find((step) => step.run?.includes("sweep_stale_locks.ts"));
+    expect(sweepStep).toBeDefined();
+    // Its run id arrives from the environment — the id the ending it writes has to carry.
+    expect(sweepStep?.env?.GITHUB_RUN_ID).toBe("${{ github.run_id }}");
+    expect(sweepStep?.env?.GITHUB_REPOSITORY).toBe("${{ github.repository }}");
+  });
+
+  /**
    * The "CI is running" comment does not belong to the workflow that hands a command
    * to validation.
    *
