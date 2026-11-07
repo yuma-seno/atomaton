@@ -19170,19 +19170,27 @@
   {
     "path": "sessions/issue-462/reviewer.json",
     "agent": "reviewer",
-    "messages": 155,
-    "calls": 102,
+    "messages": 196,
+    "calls": 120,
     "failed": 3,
     "refused": 0,
     "skills": [],
     "reported": true,
     "tools": {
-      "grep": 43,
-      "read": 34,
-      "fetch": 22,
+      "grep": 46,
+      "read": 39,
+      "fetch": 24,
       "get_issue": 1,
       "list": 1,
-      "glob": 1
+      "glob": 1,
+      "get_pr": 1,
+      "get_branch": 1,
+      "get_check_runs": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "get_issue_comments": 1,
+      "check_merge_readiness": 1,
+      "merge_pr": 1
     },
     "acts": {},
     "runs": [
@@ -19213,6 +19221,34 @@
           }
         },
         "started": "2026-11-07T03:24:26Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-07T04:58:13Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "messages": 196,
+        "seconds": 252,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 3,
+            "read": 5
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1,
+            "merge_pr": 1
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-07T04:54:01Z"
       }
     ]
   },
