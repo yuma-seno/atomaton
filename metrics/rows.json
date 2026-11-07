@@ -18257,25 +18257,25 @@
   {
     "path": "sessions/issue-458/engineer.json",
     "agent": "engineer",
-    "messages": 381,
-    "calls": 184,
-    "failed": 5,
+    "messages": 400,
+    "calls": 192,
+    "failed": 6,
     "refused": 1,
     "skills": [],
     "reported": true,
     "tools": {
-      "bash": 113,
+      "bash": 120,
       "get_issue_comments": 2,
       "read": 5,
-      "edit": 54,
+      "edit": 55,
       "write": 4,
       "get_issue": 1,
       "list_prs": 1,
       "commit_and_push": 4
     },
     "acts": {
-      "other": 111,
-      "edit": 2
+      "other": 117,
+      "edit": 3
     },
     "runs": [
       {
@@ -18469,6 +18469,23 @@
           }
         },
         "started": "2026-11-07T04:10:28Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-07T04:15:43Z",
+        "ended_because": "completed",
+        "iterations": 9,
+        "messages": 400,
+        "seconds": 59,
+        "server_calls": {
+          "files": {
+            "edit": 1
+          },
+          "shell": {
+            "bash": 7
+          }
+        },
+        "started": "2026-11-07T04:14:44Z"
       }
     ]
   },
