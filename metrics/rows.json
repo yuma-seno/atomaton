@@ -18257,25 +18257,25 @@
   {
     "path": "sessions/issue-458/engineer.json",
     "agent": "engineer",
-    "messages": 337,
-    "calls": 163,
-    "failed": 4,
+    "messages": 381,
+    "calls": 184,
+    "failed": 5,
     "refused": 1,
     "skills": [],
     "reported": true,
     "tools": {
-      "bash": 97,
+      "bash": 113,
       "get_issue_comments": 2,
       "read": 5,
-      "edit": 49,
+      "edit": 54,
       "write": 4,
       "get_issue": 1,
       "list_prs": 1,
       "commit_and_push": 4
     },
     "acts": {
-      "other": 96,
-      "edit": 1
+      "other": 111,
+      "edit": 2
     },
     "runs": [
       {
@@ -18452,6 +18452,23 @@
           }
         },
         "started": "2026-11-07T04:08:03Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-07T04:12:53Z",
+        "ended_because": "completed",
+        "iterations": 21,
+        "messages": 381,
+        "seconds": 145,
+        "server_calls": {
+          "files": {
+            "edit": 5
+          },
+          "shell": {
+            "bash": 16
+          }
+        },
+        "started": "2026-11-07T04:10:28Z"
       }
     ]
   },
@@ -20308,6 +20325,19 @@
         "started": "2026-11-06T14:59:52Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-469/archive/reviewer-1.json",
+    "agent": "reviewer",
+    "messages": 8,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
   },
   {
     "path": "sessions/pr-470/reviewer.json",
