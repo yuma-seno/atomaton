@@ -37,7 +37,7 @@
  * It also does not end a person's turn for them: a node whose thread holds no claim is not
  * this sweep's, whatever its label says.
  */
-import { gh } from "../../../adapters/github/gh.ts";
+import { gh, ghPaginated } from "../../../adapters/github/gh.ts";
 import { mostRecentAgentOn } from "../../../adapters/github/agent-on-issue.ts";
 import { readNodeLock } from "../../../adapters/github/node-lock.ts";
 import { lockOn } from "../../../adapters/github/thread.ts";
@@ -114,20 +114,31 @@ export interface SweepSummary {
  * Throws when the list cannot be read: enumerating nothing and not being able to enumerate
  * are different answers, and a sweep that treated them the same would report a clean pass
  * over a repository it never looked at.
+ *
+ * ## Why the REST issues endpoint, and not `gh issue list --label`
+ *
+ * `gh issue list` with a label goes to the SEARCH API, and the query it builds carries
+ * `type:issue` — so pull requests are excluded, and `gh issue list` refuses the qualifier
+ * that would change that. Every runner run wears this label on a pull request as readily as
+ * on an issue (`atomaton-runner.wac.ts`: "Applies to both issues and PRs"), and a review or
+ * engineer run that dies mid-work leaves a claim on a PR — the very shape this sweep exists
+ * for, on the node kind with the most runner runs. `repos/{owner}/{repo}/issues` returns
+ * both kinds (a PR is an issue with a `pull_request` field), which is how
+ * `adapters/github/issue-index.ts` reads the same list. Here the pull requests are wanted,
+ * so nothing is filtered out.
  */
 function inProgressNodes(repo: string, label: string): number[] {
-  const listed = gh(
-    "issue", "list", "--repo", repo, "--state", "open",
-    "--label", label, "--limit", String(SWEEP_LIMIT),
-    "--json", "number", "--jq", ".[].number",
-  );
-  if (listed.code !== 0) {
-    throw new Error(`could not list the nodes wearing '${label}': ${listed.stderr || listed.stdout}`);
+  const path = `repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100`;
+  let nodes: { number?: number }[];
+  try {
+    nodes = ghPaginated<{ number?: number }>("api", path);
+  } catch (error) {
+    throw new Error(`could not list the nodes wearing '${label}': ${(error as Error).message}`);
   }
-  return (listed.stdout ?? "")
-    .split("\n")
-    .map((line: string) => Number(line.trim()))
-    .filter((number) => Number.isInteger(number) && number > 0);
+  return nodes
+    .map((node) => Number(node.number))
+    .filter((number) => Number.isInteger(number) && number > 0)
+    .slice(0, SWEEP_LIMIT);
 }
 
 /**
@@ -196,9 +207,18 @@ export function sweepStaleLocks(opts: {
     // effect is a node still locked with a comment on it saying otherwise, which is the
     // worst of the states here. The labels come after, best-effort, on the same rule the
     // per-run watch applies: the thread is the record and the label is its cache.
+    // The proof asks the question the judgement answered, not "is any claim open": a comment
+    // that arrives between the release and this read is a NEW claim by a new run, and
+    // reading that as "the release did not take" would turn a healed node into a red run and
+    // skip its label write.
+    const answeredLock = read.lock.claim;
     let stillHeld: boolean;
     try {
-      stillHeld = lockOn(opts.repo, number).claim !== undefined;
+      const after = lockOn(opts.repo, number).claim;
+      stillHeld =
+        answeredLock !== undefined
+          ? after?.ask === answeredLock.ask && after?.run === answeredLock.run
+          : after !== undefined && after.ask === ask;
     } catch (error) {
       failed += 1;
       log(`::error::stale sweep: released #${number} but could not read the thread back to check it: ${(error as Error).message}`);

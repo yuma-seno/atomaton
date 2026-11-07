@@ -91,7 +91,7 @@ describe("parkOverdue", () => {
 
 describe("lockVerdict, an unparked node", () => {
   const verdictOf = (c: ClaimLock | undefined, run: RunStatusRead): string =>
-    lockVerdict({ claim: c, parked: false, parkedSince: "", openChildren: 0, run, nowMs: NOW });
+    lockVerdict({ claim: c, parked: false, parkedSince: "", openUnder: 0, run, nowMs: NOW });
 
   test("a finished run with its claim standing is released", () => {
     expect(verdictOf(claim(7), { read: true, status: "completed" })).toBe("release");
@@ -113,7 +113,7 @@ describe("lockVerdict, an unparked node", () => {
 describe("lockVerdict, a parked node", () => {
   const verdictOf = (args: {
     claim?: ClaimLock;
-    openChildren: number | undefined;
+    openUnder: number | undefined;
     parkedSince?: string;
     run?: RunStatusRead;
   }): string =>
@@ -121,44 +121,54 @@ describe("lockVerdict, a parked node", () => {
       claim: args.claim,
       parked: true,
       parkedSince: args.parkedSince ?? ago(PARK_COLLECTION_MINUTES + 1),
-      openChildren: args.openChildren,
+      openUnder: args.openUnder,
       run: args.run ?? { read: true, status: "completed" },
       nowMs: NOW,
     });
 
   test("a park with anything still open holds, however overdue", () => {
-    expect(verdictOf({ claim: claim(7), openChildren: 2, parkedSince: ago(60 * 24) })).toBe("hold");
-    expect(verdictOf({ claim: claim(7), openChildren: 1, parkedSince: ago(60 * 24) })).toBe("hold");
+    // "Anything" is sub-issues AND pull requests: `create_pr` parks on the pull request it
+    // opened, and a leaf issue has no sub-issues at all — see the adapter's `openUnderOf`.
+    expect(verdictOf({ claim: claim(7), openUnder: 2, parkedSince: ago(60 * 24) })).toBe("hold");
+    expect(verdictOf({ claim: claim(7), openUnder: 1, parkedSince: ago(60 * 24) })).toBe("hold");
   });
 
   test("a park inside its grace holds — the aggregation is still coming", () => {
-    expect(verdictOf({ claim: claim(7), openChildren: 0, parkedSince: ago(PARK_COLLECTION_MINUTES - 1) })).toBe("hold");
+    expect(verdictOf({ claim: claim(7), openUnder: 0, parkedSince: ago(PARK_COLLECTION_MINUTES - 1) })).toBe("hold");
   });
 
   test("an overdue park with nothing open is released", () => {
-    expect(verdictOf({ claim: claim(7), openChildren: 0 })).toBe("release");
+    expect(verdictOf({ claim: claim(7), openUnder: 0 })).toBe("release");
     // Including the case with no claim: a person took the claim away by hand to get out of
     // a stuck lock, and the park is what is left holding the node.
-    expect(verdictOf({ openChildren: 0 })).toBe("release");
+    expect(verdictOf({ openUnder: 0 })).toBe("release");
+  });
+
+  test("a park on a pull request is held by the pull request, not released as a leaf", () => {
+    // `create_pr` parks on the pull request it opened, and a leaf issue has no sub-issues.
+    // `openUnder` counts both, so one open PR is what keeps this from reading "nothing is
+    // open" while a reviewer is working — the adapter that computes it folds the two lists
+    // together, and this pins the judgement's side of that.
+    expect(verdictOf({ claim: claim(7), openUnder: 1, parkedSince: ago(60 * 24) })).toBe("hold");
   });
 
   test("children that could not be read are undetermined, never \"nothing is open\"", () => {
     // The whole arm rests on there being nothing left under the node. `issueLinks` reports
     // a failed read as `unavailable`, and folding that into `0` would release a parent
     // whose work is still going.
-    expect(verdictOf({ claim: claim(7), openChildren: undefined })).toBe("undetermined");
-    expect(verdictOf({ openChildren: undefined })).toBe("undetermined");
+    expect(verdictOf({ claim: claim(7), openUnder: undefined })).toBe("undetermined");
+    expect(verdictOf({ openUnder: undefined })).toBe("undetermined");
   });
 
   test("a parked ask a run has claimed since is held by that run", () => {
     // The resume that collects a park claims the parked ask with its OWN run id. A claim
     // made after the park is therefore a live collection, and releasing it would post
     // "nothing was decided" over a parent that is deciding something.
-    expect(verdictOf({ claim: claim(9, ago(0.5)), openChildren: 0, run: { read: true, status: "in_progress" } })).toBe("hold");
+    expect(verdictOf({ claim: claim(9, ago(0.5)), openUnder: 0, run: { read: true, status: "in_progress" } })).toBe("hold");
     // And once that run is over too, the park is stale again — by the same rule.
-    expect(verdictOf({ claim: claim(9, ago(0.5)), openChildren: 0, run: { read: true, status: "completed" } })).toBe("release");
+    expect(verdictOf({ claim: claim(9, ago(0.5)), openUnder: 0, run: { read: true, status: "completed" } })).toBe("release");
     // An unanswerable run on an overdue park is undetermined, like everywhere else.
-    expect(verdictOf({ claim: claim(9), openChildren: 0, run: UNREAD })).toBe("undetermined");
+    expect(verdictOf({ claim: claim(9), openUnder: 0, run: UNREAD })).toBe("undetermined");
   });
 });
 

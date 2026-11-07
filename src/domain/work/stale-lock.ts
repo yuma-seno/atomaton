@@ -143,10 +143,10 @@ export type LockVerdict = "release" | "hold" | "undetermined";
  * but an ending can release it, so "the run is over" is the whole answer.
  *
  * A PARK does have one — the aggregation — and that is why three more facts are required
- * before releasing one: nothing is left open under the node, the grace has passed, and
- * the children could be read at all. All three are about not racing the machinery's own
- * resume. A park released a sweep early would post "nothing was decided" beside a parent
- * that then decides something.
+ * before releasing one: nothing is left open under the node, the grace has passed, and the
+ * links could be read at all. All three are about not racing the machinery's own resume. A
+ * park released a sweep early would post "nothing was decided" beside a parent that then
+ * decides something.
  *
  * `claim` is absent in one real state: a person removed the claim by hand to get out of a
  * lock and left the park standing, which before this was the only way out of a stuck one.
@@ -161,15 +161,22 @@ export function lockVerdict(args: {
   readonly parked: boolean;
   /** When that ending was written. Only read when `parked`. */
   readonly parkedSince: string;
-  /** Open sub-issues under the node, or `undefined` when they could not be read. */
-  readonly openChildren: number | undefined;
+  /**
+   * Open work under the node — sub-issues AND pull requests — or `undefined` when the
+   * links could not be read.
+   *
+   * Both lists, because a park waits on whichever it started: a sub-issue
+   * (`launch_sub_agent`) or a pull request (`create_pr`). Counting only sub-issues reads a
+   * leaf issue's `create_pr` park as "nothing is open" while its pull request is in review.
+   */
+  readonly openUnder: number | undefined;
   /** What GitHub says about the claim's run. Ignored when there is no claim. */
   readonly run: RunStatusRead;
   readonly nowMs: number;
 }): LockVerdict {
   if (args.parked) {
-    if (args.openChildren === undefined) return "undetermined";
-    if (args.openChildren > 0) return "hold";
+    if (args.openUnder === undefined) return "undetermined";
+    if (args.openUnder > 0) return "hold";
     if (!parkOverdue(args.parkedSince, args.nowMs)) return "hold";
     // The park is overdue and nothing is open under it. A resume that IS dispatched
     // claims the parked ask first, so a claim made after the park is a live run holding

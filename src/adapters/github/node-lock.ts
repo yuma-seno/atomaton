@@ -42,16 +42,28 @@ export interface NodeLock {
 }
 
 /**
- * Open sub-issues under a node, or `undefined` when they could not be read.
+ * Open work under a node, or `undefined` when the links could not be read.
+ *
+ * Two lists, because a parked turn can be waiting on either and only one of them is a
+ * sub-issue:
+ *
+ *   - `children` — `launch_sub_agent` starts an issue under this node and parks on it;
+ *     the aggregation resumes the parent when the last one closes.
+ *   - `pullRequests` — `create_pr` parks on the PULL REQUEST it just opened
+ *     (`entrypoints/tools/mcp/github.ts` posts `ended=waiting` on the issue and
+ *     dispatches validation for the PR). A leaf issue has no sub-issues at all, so
+ *     counting only children would read that park as "nothing is open under this node"
+ *     while a reviewer was working its pull request — and release it mid-review.
  *
  * `issueLinks` reports an unreadable relationship as `unavailable` rather than throwing,
- * and that distinction is load-bearing here: no children and no knowledge of the children
- * must not both read as "nothing is left under this node".
+ * and that distinction is load-bearing here: no open work and no knowledge of it must not
+ * both read as "nothing is left under this node".
  */
-function openChildrenOf(repo: string, number: string | number): number | undefined {
+function openUnderOf(repo: string, number: string | number): number | undefined {
   const links = issueLinks(repo, Number(number));
   if (links.unavailable !== undefined) return undefined;
-  return links.children.filter((child) => child.state === "open").length;
+  const open = (nodes: readonly { state: string }[]) => nodes.filter((node) => node.state === "open").length;
+  return open(links.children) + open(links.pullRequests);
 }
 
 /**
@@ -62,18 +74,18 @@ function openChildrenOf(repo: string, number: string | number): number | undefin
  * reads degrade instead, to `undetermined`, because each is only ever asked to refine an
  * answer the thread already gave.
  *
- * Only a PARKED node asks about its children: an unparked lock has no collection to wait
+ * Only a PARKED node asks what is open under it: an unparked lock has no collection to wait
  * for, so the read would be a request whose answer nothing consults.
  */
 export function readNodeLock(repo: string, number: string | number, nowMs: number): NodeLock {
   const lock = lockOn(repo, number);
   const run = lock.claim !== undefined && lock.claim.run > 0 ? readRunStatus(repo, lock.claim.run) : null;
-  const openChildren = lock.park !== undefined ? openChildrenOf(repo, number) : 0;
+  const openUnder = lock.park !== undefined ? openUnderOf(repo, number) : 0;
   const verdict = lockVerdict({
     claim: lock.claim,
     parked: lock.park !== undefined,
     parkedSince: lock.park?.at ?? "",
-    openChildren,
+    openUnder,
     run: run ?? { read: false, why: "the claim names no run" },
     nowMs,
   });

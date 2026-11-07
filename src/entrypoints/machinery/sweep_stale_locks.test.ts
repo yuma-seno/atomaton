@@ -46,10 +46,17 @@ const claimComment = (body = CLAIM, minutes = 90, id = 101) => machinery(id, bod
 const endingFor = (ask: number) =>
   machinery(999, `<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=done answers=${ask} run=4242 -->\nhealed`, 0);
 
-/** The issue list the sweep enumerates, as `gh issue list --json number --jq ".[].number"` prints it. */
+/**
+ * The list the sweep enumerates: `api repos/.../issues?state=open&labels=...`, one JSON array
+ * per page.
+ *
+ * The REST issues endpoint rather than `gh issue list --label`, which goes to the search API
+ * with `type:issue` and therefore never returns a pull request. The numbers here are whatever
+ * GitHub's list holds, and pull requests are in it.
+ */
 const listed = (numbers: number[]) => ({
-  match: ["issue", "list", "--label"],
-  stdout: numbers.map((n) => String(n)).join("\n"),
+  match: ["api", "/issues?state=open", "--paginate"],
+  stdout: JSON.stringify(numbers.map((n) => ({ number: n }))),
 });
 
 /** One node's thread, as the comments endpoint returns it. */
@@ -77,8 +84,16 @@ const runStatus = (id: number, status: string, code = 0) => ({
   code,
 });
 
-/** The sub-issue links read, which only a park asks for. */
-const linksOf = (number: number, openChildren: number) => ({
+/**
+ * The links read, which only a park asks for: the sub-issues it started AND the pull
+ * requests linked to it.
+ *
+ * Both, because a park waits on whichever it started — `launch_sub_agent` starts an issue
+ * under this node, `create_pr` opens a pull request from it. A leaf issue has no sub-issues
+ * at all, so a fixture that only ever set `openChildren` could not have caught a
+ * `create_pr` park being released while its pull request was in review.
+ */
+const linksOf = (number: number, openChildren: number, openPrs = 0) => ({
   match: ["graphql"],
   stdout: JSON.stringify({
     data: {
@@ -94,7 +109,17 @@ const linksOf = (number: number, openChildren: number) => ({
               labels: { nodes: [] },
             })),
           },
-          closedByPullRequestsReferences: { nodes: [] },
+          // `closedByPullRequestsReferences` is where an issue's closing pull requests are
+          // read from, and `create_pr` links the PR to its issue.
+          closedByPullRequestsReferences: {
+            nodes: Array.from({ length: openPrs }, (_, index) => ({
+              number: 500 + index,
+              title: "the pull request",
+              state: "OPEN",
+              merged: false,
+              body: "",
+            })),
+          },
           timelineItems: { nodes: [] },
         },
       },
@@ -316,6 +341,109 @@ describe("sweep_stale_locks.ts", () => {
       expect(r.stderr).toContain("still holds a claim after the ending was posted");
       // Not relabelled: the label follows a release that took, never one that did not.
       expect(r.ghCalls.some((call) => call.includes("--add-label"))).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A pull request carrying the label is a node like any other, and it is the node kind a
+   * runner run jams on most often — every reviewer and engineer run works a PR. The
+   * enumeration used to be `gh issue list --label`, which goes to the search API with
+   * `type:issue` and never returns a pull request, so this case could not have passed.
+   */
+  test("a pull request wearing the label is swept like an issue", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(scriptPath("sweep_stale_locks.ts"), [], {
+        cwd: configDir,
+        env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_RUN_ID: "4242" },
+        rules: [
+          listed([469]),
+          ...threadTwice(469, [claimComment()], [claimComment(), endingFor(55)]),
+          runStatus(7, "completed"),
+          { match: ["api", "repos/owner/repo/issues/469"], stdout: JSON.stringify({ state: "open", labels: [] }) },
+          { match: ["issue", "comment"] },
+          { match: ["issue", "edit"] },
+          { match: ["label", "create"] },
+        ],
+      });
+      expect(r.stderr).toContain("released a dead claim on #469");
+      expect(postedBody(r.ghCalls)).toContain("<!-- atomaton:ended=done answers=55 run=4242 -->");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * `create_pr` parks on the PULL REQUEST it opened — it posts `ended=waiting` on the issue
+   * and hands the pull request to validation. A leaf issue has no sub-issues, so a rule that
+   * counted only sub-issues would read "nothing is open under this node" while a reviewer was
+   * still working, and release the park mid-review with a notice saying nothing was running.
+   */
+  test("holds a park whose pull request is still open", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(scriptPath("sweep_stale_locks.ts"), [], {
+        cwd: configDir,
+        env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_RUN_ID: "4242" },
+        rules: [
+          listed([462]),
+          threadOf(462, [claimComment(CLAIM, 120), machinery(102, PARKED, 120)]),
+          runStatus(7, "completed"),
+          // No sub-issues at all — the shape a `create_pr` park leaves — and one open PR.
+          linksOf(462, 0, 1),
+        ],
+      });
+      expect(r.stderr).toContain("held 1");
+      expect(r.stderr).toContain("released 0");
+      expect(wrote(r.ghCalls)).toBe(false);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A person commenting while the sweep is in flight opens a NEW claim, under a new run id.
+   * The release still took, and the proof has to ask the question the judgement answered —
+   * this ask, this run — rather than "is any claim open", which would call a healed node
+   * red and skip its label write.
+   */
+  test("a comment that arrives mid-sweep does not turn a healed node red", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(scriptPath("sweep_stale_locks.ts"), [], {
+        cwd: configDir,
+        env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_RUN_ID: "4242" },
+        rules: [
+          listed([9]),
+          // THREE reads of this thread, in this order — the sweep judges (1), names the
+          // agent for the notice (2), and proves the release (3). The third is the one under
+          // test: the ending is there, and a NEW run has claimed a different ask because
+          // somebody commented while the sweep was working.
+          { match: ["api", "issues/9/comments"], stdout: JSON.stringify([claimComment()]), attempt: 1 },
+          { match: ["api", "issues/9/comments"], stdout: JSON.stringify([claimComment()]), attempt: 2 },
+          {
+            match: ["api", "issues/9/comments"],
+            stdout: JSON.stringify([
+              claimComment(),
+              endingFor(55),
+              machinery(200, "<!-- atomaton:took=201 run=9999 -->", 0),
+            ]),
+            attempt: 3,
+          },
+          runStatus(7, "completed"),
+          { match: ["api", "repos/owner/repo/issues/9"], stdout: JSON.stringify({ state: "open", labels: [] }) },
+          { match: ["issue", "comment"] },
+          { match: ["issue", "edit"] },
+          { match: ["label", "create"] },
+        ],
+      });
+      expect(r.status).toBe(0);
+      expect(r.stderr).toContain("released 1");
+      expect(r.stderr).toContain("failed 0");
+      // And the label moved, because the release was verified.
+      expect(r.ghCalls.some((call) => call.includes("--add-label"))).toBe(true);
     } finally {
       rmSync(configDir, { recursive: true, force: true });
     }
