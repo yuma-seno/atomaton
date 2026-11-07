@@ -19478,6 +19478,63 @@
     ]
   },
   {
+    "path": "sessions/issue-471/reviewer.json",
+    "agent": "reviewer",
+    "messages": 76,
+    "calls": 46,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "load_skill": 1,
+      "get_pr": 2,
+      "read": 17,
+      "grep": 15,
+      "glob": 1,
+      "get_pr_reviews": 1,
+      "get_issue_comments": 2,
+      "get_check_runs": 1,
+      "get_branch": 1,
+      "fetch": 3,
+      "check_merge_readiness": 1,
+      "merge_pr": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-07T05:16:05Z",
+        "ended_because": "completed",
+        "iterations": 24,
+        "messages": 76,
+        "seconds": 926,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 14,
+            "read": 17
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 2,
+            "get_pr": 2,
+            "get_pr_reviews": 1,
+            "merge_pr": 1
+          },
+          "web": {
+            "fetch": 3
+          }
+        },
+        "started": "2026-11-07T05:00:39Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
