@@ -469,7 +469,12 @@ describe("branch-placement.ts resolveBranch", () => {
 });
 
 describe("issue-branches.ts collectIssueBranches", () => {
-  const REFS = JSON.stringify([{ ref: "refs/heads/atomaton/issue-12" }, { ref: "refs/heads/atomaton/issue-12-2" }]);
+  /** Two branches of issue 12, as `matching-refs` reports them: a name and its tip. */
+  const TIPS = { first: "a".repeat(40), second: "b".repeat(40) };
+  const REFS = JSON.stringify([
+    { ref: "refs/heads/atomaton/issue-12", object: { sha: TIPS.first } },
+    { ref: "refs/heads/atomaton/issue-12-2", object: { sha: TIPS.second } },
+  ]);
 
   function run(rules: FakeGhRule[]) {
     const configDir = makeConfigDir({});
@@ -485,6 +490,9 @@ describe("issue-branches.ts collectIssueBranches", () => {
     }
   }
 
+  /** What `gh api repos/.../pulls?head=owner:<branch>` prints for one merged pull request. */
+  const mergedPr = (sha: string) => JSON.stringify([{ merged_at: "2026-01-01T00:00:00Z", head: { sha } }]);
+
   // The merged flag decides whether a run resumes a branch or starts a new one,
   // and asking for it by head branch is what keeps that answer correct in a
   // repository with more pull requests than one page holds -- scanning the
@@ -494,7 +502,7 @@ describe("issue-branches.ts collectIssueBranches", () => {
     const r = run([
       { match: ["matching-refs/heads/atomaton/issue-12"], stdout: REFS },
       { match: ["head=owner:atomaton/issue-12-2"], stdout: "[]" },
-      { match: ["head=owner:atomaton/issue-12"], stdout: JSON.stringify([{ merged_at: "2026-01-01T00:00:00Z" }]) },
+      { match: ["head=owner:atomaton/issue-12"], stdout: mergedPr(TIPS.first) },
     ]);
 
     expect(JSON.parse(r.stdout.trim())).toEqual({
@@ -508,6 +516,28 @@ describe("issue-branches.ts collectIssueBranches", () => {
       const pulls = call.find((arg) => arg.includes("/pulls?"));
       if (pulls) expect(pulls).toContain("head=owner:");
     }
+  });
+
+  /**
+   * The reported defect (#476). A parent issue's branch carries its children's merges
+   * and outlives them, so it can still be the delivery of the whole aggregate after an
+   * earlier pull request from the same name landed part of it. Reading "a pull request
+   * from this branch merged" as "this branch's work is delivered" answered *merged* for
+   * a tip nobody had delivered, the parent's aggregation run found nothing to resume,
+   * it started on the base branch — and `create_pr` then had a head equal to its base
+   * and could not open the pull request that delivers the branch at all.
+   */
+  test("a branch that moved on after a merged pull request is not merged", () => {
+    const landed = "c".repeat(40);
+    const r = run([
+      { match: ["matching-refs/heads/atomaton/issue-12"], stdout: JSON.stringify([{ ref: "refs/heads/atomaton/issue-12", object: { sha: TIPS.first } }]) },
+      { match: ["head=owner:atomaton/issue-12"], stdout: mergedPr(landed) },
+    ]);
+
+    expect(JSON.parse(r.stdout.trim())).toEqual({
+      known: true,
+      branches: [{ name: "atomaton/issue-12", ordinal: 1, merged: false }],
+    });
   });
 
   /**
@@ -525,13 +555,11 @@ describe("issue-branches.ts collectIssueBranches", () => {
 
   test("treats a branch whose pull requests cannot be read as unmerged", () => {
     const r = run([
-      { match: ["matching-refs/heads/atomaton/issue-12"], stdout: JSON.stringify([{ ref: "refs/heads/atomaton/issue-12" }]) },
+      { match: ["matching-refs/heads/atomaton/issue-12"], stdout: REFS },
       { match: ["head=owner:atomaton/issue-12"], code: 1 },
     ]);
-    expect(JSON.parse(r.stdout.trim())).toEqual({
-      known: true,
-      branches: [{ name: "atomaton/issue-12", ordinal: 1, merged: false }],
-    });
+    const read = JSON.parse(r.stdout.trim());
+    expect(read.branches[0]).toEqual({ name: "atomaton/issue-12", ordinal: 1, merged: false });
   });
 });
 

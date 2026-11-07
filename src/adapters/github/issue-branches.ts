@@ -45,6 +45,10 @@ function log(message: string): void {
  * `merged_at` holds whatever method was used, which is why it is the question asked
  * here rather than an ancestry walk.
  *
+ * "Merged" is about the commit the branch points at NOW, not about the name: a name
+ * outlives the pull requests from it, and `headBranchMerged` below is where that is
+ * drawn and why it matters.
+ *
  * ## Why it says whether it knows
  *
  * It used to return `[]` for both "this issue has no branches" and "the list could
@@ -75,10 +79,13 @@ export function collectIssueBranches(repo: string, issueNumber: number): IssueBr
     return { known: false, why };
   }
 
-  let names: string[];
+  let listed: { name: string; tip: string }[];
   try {
-    const parsed = JSON.parse(refs.stdout || "[]") as { ref: string }[];
-    names = parsed.map((entry) => entry.ref.replace(/^refs\/heads\//, ""));
+    const parsed = JSON.parse(refs.stdout || "[]") as { ref: string; object?: { sha?: string } }[];
+    listed = parsed.map((entry) => ({
+      name: entry.ref.replace(/^refs\/heads\//, ""),
+      tip: entry.object?.sha ?? "",
+    }));
   } catch {
     const why = `the branch list for #${issueNumber} was not valid JSON`;
     log(`WARN ${why}`);
@@ -90,30 +97,60 @@ export function collectIssueBranches(repo: string, issueNumber: number): IssueBr
   // `atomaton/issue-120` — and each survivor costs a request, so dropping the ones
   // this issue does not own here is both the correct place and the cheap one.
   const owner = repo.split("/", 1)[0] ?? "";
-  const branches = names
-    .map((name) => ({ name, ordinal: ordinalOfBranch(name, issueNumber) }))
+  const branches = listed
+    .map((entry) => ({ ...entry, ordinal: ordinalOfBranch(entry.name, issueNumber) }))
     .filter((entry) => entry.ordinal > 0)
-    .map((entry) => ({ ...entry, merged: headBranchMerged(repo, owner, entry.name) }));
+    .map((entry) => ({
+      name: entry.name,
+      ordinal: entry.ordinal,
+      merged: headBranchMerged(repo, owner, entry.name, entry.tip),
+    }));
   return { known: true, branches };
 }
 
 /**
- * Whether any pull request from this branch was merged.
+ * Whether the commit this branch now points at is the one a pull request landed.
  *
  * Asks by head branch instead of scanning the repository's pull requests: that
  * list is paginated newest-first, so a branch whose pull request has since
  * fallen off the first page would read as unmerged. The number of branches one
  * issue owns is small, and this is only reached for those.
+ *
+ * ## Why the tip is part of the question
+ *
+ * "A pull request from this branch merged" and "this branch's work is in the base"
+ * are different facts, and the name makes them look like one. A branch name is
+ * reused: a parent issue's branch exists for as long as its children keep merging
+ * into it, and a merge to the base can land part of it while the branch goes on
+ * receiving work. Asking the first question answered *merged* for a tip carrying
+ * undelivered work, so the parent's aggregation run found nothing to resume and
+ * started on the base branch — where `create_pr` then had a head equal to its base
+ * and could not open the pull request that delivers the branch (#441, #476).
+ *
+ * So the branch is merged when the commit it points at NOW is the commit a pull
+ * request landed. A merged pull request from this branch whose `head.sha` is some
+ * earlier commit says only that the branch has moved on since.
+ *
+ * A failed read stays "unmerged": resuming a branch that turned out to have
+ * nothing new costs a run that starts one branch too early, and reporting a branch
+ * with undelivered work as landed loses it.
  */
-function headBranchMerged(repo: string, owner: string, branch: string): boolean {
+function headBranchMerged(repo: string, owner: string, branch: string, tip: string): boolean {
+  // No tip to compare against, so the pull requests answer nothing. "Unmerged" is
+  // the direction that resumes a branch which may have been delivered; the other
+  // loses one that has not been.
+  if (!tip) return false;
   const prs = gh("api", `repos/${repo}/pulls?state=all&per_page=100&head=${owner}:${branch}`);
   if (prs.code) {
     log(`WARN could not read pull requests for ${branch}; treating it as unmerged`);
     return false;
   }
   try {
-    const parsed = JSON.parse(prs.stdout || "[]") as { merged_at?: string | null }[];
-    return parsed.some((pr) => Boolean(pr.merged_at));
+    const parsed = JSON.parse(prs.stdout || "[]") as {
+      merged_at?: string | null;
+      head?: { sha?: string };
+    }[];
+    return parsed.some((pr) => Boolean(pr.merged_at) && pr.head?.sha === tip);
   } catch {
     log(`WARN pull request list for ${branch} was not valid JSON`);
     return false;
