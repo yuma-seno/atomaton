@@ -79,6 +79,11 @@ describe("pickDispatchedRun", () => {
  * each used to run CI again from scratch. The commit has not changed between them,
  * so the verdict cannot have, and the second and third runs bought nothing but
  * runner time. This is the reader that lets a validation reuse what is already there.
+ *
+ * Its candidate list spans two events, and #471 is why. A person's `/reviewer` on a
+ * pull request whose own `pull_request` run had already gone green dispatched a
+ * second run for the same commit and posted "CI is running" under a page of green
+ * checks. The green was there; this reader was looking at one event only.
  */
 describe("findExistingCiRun", () => {
   const ci = "atomaton-check.yml";
@@ -114,6 +119,48 @@ describe("findExistingCiRun", () => {
   test("ignores a held pull_request run on the same commit", () => {
     const held = ciRun({ event: "pull_request", conclusion: "action_required" });
     expect(findExistingCiRun([held], ci, "abc123")).toBeUndefined();
+  });
+
+  // #471: a person's `/reviewer` arrived on a pull request whose own `pull_request`
+  // run was already green. Only `workflow_dispatch` runs were candidates, so that
+  // green was invisible, CI was dispatched a second time, and the thread said "CI is
+  // running" under a page of green checks.
+  test("reuses a green pull_request run for this commit", () => {
+    const green = ciRun({ id: 4, event: "pull_request", status: "completed", conclusion: "success" });
+    expect(findExistingCiRun([green], ci, "abc123")?.conclusion).toBe("success");
+  });
+
+  // A red pull_request run is a verdict too, and reusing it is what keeps a second
+  // run from re-running the same failure.
+  test("reuses a failed pull_request run for this commit", () => {
+    const red = ciRun({ id: 5, event: "pull_request", status: "completed", conclusion: "failure" });
+    expect(findExistingCiRun([red], ci, "abc123")?.conclusion).toBe("failure");
+  });
+
+  // A cancelled run was superseded, not judged, so it is no verdict. It must not be
+  // waited for either: it is already completed, so there is nothing left to wait on.
+  test("ignores a cancelled run", () => {
+    const cancelled = ciRun({ event: "pull_request", status: "completed", conclusion: "cancelled" });
+    expect(findExistingCiRun([cancelled], ci, "abc123")).toBeUndefined();
+  });
+
+  // A `pull_request` run in flight is not waited for. The held one never counts down,
+  // so waiting on it would burn the whole timeout and report no conclusion where a
+  // dispatch would have answered in minutes.
+  test("does not wait for a pull_request run in flight", () => {
+    const running = ciRun({ event: "pull_request", status: "in_progress", conclusion: null });
+    expect(findExistingCiRun([running], ci, "abc123")).toBeUndefined();
+  });
+
+  // A concluded run answers the question whether or not something else is still
+  // going: waiting for a second run of the same workflow on the same commit learns
+  // nothing.
+  test("prefers a concluded run to one still going, whichever is newer", () => {
+    const runs = [
+      ciRun({ id: 1, event: "pull_request", status: "completed", conclusion: "success", created_at: "2026-08-15T09:00:00Z" }),
+      ciRun({ id: 2, status: "in_progress", conclusion: null, created_at: "2026-08-15T10:00:00Z" }),
+    ];
+    expect(findExistingCiRun(runs, ci, "abc123")?.id).toBe(1);
   });
 
   test("takes the newest when the commit has several runs", () => {
@@ -247,7 +294,7 @@ describe("notifyCiWaiting, through the whole script", () => {
   const HEAD = "abc123def4567890abcdef1234567890abcdef12";
 
   /** One run as the Actions API lists it. */
-  function ciActionRun(status: string, conclusion: string | null): Record<string, unknown> {
+  function ciActionRun(status: string, conclusion: string | null, event = "workflow_dispatch"): Record<string, unknown> {
     return {
       id: RUN_ID,
       status,
@@ -257,7 +304,7 @@ describe("notifyCiWaiting, through the whole script", () => {
       // Far past any test's clock: `pickDispatchedRun` filters `created_at >= since`,
       // and `since` is the script's own start time.
       created_at: "2099-01-01T00:00:00Z",
-      event: "workflow_dispatch",
+      event,
     };
   }
 
@@ -265,6 +312,8 @@ describe("notifyCiWaiting, through the whole script", () => {
     status: number | null;
     /** Every comment posted, as the `--body` each `gh issue comment` carried. */
     comments: string[];
+    /** Every argv `gh` was invoked with, so a missing dispatch is assertable. */
+    ghCalls: string[][];
     out: Record<string, string>;
   }
 
@@ -277,7 +326,7 @@ describe("notifyCiWaiting, through the whole script", () => {
    * reached here, because the 1s timeout ends the wait after one poll.
    */
   function runValidation(existingRun: Record<string, unknown> | undefined, askedByPerson: boolean): Validation {
-    const runsRule = { match: ["actions/runs?event=workflow_dispatch"] };
+    const runsRule = { match: ["actions/runs?head_sha="] };
     const runs = (list: Record<string, unknown>[]) => JSON.stringify({ total_count: list.length, workflow_runs: list });
     const rules = [
       // First-match-wins in the fake, so the more specific rules come first: the
@@ -298,8 +347,8 @@ describe("notifyCiWaiting, through the whole script", () => {
       { match: ["repos/o/r/rules/branches/main"], stdout: "[]" },
       { match: ["repos/o/r/commits/"], stdout: "2099-01-01T00:00:00Z" },
       // The dispatch itself. `--ref` is what keeps this rule off the runs-list call,
-      // whose URL carries `workflow_dispatch` -- the words the obvious
-      // `["workflow", "run"]` rule would also match.
+      // whose URL carries `head_sha` -- the words the obvious `["workflow", "run"]`
+      // rule would also match.
       { match: ["--ref", "ci.yml"], stdout: "" },
     ];
     const dir = mkdtempSync(join(tmpdir(), "atomaton-validate-"));
@@ -328,7 +377,12 @@ describe("notifyCiWaiting, through the whole script", () => {
       const comments = result.ghCalls
         .filter((call) => call[0] === "issue" && call[1] === "comment")
         .map((call) => call[call.indexOf("--body") + 1] ?? "");
-      return { status: result.status, comments, out: parseGithubOutput(readFileSync(outputFile, "utf8")) };
+      return {
+        status: result.status,
+        comments,
+        ghCalls: result.ghCalls,
+        out: parseGithubOutput(readFileSync(outputFile, "utf8")),
+      };
     } finally {
       removeTemp(dir);
     }
@@ -336,6 +390,9 @@ describe("notifyCiWaiting, through the whole script", () => {
 
   const waiting = (bodies: string[]): string | undefined =>
     bodies.find((body) => body.includes("CI is running on this pull request"));
+
+  const dispatchedCi = (calls: string[][]): boolean =>
+    calls.some((call) => call[0] === "workflow" && call[1] === "run" && call.includes("--ref"));
 
   // The whole point of moving the comment off the workflow side: the most common
   // case for a person's `/agent` on a pull request was a CI run that had already
@@ -348,9 +405,31 @@ describe("notifyCiWaiting, through the whole script", () => {
     expect(v.out.conclusion).toBe("success");
   });
 
-  // Each of the three slow tests below waits out one 10s poll interval inside the
+  // Each test below that reaches the poll loop waits out one 10s interval inside the
   // script -- the sleep is hardcoded, so the bound here is 3x it plus startup.
   const WAIT = 30_000;
+
+  // #471, as the whole script meets it: a person's `/reviewer` on a pull request
+  // whose own `pull_request` run was already green. Nothing is dispatched, nothing is
+  // announced, and the green decides the verdict -- where before, that run was not a
+  // candidate, CI was started a second time, and "CI is running" appeared under a page
+  // of green checks.
+  test("a green pull_request run on the head is reused instead of dispatched again", () => {
+    const v = runValidation(ciActionRun("completed", "success", "pull_request"), true);
+    expect(waiting(v.comments), "no wait is left to describe").toBeUndefined();
+    expect(v.comments).toEqual([]);
+    expect(dispatchedCi(v.ghCalls), "the same head is not run twice").toBe(false);
+    expect(v.out.conclusion).toBe("success");
+  });
+
+  // The held run is the one shape that must not be mistaken for a verdict: it never
+  // executed, so whatever its conclusion says, CI has not judged this commit. It must
+  // also not be waited on -- it never counts down -- so this dispatches and waits for
+  // its own run.
+  test("a held pull_request run is not a verdict and does not block a dispatch", () => {
+    const v = runValidation(ciActionRun("completed", "action_required", "pull_request"), true);
+    expect(dispatchedCi(v.ghCalls), "the hold is not a verdict, so CI is dispatched").toBe(true);
+  }, WAIT);
 
   test("a run dispatched by this validation is announced, with its run URL", () => {
     const v = runValidation(undefined, true);
