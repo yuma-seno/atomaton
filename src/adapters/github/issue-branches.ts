@@ -109,8 +109,8 @@ export function collectIssueBranches(repo: string, issueNumber: number): IssueBr
 }
 
 /**
- * Whether the commit this branch now points at is one a pull request landing this
- * branch produced.
+ * Whether the commit this branch now points at is one a pull request FROM this
+ * branch landing produced.
  *
  * Asks by head branch instead of scanning the repository's pull requests: that
  * list is paginated newest-first, so a branch whose pull request has since
@@ -128,24 +128,31 @@ export function collectIssueBranches(repo: string, issueNumber: number): IssueBr
  * started on the base branch — where `create_pr` then had a head equal to its base
  * and could not open the pull request that delivers the branch (#441, #476).
  *
- * So the branch is merged when the commit it points at NOW is a commit a pull
- * request landing this branch produced. A merged pull request from this branch
- * whose `head.sha` is some earlier commit says only that the branch has moved on
- * since.
+ * So the branch is merged when the commit it points at NOW is one a landing of this
+ * branch produced. A merged pull request from this branch whose `head.sha` is some
+ * earlier commit says only that the branch has moved on since.
  *
- * ## Two commits a landing produces, not one
+ * ## Two commits, one landing
  *
- * `head.sha` is the commit that was DELIVERED from the branch; `merge_commit_sha`
- * is the commit the landing CREATED. Both can be the tip, and the second is the
- * ordinary case for a branch something else merges into.
+ * A landing leaves two: `head.sha`, the commit delivered from the branch, and
+ * `merge_commit_sha`, where the landing left the base. Either can be the tip. They
+ * are not interchangeable guesses — the merge commit's parents are the base and
+ * `head.sha`, so an advance from the one to the other is a fast-forward, and a ref
+ * can be found on it without any pull request having been made from that tip.
  *
- * That is a parent branch, always: a child's pull request merges into it, and the
- * merge commit lands on it, so the parent's tip is the child's `merge_commit_sha`
- * while being nobody's `head.sha`. Asking only about `head.sha` therefore read a
- * parent branch whose children had all merged as still undelivered, resumed it, and
- * the run then could not open a pull request from it — nothing was left to deliver.
- * The same dead end as #476 reached from the opposite side, and it is why the two
- * comparisons belong in one answer rather than one being added later.
+ * `atomaton/issue-418` was found that way: at `7f6ce012`, the merge commit PR #419
+ * created for it, delivered from `87e54a9`. Reading that tip as undelivered resumes
+ * a branch with nothing left to deliver, and the run then finds no pull request it
+ * can open. The same dead end as #476 from the other side, which is why both
+ * comparisons are one answer.
+ *
+ * ## What this query cannot see, and must not be widened to see
+ *
+ * `head=` filters to pull requests FROM this branch, so a child's landing INTO it —
+ * the child's pull request lists the child as head and this branch as base — never
+ * appears here. That is what keeps a parent branch with undelivered work resumable,
+ * which is #476 itself. Reading a parent as merged because its children have landed
+ * needs a base-side query, and that is a different rule with the opposite answer.
  *
  * A failed read stays "unmerged": resuming a branch that turned out to have
  * nothing new costs a run that starts one branch too early, and reporting a branch

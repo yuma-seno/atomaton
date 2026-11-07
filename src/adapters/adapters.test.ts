@@ -544,16 +544,20 @@ describe("issue-branches.ts collectIssueBranches", () => {
   });
 
   /**
-   * The other shape, and the one the tip rule alone gets wrong. A parent issue's
-   * branch takes its children's merges: a child's pull request merges INTO it, so
-   * the merge commit lands on the parent's branch and becomes its tip, while no pull
-   * request was ever made FROM that tip. Asking only about `head.sha` reads the
-   * parent as undelivered after the last child has merged, resumes it, and the run
-   * then finds nothing to deliver and cannot open a pull request — #476's dead end
-   * reached from the opposite side. Real case: `atomaton/issue-418` at `7f6ce012`,
-   * which is PR #419's merge commit and PR #419's head was `87e54a9`.
+   * The other half of the same rule. A landing leaves two commits: the one delivered
+   * from the branch, and the merge commit it created on the base. Either can be the
+   * tip — the merge commit's own parents are the base and `head.sha`, so a ref can
+   * reach it without a pull request ever being made from that tip. Asking only about
+   * `head.sha` reads such a branch as undelivered, resumes it, and the run finds
+   * nothing to deliver and no pull request it can open — #476's dead end from the
+   * opposite side. Real case: `atomaton/issue-418` at `7f6ce012`, PR #419's merge
+   * commit, delivered from `87e54a9`.
+   *
+   * Note what this does NOT license: a parent branch whose children have landed
+   * INTO it must still read unmerged, and does, because those children's pull
+   * requests name the child as head and never appear in this branch's response.
    */
-  test("a branch whose tip is the merge commit a pull request created is merged", () => {
+  test("a branch whose tip is the merge commit a pull request from it created is merged", () => {
     const delivered = "c".repeat(40);
     const r = run([
       { match: ["matching-refs/heads/atomaton/issue-12"], stdout: JSON.stringify([{ ref: "refs/heads/atomaton/issue-12", object: { sha: TIPS.first } }]) },
