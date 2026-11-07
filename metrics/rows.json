@@ -20288,5 +20288,68 @@
         "started": "2026-11-06T14:59:52Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-470/reviewer.json",
+    "agent": "reviewer",
+    "messages": 120,
+    "calls": 77,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "load_skill": 1,
+      "get_pr": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "read": 21,
+      "grep": 39,
+      "search_code": 2,
+      "get_issue": 2,
+      "search_issues": 2,
+      "get_check_runs": 1,
+      "get_issue_comments": 2,
+      "list_issues": 1,
+      "get_pr_diff": 1,
+      "check_merge_readiness": 1,
+      "list_prs": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-07T03:55:53Z",
+        "ended_because": "completed",
+        "iterations": 38,
+        "messages": 120,
+        "seconds": 1242,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 38,
+            "read": 21
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue": 2,
+            "get_issue_comments": 2,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_issues": 1,
+            "list_pr_review_comments": 1,
+            "list_prs": 1
+          },
+          "search": {
+            "search_code": 2,
+            "search_issues": 2
+          }
+        },
+        "started": "2026-11-07T03:35:11Z"
+      }
+    ]
   }
 ]
