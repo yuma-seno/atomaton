@@ -62,20 +62,29 @@ function collectIssueBranches(repo, issueNumber) {
     log(`WARN ${why}`);
     return { known: false, why };
   }
-  let names;
+  let listed;
   try {
     const parsed = JSON.parse(refs.stdout || "[]");
-    names = parsed.map((entry) => entry.ref.replace(/^refs\/heads\//, ""));
+    listed = parsed.map((entry) => ({
+      name: entry.ref.replace(/^refs\/heads\//, ""),
+      tip: entry.object?.sha ?? ""
+    }));
   } catch {
     const why = `the branch list for #${issueNumber} was not valid JSON`;
     log(`WARN ${why}`);
     return { known: false, why };
   }
   const owner = repo.split("/", 1)[0] ?? "";
-  const branches = names.map((name) => ({ name, ordinal: ordinalOfBranch(name, issueNumber) })).filter((entry) => entry.ordinal > 0).map((entry) => ({ ...entry, merged: headBranchMerged(repo, owner, entry.name) }));
+  const branches = listed.map((entry) => ({ ...entry, ordinal: ordinalOfBranch(entry.name, issueNumber) })).filter((entry) => entry.ordinal > 0).map((entry) => ({
+    name: entry.name,
+    ordinal: entry.ordinal,
+    merged: headBranchMerged(repo, owner, entry.name, entry.tip)
+  }));
   return { known: true, branches };
 }
-function headBranchMerged(repo, owner, branch) {
+function headBranchMerged(repo, owner, branch, tip) {
+  if (!tip)
+    return false;
   const prs = gh("api", `repos/${repo}/pulls?state=all&per_page=100&head=${owner}:${branch}`);
   if (prs.code) {
     log(`WARN could not read pull requests for ${branch}; treating it as unmerged`);
@@ -83,7 +92,7 @@ function headBranchMerged(repo, owner, branch) {
   }
   try {
     const parsed = JSON.parse(prs.stdout || "[]");
-    return parsed.some((pr) => Boolean(pr.merged_at));
+    return parsed.some((pr) => Boolean(pr.merged_at) && (pr.head?.sha === tip || pr.merge_commit_sha === tip));
   } catch {
     log(`WARN pull request list for ${branch} was not valid JSON`);
     return false;

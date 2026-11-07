@@ -202,8 +202,11 @@ function readTargetState(number, repo) {
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
 }
+function isMerged(target) {
+  return target.known && target.kind === "pull-request" && target.state === "done";
+}
 function canBeReopened(target) {
-  return target.known && !(target.kind === "pull-request" && target.state === "done");
+  return target.known && !isMerged(target);
 }
 function recoveryAdvice(state, number, command) {
   if (state.known && !canBeReopened(state)) {

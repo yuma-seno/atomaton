@@ -387,10 +387,6 @@ function entryOf(comment) {
     at: comment.created_at
   };
 }
-function keptCommentIds(comments) {
-  const entries = comments.map((comment) => ({ id: comment.id, ...entryOf(comment) }));
-  return new Set(shapedThread(entries, readers).comments.map((entry) => entry.id));
-}
 function listComments(repo, number) {
   const listed = ghRead("api", `repos/${repo}/issues/${number}/comments`, "--paginate");
   if (listed.code !== 0)
@@ -403,17 +399,97 @@ function listComments(repo, number) {
   }
   return flat;
 }
-function commentWouldBeRemoved(repo, number, commentId) {
-  const comments = listComments(repo, number);
-  const listed = comments.find((comment) => String(comment.id) === String(commentId));
-  const parkedOf = (events) => events[events.length - 1] === "waiting";
-  if (listed === undefined) {
-    const entries = comments.map(entryOf);
-    const shaped = shapedThread(entries, readers);
-    return { removed: shaped.holder === "agent", parked: parkedOf(shaped.events) };
+function lockOf(entries, shaped) {
+  const park = shaped.events[shaped.events.length - 1] === "waiting" ? newestWaiting(entries) : undefined;
+  const open = shaped.openClaim;
+  const lock = park === undefined ? {} : { park };
+  if (open === undefined)
+    return lock;
+  const at = newestWith(entries, (body) => {
+    const claim = readers.claim(body);
+    return claim !== undefined && claim.ask === open.ask && claim.run === open.run;
+  });
+  return { ...lock, claim: { ...open, at } };
+}
+function newestWith(entries, which) {
+  for (let index = entries.length - 1;index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.quoted)
+      continue;
+    if (which(entry.body))
+      return entry.at ?? "";
   }
-  const shaped = shapedThread(comments.map(entryOf), readers);
-  return { removed: !keptCommentIds(comments).has(listed.id), parked: parkedOf(shaped.events) };
+  return "";
+}
+function newestWaiting(entries) {
+  for (let index = entries.length - 1;index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.quoted)
+      continue;
+    const ended = ENDED_TAG.readProse(entry.body);
+    if (ended?.verb === "waiting")
+      return { at: entry.at ?? "", answers: ended.answers };
+  }
+  return;
+}
+function commentWouldBeRemoved(repo, number, commentId) {
+  const entries = listComments(repo, number).map((comment) => ({ id: comment.id, ...entryOf(comment) }));
+  const shaped = shapedThread(entries, readers);
+  const lock = lockOf(entries, shaped);
+  const listed = entries.find((entry) => String(entry.id) === String(commentId));
+  if (listed === undefined)
+    return { removed: shaped.holder === "agent", parked: lock.park !== undefined, lock };
+  return { removed: !shaped.comments.includes(listed), parked: lock.park !== undefined, lock };
+}
+
+// src/adapters/github/run-status.ts
+function readRunStatus(repo, runId) {
+  const read = ghRead("api", `repos/${repo}/actions/runs/${runId}`, "--jq", ".status");
+  if (read.code !== 0) {
+    return { read: false, why: (read.stderr || read.stdout || `gh exited ${read.code}`).trim().split(`
+`)[0] ?? "" };
+  }
+  const status = (read.stdout ?? "").trim();
+  if (status === "")
+    return { read: false, why: "the run read returned no status" };
+  return { read: true, status };
+}
+
+// src/domain/work/stale-lock.ts
+var CLAIM_WITHOUT_RUN_MINUTES = 360;
+function ageMinutes(at, nowMs) {
+  const parsed = Date.parse(at);
+  if (!Number.isFinite(parsed))
+    return;
+  return (nowMs - parsed) / 60000;
+}
+function claimFreshness(claim, run, nowMs) {
+  if (claim.run > 0) {
+    if (!run.read)
+      return "unknown";
+    return run.status === "completed" ? "stale" : "fresh";
+  }
+  const age = ageMinutes(claim.at, nowMs);
+  if (age === undefined)
+    return "unknown";
+  return age >= CLAIM_WITHOUT_RUN_MINUTES ? "stale" : "fresh";
+}
+function abandonedClaim(args) {
+  if (args.parked || args.claim === undefined)
+    return false;
+  return claimFreshness(args.claim, args.run, args.nowMs) === "stale";
+}
+
+// src/adapters/github/node-lock.ts
+function lockAbandoned(repo, lock, nowMs) {
+  if (lock.park !== undefined || lock.claim === undefined)
+    return false;
+  return abandonedClaim({
+    claim: lock.claim,
+    parked: false,
+    run: lock.claim.run > 0 ? readRunStatus(repo, lock.claim.run) : { read: false, why: "the claim names no run" },
+    nowMs
+  });
 }
 
 // src/entrypoints/machinery/lib/removed-comment.ts
@@ -521,7 +597,18 @@ function main() {
     }
     console.error(`Could not read the thread on #${values.number} (${e}); removing the comment for its commands`);
   }
-  const removed = hold.removed;
+  let abandoned = false;
+  if (hold.removed && hold.lock !== undefined) {
+    try {
+      abandoned = lockAbandoned(repo, hold.lock, Date.now());
+    } catch (e) {
+      console.error(`Could not check whether the run holding #${values.number} is still going; keeping the comment: ${e}`);
+    }
+  }
+  const removed = hold.removed && !abandoned;
+  if (hold.removed && abandoned && !several) {
+    console.error(`The run that claimed #${values.number}'s turn has finished with its claim still standing, ` + "so the lock is stale and this comment is kept \u2014 the sweep will hand the node back");
+  }
   const parked = hold.parked;
   if (!removed && !several) {
     if (githubOutput)

@@ -537,8 +537,11 @@ function isAskSuperseded(repo, number, args) {
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
 }
+function isMerged(target) {
+  return target.known && target.kind === "pull-request" && target.state === "done";
+}
 function canBeReopened(target) {
-  return target.known && !(target.kind === "pull-request" && target.state === "done");
+  return target.known && !isMerged(target);
 }
 function recoveryAdvice(state, number, command) {
   if (state.known && !canBeReopened(state)) {
@@ -581,7 +584,7 @@ function dispatchUnconfirmedNotice(unconfirmed) {
     "",
     `What was about to happen: ${context}.`,
     "",
-    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "The comment that records a dispatch could not be posted or was not visible in the thread, so the machinery could not tell whether another run had already been asked for. Starting one anyway would leave a run nothing on this issue accounts for.",
     "",
     "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue."
   ].join(`
@@ -641,8 +644,13 @@ function refuseOutstandingRequest(d, markerId, ownMarker) {
       return;
     gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${markerId}`);
   };
-  if (markerId === undefined)
+  if (markerId === undefined) {
+    const ownAsk = d.ask === undefined ? "" : String(d.ask).trim();
+    if (ownAsk === "") {
+      return refuseUnconfirmed(d, `the dispatch marker on #${d.number} could not be posted, so nothing on the thread would record this dispatch`);
+    }
     return;
+  }
   const delays = [1000, 2000, 4000];
   let check;
   for (let attempt = 0;attempt <= delays.length; attempt++) {
@@ -676,29 +684,33 @@ function refuseOutstandingRequest(d, markerId, ownMarker) {
         gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
       }
     }
-    log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     removeMarker();
-    const body = [
-      ...refusalEndingLines(d),
-      dispatchUnconfirmedNotice({
-        agent: d.agent,
-        number: Number(d.number),
-        context: d.context,
-        notify: d.notify ?? ""
-      })
-    ].join(`
-`);
-    const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
-    if (code !== 0) {
-      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
-    }
-    return "unconfirmed";
+    return refuseUnconfirmed(d, `the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted`);
   }
   if (!check.outstanding)
     return;
   removeMarker();
   log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
   return "refused-outstanding";
+}
+function refuseUnconfirmed(d, why) {
+  const log = d.log ?? ((message) => console.error(message));
+  log(`${d.context}: ${why}; ${d.agent} was not started`);
+  const body = [
+    ...refusalEndingLines(d),
+    dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? ""
+    })
+  ].join(`
+`);
+  const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
+  if (code !== 0) {
+    log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+  }
+  return "unconfirmed";
 }
 function refuseSupersededAsk(d) {
   const log = d.log ?? ((message) => console.error(message));
@@ -1047,7 +1059,7 @@ function main() {
     process.exit(1);
   }
   if (outcome === "unconfirmed") {
-    console.error(`::error::Could not confirm the dispatch marker on ${type} #${number}, so ${agent} was not started; ` + "the thread may not have caught up with the marker. Retry shortly.");
+    console.error(`::error::Could not confirm the dispatch of ${agent} on ${type} #${number}, so it was not started: ` + "the comment that records a dispatch could not be posted or was not visible in the thread. Retry shortly.");
     process.exit(1);
   }
 }
