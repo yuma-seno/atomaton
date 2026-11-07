@@ -4140,9 +4140,286 @@
     {
       "role": "assistant",
       "content": "Typecheck clean. Committing this first increment:",
+      "atoma_metadata": {
+        "agent": "engineer",
+        "github_comment_id": 6700836448
+      },
+      "finish_reason": "stop"
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n続けて。終わったらクローズして。\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-07T03:08:19Z",
+        "event_type": "issue_comment",
+        "id": 6701445109,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_zvrmwtgof5893nrv8m0a5zxm",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && git log --oneline -2\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Let me check the current state of the worktree first — did my previous edits persist? The session says the worktree was reset each time. Let me check.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_dd16c06bac3848139a8e0d77ff0b2c39",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"49c5121 Merge pull request #466 from yuma-seno/self-deploy/v0.21.57\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":334}",
+      "tool_call_id": "call_00_zvrmwtgof5893nrv8m0a5zxm"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_hoe1jf7ntxesswonono1x8wq",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"path\": \"src/domain/work/closed-target.ts\", \"old_string\": \"/**\\n * Whether a person could put this target back where work can run.\\n *\\n * Merging is the one ending GitHub makes final. Everything else that ended —\\n * an issue completed or dropped, a pull request closed without merging — reopens.\\n *\\n * Derived rather than stored. This used to be a `merged: boolean` carried beside a\\n * `closed` case, which was the third place in this repository spelling the same\\n * fact its own way: `NodeState` says a pull request that is `done` is one that\\n * merged, and `kind` is already here.\\n */\\nexport function canBeReopened(target: TargetState): boolean {\\n  return target.known && !(target.kind === \\\"pull-request\\\" && target.state === \\\"done\\\");\\n}\", \"new_string\": \"/**\\n * Whether this target is a pull request that landed.\\n *\\n * The one ending GitHub makes final, and the reason the notices below read the way they\\n * do: a merged pull request cannot be reopened and nothing can be started on it, so\\n * \\\"resume it\\\" is advice nobody can follow there.\\n *\\n * Derived rather than stored. This used to be a `merged: boolean` carried beside a\\n * `closed` case, which was the third place in this repository spelling the same\\n * fact its own way: `NodeState` says a pull request that is `done` is one that\\n * merged, and `kind` is already here.\\n */\\nexport function isMerged(target: TargetState): boolean {\\n  return target.known && target.kind === \\\"pull-request\\\" && target.state === \\\"done\\\";\\n}\\n\\n/**\\n * Whether a person could put this target back where work can run.\\n *\\n * Everything that ended reopens except a merge.\\n */\\nexport function canBeReopened(target: TargetState): boolean {\\n  return target.known && !isMerged(target);\\n}\\n\\n/**\\n * What a pull request's own close leaves on its thread when a run was working there.\\n *\\n * The other node kind's receipt, beside `stopOnCloseNotice`. A pull request that merges\\n * or closes out from under a run does not stop it by itself either, and the run's own\\n * thread is where that has to be said — nothing else reaches a running job.\\n *\\n * Two outcomes, two sentences, because they leave the person in different places. A\\n * merge is final: the work the pull request carried is in, so nothing here is resumable.\\n * A close that merged nothing leaves a pull request that can be reopened and dispatched.\\n * Neither offers the way back — the run's own report says what it managed and how to\\n * continue, and this says only what is true when it is posted.\\n */\\nexport function stopOnPullRequestCloseNotice(number: number, merged: boolean): string {\\n  if (merged) {\\n    return [\\n      \\\"Atomaton: this pull request was merged while an agent was working on it, so the run has been asked to stop.\\\",\\n      \\\"\\\",\\n      \\\"Merging does not reach a run by itself — it kept going until this request arrived. The run stops after its current step, so it may take a minute.\\\",\\n      \\\"\\\",\\n      \\\"The work this pull request carried is merged already, so there is nothing here to resume. The run will report on this thread when it has stopped.\\\",\\n    ].join(\\\"\\\\n\\\");\\n  }\\n  return [\\n    `Atomaton: #${number} was closed while an agent was working on it, so the run has been asked to stop.`,\\n    \\\"\\\",\\n    \\\"Closing does not reach a run by itself — it kept going until this request arrived. The run stops after its current step, so it may take a minute.\\\",\\n    \\\"\\\",\\n    \\\"The run will report on this thread when it has stopped.\\\",\\n  ].join(\\\"\\\\n\\\");\\n}\"}"
+          }
+        },
+        {
+          "id": "call_01_cgpl62ul3ujarqlbylb200h3",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"path\": \"src/adapters/github/thread.ts\", \"old_string\": \"import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, TOOK_TAG } from \\\"./tags.ts\\\";\", \"new_string\": \"import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, STOP_TAG, TOOK_TAG } from \\\"./tags.ts\\\";\"}"
+          }
+        },
+        {
+          "id": "call_02_qa6ahymnoslky50ybhkdxb2k",
+          "type": "function",
+          "function": {
+            "name": "write",
+            "arguments": "{\"path\": \"src/entrypoints/machinery/stop_on_pr_close.ts\", \"content\": \"#!/usr/bin/env bun\\n/**\\n * stop_on_pr_close.ts — closing a pull request an agent is working on asks that run to\\n * stop, the way closing its issue already does.\\n *\\n * ## Why a pull request's close has to mean something\\n *\\n * A run was reviewing a pull request when the pull request merged. The merge reached\\n * nothing: the run kept going for another nine minutes and stopped only when an unrelated\\n * issue was closed, which reached it through the issue path. The structure was right and\\n * the coverage was not — `issues: closed` stops a run, and `pull_request_target: closed`\\n * did not, for either outcome (merged or closed unmerged).\\n *\\n * ## The mechanism is the existing one\\n *\\n * No second stop path. `STOP_TAG` in a comment, polled for by the running job, is the only\\n * way anything outside a job reaches it — `/stop` and the issue close both work that way.\\n * This is one more writer of the same tag.\\n *\\n * ## Why the gate is the claim, and not `runInFlight`\\n *\\n * Whether a run is in flight here is asked of the thread's open CLAIM\\n * (`openClaimStopState`), not of `work-tree.ts`'s `runningOn`. That reader is right for\\n * the tree and wrong for this: it is handed `merged`, and a merged pull request answers\\n * \\\"no run\\\" by design (#449) — nothing can ever be started on one, so the \\\"a request is\\n * the newest word\\\" half stops being evidence. That is exactly the node this has to reach:\\n * the reviewer that merged its own pull request and is still watching its own thread. The\\n * claim is written by a run that actually started, and a merge cannot invalidate it.\\n *\\n * ## Why a bot is not refused here, unlike an issue's close\\n *\\n * `stop_on_close.ts` no-ops a bot's close because an agent closing its own issue is how it\\n * finishes, and stopping that run would cut it off mid-wrap-up. A pull request is the\\n * other case: closing one is never how a run ends its own work. And there is nothing to\\n * sift — a bot's merge or close raises no `pull_request_target` cascade at all (the header\\n * of `atomaton-pr-closed.wac.ts` records that), so the event structure already answers\\n * what the issue path's caller has to pass in.\\n *\\n * ## Why a stop that is already there is not repeated\\n *\\n * A close can reach the same run twice within a few seconds: this job, and an issue\\n * close's subtree propagation, which posts its own tag on any node that is running. The\\n * second write would be a second comment saying the same thing, so the thread is read\\n * before it is written and a stop newer than the claim suppresses the write. A stop OLDER\\n * than the claim is ignored by the watcher (it honours only what arrived after it started\\n * watching) and so suppresses nothing.\\n *\\n * What that cannot cover is the propagation arriving AFTER this write — it has no gate of\\n * its own. The cost is one duplicate comment; the watcher stops on the first one, so the\\n * run behaves the same either way.\\n *\\n * Usage:\\n *   stop_on_pr_close.ts --number N --merged true|false\\n */\\nimport { parseArgs } from \\\"node:util\\\";\\nimport { LLM_CONTEXT_TAG, STOP_TAG } from \\\"../../adapters/github/tags.ts\\\";\\nimport { openClaimStopState } from \\\"../../adapters/github/thread.ts\\\";\\nimport { commentOn } from \\\"../../adapters/github/work-tree.ts\\\";\\nimport { stopOnPullRequestCloseNotice } from \\\"../../domain/work/closed-target.ts\\\";\\nimport { isTrue } from \\\"./lib/flags.ts\\\";\\nimport { defineScript } from \\\"./lib/script-ref.ts\\\";\\n\\nexport interface StopOnPrCloseArgs {\\n  number: string | number;\\n  /** `true` when the close was a merge. Both outcomes of `closed` are a close. */\\n  merged: string | boolean;\\n}\\n\\nexport const ref = defineScript<StopOnPrCloseArgs>(import.meta.url);\\n\\n/**\\n * The whole comment, tags included.\\n *\\n * `STOP_TAG` is what the running job reads; `LLM_CONTEXT_TAG` keeps this out of the next\\n * session, for the same reason `/stop`'s own notice is excluded — it is addressed to a\\n * person, and an agent reading it would take it as something it was told.\\n */\\nexport function stopOnPrCloseBody(args: { number: number; merged: boolean }): string {\\n  return [\\n    LLM_CONTEXT_TAG.write(\\\"exclude\\\"),\\n    STOP_TAG.write(\\\"requested\\\"),\\n    stopOnPullRequestCloseNotice(args.number, args.merged),\\n  ].join(\\\"\\\\n\\\");\\n}\\n\\nfunction main(): void {\\n  const { values } = parseArgs({\\n    args: Bun.argv.slice(2),\\n    options: {\\n      number: { type: \\\"string\\\" },\\n      merged: { type: \\\"string\\\" },\\n    },\\n  });\\n\\n  if (!values.number) {\\n    console.error(\\\"usage: stop_on_pr_close.ts --number N --merged true|false\\\");\\n    process.exit(2);\\n  }\\n\\n  const repo = process.env.GITHUB_REPOSITORY ?? \\\"\\\";\\n  const number = Number(values.number);\\n  const merged = isTrue(String(values.merged ?? \\\"\\\"));\\n\\n  // A failed read is not \\\"nothing is running\\\" — the rule `guard_comment_during_run.ts`\\n  // follows for the same reason: the answer this could not determine must not be the one\\n  // that stays quiet.\\n  let state: { claimed: boolean; requested: boolean };\\n  try {\\n    state = openClaimStopState(repo, number);\\n  } catch (e) {\\n    console.error(`::error::Could not read the thread on #${number}: ${(e as Error).message}`);\\n    process.exit(1);\\n  }\\n\\n  if (!state.claimed) {\\n    console.error(`No run is holding #${number}, so nothing here has to be stopped.`);\\n    return;\\n  }\\n  if (state.requested) {\\n    console.error(`#${number} has already been asked to stop since the run claimed it. Nothing to add.`);\\n    return;\\n  }\\n\\n  // Fatal when it does not land: this comment IS the stop. Without it the run polls, finds\\n  // nothing, and keeps going — while the person who merged has every reason to believe it\\n  // is winding down.\\n  if (!commentOn(repo, number, stopOnPrCloseBody({ number, merged }))) {\\n    console.error(`::error::Could not post the stop request on #${number}`);\\n    process.exit(1);\\n  }\\n\\n  console.error(`#${number} was ${merged ? \\\"merged\\\" : \\\"closed\\\"} while a run held it. The run has been asked to stop.`);\\n}\\n\\nif (import.meta.main) main();\\n\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Worktree reset again. I need to apply edits and commit ASAP. Let me apply all edits in a batch and then commit immediately, minimizing turns. I'll write the whole files where possible using `edit` calls, then commit.\n\nActually, since the worktree keeps getting reset, the highest-value approach: apply edits and call `commit_and_push` in as few turns as possible. Each `commit_and_push` pushes to a branch which persists.\n\nLet me apply all the edits in one turn (batched tool calls), then commit.\n\nEdits needed:\n1. closed-target.ts: isMerged + canBeReopened + stopOnPullRequestCloseNotice\n2. thread.ts: STOP_TAG import + openClaimStopState\n3. new file stop_on_pr_close.ts\n4. post_result_comment.ts: mentionLine branch + nodeFacts\n5. workflow atomaton-pr-closed.wac.ts: stop-run job\n6. tests\n\nLet me do edits 1-3 + 5 in one turn (independent files), then 4, then commit, then tests.\n\nCareful: edits to the same file in the same turn could conflict if they depend on each other's output. closed-target.ts needs two edits; I'll combine into one edit using a single larger replacement, or do them sequentially but they're on the same file — different anchors, so fine in one turn? Risky. Let me combine the closed-target edits into one edit call each, done in one turn but different anchor text — the tool applies them sequentially presumably. Actually parallel calls to edit the same file may race. Safer: one edit per file per turn.\n\nTurn A: closed-target.ts (one combined edit covering canBeReopened block + adding stopOnPullRequestCloseNotice requires two separate anchors...). I'll do a single edit that replaces from the canBeReopened doc comment through the canBeReopened function, adding isMerged; then a second edit for the notice — that's the same file. Hmm.\n\nAlternative: apply both changes to closed-target.ts via two `edit` calls in the same turn — they're independent anchors. The risk is the tool re-reading the file between them; sequential application should be fine since anchors don't overlap. I'll try it.\n\nLet me do: turn A = edits to closed-target.ts (2), thread.ts (2: import + function), new file write, workflow (2 edits). That's a lot in one turn but they're mostly distinct files. Same-file multiples: closed-target (2), thread (2), workflow (2). Risky but anchors don't overlap.\n\nSimplest safe approach: use `bash` with a heredoc? No — bash writes are fine actually! `write`/`edit` tools or bash both write the same file. But bash chaining is discouraged for reads; for writes it's acceptable but risky to get content right.\n\nI'll use: turn A = closed-target.ts two edits (sequential-ish) — actually let me just do one edit per file per turn but batch across files:\n\nTurn A (one tool block): \n- edit closed-target.ts (canBeReopened → isMerged+canBeReopened)\n- edit thread.ts (import)\n- write stop_on_pr_close.ts\n- edit workflow (import line)\nThat's 4 different files. Then Turn B:\n- edit closed-target.ts (notice)\n- edit thread.ts (function)\n- edit workflow (job graph + job + addJobs) — 3 edits same file; I'll combine job graph & job & addJobs... they are at different places. Let me instead craft a smaller set: insert job before stripTurnLabels and add to addJobs list; job graph comment optional but desirable.\n\nTo reduce turns, I'll do Turn B with: edit closed-target notice, edit thread function, edit post_result_comment mentionLine, and then Turn C: workflow edits.\n\nLet's go.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_f1757c3a94404576a50837f09c229b15",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/domain/work/closed-target.ts.",
+      "tool_call_id": "call_00_hoe1jf7ntxesswonono1x8wq"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/adapters/github/thread.ts.",
+      "tool_call_id": "call_01_cgpl62ul3ujarqlbylb200h3"
+    },
+    {
+      "role": "tool",
+      "content": "Wrote src/entrypoints/machinery/stop_on_pr_close.ts (5916 characters).",
+      "tool_call_id": "call_02_qa6ahymnoslky50ybhkdxb2k"
+    },
+    {
+      "role": "assistant",
+      "content": "Now the `openClaimStopState` reader in thread.ts:",
+      "tool_calls": [
+        {
+          "id": "call_00_45a6l7rhyybuqrihjnwehhdj",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * What a stop aimed at an in-flight run on this node has to know before writing: whether\\n * a run holds the turn, and whether a stop is already on the thread that this run would\\n * see.\\n *\\n * ## Why the claim, and not `runInFlight`\\n *\\n * `runInFlight` answers \\\"should you expect a run here\\\", and for a merged pull request it\\n * deliberately drops half the answer (#449): nothing can be started on one, so \\\"a request\\n * is the newest word\\\" stops being evidence of anything. This asks the other question —\\n * \\\"is a run watching this thread right now\\\" — and a merge says nothing about it. The run\\n * that merges a pull request is the ordinary reviewer case: it holds the claim it wrote\\n * at start and keeps watching until it ends. Asked through `runInFlight(..., { merged:\\n * true })` that run answers \\\"no run\\\", which is exactly the run a merge-derived stop\\n * exists to reach.\\n *\\n * So the answer is the open claim alone: an `atomaton:took` with no ending answering it.\\n *\\n * ## Why a stop older than the claim does not count\\n *\\n * The watcher honours only a stop written after the run began watching\\n * (`watch_for_stop.ts` polls one page since its own start), so a stop left by an earlier\\n * run on this node is invisible to this one. Counting it would suppress the request and\\n * leave a run nobody can stop. The comparison is positional — the listing arrives oldest\\n * first — so it needs no timestamps and cannot disagree with the order the readers fold.\\n *\\n * A quotation is skipped: it carries the removed author's words, so a stop tag inside one\\n * is not the machinery asking.\\n *\\n * Throws when the thread cannot be read, like every other reader here: a caller deciding\\n * whether to post a stop must not read a failed read as \\\"nobody is running\\\".\\n */\\nexport function openClaimStopState(\\n  repo: string,\\n  number: string | number,\\n): { claimed: boolean; requested: boolean } {\\n  const entries = listComments(repo, number).map(entryOf);\\n  if (shapedThread(entries, readers).openClaim === undefined) return { claimed: false, requested: false };\\n\\n  let claimAt = -1;\\n  let stopAt = -1;\\n  entries.forEach((entry, index) => {\\n    if (entry.quoted === true) return;\\n    if (readers.claim(entry.body) !== undefined) claimAt = index;\\n    if (STOP_TAG.hasProse(entry.body)) stopAt = index;\\n  });\\n  return { claimed: true, requested: stopAt > claimAt };\\n}\\n\\n/**\\n * Whether a run is in flight on a node, read from its thread.\\n\", \"old_string\": \"/**\\n * Whether a run is in flight on a node, read from its thread.\\n\", \"path\": \"src/adapters/github/thread.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/adapters/github/thread.ts.",
+      "tool_call_id": "call_00_45a6l7rhyybuqrihjnwehhdj"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_12ib80331audobgin4cxjpja",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck 2>&1 | head -10\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":5040}",
+      "tool_call_id": "call_00_12ib80331audobgin4cxjpja"
+    },
+    {
+      "role": "assistant",
+      "content": "Typecheck clean. Committing this increment now so it survives:",
+      "tool_calls": [
+        {
+          "id": "call_00_1okdzgf7s9pw9eek8vo0zafh",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"Let a pull request's close ask its run to stop\\n\\nA reviewer merged its own pull request and kept going for nine more minutes;\\nthe merge reached nothing and the run stopped only when an unrelated issue\\nclose propagated a stop through the issue path. `issues: closed` stops a run\\nand `pull_request_target: closed` did not, for either outcome.\\n\\n`stop_on_pr_close.ts` writes the same STOP_TAG the running job already polls\\nfor, so there is no second stop path — one more writer of the existing tag.\\nThe gate is the thread's open claim rather than `runInFlight`, because that\\nreader is handed `merged` and a merged pull request answers \\\"no run\\\" by design\\n(#449); the run that merges is exactly the one this has to reach. A stop newer\\nthan the claim suppresses the write, which covers the issue close's subtree\\npropagation landing in the same seconds.\\n\\nStill to come: the workflow job, and the mention wording on a merged thread.\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "call_00_1okdzgf7s9pw9eek8vo0zafh"
+    },
+    {
+      "role": "assistant",
+      "content": "Now the workflow job:",
+      "tool_calls": [
+        {
+          "id": "call_00_aecybazbdcdftd65e23xkib3",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n 55,80p src/workflows/atomaton-pr-closed.wac.ts; echo \\\"=== strip\\\"; sed -n 295,340p src/workflows/atomaton-pr-closed.wac.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"// agent only starts when a repository member triggered it.\\n//\\n// NOTE: this workflow never runs for an agent's own actions -- GITHUB_TOKEN's own\\n// actions raise no event cascade, so `pull_request_target: closed` fires only for a\\n// person's merge or close. The agent's `merge_pr` takes the merge decisions\\n// in-process instead (`decidePostMergeHandoff` + the close path's own gate). That is\\n// why the aggregation cannot be assumed to have happened merely because a merged PR\\n// links an issue (#150).\\n//\\n// Job graph:\\n//   parse (BOTH outcomes -- it carries no merge gate any more, because the\\n//          rejection side reads its output too)\\n//     \\\\-> resolve-parent --> notify-parent (merged)\\n//                        \\\\-> aggregate-sub-issues (merged)\\n//   reinvoke-origin-agent (merged; no `needs` -- it decides from the pull request's\\n//          own body, and carries its merge gate itself for the reason recorded on it)\\n//   dispatch-rejected (NOT merged, and the pull request's head branch is this\\n//          repository's -- the membership gate that keeps a fork's forged body\\n//          from starting anything)\\n//   strip-turn-labels (BOTH outcomes; no `needs` -- a closed pull request carries\\n//          neither turn label, whoever closed it, #352)\\n\\nconst parseMetadataStep = new TypedOutputsStep(\\n  {\\n    name: \\\"Parse the parent-issue tag from the PR body\\\",\\n    id: \\\"parse-metadata\\\",\\n=== strip\\n  },\\n  [new ActionsCheckoutV4({}), new SetupBunAction({ name: \\\"Setup Bun\\\" }), rejectedStep],\\n);\\n\\n/**\\n * A closed pull request carries neither turn label (#352).\\n *\\n * This is the strip for the closes THIS workflow sees — a person's merge or close,\\n * since GITHUB_TOKEN's own actions raise no event cascade. It runs for BOTH\\n * outcomes of `closed` and needs nothing: the question is the pull request's\\n * state, which the event itself answers, so a label the turn left on it — the\\n * `waiting-for-person` of a turn that was with the person when they merged (#335,\\n * #338) — comes off at the close rather than riding on it. An agent's own merge\\n * never fires this workflow; the runner's end-of-run strip and the write-point\\n * guard in `lib/turn-labels.ts` are that close's half of the same rule.\\n */\\nconst stripTurnLabelsStep = new TypedOutputsStep(\\n  {\\n    name: \\\"Take the turn labels off the closed pull request\\\",\\n    shell: \\\"bash\\\",\\n    env: {\\n      GH_TOKEN: \\\"${{ github.token }}\\\",\\n      PR_NUMBER: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.number),\\n    },\\n    run: `${scriptCommandWithArgs(manageTurnLabelsRef, { phase: \\\"closed\\\", number: \\\"\\\\${PR_NUMBER}\\\" })}\\n`,\\n  },\\n  [] as const,\\n);\\n\\nconst stripTurnLabelsJob = new DefinedJob(\\n  \\\"strip-turn-labels\\\",\\n  {\\n    \\\"runs-on\\\": \\\"ubuntu-latest\\\",\\n    \\\"timeout-minutes\\\": SCRIPT_JOB_TIMEOUT_MINUTES,\\n    // No `if`, and no `needs`: both outcomes of `closed` carry the labels off,\\n    // whoever closed it, and the job reads nothing the jobs above produce.\\n  },\\n  [new ActionsCheckoutV4({}), new SetupBunAction({ name: \\\"Setup Bun\\\" }), stripTurnLabelsStep],\\n);\\n\\nexport const atomaPrClosed = new Workflow(\\\"atomaton-pr-closed\\\", {\\n  name: \\\"Atomaton PR Closed\\\",\\n  on: {\\n    pull_request_target: { types: [\\\"closed\\\"] },\\n  },\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":117}",
+      "tool_call_id": "call_00_aecybazbdcdftd65e23xkib3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_9elrqkz3alcpz6o1g1mgkmh9",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"//   dispatch-rejected (NOT merged, and the pull request's head branch is this\\n//          repository's -- the membership gate that keeps a fork's forged body\\n//          from starting anything)\\n//   stop-run (BOTH outcomes; no `needs` -- a closed pull request may still have a run\\n//          working on it, whoever closed it, and that run has to be told)\\n//   strip-turn-labels (BOTH outcomes; no `needs` -- a closed pull request carries\\n//          neither turn label, whoever closed it, #352)\", \"old_string\": \"//   dispatch-rejected (NOT merged, and the pull request's head branch is this\\n//          repository's -- the membership gate that keeps a fork's forged body\\n//          from starting anything)\\n//   strip-turn-labels (BOTH outcomes; no `needs` -- a closed pull request carries\\n//          neither turn label, whoever closed it, #352)\", \"path\": \"src/workflows/atomaton-pr-closed.wac.ts\"}"
+          }
+        },
+        {
+          "id": "call_01_ftpy8lshig4f4aete5q72o7y",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * A closed pull request asks whatever run is holding it to stop.\\n *\\n * The mirror of `atomaton-sub-issue-closed.wac.ts`'s `stop-run`, for the other node kind.\\n * A merge used to reach nothing: a reviewer merged its own pull request and kept going for\\n * another nine minutes, and stopped only because an unrelated issue close propagated a\\n * stop through the issue path. No second stop path is added — `stop_on_pr_close.ts`\\n * writes the same `STOP_TAG` the running job already polls for.\\n *\\n * ## Why there is no merge gate\\n *\\n * Both outcomes of `closed` can leave a run working: a merge of the pull request it is\\n * reviewing, and a person closing that pull request unmerged. `dispatch-rejected` handles\\n * the second only in the sense that it hands the ISSUE a new instruction; it does not\\n * touch the run on the pull request itself.\\n *\\n * ## Why there is no bot test here\\n *\\n * The issue-side job tests `sender.type`, because an agent closing its own issue is how a\\n * run finishes and stopping it would cut it off mid-wrap-up. A pull request is not that:\\n * closing one is never a run ending its own work. And there is nothing to sift —\\n * GITHUB_TOKEN's own actions raise no event cascade, so this workflow only ever runs for a\\n * person's merge or close (see the header). The script asks the thread whether a run holds\\n * the pull request, which is the question that actually decides.\\n */\\nconst stopOnPrCloseStep = new TypedOutputsStep(\\n  {\\n    name: \\\"Stop the run this close did not stop\\\",\\n    shell: \\\"bash\\\",\\n    env: {\\n      GH_TOKEN: \\\"${{ github.token }}\\\",\\n      GITHUB_REPOSITORY: \\\"${{ github.repository }}\\\",\\n      PR_NUMBER: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.number),\\n      MERGED: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.merged),\\n    },\\n    run: `${scriptCommandWithArgs(stopOnPrCloseRef, { number: \\\"\\\\${PR_NUMBER}\\\", merged: \\\"\\\\${MERGED}\\\" })}\\n`,\\n  },\\n  [] as const,\\n);\\n\\nconst stopRunJob = new DefinedJob(\\n  \\\"stop-run\\\",\\n  {\\n    \\\"runs-on\\\": \\\"ubuntu-latest\\\",\\n    \\\"timeout-minutes\\\": SCRIPT_JOB_TIMEOUT_MINUTES,\\n    // No `if`, and no `needs`: both outcomes of `closed` can leave a run working, and the\\n    // job reads nothing the jobs above it produce.\\n  },\\n  [new ActionsCheckoutV4({}), new SetupBunAction({ name: \\\"Setup Bun\\\" }), stopOnPrCloseStep],\\n);\\n\\n/**\\n * A closed pull request carries neither turn label (#352).\", \"old_string\": \"/**\\n * A closed pull request carries neither turn label (#352).\", \"path\": \"src/workflows/atomaton-pr-closed.wac.ts\"}"
+          }
+        },
+        {
+          "id": "call_02_8t86wovgqj7ubkbq7oknf2hb",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"import { ref as manageTurnLabelsRef } from \\\"../entrypoints/machinery/manage_turn_labels.ts\\\";\\nimport { ref as stopOnPrCloseRef } from \\\"../entrypoints/machinery/stop_on_pr_close.ts\\\";\", \"old_string\": \"import { ref as manageTurnLabelsRef } from \\\"../entrypoints/machinery/manage_turn_labels.ts\\\";\", \"path\": \"src/workflows/atomaton-pr-closed.wac.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-pr-closed.wac.ts.",
+      "tool_call_id": "call_00_9elrqkz3alcpz6o1g1mgkmh9"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-pr-closed.wac.ts.",
+      "tool_call_id": "call_01_ftpy8lshig4f4aete5q72o7y"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-pr-closed.wac.ts.",
+      "tool_call_id": "call_02_8t86wovgqj7ubkbq7oknf2hb"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_w04121uygeag6fd02m2s6h59",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  dispatchRejectedJob,\\n  stopRunJob,\\n  stripTurnLabelsJob,\\n]);\", \"old_string\": \"  dispatchRejectedJob,\\n  stripTurnLabelsJob,\\n]);\", \"path\": \"src/workflows/atomaton-pr-closed.wac.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-pr-closed.wac.ts.",
+      "tool_call_id": "call_00_w04121uygeag6fd02m2s6h59"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_43zgkj8abeqg64hjok3xhevw",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth 2>&1 | tail -5 && grep -n \\\"stop-run\\\" -A 25 dist/.github/workflows/atomaton-pr-closed.yml | head -40\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"synth-workflows: generated 9 workflow file(s) from 9 source(s) in src/workflows/\\nbuild-dist: bundled 63 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/machinery -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/scripts\\nbuild-dist: bundled 14 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.21.57 (116 files)\\n165:  stop-run:\\n166-    runs-on: ubuntu-latest\\n167-    timeout-minutes: 5\\n168-    steps:\\n169-      - uses: actions/checkout@v4\\n170-      - name: Setup Bun\\n171-        with:\\n172-          bun-version: latest\\n173-        uses: oven-sh/setup-bun@v2\\n174-      - name: Stop the run this close did not stop\\n175-        shell: bash\\n176-        env:\\n177-          GH_TOKEN: ${{ github.token }}\\n178-          GITHUB_REPOSITORY: ${{ github.repository }}\\n179-          PR_NUMBER: ${{ github.event.pull_request.number }}\\n180-          MERGED: ${{ github.event.pull_request.merged }}\\n181-        run: |\\n182-          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/stop_on_pr_close.ts\\\" --number \\\"${PR_NUMBER}\\\" --merged \\\"${MERGED}\\\"\\n183-  strip-turn-labels:\\n184-    runs-on: ubuntu-latest\\n185-    timeout-minutes: 5\\n186-    steps:\\n187-      - uses: actions/checkout@v4\\n188-      - name: Setup Bun\\n189-        with:\\n190-          bun-version: latest\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":543}",
+      "tool_call_id": "call_00_43zgkj8abeqg64hjok3xhevw"
+    },
+    {
+      "role": "assistant",
+      "content": "The job generates with no `if:` and no `needs:`. Now the second fix — the mention wording:",
       "finish_reason": "stop",
       "atoma_metadata": {
-        "github_comment_id": 6700836448,
+        "github_comment_id": 6701467644,
         "agent": "engineer"
       }
     }
@@ -4150,9 +4427,9 @@
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 6,
+      "event_count": 7,
       "session_number": "458",
-      "snapshot_hash": "05a78e38222d4cd199a6e99db78bf56aee166017fc7c10b53a74bfc512d96d31",
+      "snapshot_hash": "7c3d1a702051f97a4e7149fc46c28a955a8aec07c80458f0ee9b46fadc4f0676",
       "type": "issue",
       "version": 1
     }
@@ -4220,6 +4497,27 @@
         }
       },
       "started": "2026-11-07T02:10:24Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-07T03:10:28Z",
+      "ended_because": "completed",
+      "iterations": 10,
+      "messages": 328,
+      "seconds": 81,
+      "server_calls": {
+        "files": {
+          "edit": 7,
+          "write": 1
+        },
+        "github": {
+          "commit_and_push": 1
+        },
+        "shell": {
+          "bash": 4
+        }
+      },
+      "started": "2026-11-07T03:09:07Z"
     }
   ]
 }
