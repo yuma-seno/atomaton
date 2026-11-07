@@ -52,22 +52,29 @@ saved, names the two ways forward — continue with `/agent`, or start clean wit
 `/agent recover` — and links the run's log. The node is back with a person, so the
 next comment on the thread resumes normally.
 
-There are two ways a failed run reaches that notice, and which one runs depends on
-whether the step the agent ran in failed:
+**One step posts it, whatever the run did.** There used to be two writers, and which
+one ran depended on whether the step the agent ran in succeeded: a run whose step
+succeeded and whose core filed `failed` reached the result comment, and a run whose
+step exited non-zero reached a separate "Report failure" step, because nothing later
+in the run would have. One event with two writers, each reachable only through a
+signal the other could not see — and the cost was a run that fell between them: the
+step succeeded, the core filed `failed`, and the thread got nothing at all. No
+comment, no `atomaton:ended`, and a person with no way to learn anything but by
+opening the run and reading its log.
 
-- **The "Run agent" step failed.** Nothing later in the run posts, so the
-  workflow's own "Report failure" step posts the notice, and its exit code decides
-  the run's colour.
-- **The step succeeded and the core filed `failed`.** This is the shape a session
-  that died on its own limit leaves: `atoma` exits with the status of a stop it
-  handled, the step succeeds, and no failure step runs. The result comment posts
-  the same notice in these colours instead — what did not finish, that the session
-  is saved, the two ways forward, and the tail of the run's log — under the
-  `atomaton:ended` tag every ending carries.
+So the result-comment step now runs for both outcomes, and reads the step's own
+outcome. A step that failed with no ending recorded *is* a failed run, and the same
+notice the core's `failed` produced is what it posts: what did not finish, that the
+session is saved, the two ways forward, and the tail of the run's log — under the
+`atomaton:ended` tag every ending carries, so the thread's guard comes off and the
+next comment resumes normally.
 
-The second is not a nicety. Before it existed, a run in that shape ended with
-nothing on its thread at all: no comment, no `atomaton:ended`, and a person with
-no way to learn anything but by opening the run and reading its log.
+Four shapes still post nothing, and each should. A run that never claimed the turn owes
+the thread nothing. A run that found no events never reached the agent at all. A
+cancelled run is a person stopping it on purpose, and its half-written output is not a
+report. And a run whose agent step was *skipped* is a machinery death before the agent
+started — the one the run watch below exists for, because the report from inside the
+run could not happen.
 
 The colour follows what the comment says, because the thing that reports is a step
 inside the run:
@@ -84,6 +91,11 @@ inside the run:
   died before the reporter could run (the checkout, the tool installs, the session
   save), or `gh` refused the comment. Red is then the only signal the run leaves,
   and the workflow log says what the thread does not.
+
+Whose a failure was is read off one flag, which the agent's step writes only when
+`atoma` itself exits with a failure and nothing else writes. A flag that is absent
+reads as the machinery's, so losing it turns every failure red again — the
+conservative direction, since the notice posts either way.
 
 ## When a run leaves no ending at all
 
