@@ -421,6 +421,38 @@ describe("agent prompt contracts", () => {
   });
 
   /**
+   * A run that ends mid-sentence reports work it has not done.
+   *
+   * #467: the engineer runs on #458 and #462 kept ending with a line that
+   * introduced the next step — "Now the contract test …:", "Committing,
+   * then …:" — and no call after it. The run ends when a message carries no
+   * tool call, so that sentence became the posted comment and the step it
+   * announced never ran. The edits it had not committed were lost with the
+   * run's temporary tree, and each was re-done by a rerun.
+   *
+   * What the prompt said was where the last message goes, not that writing one
+   * ends the run. A sentence announcing work is the shape a model reaches for
+   * between steps, so the fact is stated where the comment is described, and
+   * the fix sits beside it: the call goes in the same message as its
+   * introduction.
+   */
+  test("the template says a message with no call ends the run", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8").replace(/\s+/g, " ");
+    expect(prompt, "the fact that ends this class of failure").toContain(
+      "A message that calls no tool ends the run",
+    );
+    expect(prompt, "so an introduction without its call is not a progress note").toContain(
+      "it is the run's last word",
+    );
+    expect(prompt, "the fix, at the moment the call would have followed").toContain(
+      "Make the call in the same message as the sentence that introduces it",
+    );
+    expect(prompt, "and the one case where a call-less message is right").toContain(
+      "only when you mean it as the report",
+    );
+  });
+
+  /**
    * The reviewer reaches its verdict before it asks who may merge.
    *
    * This pinned the reverse -- "Do this before deciding" -- which put

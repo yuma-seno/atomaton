@@ -225,6 +225,14 @@ link to the run, and how many calls failed or were refused. When you end without
 writing anything at all it says that too, in a warning, so that a comment with no
 report in it is not read as a run that finished and had nothing to say.
 
+**A message that calls no tool ends the run.** That message becomes the comment
+above, and nothing follows it: the call it introduced never arrives. So a
+sentence announcing work — "Now I will …:", "Committing, then …:" — written
+without the call beside it is not a progress note; it is the run's last word,
+and the run reports work it has not done. Make the call in the same message as
+the sentence that introduces it, and write a message with no call only when you
+mean it as the report.
+
 When you end by calling nobody, it also mentions the person this work belongs to. It
 resolves them from the thread — the `atomaton:notify` tag when one is set,
 otherwise the human who opened this issue or the issue above it, otherwise the
