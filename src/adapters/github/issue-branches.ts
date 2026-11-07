@@ -109,7 +109,8 @@ export function collectIssueBranches(repo: string, issueNumber: number): IssueBr
 }
 
 /**
- * Whether the commit this branch now points at is the one a pull request landed.
+ * Whether the commit this branch now points at is one a pull request landing this
+ * branch produced.
  *
  * Asks by head branch instead of scanning the repository's pull requests: that
  * list is paginated newest-first, so a branch whose pull request has since
@@ -127,9 +128,24 @@ export function collectIssueBranches(repo: string, issueNumber: number): IssueBr
  * started on the base branch — where `create_pr` then had a head equal to its base
  * and could not open the pull request that delivers the branch (#441, #476).
  *
- * So the branch is merged when the commit it points at NOW is the commit a pull
- * request landed. A merged pull request from this branch whose `head.sha` is some
- * earlier commit says only that the branch has moved on since.
+ * So the branch is merged when the commit it points at NOW is a commit a pull
+ * request landing this branch produced. A merged pull request from this branch
+ * whose `head.sha` is some earlier commit says only that the branch has moved on
+ * since.
+ *
+ * ## Two commits a landing produces, not one
+ *
+ * `head.sha` is the commit that was DELIVERED from the branch; `merge_commit_sha`
+ * is the commit the landing CREATED. Both can be the tip, and the second is the
+ * ordinary case for a branch something else merges into.
+ *
+ * That is a parent branch, always: a child's pull request merges into it, and the
+ * merge commit lands on it, so the parent's tip is the child's `merge_commit_sha`
+ * while being nobody's `head.sha`. Asking only about `head.sha` therefore read a
+ * parent branch whose children had all merged as still undelivered, resumed it, and
+ * the run then could not open a pull request from it — nothing was left to deliver.
+ * The same dead end as #476 reached from the opposite side, and it is why the two
+ * comparisons belong in one answer rather than one being added later.
  *
  * A failed read stays "unmerged": resuming a branch that turned out to have
  * nothing new costs a run that starts one branch too early, and reporting a branch
@@ -149,8 +165,11 @@ function headBranchMerged(repo: string, owner: string, branch: string, tip: stri
     const parsed = JSON.parse(prs.stdout || "[]") as {
       merged_at?: string | null;
       head?: { sha?: string };
+      merge_commit_sha?: string | null;
     }[];
-    return parsed.some((pr) => Boolean(pr.merged_at) && pr.head?.sha === tip);
+    return parsed.some(
+      (pr) => Boolean(pr.merged_at) && (pr.head?.sha === tip || pr.merge_commit_sha === tip),
+    );
   } catch {
     log(`WARN pull request list for ${branch} was not valid JSON`);
     return false;

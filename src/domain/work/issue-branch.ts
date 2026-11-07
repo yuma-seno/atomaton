@@ -28,12 +28,14 @@ export interface OwnedBranch {
   /** 1 for the first, 2 for the second, and so on. Nothing here is ever 0: that means unowned. */
   ordinal: number;
   /**
-   * True when the commit this branch points at is the one a pull request landed.
+   * True when the commit this branch points at is one a pull request landing this
+   * branch produced.
    *
    * Not "a pull request from this branch merged": a branch name outlives the pull
    * requests from it, so a branch that has taken more work since the last merge is
    * still undelivered. `adapters/github/issue-branches.ts` is where that distinction
-   * is drawn, because it is the half that can see the tip.
+   * is drawn, because it is the half that can see the tip — and both commits a
+   * landing produces count, which is what a parent branch's tip is.
    */
   merged: boolean;
 }
