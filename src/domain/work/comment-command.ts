@@ -53,7 +53,7 @@ export type SessionMode = (typeof SESSION_MODES)[number];
  * The two ways a person restarts work after a run that ended, as the notices say them.
  *
  * Every notice that hands a node back to a person after a run that left no usable
- * report — the failure notice (`report_run_failure.ts`), the run watch's notice
+ * report — the failure notice (`post_result_comment.ts`), the run watch's notice
  * (`reconcile_run_ending.ts`) — says the same two things next, because the person
  * reading it has the same decision: carry the history, or archive it and start
  * clean. Which of those is right is a judgement about the work, and it belongs to

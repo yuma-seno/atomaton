@@ -1,22 +1,23 @@
 /**
  * failure-notice.ts — the words a failed run leaves on its thread.
  *
- * Two machinery scripts speak for a run that failed, and they are one event:
+ * One script speaks for a run that failed: `post_result_comment.ts`. It used to be two,
+ * and the second existed only because the first ran on one side of a step outcome:
  *
- *   - `report_run_failure.ts`, for a "Run agent" step that exits non-zero. The step
- *     failed, so nothing later in the run posts anything.
- *   - `post_result_comment.ts`, for a run the core filed `failed` that has nothing of
- *     its own to show. That step SUCCEEDED, so the failure notice above never runs —
- *     which is #441: a session died on its context budget, the core recorded `failed`,
- *     the last assistant turn was a tool call, no tool had recorded an ending, and the
- *     thread received nothing at all. No comment, no `atomaton:ended` tag to release
- *     the thread's guard, and a person had to open the run and read its log to learn
- *     that anything had happened.
+ *   - a "Run agent" step that came back with the core recording `failed` — a session
+ *     that died on its context budget, say — reached the result comment, which had
+ *     nothing of the run's own to show. That is #441: the last assistant turn was a tool
+ *     call, no tool had recorded an ending, and the thread received nothing at all. No
+ *     comment, no `atomaton:ended` tag to release the thread's guard, and a person had
+ *     to open the run and read its log to learn that anything had happened.
+ *   - a "Run agent" step that exited non-zero — a hard crash — reached nothing, because
+ *     every later step was gated on that step succeeding. A separate script
+ *     (`report_run_failure.ts`) covered it, in a step of its own, with the same sentence.
  *
- * The sentence a person needs is the same in both cases — what became of the run, that
- * its session survived, and the two ways forward — so it is written once here and both
- * callers use it. A second copy would be a second answer to "what do I do now", free to
- * drift from this one.
+ * One event, two writers, and the cost was the gap the split invites: a run whose step
+ * succeeded but whose core filed `failed` fell between them. So the post step now runs
+ * for both outcomes and this is one caller. See `post_result_comment.ts`'s "This is the
+ * only writer of a run's ending".
  */
 import { existsSync, readFileSync } from "node:fs";
 import { recoveryLines } from "../../../domain/work/comment-command.ts";
@@ -67,13 +68,12 @@ export function logExcerptFrom(path: string | undefined): string {
 /**
  * What the failure notice says, from the line that names the run.
  *
- * The caller writes the tags above it — `report_run_failure.ts` through `turnHeader`,
- * `post_result_comment.ts` through the result comment's own header — and this is the
- * prose under them.
+ * The caller writes the tags above it — `post_result_comment.ts` through the result
+ * comment's own header — and this is the prose under them.
  *
- * `notify` opens the notice with the person, which the failure notice does and the
- * result comment does not: the result comment names the person in its own mention
- * sentence at the bottom, where every other ending on the thread names them.
+ * `notify` opens the notice with the person. The result comment, the only caller, names
+ * the person in its own mention sentence at the bottom instead, where every other
+ * ending on the thread names them, so it passes no `notify`.
  *
  * `runUrl` is passed by the caller whose comment carries no footer, and omitted by the
  * one whose footer already has the run link, so one fact is not printed twice in one

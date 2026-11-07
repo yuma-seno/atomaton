@@ -224,40 +224,74 @@ describe("generated workflows", () => {
   });
 
   /**
-   * The failure notice stands down once the run has already reported.
+   * One step writes a run's ending, in every shape the agent step can leave.
    *
-   * Both comments describe the same run, and the second one contradicts the first: a
-   * person reading "the work is on the issue" and then a failure notice has no way to
-   * tell which is true. The trigger is therefore the run's own `comment_id`, which
-   * `post-result` writes only on the path that posts — so the condition is exactly "this
-   * run has no ending on the thread", which is also when the notice is the thing that
-   * must write one.
+   * It used to be two, and the split was reachable only through a step outcome: "Post
+   * result comment" ran on `steps.atoma.outcome == 'success'`, and "Report failure"
+   * covered the step that died — gated on `always()`, the failure, AND `comment_id`
+   * being empty, because two comments describing one run contradict each other. The cost
+   * of that ordering is the bug it invites: a run whose step succeeded but whose core
+   * filed `failed` reached neither writer, and #441 is that run.
    *
-   * The failure half is the agent's own outcome, not the job's: "Run agent" runs with
-   * `continue-on-error`, so a reported failure no longer fails the job, and `job.status`
-   * would never say what the notice is for. It is also what keeps machinery failures
-   * red — a checkout or a session save that dies never reaches this condition, and the
-   * red run stays the only signal those leave.
+   * So the post step is now the one writer, and the facts below are the whole of why it
+   * can be:
    *
-   * Held on the generated YAML because that is where the condition lives, and because
+   *   1. `always()`, because a step that died leaves `success()` false and GitHub ANDs it
+   *      into every `if:` that does not say otherwise — the step whose whole job is to
+   *      report THAT failure would never run.
+   *   2. the agent's two real outcomes are named rather than left open. `cancelled` is a
+   *      person stopping a run on purpose, and `skipped` means the machinery died before
+   *      the agent did — the run the watch exists for, because the inside report could
+   *      not run. Posting for either would replace a notice that can say what happened
+   *      with one that cannot.
+   *   3. the two gates that made the old condition specific stay: `claimed`, because a
+   *      run that never took the turn owes the thread nothing, and `new_event_count`,
+   *      which holds wherever the claim does.
+   *   4. `--outcome` and `--atoma-failed` reach the script, which is what lets it tell a
+   *      crash from a soft stop and the agent's failure from the machinery's.
+   *
+   * Held on the generated YAML because that is where the condition and the argv live, and
    * an `always()` that loses a term still runs — it just runs when it should not.
    */
-  test("the failure notice does not fire on a run that already posted its report", () => {
-    type WorkflowStep = { name?: string; if?: string };
+  test("one step posts a run's ending, and it runs whatever the agent's step did", () => {
+    type WorkflowStep = { name?: string; if?: string; run?: string };
     type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
 
     const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
-    const step = workflow.jobs?.run?.steps?.find((candidate) => candidate.name === "Report failure");
-    expect(step, "the failure notice step").toBeDefined();
+    const steps = workflow.jobs?.run?.steps ?? [];
+
+    expect(
+      steps.find((candidate) => candidate.name === "Report failure"),
+      "the second writer is gone — one event, one step that speaks for it",
+    ).toBeUndefined();
+
+    const step = steps.find((candidate) => candidate.name === "Post result comment");
+    expect(step, "the one step that writes a run's ending").toBeDefined();
     const condition = step?.if ?? "";
-    expect(condition, "it has to run when a prior step failed").toContain("always()");
-    expect(condition, "and only when the agent itself failed — machinery failures keep their own red").toContain(
+    expect(condition, "a step that died leaves success() false, so this must override it").toContain("always()");
+    expect(condition, "the agent's own failure is a shape that must be reported").toContain(
       "steps.atoma.outcome == 'failure'",
     );
-    expect(
-      condition,
-      "and not when a result comment was already posted, or the two comments disagree",
-    ).toContain("steps.post-result.outputs.comment_id == ''");
+    expect(condition, "and its success still is").toContain("steps.atoma.outcome == 'success'");
+    // A cancellation is a person's decision, and a skipped agent step is a death the
+    // watch covers; a comment here would replace the notice that can say so.
+    for (const excluded of ["'cancelled'", "'skipped'"]) {
+      expect(condition, `no ending is posted for a step that was ${excluded}`).not.toContain(excluded);
+    }
+    expect(condition, "a run that never took the turn owes the thread nothing").toContain(
+      "steps.claim.outputs.claimed == 'true'",
+    );
+    expect(condition, "the gate the claim was taken under stays with it").toContain(
+      "steps.context.outputs.new_event_count != '0'",
+    );
+
+    const run = step?.run ?? "";
+    expect(run, "the step's own outcome is what tells a crash from a soft stop").toContain(
+      '--outcome "${{ steps.atoma.outcome }}"',
+    );
+    expect(run, "and whose the failure was decides the run's colour").toContain(
+      '--atoma-failed "${{ steps.atoma.outputs.atoma_failed }}"',
+    );
   });
 
   /**
@@ -341,7 +375,7 @@ describe("generated workflows", () => {
    *   2. the fallible machinery before atoma stops the step at its own site: the
    *      bash runs with `-e`, so nothing falls through — the guard's job is to
    *      NAME the failure and to exit before the flag can be written.
-   *   3. "Report failure" receives the flag, so its exit code can tell the two
+   *   3. "Post result comment" receives the flag, so its exit code can tell the two
    *      apart.
    *
    * Held on the generated YAML: the ordering, the guard and the wiring all live in
@@ -355,9 +389,9 @@ describe("generated workflows", () => {
     const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
     const steps = workflow.jobs?.run?.steps ?? [];
     const agent = steps.find((candidate) => candidate.name === "Run agent");
-    const report = steps.find((candidate) => candidate.name === "Report failure");
+    const report = steps.find((candidate) => candidate.name === "Post result comment");
     expect(agent, "the agent step").toBeDefined();
-    expect(report, "the failure notice step").toBeDefined();
+    expect(report, "the step that decides the colour").toBeDefined();
 
     const run = agent?.run ?? "";
     const flagAt = run.indexOf('atoma_failed=true');
@@ -380,10 +414,12 @@ describe("generated workflows", () => {
     ).toBe(true);
     expect(run, "no earlier boundary flag survives the rename").not.toContain("atoma_reached");
 
-    expect(report?.env?.ATOMA_FAILED, "the distinction reaches the reporter").toBe(
-      "${{ steps.atoma.outputs.atoma_failed }}",
+    // Through the argv, not an `env:` mapping. The post step keeps one credential and
+    // nothing else, and the exact interpolation is what carries it: an empty value here
+    // would read as the machinery's and turn every failure red.
+    expect(report?.run, "the distinction reaches the script that decides the colour").toContain(
+      '--atoma-failed "${{ steps.atoma.outputs.atoma_failed }}"',
     );
-    expect(report?.run, "the reporter passes it to the script that decides the colour").toContain("--atoma-failed");
   });
 
   /**

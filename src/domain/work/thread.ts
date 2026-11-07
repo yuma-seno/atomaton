@@ -72,11 +72,11 @@ export type TurnHolder = "agent" | "person";
  * The event a body is used to be derived from `isAgentResult` -- an `atomaton:agent`
  * tag meant `returned` or `handed-off`, and nothing else could be either. That put the
  * result comment in charge of "how the turn ended", and there are bodies that end a
- * turn and are NOT result comments: the failure notice (`report_run_failure.ts`) gives
- * the node back to a person, and `launch_sub_agent`/`create_pr` leave it waiting on a
- * child. Neither carries `atomaton:agent` (tagging them as results would file a
- * failure with the runs that reported), so neither was read as an event at all, and
- * the node's last event stayed the `asked` that started the run.
+ * turn and are NOT result comments: the failure notice (`post_result_comment.ts`'s
+ * `failed` arm) gives the node back to a person, and `launch_sub_agent`/`create_pr`
+ * leave it waiting on a child. Neither carries `atomaton:agent` (tagging them as
+ * results would file a failure with the runs that reported), so neither was read as an
+ * event at all, and the node's last event stayed the `asked` that started the run.
  *
  * `ending` is the tag that means "how this run ended" -- `atomaton:ended`, written on
  * every body that ends a turn -- so it is what decides. A body with no ending is not
