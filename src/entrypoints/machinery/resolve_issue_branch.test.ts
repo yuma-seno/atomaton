@@ -29,8 +29,10 @@ describe("resolve_issue_branch.ts", () => {
     JSON.stringify([{ ref: "refs/heads/atomaton/issue-7", object: { sha } }]);
 
   /** What `repos/.../pulls?head=owner:<branch>` prints for one merged pull request. */
-  const mergedPrAt = (sha: string) =>
-    JSON.stringify([{ merged_at: "2026-01-01T00:00:00Z", head: { sha } }]);
+  const mergedPrAt = (sha: string, mergeCommit?: string) =>
+    JSON.stringify([
+      { merged_at: "2026-01-01T00:00:00Z", head: { sha }, ...(mergeCommit ? { merge_commit_sha: mergeCommit } : {}) },
+    ]);
 
   /** Run the script the way the workflow step does, and report its `branch` output. */
   function run(rules: FakeGhRule[]): { status: number | null; stderr: string; branch: string } {
@@ -80,6 +82,21 @@ describe("resolve_issue_branch.ts", () => {
     ]);
     expect(r.status).toBe(0);
     expect(r.branch).toBe("atomaton/issue-7");
+  });
+
+  /**
+   * A branch left sitting on its own landing's merge commit. The merge commit PR #419
+   * created is where `atomaton/issue-418` stood (`7f6ce012`), delivered from
+   * `87e54a9`. Resuming here sends a run to a branch with nothing left to deliver,
+   * where `create_pr` then has nothing to open — the mirror image of #476.
+   */
+  test("a branch whose tip is the merge commit a pull request from it created is not resumed", () => {
+    const r = run([
+      { match: ["matching-refs/heads/atomaton/issue-7"], stdout: refsAt(TIP) },
+      { match: ["head=owner:atomaton/issue-7"], stdout: mergedPrAt(STALE, TIP) },
+    ]);
+    expect(r.status).toBe(0);
+    expect(r.branch).toBe("");
   });
 
   /**

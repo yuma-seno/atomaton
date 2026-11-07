@@ -491,7 +491,10 @@ describe("issue-branches.ts collectIssueBranches", () => {
   }
 
   /** What `gh api repos/.../pulls?head=owner:<branch>` prints for one merged pull request. */
-  const mergedPr = (sha: string) => JSON.stringify([{ merged_at: "2026-01-01T00:00:00Z", head: { sha } }]);
+  const mergedPr = (sha: string, mergeCommit?: string) =>
+    JSON.stringify([
+      { merged_at: "2026-01-01T00:00:00Z", head: { sha }, ...(mergeCommit ? { merge_commit_sha: mergeCommit } : {}) },
+    ]);
 
   // The merged flag decides whether a run resumes a branch or starts a new one,
   // and asking for it by head branch is what keeps that answer correct in a
@@ -537,6 +540,33 @@ describe("issue-branches.ts collectIssueBranches", () => {
     expect(JSON.parse(r.stdout.trim())).toEqual({
       known: true,
       branches: [{ name: "atomaton/issue-12", ordinal: 1, merged: false }],
+    });
+  });
+
+  /**
+   * The other half of the same rule. A landing leaves two commits: the one delivered
+   * from the branch, and the merge commit it created on the base. Either can be the
+   * tip — the merge commit's own parents are the base and `head.sha`, so a ref can
+   * reach it without a pull request ever being made from that tip. Asking only about
+   * `head.sha` reads such a branch as undelivered, resumes it, and the run finds
+   * nothing to deliver and no pull request it can open — #476's dead end from the
+   * opposite side. Real case: `atomaton/issue-418` at `7f6ce012`, PR #419's merge
+   * commit, delivered from `87e54a9`.
+   *
+   * Note what this does NOT license: a parent branch whose children have landed
+   * INTO it must still read unmerged, and does, because those children's pull
+   * requests name the child as head and never appear in this branch's response.
+   */
+  test("a branch whose tip is the merge commit a pull request from it created is merged", () => {
+    const delivered = "c".repeat(40);
+    const r = run([
+      { match: ["matching-refs/heads/atomaton/issue-12"], stdout: JSON.stringify([{ ref: "refs/heads/atomaton/issue-12", object: { sha: TIPS.first } }]) },
+      { match: ["head=owner:atomaton/issue-12"], stdout: mergedPr(delivered, TIPS.first) },
+    ]);
+
+    expect(JSON.parse(r.stdout.trim())).toEqual({
+      known: true,
+      branches: [{ name: "atomaton/issue-12", ordinal: 1, merged: true }],
     });
   });
 
