@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.58",
+  "version": "v0.21.59",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -42,7 +42,6 @@
     ".github/atomaton-runtime/scripts/record_run_metadata.ts",
     ".github/atomaton-runtime/scripts/redact_stream.ts",
     ".github/atomaton-runtime/scripts/report_config_findings.ts",
-    ".github/atomaton-runtime/scripts/report_run_failure.ts",
     ".github/atomaton-runtime/scripts/request_stop.ts",
     ".github/atomaton-runtime/scripts/resolve_entry_agent.ts",
     ".github/atomaton-runtime/scripts/resolve_issue_branch.ts",
@@ -58,6 +57,8 @@
     ".github/atomaton-runtime/scripts/save_workspace.ts",
     ".github/atomaton-runtime/scripts/scan_secrets.ts",
     ".github/atomaton-runtime/scripts/stop_on_close.ts",
+    ".github/atomaton-runtime/scripts/stop_on_pr_close.ts",
+    ".github/atomaton-runtime/scripts/sweep_stale_locks.ts",
     ".github/atomaton-runtime/scripts/validate_deliverable.ts",
     ".github/atomaton-runtime/scripts/validate_pull_request.ts",
     ".github/atomaton-runtime/scripts/watch_for_stop.ts",

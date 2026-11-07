@@ -41,7 +41,7 @@ run-name: '${{ inputs.agent }} on #${{ inputs.number }}'
         description: Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.
         required: false
         type: string
-        default: v0.4.6
+        default: v0.4.7
       reload_count:
         description: How many times this work has already rebuilt its environment (set by reload_environment; leave at 0)
         required: false
@@ -91,7 +91,7 @@ run-name: '${{ inputs.agent }} on #${{ inputs.number }}'
         description: Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.
         required: false
         type: string
-        default: v0.4.6
+        default: v0.4.7
       reload_count:
         description: How many times this work has already rebuilt its environment (set by reload_environment; leave at 0)
         required: false
@@ -786,7 +786,7 @@ jobs:
           # Guarded, not bare: the guard names the failure — the machinery could not produce
           # the tools file, atoma never started — instead of leaving the step's exit code to
           # say it, and it stops the step here, before the failure branch below can write the
-          # boundary flag. A failure here is the MACHINERY's, and "Report failure" reads that
+          # boundary flag. A failure here is the MACHINERY's, and "Post result comment" reads
           # from `atoma_failed` staying unset.
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/write_tools_file.ts" --config "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/config.yaml" --defaults "${ATOMATON_MACHINERY_ROOT}/.github/atomaton-runtime/tools/defaults.yaml" --out "${RUNNER_TEMP}/atomaton-run/tools.yaml" --hook-base "${ATOMATON_MACHINERY_ROOT}/.github/atomaton-runtime/tools" || { echo "::error::could not write the tools file from the machinery config; atoma never started"; exit 1; }
           TOOLS_ARG="--tools-file ${RUNNER_TEMP}/atomaton-run/tools.yaml"
@@ -889,7 +889,7 @@ jobs:
           # atoma has run is attributed to atoma. `sudo -n -u "$TOOL_USER" true` is everything
           # the invocation needs from sudo — the user, the passwordless grant — at no cost, so
           # a refusal is caught here, while it is still nameable and while the boundary flag is
-          # still unwritten: "Report failure" reads that as the machinery's. The residue is a
+          # still unwritten: "Post result comment" reads that as the machinery's. The residue is a
           # sudo that passes the preflight and fails the real invocation, which arrives as
           # atoma's exit code and is attributed to atoma; nothing in this script can
           # distinguish the two, and the log will say.
@@ -1003,14 +1003,14 @@ jobs:
           #
           # A non-zero status that is not the soft stop is still a failure and still ends the
           # step, so none of the run's own outputs are written: the turn failed, and
-          # decide_turn_ending.ts reads that from the step's outcome. "Report failure" turns
+          # decide_turn_ending.ts reads that from the step's outcome. "Post result comment" turns
           # that failure into the ending it owes the thread, and the colour it leaves behind is
           # decided by the flag the failure branch below publishes.
           if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
             bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/read_run_ending.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --exit-code "${EXIT_CODE}" --stop-file "${RUNNER_TEMP}/atomaton-run/stop-requested"
           elif [ "$EXIT_CODE" != "0" ]; then
             # atoma's own failure — neither success nor the soft stop — published for
-            # "Report failure", which leaves the run green only for this case. Everything
+            # "Post result comment", which leaves the run green only for this case. Everything
             # the machinery does around atoma — the tools file, the sudo preflight above,
             # and the reads that turn a 0/2 exit into an ending, which this bash runs with
             # `-e` — leaves the flag unwritten, and unwritten is red: the machinery's.
@@ -1130,8 +1130,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/post_result_comment.ts" --number "${{ inputs.number }}" --agent "${{ inputs.agent }}" --type "${{ inputs.type }}" --notify "${{ steps.notify.outputs.notify }}" --directive "${{ steps.atoma.outputs.directive }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --reported "${{ steps.atoma.outputs.reported }}" --messages-before "${{ steps.context.outputs.messages_before }}" --changed "${{ steps.atoma.outputs.changed }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --ending-comment "${RUNNER_TEMP}/atomaton-run/ending-comment.json" --ending-invalid "${{ steps.atoma.outputs.ending_invalid }}" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json" --ask "${{ inputs.ask }}" --run-id "${{ github.run_id }}"
-        if: steps.atoma.outcome == 'success' && steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/post_result_comment.ts" --number "${{ inputs.number }}" --agent "${{ inputs.agent }}" --type "${{ inputs.type }}" --notify "${{ steps.notify.outputs.notify }}" --directive "${{ steps.atoma.outputs.directive }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --outcome "${{ steps.atoma.outcome }}" --atoma-failed "${{ steps.atoma.outputs.atoma_failed }}" --reported "${{ steps.atoma.outputs.reported }}" --messages-before "${{ steps.context.outputs.messages_before }}" --changed "${{ steps.atoma.outputs.changed }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --ending-comment "${RUNNER_TEMP}/atomaton-run/ending-comment.json" --ending-invalid "${{ steps.atoma.outputs.ending_invalid }}" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json" --ask "${{ inputs.ask }}" --run-id "${{ github.run_id }}"
+        if: always() && (steps.atoma.outcome == 'success' || steps.atoma.outcome == 'failure') && steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
       - name: Record run metadata
         shell: bash
         run: |
@@ -1155,20 +1155,6 @@ jobs:
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/write_metrics_report.ts"
         if: always()
-      - name: Report failure
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ATOMA_FAILED: ${{ steps.atoma.outputs.atoma_failed }}
-          NUMBER: ${{ inputs.number }}
-          AGENT: ${{ inputs.agent }}
-          NOTIFY: ${{ steps.notify.outputs.notify }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          ASK: ${{ inputs.ask }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/report_run_failure.ts" --number "${NUMBER}" --agent "${AGENT}" --notify "${NOTIFY}" --run-url "${RUN_URL}" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --atoma-failed "${ATOMA_FAILED}" --ask "${ASK}" --run-id "${RUN_ID}"
-        if: always() && steps.atoma.outcome == 'failure' && steps.post-result.outputs.comment_id == ''
       - name: Check for uncommitted changes
         id: dirty
         shell: bash

@@ -636,9 +636,20 @@ function pickDispatchedRun(runs, headSha, since) {
   const run = candidates[0];
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
+var VERDICT_EVENTS = new Set(["workflow_dispatch", "pull_request"]);
+function hasVerdict(run) {
+  if (run.status !== "completed")
+    return false;
+  const conclusion = (run.conclusion ?? "").trim();
+  return conclusion !== "" && conclusion !== "cancelled" && conclusion !== "action_required";
+}
+function waitable(run) {
+  return run.status !== "completed" && run.event === "workflow_dispatch";
+}
 function findExistingCiRun(runs, workflow, headSha) {
-  const candidates = runs.filter((run) => run.event === "workflow_dispatch").filter((run) => run.head_sha === headSha).filter((run) => run.path.endsWith(`/${workflow}`)).sort((a, b) => a.created_at < b.created_at ? 1 : -1);
-  const run = candidates[0];
+  const onThisCommit = runs.filter((run) => VERDICT_EVENTS.has(run.event)).filter((run) => run.head_sha === headSha).filter((run) => run.path.endsWith(`/${workflow}`));
+  const newest = (candidates) => [...candidates].sort((a, b) => a.created_at < b.created_at ? 1 : -1)[0];
+  const run = newest(onThisCommit.filter(hasVerdict)) ?? newest(onThisCommit.filter(waitable));
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
 function countPriorRetries(repo, number) {
@@ -674,15 +685,14 @@ function notifyCiWaiting(repo, number, askedByPerson, runUrl) {
 function runCiAndWait(repo, number, workflow, branch, headSha, timeoutSeconds, askedByPerson) {
   const runUrlFor = (id) => `https://github.com/${repo}/actions/runs/${id}`;
   const listRuns = () => {
-    const listed = gh("api", `repos/${repo}/actions/runs?event=workflow_dispatch&head_sha=${headSha}`).stdout;
+    const listed = ghRead("api", `repos/${repo}/actions/runs?head_sha=${headSha}&per_page=100`).stdout;
     const { workflow_runs = [] } = JSON.parse(listed || "{}");
     return workflow_runs;
   };
   const existing = findExistingCiRun(listRuns(), workflow, headSha);
-  const reusable = existing?.status === "completed" && existing.conclusion && existing.conclusion !== "cancelled";
-  if (reusable) {
+  if (existing?.status === "completed") {
     log(`reusing CI run ${existing.id} for ${headSha.slice(0, 7)}: ${existing.conclusion}`);
-    return { conclusion: existing.conclusion, runUrl: runUrlFor(existing.id) };
+    return { conclusion: existing.conclusion ?? "", runUrl: runUrlFor(existing.id) };
   }
   const alreadyRunning = existing !== undefined && existing.status !== "completed";
   const since = new Date().toISOString();

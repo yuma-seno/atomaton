@@ -12,6 +12,8 @@
 
 name: Atomaton Run Watch
 'on':
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_run:
     workflows:
       - Atomaton Runner
@@ -20,7 +22,7 @@ name: Atomaton Run Watch
     types:
       - completed
 concurrency:
-  group: atomaton-run-watch-${{ github.event.workflow_run.display_title }}
+  group: atomaton-run-watch-${{ github.event_name }}-${{ github.event.workflow_run.display_title }}
   cancel-in-progress: false
 permissions:
   actions: write
@@ -32,6 +34,7 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    if: github.event_name == 'workflow_run'
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
@@ -49,3 +52,21 @@ jobs:
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/reconcile_run_ending.ts" --display-title "${DISPLAY_TITLE}" --run-id "${RUN_ID}" --run-url "${RUN_URL}" --conclusion "${CONCLUSION}"
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Bun
+        with:
+          bun-version: latest
+        uses: oven-sh/setup-bun@v2
+      - name: Sweep the stale locks
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/sweep_stale_locks.ts"

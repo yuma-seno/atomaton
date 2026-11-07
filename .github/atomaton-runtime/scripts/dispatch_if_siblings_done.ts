@@ -793,8 +793,11 @@ function readTargetState(number, repo) {
 function mayStartWorkOn(target) {
   return target.known && target.state === "open";
 }
+function isMerged(target) {
+  return target.known && target.kind === "pull-request" && target.state === "done";
+}
 function canBeReopened(target) {
-  return target.known && !(target.kind === "pull-request" && target.state === "done");
+  return target.known && !isMerged(target);
 }
 function recoveryAdvice(state, number, command) {
   if (state.known && !canBeReopened(state)) {
@@ -837,7 +840,7 @@ function dispatchUnconfirmedNotice(unconfirmed) {
     "",
     `What was about to happen: ${context}.`,
     "",
-    "GitHub did not show the machinery its own marker in the thread, so it could not tell whether another run had already been asked for. Starting one anyway could put two runs on this issue at once.",
+    "The comment that records a dispatch could not be posted or was not visible in the thread, so the machinery could not tell whether another run had already been asked for. Starting one anyway would leave a run nothing on this issue accounts for.",
     "",
     "This is usually transient. Retry shortly by commenting `/`" + agent + "` on this issue."
   ].join(`
@@ -897,8 +900,13 @@ function refuseOutstandingRequest(d, markerId, ownMarker) {
       return;
     gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${markerId}`);
   };
-  if (markerId === undefined)
+  if (markerId === undefined) {
+    const ownAsk = d.ask === undefined ? "" : String(d.ask).trim();
+    if (ownAsk === "") {
+      return refuseUnconfirmed(d, `the dispatch marker on #${d.number} could not be posted, so nothing on the thread would record this dispatch`);
+    }
     return;
+  }
   const delays = [1000, 2000, 4000];
   let check;
   for (let attempt = 0;attempt <= delays.length; attempt++) {
@@ -932,29 +940,33 @@ function refuseOutstandingRequest(d, markerId, ownMarker) {
         gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
       }
     }
-    log(`${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` + `and ${d.agent} was not started`);
     removeMarker();
-    const body = [
-      ...refusalEndingLines(d),
-      dispatchUnconfirmedNotice({
-        agent: d.agent,
-        number: Number(d.number),
-        context: d.context,
-        notify: d.notify ?? ""
-      })
-    ].join(`
-`);
-    const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
-    if (code !== 0) {
-      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
-    }
-    return "unconfirmed";
+    return refuseUnconfirmed(d, `the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted`);
   }
   if (!check.outstanding)
     return;
   removeMarker();
   log(`${d.context}: #${d.number} already has an agent asked for on it, so ${d.agent} was not started; ` + "the dispatch marker was removed");
   return "refused-outstanding";
+}
+function refuseUnconfirmed(d, why) {
+  const log = d.log ?? ((message) => console.error(message));
+  log(`${d.context}: ${why}; ${d.agent} was not started`);
+  const body = [
+    ...refusalEndingLines(d),
+    dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? ""
+    })
+  ].join(`
+`);
+  const { code, stdout, stderr } = gh("issue", "comment", String(d.number), ...d.repo ? ["--repo", d.repo] : [], "--body", body);
+  if (code !== 0) {
+    log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+  }
+  return "unconfirmed";
 }
 function refuseSupersededAsk(d) {
   const log = d.log ?? ((message) => console.error(message));
@@ -1298,8 +1310,13 @@ ${line}`);
   if (markerAlreadyWritten) {
     return { kind: "already-aggregated" };
   }
-  const markerId = commentOnWithId(opts.repo, opts.parent, `${AGGREGATED_TAG.write(opts.closedNum)}
-Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`);
+  const agent = parentAgent(opts.repo, opts.parent);
+  const markerLines = [
+    AGGREGATED_TAG.write(opts.closedNum),
+    `Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the parent's agent for aggregation.`
+  ];
+  const markerId = commentOnWithId(opts.repo, opts.parent, [...agent === "" ? [] : [DISPATCH_TAG.write(agent)], ...markerLines].join(`
+`));
   if (markerId === null) {
     const why = `could not write the aggregation marker on #${opts.parent} (the comment POST failed)`;
     console.error(`${why}; not dispatching, because without the marker a second caller would dispatch too`);
@@ -1307,12 +1324,13 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
   }
   const outcome = dispatchRunner({
     context: `all sub-issues of #${opts.parent} are complete, so the agent that was on it was to be re-invoked`,
-    agent: parentAgent(opts.repo, opts.parent),
+    agent,
     type: "issue",
     number: opts.parent,
     notify: resolveNotify(opts.repo, opts.parent),
     repo: opts.repo,
-    continuesChain: opts.continuesChain
+    continuesChain: opts.continuesChain,
+    markerCommentId: markerId
   });
   const takeBackMarker = (why) => {
     const removed = gh("api", "--method", "DELETE", `repos/${opts.repo}/issues/comments/${markerId}`);
@@ -1322,15 +1340,24 @@ Atomaton: All sub-tasks completed (last: #${opts.closedNum}). Re-invoking the pa
       console.error(`${why}; AND the aggregation marker could not be removed (${removed.stderr.trim() || removed.stdout.trim()}), ` + `so nothing will retry: aggregate #${opts.parent} by hand`);
     }
   };
+  const takeBackDispatchTag = () => {
+    const { code, stdout, stderr } = gh("api", `repos/${opts.repo}/issues/comments/${markerId}`, "--method", "PATCH", "-f", `body=${markerLines.join(`
+`)}`);
+    if (code !== 0) {
+      console.error(`#${opts.parent} is closed, and the dispatch tag could not be taken off its marker ` + `(${stderr.trim() || stdout.trim()}): the thread will read as though a run were coming.`);
+    }
+  };
   if (outcome === "dispatched")
     return { kind: "dispatched" };
-  if (outcome === "refused-closed")
+  if (outcome === "refused-closed") {
+    takeBackDispatchTag();
     return { kind: "parent-closed" };
-  if (outcome === "refused-outstanding") {
-    takeBackMarker(`parent #${opts.parent} already had an agent asked for on it, so this aggregation did not start`);
-    return { kind: "parent-busy" };
   }
-  takeBackMarker(`the dispatch of ${parentAgent(opts.repo, opts.parent) || "(no agent)"} onto #${opts.parent} failed`);
+  if (outcome === "refused-outstanding")
+    return { kind: "parent-busy" };
+  if (outcome === "unconfirmed")
+    return { kind: "dispatch-failed" };
+  takeBackMarker(`the dispatch of ${agent || "(no agent)"} onto #${opts.parent} failed`);
   return { kind: "dispatch-failed" };
 }
 function withNotice(opts, result) {

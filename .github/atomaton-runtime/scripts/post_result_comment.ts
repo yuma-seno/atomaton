@@ -291,6 +291,29 @@ function readTargetState(number, repo) {
   return { known: false, why: `unrecognised state ${JSON.stringify(parsed.state ?? null)}` };
 }
 
+// src/adapters/github/pull-request.ts
+function whyNot(what, result) {
+  return `${what}: ${result.stderr || result.stdout || `gh exited ${result.code}`}`;
+}
+function readPullRequestObject(repo, number) {
+  const what = `gh api repos/${repo}/pulls/${number}`;
+  const result = ghRead("api", `repos/${repo}/pulls/${number}`);
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  if (!result.stdout.trim())
+    return { known: false, why: `${what}: gh printed nothing` };
+  try {
+    return { known: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { known: false, why: `${what}: the answer was not JSON` };
+  }
+}
+
+// src/domain/work/closed-target.ts
+function isMerged(target) {
+  return target.known && target.kind === "pull-request" && target.state === "done";
+}
+
 // src/domain/work/completion-mention.ts
 function shouldMentionOnCompletion(signals) {
   if (!signals.notify)
@@ -589,14 +612,36 @@ function tokenUsageLine(logsFile) {
   const cached = /cached=(\d+)/.exec(usageLine)?.[1];
   return renderTokenLine({ total, prompt, completion, cached });
 }
-function subIssueState(number, type) {
-  if (type !== "issue")
-    return { isSubIssue: false, issueClosed: false };
+function nodeFacts(number, type, interrupted) {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const state = readTargetState(number, repo);
-  const issueClosed = state.known && state.state !== "open";
+  if (type !== "issue") {
+    if (!interrupted)
+      return { isSubIssue: false, issueClosed: false };
+    const read = readPullRequestObject(repo, Number(number));
+    if (!read.known) {
+      return { isSubIssue: false, issueClosed: false, target: { known: false, why: read.why } };
+    }
+    const { state, merged_at: mergedAt, body } = read.value;
+    if (state !== "open" && state !== "closed") {
+      const why = `unrecognised pull request state ${JSON.stringify(state ?? null)}`;
+      return { isSubIssue: false, issueClosed: false, target: { known: false, why } };
+    }
+    return {
+      isSubIssue: false,
+      issueClosed: false,
+      target: { known: true, kind: "pull-request", state: state === "open" ? "open" : mergedAt ? "done" : "abandoned" },
+      parentIssue: PARENT_ISSUE_TAG.readProse(body ?? "")
+    };
+  }
+  const target = readTargetState(number, repo);
   const found = parentIssueOf(repo, Number(number));
-  return { isSubIssue: found.known && found.parent > 0, issueClosed };
+  const parent = found.known && found.parent > 0 ? found.parent : undefined;
+  return {
+    isSubIssue: parent !== undefined,
+    issueClosed: target.known && target.state !== "open",
+    target,
+    parentIssue: parent
+  };
 }
 function readSession(path) {
   if (!path || !existsSync4(path))
@@ -658,15 +703,27 @@ function howItWasCutShort(endedBecause) {
 }
 function mentionLine(ending, args) {
   if (args.endedBecause === "failed") {
-    return `@${args.notify} \u2014 **${args.agent}** stopped mid-run, and no agent will run next. ` + `Resume it, or say what to do instead.`;
+    return `@${args.notify} \u2014 **${args.agent}** stopped mid-run, and no agent will run next. ` + continuation(args, "Resume it, or say what to do instead.");
   }
   if (cutShort(args.endedBecause)) {
-    return `@${args.notify} \u2014 **${args.agent}** ${howItWasCutShort(args.endedBecause)} ` + `before it finished, and no agent will run next. Resume it, or say what to do instead.`;
+    return `@${args.notify} \u2014 **${args.agent}** ${howItWasCutShort(args.endedBecause)} ` + `before it finished, and no agent will run next. ` + continuation(args, "Resume it, or say what to do instead.");
   }
   if (ending.ended === "no-report") {
     return `@${args.notify} \u2014 **${args.agent}** ended without writing a report. Nothing interrupted it ` + `and nothing runs next; it simply left no closing text, so there is nothing here to review. ` + `What it did is in its saved session.`;
   }
   return `@${args.notify} \u2014 **${args.agent}** task completed. No agent will be automatically executed next. Please review the results or provide instructions for the next step.`;
+}
+function continuation(args, resume) {
+  if (args.target === undefined)
+    return resume;
+  if (isMerged(args.target)) {
+    const elsewhere = args.parentIssue !== undefined && args.parentIssue > 0 ? `Continue on #${args.parentIssue}, the issue this pull request delivered.` : "Continue on the issue this pull request delivered.";
+    return `The work this pull request carried is merged already, so there is nothing here to resume. ${elsewhere}`;
+  }
+  if (args.target.known && args.target.state !== "open") {
+    return "That thread is closed, so there is nothing left to resume here \u2014 reopen it to continue, or say what to do instead.";
+  }
+  return resume;
 }
 function endingHere(args) {
   return endingOf({
@@ -725,6 +782,7 @@ function buildCommentBody(args) {
     tokenLine: args.tokenLine,
     toolTrouble: args.toolTrouble,
     endedBecause: args.endedBecause,
+    target: args.target,
     spentOn: args.spentOn
   }));
   return lines.join(`
@@ -739,7 +797,14 @@ function buildFooter(args) {
   if (args.toolTrouble !== undefined)
     lines.push(`_${args.toolTrouble}_`);
   if (args.endedBecause === "stopped") {
-    lines.push(`\u23F8\uFE0F _Stopped on request. **The session is saved.** Comment \`/resume\` to continue ` + `from here, or \`/${args.agent}\` with an instruction on the following lines._`);
+    const saved = "\u23F8\uFE0F _Stopped on request. **The session is saved.**";
+    if (args.target !== undefined && isMerged(args.target)) {
+      lines.push(`${saved} The work this pull request carried is merged already, so there is ` + `nothing here to resume._`);
+    } else if (args.target !== undefined && args.target.known && args.target.state !== "open") {
+      lines.push(`${saved} That thread is closed, so there is nothing left to resume here \u2014 ` + `reopen it to continue._`);
+    } else {
+      lines.push(`${saved} Comment \`/resume\` to continue from here, or \`/${args.agent}\` ` + `with an instruction on the following lines._`);
+    }
   } else if (reachedLimit(args.endedBecause)) {
     lines.push(`\u26A0\uFE0F _The run ${howItWasCutShort(args.endedBecause)}. Comment \`/${args.agent}\` to continue._`);
   }
@@ -770,6 +835,12 @@ ${buildFooter({
   }
   console.error(`footer appended to the ending comment ${args.commentId}`);
 }
+function colourForStepFailure(stepFailed, atomaFailed) {
+  if (!stepFailed || atomaFailed)
+    return;
+  console.error("The machinery failed, not the agent; the notice healed the thread, but the run stays red.");
+  process.exitCode = 1;
+}
 function main() {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
@@ -792,7 +863,9 @@ function main() {
       "ending-invalid": { type: "string" },
       "people-file": { type: "string" },
       ask: { type: "string" },
-      "run-id": { type: "string" }
+      "run-id": { type: "string" },
+      outcome: { type: "string" },
+      "atoma-failed": { type: "string" }
     }
   });
   if (!values.number || !values.agent || !values["run-url"]) {
@@ -808,7 +881,8 @@ function main() {
   let output = redacted;
   let salvaged = false;
   let wroteNothing = false;
-  const endedBecause = values["ended-because"];
+  const stepFailed = values.outcome === "failure";
+  const endedBecause = values["ended-because"] || (stepFailed ? "failed" : "");
   const endedEarly = cutShort(endedBecause);
   const failed = endedBecause === "failed";
   if (!output.trim() && endedEarly) {
@@ -820,7 +894,7 @@ function main() {
     }
   }
   if (!output.trim()) {
-    const ending = readEndingComment(values["ending-comment"]);
+    const ending = stepFailed ? undefined : readEndingComment(values["ending-comment"]);
     if (ending) {
       console.error(`appending the result footer onto the tool's ending comment ${ending.commentId} (on ${ending.node})`);
       appendFooter({
@@ -848,7 +922,7 @@ function main() {
   if (failed && !salvaged && output.trim() !== "")
     salvaged = true;
   const endingInvalid = isTrue(values["ending-invalid"]);
-  const notACall = endingInvalid || salvaged || cutShort(values["ended-because"]);
+  const notACall = endingInvalid || salvaged || endedEarly;
   const callees = readCalleesFile(values["people-file"]);
   const known = notACall ? [] : callees.participants;
   const callable = notACall ? [] : callees.humans;
@@ -857,18 +931,21 @@ function main() {
     console.error(`escaped ${checked.escaped.length} mention(s): ${checked.escaped.join(", ")}`);
   }
   const called = calledHumans(output, callable);
-  const issueState = subIssueState(values.number, values.type);
+  const facts = nodeFacts(values.number, values.type, cutShort(values["ended-because"]));
   const mentionSignals = {
     notify: values.notify,
     directive: values.directive,
     chainContinues: values["chain-continues"],
-    endedBecause: values["ended-because"],
+    endedBecause,
     reported: isTrue(values.reported),
     agentCalledHuman: called.length === 1,
-    ...issueState
+    isSubIssue: facts.isSubIssue,
+    issueClosed: facts.issueClosed
   };
+  const advice = { target: facts.target, parentIssue: facts.parentIssue };
   const body = buildCommentBody({
     ...mentionSignals,
+    ...advice,
     agent: values.agent,
     salvaged,
     wroteNothing,
@@ -883,7 +960,7 @@ function main() {
     changed: isTrue(values.changed),
     toolTrouble: toolTroubleLine(readSession(values.session), Number(values["messages-before"])),
     tokenLine: tokenUsageLine(values["logs-file"] ?? ""),
-    spentOn: reachedLimit(values["ended-because"]) ? toolCallTally(readSession(values.session)) : undefined,
+    spentOn: reachedLimit(endedBecause) ? toolCallTally(readSession(values.session)) : undefined,
     excerpt: failed ? logExcerptFrom(values["logs-file"]) : undefined
   });
   const { code, stdout, stderr } = gh("api", `repos/${process.env.GITHUB_REPOSITORY}/issues/${values.number}/comments`, "--method", "POST", "-f", `body=${body}`, "--jq", ".id");
@@ -899,6 +976,7 @@ function main() {
 `);
   }
   console.error(`Posted comment ID: ${commentId}`);
+  colourForStepFailure(stepFailed, isTrue(values["atoma-failed"]));
 }
 if (import.meta.main)
   main();
