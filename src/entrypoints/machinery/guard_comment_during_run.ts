@@ -267,7 +267,10 @@ function main(): void {
     }
   }
   const removed = hold.removed && !abandoned;
-  if (hold.removed && abandoned) {
+  // Said only when the comment is really kept. A comment carrying more than one command is
+  // deleted for that reason whatever the lock is doing — a separate refusal, and a line
+  // claiming "this comment is kept" beside a deletion would be wrong.
+  if (hold.removed && abandoned && !several) {
     console.error(
       `The run that claimed #${values.number}'s turn has finished with its claim still standing, ` +
         "so the lock is stale and this comment is kept — the sweep will hand the node back",
