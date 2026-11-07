@@ -801,6 +801,7 @@ export function buildCommentBody(args: {
     tokenLine: args.tokenLine,
     toolTrouble: args.toolTrouble,
     endedBecause: args.endedBecause,
+    target: args.target,
     spentOn: args.spentOn,
   }));
 
@@ -838,6 +839,8 @@ export function buildFooter(args: {
   toolTrouble?: string;
   /** How the run ended, for the cut-short notices. Empty in the appended footer. */
   endedBecause?: string;
+  /** What became of the node this run worked on, when the advice depends on it. */
+  target?: TargetState;
   /** What a run that hit a limit spent its budget on, from `tool-tally.ts`. */
   spentOn?: string;
 }): string {
@@ -863,10 +866,27 @@ export function buildFooter(args: {
     // Says the session survived, because that is the whole difference between this
     // and cancelling the job, and the person who stopped it cannot tell from here
     // which one they got.
-    lines.push(
-      `⏸️ _Stopped on request. **The session is saved.** Comment \`/resume\` to continue ` +
-        `from here, or \`/${args.agent}\` with an instruction on the following lines._`,
-    );
+    //
+    // The command it offers has to be one the thread can still take. On a merged pull
+    // request neither `/resume` nor `/<agent>` can run, so the footer says what is true
+    // and stops there; the mention above names where the follow-up belongs (#455).
+    const saved = "⏸️ _Stopped on request. **The session is saved.**";
+    if (args.target !== undefined && isMerged(args.target)) {
+      lines.push(
+        `${saved} The work this pull request carried is merged already, so there is ` +
+          `nothing here to resume._`,
+      );
+    } else if (args.target !== undefined && args.target.known && args.target.state !== "open") {
+      lines.push(
+        `${saved} That thread is closed, so there is nothing left to resume here — ` +
+          `reopen it to continue._`,
+      );
+    } else {
+      lines.push(
+        `${saved} Comment \`/resume\` to continue from here, or \`/${args.agent}\` ` +
+          `with an instruction on the following lines._`,
+      );
+    }
   } else if (reachedLimit(args.endedBecause)) {
     // The limits only. A failed run's footer would repeat what the failure notice above
     // it already says -- that it did not finish, and how to continue.
