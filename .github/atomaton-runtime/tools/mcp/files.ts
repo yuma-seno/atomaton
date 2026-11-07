@@ -17995,7 +17995,7 @@ function editFile(a) {
   if (count > 1 && !a.replace_all) {
     throw new Error(`That text appears ${count} times in '${a.path}'. Include enough surrounding lines to make it unique, or set replace_all.`);
   }
-  const after = a.replace_all ? before.split(a.old_string).join(a.new_string) : before.replace(a.old_string, a.new_string);
+  const after = a.replace_all ? before.split(a.old_string).join(a.new_string) : before.replace(a.old_string, () => a.new_string);
   writeFileSync(full, after);
   const changed = a.replace_all ? count : 1;
   log(`edit ${shown(full)} x${changed}`);
