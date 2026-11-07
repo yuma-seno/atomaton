@@ -527,3 +527,81 @@ console.log(outcome);
     15_000,
   );
 });
+
+/**
+ * The evidence a dispatch leaves behind, and why it is a condition rather than a hope.
+ *
+ * `postDispatchMarker` failing used to be harmless: the dispatch went out with the
+ * ordering check skipped. What that leaves is a run nobody can account for — no
+ * `atomaton:dispatch` on the node for `wasLaunchedOn`, `mostRecentAgentOn` or the
+ * guard to read, and no ask for the runner to claim, so `claim_turn.ts` writes nothing
+ * and the run watch cannot tell a run that took no turn from a run that died.
+ *
+ * A dispatch that names an ask of its OWN is not in that position: the caller's comment
+ * is the record, and the run's claim goes on it. It still goes out with the ordering
+ * check skipped, which is what the hand-off has always done.
+ */
+describe("the dispatch's own evidence", () => {
+  function runMarkerless(opts: {
+    target: number;
+    /** Post the dispatch's own marker rather than a caller supplying one. */
+    ask?: number;
+  }): { outcome: string; stderr: string; ghCalls: string[][] } {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-dispatch-no-marker-"));
+    const shim = join(dir, "shim.ts");
+    writeFileSync(
+      shim,
+      `import { dispatchRunner } from "${importable(join(LIB_DIR, "dispatch.ts"))}";
+const outcome = dispatchRunner({
+  context: "the aggregation re-invoked the parent",
+  agent: "atomaton",
+  type: "issue",
+  number: ${opts.target},
+  repo: "owner/repo",
+  ${opts.ask === undefined ? "" : `ask: ${opts.ask},`}
+});
+console.log(outcome);
+`,
+    );
+    const rules: FakeGhRule[] = [
+      // The marker POST fails: a rate limit, a 5xx, a missing scope — the cause does not
+      // matter, because what the dispatch has afterwards is the same nothing.
+      { match: ["api", `repos/owner/repo/issues/${opts.target}/comments`, "POST"], code: 1, stdout: "API rate limit exceeded" },
+      threadRule(opts.target, []),
+      { match: ["api", `repos/owner/repo/issues/${opts.target}`], stdout: JSON.stringify({ state: "open" }) },
+      { match: ["issue", "comment"], stdout: "" },
+      { match: ["workflow", "run", "atomaton-runner.yml"], stdout: "" },
+    ];
+    try {
+      const r = runWithFakeGh(shim, [], {
+        rules,
+        env: { TYPE: "issue", NUMBER: String(opts.target), ATOMATON_OPS_LOG: join(dir, "ops.log") },
+      });
+      return { outcome: r.stdout.trim(), stderr: r.stderr, ghCalls: r.ghCalls };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  test("a marker that could not be posted, and no ask of its own, dispatches nothing", () => {
+    const { outcome, stderr, ghCalls } = runMarkerless({ target: 500 });
+    expect(outcome).toBe("unconfirmed");
+    // The whole point: `workflow_dispatch` never went out.
+    expect(ghCalls.some((call) => call[0] === "workflow")).toBe(false);
+    // And a person is told, on the node, why nothing started.
+    const notice = ghCalls.find((call) => call[0] === "issue" && call[1] === "comment") ?? [];
+    expect(notice.join(" ")).toContain("was not started");
+    expect(notice.join(" ")).toContain("could not be confirmed");
+    expect(stderr).toContain("could not be posted");
+  });
+
+  test("a dispatch whose caller named the ask still goes out, with the check skipped", () => {
+    // The runner's hand-off: its own result comment is the record and the ask the
+    // successor claims, so a marker that failed to post costs the ordering check and
+    // nothing else. Refusing here would break every hand-off on a rate limit.
+    const { outcome, ghCalls } = runMarkerless({ target: 500, ask: 900 });
+    expect(outcome).toBe("dispatched");
+    const dispatch = ghCalls.find((call) => call[0] === "workflow") ?? [];
+    expect(dispatch.join(" ")).toContain("ask=900");
+  });
+});

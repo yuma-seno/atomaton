@@ -56,6 +56,7 @@ import {
   type TurnReaders,
 } from "../../domain/work/thread.ts";
 import type { DatedComment, EndingWalkReaders, WatchComment } from "../../domain/work/run-report.ts";
+import type { ClaimLock } from "../../domain/work/stale-lock.ts";
 
 /**
  * The readers, from the modules that own each format.
@@ -367,21 +368,118 @@ export interface WouldBeRemoved {
    * who wrote during a park needs the resume moment, not the run, named.
    */
   parked: boolean;
+  /**
+   * The lock this answer rests on: which run took the turn, and whether a park holds it.
+   *
+   * Carried rather than folded away (#462) because "the ball is with an agent" and "an
+   * agent is still there" are different facts, and this read has only ever answered the
+   * first. The claim names the run; whether that run has FINISHED is a second read, and
+   * the caller makes it — `stale-lock.ts` decides what the pair means. Handing the
+   * identity over here rather than re-reading the thread there keeps one listing per
+   * question.
+   */
+  lock: ThreadLock;
+}
+
+/**
+ * The lock a node's thread holds — the claim, and whether a park is holding it.
+ *
+ * `claim.at` is the claim COMMENT's `created_at`, which is the marker's creation time when
+ * the claim was appended to a dispatch marker (`claim_turn.ts`'s in-place path). That is
+ * earlier than the claim itself, so a claim like that reads older than it is: only the
+ * run-less fallback uses the time at all, and being early there means being conservative
+ * about calling a lock dead, which is the safe direction. The same holds for `park.at`,
+ * which is the `waiting` ending's own comment.
+ */
+export interface ThreadLock {
+  /** The claim the walk leaves open, with when its comment was written. */
+  claim?: ClaimLock;
+  /**
+   * The park holding the turn (#208), when the newest event is a `waiting` ending.
+   *
+   * Absent is the ordinary case: a live run's thread has an `asked` or nothing newest, and
+   * a returned ending hands the turn to a person. Present with `at` unreadable is the one
+   * shape a caller must not read as "parked a long time ago".
+   *
+   * `answers` is the ask the parked ending holds open: the claim can be gone (a person
+   * taking it away by hand was, before this, the only way out of a stuck one) and the park
+   * still names what an ending that finishes it has to answer.
+   */
+  park?: { readonly at: string; readonly answers: number };
+}
+
+/**
+ * The lock `shaped` leaves behind, read off the entries it was shaped from.
+ *
+ * The entries must be the ones handed to `shapedThread`, in order: the claim is matched
+ * back to the entry that carries it so the time comes from the same read, and the newest
+ * `waiting` ending is what says a park holds the turn. Walking backwards and skipping
+ * quotations, the rule every walk in this file applies — a quotation carries the removed
+ * author's tags verbatim.
+ *
+ * The claim is matched on ask AND run: a re-invoked parent claims the parked ask under its
+ * own run id, so two claims on one ask exist during a park's collection and only the later
+ * one is the lock.
+ */
+function lockOf<T extends DatedEntry>(entries: readonly T[], shaped: ShapedThread<T>): ThreadLock {
+  const park = shaped.events[shaped.events.length - 1] === "waiting" ? newestWaiting(entries) : undefined;
+  const open = shaped.openClaim;
+  const lock: ThreadLock = park === undefined ? {} : { park };
+  if (open === undefined) return lock;
+  const at = newestWith(entries, (body) => {
+    const claim = readers.claim(body);
+    return claim !== undefined && claim.ask === open.ask && claim.run === open.run;
+  });
+  // An empty time means the two folds disagreed, which they cannot: both read the same
+  // entries and skip the same quotations. Reported as an untimed claim rather than as no
+  // claim, so a future divergence lands on "cannot tell how old" instead of on "nothing
+  // holds this node".
+  return { ...lock, claim: { ...open, at } };
+}
+
+/** When the newest entry matching `which` was written, or "" when nothing matches. */
+function newestWith<T extends DatedEntry>(entries: readonly T[], which: (body: string) => boolean): string {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    if (entry.quoted) continue;
+    if (which(entry.body)) return entry.at ?? "";
+  }
+  return "";
+}
+
+/** The newest `waiting` ending's time and the ask it holds open — a park's own record. */
+function newestWaiting<T extends DatedEntry>(entries: readonly T[]): { at: string; answers: number } | undefined {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    if (entry.quoted) continue;
+    const ended = ENDED_TAG.readProse(entry.body);
+    if (ended?.verb === "waiting") return { at: entry.at ?? "", answers: ended.answers };
+  }
+  return undefined;
+}
+
+/**
+ * The lock a node's thread holds.
+ *
+ * Throws when the thread cannot be read, like every other reader here: a caller deciding
+ * whether to release a node or to keep a person's comment must not read a failed read as
+ * "nothing holds this".
+ */
+export function lockOn(repo: string, number: string | number): ThreadLock {
+  const entries = listComments(repo, number).map(entryOf);
+  return lockOf(entries, shapedThread(entries, readers));
 }
 
 export function commentWouldBeRemoved(repo: string, number: string | number, commentId: string | number): WouldBeRemoved {
-  const comments = listComments(repo, number);
-  const listed = comments.find((comment) => String(comment.id) === String(commentId));
-  const parkedOf = (events: readonly TurnEvent[]): boolean => events[events.length - 1] === "waiting";
-  if (listed === undefined) {
-    // Read-after-write lag: the comment being judged is newer than the listing. Judge
-    // it as the latest arrival, which is whose turn the whole listed thread leaves.
-    const entries = comments.map(entryOf);
-    const shaped = shapedThread(entries, readers);
-    return { removed: shaped.holder === "agent", parked: parkedOf(shaped.events) };
-  }
-  const shaped = shapedThread(comments.map(entryOf), readers);
-  return { removed: !keptCommentIds(comments).has(listed.id), parked: parkedOf(shaped.events) };
+  const entries = listComments(repo, number).map((comment) => ({ id: comment.id, ...entryOf(comment) }));
+  const shaped = shapedThread(entries, readers);
+  const lock = lockOf(entries, shaped);
+  const listed = entries.find((entry) => String(entry.id) === String(commentId));
+  // Read-after-write lag: the comment being judged is newer than the listing, so it has no
+  // position of its own. Judge it as the latest arrival — whose turn the whole listed
+  // thread leaves. The same rule as `keptCommentIds`, over the walk already made.
+  if (listed === undefined) return { removed: shaped.holder === "agent", parked: lock.park !== undefined, lock };
+  return { removed: !shaped.comments.includes(listed), parked: lock.park !== undefined, lock };
 }
 
 /**

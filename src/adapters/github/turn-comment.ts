@@ -42,9 +42,9 @@ import { AGENT_TAG, ENDED_TAG, LLM_CONTEXT_TAG } from "./tags.ts";
  * The endings a turn comment may carry, as `ENDED_TAG` spells them.
  *
  * The tag's own vocabulary rather than `domain/work/turn.ts`'s `Ending`, deliberately:
- * several of the domain's endings are not turn comments in this sense (`failed` is
- * written by `report_run_failure`, `finished` and `no-report` by `post_result_comment`),
- * and a reader of a call here should see the small set the tag accepts. The projection
+ * several of the domain's endings are not turn comments in this sense (`failed`,
+ * `finished` and `no-report` are all `post_result_comment`'s), and a reader of a call
+ * here should see the small set the tag accepts. The projection
  * from `Ending` is `post_result_comment`'s `endedTag`, and it stays there — one
  * exhaustive switch, where a new ending is a type error rather than a silent landing on
  * `done`.

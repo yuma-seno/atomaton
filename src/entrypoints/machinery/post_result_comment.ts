@@ -11,8 +11,45 @@
  *   post_result_comment.ts --number N --agent NAME [--notify LOGIN]
  *     [--directive NAME] [--chain-continues true|false]
  *     [--ended-because completed|runtime|iterations|stopped|loop|failed]
+ *     [--outcome success|failure] [--atoma-failed true]
  *     --run-url URL [--ending-comment PATH]
  * Writes `comment_id=<id>` to $GITHUB_OUTPUT when a comment is posted.
+ *
+ * ## This is the only writer of a run's ending
+ *
+ * It used to speak only for a run whose "Run agent" step SUCCEEDED. The step can also
+ * die — atoma exits non-zero, or the machinery inside the step does — and nothing
+ * later in the run posted in that shape, so a second script (`report_run_failure.ts`)
+ * posted the same notice from a step of its own. Two writers for one event, with the
+ * second reachable only through a step outcome the first could not see, and the cost
+ * is the bug that ordering invites: a run the core filed `failed` whose step succeeded
+ * reached neither writer, and the thread got nothing at all.
+ *
+ * So the step now runs for both outcomes — `--outcome` carries GitHub's own word — and
+ * `ended_because` is read through it: a step that failed with no ending recorded IS
+ * `failed`, the word every decision below already keys off. One writer, one set of
+ * sentences, one place where the run's colour is decided.
+ *
+ * ## The exit code is that colour
+ *
+ * A comment that landed heals the thread, and the run's colour then has to say what
+ * the comment cannot. Three cases:
+ *
+ *   - **the agent's own failure, notice posted — 0.** The notice IS the run's report;
+ *     a red run beside it would repeat that news in Notifications, where it drowns the
+ *     runs whose red is their only signal.
+ *   - **the machinery's failure, notice posted — non-zero.** A machinery failure inside
+ *     the step (the tools file it could not write, a `sudo` it was refused, an ending it
+ *     could not read) still says everything the thread needs, and the run goes red
+ *     anyway: red is the machinery's signal, and the thread is healed beside it, not
+ *     instead of it.
+ *   - **a notice that could not be written — non-zero, raised.** Red is then the only
+ *     signal left.
+ *
+ * Whose the failure was arrives as `--atoma-failed`, the output "Run agent" writes when
+ * atoma's own exit is a failure and nothing else writes. Absent reads as NOT atoma's —
+ * the machinery's, wherever it struck — so a future rename that loses the output turns
+ * every failure red again, which is the conservative direction.
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -122,6 +159,23 @@ export interface PostResultCommentArgs {
    */
   ask?: string | number;
   "run-id"?: string | number;
+  /**
+   * `steps.atoma.outcome` — whether the step the agent ran in came back at all.
+   *
+   * This is the one thing `ended_because` cannot carry on a hard crash: the reads that
+   * turn atoma's own exit into an ending run only for the two statuses atoma handles
+   * itself, so a step that failed leaves no ending behind, and the absence is the
+   * answer. Absent, or anything but `"failure"`, reads as a step that came back — the
+   * shape this script had before it was the only writer.
+   */
+  outcome?: string;
+  /**
+   * Whether atoma itself failed — the output "Run agent" writes when its exit is
+   * neither success nor the soft stop. Absent, or anything but `"true"`, reads as the
+   * machinery's, wherever it struck, which is the conservative direction: the notice
+   * still posts, and the run stays red. See "The exit code is that colour".
+   */
+  "atoma-failed"?: string;
 }
 
 export const ref = defineScript<PostResultCommentArgs>(import.meta.url);
@@ -956,6 +1010,23 @@ function appendFooter(args: {
   console.error(`footer appended to the ending comment ${args.commentId}`);
 }
 
+/**
+ * The colour a run keeps once its ending reached the thread.
+ *
+ * The comment heals the thread, and the run's colour then has to carry what the comment
+ * cannot. Two shapes are green: a step that came back — every ordinary run and every
+ * soft stop — and an agent failure whose notice landed, which has said everything there
+ * is to say and whose red run would only repeat that news in Notifications. Every other
+ * shape is red: the machinery failed inside the step (a tools file it could not write,
+ * a `sudo` it was refused, an ending it could not read), or atoma's own exit was a
+ * failure and the flag was never written, which is the conservative direction.
+ */
+function colourForStepFailure(stepFailed: boolean, atomaFailed: boolean): void {
+  if (!stepFailed || atomaFailed) return;
+  console.error("The machinery failed, not the agent; the notice healed the thread, but the run stays red.");
+  process.exitCode = 1;
+}
+
 function main(): void {
   const { values } = parseArgs({
     args: Bun.argv.slice(2),
@@ -979,6 +1050,8 @@ function main(): void {
       "people-file": { type: "string" },
       ask: { type: "string" },
       "run-id": { type: "string" },
+      outcome: { type: "string" },
+      "atoma-failed": { type: "string" },
     },
   });
 
@@ -1041,7 +1114,12 @@ function main(): void {
   let output = redacted;
   let salvaged = false;
   let wroteNothing = false;
-  const endedBecause = values["ended-because"];
+  // A step that failed left no ending behind: the reads that turn atoma's own exit into
+  // one run only for the two statuses atoma handles itself, and a crash writes the
+  // boundary flag instead. So the step's outcome IS the ending in that shape, and the
+  // word it becomes is the one every decision below already keys off.
+  const stepFailed = values.outcome === "failure";
+  const endedBecause = values["ended-because"] || (stepFailed ? "failed" : "");
   const endedEarly = cutShort(endedBecause);
   const failed = endedBecause === "failed";
 
@@ -1055,7 +1133,12 @@ function main(): void {
   }
 
   if (!output.trim()) {
-    const ending = readEndingComment(values["ending-comment"]);
+    // Not asked of a failed step: what a session-ending tool recorded is the comment
+    // THAT tool posted, and the old arrangement posted the failure notice beside it
+    // anyway — the tool says what the run did, the notice says that it then died, and
+    // only the second is an ending. Reading the record here would turn a crash into a
+    // footer on a comment that reads as a hand-off.
+    const ending = stepFailed ? undefined : readEndingComment(values["ending-comment"]);
     if (ending) {
       console.error(`appending the result footer onto the tool's ending comment ${ending.commentId} (on ${ending.node})`);
       appendFooter({
@@ -1071,9 +1154,8 @@ function main(): void {
     if (failed) {
       // Nothing to show, and nothing to invent: the failure notice itself is the body
       // (#441), so `output` stays empty rather than gaining a placeholder under it.
-      // Until this existed the run owed the thread what `report_run_failure.ts` says
-      // and delivered it silently -- this step succeeded, so that step never ran and
-      // the thread kept the `asked` that started the run.
+      // The same arm answers a hard crash now — the step failed, no ending was recorded,
+      // and this is the only writer left to say so.
       console.error("the run failed with nothing to report -- posting the failure notice rather than nothing.");
     } else if (endedEarly) {
       // It is wrong for a run that was cut short, and this is the common shape
@@ -1129,7 +1211,7 @@ function main(): void {
   // which of the three it was, and the machinery's own mention is what reaches
   // somebody.
   const endingInvalid = isTrue(values["ending-invalid"]);
-  const notACall = endingInvalid || salvaged || cutShort(values["ended-because"]);
+  const notACall = endingInvalid || salvaged || endedEarly;
   // The two lists the run was given, from the same file the notice and the ending
   // check read: one read of the thread at the start of the run, not three that have
   // to agree. `known` may notify; `callable` may be handed the turn.
@@ -1162,7 +1244,10 @@ function main(): void {
     notify: values.notify,
     directive: values.directive,
     chainContinues: values["chain-continues"],
-    endedBecause: values["ended-because"],
+    // The ending this script resolved, not the flag it was handed: a crash carries no
+    // `--ended-because` at all, and a mention decision that read the absent flag would
+    // file the failure with the runs that finished.
+    endedBecause,
     reported: isTrue(values.reported),
     agentCalledHuman: called.length === 1,
     isSubIssue: facts.isSubIssue,
@@ -1198,7 +1283,7 @@ function main(): void {
     // The tally a person needs to decide between retrying and re-scoping. The
     // separate limit notice used to be the only place it appeared; it belongs on
     // the comment that already tells them the run stopped, and this is that comment.
-    spentOn: reachedLimit(values["ended-because"]) ? toolCallTally(readSession(values.session)) : undefined,
+    spentOn: reachedLimit(endedBecause) ? toolCallTally(readSession(values.session)) : undefined,
     // Only a failed run reads these, and only to say why it stopped — so the log is
     // opened only then. Read here rather than inside `buildCommentBody` because the
     // log is this file's input, not the body's: the same separation as the output,
@@ -1217,6 +1302,9 @@ function main(): void {
     ".id",
   );
   if (code !== 0) {
+    // Not converted into a comment, because there is nowhere left to put one: red is
+    // then the only signal the run leaves, and the workflow log is where the reason
+    // reaches somebody. See "The exit code is that colour".
     throw new Error(`Failed to post result comment: ${stderr || stdout}`);
   }
 
@@ -1230,6 +1318,10 @@ function main(): void {
     appendFileSync(githubOutput, `notified=${makesCompletionMention(mentionSignals) ? "true" : "false"}\n`);
   }
   console.error(`Posted comment ID: ${commentId}`);
+
+  // The comment landed, so the thread is healed. What is left is the run's colour —
+  // the one thing the thread cannot carry. See "The exit code is that colour".
+  colourForStepFailure(stepFailed, isTrue(values["atoma-failed"]));
 }
 
 if (import.meta.main) main();

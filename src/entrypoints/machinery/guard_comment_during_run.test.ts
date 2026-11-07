@@ -621,6 +621,145 @@ describe("guard_comment_during_run.ts", () => {
     }
   });
 
+  /**
+   * #462: the claim outlives its run, and this guard used to delete on that alone.
+   *
+   * A run that dies without reporting leaves `atomaton:took` standing with no ending after
+   * it, and every reader here read that as "an agent is working". The guard then removed
+   * every comment a person wrote, on a node where nothing was running and nothing was
+   * coming — a lock nobody could open, from the outside or from within. The run the claim
+   * names is now asked about directly, and a finished one keeps the comment and lets the
+   * dispatch go.
+   *
+   * The fixture's claim carries no timestamps, so the run is the ONLY thing that can
+   * answer: `actions/runs/7` reporting `completed` is the whole case.
+   */
+  test("keeps the comment when the run that claimed the turn has finished", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer", OPEN_CLAIM]),
+            readBack(123, "my careful note"),
+            // The claim is `run=7`, and that run is over.
+            { match: ["actions/runs/7"], stdout: "completed" },
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      // Neither deleted nor answered with a notice: the comment is an ordinary turn starter
+      // on a node nothing holds, and the dispatch that follows takes it up.
+      expect(r.ghCalls.some((c) => c.includes("DELETE"))).toBe(false);
+      expect(noticeOf(r.ghCalls)).toBe("");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The same fixture with the run still going, so the difference between the two tests is
+   * the one read and nothing else. Without this, the test above would pass on a guard that
+   * had simply stopped deleting.
+   */
+  test("still deletes while the run that claimed the turn is going", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer", OPEN_CLAIM]),
+            readBack(123, "my careful note"),
+            { match: ["actions/runs/7"], stdout: "in_progress" },
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/123"))).toBe(true);
+      expect(noticeOf(r.ghCalls)).toContain("@octocat");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A run status nobody could read is not a finished run. Removing a LIVE run's comments is
+   * the harm this guard exists to prevent, so an unreadable answer keeps the old behaviour
+   * — matching the thread it cannot read, which already has its own test.
+   */
+  test("keeps deleting when the run's status cannot be read", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "123", "--commenter", "octocat"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...thread("", ["/engineer", OPEN_CLAIM]),
+            readBack(123, "my careful note"),
+            { match: ["actions/runs/7"], code: 1 },
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/123"))).toBe(true);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A park is never abandoned by this guard, however old, because the aggregation resumes
+   * it and reads what was written during the wait (#208). A missed park is the sweep's to
+   * release, on the park's own clock — the guard taking that decision would delete the
+   * comment the resumed run needed. The `completed` status is supplied deliberately: a rule
+   * that did not exclude parks would read it and keep the comment.
+   */
+  test("a parked node keeps deleting, even when its run has finished", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "102", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([
+              [OPEN_CLAIM, false],
+              ["<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=waiting answers=55 run=7 -->", false],
+              ["a remark", true],
+            ]),
+            readBack(102, "a remark"),
+            { match: ["actions/runs/7"], stdout: "completed" },
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/102"))).toBe(true);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
   // The ceiling keeps the notice under GitHub's 65,536-character limit on a comment
   // body, so a very long comment cannot turn the notice itself into the thing that
   // fails. The cut is said.

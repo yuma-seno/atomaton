@@ -206,8 +206,8 @@ function main(): void {
   }
   if (outcome === "unconfirmed") {
     console.error(
-      `::error::Could not confirm the dispatch marker on ${type} #${number}, so ${agent} was not started; ` +
-        "the thread may not have caught up with the marker. Retry shortly.",
+      `::error::Could not confirm the dispatch of ${agent} on ${type} #${number}, so it was not started: ` +
+        "the comment that records a dispatch could not be posted or was not visible in the thread. Retry shortly.",
     );
     process.exit(1);
   }

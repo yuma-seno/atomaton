@@ -4,9 +4,9 @@
  * ## Why outside
  *
  * Everything that reports a run's ending reports from a step INSIDE the run
- * (`post_result_comment.ts`, `report_run_failure.ts`). A run that was killed — its
- * runner lost, a timeout, a cancel, or the machinery's `new_event_count == 0` path
- * that skips every agent step and ends green — reaches no step that could write one,
+ * (`post_result_comment.ts`). A run that was killed — its runner lost, a timeout, a
+ * cancel, or the machinery's `new_event_count == 0` path that skips every agent step
+ * and ends green — reaches no step that could write one,
  * and the thread's last turn event stays the `asked` that started the run. That is
  * not a cosmetic state: the guard reads the thread, keeps deleting what a person
  * writes next, and no run arrives to heal it, because the run that would have is

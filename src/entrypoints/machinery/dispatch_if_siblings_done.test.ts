@@ -47,20 +47,29 @@ describe("dispatch_if_siblings_done.ts", () => {
           cwd: configDir,
           rules: [
             ...subIssues(),
-            // The dispatch marker and the aggregation marker, then the thread read that
-            // follows. Every write goes through `gh api --method POST .../comments`, so
-            // each POST rule is keyed on the BODY it carries -- `atomaton:dispatch` here,
-            // `atomaton:aggregated` below. A rule matching only the path and method
-            // answers whichever write runs first, and did.
+            // One comment per completion: the aggregation marker IS the dispatch's
+            // marker and ask now, so there is one POST and it carries both tags. Its id
+            // 555 is what the freshness probe looks for, and the thread read below shows
+            // it — a marker the listing does not yet show is retried with backoff and
+            // then stood down from, which is the dispatch's own behaviour rather than a
+            // fixture property.
             //
             // The three readers of the parent's thread — the dispatch freshness probe,
-            // the aggregation marker check and `mostRecentAgentOn` — are ONE call now,
-            // the shared `listComments`: `--paginate`, whole comment objects. So there
-            // is one read rule, and its bodies serve all three: the dispatch marker
-            // names the agent, and its id 555 is the comment the probe looks for.
-            { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:dispatch"], stdout: "555" },
+            // the aggregation marker check and `mostRecentAgentOn` — are ONE call, the
+            // shared `listComments`: `--paginate`, whole comment objects. So there is one
+            // read rule, and its bodies serve all three.
             { match: ["api", "issues/5/comments", "--method", "POST", "atomaton:aggregated"], stdout: "556" },
-            { match: ["api", "issues/5/comments", "--paginate"], stdout: JSON.stringify([{ id: 555, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
+            {
+              match: ["api", "issues/5/comments", "--paginate"],
+              stdout: JSON.stringify([
+                { id: 1, body: "<!-- atomaton:dispatch=atomaton -->" },
+                { id: 2, body: "<!-- atomaton:ended=waiting answers=0 run=0 -->" },
+                // The marker this gate is about to write, id 556, as the freshness
+                // probe must find it. Neutral: a body claiming `atomaton:aggregated`
+                // would be the idempotency read answering `already-aggregated` first.
+                { id: 556, body: "a comment with no tag on it" },
+              ]),
+            },
             { match: ["workflow", "run"] },
             // The parent's state. `dispatchRunner` refuses to start an agent on
             // anything it cannot confirm is open, so the happy path has to say so.
@@ -72,10 +81,13 @@ describe("dispatch_if_siblings_done.ts", () => {
       // The aggregation marker, written as a body on the parent. Asserted on the body
       // rather than on a `comment` argv element: the write is `api .../comments
       // -f body=...` now, which is the only form that returns the new comment's id.
-      expect(
-        r.ghCalls.some((c) => c.some((a) => a.includes("atomaton:aggregated"))),
-        "the completion must be claimed by writing the aggregation marker",
-      ).toBe(true);
+      const writes = r.ghCalls.filter(
+        (c) => c.includes("api") && c.some((a) => a.includes("issues/5/comments")) && c.includes("--method"),
+      );
+      expect(writes, "one comment per completion: the marker is also the dispatch's ask").toHaveLength(1);
+      const body = writes[0]?.find((a) => a.startsWith("body=")) ?? "";
+      expect(body, "the completion must be claimed by writing the aggregation marker").toContain("atomaton:aggregated=9");
+      expect(body, "and the tag that keeps it one comment").toContain("atomaton:dispatch=atomaton");
       expect(r.ghCalls.some((c) => c[0] === "workflow" && c[1] === "run")).toBe(true);
     } finally {
       rmSync(configDir, { recursive: true, force: true });

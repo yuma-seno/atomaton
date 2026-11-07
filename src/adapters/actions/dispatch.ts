@@ -165,10 +165,21 @@ export interface RunnerDispatch {
    * and uses it as the freshness probe exactly as it used the marker, and the run
    * claims that comment at start.
    *
+   * The aggregation gate is the third caller, and the reason this parameter's comment
+   * matters beyond tidiness: it already writes an `atomaton:aggregated` marker, and
+   * passing the id is what stops a second marker being written beside it. That comment
+   * has to carry `atomaton:dispatch` too, or `claim_turn.ts` cannot append the run's
+   * claim to it in place and posts one of its own — two new comments again.
+   *
    * A refusal removes it, as it removes a marker posted here: the directive would
    * otherwise stay on the thread as an ask nobody took up, and no run will read it
    * because none was started. A marker that never became visible is not re-posted —
    * the caller's comment already IS the post, so there is nothing to retry here.
+   *
+   * For the aggregation that removal is load-bearing rather than tidy: the marker is
+   * also the idempotency claim (“this completion has been aggregated”), so a refusal
+   * that left it in place would make every later caller answer `already-aggregated`
+   * about an aggregation that never happened.
    */
   markerCommentId?: number | string;
   /**
@@ -287,12 +298,16 @@ export type DispatchOutcome =
   /** A request for an agent was already outstanding on the target. Nobody was dispatched, and the marker is removed. */
   | "refused-outstanding"
   /**
-   * The dispatch marker could not be confirmed in the thread, so the ordering check
-   * could not be trusted. Nobody was dispatched, and a notice is posted.
+   * The dispatch has no marker in the thread — the post failed, or it was posted and
+   * never became visible — so the ordering check could not be trusted and could not
+   * be replaced. Nobody was dispatched, and a notice is posted.
    *
-   * Separate from `failed`, which is GitHub rejecting the dispatch itself. This is the
-   * read side: the marker was posted but never became visible, so a second dispatch
-   * could not be ruled out and starting one would risk two runs on one node.
+   * Separate from `failed`, which is GitHub rejecting the dispatch itself. Both halves
+   * here are about the evidence: without a marker the read that rules out a second run
+   * cannot be taken, and a run whose start left nothing in the thread is one no later
+   * reader can account for. A dispatch that names an ask of its own is the exception —
+   * that comment is the record the run will claim, so it goes out (see
+   * `refuseOutstandingRequest`).
    */
   | "unconfirmed"
   /**
@@ -361,9 +376,10 @@ function refuseClosedTarget(d: RunnerDispatch, state: TargetState): "refused-clo
  * pull request, now posted for every node and every path, because the check needs it
  * everywhere.
  *
- * Returns `undefined` when it could not be posted. That is not fatal on its own — the
- * dispatch can still go out — but the ordering check cannot run without it, so the
- * caller decides.
+ * Returns `undefined` when it could not be posted. The ordering check cannot run
+ * without it, and what `refuseOutstandingRequest` does next depends on whether the
+ * dispatch has an ask of its own: one that does may still go out, and one that does
+ * not is refused rather than started without a record.
  */
 function postDispatchMarker(d: RunnerDispatch): string | undefined {
   const log = d.log ?? ((message: string) => console.error(message));
@@ -416,12 +432,24 @@ function postDispatchMarker(d: RunnerDispatch): string | undefined {
  *
  * ## When the marker never appears
  *
- * The post itself may have failed, so it is retried a few times. If it still never
- * appears, the ordering check cannot be trusted and nobody is dispatched: a notice is
- * posted and the outcome is `unconfirmed`. Starting a run on an unverified thread is the
- * failure this whole function exists to prevent, so the cautious answer is to stand down.
+ * The thread can lag behind the write, so the listing is polled a few times, and a
+ * marker this module posted is re-posted once before giving up — a second post is safe
+ * precisely because the first is not in the listing. If it still is not there, the
+ * ordering check cannot be trusted and nobody is dispatched: a notice is posted and the
+ * outcome is `unconfirmed`. Starting a run on an unverified thread is the failure this
+ * whole function exists to prevent, so the cautious answer is to stand down.
  *
  * A read that fails refuses too, for the same reason.
+ *
+ * ## When the marker could not be posted at all
+ *
+ * The same answer, because it is the same absence: no marker means no ordering check,
+ * and the marker is also the one thing on the thread that says a run is coming. A
+ * dispatch that names an ask of its own still has that record — the hand-off's result
+ * comment, which its run will claim — so it goes out with the check skipped rather
+ * than guessed at. Every other caller would start a run the thread cannot account
+ * for, and the next reader would see a node with an agent working on it and nothing
+ * that asked for one. So it stands down, `unconfirmed`, and the target is told.
  *
  * Returns the refusal, or `undefined` when the dispatch may proceed.
  */
@@ -442,9 +470,20 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
   };
 
   // No marker means the ordering check has nothing to be ordered against, so it cannot
-  // run. The dispatch still goes out -- the marker failing to post is not fatal on its
-  // own -- but the check is skipped rather than guessed at.
-  if (markerId === undefined) return undefined;
+  // run — and nothing on the thread records that this dispatch is coming. The ask a
+  // caller named is that record, so a dispatch with one goes out and the check is
+  // skipped rather than guessed at. Without one there is nothing to skip to: see this
+  // function's doc.
+  if (markerId === undefined) {
+    const ownAsk = d.ask === undefined ? "" : String(d.ask).trim();
+    if (ownAsk === "") {
+      return refuseUnconfirmed(
+        d,
+        `the dispatch marker on #${d.number} could not be posted, so nothing on the thread would record this dispatch`,
+      );
+    }
+    return undefined;
+  }
 
   // Widening, like `ghRead`: the point is to outlast a lag, not to sit out an outage.
   // A run holds a runner while this sleeps, so the total is bounded.
@@ -487,31 +526,15 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
         gh("api", "--method", "DELETE", `repos/${repoPath}/issues/comments/${reposted}`);
       }
     }
-    log(
-      `${d.context}: the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted ` +
-        `and ${d.agent} was not started`,
-    );
     // The marker this dispatch posted is taken back even though it never showed: a
     // comment that appears after the refusal would sit in the thread as a request
     // nobody claimed -- the exact residue this module's refusals exist not to leave
     // (#194). The repost was already deleted above.
     removeMarker();
-    const body = [
-      ...refusalEndingLines(d),
-      dispatchUnconfirmedNotice({
-        agent: d.agent,
-        number: Number(d.number),
-        context: d.context,
-        notify: d.notify ?? "",
-      }),
-    ].join("\n");
-    const { code, stdout, stderr } = gh(
-      "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
+    return refuseUnconfirmed(
+      d,
+      `the dispatch marker on #${d.number} never became visible, so the ordering check could not be trusted`,
     );
-    if (code !== 0) {
-      log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
-    }
-    return "unconfirmed";
   }
 
   if (!check.outstanding) return undefined;
@@ -522,6 +545,38 @@ function refuseOutstandingRequest(d: RunnerDispatch, markerId: string | undefine
       "the dispatch marker was removed",
   );
   return "refused-outstanding";
+}
+
+/**
+ * Stand down with `unconfirmed`, and tell the target why.
+ *
+ * Shared by the two ways a dispatch ends up with no marker to order against — the one
+ * it posted never appeared, and the one it tried to post never existed — so the notice
+ * a person reads is the same sentence for the same absence. `why` is the log line's
+ * half; the notice says what a person can act on.
+ *
+ * The marker, where there is one, is taken back by the caller before this: a comment
+ * that appears after the refusal would sit in the thread as a request nobody claimed.
+ */
+function refuseUnconfirmed(d: RunnerDispatch, why: string): "unconfirmed" {
+  const log = d.log ?? ((message: string) => console.error(message));
+  log(`${d.context}: ${why}; ${d.agent} was not started`);
+  const body = [
+    ...refusalEndingLines(d),
+    dispatchUnconfirmedNotice({
+      agent: d.agent,
+      number: Number(d.number),
+      context: d.context,
+      notify: d.notify ?? "",
+    }),
+  ].join("\n");
+  const { code, stdout, stderr } = gh(
+    "issue", "comment", String(d.number), ...(d.repo ? ["--repo", d.repo] : []), "--body", body,
+  );
+  if (code !== 0) {
+    log(`${d.context}: could not post the unconfirmed notice on #${d.number}: ${stderr || stdout}`);
+  }
+  return "unconfirmed";
 }
 
 /**

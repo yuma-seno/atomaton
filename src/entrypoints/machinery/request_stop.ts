@@ -128,6 +128,26 @@ export function commandsAfterStop(original: string): string[] {
  *
  * The ending's `run` is 0: no run wrote it, the person did. Everything else about
  * the shape is an ordinary ending, because the readers are the same readers.
+ *
+ * ## Why `/stop` is not the only way out any more, and why this shape stays (#462)
+ *
+ * This was the ONLY escape from a lock whose run had died: a claim with no ending after
+ * it holds the turn forever, and before #462 nothing could take it away but a person
+ * running `/stop` — or, worse, a hand-edited tag. The shape is unchanged on purpose, and
+ * not because it went unnoticed: the escape route is now TWO others, and both are the
+ * reason this one can stay as narrow as it is.
+ *
+ *   - the scheduled sweep (`entrypoints/machinery/lib/stale-sweep.ts`) releases a claim
+ *     whose run has finished, and a park whose collection never came, from outside any
+ *     run — so the node comes back without a person having to know `/stop` exists;
+ *   - the guard no longer deletes a comment made under a stale lock
+ *     (`domain/work/stale-lock.ts`), so the way in is open even before the sweep runs.
+ *
+ * Widening this would be a second spelling of the same judgement, made from inside a run
+ * with less information than either of those has: `/stop` sees one node's thread and
+ * nothing about whether the run it names is still going. So it keeps its two gates and
+ * answers the park a person is explicitly abandoning, which is a different act from the
+ * sweep handing back a lock nobody is coming for.
  */
 export function parkExit(
   openClaim: { ask: number; run: number; parked: boolean; claimed: boolean } | undefined,

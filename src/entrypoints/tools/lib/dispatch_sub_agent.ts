@@ -66,6 +66,16 @@ export function dispatchSubAgent(issue: number, agent: string, notify = "", disp
         "Wait for that run, or comment on the issue yourself.",
     );
   }
+  if (outcome === "unconfirmed") {
+    // Nothing was rejected by GitHub and nothing is running: the comment that records
+    // a dispatch could not be posted or was not visible, so the run would have been one
+    // the thread cannot account for. Retrying is the fix, so it is said rather than
+    // pointing at the log for an error that is not there.
+    throw new Error(
+      `nothing on #${issue} records a dispatch to ${agent}, so ${agent} was not started. ` +
+        "This is usually transient — try the launch again.",
+    );
+  }
   if (outcome !== "dispatched") {
     throw new Error(`could not dispatch ${agent} on sub-issue #${issue}; see the workflow log for the gh error`);
   }
