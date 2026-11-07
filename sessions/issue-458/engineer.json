@@ -4721,9 +4721,214 @@
     {
       "role": "assistant",
       "content": "All 78 pass. Let me add a test that the footer's `/resume` is suppressed, then commit:",
+      "atoma_metadata": {
+        "agent": "engineer",
+        "github_comment_id": 6702100309
+      },
+      "finish_reason": "stop"
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n続けて。終わったらクローズして。\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-07T04:13:47Z",
+        "event_type": "issue_comment",
+        "id": 6702108497,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ks6n4ta6ohnrod0rp08hsiux",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && git log --oneline -2\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"2f4d3a8 Hold the stop job's two absent gates in the generated workflow\\na3e0607 Test the pull request close-stop poster\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":280}",
+      "tool_call_id": "call_00_ks6n4ta6ohnrod0rp08hsiux"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_ijsl3y1cv19hw0qpx1z1clrl",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -c \\\"canResume\\\" src/entrypoints/machinery/post_result_comment.ts; grep -c \\\"on an interrupted run\\\" src/entrypoints/machinery/post_result_comment.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The worktree is clean at 2f4d3a8 — the post_result_comment test additions and the footer canResume change from the last run were lost? Let me check.\n\nWait, `git status --short` shows nothing and log is at 2f4d3a8. So the edits I made in the previous turn (post_result_comment.test.ts additions, canResume footer) are gone — they were not committed. Hmm, but the previous turn's edits were made... and then this new run started with a reset worktree.\n\nWait — but the last turn ended with a tool result showing the tests pass. Then the user message arrived. So the worktree was reset. Let me check if my edits exist.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_addf333a5d2947feadaa413cfbe0e498",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"failed\",\"exit_code\":1,\"stdout\":\"0\\n0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":113}",
+      "tool_call_id": "call_00_ijsl3y1cv19hw0qpx1z1clrl"
+    },
+    {
+      "role": "assistant",
+      "content": "The reset lost the last increment again. Re-applying it:",
+      "tool_calls": [
+        {
+          "id": "call_00_kh6a55wsbz7adorge6azzwve",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"Stopped on request\\\" -A 6 src/entrypoints/machinery/post_result_comment.ts; echo \\\"=== continuation\\\"; grep -n \\\"function continuation\\\" -A 22 src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The worktree was reset again, and the previous edits were lost. I need to re-apply the canResume work and the tests. Let me re-apply efficiently — I have the exact text.\n\nLet me check the current state of post_result_comment.ts around the footer and mentionLine to reapply.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_1f21c6c0aaac410482ddefaccb0ff806",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"867:      `⏸️ _Stopped on request. **The session is saved.** Comment \\\\`/resume\\\\` to continue ` +\\n868-        `from here, or \\\\`/${args.agent}\\\\` with an instruction on the following lines._`,\\n869-    );\\n870-  } else if (reachedLimit(args.endedBecause)) {\\n871-    // The limits only. A failed run's footer would repeat what the failure notice above\\n872-    // it already says -- that it did not finish, and how to continue.\\n873-    lines.push(`⚠️ _The run ${howItWasCutShort(args.endedBecause)}. Comment \\\\`/${args.agent}\\\\` to continue._`);\\n=== continuation\\n513:function continuation(\\n514-  args: { target?: TargetState; parentIssue?: number },\\n515-  resume: string,\\n516-): string {\\n517-  if (args.target === undefined) return resume;\\n518-  if (isMerged(args.target)) {\\n519-    const elsewhere =\\n520-      args.parentIssue !== undefined && args.parentIssue > 0\\n521-        ? `Continue on #${args.parentIssue}, the issue this pull request delivered.`\\n522-        : \\\"Continue on the issue this pull request delivered.\\\";\\n523-    return `The work this pull request carried is merged already, so there is nothing here to resume. ${elsewhere}`;\\n524-  }\\n525-  if (args.target.known && args.target.state !== \\\"open\\\") {\\n526-    return \\\"That thread is closed, so there is nothing left to resume here — reopen it to continue, or say what to do instead.\\\";\\n527-  }\\n528-  return resume;\\n529-}\\n530-\\n531-/**\\n532- * How this turn ended, as far as this comment can know.\\n533- *\\n534- * `succeeded` is true by construction: the workflow only runs this step when the\\n535- * agent step succeeded. That is not the same as the run succeeding — a run the core\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":113}",
+      "tool_call_id": "call_00_kh6a55wsbz7adorge6azzwve"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_lx69dlp6bdcmvw45qct9fkgn",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  if (args.target.known && args.target.state !== \\\"open\\\") {\\n    return \\\"That thread is closed, so there is nothing left to resume here — reopen it to continue, or say what to do instead.\\\";\\n  }\\n  return resume;\\n}\\n\\n/**\\n * Whether `/resume` is advice somebody can act on, given what became of the node.\\n *\\n * One answer, because two places offer it and a comment offering it in one place while\\n * saying the work had already landed in the other is worse than either: the mention's\\n * continuation sentence, and the footer's \\\"to continue from here\\\".\\n *\\n * A merged pull request cannot take one — it cannot be reopened and nothing can be started\\n * on it. Neither can any other closed thread, though there a person can undo the close and\\n * then resume, which is what the continuation sentence says.\\n *\\n * `undefined` means nobody read the thread, and offering it is what this comment has always\\n * done; a state nobody could read is not evidence that the thread is closed.\\n */\\nfunction resumeOffered(target?: TargetState): boolean {\\n  return target === undefined || !target.known || target.state === \\\"open\\\";\\n}\", \"old_string\": \"  if (args.target.known && args.target.state !== \\\"open\\\") {\\n    return \\\"That thread is closed, so there is nothing left to resume here — reopen it to continue, or say what to do instead.\\\";\\n  }\\n  return resume;\\n}\", \"path\": \"src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/post_result_comment.ts.",
+      "tool_call_id": "call_00_lx69dlp6bdcmvw45qct9fkgn"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_pjiq3ooxnhdfu9gejay98b53",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n 860,880p src/entrypoints/machinery/post_result_comment.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"  spentOn?: string;\\n}): string {\\n  const lines: string[] = [\\\"---\\\"];\\n  if (args.tokenLine !== undefined) lines.push(args.tokenLine);\\n  const metrics = args.repo\\n    ? ` · [metrics](https://github.com/${args.repo}/blob/atomaton-data/metrics/report.md)`\\n    : \\\"\\\";\\n  lines.push(`_run by [${args.agent}](${args.runUrl})${metrics}_`);\\n  // Under the run link and above the notice saying how to continue: this is a fact\\n  // about the run, the notice is the action, and the action reads last.\\n  //\\n  // No `⚠️`, in the same voice as the token line and the run link above it. The\\n  // marker means one thing in this footer -- the run was cut off and a person has to\\n  // continue it -- and this line is not that. Most of what it counts is a guard doing\\n  // its job, which `looksRefused` exists to distinguish from a tool breaking;\\n  // measured, 107 of 396 runs carried a refused or errored call, so a warning sign\\n  // here would appear on a quarter of all comments and the one below it would stop\\n  // being read. The line's job is to make the count impossible to lose, not to claim\\n  // a fault.\\n  if (args.toolTrouble !== undefined) lines.push(`_${args.toolTrouble}_`);\\n  if (args.endedBecause === \\\"stopped\\\") {\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":112}",
+      "tool_call_id": "call_00_pjiq3ooxnhdfu9gejay98b53"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_mcmagge9cket0dpetgo91mul",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && python3 - <<'PY'\\np=\\\"src/entrypoints/machinery/post_result_comment.ts\\\"\\ns=open(p).read()\\n\\nold_doc = \\\"\\\"\\\"  /** How the run ended, for the cut-short notices. Empty in the appended footer. */\\n  endedBecause?: string;\\\"\\\"\\\"\\nnew_doc = \\\"\\\"\\\"  /** How the run ended, for the cut-short notices. Empty in the appended footer. */\\n  endedBecause?: string;\\n  /**\\n   * Whether `/resume` is advice the thread can take. Absent means nobody asked, and the\\n   * footer offers it — the wording it has always had.\\n   */\\n  canResume?: boolean;\\\"\\\"\\\"\\nassert s.count(old_doc)==1\\ns=s.replace(old_doc,new_doc)\\n\\nold_call = \\\"\\\"\\\"    endedBecause: args.endedBecause,\\n    spentOn: args.spentOn,\\n  }));\\\"\\\"\\\"\\nnew_call = \\\"\\\"\\\"    endedBecause: args.endedBecause,\\n    spentOn: args.spentOn,\\n    canResume: resumeOffered(args.target),\\n  }));\\\"\\\"\\\"\\nassert s.count(old_call)==1\\ns=s.replace(old_call,new_call)\\n\\nold_stop = \\\"\\\"\\\"  if (args.endedBecause === \\\"stopped\\\") {\\n    // Says the session survived, because that is the whole difference between this\\n    // and cancelling the job, and the person who stopped it cannot tell from here\\n    // which one they got.\\n    lines.push(\\n      `\\\\u23f8\\\\ufe0f _Stopped on request. **The session is saved.** Comment \\\\\\\\`/resume\\\\\\\\` to continue ` +\\n        `from here, or \\\\\\\\`/${args.agent}\\\\\\\\` with an instruction on the following lines._`,\\n    );\\n  } else if (reachedLimit(args.endedBecause)) {\\\"\\\"\\\"\\nnew_stop = \\\"\\\"\\\"  if (args.endedBecause === \\\"stopped\\\") {\\n    // Says the session survived, because that is the whole difference between this and\\n    // cancelling the job, and the person who stopped it cannot tell from here which one\\n    // they got.\\n    //\\n    // The `/resume` half is left off when the thread cannot take one (#455): a merged pull\\n    // request is the case that was observed, and a footer offering a resume underneath a\\n    // mention saying the work had already landed would contradict it in the same comment.\\n    // `canResume` is that decision, made once, by the code that reads the thread.\\n    lines.push(\\n      args.canResume === false\\n        ? `\\\\u23f8\\\\ufe0f _Stopped on request. **The session is saved.** Comment \\\\\\\\`/${args.agent}\\\\\\\\` ` +\\n            `with an instruction on the following lines._`\\n        : `\\\\u23f8\\\\ufe0f _Stopped on request. **The session is saved.** Comment \\\\\\\\`/resume\\\\\\\\` to ` +\\n            `continue from here, or \\\\\\\\`/${args.agent}\\\\\\\\` with an instruction on the following lines._`,\\n    );\\n  } else if (reachedLimit(args.endedBecause)) {\\\"\\\"\\\"\\nassert s.count(old_stop)==1, s.count(old_stop)\\ns=s.replace(old_stop,new_stop)\\nopen(p,\\\"w\\\").write(s)\\nprint(\\\"ok\\\")\\nPY\\nbun run typecheck 2>&1 | tail -3\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"ok\\n$ tsc --noEmit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":4955}",
+      "tool_call_id": "call_00_mcmagge9cket0dpetgo91mul"
+    },
+    {
+      "role": "assistant",
+      "content": "Now re-adding the tests (they were also lost). Let me verify and append:",
+      "tool_calls": [
+        {
+          "id": "call_00_gm92txvramm9h1uj7av9s8rf",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -c \\\"on an interrupted run\\\" src/entrypoints/machinery/post_result_comment.test.ts; tail -3 src/entrypoints/machinery/post_result_comment.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"0\\n    expect(r.body).toContain(\\\"Spent on: 2 tool calls\\\");\\n  });\\n});\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":114}",
+      "tool_call_id": "call_00_gm92txvramm9h1uj7av9s8rf"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_42f55vfbs754nqhfuegfno4r",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && cat >> src/entrypoints/machinery/post_result_comment.test.ts <<'TESTEOF'\\n\\n/**\\n * Where an interrupted run's report sends a person (#455).\\n *\\n * A reviewer was stopped on a pull request that had already merged. Its report said\\n * \\\"Resume it, or say what to do instead\\\" — advice nobody could follow: the review target\\n * was on the default branch, GitHub cannot reopen a merged pull request, and no run can be\\n * started on one. The person holding the merged work was being pointed back at the dead\\n * thread.\\n *\\n * So the continuation is decided by what became of the THREAD, not by how the run ended:\\n * the same wrong appears on a merge-derived stop and on a failure that happens to land on a\\n * merged pull request. It is asserted at the level a person sees it — the comment body the\\n * script posts — because every link in the chain (the read, the branch, the sentence) has to\\n * hold for any of this to be true.\\n */\\ndescribe(\\\"post_result_comment.ts on an interrupted run\\\", () => {\\n  /** The REST object, as `gh api repos/.../pulls/N` returns it. */\\n  const pullRequest = (fields: { state: \\\"open\\\" | \\\"closed\\\"; mergedAt?: string | null; body?: string }) =>\\n    JSON.stringify({ state: fields.state, merged_at: fields.mergedAt ?? null, body: fields.body ?? \\\"\\\" });\\n\\n  /**\\n   * Run the script for a stopped run on `number`, against a fake `gh` that answers the pull\\n   * request read with `pr`.\\n   */\\n  function run(args: { number: string; pr: string }) {\\n    const dir = mkdtempSync(join(tmpdir(), \\\"atomaton-post-result-\\\"));\\n    writeFileSync(join(dir, \\\"atomaton_output.txt\\\"), \\\"Reviewed two files, then this arrived.\\\");\\n    try {\\n      const r = runWithFakeGh(\\n        scriptPath(\\\"post_result_comment.ts\\\"),\\n        [\\n          \\\"--number\\\", args.number, \\\"--type\\\", \\\"pr\\\", \\\"--agent\\\", \\\"reviewer\\\",\\n          \\\"--notify\\\", \\\"octocat\\\", \\\"--ended-because\\\", \\\"stopped\\\",\\n          \\\"--run-url\\\", \\\"http://example.com/run/1\\\", \\\"--output\\\", join(dir, \\\"atomaton_output.txt\\\"),\\n        ],\\n        {\\n          cwd: dir,\\n          env: { GITHUB_REPOSITORY: \\\"owner/repo\\\" },\\n          rules: [\\n            // The pull request read first: its rule is the more specific one, and the POST\\n            // below would otherwise be answered as a read.\\n            { match: [\\\"api\\\", `repos/owner/repo/pulls/${args.number}`], stdout: args.pr },\\n            { match: [\\\"api\\\", \\\"comments\\\"], stdout: \\\"42\\\" },\\n          ],\\n        },\\n      );\\n      const body = r.ghCalls.find((c) => c.includes(\\\"--method\\\"))?.join(\\\" \\\") ?? \\\"\\\";\\n      return { ...r, body };\\n    } finally {\\n      rmSync(dir, { recursive: true, force: true });\\n    }\\n  }\\n\\n  test(\\\"a merged pull request says the work is in, and points at the issue it delivered\\\", () => {\\n    const r = run({\\n      number: \\\"455\\\",\\n      pr: pullRequest({ state: \\\"closed\\\", mergedAt: \\\"2026-11-06T14:27:05Z\\\", body: \\\"<!-- atomaton:parent-issue=441 -->\\\" }),\\n    });\\n    expect(r.status).toBe(0);\\n    // The sentence a person could act on: where the follow-up work actually belongs.\\n    expect(r.body).toContain(\\\"is merged already\\\");\\n    expect(r.body).toContain(\\\"Continue on #441, the issue this pull request delivered.\\\");\\n    // And not the one they cannot follow. Both places that offer a resume are checked,\\n    // because a footer saying \\\"comment /resume to continue\\\" underneath the sentence above\\n    // would contradict it in the same comment.\\n    expect(r.body).not.toContain(\\\"Resume it\\\");\\n    expect(r.body).not.toContain(\\\"/resume\\\");\\n  });\\n\\n  test(\\\"a merged pull request with no recorded parent still says there is nothing here\\\", () => {\\n    const r = run({ number: \\\"455\\\", pr: pullRequest({ state: \\\"closed\\\", mergedAt: \\\"2026-11-06T14:27:05Z\\\" }) });\\n    expect(r.status).toBe(0);\\n    expect(r.body).toContain(\\\"is merged already\\\");\\n    // No `#N` invented: a guessed number sends somebody to an unrelated thread.\\n    expect(r.body).not.toContain(\\\"Continue on #\\\");\\n  });\\n\\n  test(\\\"an open pull request keeps the resume sentence it always had\\\", () => {\\n    const r = run({ number: \\\"455\\\", pr: pullRequest({ state: \\\"open\\\" }) });\\n    expect(r.status).toBe(0);\\n    expect(r.body).toContain(\\\"Resume it, or say what to do instead.\\\");\\n    expect(r.body).toContain(\\\"/resume\\\");\\n    expect(r.body).not.toContain(\\\"is merged already\\\");\\n  });\\n\\n  /**\\n   * A pull request closed without merging is not a dead end: GitHub reopens it, so the\\n   * advice names the undo. Saying \\\"resume it\\\" is the wrong half — `/resume` on a closed node\\n   * starts nothing — and saying \\\"already merged\\\" would be false.\\n   */\\n  test(\\\"a pull request closed without merging is reopened, not resumed\\\", () => {\\n    const r = run({ number: \\\"455\\\", pr: pullRequest({ state: \\\"closed\\\" }) });\\n    expect(r.status).toBe(0);\\n    expect(r.body).toContain(\\\"reopen it\\\");\\n    expect(r.body).not.toContain(\\\"Resume it\\\");\\n    expect(r.body).not.toContain(\\\"is merged already\\\");\\n  });\\n\\n  /**\\n   * A read that did not happen is not evidence that the thread is closed. The resume\\n   * sentence is what a person can act on once it is read, and it is the wording this\\n   * comment had before any of this existed.\\n   */\\n  test(\\\"an unreadable pull request keeps the resume sentence rather than guessing\\\", () => {\\n    const dir = mkdtempSync(join(tmpdir(), \\\"atomaton-post-result-\\\"));\\n    writeFileSync(join(dir, \\\"atomaton_output.txt\\\"), \\\"Reviewed two files, then this arrived.\\\");\\n    try {\\n      const r = runWithFakeGh(\\n        scriptPath(\\\"post_result_comment.ts\\\"),\\n        [\\n          \\\"--number\\\", \\\"455\\\", \\\"--type\\\", \\\"pr\\\", \\\"--agent\\\", \\\"reviewer\\\", \\\"--notify\\\", \\\"octocat\\\",\\n          \\\"--ended-because\\\", \\\"stopped\\\", \\\"--run-url\\\", \\\"http://example.com/run/1\\\",\\n          \\\"--output\\\", join(dir, \\\"atomaton_output.txt\\\"),\\n        ],\\n        {\\n          cwd: dir,\\n          env: { GITHUB_REPOSITORY: \\\"owner/repo\\\" },\\n          rules: [\\n            { match: [\\\"api\\\", \\\"pulls/455\\\"], code: 1, stdout: \\\"\\\" },\\n            { match: [\\\"api\\\", \\\"comments\\\"], stdout: \\\"42\\\" },\\n          ],\\n        },\\n      );\\n      expect(r.status).toBe(0);\\n      expect(r.ghCalls.find((c) => c.includes(\\\"--method\\\"))?.join(\\\" \\\") ?? \\\"\\\").toContain(\\n        \\\"Resume it, or say what to do instead.\\\",\\n      );\\n    } finally {\\n      rmSync(dir, { recursive: true, force: true });\\n    }\\n  });\\n\\n  /**\\n   * The read is only worth paying for when the sentence can change. A run that finished says\\n   * what it did, which no thread state alters — so for a pull request that finished normally\\n   * this is one fewer `gh` call on every review.\\n   */\\n  test(\\\"a run that completed reads nothing about the thread\\\", () => {\\n    const dir = mkdtempSync(join(tmpdir(), \\\"atomaton-post-result-\\\"));\\n    writeFileSync(join(dir, \\\"atomaton_output.txt\\\"), \\\"Reviewed and reported.\\\");\\n    try {\\n      const r = runWithFakeGh(\\n        scriptPath(\\\"post_result_comment.ts\\\"),\\n        [\\n          \\\"--number\\\", \\\"455\\\", \\\"--type\\\", \\\"pr\\\", \\\"--agent\\\", \\\"reviewer\\\", \\\"--notify\\\", \\\"octocat\\\",\\n          \\\"--ended-because\\\", \\\"completed\\\", \\\"--run-url\\\", \\\"http://example.com/run/1\\\",\\n          \\\"--output\\\", join(dir, \\\"atomaton_output.txt\\\"),\\n        ],\\n        { cwd: dir, env: { GITHUB_REPOSITORY: \\\"owner/repo\\\" }, rules: [{ match: [\\\"api\\\", \\\"comments\\\"], stdout: \\\"42\\\" }] },\\n      );\\n      expect(r.status).toBe(0);\\n      expect(r.ghCalls.some((c) => c.join(\\\" \\\").includes(\\\"pulls/455\\\"))).toBe(false);\\n    } finally {\\n      rmSync(dir, { recursive: true, force: true });\\n    }\\n  });\\n});\\nTESTEOF\\nbun test src/entrypoints/machinery/post_result_comment.test.ts 2>&1 | tail -14\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) post_result_comment.ts on a closing message > a refused message escapes even the owner it would have been allowed to call [34.56ms]\\n(pass) post_result_comment.ts on a run that reached its limit > writes notified=true and carries the tally when the comment mentioned the person [27.59ms]\\n(pass) post_result_comment.ts on a run that reached its limit > writes notified=false when nobody was configured to mention [26.84ms]\\n(pass) post_result_comment.ts on an interrupted run > a merged pull request says the work is in, and points at the issue it delivered [27.38ms]\\n(pass) post_result_comment.ts on an interrupted run > a merged pull request with no recorded parent still says there is nothing here [26.88ms]\\n(pass) post_result_comment.ts on an interrupted run > an open pull request keeps the resume sentence it always had [27.02ms]\\n(pass) post_result_comment.ts on an interrupted run > a pull request closed without merging is reopened, not resumed [26.88ms]\\n(pass) post_result_comment.ts on an interrupted run > an unreadable pull request keeps the resume sentence rather than guessing [26.64ms]\\n(pass) post_result_comment.ts on an interrupted run > a run that completed reads nothing about the thread [20.03ms]\\n\\n 78 pass\\n 0 fail\\n 224 expect() calls\\nRan 78 tests across 1 file. [905.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1024}",
+      "tool_call_id": "call_00_42f55vfbs754nqhfuegfno4r"
+    },
+    {
+      "role": "assistant",
+      "content": "All 78 pass. Committing now:",
       "finish_reason": "stop",
       "atoma_metadata": {
-        "github_comment_id": 6702100309,
+        "github_comment_id": 6702126701,
         "agent": "engineer"
       }
     }
@@ -4731,9 +4936,9 @@
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 13,
+      "event_count": 14,
       "session_number": "458",
-      "snapshot_hash": "f1c1a2db7369366cc110d9151c1712492807c5e58d33d7bd103e6bffe2a71715",
+      "snapshot_hash": "22db79d90e967d25f62e2c990cf27e15cdf2d3507e2d46b1938f4099c1768bf3",
       "type": "issue",
       "version": 1
     }
@@ -4930,6 +5135,23 @@
         }
       },
       "started": "2026-11-07T04:10:28Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-07T04:15:43Z",
+      "ended_because": "completed",
+      "iterations": 9,
+      "messages": 400,
+      "seconds": 59,
+      "server_calls": {
+        "files": {
+          "edit": 1
+        },
+        "shell": {
+          "bash": 7
+        }
+      },
+      "started": "2026-11-07T04:14:44Z"
     }
   ]
 }
