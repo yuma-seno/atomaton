@@ -12,6 +12,7 @@ import { ref as parsePrMetadataRef } from "../entrypoints/machinery/parse_pr_met
 import { ref as dispatchPostMergeRef } from "../entrypoints/machinery/dispatch_post_merge.ts";
 import { ref as dispatchRejectedRef } from "../entrypoints/machinery/dispatch_rejected.ts";
 import { ref as manageTurnLabelsRef } from "../entrypoints/machinery/manage_turn_labels.ts";
+import { ref as stopOnPrCloseRef } from "../entrypoints/machinery/stop_on_pr_close.ts";
 import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // Detect what became of a pull request and act on the two things a close can
@@ -71,6 +72,8 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 //   dispatch-rejected (NOT merged, and the pull request's head branch is this
 //          repository's -- the membership gate that keeps a fork's forged body
 //          from starting anything)
+//   stop-run (BOTH outcomes; no `needs` -- a closed pull request may still have a run
+//          working on it, whoever closed it, and that run has to be told)
 //   strip-turn-labels (BOTH outcomes; no `needs` -- a closed pull request carries
 //          neither turn label, whoever closed it, #352)
 
@@ -297,6 +300,58 @@ const dispatchRejectedJob = new DefinedJob(
 );
 
 /**
+ * A closed pull request asks whatever run is holding it to stop.
+ *
+ * The mirror of `atomaton-sub-issue-closed.wac.ts`'s `stop-run`, for the other node kind.
+ * A merge used to reach nothing: a reviewer merged its own pull request and kept going for
+ * another nine minutes, and stopped only because an unrelated issue close propagated a
+ * stop through the issue path. No second stop path is added — `stop_on_pr_close.ts` writes
+ * the same `STOP_TAG` the running job already polls for.
+ *
+ * ## Why there is no merge gate
+ *
+ * Both outcomes of `closed` can leave a run working: a merge of the pull request it is
+ * reviewing, and a person closing that pull request unmerged. `dispatch-rejected` handles
+ * the second only in the sense that it hands the ISSUE a new instruction; it does not
+ * touch the run on the pull request itself.
+ *
+ * ## Why there is no bot test here
+ *
+ * The issue-side job tests `sender.type`, because an agent closing its own issue is how a
+ * run finishes and stopping it would cut it off mid-wrap-up. A pull request is not that:
+ * closing one is never a run ending its own work. And there is nothing to sift —
+ * GITHUB_TOKEN's own actions raise no event cascade, so this workflow only ever runs for a
+ * person's merge or close (see the header). The script asks the thread whether a run holds
+ * the pull request, which is the question that actually decides.
+ */
+const stopOnPrCloseStep = new TypedOutputsStep(
+  {
+    name: "Stop the run this close did not stop",
+    shell: "bash",
+    env: {
+      GH_TOKEN: "${{ github.token }}",
+      GITHUB_REPOSITORY: "${{ github.repository }}",
+      PR_NUMBER: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.number),
+      MERGED: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.merged),
+    },
+    run: `${scriptCommandWithArgs(stopOnPrCloseRef, { number: "\${PR_NUMBER}", merged: "\${MERGED}" })}
+`,
+  },
+  [] as const,
+);
+
+const stopRunJob = new DefinedJob(
+  "stop-run",
+  {
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
+    // No `if`, and no `needs`: both outcomes of `closed` can leave a run working, and the
+    // job reads nothing the jobs above it produce.
+  },
+  [new ActionsCheckoutV4({}), new SetupBunAction({ name: "Setup Bun" }), stopOnPrCloseStep],
+);
+
+/**
  * A closed pull request carries neither turn label (#352).
  *
  * This is the strip for the closes THIS workflow sees — a person's merge or close,
@@ -427,5 +482,6 @@ PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
     ],
   ),
   dispatchRejectedJob,
+  stopRunJob,
   stripTurnLabelsJob,
 ]);

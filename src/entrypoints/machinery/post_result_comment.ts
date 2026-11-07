@@ -20,6 +20,9 @@ import { gh } from "../../adapters/github/gh.ts";
 import { AGENT_TAG, CHANGED_TAG, ENDED_TAG } from "../../adapters/github/tags.ts";
 import { parentIssueOf } from "../../adapters/github/parent-issue.ts";
 import { readTargetState } from "../../adapters/github/target-state.ts";
+import { readPullRequestObject } from "../../adapters/github/pull-request.ts";
+import { PARENT_ISSUE_TAG } from "../../adapters/github/tags.ts";
+import { isMerged, type TargetState } from "../../domain/work/closed-target.ts";
 import { shouldMentionOnCompletion } from "../../domain/work/completion-mention.ts";
 import { endingOf, type TurnEnding } from "../../domain/work/turn.ts";
 import { redact } from "../../shared/redaction.ts";
@@ -172,32 +175,78 @@ function tokenUsageLine(logsFile: string): string | undefined {
   return renderTokenLine({ total, prompt, completion, cached });
 }
 
+/** The pull request fields this file needs, as the REST object carries them. */
+interface PullRequestFacts {
+  state?: string;
+  /** Only this tells a merged pull request from one closed unmerged; `state` says `closed` for both. */
+  merged_at?: string | null;
+  /** Carries `atomaton:parent-issue`, the issue the pull request delivered. */
+  body?: string;
+}
+
 /**
- * Whether this issue is an agent-created sub-task, and whether it is closed.
+ * What the mention decision needs to know about the node this run worked on.
  *
- * Both answers come from one read, and a failed read answers "no" — a run
- * mentioning a person it need not have is a smaller harm than a run that
- * silently drops the only signal that work has stopped.
+ * The four facts answer two different questions, and they are read for two different
+ * reasons:
  *
- * Skipped entirely for a pull request run: `--number` is a PR number there, and
- * `gh issue view` on one is an error rather than an answer.
+ * - `isSubIssue` and `issueClosed` feed `shouldMentionOnCompletion`, and every run needs
+ *   them. A failed read answers "no" for both: a run mentioning a person it need not have
+ *   is a smaller harm than a run that silently drops the only signal that work has
+ *   stopped.
+ * - `target` and `parentIssue` are what `mentionLine` reads to decide whether its advice
+ *   can be followed, and they are only asked for an INTERRUPTED ending — the other two
+ *   endings say what the run did, which no thread state can change. On a pull request that
+ *   is the read that costs nothing on the ordinary review.
+ *
+ * Skipped for a pull request until something is interrupted: `--number` is a PR number
+ * there, and `gh issue view` on one is an error rather than an answer, so the pull
+ * request half goes through `readPullRequestObject` — the reader that answers for one and
+ * carries the body in the same response.
  *
  * The state is `readTargetState`'s, not a second read of `gh issue view --json state`.
  * That copy looked for the literal `"CLOSED"` and could not tell a merged pull request
- * from a closed one — the distinction `target-state.ts` exists to make, and the one
- * that decides whether "reopen it" is advice a person can follow.
+ * from a closed one — the distinction `target-state.ts` exists to make, and the one that
+ * decides whether "resume it" is advice a person can follow.
  */
-function subIssueState(number: string, type?: string): { isSubIssue: boolean; issueClosed: boolean } {
-  if (type !== "issue") return { isSubIssue: false, issueClosed: false };
+function nodeFacts(
+  number: string,
+  type: string | undefined,
+  interrupted: boolean,
+): { isSubIssue: boolean; issueClosed: boolean; target?: TargetState; parentIssue?: number } {
   const repo = process.env.GITHUB_REPOSITORY ?? "";
-  const state = readTargetState(number, repo);
-  const issueClosed = state.known && state.state !== "open";
+
+  if (type !== "issue") {
+    if (!interrupted) return { isSubIssue: false, issueClosed: false };
+    const read = readPullRequestObject<PullRequestFacts>(repo, Number(number));
+    if (!read.known) {
+      return { isSubIssue: false, issueClosed: false, target: { known: false, why: read.why } };
+    }
+    const { state, merged_at: mergedAt, body } = read.value;
+    if (state !== "open" && state !== "closed") {
+      const why = `unrecognised pull request state ${JSON.stringify(state ?? null)}`;
+      return { isSubIssue: false, issueClosed: false, target: { known: false, why } };
+    }
+    return {
+      isSubIssue: false,
+      issueClosed: false,
+      target: { known: true, kind: "pull-request", state: state === "open" ? "open" : mergedAt ? "done" : "abandoned" },
+      parentIssue: PARENT_ISSUE_TAG.readProse(body ?? ""),
+    };
+  }
+
+  const target = readTargetState(number, repo);
   // GitHub's own link, like every other reader of this relationship. The body's
   // `atomaton:parent` tag is gone -- it recorded the parent at creation and nothing
-  // rewrote it. `known: false` falls in with the rest of this function's failures:
-  // the two facts here only decide whether one extra sentence appears in a comment.
+  // rewrote it. `known: false` falls in with the rest of this function's failures.
   const found = parentIssueOf(repo, Number(number));
-  return { isSubIssue: found.known && found.parent > 0, issueClosed };
+  const parent = found.known && found.parent > 0 ? found.parent : undefined;
+  return {
+    isSubIssue: parent !== undefined,
+    issueClosed: target.known && target.state !== "open",
+    target,
+    parentIssue: parent,
+  };
 }
 
 /**
@@ -396,21 +445,43 @@ function howItWasCutShort(endedBecause: string | undefined): string {
  * one because the ordinary one is the false claim this change exists to stop making.
  * A run that produced no closing text has no results to review; what it did is in a
  * saved session, and the person is being told so they can go and look.
+ *
+ * ## Why the two interrupted arms read the thread's state (#455)
+ *
+ * "Resume it" is advice, and advice can be wrong. On a merged pull request it is: the
+ * review target is on the default branch, GitHub cannot reopen the pull request, and no
+ * run can be started there — so the sentence invited a person to resume work that had
+ * already landed. It was observed exactly that way, in a stopped reviewer's report on a
+ * merged pull request.
+ *
+ * The branch is taken on the THREAD's state rather than on `endedBecause`, because the
+ * state is what makes the advice wrong, and it is the same wrong for a merge-derived stop
+ * and for a failure that happened to land on a merged pull request. Only the continuation
+ * sentence changes: what the run did, and that nothing runs next, are true either way.
  */
 function mentionLine(
   ending: TurnEnding,
-  args: { agent: string; notify?: string; endedBecause?: string },
+  args: {
+    agent: string;
+    notify?: string;
+    endedBecause?: string;
+    /** What became of the node this run worked on. Absent keeps the resume sentence. */
+    target?: TargetState;
+    /** The issue a merged pull request delivered, when there is one to point at. */
+    parentIssue?: number;
+  },
 ): string {
   if (args.endedBecause === "failed") {
     return (
       `@${args.notify} — **${args.agent}** stopped mid-run, and no agent will run next. ` +
-      `Resume it, or say what to do instead.`
+      continuation(args, "Resume it, or say what to do instead.")
     );
   }
   if (cutShort(args.endedBecause)) {
     return (
       `@${args.notify} — **${args.agent}** ${howItWasCutShort(args.endedBecause)} ` +
-      `before it finished, and no agent will run next. Resume it, or say what to do instead.`
+      `before it finished, and no agent will run next. ` +
+      continuation(args, "Resume it, or say what to do instead.")
     );
   }
   if (ending.ended === "no-report") {
@@ -421,6 +492,40 @@ function mentionLine(
     );
   }
   return `@${args.notify} — **${args.agent}** task completed. No agent will be automatically executed next. Please review the results or provide instructions for the next step.`;
+}
+
+/**
+ * What can be done about an interrupted run, given what became of the node it ran on.
+ *
+ * `resume` is the caller's sentence for the common case, and it is passed in rather than
+ * written here because it is the wording this comment has always had and nothing about
+ * the states below should be able to change it.
+ *
+ * A merged pull request gets its own sentence, and no `/resume`: the work is in, the pull
+ * request cannot be reopened, and a resume there would produce something that is not the
+ * work it was for. What is left is the thread the follow-up belongs on.
+ *
+ * Any other ending — a closed issue, a pull request closed without merging — is a state a
+ * person can undo, so the advice names the undo rather than offering a resume that cannot
+ * run. `known: false` keeps the resume sentence: an unread state is not evidence that the
+ * thread is closed, and the resume is what the person can act on once it is read.
+ */
+function continuation(
+  args: { target?: TargetState; parentIssue?: number },
+  resume: string,
+): string {
+  if (args.target === undefined) return resume;
+  if (isMerged(args.target)) {
+    const elsewhere =
+      args.parentIssue !== undefined && args.parentIssue > 0
+        ? `Continue on #${args.parentIssue}, the issue this pull request delivered.`
+        : "Continue on the issue this pull request delivered.";
+    return `The work this pull request carried is merged already, so there is nothing here to resume. ${elsewhere}`;
+  }
+  if (args.target.known && args.target.state !== "open") {
+    return "That thread is closed, so there is nothing left to resume here — reopen it to continue, or say what to do instead.";
+  }
+  return resume;
 }
 
 /**
@@ -516,6 +621,20 @@ export function buildCommentBody(args: {
   tokenLine?: string;
   isSubIssue?: boolean;
   issueClosed?: boolean;
+  /**
+   * What became of the node this run worked on, for the mention's advice (#455).
+   *
+   * Absent is "nobody asked", and the resume sentence — the wording this comment carried
+   * before the state was read — is what an absent state keeps.
+   */
+  target?: TargetState;
+  /**
+   * The issue a merged pull request delivered, so the mention can point at it.
+   *
+   * Read from the pull request's `atomaton:parent-issue` tag, the one record of that edge
+   * that survives here — see `adapters/github/tags.ts`.
+   */
+  parentIssue?: number;
   /** Logins the agent wrote as mentions that were escaped instead. */
   escapedMentions?: readonly string[];
   /**
@@ -1011,9 +1130,14 @@ function main(): void {
   // Read off the unescaped text, against the people the run was told it may call.
   const called = calledHumans(output, callable);
 
-  // One read of the state, because the mention decision is asked twice: for the
+  // One read of the node, because the mention decision is asked twice: for the
   // comment's own sentence, and for the output the runner gates the limit notice on.
-  const issueState = subIssueState(values.number, values.type);
+  //
+  // The state and the parent are read only when the ending is interrupted: they decide
+  // whether the mention's advice can be followed, and the other two endings state what the
+  // run did, which no thread can change. On a pull request that is the read that costs
+  // nothing on the ordinary review.
+  const facts = nodeFacts(values.number, values.type, cutShort(values["ended-because"]));
   const mentionSignals = {
     notify: values.notify,
     directive: values.directive,
@@ -1021,11 +1145,17 @@ function main(): void {
     endedBecause: values["ended-because"],
     reported: isTrue(values.reported),
     agentCalledHuman: called.length === 1,
-    ...issueState,
+    isSubIssue: facts.isSubIssue,
+    issueClosed: facts.issueClosed,
   };
+  // Kept apart from `mentionSignals` so the runner's gate sees exactly the signals it did
+  // before, and spread in beside them: `mentionLine` receives the whole object and reads
+  // these two only for the sentence about continuing.
+  const advice = { target: facts.target, parentIssue: facts.parentIssue };
 
   const body = buildCommentBody({
     ...mentionSignals,
+    ...advice,
     agent: values.agent,
     salvaged,
     wroteNothing,
