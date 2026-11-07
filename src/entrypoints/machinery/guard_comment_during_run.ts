@@ -50,6 +50,16 @@
  * the decision never read the label, and `commentWouldBeRemoved` still finds the
  * last turn event "asked" and deletes the comment anyway. Observed on #17.
  *
+ * ## The claim is not the whole question (#462)
+ *
+ * A claim outlives its run when the run dies without reporting, and the claim alone then
+ * says "an agent is working" on a node where nothing is running and nothing is coming —
+ * so this guard deleted every comment a person wrote, on a node nobody could reach. The
+ * run the claim names is asked about directly, and a `stale` lock keeps the comment:
+ * `domain/work/stale-lock.ts` is that judgement, shared with the sweep so the two cannot
+ * disagree about who is working. An unreadable run status is not stale — the delete stays
+ * the conservative answer when nobody can tell.
+ *
  * Usage:
  *   guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN
  * Writes `blocked=true|false` to $GITHUB_OUTPUT.
@@ -58,7 +68,8 @@ import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
 import { LLM_CONTEXT_TAG, QUOTES_TAG, proseOnly } from "../../adapters/github/tags.ts";
-import { commentWouldBeRemoved } from "../../adapters/github/thread.ts";
+import { commentWouldBeRemoved, type ThreadLock } from "../../adapters/github/thread.ts";
+import { lockAbandoned } from "../../adapters/github/node-lock.ts";
 import { commandLabel, commandsIn } from "../../domain/work/comment-command.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
 import { preservedCommentBlock } from "./lib/removed-comment.ts";
@@ -215,7 +226,7 @@ function main(): void {
   // the comment in two needs to know the ball is with an agent as well — otherwise they
   // post the first half, it is refused by this same guard, and they are told the other
   // reason a comment later.
-  let hold: { removed: boolean; parked: boolean } = { removed: false, parked: false };
+  let hold: { removed: boolean; parked: boolean; lock?: ThreadLock } = { removed: false, parked: false };
   try {
     hold = commentWouldBeRemoved(repo, values.number, values["comment-id"]);
   } catch (e) {
@@ -230,7 +241,41 @@ function main(): void {
     }
     console.error(`Could not read the thread on #${values.number} (${e}); removing the comment for its commands`);
   }
-  const removed = hold.removed;
+  // ## The third question: is the run that claimed the turn still there? (#462)
+  //
+  // The claim alone says an agent TOOK the turn, and every reader here has treated it as
+  // "an agent is working" until an ending answers the same ask. A run that dies without
+  // reporting leaves the claim standing, and then this guard removes every comment a
+  // person writes — on a node where nothing is running and nothing is coming. The run the
+  // claim names is asked about directly (`actions/runs/{id}`), and a finished one keeps
+  // the comment AND lets the dispatch go: the node has no live turn, so the comment is an
+  // ordinary turn starter rather than an interruption.
+  //
+  // Deliberately only the ANSWERED `stale` counts. A run status that could not be read is
+  // not "finished" — removing a live run's comments is the harm this guard exists to
+  // prevent — and a park is never stale here, because the aggregation resumes it and reads
+  // what was written during the wait. See `domain/work/stale-lock.ts`.
+  let abandoned = false;
+  if (hold.removed && hold.lock !== undefined) {
+    try {
+      abandoned = lockAbandoned(repo, hold.lock, Date.now());
+    } catch (e) {
+      // `lockAbandoned` answers false for a failed run read; this catches anything
+      // unexpected, and it keeps the comment: the conservative side is the one that does
+      // not delete.
+      console.error(`Could not check whether the run holding #${values.number} is still going; keeping the comment: ${e}`);
+    }
+  }
+  const removed = hold.removed && !abandoned;
+  // Said only when the comment is really kept. A comment carrying more than one command is
+  // deleted for that reason whatever the lock is doing — a separate refusal, and a line
+  // claiming "this comment is kept" beside a deletion would be wrong.
+  if (hold.removed && abandoned && !several) {
+    console.error(
+      `The run that claimed #${values.number}'s turn has finished with its claim still standing, ` +
+        "so the lock is stale and this comment is kept — the sweep will hand the node back",
+    );
+  }
   // A parked hold reads differently from a running one, and the person who wrote
   // during a park needs the resume moment named rather than a run they would wait
   // for in vain (#208).
