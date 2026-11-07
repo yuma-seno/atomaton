@@ -4322,6 +4322,40 @@ describe("mcp/files.ts", () => {
     expect(r.result.content[0].text).toContain("not in");
   });
 
+  /**
+   * A replacement is text, not a template. `String.prototype.replace` reads `$&`,
+   * `` $` ``, `$'` and `$$` in a string replacement as patterns -- the whole match,
+   * the text before it, the text after it, a dollar -- and a comment explaining
+   * replacement patterns is exactly when an editor writes one. Observed on the
+   * customer-doc skill: an edit whose `new_string` mentioned those sequences, sent
+   * with no error, grew the file from 41 lines to 1436 -- the match, its before and
+   * its after, injected at the match. The single-occurrence path goes through a
+   * function, whose return value is taken literally.
+   */
+  test("edit keeps the replacement patterns in new_string literal", async () => {
+    const root = fixture({ "a.ts": "alpha beta gamma\n" });
+    const r = await call(root, "edit", {
+      path: "a.ts",
+      old_string: "beta",
+      new_string: "beta ($& $` $' $$)",
+    });
+    expect(r.result.isError).toBe(false);
+    expect(readFileSync(join(root, "a.ts"), "utf8")).toBe("alpha beta ($& $` $' $$) gamma\n");
+  });
+
+  /** `replace_all` joined literally already; the invariant is pinned so it stays so. */
+  test("replace_all keeps the same sequences literal too", async () => {
+    const root = fixture({ "a.ts": "beta\nbeta\n" });
+    const r = await call(root, "edit", {
+      path: "a.ts",
+      old_string: "beta",
+      new_string: "$& $' $$",
+      replace_all: true,
+    });
+    expect(r.result.isError).toBe(false);
+    expect(readFileSync(join(root, "a.ts"), "utf8")).toBe("$& $' $$\n$& $' $$\n");
+  });
+
   test("write creates the directories above the file", async () => {
     const root = fixture({});
     const r = await call(root, "write", { path: "a/b/c.txt", content: "made" });

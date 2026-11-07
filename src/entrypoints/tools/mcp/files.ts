@@ -346,6 +346,15 @@ const EDIT_SCHEMA = z.object({
  * Text that appears more than once is refused rather than taking the first: a caller
  * that meant the third has no way to say so, and a wrong edit made quietly is found
  * much later than a refusal.
+ *
+ * The replacement goes through a function, not a string, on purpose:
+ * `String.prototype.replace` reads `$&`, `` $` ``, `$'` and `$$` in a string
+ * replacement as patterns -- the whole match, the text before it, the text after it,
+ * a literal dollar -- so a `new_string` that merely MENTIONED them injected the
+ * file's own surroundings at the match and grew a 41-line file to 1436, silently. A
+ * replacement is text, not a template, and a function's return value is taken
+ * literally. `replace_all` never had the problem: `split` + `join` is already
+ * literal.
  */
 function editFile(a: z.infer<typeof EDIT_SCHEMA>): McpToolResult {
   const full = within(a.path);
@@ -364,7 +373,7 @@ function editFile(a: z.infer<typeof EDIT_SCHEMA>): McpToolResult {
   }
   const after = a.replace_all
     ? before.split(a.old_string).join(a.new_string)
-    : before.replace(a.old_string, a.new_string);
+    : before.replace(a.old_string, () => a.new_string);
   writeFileSync(full, after);
   const changed = a.replace_all ? count : 1;
   log(`edit ${shown(full)} x${changed}`);
