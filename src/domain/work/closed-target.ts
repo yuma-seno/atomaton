@@ -55,18 +55,60 @@ export function mayStartWorkOn(target: TargetState): boolean {
 }
 
 /**
- * Whether a person could put this target back where work can run.
+ * Whether this target is a pull request that landed.
  *
- * Merging is the one ending GitHub makes final. Everything else that ended —
- * an issue completed or dropped, a pull request closed without merging — reopens.
+ * The one ending GitHub makes final, and the reason the notices below read the way they
+ * do: a merged pull request cannot be reopened and nothing can be started on it, so
+ * "resume it" is advice nobody can follow there.
  *
  * Derived rather than stored. This used to be a `merged: boolean` carried beside a
  * `closed` case, which was the third place in this repository spelling the same
  * fact its own way: `NodeState` says a pull request that is `done` is one that
  * merged, and `kind` is already here.
  */
+export function isMerged(target: TargetState): boolean {
+  return target.known && target.kind === "pull-request" && target.state === "done";
+}
+
+/**
+ * Whether a person could put this target back where work can run.
+ *
+ * Everything that ended reopens except a merge.
+ */
 export function canBeReopened(target: TargetState): boolean {
-  return target.known && !(target.kind === "pull-request" && target.state === "done");
+  return target.known && !isMerged(target);
+}
+
+/**
+ * What a pull request's own close leaves on its thread when a run was working there.
+ *
+ * The other node kind's receipt, beside `stopOnCloseNotice`. A pull request that merges
+ * or closes out from under a run does not stop it by itself either, and the run's own
+ * thread is where that has to be said — nothing else reaches a running job.
+ *
+ * Two outcomes, two sentences, because they leave the person in different places. A
+ * merge is final: the work the pull request carried is in, so nothing here is resumable.
+ * A close that merged nothing leaves a pull request that can be reopened and dispatched.
+ * Neither offers the way back — the run's own report says what it managed and how to
+ * continue, and this says only what is true when it is posted.
+ */
+export function stopOnPullRequestCloseNotice(number: number, merged: boolean): string {
+  if (merged) {
+    return [
+      "Atomaton: this pull request was merged while an agent was working on it, so the run has been asked to stop.",
+      "",
+      "Merging does not reach a run by itself — it kept going until this request arrived. The run stops after its current step, so it may take a minute.",
+      "",
+      "The work this pull request carried is merged already, so there is nothing here to resume. The run will report on this thread when it has stopped.",
+    ].join("\n");
+  }
+  return [
+    `Atomaton: #${number} was closed while an agent was working on it, so the run has been asked to stop.`,
+    "",
+    "Closing does not reach a run by itself — it kept going until this request arrived. The run stops after its current step, so it may take a minute.",
+    "",
+    "The run will report on this thread when it has stopped.",
+  ].join("\n");
 }
 
 /**

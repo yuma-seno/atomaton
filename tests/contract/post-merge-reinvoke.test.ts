@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 interface Job {
   needs?: string | string[];
   if?: string;
+  steps?: { run?: string }[];
 }
 
 function jobs(): Record<string, Job> {
@@ -108,5 +109,34 @@ describe("post-merge re-invocation", () => {
     const rejected = jobs()["dispatch-rejected"];
     expect(rejected, "run `bun run synth` first").toBeDefined();
     expect(rejected?.if ?? "").toContain("github.event.pull_request.head.repo.full_name == github.repository");
+  });
+
+  /**
+   * A close asks whatever run is holding the pull request to stop, for BOTH outcomes.
+   *
+   * The measured defect (#455): a reviewer was reviewing a pull request when it merged,
+   * and the merge reached nothing — the run kept going for another nine minutes and
+   * stopped only because an unrelated issue closed. `issues: closed` stops a run;
+   * `pull_request: closed` did not, for either outcome.
+   *
+   * No `if`, and no `needs`, and each half of that is load-bearing:
+   *
+   *   - a merge gate would leave the close-that-merged-nothing unstopped, and both are a
+   *     `closed` an in-flight run has to hear about;
+   *   - a `needs` would make the stop wait on the parent resolution, which has nothing to
+   *     do with whether a run is polling — and a skipped dependency would skip the stop.
+   *
+   * The `if` is asserted to be absent rather than checked for content, so a later edit
+   * that adds a gate has to come here and say why.
+   */
+  test("a closed pull request asks its run to stop, whichever way it closed", () => {
+    const stop = jobs()["stop-run"];
+    expect(stop, "a closed pull request must be able to stop the run on it").toBeDefined();
+    expect(stop?.if, "both outcomes of `closed` can leave a run working").toBeUndefined();
+    expect(needs(stop), "whether a run is polling is nothing the jobs above answer").toEqual([]);
+    const run = (stop?.steps ?? []).map((step) => step.run ?? "").join("\n");
+    expect(run, "the poster is what writes the tag the running job polls for").toContain(
+      "stop_on_pr_close.ts",
+    );
   });
 });

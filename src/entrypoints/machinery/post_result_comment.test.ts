@@ -132,6 +132,70 @@ describe("post_result_comment.ts buildCommentBody", () => {
     expect(body).not.toContain("task completed");
   });
 
+  /**
+   * The advice has to be followable, and on a merged pull request it is not: the work
+   * is on the default branch, GitHub cannot reopen the pull request, and no run can be
+   * started there. The sentence a person needs is the thread the follow-up belongs on
+   * (#455). Observed on a stopped reviewer's report over a merged pull request.
+   */
+  test("stops advising a resume when the pull request merged", () => {
+    const body = buildCommentBody({
+      agent: "reviewer",
+      notify: "octocat",
+      endedBecause: "stopped",
+      runUrl: "http://example.com/run/1",
+      output: "Stopping here.",
+      target: { known: true, kind: "pull-request", state: "done" },
+      parentIssue: 441,
+    });
+    expect(body).toContain("merged already");
+    expect(body).toContain("Continue on #441");
+    expect(body).not.toContain("/resume");
+  });
+
+  test("points at the thread even when it has no number", () => {
+    const body = buildCommentBody({
+      agent: "reviewer",
+      notify: "octocat",
+      endedBecause: "stopped",
+      runUrl: "http://example.com/run/1",
+      output: "Stopping here.",
+      target: { known: true, kind: "pull-request", state: "done" },
+    });
+    expect(body).toContain("Continue on the issue this pull request delivered");
+    expect(body).not.toContain("/resume");
+  });
+
+  /** A close that merged nothing can be undone, so the advice names the undo. */
+  test("names the reopen when the thread was closed without merging", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      endedBecause: "stopped",
+      runUrl: "http://example.com/run/1",
+      output: "Stopping here.",
+      target: { known: true, kind: "pull-request", state: "abandoned" },
+    });
+    expect(body).toContain("reopen it");
+    expect(body).not.toContain("/resume");
+  });
+
+  /**
+   * An unread state is not evidence that the thread is closed. Keeping the resume
+   * sentence is safe in the one direction: a person can act on it once the state is read.
+   */
+  test("keeps the resume when the state could not be read", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      notify: "octocat",
+      endedBecause: "stopped",
+      runUrl: "http://example.com/run/1",
+      output: "Stopping here.",
+      target: { known: false, why: "gh failed" },
+    });
+    expect(body).toContain("/resume");
+  });
+
   /** The ordinary ending keeps the sentence it always had. */
   test("a run that finished still says so", () => {
     const body = buildCommentBody({

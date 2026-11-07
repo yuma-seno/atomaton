@@ -34,7 +34,7 @@
  * reader belongs beside the other modules that read a thread, not in either caller.
  */
 import { gh, ghRead, splitConcatenatedJson } from "./gh.ts";
-import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, TOOK_TAG } from "./tags.ts";
+import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, STOP_TAG, TOOK_TAG } from "./tags.ts";
 import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
@@ -413,6 +413,55 @@ export function openClaimOn(
     parked: shaped.events[shaped.events.length - 1] === "waiting",
     claimed: last !== undefined && readers.claim(last.body) !== undefined,
   };
+}
+
+/**
+ * What a stop aimed at an in-flight run on this node has to know before writing: whether
+ * a run holds the turn, and whether a stop is already on the thread that this run would
+ * see.
+ *
+ * ## Why the claim, and not `runInFlight`
+ *
+ * `runInFlight` answers "should you expect a run here", and for a merged pull request it
+ * deliberately drops half the answer (#449): nothing can be started on one, so "a request
+ * is the newest word" stops being evidence of anything. This asks the other question —
+ * "is a run watching this thread right now" — and a merge says nothing about it. The run
+ * that merges a pull request is the ordinary reviewer case: it holds the claim it wrote
+ * at start and keeps watching until it ends. Asked through `runInFlight(..., { merged:
+ * true })` that run answers "no run", which is exactly the run a merge-derived stop
+ * exists to reach.
+ *
+ * So the answer is the open claim alone: an `atomaton:took` with no ending answering it.
+ *
+ * ## Why a stop older than the claim does not count
+ *
+ * The watcher honours only a stop written after the run began watching
+ * (`watch_for_stop.ts` polls one page since its own start), so a stop left by an earlier
+ * run on this node is invisible to this one. Counting it would suppress the request and
+ * leave a run nobody can stop. The comparison is positional — the listing arrives oldest
+ * first — so it needs no timestamps and cannot disagree with the order the readers fold.
+ *
+ * A quotation is skipped: it carries the removed author's words, so a stop tag inside one
+ * is not the machinery asking.
+ *
+ * Throws when the thread cannot be read, like every other reader here: a caller deciding
+ * whether to post a stop must not read a failed read as "nobody is running".
+ */
+export function openClaimStopState(
+  repo: string,
+  number: string | number,
+): { claimed: boolean; requested: boolean } {
+  const entries = listComments(repo, number).map(entryOf);
+  if (shapedThread(entries, readers).openClaim === undefined) return { claimed: false, requested: false };
+
+  let claimAt = -1;
+  let stopAt = -1;
+  entries.forEach((entry, index) => {
+    if (entry.quoted === true) return;
+    if (readers.claim(entry.body) !== undefined) claimAt = index;
+    if (STOP_TAG.hasProse(entry.body)) stopAt = index;
+  });
+  return { claimed: true, requested: stopAt > claimAt };
 }
 
 /**
