@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildCommentBody, buildFooter, lastAgentText, makesCompletionMention } from "./post_result_comment.ts";
 import type { Session } from "../../domain/work/session.ts";
+import { logExcerpt } from "./lib/failure-notice.ts";
 import { runWithFakeGh, scriptPath } from "./testing/harness.ts";
 
 describe("post_result_comment.ts buildCommentBody", () => {
@@ -1084,12 +1085,28 @@ describe("a failed run that said nothing", () => {
    * kind of second copy this repository keeps removing. Every line the other caller's
    * notice carries is here too.
    */
-  test("says what the workflow's own failure notice says", async () => {
-    const { failureLines } = await import("./lib/failure-notice.ts");
+  /**
+   * The three things a person needs, written out by hand rather than compared against
+   * `failureLines`' own return value.
+   *
+   * The old version of this test asked `failureLines` what it says and then looked for
+   * that in the body — which passes for as long as both sides move together, and cannot
+   * notice the sentences themselves going wrong. These are the sentences, and the reason
+   * each is here:
+   *
+   *   - what became of the run, because "nothing happened" is the one reading a silent
+   *     crash invites;
+   *   - that the session survived, because it decides whether continuing is possible;
+   *   - both ways forward, spelled as commands a person can copy. `/agent` alone would
+   *     leave a run that is not worth resuming with no way to say so.
+   */
+  test("says what became of the run, that its session survived, and both ways forward", () => {
     const body = buildCommentBody({ ...base, excerpt: "boom" });
-    for (const line of failureLines({ agent: "atomaton", excerpt: "boom" })) {
-      expect(body, `missing from the failed run's comment: ${line}`).toContain(line);
-    }
+    expect(body).toContain("did not finish");
+    expect(body).toContain("The session was saved.");
+    expect(body).toContain("`/atomaton`");
+    expect(body).toContain("`/atomaton recover`");
+    expect(body).toContain("boom");
   });
 
   /**
@@ -1525,5 +1542,322 @@ describe("post_result_comment.ts on a run that reached its limit", () => {
     expect(r.body).not.toContain("@");
     // The tally is still there: it is this comment's now, not the notice's.
     expect(r.body).toContain("Spent on: 2 tool calls");
+  });
+});
+
+/**
+ * The excerpt a failure notice may carry, from the run's own log.
+ *
+ * It moved here with the notice: `report_run_failure.ts` was the file that had these
+ * tests and the step that ran it, and both are gone now that one writer posts a run's
+ * ending. The function lives in `lib/failure-notice.ts` and this file is where its
+ * output reaches a person, so the tests belong on this side of the move.
+ */
+describe("the log excerpt a failure notice carries", () => {
+  test("keeps only the lines that might say what went wrong", () => {
+    const log = ["starting up", "ERROR: could not connect", "reading file", "panic: nope"].join("\n");
+    const excerpt = logExcerpt(log);
+    expect(excerpt).toContain("ERROR: could not connect");
+    expect(excerpt).toContain("panic: nope");
+    expect(excerpt).not.toContain("reading file");
+  });
+
+  test("stops at five, because a comment is not a log viewer", () => {
+    const log = Array.from({ length: 20 }, (_, i) => `error ${i}`).join("\n");
+    expect(logExcerpt(log).split("\n")).toHaveLength(5);
+  });
+
+  /**
+   * The LAST five, not the first. A log opens with start-up chatter and ends with why it
+   * stopped, so the head of the matching set is the least likely part to answer.
+   */
+  test("keeps the end of the matching set, where the reason is", () => {
+    const log = ["error: connecting", "reading files", "error: still reading", "WARN: gave up"].join("\n");
+    expect(logExcerpt(log)).toBe("error: connecting\nerror: still reading\nWARN: gave up");
+  });
+
+  /**
+   * #441's only explanation was two WARN lines about a context budget, and an excerpt
+   * keyed to errors alone was empty in exactly the case it was needed.
+   */
+  test("a warning counts as something that might say what went wrong", () => {
+    expect(logExcerpt("starting\nWARN: Session exceeded its context limit (200430 of 200000 tokens)")).toContain(
+      "Session exceeded its context limit",
+    );
+  });
+
+  /**
+   * `unauthorized` is one of the words this greps for, and is exactly the line a
+   * provider emits with the credential in it. Actions masks secrets in the workflow log
+   * and does nothing for an issue comment.
+   */
+  test("credential-shaped text does not survive into the comment", () => {
+    // Built rather than written out, so this file never holds a credential-shaped
+    // literal: the pattern is what is under test, and an assembled one exercises it
+    // without teaching a scanner to flag the test.
+    const key = `sk-ant-api03-${"A".repeat(24)}`;
+    const excerpt = logExcerpt(`unauthorized: Bearer ${key}`);
+    expect(excerpt).not.toContain(key);
+    expect(excerpt).toContain("unauthorized");
+  });
+
+  test("a log with nothing interesting yields nothing", () => {
+    expect(logExcerpt("all fine\nstill fine")).toBe("");
+  });
+});
+
+/**
+ * The hard crash: "Run agent" exited non-zero, and nothing else in the run writes.
+ *
+ * This is the shape the second writer existed for. atoma dies (or the machinery inside
+ * the step does), the reads that turn atoma's exit into an ending never run — they
+ * handle 0 and 2 — so `--ended-because` arrives empty, `--reported` arrives empty,
+ * `--changed` arrives empty, and the session may not even have been written. What does
+ * arrive is `--outcome failure`, and on its own that is the whole of what the script
+ * needs: a step that failed with no ending recorded IS a failed run.
+ *
+ * Everything below runs the script the way the workflow runs it, through the fake `gh`,
+ * so the comment and the colour are both measured rather than read off the source.
+ */
+describe("post_result_comment.ts on a hard crash", () => {
+  /** The run directory as a crashed step leaves it: a log, and nothing else. */
+  function crashDir(log = "starting up\nERROR: provider returned 529 overloaded\n"): string {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-crash-"));
+    writeFileSync(join(dir, "atomaton_output.txt"), "");
+    writeFileSync(join(dir, "atomaton_logs.txt"), log);
+    return dir;
+  }
+
+  /**
+   * Exactly what the runner passes a crashed "Run agent" step.
+   *
+   * `--atoma-failed true` is the usual case — atoma itself exits non-zero — and a test
+   * can drop it to say the machinery failed instead. The absent flag is not a second
+   * mode the workflow has: it is what a failure BEFORE atoma (the tools file, the sudo
+   * preflight) leaves, which is exactly what has to read as the machinery's.
+   */
+  function crashArgs(dir: string, extra: string[] = []): string[] {
+    return [
+      "--number", "461", "--type", "issue", "--agent", "atomaton", "--notify", "octocat",
+      "--run-url", "http://example.com/run/1",
+      "--outcome", "failure",
+      "--output", join(dir, "atomaton_output.txt"),
+      "--logs-file", join(dir, "atomaton_logs.txt"),
+      "--ending-comment", join(dir, "ending-comment.json"),
+      "--session", join(dir, "session.json"),
+      "--people-file", join(dir, "callees.json"),
+      "--ask", "11", "--run-id", "22",
+      "--atoma-failed", "true",
+      ...extra,
+    ];
+  }
+
+  /** The same crash, told as the machinery's: the flag "Run agent" writes for atoma's own exit is simply not there. */
+  function machineryFailureArgs(dir: string): string[] {
+    return crashArgs(dir).filter((arg, index, all) => arg !== "--atoma-failed" && all[index - 1] !== "--atoma-failed");
+  }
+
+  /**
+   * One comment, and it is the notice. Exactly one, because a crash that posted twice
+   * would be the two-writers problem back in a different shape.
+   */
+  test("posts exactly one comment, and it is the did-not-finish notice", () => {
+    const dir = crashDir();
+    try {
+      const r = runWithFakeGh(scriptPath("post_result_comment.ts"), crashArgs(dir), {
+        cwd: dir,
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [{ match: ["api", "comments"], stdout: "42" }],
+      });
+      expect(r.status, r.stderr).toBe(0);
+
+      const posts = r.ghCalls.filter((call) => call.join(" ").includes("POST"));
+      expect(posts, "one comment, not two").toHaveLength(1);
+
+      const body = posts[0]?.join(" ") ?? "";
+      // The three sentences a person needs, and the two ways forward.
+      expect(body).toContain("did not finish");
+      expect(body).toContain("The session was saved");
+      expect(body).toContain("`/atomaton`");
+      expect(body).toContain("`/atomaton recover`");
+      // Where the run is, because a crashed run's log is the only explanation there is.
+      expect(body).toContain("http://example.com/run/1");
+      // The reason, out of the log.
+      expect(body).toContain("provider returned 529 overloaded");
+      // The tag the run watch and the thread guard read. Without it this comment is not
+      // an ending, and the node's guard stays holding the turn.
+      expect(body).toContain("atomaton:ended=done answers=11 run=22");
+      // The mention sentence a crashed run gets, rather than the "task completed" one a
+      // soft stop can reach: nothing finished here.
+      expect(body).toContain("stopped mid-run");
+      expect(body).toContain("@octocat");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The agent's own failure, notice posted: green. The notice IS the run's report, and a
+   * red run beside it repeats that news in Notifications, where it drowns the runs whose
+   * red is their only signal.
+   */
+  test("leaves the run green when the failure was atoma's own and the notice landed", () => {
+    const dir = crashDir();
+    try {
+      const r = runWithFakeGh(scriptPath("post_result_comment.ts"), crashArgs(dir), {
+        cwd: dir,
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [{ match: ["api", "comments"], stdout: "42" }],
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).not.toContain("The machinery failed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The machinery's failure: the notice still posts, and the run is red anyway. Red is
+   * the machinery's signal, and the thread is healed beside it, not instead of it.
+   *
+   * `atoma-failed` absent is how the workflow says whose the failure was — the flag is
+   * written only when atoma's own exit is a failure, and nothing else writes it.
+   */
+  test("leaves the run red when the failure was the machinery's, having still healed the thread", () => {
+    const dir = crashDir();
+    try {
+      const r = runWithFakeGh(scriptPath("post_result_comment.ts"), machineryFailureArgs(dir), {
+        cwd: dir,
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [{ match: ["api", "comments"], stdout: "42" }],
+      });
+      expect(r.status, "the machinery's failure stays red").not.toBe(0);
+      expect(r.stderr).toContain("The machinery failed");
+      expect(r.ghCalls.some((call) => call.join(" ").includes("did not finish"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A crash that left some text: the notice, plus that text labelled a fragment.
+   * Presenting the last thing said before a failure as the run's conclusion is the false
+   * claim the fragment warning exists to prevent — and on a crash `reported` is never
+   * written, so nothing else would have set it.
+   */
+  test("labels whatever text the crashed run left as a fragment", () => {
+    const dir = crashDir();
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "I read the config and found 13 keys.");
+      const r = runWithFakeGh(scriptPath("post_result_comment.ts"), crashArgs(dir), {
+        cwd: dir,
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [{ match: ["api", "comments"], stdout: "42" }],
+      });
+      expect(r.status, r.stderr).toBe(0);
+      const body = r.ghCalls.find((call) => call.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(body).toContain("did not finish");
+      expect(body).toContain("13 keys");
+      expect(body).toContain("ended before it wrote a report");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A crash on a run that claimed no ask: the notice still posts, and the ending names
+   * no ask. `0` is the honest record — the body of a new issue is not a comment — and it
+   * matches no real id, so a reader comparing ids reads it as an answer to nothing rather
+   * than guessing one.
+   */
+  test("posts for a crash on a run that claimed no ask, with the ids reading 0", () => {
+    const dir = crashDir();
+    try {
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        [
+          "--number", "461", "--agent", "atomaton", "--run-url", "http://example.com/run/1",
+          "--outcome", "failure", "--atoma-failed", "true",
+          "--output", join(dir, "atomaton_output.txt"),
+        ],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      const body = r.ghCalls.find((call) => call.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(body).toContain("atomaton:ended=done answers=0 run=0");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A crash with a recorded ending-comment still posts rather than patching it.
+   *
+   * The record says which comment a session-ending TOOL posted, and the old arrangement
+   * posted the failure notice beside it anyway: the tool says what the run did, the
+   * notice says that it then died, and only the second is an ending. Reading the record
+   * here would turn a crash into a footer on a comment that reads as a hand-off, and the
+   * thread would keep the tool's ending for a run that did not get that far.
+   */
+  test("posts rather than appending to an ending comment the run recorded", () => {
+    const dir = crashDir();
+    try {
+      writeFileSync(join(dir, "ending-comment.json"), JSON.stringify({ commentId: "42", node: "461" }));
+      const r = runWithFakeGh(scriptPath("post_result_comment.ts"), crashArgs(dir), {
+        cwd: dir,
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [{ match: ["api", "comments"], stdout: "43" }],
+      });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.ghCalls.some((call) => call.join(" ").includes("POST")), "the notice is posted").toBe(true);
+      expect(r.ghCalls.some((call) => call.includes("PATCH")), "and not appended to the tool's comment").toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A step that came back is a step that came back. `--outcome success` has to leave no
+   * trace at all, or the fold would have changed every ordinary run's comment.
+   */
+  test("says nothing about a failure when the step came back", () => {
+    const dir = crashDir("all fine\nnothing to report\n");
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "All done.");
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        [
+          "--number", "5", "--type", "issue", "--agent", "engineer", "--run-url", "http://example.com/run/1",
+          "--outcome", "success", "--output", join(dir, "atomaton_output.txt"),
+        ],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status, r.stderr).toBe(0);
+      const body = r.ghCalls.find((call) => call.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(body).toContain("All done.");
+      expect(body).not.toContain("did not finish");
+      expect(body).not.toContain("The session was saved");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * A notice `gh` refuses: red, and that is the only signal left. The exception is the
+   * signal, and the step's own failure is what the run shows.
+   */
+  test("exits non-zero when the comment itself cannot be posted", () => {
+    const dir = crashDir();
+    try {
+      const r = runWithFakeGh(scriptPath("post_result_comment.ts"), crashArgs(dir), {
+        cwd: dir,
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [{ match: ["api", "comments"], code: 1, stdout: "gh: refused" }],
+      });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("Failed to post result comment");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
