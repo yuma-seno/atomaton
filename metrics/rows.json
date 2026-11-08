@@ -8021,8 +8021,8 @@
   {
     "path": "sessions/issue-224/atomaton.json",
     "agent": "atomaton",
-    "messages": 76,
-    "calls": 41,
+    "messages": 82,
+    "calls": 43,
     "failed": 0,
     "refused": 0,
     "skills": [
@@ -8035,7 +8035,7 @@
       "get_issue_comments": 1,
       "read": 14,
       "atoma_builtin__load_skill": 1,
-      "fetch": 4,
+      "fetch": 6,
       "search_issues": 1,
       "search_code": 2,
       "grep": 4,
@@ -8135,6 +8135,20 @@
         "seconds": 93,
         "server_calls": {},
         "started": "2026-11-08T02:56:23Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-08T03:09:55Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 82,
+        "seconds": 200,
+        "server_calls": {
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-08T03:06:35Z"
       }
     ]
   },
