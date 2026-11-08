@@ -14,6 +14,7 @@
  * Pure. The GraphQL half lives in `adapters/github/issue-links.ts`.
  */
 import type { NodeState } from "./work-tree.ts";
+import { codeSegments } from "../../shared/fence.ts";
 
 export interface LinkedIssue {
   number: number;
@@ -210,20 +211,11 @@ export function closingKeywordRefusal(found: readonly string[], what: string): s
   );
 }
 
-/** A fenced code block, or an inline code span. The same rule `mention.ts` uses. */
-const CODE = /```[\s\S]*?```|`[^`\n]*`/g;
-
 /** The parts of `text` that are not inside code. */
 function outsideCode(text: string): string[] {
-  const out: string[] = [];
-  let last = 0;
-  for (const match of text.matchAll(CODE)) {
-    const at = match.index ?? 0;
-    out.push(text.slice(last, at));
-    last = at + match[0].length;
-  }
-  out.push(text.slice(last));
-  return out;
+  return codeSegments(text)
+    .filter((segment) => !segment.code)
+    .map((segment) => segment.text);
 }
 
 

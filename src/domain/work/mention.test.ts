@@ -52,6 +52,74 @@ describe("checking who an agent tried to notify", () => {
     expect(result.text).toContain("`@stranger`");
   });
 
+  /**
+   * A four-backtick fence holding a three-backtick sample is how a draft quotes a
+   * Markdown file, and GitHub renders the whole thing as one code block. Pairing
+   * three backticks wherever it found them read it as code, prose, code -- so the
+   * sample was rewritten while it was still displayed as code, which is the loss
+   * this whole module exists to avoid (#488).
+   */
+  test("a fence nested inside a longer fence is one code block, not two", () => {
+    const text = [
+      "Draft below, with @stranger named in prose.",
+      "",
+      "````markdown",
+      "```text",
+      "commit by @torvalds",
+      "```",
+      "````",
+      "",
+      "and @another outside.",
+    ].join("\n");
+    const result = escapeUnknownMentions(text, KNOWN);
+    // Byte for byte: the inner sample is code, so nothing in it is touched.
+    expect(result.text).toContain("```text\ncommit by @torvalds\n```");
+    expect(result.text).toContain("`@stranger`");
+    expect(result.text).toContain("`@another`");
+    expect(result.escaped).toEqual(["stranger", "another"]);
+  });
+
+  /** A fence that never closes is code to the end, which is the safe direction. */
+  test("an unclosed fence protects the rest of the comment", () => {
+    const text = ["```", "commit by @torvalds", "and @another line"].join("\n");
+    const result = escapeUnknownMentions(text, KNOWN);
+    expect(result.text).toBe(text);
+    expect(result.escaped).toEqual([]);
+  });
+
+  test("a tilde fence is a code block too", () => {
+    const text = ["~~~", "commit by @torvalds", "~~~", "but @stranger here"].join("\n");
+    const result = escapeUnknownMentions(text, KNOWN);
+    expect(result.text).toContain("commit by @torvalds");
+    expect(result.text).toContain("`@stranger`");
+    expect(result.escaped).toEqual(["stranger"]);
+  });
+
+  /**
+   * `> ``` ` is a code block on GitHub, so a name inside it notifies nobody -- and
+   * escaping it would put backticks inside the sample. Both halves of #488's rule,
+   * one container deeper.
+   */
+  test("a fence inside a blockquote is left exactly as written", () => {
+    const text = ["Quoted from the log:", "", "> ```", "> commit by @torvalds", "> ```", "", "and @stranger in prose"].join("\n");
+    const result = escapeUnknownMentions(text, KNOWN);
+    expect(result.text).toContain("> commit by @torvalds");
+    expect(result.text).toContain("`@stranger` in prose");
+    expect(result.escaped).toEqual(["stranger"]);
+  });
+
+  /**
+   * The shape of the comment that opened #488: prose naming an account, a draft
+   * quoted in a four-backtick block, and a closing mention. Only the prose is
+   * rewritten, and the draft reaches GitHub exactly as the run wrote it.
+   */
+  test("the issue-436 draft survives with only its prose escaped", () => {
+    const draft = ["ここに説明です。通知@0 の話。", "", "````markdown", "```text", "@torvalds が書いた", "```", "````", "", "おわり"].join("\n");
+    const result = escapeUnknownMentions(draft, KNOWN);
+    expect(result.text).toBe(draft.replace("通知@0", "通知`@0`"));
+    expect(result.escaped).toEqual(["0"]);
+  });
+
   test("an already escaped mention is not escaped twice", () => {
     const result = escapeUnknownMentions("see `@stranger` above", KNOWN);
     expect(result.text).toBe("see `@stranger` above");
@@ -119,6 +187,19 @@ describe("reading who was named", () => {
   /** Code is where a name is quoted rather than called. */
   test("code spans and fenced blocks are not prose", () => {
     expect(mentionsIn("ask `@a` or see:\n```\n@b\n```\n")).toEqual([]);
+  });
+
+  /** The nested shape is the one the old regex got wrong (#488). */
+  test("a sample inside a longer fence is not prose either", () => {
+    expect(mentionsIn(["see:", "````markdown", "```text", "@b", "```", "````"].join("\n"))).toEqual([]);
+  });
+
+  /**
+   * A quoted sample is not a call: a name in it was never `@`-ing anybody, and the
+   * old count would refuse a closing message for naming two things when it named one.
+   */
+  test("a quoted sample is not a call", () => {
+    expect(mentionsIn(["> ```", "> commit by @b", "> ```", "", "@c"].join("\n"))).toEqual(["c"]);
   });
 
   test("an email address and a scoped package are not mentions", () => {
