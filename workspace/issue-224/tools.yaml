@@ -1,0 +1,146 @@
+# Generated from .github/atomaton/config.yaml for this run. Not a file to edit or keep.
+hooks:
+  after_tool:
+    - /home/runner/work/atomaton/atomaton/.github/atomaton-runtime/tools/hooks/workspace_guard.ts
+  before_compaction:
+    - /home/runner/work/atomaton/atomaton/.github/atomaton-runtime/tools/hooks/archive_before_compaction.ts
+files:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/files.ts"
+  env: {}
+  hooks:
+    before_tool: /home/runner/work/atomaton/atomaton/.github/atomaton-runtime/tools/hooks/files_guard.ts
+    after_tool: /home/runner/work/atomaton/atomaton/.github/atomaton-runtime/tools/hooks/note_file_opened.ts
+  max_output_chars: 16000
+files_readonly:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/files.ts"
+  env: {}
+  hooks:
+    tool_allowlist:
+      - read
+      - grep
+      - glob
+      - list
+    before_tool: /home/runner/work/atomaton/atomaton/.github/atomaton-runtime/tools/hooks/files_guard.ts
+    after_tool: /home/runner/work/atomaton/atomaton/.github/atomaton-runtime/tools/hooks/note_file_opened.ts
+  max_output_chars: 16000
+shell:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/shell.ts"
+  env: {}
+  request_timeout_secs: 3600
+  hooks:
+    before_tool: /home/runner/work/atomaton/atomaton/.github/atomaton-runtime/tools/hooks/shell_guard.ts
+  max_output_chars: 16000
+github:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/github.ts"
+  env:
+    GH_TOKEN: "${GH_TOKEN}"
+  hooks: {}
+  max_output_chars: 16000
+web:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/web.ts"
+  env: {}
+  hooks: {}
+  max_output_chars: 16000
+search:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/search.ts"
+  env:
+    GH_TOKEN: "${GH_TOKEN}"
+  request_timeout_secs: 300
+  hooks: {}
+  max_output_chars: 16000
+atomaton:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/atomaton.ts"
+  env:
+    GH_TOKEN: "${GH_TOKEN}"
+  hooks: {}
+  max_output_chars: 16000
+attachments:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/attachments.ts"
+  env:
+    GH_TOKEN: "${GH_TOKEN}"
+  request_timeout_secs: 180
+  hooks: {}
+  max_output_chars: 16000
+atomaton_env:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/atomaton.ts"
+  env:
+    GH_TOKEN: "${GH_TOKEN}"
+  hooks:
+    tool_allowlist:
+      - reload_environment
+      - request_close_issue
+  max_output_chars: 16000
+delegate:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
+    - "--roster"
+    - delegate
+    - "--delegates-dir"
+    - .github/atomaton/delegates
+  env:
+    OPENAI_API_KEY: "${OPENAI_API_KEY}"
+    OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+    ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
+    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
+  request_timeout_secs: 660
+  hooks: {}
+  max_output_chars: 16000
+delegate_readonly:
+  unprefixed: true
+  command: bun
+  args:
+    - run
+    - "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/tools/mcp/delegate.ts"
+    - "--roster"
+    - delegate_readonly
+    - "--delegates-dir"
+    - .github/atomaton/delegates
+  env:
+    OPENAI_API_KEY: "${OPENAI_API_KEY}"
+    OPENROUTER_API_KEY: "${OPENROUTER_API_KEY}"
+    ORCAROUTER_API_KEY: "${ORCAROUTER_API_KEY}"
+    ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    ATOMA_COPILOT_TOKEN: "${ATOMA_COPILOT_TOKEN}"
+  request_timeout_secs: 660
+  hooks: {}
+  max_output_chars: 16000
