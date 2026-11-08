@@ -28,9 +28,16 @@ Build a plan to split this task into sub-issues.
 **`atomaton` is the one to start with.** It is the agent a person reaches first,
 and it decides what the request is — a question to answer, one leaf to do, or
 work to split into sub-issues and dispatch. Naming `engineer` or `reviewer`
-directly is for when you already know the work is one leaf or one review; the
-agents hand work to each other in the same words, so most runs are started by an
-agent rather than by a person.
+directly is for when you already know the work is one leaf or one review; the agents
+hand work to each other in the same words, so most runs are started by an agent rather
+than by a person.
+
+**A security audit is the one request where starting with `atomaton` matters.** It
+cuts the audit into areas and dispatches each one, and that is what brings the
+findings back: the run that audited an area closes it, and the close is what wakes
+`atomaton` to file the findings and write the reconciled report. Naming `auditor`
+yourself is fine for re-running one area, and it skips that step — the report arrives
+as that issue's closing comment, and filing and reconciliation are then yours.
 
 Text after an agent name on the command line is rejected rather than guessed at,
 because the name is used as a filename and as a shell word. A comment says so on

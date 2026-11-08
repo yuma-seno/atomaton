@@ -60,7 +60,7 @@ in [the README](../README.md).
    the request goes on the lines below. **Start with `atomaton`** — it is the
    agent a person reaches first, and it decides whether what you described is a
    question to answer, one leaf to do, or work to split into sub-issues. The
-   three that ship — `atomaton`, `engineer` and `reviewer` — are a template
-   rather than a fixed set: [what an agent definition
+   agents that ship — `atomaton`, `engineer`, `reviewer`, `architect` and
+   `auditor` — are a template rather than a fixed set: [what an agent definition
    is](agents/overview.md), and how to add one of your own. [How to ask, and what happens
    next](work/how-it-works/what-starts-a-run.md#how-to-ask).
