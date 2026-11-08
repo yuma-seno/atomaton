@@ -3,9 +3,21 @@
  * on the orphan `atomaton-data` git branch, this repo's persistent session
  * store (GitHub Actions runners have no other durable storage between runs).
  */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { gitRun } from "../../../adapters/github/gh.ts";
 import { ARCHIVE_DIR, sessionDir, workspaceDir } from "../../../domain/machinery/data-layout.ts";
 
@@ -294,6 +306,102 @@ export function restoreWorkspace(prefix: string, destDir: string): boolean {
   return true;
 }
 
+/** A copied directory: writable, because the worktree it is staged from is removed again. */
+const DIRECTORY_MODE = 0o755;
+/** A copied file. Permissions are not what the snapshot carries; the execute bit is. */
+const FILE_MODE = 0o644;
+/** The same, for a source file that has an execute bit for somebody. */
+const EXECUTABLE_FILE_MODE = 0o755;
+
+/**
+ * Copy the tree at `source` into the (empty) directory `destination`, returning the
+ * paths that were left out because this user cannot read them.
+ *
+ * ## Why not `cpSync`
+ *
+ * `cpSync` fails the whole tree on the first file it cannot read. The workspace is
+ * written by the tool user and saved by the runner -- two identities, one directory --
+ * so a file the agent's tools created 0600 is unreadable to the copy, and every other
+ * file in the workspace is lost with it. A path that cannot be read is skipped and
+ * named instead; the rest of the tree is worth more than any one of them.
+ *
+ * ## Why `.git` is not copied
+ *
+ * Committing a directory that holds a `.git` records it as a gitlink -- one entry,
+ * no contents -- so it does not preserve a clone's history, it makes the whole
+ * directory restore as an empty one. Measured, on a workspace holding one clone:
+ *
+ *     .git copied   160000 commit <sha>   workspace/issue-7/data-branch
+ *                   -> restored as an empty `data-branch/`
+ *     .git skipped  100644 blob <sha>     workspace/issue-7/data-branch/README.md
+ *                   -> restored as the files the agent had
+ *
+ * Leaving it out is the version that keeps what the agent left.
+ *
+ * ## Why the modes are normalized
+ *
+ * `git add` records 100644 or 100755 and nothing else, so the modes on disc matter only
+ * to the worktree staging them: a read-only directory cannot be removed when the next
+ * push attempt starts over, and a 000 file cannot be read by the `git` doing the add.
+ * The execute bit is carried because that one survives the commit.
+ *
+ * Returns undefined when `source` itself cannot be read. That is not a partial tree to
+ * save: staging an empty one over the previous snapshot would delete it, and a stale
+ * workspace is worth far more to the next run than none.
+ */
+function copyWorkspace(source: string, destination: string): string[] | undefined {
+  const skipped: string[] = [];
+
+  /** Walks `from` into `to`. False when `from` could not be listed at all. */
+  const copy = (from: string, to: string): boolean => {
+    let entries;
+    try {
+      entries = readdirSync(from, { withFileTypes: true });
+    } catch {
+      skipped.push(relative(source, from) || ".");
+      return false;
+    }
+    // Created only once its contents are known: a directory this user cannot list is
+    // left out whole rather than committed as an empty one, which the next run would
+    // restore as a directory that had lost everything in it.
+    mkdirSync(to, { recursive: true });
+    chmodSync(to, DIRECTORY_MODE);
+
+    for (const entry of entries) {
+      // Unprefixed and exact: `notes/.gitignore` is an ordinary file, and a `.git` that
+      // is a FILE rather than a directory is a worktree's pointer into one.
+      if (entry.name === ".git") continue;
+      const sourcePath = join(from, entry.name);
+      const targetPath = join(to, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          copy(sourcePath, targetPath);
+        } else if (entry.isSymbolicLink()) {
+          // Git stores a symlink as one, so this is the copy that keeps it: reading
+          // through the link would put a copy of somebody else's file in the snapshot.
+          symlinkSync(readlinkSync(sourcePath), targetPath);
+        } else if (entry.isFile()) {
+          copyFileSync(sourcePath, targetPath);
+          const executable = (statSync(sourcePath).mode & 0o111) !== 0;
+          chmodSync(targetPath, executable ? EXECUTABLE_FILE_MODE : FILE_MODE);
+        } else {
+          // A fifo or a socket. Nothing to carry, and reading one blocks.
+          skipped.push(relative(source, sourcePath));
+        }
+      } catch {
+        // Unreadable, or it went away between the listing and the copy. Either way the
+        // rest of the tree is worth more than this one path -- and a file the copy
+        // stopped halfway through is not a shorter version of it, so it does not stay.
+        rmSync(targetPath, { recursive: true, force: true });
+        skipped.push(relative(source, sourcePath));
+      }
+    }
+    return true;
+  };
+
+  return copy(source, destination) ? skipped : undefined;
+}
+
 /**
  * Replace `prefix` on the atomaton-data branch with the contents of `sourceDir`.
  *
@@ -333,7 +441,18 @@ export function saveWorkspace(prefix: string, sourceDir: string, commitMessage: 
       const target = join(worktreeDir, prefix);
       rmSync(target, { recursive: true, force: true });
       mkdirSync(dirname(target), { recursive: true });
-      cpSync(sourceDir, target, { recursive: true });
+      const skipped = copyWorkspace(sourceDir, target);
+      if (skipped === undefined) {
+        console.error(`[${DATA_BRANCH}] cannot read ${sourceDir}; leaving the previous workspace snapshot alone`);
+        break;
+      }
+      // A warning annotation rather than a log line: the save itself succeeds, so
+      // nothing else in the job says a file the agent left will not be there next run.
+      for (const path of skipped) {
+        console.error(
+          `::warning::workspace snapshot: left ${path} out, because the user saving it cannot read it`,
+        );
+      }
       gitIn(worktreeDir, "add", "--all", prefix);
 
       if (gitIn(worktreeDir, "diff", "--cached", "--quiet").code === 0) {

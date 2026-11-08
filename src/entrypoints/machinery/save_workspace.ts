@@ -52,13 +52,24 @@ function main(): void {
   // An empty workspace is still worth pushing: it is how a deletion takes effect.
   // The agent removing its notes and this skipping the save would leave them there
   // for the next run, which is the shape where deletions silently do not happen.
-  const count = readdirSync(source).length;
   const prefix = workspaceTargetPrefix(root);
-  const saved = saveWorkspace(
-    prefix,
-    source,
-    `atomaton: workspace for issue #${root}${values.agent ? ` (${values.agent})` : ""} — ${count} entries`,
-  );
+  // Caught rather than left to the runtime: an exception here ends the STEP non-zero,
+  // and the step's failure is the job's -- which is how a run that had already posted
+  // its report and saved its session exited 1 over a file it could not copy. The
+  // promise at the top of this file is that a failed save costs the next run its notes
+  // and nothing else, so every way of failing lands in the report below.
+  let count = 0;
+  let saved = false;
+  try {
+    count = readdirSync(source).length;
+    saved = saveWorkspace(
+      prefix,
+      source,
+      `atomaton: workspace for issue #${root}${values.agent ? ` (${values.agent})` : ""} — ${count} entries`,
+    );
+  } catch (error) {
+    console.error(`[atomaton-workspace] could not save ${prefix}: ${(error as Error).message}`);
+  }
 
   console.error(
     saved
