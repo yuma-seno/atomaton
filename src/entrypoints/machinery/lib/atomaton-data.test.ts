@@ -176,6 +176,56 @@ describe("saveWorkspace", () => {
     expect(stderr, "a dangling link is stored, not warned about").not.toContain("dangling.md");
   });
 
+  /**
+   * The other side of the `.git` skip: a prefix that ALREADY holds what the old code
+   * committed for a nested repository.
+   *
+   * Bookkeeping one of those the old way gives a GITLINK, and at that path the worktree
+   * holds an empty directory rather than a file. `git add --all` does not notice files
+   * beneath it -- the index keeps the gitlink and everything under it is dropped with no
+   * failure and no warning. The whole prefix has to be cleared from the index first.
+   */
+  test("replaces a gitlink the previous snapshot left at the same path", () => {
+    // A repository, so its commit id is one git can record as a gitlink.
+    const nested = join(root, "nested");
+    mkdirSync(nested);
+    git(nested, "init", "--quiet", "--initial-branch=main");
+    git(nested, "config", "user.email", "test@example.com");
+    git(nested, "config", "user.name", "Test");
+    fileAt(join(nested, "a.md"), "a\n");
+    git(nested, "add", "--all");
+    git(nested, "commit", "--quiet", "-m", "c");
+
+    git(repo, "worktree", "add", "--quiet", "--detach", join(root, "seed"), "origin/atomaton-data");
+    const seed = join(root, "seed");
+    fileAt(join(seed, "workspace/issue-7/old-notes.md"), "the previous run's notes\n");
+    git(seed, "add", "--all");
+    git(seed, "update-index", "--add", "--cacheinfo",
+      `160000,${git(nested, "rev-parse", "HEAD")},workspace/issue-7/data-branch`);
+    git(seed, "commit", "--quiet", "-m", "snapshot from before the .git skip");
+    git(seed, "push", "--quiet", "origin", "HEAD:refs/heads/atomaton-data");
+
+    // The workspace this run leaves: ordinary files where that gitlink was.
+    cloneInWorkspace(0o644);
+    writeFileSync(join(workspace, "data-branch", "README.md"), "what the agent checked out\n");
+
+    const { status, stderr } = save();
+
+    expect(status, `save_workspace.ts exited ${status}:\n${stderr}`).toBe(0);
+    const tree = snapshot();
+    expect(
+      tree.split("\n").filter((line) => line.startsWith("160000")),
+      "the gitlink has to be replaced, or every file beneath it is dropped",
+    ).toEqual([]);
+    expect(tree).toContain("workspace/issue-7/data-branch/README.md");
+    expect(tree, "the rest of the prefix is written as before").toContain(
+      "workspace/issue-7/notes.md",
+    );
+    expect(tree, "a file the previous snapshot had and this one does not is still replaced").not.toContain(
+      "old-notes.md",
+    );
+  });
+
   test.skipIf(RUNS_AS_ROOT)(
     "leaves the previous snapshot alone when the workspace cannot be read at all",
     () => {

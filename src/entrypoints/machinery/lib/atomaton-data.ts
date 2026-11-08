@@ -453,7 +453,18 @@ export function saveWorkspace(prefix: string, sourceDir: string, commitMessage: 
           `::warning::workspace snapshot: left ${path} out, because the user saving it cannot read it`,
         );
       }
-      gitIn(worktreeDir, "add", "--all", prefix);
+      // Clear the index's entries for the prefix before staging the new tree.
+      //
+      // `git add --all` alone is not enough, and the reason is measured rather than
+      // theoretical: a directory committed with a `.git` in it went in as a GITLINK, and
+      // at that path the worktree holds an empty directory rather than a file. Staging
+      // over it does not notice the files copied beneath -- the index keeps the gitlink
+      // and everything under it is dropped silently, which is the same empty-directory
+      // restore the `.git` skip exists to prevent, reached from the other side. One such
+      // entry is on `atomaton-data` now. `--ignore-unmatch` because a prefix nobody has
+      // saved yet is the ordinary first run.
+      gitIn(worktreeDir, "rm", "-r", "--cached", "--quiet", "--ignore-unmatch", "--", prefix);
+      gitIn(worktreeDir, "add", "--all", "--", prefix);
 
       if (gitIn(worktreeDir, "diff", "--cached", "--quiet").code === 0) {
         saved = true;
