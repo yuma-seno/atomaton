@@ -56,11 +56,12 @@ Nothing counts them, and nothing names them outside the files themselves.
 | `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |
 | `engineering/secrets-in-a-check` | A check you were asked for needs a real credential to mean anything. |
 | `research/web-search` | The answer is not in this repository. |
+| `writing/japanese` | Writing for a person in Japanese — the report, a question, a pull request body. |
 
 `skills/project/` is yours outright — the template ships nothing there and an
-upgrade will not fight you for it. The three above are defaults the template also
-expects you to tune. Adding an agent or a skill is a new file; the paths and the
-frontmatter are in
+upgrade will not fight you for it. The skills listed above are defaults the
+template also expects you to tune. Adding an agent or a skill is a new file; the
+paths and the frontmatter are in
 [the documentation](https://github.com/yuma-seno/atomaton/blob/main/docs/agents/overview.md).
 
 ## What is not here
