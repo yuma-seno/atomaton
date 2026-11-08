@@ -17116,9 +17116,9 @@
   {
     "path": "sessions/issue-436/atomaton.json",
     "agent": "atomaton",
-    "messages": 87,
-    "calls": 48,
-    "failed": 1,
+    "messages": 141,
+    "calls": 75,
+    "failed": 4,
     "refused": 1,
     "skills": [],
     "reported": true,
@@ -17126,15 +17126,16 @@
       "get_issue": 1,
       "list": 2,
       "search_code": 1,
-      "grep": 5,
-      "read": 11,
-      "bash": 22,
-      "fetch": 6
+      "grep": 6,
+      "read": 18,
+      "bash": 37,
+      "fetch": 9,
+      "write": 1
     },
     "acts": {
-      "other": 7,
-      "search": 13,
-      "open": 2
+      "other": 15,
+      "search": 19,
+      "open": 3
     },
     "runs": [
       {
@@ -17164,6 +17165,28 @@
           }
         },
         "started": "2026-11-03T14:28:47Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-08T02:54:21Z",
+        "ended_because": "completed",
+        "iterations": 24,
+        "messages": 141,
+        "seconds": 685,
+        "server_calls": {
+          "files": {
+            "grep": 1,
+            "read": 7,
+            "write": 1
+          },
+          "shell": {
+            "bash": 15
+          },
+          "web": {
+            "fetch": 3
+          }
+        },
+        "started": "2026-11-08T02:42:56Z"
       }
     ]
   },
