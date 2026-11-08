@@ -200,6 +200,10 @@ describe("reportFrom", () => {
     const text = reportFrom({ response: null, ended_because: "failed", seconds: 0, iterations: 0 });
     expect(text).not.toContain("needs longer than the sub-run's limit");
     expect(text).toContain("never reached a model");
+    // #459: the quota case is one of the never-reached-a-model endings, so the
+    // advice names the paid delegates as its fallback even before any stderr has
+    // arrived to name the cause.
+    expect(text).toContain("paid delegates in your tool list");
   });
 
   test("an ending after real work keeps the time-limit advice", () => {
