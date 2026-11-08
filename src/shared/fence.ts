@@ -34,30 +34,56 @@ export interface TextSegment {
  * Backtick fences may not carry backticks in their info string; that rule is what
  * keeps an inline `` `a` `` inside a sentence from opening a block.
  *
+ * A blockquote marker is stepped over before either test, because a fence inside a
+ * `>` is still a fence -- GitHub renders `> ``` ` as a code block and notifies
+ * nobody from it. Reading it as prose is not the safe direction: it puts backticks
+ * inside a sample a person is meant to read, which is the whole failure this module
+ * exists to avoid. A quote that ends takes its fence with it, so the lines after a
+ * `>` block are prose again.
+ *
  * An inline span is prose here. That is what the tag readers want -- a tag written
  * in a one-line example is still the machinery's word for what the run did -- and it
  * is not what a mention wants, which is why `codeSegments` is the wider one.
  *
- * An indented code block is not recognised, and deliberately: its indent is relative
- * to the enclosing list item, so a list nested by four spaces reads the same as a code
- * block unless a full block parser is here. Guessing wrong in the other direction
- * leaves a mention unescaped and a stranger notified, which is the mistake with no
- * symptom on this side, so the fence -- the unambiguous case -- is the one taken.
+ * An indented code block is not recognised, and deliberately. Deciding whether
+ * `    ` starts one needs list context: `    @name` is a list item's continuation
+ * paragraph -- prose GitHub notifies from -- and the same indent at the top level is
+ * code, and nothing in the line says which. So a fence indented four spaces is prose
+ * here, which is narrower than the regex this replaced.
+ *
+ * The header's ranking is what picks that side of the ambiguity: escaping a name that
+ * was already safe costs a comment that reads oddly, while leaving one unescaped
+ * notifies a stranger and leaves no trace here. Guessing "code" would take the
+ * mistake nobody finds out about, so the guess goes the other way even though it can
+ * put backticks in a sample.
  */
 export function fenceSegments(text: string): TextSegment[] {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const segments: TextSegment[] = [];
-  let open: { char: string; length: number } | null = null;
+  let open: { char: string; length: number; depth: number } | null = null;
   let current: TextSegment = { text: "", code: false };
+
+  const flush = (): void => {
+    if (current.text) segments.push(current);
+    current = { text: "", code: false };
+  };
 
   for (const line of lines) {
     const bare = line.replace(/\r?\n$/, "");
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
+    // The quote depth the line is written at, and its text with every marker gone.
+    const { depth, rest } = stripQuotes(bare, Number.POSITIVE_INFINITY);
+
+    if (open !== null && depth < open.depth) {
+      // The blockquote the fence opened in has ended, and a fence ends with its container.
+      flush();
+      open = null;
+    }
+
     if (open === null) {
-      const opens = fence !== null && (fence[1]![0] !== "`" || !fence[2]!.includes("`"));
-      if (opens) {
-        if (current.text) segments.push(current);
-        open = { char: fence[1]![0]!, length: fence[1]!.length };
+      const fence = FENCE.exec(rest);
+      if (fence !== null && (fence[1]![0] !== "`" || !fence[2]!.includes("`"))) {
+        flush();
+        open = { char: fence[1]![0]!, length: fence[1]!.length, depth };
         current = { text: line, code: true };
       } else {
         current.text += line;
@@ -66,15 +92,38 @@ export function fenceSegments(text: string): TextSegment[] {
     }
 
     current.text += line;
+    const fence = FENCE.exec(stripQuotes(bare, open.depth).rest);
     if (fence && fence[1]![0] === open.char && fence[1]!.length >= open.length && fence[2]!.trim() === "") {
-      segments.push(current);
-      current = { text: "", code: false };
+      flush();
       open = null;
     }
   }
 
-  if (current.text) segments.push(current);
+  flush();
   return segments;
+}
+
+/** A fence line, once the blockquote markers in front of it are gone. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/**
+ * How deep in a blockquote `line` sits, and the line with that many `>` markers and
+ * their optional trailing space removed.
+ *
+ * `limit` stops the peel early, which is how a line inside a blockquote is read at
+ * the depth the fence opened at -- one level deeper and a `>` written inside the
+ * sample would be mistaken for the quote's own marker.
+ */
+function stripQuotes(line: string, limit: number): { depth: number; rest: string } {
+  let rest = line;
+  let depth = 0;
+  while (depth < limit) {
+    const marker = /^ {0,3}> ?/.exec(rest);
+    if (marker === null) break;
+    rest = rest.slice(marker[0].length);
+    depth += 1;
+  }
+  return { depth, rest };
 }
 
 /**

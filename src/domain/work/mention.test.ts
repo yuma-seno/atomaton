@@ -96,6 +96,19 @@ describe("checking who an agent tried to notify", () => {
   });
 
   /**
+   * `> ``` ` is a code block on GitHub, so a name inside it notifies nobody -- and
+   * escaping it would put backticks inside the sample. Both halves of #488's rule,
+   * one container deeper.
+   */
+  test("a fence inside a blockquote is left exactly as written", () => {
+    const text = ["Quoted from the log:", "", "> ```", "> commit by @torvalds", "> ```", "", "and @stranger in prose"].join("\n");
+    const result = escapeUnknownMentions(text, KNOWN);
+    expect(result.text).toContain("> commit by @torvalds");
+    expect(result.text).toContain("`@stranger` in prose");
+    expect(result.escaped).toEqual(["stranger"]);
+  });
+
+  /**
    * The shape of the comment that opened #488: prose naming an account, a draft
    * quoted in a four-backtick block, and a closing mention. Only the prose is
    * rewritten, and the draft reaches GitHub exactly as the run wrote it.
@@ -179,6 +192,14 @@ describe("reading who was named", () => {
   /** The nested shape is the one the old regex got wrong (#488). */
   test("a sample inside a longer fence is not prose either", () => {
     expect(mentionsIn(["see:", "````markdown", "```text", "@b", "```", "````"].join("\n"))).toEqual([]);
+  });
+
+  /**
+   * A quoted sample is not a call: a name in it was never `@`-ing anybody, and the
+   * old count would refuse a closing message for naming two things when it named one.
+   */
+  test("a quoted sample is not a call", () => {
+    expect(mentionsIn(["> ```", "> commit by @b", "> ```", "", "@c"].join("\n"))).toEqual(["c"]);
   });
 
   test("an email address and a scoped package are not mentions", () => {

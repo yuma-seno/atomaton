@@ -156,6 +156,18 @@ describe("withoutTags on a fenced sample", () => {
     expect(AGENT_TAG.read(proseOnly(body))).toBeUndefined();
     expect(NOTIFY_TAG.read(proseOnly(body))).toBe("bob");
   });
+
+  /**
+   * A fence inside a blockquote is still a fence, and the machinery writes its tags
+   * in prose only -- so nothing it wrote is lost by stepping over a quoted sample,
+   * and a tag quoted one level down is no longer read as the run speaking.
+   */
+  test("a quoted fence is a sample too", () => {
+    const body = ["Someone quoting a result:", "", "> ```", `> ${AGENT_TAG.write("engineer")}`, "> ```", "", NOTIFY_TAG.write("bob")].join("\n");
+    expect(AGENT_TAG.read(proseOnly(body))).toBeUndefined();
+    expect(withoutTags(body)).toContain(`> ${AGENT_TAG.write("engineer")}`);
+    expect(NOTIFY_TAG.readProse(body)).toBe("bob");
+  });
 });
 
 /**

@@ -33,7 +33,13 @@ describe("where the code is", () => {
     expect(prose(["~~~", "```", "~~~", "after"].join("\n"))).toBe("after");
   });
 
-  /** Four spaces of indent is an indented code block, not a fence. */
+  /**
+   * Four spaces of indent is an indented code block, not a fence -- and a fence
+   * under a list item is indented to the item's content column, which is the same
+   * four spaces. Telling the two apart needs a block parser with list context, so
+   * this side reads both as prose. That is narrower than the regex this replaced,
+   * which matched a fence at any indent; the asymmetry is argued in `fence.ts`.
+   */
   test("a fence may be indented by up to three spaces and no more", () => {
     expect(prose("    ```\nafter")).toBe("    ```\nafter");
   });
@@ -55,5 +61,29 @@ describe("where the code is", () => {
   test("the segments give the argument back byte for byte", () => {
     const text = ["日本語の本文 @0", "", "````markdown", "```text", "@torvalds", "```", "````", "", "`a `b` c` end"].join("\n");
     expect(codeSegments(text).map((segment) => segment.text).join("")).toBe(text);
+  });
+
+  /**
+   * `> ``` ` is a code block on GitHub, so reading it as prose would put backticks
+   * inside a sample somebody is meant to read -- the failure this module exists for.
+   */
+  test("a fence inside a blockquote is code", () => {
+    const text = ["Quoted:", "> ```", "> commit by @torvalds", "> ```", "after"].join("\n");
+    expect(prose(text)).toBe("Quoted:\nafter");
+  });
+
+  /** A quote that ends takes its fence with it: the lines after are prose again. */
+  test("a fence does not outlive the blockquote it opened in", () => {
+    const text = ["> ```", "> code", "", "and @torvalds here"].join("\n");
+    expect(prose(text)).toBe("\nand @torvalds here");
+  });
+
+  test("a doubly quoted fence is code too", () => {
+    expect(prose([">> ```", ">> code", ">> ```", "after"].join("\n"))).toBe("after");
+  });
+
+  /** A `>` written inside the sample is sample text, not the quote's own marker. */
+  test("a marker deeper than the opener is part of the sample", () => {
+    expect(prose(["> ```", "> > quoted run", "> ```", "after"].join("\n"))).toBe("after");
   });
 });
