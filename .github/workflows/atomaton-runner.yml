@@ -187,7 +187,7 @@ jobs:
           echo "machinery moved to ${RUNNER_TEMP}/atomaton-machinery; the work tree holds only the repository"
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Resolve the issue's branch
         id: issue-branch

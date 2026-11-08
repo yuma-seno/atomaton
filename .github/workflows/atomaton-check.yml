@@ -33,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Read `checks.from_pull_request`
         id: plan
@@ -54,7 +54,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Read `checks.from_default_branch`
         id: plan
@@ -85,7 +85,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Run configured environment setup
         shell: bash
@@ -130,7 +130,7 @@ jobs:
           path: .atomaton-pull-request
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Run this check's commands
         shell: bash
@@ -188,7 +188,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Run configured environment setup
         shell: bash

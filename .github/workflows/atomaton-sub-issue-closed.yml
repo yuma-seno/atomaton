@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Check sub-issue closure (native parent link)
         id: check
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Check siblings and re-trigger atomaton
         shell: bash
@@ -74,7 +74,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Stop the run this close did not stop
         shell: bash
@@ -93,7 +93,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Take the turn labels off the closed issue
         shell: bash
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Prune stored data for issues that are over
         shell: bash
