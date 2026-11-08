@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Reconcile the run's ending
         shell: bash
@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Sweep the stale locks
         shell: bash

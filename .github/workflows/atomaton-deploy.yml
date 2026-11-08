@@ -50,7 +50,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Read `deploy` and select what this run is for
         id: plan
@@ -94,7 +94,7 @@ jobs:
           ref: ${{ matrix.ref }}
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Run configured environment setup
         shell: bash
@@ -163,7 +163,7 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Deploy any tag these deployments created
         shell: bash
