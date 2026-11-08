@@ -111,6 +111,23 @@ configuration rather than assuming.
 step that reads a file needs that file guaranteed present in the deployed tree, not
 merely present in the branch where it was authored.
 
+**A security-relevant line changed.** Four shapes, and this is a look rather than an
+audit. A whole-codebase pass is a separate audit, run when somebody asks for one; a
+review that tried to reproduce it here would cost what this gate is not worth paying.
+
+- a credential written into source, a fixture, a workflow or a command line, rather
+  than reached through the environment;
+- a new route, job, tool or operation that does something consequential with no
+  authorization check — and whether its siblings have one, which is the comparison
+  the diff cannot make;
+- untrusted input — a request field, an issue body, a fetched page, a filename —
+  reaching a shell, a query, a template or an agent's instructions;
+- a manifest and its lockfile changing apart, or a dependency added from a source
+  that is not the registry.
+
+Anything beyond these four is the audit's, not the review's: say so and leave it
+there rather than widening this gate into a scan.
+
 ## Outcome
 
 Decide from what you read, then act. Exactly one of these ends a run, and each is

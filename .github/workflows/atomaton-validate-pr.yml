@@ -61,7 +61,7 @@ jobs:
           path: pr-head
       - name: Setup Bun
         with:
-          bun-version: latest
+          bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
       - name: Install Atoma CLI
         shell: bash

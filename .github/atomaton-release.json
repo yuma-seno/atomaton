@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.60",
+  "version": "v0.21.61",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -84,6 +84,7 @@
     ".github/atomaton/README.md",
     ".github/atomaton/agent-definitions/architect.md",
     ".github/atomaton/agent-definitions/atomaton.md",
+    ".github/atomaton/agent-definitions/auditor.md",
     ".github/atomaton/agent-definitions/engineer.md",
     ".github/atomaton/agent-definitions/reviewer.md",
     ".github/atomaton/config.yaml",
@@ -108,6 +109,10 @@
     ".github/atomaton/skills/engineering/environment.md",
     ".github/atomaton/skills/engineering/secrets-in-a-check.md",
     ".github/atomaton/skills/research/web-search.md",
+    ".github/atomaton/skills/security/agent-prompt-surface.md",
+    ".github/atomaton/skills/security/gh-actions-surface.md",
+    ".github/atomaton/skills/security/on-demand-audit.md",
+    ".github/atomaton/skills/writing/japanese.md",
     ".github/workflows/atomaton-check.yml",
     ".github/workflows/atomaton-deploy.yml",
     ".github/workflows/atomaton-entry.yml",

@@ -17911,7 +17911,7 @@ function reportFrom(envelope, stderr = "", exitCode) {
   const because = envelope.ended_because ?? "failed";
   const why = stderr.trim() ? ` It reported: ${capText(stderr.trim(), 2000, "tail").text}` : "";
   const neverReachedAModel = (envelope.iterations ?? 0) === 0;
-  const advice = neverReachedAModel ? " Nothing was returned to report. The sub-run never reached a model, so the task's size " + "is not the answer; do the work here instead." : " Nothing was returned to report. If the task needs longer than the sub-run's limit, " + "do the work here instead.";
+  const advice = neverReachedAModel ? " Nothing was returned to report. The sub-run never reached a model, so the task's size " + "is not the answer; if the error above names an exhausted free allowance, send the task " + "to one of the paid delegates in your tool list \u2014 otherwise do the work here." : " Nothing was returned to report. If the task needs longer than the sub-run's limit, " + "do the work here instead.";
   const status = exitCode === undefined || exitCode === null ? "" : ` (exit ${exitCode})`;
   return `The delegate produced no report: the sub-run ended because of \`${because}\` ` + `after ${envelope.seconds ?? 0}s and ${envelope.iterations ?? 0} iteration(s)${status}.` + why + advice;
 }
@@ -18223,7 +18223,7 @@ function delegateDescription(def, shared) {
 }
 function tierText(frontmatter) {
   const free = (frontmatter.get("model") ?? "").endsWith("/free");
-  return free ? " This one is FREE, and its request limit is shared with every other agent using that tier " + "\u2014 so the way to find out whether a task fits is to try it. A refusal before you get an " + "answer means the task was too large for the tier, not that the task was wrong: ask for " + "less, or do the work here instead. When the shared allowance itself is used up, the " + "refusal says so (a 402 that names the exhausted free allowance) and no task fits: read " + "the report, and use one of the other delegates you were offered, or do the work here." : " This one is PAID, so reach for the free delegate first and come here when it has said the " + "task is too large \u2014 or when the task is obviously big enough that the refusal is certain.";
+  return free ? " This one is FREE, and its request limit is shared with every other agent using that tier " + "\u2014 so the way to find out whether a task fits is to try it. A refusal before you get an " + "answer means the task was too large for the tier, not that the task was wrong: ask for " + "less, or do the work here instead. When the shared allowance itself is used up, the " + "refusal says so (a 402 that names the exhausted free allowance) and no task fits: send " + "the task to one of the paid delegates in your tool list instead, or do the work here." : " This one is PAID, so reach for the free delegate first and come here when it has said the " + "task is too large or its allowance is used up \u2014 or when the task is obviously big enough " + "that the refusal is certain.";
 }
 function distinguishingText(role) {
   const firstParagraph = role.split(/\n\s*\n/)[0]?.trim() ?? "";

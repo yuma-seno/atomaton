@@ -150,7 +150,8 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/resolve_entry_agent.ts
 var ref = defineScript(import.meta.url);
-function commandLine(body) {
+function proseLines(body) {
+  const lines = [];
   for (const raw of body.split(`
 `)) {
     const line = raw.trim();
@@ -158,9 +159,14 @@ function commandLine(body) {
       continue;
     if (line.startsWith("<!--") && line.endsWith("-->"))
       continue;
-    return line;
+    lines.push(line);
   }
-  return "";
+  return lines;
+}
+var BARE_COMMAND = new RegExp(`^/(${AGENT_NAME_PATTERN})$`);
+function bareCommand(line) {
+  const m = BARE_COMMAND.exec(line);
+  return m?.[1];
 }
 function main() {
   const eventPath = process.env.GITHUB_EVENT_PATH;
@@ -173,19 +179,30 @@ function main() {
   }
   const event = JSON.parse(readFileSync(eventPath, "utf8"));
   const body = proseOnly(event.issue?.body ?? "");
-  if (!commandLine(body).startsWith("/"))
-    return;
-  const agent = commandLine(body).slice(1).trim();
-  if (!agent)
-    return;
-  if (!isAgentName(agent)) {
-    console.error(`::warning::Ignoring '/${agent}': an agent command must be a bare name on its own line ` + `(for example '/engineer'), with any instructions on the lines after it.`);
-    return;
-  }
-  if (githubOutput) {
-    appendFileSync(githubOutput, [`agent=${agent}`, `number=${number}`, "type=issue", `notify=${sender}`].join(`
+  const lines = proseLines(body);
+  const emit = (agent) => {
+    if (githubOutput) {
+      appendFileSync(githubOutput, [`agent=${agent}`, `number=${number}`, "type=issue", `notify=${sender}`].join(`
 `) + `
 `);
+    }
+  };
+  const first = lines[0] ?? "";
+  if (first.startsWith("/")) {
+    const agent = first.slice(1).trim();
+    if (agent && !isAgentName(agent)) {
+      console.error(`::warning::Ignoring '/${agent}': an agent command must be a bare name on its own line ` + `(for example '/engineer'), with any instructions on the lines after it.`);
+    } else if (agent) {
+      emit(agent);
+      return;
+    }
+  }
+  for (const line of lines.slice(1)) {
+    const agent = bareCommand(line);
+    if (agent !== undefined) {
+      emit(agent);
+      return;
+    }
   }
 }
 if (import.meta.main)

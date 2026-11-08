@@ -49,16 +49,22 @@ Nothing counts them, and nothing names them outside the files themselves.
 | `engineer` | Implements one engineer-ready leaf task, validates it, and opens a pull request. |
 | `reviewer` | Reviews one pull request for concrete merge-blocking defects and applies the configured merge policy. |
 | `architect` | Decides how to build something when it cannot be worked out from where the question was asked, and writes the decision down. Builds nothing. |
+| `auditor` | Audits one area of the repository for security weaknesses when asked, and reports evidence-backed findings. Changes nothing. |
 
 | Skill | When an agent loads it |
 | --- | --- |
 | `delivery/pipeline-setup` | `checks` is empty, a pull request comes back with no required check, or nothing deploys on merge. |
+| `docs/customer-doc` | A run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate. |
 | `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |
 | `engineering/secrets-in-a-check` | A check you were asked for needs a real credential to mean anything. |
 | `research/web-search` | The answer is not in this repository. |
+| `security/on-demand-audit` | Asked to run a security audit, or dispatching one — the procedure both ends follow. |
+| `security/gh-actions-surface` | An audit covers CI and workflow files. |
+| `security/agent-prompt-surface` | An audit covers an agent, its prompts, or its tool configuration. |
+| `writing/japanese` | Writing for a person in Japanese — the report, a question, a pull request body. |
 
 `skills/project/` is yours outright — the template ships nothing there and an
-upgrade will not fight you for it. The three above are defaults the template also
+upgrade will not fight you for it. The ones above are defaults the template also
 expects you to tune. Adding an agent or a skill is a new file; the paths and the
 frontmatter are in
 [the documentation](https://github.com/yuma-seno/atomaton/blob/main/docs/agents/overview.md).
