@@ -9,6 +9,7 @@
  */
 import { AGENT_NAME_PATTERN } from "../../domain/work/agent-name.ts";
 import { LOGIN_PATTERN } from "../../domain/work/mention.ts";
+import { fenceSegments } from "../../shared/fence.ts";
 
 /**
  * The prefix every tag carries, written once.
@@ -487,53 +488,4 @@ export function proseOnly(text: string): string {
   return fenceSegments(text)
     .map((segment) => (segment.code ? "\n" : segment.text))
     .join("");
-}
-
-interface TextSegment {
-  text: string;
-  /** Inside a fenced block: code, not prose. */
-  code: boolean;
-}
-
-/**
- * `text` in alternating runs of prose and fenced code, by CommonMark's rule:
- * a fence opens with at least three backticks or tildes (up to three spaces of
- * indent) and closes with the same character, at least as many of them, and
- * nothing else on the line. A fence never closed runs to the end of the text,
- * which is the safe direction -- the rest is evidence rather than bookkeeping.
- *
- * Backtick fences may not carry backticks in their info string; that rule is what
- * keeps an inline `` `a` `` inside a sentence from opening a block.
- */
-function fenceSegments(text: string): TextSegment[] {
-  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
-  const segments: TextSegment[] = [];
-  let open: { char: string; length: number } | null = null;
-  let current: TextSegment = { text: "", code: false };
-
-  for (const line of lines) {
-    const bare = line.replace(/\r?\n$/, "");
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
-    if (open === null) {
-      const opens = fence !== null && (fence[1]![0] !== "`" || !fence[2]!.includes("`"));
-      if (opens) {
-        if (current.text) segments.push(current);
-        open = { char: fence[1]![0]!, length: fence[1]!.length };
-        current = { text: line, code: true };
-      } else {
-        current.text += line;
-      }
-      continue;
-    }
-
-    current.text += line;
-    if (fence && fence[1]![0] === open.char && fence[1]!.length >= open.length && fence[2]!.trim() === "") {
-      segments.push(current);
-      current = { text: "", code: false };
-      open = null;
-    }
-  }
-
-  if (current.text) segments.push(current);
-  return segments;
 }

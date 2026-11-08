@@ -31,7 +31,13 @@
  * either, so there is nothing to prevent -- and adding backticks inside a code
  * block would change code somebody is meant to read. That is the one case where
  * doing the safe-looking thing is the destructive one.
+ *
+ * Where the code is comes from `shared/fence.ts`, which is also what decides it for
+ * the tag readers: it was a regex here pairing backticks anywhere it found them, so a
+ * four-backtick fence holding a three-backtick sample -- a draft quoting a Markdown
+ * file -- read as code, prose, code, and the sample was rewritten.
  */
+import { codeSegments } from "../../shared/fence.ts";
 
 /**
  * A GitHub login as GitHub itself allows one: alphanumerics and single hyphens,
@@ -54,9 +60,6 @@ export const LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}"
  * does the same for `@org/team`, which GitHub treats as a team.
  */
 const MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
-
-/** A fenced code block, or an inline code span, in that order of greed. */
-const CODE = /```[\s\S]*?```|`[^`\n]*`/g;
 
 export interface MentionCheck {
   /** The text, with unknown mentions wrapped in backticks. */
@@ -90,13 +93,16 @@ export function mentionsSomeone(text: string): boolean {
  *
  * Code is skipped for the same reason it is skipped there: GitHub does not notify
  * from a code span, so a name inside one is not a call either.
- * A fenced block is replaced by a space rather than deleted, so removing it cannot
+ * A code segment is replaced by a space rather than deleted, so removing it cannot
  * join the words on either side of it into a mention that was not written.
  */
 export function mentionsIn(text: string): string[] {
   const found: string[] = [];
   const seen = new Set<string>();
-  for (const match of text.replace(CODE, " ").matchAll(new RegExp(MENTION.source, "g"))) {
+  const prose = codeSegments(text)
+    .map((segment) => (segment.code ? " " : segment.text))
+    .join("");
+  for (const match of prose.matchAll(new RegExp(MENTION.source, "g"))) {
     const login = match[2]!;
     const key = login.toLowerCase();
     if (seen.has(key)) continue;
@@ -134,19 +140,14 @@ export function escapeUnknownMentions(text: string, known: Iterable<string>): Me
       return `${before}\`@${login}\``;
     });
 
-  // Walk the code spans and transform only what lies between them.
-  let out = "";
-  let last = 0;
-  CODE.lastIndex = 0;
-  for (const match of text.matchAll(CODE)) {
-    const at = match.index ?? 0;
-    out += transform(text.slice(last, at));
-    out += match[0];
-    last = at + match[0].length;
-  }
-  out += transform(text.slice(last));
-
-  return { text: out, escaped };
+  // Walk the segments and transform only the prose ones. Joining them back is
+  // byte-identical to the argument, because that is what `codeSegments` promises.
+  return {
+    text: codeSegments(text)
+      .map((segment) => (segment.code ? segment.text : transform(segment.text)))
+      .join(""),
+    escaped,
+  };
 }
 
 /**

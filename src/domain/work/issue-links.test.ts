@@ -82,6 +82,11 @@ describe("closingReferences", () => {
     expect(closingReferences("```\nCloses #1\n```")).toEqual([]);
   });
 
+  /** The sample inside a longer fence is one code block, not prose in the middle of it. */
+  test("a sample inside a longer fence is left alone too", () => {
+    expect(closingReferences("as in:\n````markdown\n```text\nCloses #1\n```\n````")).toEqual([]);
+  });
+
   test("the same reference twice is reported once", () => {
     expect(closingReferences("Closes #1 and Closes #1")).toEqual(["Closes #1"]);
   });
