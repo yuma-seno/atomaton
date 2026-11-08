@@ -54,12 +54,14 @@ Nothing counts them, and nothing names them outside the files themselves.
 | Skill | When an agent loads it |
 | --- | --- |
 | `delivery/pipeline-setup` | `checks` is empty, a pull request comes back with no required check, or nothing deploys on merge. |
+| `docs/customer-doc` | A run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate. |
 | `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |
 | `engineering/secrets-in-a-check` | A check you were asked for needs a real credential to mean anything. |
 | `research/web-search` | The answer is not in this repository. |
 | `security/on-demand-audit` | Asked to run a security audit, or dispatching one — the procedure both ends follow. |
 | `security/gh-actions-surface` | An audit covers CI and workflow files. |
 | `security/agent-prompt-surface` | An audit covers an agent, its prompts, or its tool configuration. |
+| `writing/japanese` | Writing for a person in Japanese — the report, a question, a pull request body. |
 
 `skills/project/` is yours outright — the template ships nothing there and an
 upgrade will not fight you for it. The ones above are defaults the template also

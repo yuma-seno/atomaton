@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { WORKSPACE_PATH } from "../../src/domain/work/workspace.ts";
 
 describe("agent prompt contracts", () => {
@@ -1001,5 +1002,45 @@ describe("agent prompt contracts", () => {
     );
     // The reason, not just the rule: a run that reads only "you cannot" looks for a way.
     expect(prompt).toContain("it would be a credential in the hands of code nobody has read yet");
+  });
+
+  /**
+   * A writing skill is only worth shipping if a run reaches it, and the catalog
+   * description is not enough on its own.
+   *
+   * The same mechanism measured on the reviewer applies here: one step asked for by
+   * two mechanisms was obeyed 224/227 through the one in the role prompt and 43/227
+   * through the skill, the difference being the mechanism rather than the wording.
+   * The report is written once, at the end of a run, with nothing after it to notice
+   * that a skill which shapes its sentences was never loaded — so the sentence that
+   * sends a run to it belongs in the template, and this holds it there.
+   *
+   * What is pinned is the property, not the prose: the template names writing for a
+   * person as the trigger, and a writing skill exists for the catalog to describe.
+   * Rewording either one still passes.
+   */
+  test("the prompt sends a run to a writing skill before it writes for a person", () => {
+    const prompt = readFileSync("src/content/prompt-template.md", "utf8").replace(/\s+/g, " ");
+    expect(prompt, "the trigger is writing for a person, not a category of work").toContain(
+      "Writing for a person",
+    );
+    expect(prompt, "and it says to load one, rather than naming one").toContain(
+      "a language the catalog has a writing skill for",
+    );
+    // The conclusion rule: the machinery's names are anchors, not the sentence's
+    // substance. Without it the vocabulary rule has nowhere to live, because the
+    // conclusion is the one part every report has.
+    expect(prompt).toContain("The conclusion is written for a person, not for a reader of the code");
+    expect(prompt, "one sentence carries one actor and one action").toContain(
+      "One sentence, one actor, one action",
+    );
+
+    const writing = readdirSync("src/content/skills", { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name === "writing")
+      .flatMap((entry) => readdirSync(join("src/content/skills", entry.name)));
+    expect(
+      writing.length,
+      "the template sends runs to a writing skill; with none shipped, that sentence sends them nowhere",
+    ).toBeGreaterThan(0);
   });
 });
