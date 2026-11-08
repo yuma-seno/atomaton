@@ -28,6 +28,7 @@ only: the reason behind a step is at the other end of that step's link.
 | [run an agent on a different model](agents/tasks/run-an-agent-on-a-different-model.md) | `model`, in an agent definition |
 | [add an agent of your own](agents/tasks/add-an-agent-of-your-own.md) | a new file under `agent-definitions/` |
 | [write a skill](agents/tasks/write-a-skill.md) | a new file under `skills/` |
+| [audit your repository for security weaknesses](agents/tasks/audit-a-repository-for-security-weaknesses.md) | nothing — one `/auditor` on an issue |
 | [have a screenshot reach an agent as a picture](agents/tasks/have-a-screenshot-reach-an-agent-as-a-picture.md) | `vision`, in an agent definition |
 | [switch between the Chat Completions and Responses APIs](agents/tasks/switch-between-the-chat-completions-and-responses-apis.md) | `provider`, in an agent definition |
 | [reach a provider the table does not list](agents/tasks/reach-a-provider-the-table-does-not-list.md) | the `OPENAI_BASE_URL` repository variable |

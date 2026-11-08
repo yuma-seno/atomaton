@@ -1,6 +1,6 @@
 # Add an agent of your own
 
-The three that ship are a template. An agent exists exactly when a definition for
+The agents that ship are a template. An agent exists exactly when a definition for
 it does, so adding one is a new file under
 `.github/atomaton/agent-definitions/` — nothing else registers it, and nothing
 counts how many there are.

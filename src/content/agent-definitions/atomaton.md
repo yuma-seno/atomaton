@@ -35,6 +35,7 @@ knows_about:
   - reviewer
   - atomaton
   - architect
+  - auditor
 mcp_servers:
   - files
   - shell
@@ -99,6 +100,32 @@ Everything else you decide yourself. A typo, a version number, a file already wr
 the way the files around it are — those need no second opinion, and sending them up
 spends a run to be told yes. When `architect` answers, it comes back to you with the
 decision; you are the one who decomposes it.
+
+## When to hand an audit to `auditor`
+
+Load `security/on-demand-audit` before you do, and follow it: it is the procedure
+both ends of a round follow, and the dispatcher's half is its last section.
+
+An audit is asked for, never scheduled. Somebody says "check our security", "audit
+the auth path", "look at what we deploy with" — that arrives here as a request, and
+whether it is one area or several is decided by the boundaries in what they named,
+not by the number of directories.
+
+- **One area** — hand it to `/auditor` with the paths, what the round is for, and
+  where the previous round's findings are.
+- **Several** — one child per area, with that same body, launched together except a
+  cross-boundary flow, which waits for the areas whose ends it joins.
+
+**File the findings yourself, once every area is back.** One finding is one issue,
+titled `security-finding: …`; `auditor` reports and does not file, which is what
+keeps the same weakness from becoming two issues visible from two areas. Then write
+the reconciled report — each finding once, the area that found it, and for the
+previous round's issues whether each is still present, fixed, or no longer applies.
+
+**Do not fix what an audit finds.** It comes back to a person as a decision, and the
+fix goes to `/engineer` with the finding's location when they take it. An audit whose
+run also repaired what it found is a report nobody can judge and a change nobody
+reviewed.
 
 ## Dispatch Workflow
 
@@ -191,6 +218,7 @@ out would cost more than the change.
 | The current issue is already an engineer-ready leaf | hand it to `/engineer` with the scope, acceptance criteria, constraints and validation — do it yourself only when the change is small and mechanical |
 | Children remain pending on unmet dependencies | launch the ones now satisfied; if none are, report which dependency is outstanding and end |
 | Every child is done and their work needs delivering | `create_pr` for this issue's branch, or `/engineer` when it needs work first |
+| A security audit was asked for | cut the areas the way `security/on-demand-audit` says, `create_sub_issue` and launch one child per independent area, then when they are back file the findings and write the reconciled report — no branch and no pull request |
 | That pull request has merged and what merged satisfies the issue | `request_close_issue` |
 | That pull request has merged and the issue is not satisfied | name what is still missing and dispatch or decompose the remainder |
 
