@@ -88,7 +88,11 @@ it is spelled. `shell` is here for scanners and for read-only inspection.
 
 **Do not file the findings as issues.** You report; the dispatcher files. One
 finding is one issue and they have to be created in one place, after every area has
-come back, or the same weakness is filed once per area that can see it.
+come back, or the same weakness is filed once per area that can see it. Your report
+reaches it by itself: the close below posts it on the parent's thread, and the close
+is what wakes the dispatcher. That is why an area is always dispatched as a sub-issue
+— so it is worth knowing that `get_issue` showing no parent means the run was started
+by a person, not that the report will vanish.
 
 **Do not open a pull request, and do not merge.** A fix is `engineer`'s, decided by
 a person from your report.

@@ -68,9 +68,9 @@ One area per run, and a cross-boundary flow is the **last** area and covers the
 whole path — the areas before it each established one end of the flow, and the run
 that has both ends in front of it is the one that can see the join.
 
-A small audit is one area; dispatch it directly rather than cutting one leaf per
-folder to look thorough. The split exists so that a large codebase can be read
-deeply, not so that a small one can be reported in fragments.
+A small audit is one area — and it is still one sub-issue. The split exists so that a
+large codebase can be read deeply, not so that a small one can be reported in
+fragments; but the sub-issue is not the split, it is the return path. See step 11.
 
 ## 3. Lenses
 
@@ -176,7 +176,7 @@ Vulgarity of caution is not a finding. Each of these is dropped, not downgraded:
 
 ## 8. The report
 
-Every area reports in this shape, and each finding carries all seven parts. A
+Every area reports in this shape, and each finding carries all eight parts. A
 finding missing one of them is not finished — the location and the impact are what a
 person decides from, and the evidence is what makes the location checkable.
 
@@ -270,18 +270,33 @@ reconciled report on the issue the audit was requested on. The reconciled report
 repeats each finding once, names which area found it, and states the comparison
 result for the previous round.
 
+**Every area therefore goes out as a sub-issue, including the only one.** That is the
+part that is easy to get wrong, because a small audit looks like it should not need
+the ceremony. It is not ceremony: the dispatcher is a run, and it is re-invoked when
+one of its children closes — a child closing, or a pull request merging, and nothing
+else. A handoff directly to the agent that audits ends the dispatcher's run and starts
+nothing on its return, so a round dispatched that way produces a report on a thread
+nobody is reading and no `security-finding:` issues at all. The next round then
+compares against nothing.
+
+So: one area, one child, one line in the dispatch. The cost of the extra issue is one
+GitHub object; the cost of the alternative is that the filing step never happens.
+
+The alternative — the auditor filing the root issues itself when nobody dispatched it
+— would put the list in two places and gives up the reconciliation that deduplicates
+across areas. It is worse, and it is written down here only so a later round does not
+reinvent it.
+
 ## 12. Running a round, from the dispatching side
 
 1. **Read** the request, and establish the scope as in step 1.
-2. **Cut the areas** as in step 2. One area is handed straight to the agent that
-   audits, with the paths and what the round is for — a sub-issue cut only to hold
-   one area buys a round trip and nothing else. Several areas become one sub-issue
-   each, and each body names its area (paths and boundaries), what the round is for,
-   and where the previous round's findings are — the title prefix to search, not a
-   list repeated by hand.
+2. **Cut the areas** as in step 2, and give each one its own sub-issue — one area
+   included, for the re-invocation reason in step 11. Its body names the area (paths
+   and boundaries), what the round is for, and where the previous round's findings
+   are — the title prefix to search, not a list repeated by hand.
 3. **Launch the ones that are independent.** Areas that share a boundary are worth
    launching together; the cross-boundary flow goes last, and it is the one that has
-   to wait.
+   to wait. When there is one area this step is one `launch_sub_agent` with one task.
 4. **Reconcile** what comes back as in steps 10 and 11, and report.
 5. **Hand the fixes over, do not make them.** What a person decides to fix goes to
    the agent the project uses for implementation — with the finding, its location,

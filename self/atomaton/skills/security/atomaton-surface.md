@@ -20,7 +20,7 @@ The natural cut is not by directory — it is by what each part is trusted with:
 | Area | What is in it | What makes it its own area |
 | --- | --- | --- |
 | `src/workflows/` | the workflow generator, and the YAML it emits | it decides `${{ }}` expansion, triggers, `permissions` and `uses:` for every workflow an adopter runs. Read with `security/gh-actions-surface` |
-| `self/workflows/` | the two hand-written workflows, one holding `SELF_DEPLOY_TOKEN` | the only workflows no generator produces, and the only place a token this repository owns is written down |
+| `self/workflows/` | the two hand-written workflows, both holding `SELF_DEPLOY_TOKEN` | the only workflows no generator produces, and the only place a token this repository owns is written down |
 | `src/entrypoints/machinery/` | the glue each generated step runs | it runs on the default branch with a write token and treats the pull request's tree as data. The whole trust story is which tree a script is executed from and which one it merely reads |
 | `src/adapters/` | GitHub, actions and MCP adapters, including dispatch | the boundary between "we decided" and "GitHub did it": dispatch, the closed-target guard, the ops log |
 | `src/entrypoints/tools/mcp/` | the tool servers an agent is handed | credential routing, the hook layer, and the hooks that can and cannot be a boundary |
@@ -29,8 +29,10 @@ The natural cut is not by directory — it is by what each part is trusted with:
 | `self/` | this repository's overlay onto `.github/` | applied as soon as it merges, unlike `src/` |
 | `package.json` + `bun.lock` | the toolchain every run installs | supply chain, structurally — `bun audit` for the advisory half |
 
-`src/lib/` is a kernel both halves import, and it is not an area of its own: its
-weaknesses show up at the boundary that uses it, where the input and the sink are.
+`src/shared/` is a leaf kernel both halves import, and it is not an area of its own:
+its weaknesses show up at the boundary that uses it, where the input and the sink
+are. (`src/build-dist.ts` still calls it `src/lib/**` in a comment; the directory has
+not been that for a while, and the comment is a separate fix.)
 
 ## Decisions that already constrain a finding
 

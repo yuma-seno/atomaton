@@ -1,13 +1,21 @@
 # Audit a repository for security weaknesses
 
-Ask for an audit on an issue, and `auditor` reads an area of your repository,
-verifies what it finds, and reports with evidence. It changes nothing and opens no
-pull request.
+Ask for an audit on an issue, and `atomaton` cuts it into areas, has each one audited,
+and reports what was found. The audit reads your repository and verifies what it
+finds. It changes nothing and opens no pull request.
 
 ```text
-/auditor
+/atomaton
 Audit the API layer: src/api/, and the boundary between it and the database.
 ```
+
+**Ask with `/atomaton`, even when it is one area.** Each area is dispatched as its own
+sub-issue, and that is what brings the findings back: the run that audited an area
+closes it, and the close re-invokes `atomaton` to file the findings and write the
+reconciled report. Naming `/auditor` yourself skips that — you get the report as that
+issue's closing comment, and filing and reconciliation are then yours. That is a
+reasonable way to re-run one area you already know how to handle, and the wrong way to
+run a round you want recorded.
 
 The area is yours to name. Name paths, a boundary, a concern — "the authentication
 path", "how we deploy", "everything under `services/billing/`". With no area named,
@@ -62,6 +70,7 @@ which are exact and free and cannot be argued out of a finding. [Give a reposito
 pipeline an agent can write and maintain](../../pipeline/tasks/give-a-repository-a-pipeline-an-agent-can-write-and-maintain.md)
 is where those go.
 
-The skills the agent loads are `security/on-demand-audit`, `security/gh-actions-surface`
-and `security/agent-prompt-surface`; [write a skill](write-a-skill.md) is how they are
-shaped, and how to change what one of them says.
+The skills the auditor loads are `security/on-demand-audit`,
+`security/gh-actions-surface` and `security/agent-prompt-surface`; [write a
+skill](write-a-skill.md) is how they are shaped, and how to change what one of them
+says.

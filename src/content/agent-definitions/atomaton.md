@@ -108,13 +108,16 @@ both ends of a round follow, and the dispatcher's half is its last section.
 
 An audit is asked for, never scheduled. Somebody says "check our security", "audit
 the auth path", "look at what we deploy with" — that arrives here as a request, and
-whether it is one area or several is decided by the boundaries in what they named,
-not by the number of directories.
+the areas are decided by the boundaries in what they named, not by the number of
+directories.
 
-- **One area** — hand it to `/auditor` with the paths, what the round is for, and
-  where the previous round's findings are.
-- **Several** — one child per area, with that same body, launched together except a
-  cross-boundary flow, which waits for the areas whose ends it joins.
+**Cut one sub-issue per area and launch them, even when there is only one area.** The
+sub-issue is not bureaucracy — it is the return path. This run is re-invoked when one
+of its children closes, and by nothing else, so an area handed over directly reports
+into a thread no run is reading and the findings never get filed. One area is one
+child; several are one child each, launched together except a cross-boundary flow,
+which waits for the areas whose ends it joins. Each body carries the paths and
+boundaries, what the round is for, and where the previous round's findings are.
 
 **File the findings yourself, once every area is back.** One finding is one issue,
 titled `security-finding: …`; `auditor` reports and does not file, which is what
@@ -218,7 +221,7 @@ out would cost more than the change.
 | The current issue is already an engineer-ready leaf | hand it to `/engineer` with the scope, acceptance criteria, constraints and validation — do it yourself only when the change is small and mechanical |
 | Children remain pending on unmet dependencies | launch the ones now satisfied; if none are, report which dependency is outstanding and end |
 | Every child is done and their work needs delivering | `create_pr` for this issue's branch, or `/engineer` when it needs work first |
-| A security audit was asked for | cut the areas the way `security/on-demand-audit` says, `create_sub_issue` and launch one child per independent area, then when they are back file the findings and write the reconciled report — no branch and no pull request |
+| A security audit was asked for | cut the areas the way `security/on-demand-audit` says, then `create_sub_issue` and `launch_sub_agent` for **every** area including a lone one — a direct handoff reports to no run, so nothing files the findings. No branch and no pull request; when the children are back, file the findings and write the reconciled report |
 | That pull request has merged and what merged satisfies the issue | `request_close_issue` |
 | That pull request has merged and the issue is not satisfied | name what is still missing and dispatch or decompose the remainder |
 

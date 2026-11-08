@@ -8,8 +8,8 @@
  *
  * - a skill named by an agent definition that no file answers — `load_skill` comes
  *   back empty and the run proceeds without the procedure it was told to follow;
- * - an `auditor` that names a writing server, which turns a report-only role into a
- *   run that can change the tree it is judging;
+ * - an `auditor` that names `files` or `delegate`, the two servers that would turn a
+ *   report-only role into a run able to change the tree it is judging;
  * - a report format that lost the part somebody acts on — the location, the separate
  *   confidence, the advisory a dependency finding rests on — because nothing fails
  *   when a paragraph is deleted from a prompt.
@@ -42,6 +42,7 @@ const read = (path: string): string => readFileSync(path, "utf8").replace(/\s+/g
  * silently checks an empty string for anyone on Windows.
  */
 
+const atomaton = read(join(AGENT_DIR, "atomaton.md"));
 const auditorRaw = readFileSync(join(AGENT_DIR, "auditor.md"), "utf8");
 const auditor = auditorRaw.replace(/\s+/g, " ");
 const procedure = read(join(SKILL_DIR, "security/on-demand-audit.md"));
@@ -49,18 +50,28 @@ const reviewer = read(join(AGENT_DIR, "reviewer.md"));
 
 describe("the auditor", () => {
   /**
-   * The role is report-only, and `mcp_servers` is what makes that true rather than
-   * the prompt. `files` writes; `delegate` holds a sub-run that writes.
+   * The two servers that make the role report-only by construction, absent.
+   *
+   * What this establishes is narrower than "nothing here can write", and the
+   * difference is worth stating because a later reader will rely on it: `shell` is
+   * in the list below and a shell writes. `files` and `delegate` are the write
+   * capability withheld; `shell` is present for the scanners, and what keeps it
+   * from being used to edit is the role text in `auditor.md` and the guard the
+   * shell server applies — neither of which is a tool-set fact this test can assert.
+   * An assertion that claimed the stronger property would pass while the weaker one
+   * was all that held.
    */
-  test("holds no server that can change the tree", () => {
+  test("withholds `files` and `delegate`, and holds the read-only versions", () => {
     const frontmatter = frontmatterOf(auditorRaw);
     const servers = /mcp_servers:\r?\n((?:\s*(?:#.*)?\r?\n|\s*-.*\r?\n)*)/.exec(frontmatter)?.[1] ?? "";
     const named = [...servers.matchAll(/^\s*-\s*(\S+)/gm)].map((m) => m[1]!);
 
     expect(named, "an auditor with no tools cannot audit").not.toEqual([]);
-    expect(named, "`files` writes, and this role makes no change").not.toContain("files");
-    expect(named, "the writing delegate is a write one tool call away").not.toContain("delegate");
+    expect(named, "`files` carries the write tools the role must not have").not.toContain("files");
+    expect(named, "`delegate` runs a sub-agent holding writing servers").not.toContain("delegate");
     // Reading, a scanner, and the thread it reports on -- plus the read-only pair.
+    // `shell` is here on purpose: a dependency audit is a command, and the role text
+    // is what keeps it to reading. See the doc comment above.
     for (const server of ["files_readonly", "shell", "github", "web", "search", "delegate_readonly"]) {
       expect(named, `${server} is what this role does its work with`).toContain(server);
     }
@@ -79,6 +90,39 @@ describe("the auditor", () => {
    */
   test("is told not to file findings itself", () => {
     expect(auditor).toContain("Do not file the findings as issues");
+  });
+});
+
+/**
+ * A round's findings are filed by a run that is re-invoked when one of its children
+ * closes, and by nothing else. So a handoff that names the auditor directly, with no
+ * sub-issue, ends the dispatcher's run and starts nothing on its return — the report
+ * lands on a thread no run is reading and no `security-finding:` issue is created.
+ *
+ * That is easy to reintroduce, because a one-area audit *looks* like it should not
+ * need the ceremony, and the sentence saying so is a plausible thing to write. The
+ * cost of the bug is invisible until a second round, which then compares against
+ * nothing and concludes the first round found nothing.
+ */
+describe("a round always has a return path", () => {
+  test("every area is a sub-issue, including the only one", () => {
+    expect(atomaton, "the dispatcher cuts a child per area, a lone area included").toContain(
+      "even when there is only one area",
+    );
+    expect(atomaton, "and says what the sub-issue is for").toContain("it is the return path");
+    expect(procedure, "the procedure says the same, for the same reason").toContain(
+      "including the only one",
+    );
+    // The direct handoff for a single area is the defect, not a shorthand.
+    expect(atomaton, "a lone area handed straight over files nothing").not.toContain(
+      "**One area** — hand it to",
+    );
+  });
+
+  test("the agent that reports can close, which is what wakes the dispatcher", () => {
+    expect(auditor, "the close is the report's route to the parent").toContain(
+      "closing is what wakes it to reconcile",
+    );
   });
 });
 
@@ -106,9 +150,16 @@ describe("the audit procedure", () => {
    * dependency claim checkable.
    */
   test("carries the fields a finding is decided from", () => {
-    for (const field of ["Class:", "Location:", "Evidence:", "Impact:", "Severity:", "Confidence:", "Fix:", "Source:"]) {
+    const fields = ["Class:", "Location:", "Evidence:", "Impact:", "Severity:", "Confidence:", "Fix:", "Source:"];
+    for (const field of fields) {
       expect(procedure, `a finding without ${field} is not finished`).toContain(field);
     }
+    // The count is stated as well as the list, and a run told a lower number drops
+    // one — most likely `Source` or `Confidence`, the two the file argues for.
+    expect(procedure, "the stated count has to match the fields").toContain(
+      "all eight parts",
+    );
+    expect(procedure, "and the old miscount must not come back").not.toContain("seven parts");
   });
 
   /** Verified against a primary advisory, never a remembered one. */
