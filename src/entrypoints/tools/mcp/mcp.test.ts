@@ -3976,8 +3976,11 @@ describe("mcp/delegate.ts", () => {
     expect(byName.get("delegate")).toContain("shared with every other agent");
     // #238: the exhaustion case is named, and names no other delegate — the paid
     // delegates are files a project renames or deletes, so the description points
-    // at "the other delegates you were offered", never at a spelled name.
+    // at "the paid delegates in your tool list", never at a spelled name.
     expect(byName.get("delegate")).toContain("no task fits");
+    // #459: the fallback is said in so many words — a caller reading the 402 is
+    // told where to take the task next, not left with the work alone.
+    expect(byName.get("delegate")).toContain("paid delegates in your tool list");
     // `delegate_readonly` lives on the other roster; this test reads the `delegate`
     // roster's tools alone.
     const ro = await sendRequest(

@@ -688,10 +688,11 @@ function delegateDescription(def: ResolvedDelegate, shared: string): string {
  * The free tier's refusal is described by its OBSERVED shape, never by the paid
  * delegates' names (#238): those are files a project renames and deletes, and a
  * name spelled here would outlive the file it named — the same layering rule that
- * keeps every other definition fact in the definitions. The refusal itself carries
- * the cause verbatim (`402`, `free_quota_exhausted`, the billing URL), so the
- * caller that wants a paid path reads the report and picks among the delegates it
- * was actually offered.
+ * keeps every other definition fact in the definitions. "Paid" is a property the
+ * caller can check against its own tool list, so the fallback is named by that
+ * property. On a 402 the sub-run never reaches a model and returns nothing, so
+ * there is no report to read: the caller is pointed at the paid delegates
+ * outright (#459).
  */
 function tierText(frontmatter: Map<string, string>): string {
   const free = (frontmatter.get("model") ?? "").endsWith("/free");
@@ -700,10 +701,11 @@ function tierText(frontmatter: Map<string, string>): string {
         "— so the way to find out whether a task fits is to try it. A refusal before you get an " +
         "answer means the task was too large for the tier, not that the task was wrong: ask for " +
         "less, or do the work here instead. When the shared allowance itself is used up, the " +
-        "refusal says so (a 402 that names the exhausted free allowance) and no task fits: read " +
-        "the report, and use one of the other delegates you were offered, or do the work here."
+        "refusal says so (a 402 that names the exhausted free allowance) and no task fits: send " +
+        "the task to one of the paid delegates in your tool list instead, or do the work here."
     : " This one is PAID, so reach for the free delegate first and come here when it has said the " +
-        "task is too large — or when the task is obviously big enough that the refusal is certain.";
+        "task is too large or its allowance is used up — or when the task is obviously big enough " +
+        "that the refusal is certain.";
 }
 
 /**

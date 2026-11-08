@@ -239,7 +239,11 @@ export interface RunEnvelope {
  *
  * The advice is conditional on the ending it fits. `iterations` of zero means the
  * sub-run never reached a model, so nothing timed out and no prompt was measured —
- * pointing the caller at the task's size there is the mistake #178 recorded.
+ * pointing the caller at the task's size there is the mistake #178 recorded. An
+ * exhausted free allowance is the one never-reached-a-model ending a paid delegate
+ * can fix, so the advice names that case and its fallback; the stderr appended just
+ * before it carries the cause verbatim, which is how the caller tells one from the
+ * other (#459).
  */
 export function reportFrom(envelope: RunEnvelope, stderr = "", exitCode?: number | null): string {
   const response = (envelope.response ?? "").trim();
@@ -249,7 +253,8 @@ export function reportFrom(envelope: RunEnvelope, stderr = "", exitCode?: number
   const neverReachedAModel = (envelope.iterations ?? 0) === 0;
   const advice = neverReachedAModel
     ? " Nothing was returned to report. The sub-run never reached a model, so the task's size " +
-      "is not the answer; do the work here instead."
+      "is not the answer; if the error above names an exhausted free allowance, send the task " +
+      "to one of the paid delegates in your tool list — otherwise do the work here."
     : " Nothing was returned to report. If the task needs longer than the sub-run's limit, " +
       "do the work here instead.";
   const status = exitCode === undefined || exitCode === null ? "" : ` (exit ${exitCode})`;
