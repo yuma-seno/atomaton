@@ -17114,8 +17114,8 @@
   {
     "path": "sessions/issue-437/atomaton.json",
     "agent": "atomaton",
-    "messages": 31,
-    "calls": 21,
+    "messages": 35,
+    "calls": 22,
     "failed": 0,
     "refused": 0,
     "skills": [],
@@ -17128,7 +17128,8 @@
       "grep": 2,
       "search_code": 1,
       "get_pr": 6,
-      "read": 3
+      "read": 3,
+      "request_close_issue": 1
     },
     "acts": {
       "other": 1
@@ -17160,6 +17161,20 @@
           }
         },
         "started": "2026-11-08T02:24:09Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-08T02:36:54Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 35,
+        "seconds": 61,
+        "server_calls": {
+          "atomaton": {
+            "request_close_issue": 1
+          }
+        },
+        "started": "2026-11-08T02:35:53Z"
       }
     ]
   },
