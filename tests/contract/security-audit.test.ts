@@ -43,6 +43,9 @@ const read = (path: string): string => readFileSync(path, "utf8").replace(/\s+/g
  */
 
 const atomaton = read(join(AGENT_DIR, "atomaton.md"));
+const auditTaskPage = read("docs/agents/tasks/audit-a-repository-for-security-weaknesses.md");
+const docMap = read("docs/README.md");
+const startingARun = read("docs/work/how-it-works/what-starts-a-run.md");
 const auditorRaw = readFileSync(join(AGENT_DIR, "auditor.md"), "utf8");
 const auditor = auditorRaw.replace(/\s+/g, " ");
 const procedure = read(join(SKILL_DIR, "security/on-demand-audit.md"));
@@ -116,6 +119,24 @@ describe("a round always has a return path", () => {
     // The direct handoff for a single area is the defect, not a shorthand.
     expect(atomaton, "a lone area handed straight over files nothing").not.toContain(
       "**One area** — hand it to",
+    );
+  });
+
+  /**
+   * The instruction is only as good as the page that sends people to it. The task
+   * page says to ask with `/atomaton`, and two pages route a reader to that page —
+   * the docs map, and the page on how a run starts. Both said `/auditor`, which is
+   * the shortcut the task page itself calls the wrong way to run a round you want
+   * recorded. A reader arrives at the advice through those two, not through the task
+   * page, so leaving them is leaving the defect in place behind a fixed page.
+   */
+  test("the pages that route to the audit also say `/atomaton`", () => {
+    expect(docMap, "the map row is the front door to the task page").toContain(
+      "one `/atomaton` on an issue",
+    );
+    expect(docMap, "and it must not offer the shortcut").not.toContain("one `/auditor` on an issue");
+    expect(startingARun, "naming `auditor` directly costs the filing step, and says so").toContain(
+      "it skips that step",
     );
   });
 
