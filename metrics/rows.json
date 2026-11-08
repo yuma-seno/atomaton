@@ -20818,6 +20818,62 @@
     ]
   },
   {
+    "path": "sessions/issue-488/reviewer.json",
+    "agent": "reviewer",
+    "messages": 78,
+    "calls": 49,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions",
+      "writing/japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "read": 14,
+      "grep": 25,
+      "load_skill": 2,
+      "get_pr": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "get_issue_comments": 1,
+      "glob": 1,
+      "search_issues": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-08T16:00:05Z",
+        "ended_because": "completed",
+        "iterations": 20,
+        "messages": 78,
+        "seconds": 1226,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 25,
+            "read": 14
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          },
+          "search": {
+            "search_issues": 1
+          }
+        },
+        "started": "2026-11-08T15:39:39Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-489/atomaton.json",
     "agent": "atomaton",
     "messages": 71,
