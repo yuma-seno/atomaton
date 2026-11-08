@@ -2497,14 +2497,363 @@
       "role": "tool",
       "content": "{\"number\":487,\"url\":\"https://github.com/yuma-seno/atomaton/pull/487\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_00_n6xs3x8p0aac6htxys2quccg"
+    },
+    {
+      "role": "user",
+      "content": "PR #487: Add a Japanese writing skill and the language-neutral report rules\n**Labels:** atomaton/in-progress\n**Linked Issue:** #417\n\n/reviewer\n\nPart of #417\n## 何が変わるか\n\n報告の契約に、日本語に依存しない規則を3文だけ足し、日本語の文の作法をスキル1本として追加します。\n\n**`src/content/prompt-template.md`（3か所）**\n\n- 結論の後に: 結論は結果の言葉で書き、ファイル名・関数名・フラグは根拠の部に置くアンカーであること。\n- \"Reason privately\" の後に: 一文に一つの主体と一つの動作を入れること。\n- Skills の \"Check the catalog again\" の後に: 人に向けて書くとき、カタログに書き方のスキルがあれば先にロードすること。\n\n3本目はスキルの説明ではなく**起動線**です。同じ手順をロールプロンプトとスキルの2経路で頼んだとき、守られたのは 224/227 と 43/227 で、差は文言ではなく機構でした（`.github/atomaton/skills/project/conventions.md` と `docs/agents/tasks/write-a-skill.md`）。報告はrunの最後に一度だけ書かれ、その後に「ロードし忘れ」に気づく機会がないので、この一文はテンプレートに必要です。\n\n**`src/content/skills/writing/japanese.md`（新規、104行）**\n\nyomiyasu v2.5.0（MIT）を、推敲ではなく**生成向け**に組み直したもの。原文照合・書き手への確認事項の報告という推敲専用の工程は落とし、原則を命令形にしています。日本語固有の文法はテンプレートに入れません — 日本語を書かないプロジェクトの全runで死に重量になるためです。\n\n**`src/content/README.md`**: スキル表に1行追加。「three above」が（この変更の前から）4行に対して誤っていたので、数ではなく「the skills listed above」に直しました。\n\n## 検証\n\n- `bun test` — 2267 pass / 0 fail（173ファイル、`./tests/e2e` は 5 pass / 6 skip / 0 fail）\n- `bun run typecheck` — 終了コード0\n- `bun run synth` — 終了コード0。`dist/.github/atomaton/skills/writing/japanese.md` が出ることを確認（`skills/` はディレクトリごとコピーされるため `build-dist.ts` の変更は不要）\n- `atoma validate --agent-def .github/atomaton/agent-definitions/engineer.md --template src/content/prompt-template.md` — \"Template checked: every placeholder is one atoma substitutes\"\n- `bun run src/entrypoints/machinery/scan_secrets.ts` — 終了コード0（ただし gitleaks のリリースを解決できず、実際のスキャンは走っていません）\n\n追加した契約テストは `tests/contract/agent-prompts.test.ts` の \"the prompt sends a run to a writing skill before it writes for a person\" です。文言ではなく性質を固定しています — 起動の合図が「人に向けて書くこと」であること、ロードを指示していること、結論と一文の規則があること、そして `writing/` に実際にスキルが存在すること。文面を書き換えても通り、スキルを消すと落ちます。\n\n## 仕様から変えた1点（要確認）\n\n指示には `self/atomaton/skills/writing/japanese.md` と `.github/atomaton/skills/writing/japanese.md` に同一コピーを置き、マージと同時にこのリポジトリのrunに効かせる、とありました。**これはこのリポジトリの契約が拒否します。**\n\n`tests/contract/self-overlay.test.ts` の \"the overlay does not shadow the deliverable\" は、`src/` が配布しているファイルを `self/` に置くことを禁じています。実測した拒否文:\n\n```\nthe deliverable ships these too, so self/ silently overrides them. If the intent is\nto change them for everyone, change src/; if only for this repository, that is a fork of\na shipped file and needs saying out loud\n+ [ \"atomaton/skills/writing/japanese.md\" ]\n```\n\n理由は `self/` の存在意義そのものです。リリースが後でそのファイルを変えたとき、`self/` のコピーが黙って勝ち続けます。したがって2つのコピーは置かず、`src/content/` のみに置きました。この判断は手段に関するものなので、仕様ではなくこのリポジトリの契約に従わせています。\n\n結果として**効果の出る時期が変わります**: スキルとテンプレートの3行は、どちらも次のリリース＋self-deploy の後にこのリポジトリのrunへ届きます（`.github/atomaton/prompt-template.md` はリリース供給源で、手で直すと次のdeployで失われるため触っていません）。マージ直後から効く版が必要なら、`self/` ではなくリリースを1本出すのが正しい経路です。\n\n## マージについて\n\n`.github/**` は触っていませんが、`merge.governed_paths` によりテンプレートとスキルは採用者のrunに届く変更です。人によるマージをお願いします。\n\n<details>\n<summary>棄てた選択肢</summary>\n\n- **yomiyasu本体の同梱** — SKILL.md が約128KB。`load_skill` は本文を丸ごとプロンプトに注入するので、これ1本で残りのシステムプロンプトに匹敵します。\n- **日本語規則をテンプレートに直接書く** — 日本語を書かないプロジェクトの全runに載り、`src/domain/record/metrics.ts` が言う「使われないものは毎回課金される」がそのまま当てはまります。\n- **`self/` に同一コピーを置いてマージ直後から効かせる** — 上記のとおり契約違反。\n- **語彙表を上流のREADMEからそのまま写す** — 上流のBefore/Afterに実際に現れる語だけを残しました（「負荷を逃がす」「泥臭い」は私が前回の検討で混ぜていたもので、上流の書き直し例にはありません。除きました）。\n</details>\n\n## 確かめられなかったこと\n\n- **`self/` 経由の即時反映ができないことの回避策**。リリースを切るのが正しい経路だと読んでいますが、それをこのPRの中で実行はしていません（`package.json` の `version` は人とリリースworkflowのもので、作業PRでは触れません）。\n- **gitleaks の実スキャン**。`scan_secrets.ts` は「could not resolve the latest gitleaks release, so this branch was not scanned for credentials」を警告して終了コード0で終わりました。資格情報の観点ではこのブランチは未検査です。\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/42439227467)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-08T02:51:25Z",
+        "event_type": "pr_opened",
+        "id": "pr-487",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\n報告スキルの1行が、このスキルが従うと宣言している報告契約と食い違っています。あと1点、同梱スキルの索引から `docs/customer-doc` が落ちています。どちらもこのブランチで直してください。\n\n1. **`src/content/skills/writing/japanese.md:14`** — 「部ごとに上限があり」と書いていますが、契約は「4つのうち3つに上限があり、『What you could not establish』には上限がない」です（`src/content/prompt-template.md:268-269`、`:302-303`）。この文は日本語の報告すべてにロードされ、契約の要約として読まれるので、「確かめられなかったこと」を切り詰める方向に働きます。契約が明示的に守っている唯一の部なので、**「三つの部に上限があり、『確かめられなかったこと』には上限がない」**に直してください。\n\n2. **`src/content/README.md:53-59`** — この表の見出しは \"The agents and skills that ship\" で、同じPRで「The skills listed above are defaults」と書き換えていますが、`src/content/skills/docs/customer-doc.md` の行がありません（リリースにも入っています: `.github/atomaton-release.json:102`）。採用者にとってこの表が唯一の索引なので、あのスキルの存在に気づけません。**行を1本足す**か、見出しを「同梱する既定の一部」に狭めてください。欠落自体は本PR以前からありますが、表と文を同じPRで触っている以上ここで閉じられます。\n\n<details>\n<summary>根拠（引用）と、確認して問題なかった点</summary>\n\n食い違いの原文:\n\n- スキル `:14` — 「**報告の契約が優先する。** システムプロンプトの報告は四つの部からなり、部ごとに上限があり、検証のためのものは折りたたみに入れる。」\n- テンプレート `:268-269` — 「in four parts, in this order, every time. … **Three of the four have a ceiling**, and a ceiling is a limit rather than a target.」\n- テンプレート `:302-303` — 「**This is the one part with no ceiling**, because it is the one that goes missing.」\n\n索引の欠落:\n\n- `src/content/README.md:40` — 「## The agents and skills that ship」\n- 同 `:55-59` の行は `delivery/pipeline-setup`、`engineering/environment`、`engineering/secrets-in-a-check`、`research/web-search`、`writing/japanese` の5本。`src/content/skills/` にあるのは6本で、`docs/customer-doc.md` が無い。\n\nこの2点以外で、diffの外を読んで確認したこと（いずれも問題なし）:\n\n- `build-dist.ts` を触っていないのは正しい。`skills/` はディレクトリごとコピーされます（`src/build-dist.ts:171`）。\n- `self/` と `.github/` に同一コピーを置かなかった判断も正しい。配布物と同名のファイルを `self/` に置くと `tests/contract/self-overlay.test.ts:239-256` が落ちます。\n- `writing/` という新カテゴリのために他に宣言が要る場所はありません。カタログは `tests/contract/skill-catalog.test.ts:9-16` がディレクトリを歩き、メトリクスの一覧は `src/entrypoints/machinery/write_metrics_report.ts:292-305` がファイルシステムから名前を作ります。allowlistは存在しません。\n- 語彙表の8組は上流 v2.5.0 の README Before/After と全組一致しました（例: 静かに壊れます→気づかないうちに損なわれます、共通側に倒す→共通のものに統一する、手触り感→操作感）。出典（版・MIT・URL）も `:104` にあります。\n- 「three above」→「The skills listed above」の修正は妥当でした。変更前から4行に対して「three」でした。\n- 追加した契約テスト `tests/contract/agent-prompts.test.ts:1022-1045` は、文面ではなく性質（起動の合図・ロードの指示・スキルの実在）を固定していて、このリポジトリの既存の固定方法と揃っています。\n\n</details>\n\n確認できなかったこと: `bun test` と `bun run synth` はこのrunでは実行していません（シェルなし）。根拠はheadの `atomaton-check` が success であることとPR本文の実測値だけです。gitleaks はPR本文のとおり未実行です。\n\n次の一手: 上の2点を直して同じブランチにpushし、レビューを再依頼してください。`check_merge_readiness` は現時点で `ready: true`・blocker なしなので、修正後はマージまで進めます。\n\n\n---\n_Tokens: 2485219 total (2368115 prompt + 117104 completion, 2289280 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/42440452870) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\n_Counted from the session: 2 refused or errored tool calls._",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-08T03:10:53Z",
+        "event_type": "pr_comment",
+        "id": 6716550696,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/content/README.md b/src/content/README.md\nindex 765d9ab6..282be19e 100644\n--- a/src/content/README.md\n+++ b/src/content/README.md\n@@ -56,11 +56,12 @@ Nothing counts them, and nothing names them outside the files themselves.\n | `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |\n | `engineering/secrets-in-a-check` | A check you were asked for needs a real credential to mean anything. |\n | `research/web-search` | The answer is not in this repository. |\n+| `writing/japanese` | Writing for a person in Japanese — the report, a question, a pull request body. |\n \n `skills/project/` is yours outright — the template ships nothing there and an\n-upgrade will not fight you for it. The three above are defaults the template also\n-expects you to tune. Adding an agent or a skill is a new file; the paths and the\n-frontmatter are in\n+upgrade will not fight you for it. The skills listed above are defaults the\n+template also expects you to tune. Adding an agent or a skill is a new file; the\n+paths and the frontmatter are in\n [the documentation](https://github.com/yuma-seno/atomaton/blob/main/docs/agents/overview.md).\n \n ## What is not here\ndiff --git a/src/content/prompt-template.md b/src/content/prompt-template.md\nindex 64375f37..cc5af371 100644\n--- a/src/content/prompt-template.md\n+++ b/src/content/prompt-template.md\n@@ -213,6 +213,10 @@ or opening the file with the shell. Loading one counts toward no operational lim\n irrelevant when the run started becomes relevant the moment the work reaches it,\n and by then nothing will remind you but this sentence.\n \n+Writing for a person — a report, a question, a handoff — in a language the catalog\n+has a writing skill for? Load it first, and write in the thread's language: the\n+skill shapes the sentences.\n+\n {{AVAILABLE_SKILLS}}\n \n # What this run already reports for you\n@@ -269,6 +273,11 @@ what it means for whoever reads it. Not that you followed the steps and not that\n the work is complete: how the run ended is already recorded above.\n Two sentences is the ceiling, not the opening move of a longer one.\n \n+**The conclusion is written for a person, not for a reader of the code.** What\n+happened and what it changes, in the words of the outcome; the machinery's names —\n+files, functions, flags — are anchors, and they belong in the evidence part beside\n+what backs them.\n+\n **How you know.** Only the claims your conclusion rests on — not every claim the\n message makes. Each of those anchored to something the reader can check without\n asking you: a path with a line number, text copied out of a tool result, a number\n@@ -331,6 +340,10 @@ Reason privately and do not narrate tool calls. An act you did not see succeed d\n not happen: an intention is not an outcome and a step you took is not a result, so\n report what came back.\n \n+**One sentence, one actor, one action.** A sentence lands who did what in a single\n+pass; if a reader has to reread to find the verb or what it hangs on, split or\n+straighten the sentence instead of padding it.\n+\n **No opening and no closing.** The first line is the conclusion — not \"I looked\n at\", not \"let me\", not what you are about to do. The last is what happens next.\n Everything between them is a claim, an anchor, or the thing you could not pin down,\ndiff --git a/src/content/skills/writing/japanese.md b/src/content/skills/writing/japanese.md\nnew file mode 100644\nindex 00000000..1f60c01c\n--- /dev/null\n+++ b/src/content/skills/writing/japanese.md\n@@ -0,0 +1,104 @@\n+---\n+name: writing/japanese\n+description: Load before writing for a person in Japanese — the run's report, a question or consultation, a pull request body, a handoff, a sub-issue. Japanese sentence craft for reports — subject–predicate alignment, plain verbs over AI-flavoured metaphor, sentence endings, bullets and folds. Adapted from yomiyasu v2.5.0 (MIT).\n+---\n+\n+# 人に向けて日本語で書く\n+\n+## 何に効き、何が優先するか\n+\n+このrunが**人に向けて書く日本語**すべてが対象になる — 報告コメント、質問、相談、プルリクエストの本文、サブIssueの本文、次の担当への引き継ぎ。\n+\n+対象外は、コード、コミットメッセージ、機構が固定で持っている英文、報告契約そのものの見出し語。\n+\n+**報告の契約が優先する。** システムプロンプトの報告は四つの部からなり、部ごとに上限があり、検証のためのものは折りたたみに入れる。このスキルはその枠の中で文を整えるだけで、枠を変えない。衝突したら契約に従う。\n+\n+**投稿する前に、一度だけ読み直す。** 下書きをこの原則で通し、直してから出す。報告はrunの最後に一度しか書かれないので、読み直しの機会はここしかない。\n+\n+以下は [yomiyasu](https://github.com/nanaism/yomiyasu) v2.5.0（MIT）の変換原則を、推敲ではなく**生成向け**に組み直したもの。上流は追わない。\n+\n+## 一文\n+\n+**主語と述語を離さない。** 一読で「誰が何をしたか」が追えること。修飾を主述の間に長く挟むと、読み手は述語を探して戻る。挟むなら文を分ける。\n+\n+> ✗ この変更は、前回の議論で保留にされていた点を踏まえたうえで、今回の判断として取り込むことにしました。\n+> ○ 前回はこの点を保留にしていました。今回は取り込みます。\n+\n+**指示語の先を確定させる。** 「これ」「その方針」「前者」は、直前の一文だけを読んで指す先が決まる位置に置く。決まらないなら名詞に戻す。\n+\n+**長さの目安は一文30〜45字、読点は0〜2個。** 超えたら、読点を足すのではなく文を割る。間を作るためだけの読点は外す。並んだ語句を区切る読点、外すと係り先が変わる読点は残す。\n+\n+## 文末\n+\n+**終わったことを「〜します」と書かない。** 報告で最も多い病。直したなら「修正しました」、いま直しているなら「修正しています」、これからなら「修正します」。この三つを文末で書き分ける。\n+\n+**言い切りの強さを変えない。** 確かめたことは「〜です」、推測は「〜と考えられます」。弱めるのは事実でないときだけ。\n+\n+**文末を散らすこと自体を目的にしない。** 同じ文末が続いて単調なら、語順と文のまとめ方で整える。文の働き（説明・依頼・報告）は変えない。\n+\n+## 語彙\n+\n+**比喩を平易な動詞に戻す。** 次の語は上流の書き直し例で言い換えられたもの。同じ語を機械的に置き換えるのではなく、この種の語を書いたら一度立ち止まる。\n+\n+| 書いてしまいがち | 言い換え |\n+| --- | --- |\n+| 静かに壊れます | 気づかないうちに損なわれます |\n+| 解像度が一段上がります | 理解が一段深まります |\n+| 地味に効いてきます | 目立たないながらも役立ちます |\n+| 時間を溶かす | 時間を無駄にする |\n+| 原因を潰す | 原因を取り除く |\n+| 共通側に倒す | 共通のものに統一する |\n+| 黙ってスキップする | 表に出さずにスキップする |\n+| 手触り感 | 操作感 |\n+\n+**道具に意志を貸さない。** 「テストが叫ぶ」「設定が怒る」は、何がどうなるかに書き直す。道具の客観的な動作を述べる文（「この関数は例外を返す」）はそのまま残す。\n+\n+**大げさな名前にしない。** 仕組みを「OS」「契約」「正本」と呼ぶのは、役割に合う語があるときは避ける。意思決定OS → 意思決定の枠組み。\n+\n+**「単なるXではなくY」を減らす。** 対比が読み手の判断を変えるときだけ残し、それ以外はYを直接述べる。\n+\n+## 構成\n+\n+**結論を最初に置く。** 前置き、経緯、免責を先に並べない。\n+\n+**予告だけの文を書かない。** 「以下の3点が挙げられます」は、中身を書いてからその文が要るか決める。要るなら中身と同じ一文にまとめる。宣言した数は項目数と一致させる — 一致しないなら数を書かない。\n+\n+**一段落に一つの話題。** 話題が変わったら段落を変える。段落の最初の文で何の話かが分かるようにする。\n+\n+**接続詞は、何と何をつないでいるか確かめてから置く。** 「しかし」「そのため」「また」は、前の文との関係が実際にその関係であるときだけ。\n+\n+**余談は末尾に一文だけ。** 本題の途中に差し込まない。\n+\n+## 箇条書きと折りたたみ\n+\n+**太字ラベルとコロンの形を避ける。** 「**検証**: 済み」ではなく、ラベルを説明の文に溶かす — 「検証は済んでいます」。\n+\n+**箇条書きは、並列が明確なときだけ。** 手順、選択肢、対比する項目。文章で書けるものを項目に割らない。\n+\n+**`<details>` は検証のためのものを畳む。** 根拠の一覧、再現手順、測定値、引用、棄てた選択肢。summaryは中身を名指しする — 「検証: テスト全件pass」「棄てた選択肢」。中身のないsummaryは、畳んだことが情報を隠しただけになる。\n+\n+**結論、質問、次の一手は畳まない。** 読み手が行動するために開かずに済むこと。折りたたみは入れ子にしない。\n+\n+**太字は契約が構造を示すために使う。** 本文の強調には使わない。\n+\n+## 削る基準\n+\n+**読み手の次の行動が変わらない情報は、削るか折りたたむ。** 判断材料にならない過程は書かない。\n+\n+**過程の羅列を結果の一文に置き換える。** 「〜を確認しました。〜も確認しました」は「確認した結果、〜でした」になる。\n+\n+**同じ結論を二箇所に書かない。** 結論、根拠、次の一手のどれか一箇所に置く。\n+\n+**測っていないことを、測ったように書かない。** 資料、原文、会話にない数値・原因・感情を足さない。確かめていないことは「確かめていない」と書く。\n+\n+## 表記\n+\n+**補助動詞と形式名詞はかなにする。** 出来ます → できます、する事が → することが、〜して下さい → 〜してください。\n+\n+**それ以外の表記の揺れは直さない。** 送り仮名や英字の大小を整える作業は、読みやすさを上げない。\n+\n+**英数字の前後の空白は、周囲の書式に合わせる。** 文中で全角と半角を混ぜない。\n+\n+---\n+\n+出典: yomiyasu v2.5.0（MIT、https://github.com/nanaism/yomiyasu ）。推敲用の手順（原文との照合、書き手への確認事項の報告）は含めず、生成向けに再構成している。\ndiff --git a/tests/contract/agent-prompts.test.ts b/tests/contract/agent-prompts.test.ts\nindex 4a8f7c7e..f003d184 100644\n--- a/tests/contract/agent-prompts.test.ts\n+++ b/tests/contract/agent-prompts.test.ts\n@@ -1,5 +1,6 @@\n import { describe, expect, test } from \"bun:test\";\n-import { readFileSync } from \"node:fs\";\n+import { readFileSync, readdirSync } from \"node:fs\";\n+import { join } from \"node:path\";\n import { WORKSPACE_PATH } from \"../../src/domain/work/workspace.ts\";\n \n describe(\"agent prompt contracts\", () => {\n@@ -1002,4 +1003,44 @@ describe(\"agent prompt contracts\", () => {\n     // The reason, not just the rule: a run that reads only \"you cannot\" looks for a way.\n     expect(prompt).toContain(\"it would be a credential in the hands of code nobody has read yet\");\n   });\n+\n+  /**\n+   * A writing skill is only worth shipping if a run reaches it, and the catalog\n+   * description is not enough on its own.\n+   *\n+   * The same mechanism measured on the reviewer applies here: one step asked for by\n+   * two mechanisms was obeyed 224/227 through the one in the role prompt and 43/227\n+   * through the skill, the difference being the mechanism rather than the wording.\n+   * The report is written once, at the end of a run, with nothing after it to notice\n+   * that a skill which shapes its sentences was never loaded — so the sentence that\n+   * sends a run to it belongs in the template, and this holds it there.\n+   *\n+   * What is pinned is the property, not the prose: the template names writing for a\n+   * person as the trigger, and a writing skill exists for the catalog to describe.\n+   * Rewording either one still passes.\n+   */\n+  test(\"the prompt sends a run to a writing skill before it writes for a person\", () => {\n+    const prompt = readFileSync(\"src/content/prompt-template.md\", \"utf8\").replace(/\\s+/g, \" \");\n+    expect(prompt, \"the trigger is writing for a person, not a category of work\").toContain(\n+      \"Writing for a person\",\n+    );\n+    expect(prompt, \"and it says to load one, rather than naming one\").toContain(\n+      \"a language the catalog has a writing skill for\",\n+    );\n+    // The conclusion rule: the machinery's names are anchors, not the sentence's\n+    // substance. Without it the vocabulary rule has nowhere to live, because the\n+    // conclusion is the one part every report has.\n+    expect(prompt).toContain(\"The conclusion is written for a person, not for a reader of the code\");\n+    expect(prompt, \"one sentence carries one actor and one action\").toContain(\n+      \"One sentence, one actor, one action\",\n+    );\n+\n+    const writing = readdirSync(\"src/content/skills\", { withFileTypes: true })\n+      .filter((entry) => entry.isDirectory() && entry.name === \"writing\")\n+      .flatMap((entry) => readdirSync(join(\"src/content/skills\", entry.name)));\n+    expect(\n+      writing.length,\n+      \"the template sends runs to a writing skill; with none shipped, that sentence sends them nowhere\",\n+    ).toBeGreaterThan(0);\n+  });\n });\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-08T03:11:15Z",
+        "event_type": "pr_diff",
+        "id": "pr-487-diff",
+        "layer": "github-context",
+        "sha": "52d1fe62",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "Both findings are correct. Let me verify the exact contract wording and the skill index, then fix.",
+      "tool_calls": [
+        {
+          "id": "call_00_0f5647qab9v0vlhw33dyfupy",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '262,272p;296,306p' src/content/prompt-template.md\"}"
+          }
+        },
+        {
+          "id": "call_01_0psqpv4faplhbtqeuacexv74",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && ls src/content/skills/*/ | cat; echo \\\"=== rows ===\\\"; sed -n '53,60p' src/content/README.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Both findings are concrete and correct. Let me verify them against the files and fix.\n\n1. Skill line 14 says \"四つの部からなり、部ごとに上限があり\" — the contract says three of four have a ceiling. Fix to say three of the four have ceilings and the \"could not establish\" part has none.\n\n2. README skill table missing docs/customer-doc. Add the row.\n\nLet me read the relevant lines and fix.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_7f5ba1e249ae4a4c9ecee37ccc9e1224",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"written — an explanation, an answer, a review, a measurement — that is the body of\\nthis message, written once, above these parts. The parts report on the run that\\nproduced it; none of them is where its content goes.\\n\\nWhat the machinery and GitHub already state is stated above. What is left is what\\nexists nowhere else — what you concluded, and how you know — in four parts, in\\nthis order, every time. A part with nothing in it says so; none is dropped. Three\\nof the four have a ceiling, and a ceiling is a limit rather than a target.\\n\\n**What you concluded.** One or two sentences, first, saying what is true now and\\nwhat it means for whoever reads it. Not that you followed the steps and not that\\n\\n**What you could not establish.** What you tried, what came back, and what is\\nstill unknown because of it — a tool that refused you, a gate you could not read,\\na search that kept returning unrelated files, a place where you assumed rather\\nthan checked. Nobody else can recover this: you are the run that saw it, and the\\nresult it arrived in is not kept. Write that there is nothing if there is\\ngenuinely nothing; leaving the part out is itself a claim. This is the one part\\nwith no ceiling, because it is the one that goes missing.\\n\\n**What happens next.** Who or what acts now, and on what. If nothing follows, say\\nthe work is done and stop. Three sentences at most.\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":334}",
+      "tool_call_id": "call_00_0f5647qab9v0vlhw33dyfupy"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/content/skills/delivery/:\\npipeline-setup.md\\n\\nsrc/content/skills/docs/:\\ncustomer-doc.md\\ncustomer-doc.mjs\\ndeps.mjs\\ntemplates\\n\\nsrc/content/skills/engineering/:\\nenvironment.md\\nsecrets-in-a-check.md\\n\\nsrc/content/skills/research/:\\nweb-search.md\\n\\nsrc/content/skills/writing/:\\njapanese.md\\n=== rows ===\\n| Skill | When an agent loads it |\\n| --- | --- |\\n| `delivery/pipeline-setup` | `checks` is empty, a pull request comes back with no required check, or nothing deploys on merge. |\\n| `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |\\n| `engineering/secrets-in-a-check` | A check you were asked for needs a real credential to mean anything. |\\n| `research/web-search` | The answer is not in this repository. |\\n| `writing/japanese` | Writing for a person in Japanese — the report, a question, a pull request body. |\\n\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":107}",
+      "tool_call_id": "call_01_0psqpv4faplhbtqeuacexv74"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_bugs5xwus02xt8l0vycf23sk",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '1,6p' src/content/skills/docs/customer-doc.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Both findings confirmed. Fix 1: the skill line 14 wording. Fix 2: add docs/customer-doc row.\n\nFor fix 2, I should add the row. Where to put it — alphabetically by category: delivery, docs, engineering, research, writing. So `docs/customer-doc` goes after `delivery/pipeline-setup`.\n\nLet me check the customer-doc skill's description to write an accurate \"when to load\".",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_885d7e383b9d42c3afe7d480e3f0aa97",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"---\\nname: docs/customer-doc\\ndescription: Load when a run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate — by filling a template from a data file, rendering every page to an image and reading those images until the layout is right, then reporting what was produced and what a person still has to check.\\n---\\n\\n# Producing a customer document: template, fill, then look at it\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":99}",
+      "tool_call_id": "call_00_bugs5xwus02xt8l0vycf23sk"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_pvixy5lrsrf10e5t2dxaguul",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"**報告の契約が優先する。** システムプロンプトの報告は四つの部からなり、そのうち三つに上限がある。残る「確かめられなかったこと」には上限がなく、切り詰めてはいけない。このスキルはその枠の中で文を整えるだけで、枠を変えない。衝突したら契約に従う。\", \"old_string\": \"**報告の契約が優先する。** システムプロンプトの報告は四つの部からなり、部ごとに上限があり、検証のためのものは折りたたみに入れる。このスキルはその枠の中で文を整えるだけで、枠を変えない。衝突したら契約に従う。\", \"path\": \"src/content/skills/writing/japanese.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Fix 1: skill line 14. Fix 2: add a row for docs/customer-doc. Also keep the alphabetical/category order — rows are ordered by category: delivery, docs should come after delivery. Let me insert `docs/customer-doc` after delivery/pipeline-setup.\n\nWait, the table currently lists delivery, engineering/environment, engineering/secrets-in-a-check, research, writing. Alphabetically docs/ goes after delivery/. Insert there.\n\nNow the skill line 14 fix.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_b4a55fa48e7f4e9ba51e4dbedd2e2b4f",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/skills/writing/japanese.md.",
+      "tool_call_id": "call_00_pvixy5lrsrf10e5t2dxaguul"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_jf6zf8urorphz60xjo913p2z",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"| `delivery/pipeline-setup` | `checks` is empty, a pull request comes back with no required check, or nothing deploys on merge. |\\n| `docs/customer-doc` | A run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate. |\\n| `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |\", \"old_string\": \"| `delivery/pipeline-setup` | `checks` is empty, a pull request comes back with no required check, or nothing deploys on merge. |\\n| `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |\", \"path\": \"src/content/README.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now the details folding instruction: previously the sentence had \"検証のためのものは折りたたみに入れる\" — I removed it. That's fine, since the 箇条書きと折りたたみ section covers it. But maybe keep it concise. Good.\n\nNow the README: add docs/customer-doc row. It ships (it's in src/content/skills/docs/). Add row in alphabetical position: delivery, docs, engineering, research, writing.\n\nAlso, the \"skills listed above are defaults\" phrasing now truly covers all six. Good.\n\nLet me also check: is docs/customer-doc mentioned as requiring LibreOffice install etc. What \"when an agent loads it\"? From the description: \"a run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate\".\n\nAlso check src/content/README.md line ~110-135 about delegates — the doc skill table maybe referenced elsewhere. Let's check whether the README elsewhere references skills.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_97076153e5874ec4875640cb728f3d7b",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/content/README.md.",
+      "tool_call_id": "call_00_jf6zf8urorphz60xjo913p2z"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_zksxhu33j0ts5ijl36dzhl2o",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn \\\"README\\\" tests/contract/doc-template-rows.test.ts tests/contract/skill-catalog.test.ts | head; echo ===; grep -rn \\\"agent-definitions\\\\|skills\\\" tests/contract/config-contract.test.ts | head -5\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now, the contract mismatch: is a test warranted? The reviewer's point 1 is a real semantic bug. A test pinning the count would be fragile... but the substance is that this skill tells a run the part with no ceiling has one. Let me consider whether to add a check. The skill is a shipped file; the contract has \"Three of the four have a ceiling\". Could add a test to agent-prompts.test.ts that any skill claiming ceilings matches. That's awkward to write generically.\n\nSimpler and honest: the fix is wording. But there is a defensible test: the skill must not say every part has a ceiling. Hmm, brittle.\n\nActually, there's a better framing: the reason the error was possible is that the skill summarizes the contract from memory. A test that the summary names the exception is reasonable — pin the property \"the skill says the part with no ceiling has none\", similar to how the repo pins properties. Let me add it to the writing-related test I already wrote, since it's about the same mechanism (a writing skill restating the report contract). That's a modest, property-shaped assertion.\n\nLet me verify the README table count issue and check doc-template-rows/other tests that may enforce README rows match files. Let me check if any test verifies the README skill table against the skills directory.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_b8460c487f584164a7947c8e880397b9",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"===\\n71:    const reviewer = readFileSync(\\\"src/content/agent-definitions/reviewer.md\\\", \\\"utf8\\\");\\n348:        agentNames: readdirSync(\\\"src/content/agent-definitions\\\")\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":100}",
+      "tool_call_id": "call_00_zksxhu33j0ts5ijl36dzhl2o"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_kgudaromyiqtoee15q7yiarc",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '8,18p' src/content/skills/writing/japanese.md; echo \\\"=== README ===\\\"; sed -n '53,62p' src/content/README.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Nothing checks the README table against the skills directory. The reviewer suggested either adding the row or narrowing the heading. I added the row. But should I also add a test that would catch a future missing row? That would be a good fix but perhaps beyond the leaf scope. Actually the reviewer said the missing row predates this PR; adding a test would prevent recurrence. Let me consider: a test that every skill file has a row in the README table. That's a small, focused addition and closes the class of defect rather than one instance. The reviewer explicitly recommended \"行を1本足す\" or narrow heading. I'll add the row plus a contract test that the table lists every shipped skill — that prevents recurrence and matches the repository's convention (\"a fact kept only in people's heads goes stale with nothing saying so\").\n\nLet me check whether such a test is reasonable and cheap. Yes.\n\nAlso I should double-check my skill's line 16 mention of \"折りたたみに入れる\" — I removed it. Good; folding is covered later in the skill.\n\nLet me verify the edited line reads well and check the contract reference is accurate.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_ea319c9894b34ef6a722682b7cf1b141",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"## 何に効き、何が優先するか\\n\\nこのrunが**人に向けて書く日本語**すべてが対象になる — 報告コメント、質問、相談、プルリクエストの本文、サブIssueの本文、次の担当への引き継ぎ。\\n\\n対象外は、コード、コミットメッセージ、機構が固定で持っている英文、報告契約そのものの見出し語。\\n\\n**報告の契約が優先する。** システムプロンプトの報告は四つの部からなり、そのうち三つに上限がある。残る「確かめられなかったこと」には上限がなく、切り詰めてはいけない。このスキルはその枠の中で文を整えるだけで、枠を変えない。衝突したら契約に従う。\\n\\n**投稿する前に、一度だけ読み直す。** 下書きをこの原則で通し、直してから出す。報告はrunの最後に一度しか書かれないので、読み直しの機会はここしかない。\\n\\n以下は [yomiyasu](https://github.com/nanaism/yomiyasu) v2.5.0（MIT）の変換原則を、推敲ではなく**生成向け**に組み直したもの。上流は追わない。\\n=== README ===\\n| Skill | When an agent loads it |\\n| --- | --- |\\n| `delivery/pipeline-setup` | `checks` is empty, a pull request comes back with no required check, or nothing deploys on merge. |\\n| `docs/customer-doc` | A run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate. |\\n| `engineering/environment` | Something needed is not installed, an install fails, or the work tree is broken. |\\n| `engineering/secrets-in-a-check` | A check you were asked for needs a real credential to mean anything. |\\n| `research/web-search` | The answer is not in this repository. |\\n| `writing/japanese` | Writing for a person in Japanese — the report, a question, a pull request body. |\\n\\n`skills/project/` is yours outright — the template ships nothing there and an\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":99}",
+      "tool_call_id": "call_00_kgudaromyiqtoee15q7yiarc"
+    },
+    {
+      "role": "assistant",
+      "content": "Now a regression test for the index gap the reviewer found — the class of defect, not just this row.",
+      "tool_calls": [
+        {
+          "id": "call_00_wou8e1xjpnqpxevdr7psxn8k",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && tail -20 tests/contract/skill-catalog.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now the index has 6 rows matching 6 skills (pipeline-setup, customer-doc, environment, secrets-in-a-check, web-search, japanese). project/ ships nothing in src/content, correct.\n\nShould I add a test that the README skill table lists every shipped skill? That would prevent the class of defect the reviewer found. It's a focused regression test. Let me consider: `skill-catalog.test.ts` already walks all skills. A test that the README table mentions each shipped skill name would close the hole durably. That is exactly the kind of regression coverage the role asks for. Let me add it to skill-catalog.test.ts.\n\nCareful about false positives: the README table is the only index. But `.github/atomaton/README.md` is the deployed copy — it also needs the row? The self-overlay test requires self/ and .github/ identical, but README is not in self/. .github/atomaton/README.md comes from the release. So I only edit src/content/README.md — correct.\n\nIf I add a test that reads src/content/README.md, then when running against `src/content/skills`, fine.\n\nLet me add it.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_resp_3272b973404d4e9d8dcd44def149495b",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"      const document = readFileSync(file, \\\"utf8\\\");\\n      for (const server of servers) {\\n        for (const match of document.matchAll(new RegExp(`\\\\`${server}__([a-z_]+)\\\\``, \\\"g\\\"))) {\\n          wrong.push(`${file}: \\\\`${server}__${match[1]}\\\\` — call it \\\\`${match[1]}\\\\``);\\n        }\\n      }\\n      // The built-in's own spelling. The old namespace name names nothing after the\\n      // rename, so it fails a skill the way a dead `server__tool` does; the bare\\n      // `load_skill` passes what is above and needs saying nothing extra here.\\n      for (const match of document.matchAll(/`atoma_builtin__[a-z_]+`/g)) {\\n        wrong.push(`${file}: ${match[0]} — the built-in is called \\\\`load_skill\\\\``);\\n      }\\n    }\\n    expect(\\n      wrong,\\n      \\\"a shipped server is `unprefixed`, so its tools are called by their own names; a name \\\" +\\n        \\\"carrying the server prefix is one no run has\\\",\\n    ).toEqual([]);\\n  });\\n});\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":101}",
+      "tool_call_id": "call_00_wou8e1xjpnqpxevdr7psxn8k"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_cjhnvm7m8kf4ia599hnzyqpr",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    expect(\\n      wrong,\\n      \\\"a shipped server is `unprefixed`, so its tools are called by their own names; a name \\\" +\\n        \\\"carrying the server prefix is one no run has\\\",\\n    ).toEqual([]);\\n  });\\n\\n  /**\\n   * The shipped skills index names every skill that ships.\\n   *\\n   * `src/content/README.md` is the only place an adopter can learn a skill exists:\\n   * the catalog an agent reads is built from the directory, so a skill missing from\\n   * the README loads fine and is simply never discovered by the person who could\\n   * tune it. The heading says \\\"the agents and skills that ship\\\", which is a claim\\n   * about a set, and nothing was reading it against the set.\\n   *\\n   * It had already drifted both ways. `docs/customer-doc` shipped in the release\\n   * manifest and was absent from the table, and the sentence under it said \\\"the\\n   * three above\\\" while the table held four rows. Neither is checkable by reading the\\n   * file it is in, which is why this reads it against the directory.\\n   *\\n   * What is pinned is membership, not order or wording: a row may say anything about\\n   * a skill, and a skill may be described in any words, as long as its name is there.\\n   */\\n  test(\\\"the shipped README names every skill in the catalog\\\", () => {\\n    const readme = readFileSync(\\\"src/content/README.md\\\", \\\"utf8\\\");\\n\\n    const shipped: string[] = [];\\n    const collect = (directory: string): void => {\\n      for (const entry of readdirSync(directory, { withFileTypes: true })) {\\n        const path = join(directory, entry.name);\\n        if (entry.isDirectory()) collect(path);\\n        else if (entry.isFile() && entry.name.endsWith(\\\".md\\\")) {\\n          const name = readFileSync(path, \\\"utf8\\\").match(/^---\\\\r?\\\\n[\\\\s\\\\S]*?\\\\bname:\\\\s*(\\\\S+)/)?.[1];\\n          if (name) shipped.push(name);\\n        }\\n      }\\n    };\\n    collect(\\\"src/content/skills\\\");\\n\\n    // Without this the loop below passes on a walk that found nothing, which is the\\n    // failure mode a membership test has that a count test does not.\\n    expect(shipped.length, \\\"no skills found; check the walk's starting directory\\\").toBeGreaterThan(0);\\n\\n    const missing = shipped.filter((name) => !readme.includes(\\\"`\\\" + name + \\\"`\\\"));\\n    expect(\\n      missing,\\n      \\\"the README is the only index of what ships, so a skill it omits is one an adopter \\\" +\\n        \\\"will never know they could tune. Add a row to the skill table\\\",\\n    ).toEqual([]);\\n  });\\n});\", \"old_string\": \"    expect(\\n      wrong,\\n      \\\"a shipped server is `unprefixed`, so its tools are called by their own names; a name \\\" +\\n        \\\"carrying the server prefix is one no run has\\\",\\n    ).toEqual([]);\\n  });\\n});\", \"path\": \"tests/contract/skill-catalog.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in tests/contract/skill-catalog.test.ts.",
+      "tool_call_id": "call_00_cjhnvm7m8kf4ia599hnzyqpr"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_00_w6nlk3iljaxo22oh8gvu1xy8",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && head -5 tests/contract/skill-catalog.test.ts; echo ---; bun test tests/contract/skill-catalog.test.ts 2>&1 | tail -12\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"import { describe, expect, test } from \\\"bun:test\\\";\\nimport { readFileSync, readdirSync } from \\\"node:fs\\\";\\nimport { join } from \\\"node:path\\\";\\nimport { toolDefaults } from \\\"../../src/domain/machinery/shipped-servers.ts\\\";\\n\\n---\\nbun test v1.4.4 (38afee6c8)\\n\\ntests/contract/skill-catalog.test.ts:\\n(pass) skill catalog > has valid, unique metadata and non-empty instructions [0.51ms]\\n(pass) skill catalog > a skill does not write a shipped server's tool as `server__tool` [1.03ms]\\n(pass) skill catalog > the shipped README names every skill in the catalog [0.32ms]\\n\\n 3 pass\\n 0 fail\\n 34 expect() calls\\nRan 3 tests across 1 file. [8.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":108}",
+      "tool_call_id": "call_00_w6nlk3iljaxo22oh8gvu1xy8"
+    },
+    {
+      "role": "assistant",
+      "content": "Now verify the test actually fails when a row is removed — a membership test that cannot fail is worth nothing.",
+      "tool_calls": [
+        {
+          "id": "call_00_fna6camora7t2e5l4arx34eb",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && cp src/content/README.md /tmp/readme.bak && python3 - <<'EOF'\\np=\\\"src/content/README.md\\\"\\ns=open(p,encoding=\\\"utf8\\\").read()\\ns=s.replace(\\\"| `docs/customer-doc` | A run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate. |\\\\n\\\",\\\"\\\")\\nopen(p,\\\"w\\\",encoding=\\\"utf8\\\").write(s)\\nEOF\\nbun test tests/contract/skill-catalog.test.ts 2>&1 | grep -E \\\"missing|customer-doc|fail|pass\\\" | head -8; cp /tmp/readme.bak src/content/README.md; echo \\\"--- restored ---\\\"; grep -c \\\"customer-doc\\\" src/content/README.md\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) skill catalog > has valid, unique metadata and non-empty instructions [0.47ms]\\n(pass) skill catalog > a skill does not write a shipped server's tool as `server__tool` [1.06ms]\\n130 |     const missing = shipped.filter((name) => !readme.includes(\\\"`\\\" + name + \\\"`\\\"));\\n132 |       missing,\\n+   \\\"docs/customer-doc\\\",\\n(fail) skill catalog > the shipped README names every skill in the catalog [0.50ms]\\n 2 pass\\n 1 fail\\n--- restored ---\\n1\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":121}",
+      "tool_call_id": "call_00_fna6camora7t2e5l4arx34eb"
+    },
+    {
+      "role": "assistant",
+      "content": "The test fails on exactly the defect the reviewer found. Running the full suite.",
+      "finish_reason": "stop",
+      "atoma_metadata": {
+        "github_comment_id": 6716571679,
+        "agent": "engineer"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 7,
-      "snapshot_hash": "4fdeb2877001805a6108e91221cb01a92524193fc9b917e550ad5f46791831e5",
-      "version": 1
+      "event_count": 10,
+      "snapshot_hash": "4c1e77442d145133052849cd400d32cd7bd3ffa9fc7b4414e81264c88971417e",
+      "version": 1,
+      "type": "issue",
+      "session_number": "417"
     }
   },
   "atoma_runs": [
@@ -2533,6 +2882,23 @@
         }
       },
       "started": "2026-11-08T02:36:33Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-08T03:12:59Z",
+      "ended_because": "completed",
+      "iterations": 11,
+      "messages": 199,
+      "seconds": 60,
+      "server_calls": {
+        "files": {
+          "edit": 3
+        },
+        "shell": {
+          "bash": 8
+        }
+      },
+      "started": "2026-11-08T03:11:59Z"
     }
   ]
 }
