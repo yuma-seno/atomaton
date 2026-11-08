@@ -15869,15 +15869,15 @@
   {
     "path": "sessions/issue-417/atomaton.json",
     "agent": "atomaton",
-    "messages": 49,
-    "calls": 32,
+    "messages": 54,
+    "calls": 33,
     "failed": 2,
     "refused": 0,
     "skills": [],
     "reported": true,
     "tools": {
       "list": 3,
-      "fetch": 6,
+      "fetch": 7,
       "read": 8,
       "glob": 2,
       "search_code": 2,
@@ -15915,6 +15915,20 @@
           }
         },
         "started": "2026-11-08T01:30:27Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-08T02:23:32Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 54,
+        "seconds": 244,
+        "server_calls": {
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-08T02:19:28Z"
       }
     ]
   },
