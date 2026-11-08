@@ -4,18 +4,20 @@ One Markdown file per agent under `.github/atomaton/agent-definitions/`, with th
 settings in its frontmatter and the role prompt below it. `<name>` is what
 `/<name>` dispatches.
 
-**The definitions that ship are a template, not a fixed set.** Three arrive —
-`atomaton`, `engineer` and `reviewer` — and they are a starting point rather than
-the set of agents a repository may have. Adding one is a new file here; removing
-one is deleting it. Nothing counts them, and nothing names them outside the files
-themselves: a run is started by a name read from the thread, so an agent exists
-exactly when a definition for it does.
+**The definitions that ship are a template, not a fixed set.** Five arrive —
+`atomaton`, `engineer`, `reviewer`, `architect` and `auditor` — and they are a
+starting point rather than the set of agents a repository may have. Adding one is a
+new file here; removing one is deleting it. Nothing counts them, and nothing names
+them outside the files themselves: a run is started by a name read from the thread,
+so an agent exists exactly when a definition for it does.
 
 **They are not peers.** `atomaton` is the one a person reaches first: a request
 arrives there before it is a task, and it decides what the request is — a question
 to answer, one leaf to do, or work to split into sub-issues. `engineer` and
 `reviewer` are the agents it and each other hand work to, and a person rarely
-names them directly. Which of the three a given run is, and what it may do, is
+names them directly. `architect` is handed a decision that cannot be made where the
+question was asked, and `auditor` is handed one area of the repository to audit when
+somebody asks for an audit. Which of the five a given run is, and what it may do, is
 its own definition rather than a setting here.
 
 This is Atoma's own contract rather than this project's, which is why a setting

@@ -89,4 +89,49 @@ describe("skill catalog", () => {
         "carrying the server prefix is one no run has",
     ).toEqual([]);
   });
+
+  /**
+   * The shipped skills index names every skill that ships.
+   *
+   * `src/content/README.md` is the only place an adopter can learn a skill exists: the
+   * catalog an agent reads is built from this directory, so a skill missing from the
+   * README loads fine and is never discovered by the person who could tune it. The
+   * heading says "the agents and skills that ship" — a claim about a set — and nothing
+   * read it against the set.
+   *
+   * It had already drifted both ways when this was written: `docs/customer-doc`
+   * shipped in the release manifest and had no row, and the sentence under the table
+   * said "the three above" while the table held four. Neither is visible from inside
+   * the file that carries it, which is why this reads it against the directory.
+   *
+   * What is pinned is membership. A row may say anything about a skill, and the prose
+   * around the table may be rewritten; only the name has to be there.
+   */
+  test("the shipped README names every skill in the catalog", () => {
+    const readme = readFileSync("src/content/README.md", "utf8");
+
+    const shipped: string[] = [];
+    const collect = (directory: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) collect(path);
+        else if (entry.isFile() && entry.name.endsWith(".md")) {
+          const name = readFileSync(path, "utf8").match(/^---\r?\n[\s\S]*?\bname:\s*(\S+)/)?.[1];
+          if (name) shipped.push(name);
+        }
+      }
+    };
+    collect("src/content/skills");
+
+    // Without this the check below passes on a walk that found nothing, which is the
+    // one failure mode a membership test has that a count test does not.
+    expect(shipped.length, "no skills found; check the walk's starting directory").toBeGreaterThan(0);
+
+    const missing = shipped.filter((name) => !readme.includes("`" + name + "`"));
+    expect(
+      missing,
+      "the README is the only index of what ships, so a skill it omits is one an adopter " +
+        "never learns they could tune. Add a row to the skill table",
+    ).toEqual([]);
+  });
 });
