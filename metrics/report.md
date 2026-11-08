@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 194 | 3.1% | 246 | 6,099 | 10 | 26.9 |
-| Last 30 days | 597 | 4.9% | 246 | 9,859 | 13 | 18.3 |
-| Last year | 634 | 5% | 257 | 10,246 | 15 | 19.0 |
-| All time | 634 | 5% | 257 | 10,246 | 15 | 19.0 |
+| Last 7 days | 195 | 3.1% | 246 | 6,099 | 10 | 26.9 |
+| Last 30 days | 598 | 4.8% | 246 | 9,859 | 13 | 18.3 |
+| Last year | 635 | 5% | 256 | 10,246 | 15 | 19.0 |
+| All time | 635 | 5% | 256 | 10,246 | 15 | 19.0 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 602 |
+| `completed` | 603 |
 | `failed` | 21 |
 | `stopped` | 11 |
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,375,816 | 9,658,210 | 29,805,044 | 29,805,044 | 267,829,937 |
-| messages per session | 136 | 341 | 439 | 439 | 10,879 |
+| messages per session | 136 | 341 | 439 | 439 | 10,883 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -69,7 +69,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `atoma_builtin__load_skill` | 39 | 1 | 0 | 2.6% |
 | `get_pr_diff` | 28 | 0 | 0 | 0% |
 | `get_pr_reviews` | 26 | 0 | 0 | 0% |
-| `request_close_issue` | 24 | 0 | 0 | 0% |
+| `request_close_issue` | 25 | 0 | 0 | 0% |
 | `merge_pr` | 21 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 18 | 0 | 0 | 0% |
 | `search_remote_code` | 18 | 6 | 0 | 33.3% |
@@ -119,7 +119,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,232,143 | 5,707,358 | 28,119,706 | 73,718,100 | 806,002,923 |
-| messages per session | 113 | 306 | 705 | 731 | 37,550 |
+| messages per session | 113 | 306 | 705 | 731 | 37,554 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -151,7 +151,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `write` | 128 | 2 | 0 | 1.6% |
 | `search_issues` | 121 | 0 | 3 | 0% |
 | `get_pr_diff` | 119 | 3 | 0 | 2.5% |
-| `request_close_issue` | 87 | 1 | 0 | 1.1% |
+| `request_close_issue` | 88 | 1 | 0 | 1.1% |
 | `get_pr_reviews` | 63 | 0 | 0 | 0% |
 | `list_prs` | 59 | 0 | 0 | 0% |
 | `merge_pr` | 58 | 0 | 0 | 0% |
@@ -220,7 +220,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,346,638 | 5,781,615 | 28,119,706 | 73,718,100 | 925,821,600 |
-| messages per session | 120 | 330 | 705 | 731 | 42,231 |
+| messages per session | 120 | 330 | 705 | 731 | 42,235 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -253,7 +253,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `create_pr` | 141 | 45 | 0 | 31.9% |
 | `search_issues` | 121 | 0 | 3 | 0% |
 | `get_pr_diff` | 119 | 3 | 0 | 2.5% |
-| `request_close_issue` | 87 | 1 | 0 | 1.1% |
+| `request_close_issue` | 88 | 1 | 0 | 1.1% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `get_pr_reviews` | 63 | 0 | 0 | 0% |
@@ -340,7 +340,7 @@ Neither figure covers 15 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,346,638 | 5,781,615 | 28,119,706 | 73,718,100 | 925,821,600 |
-| messages per session | 111 | 327 | 705 | 731 | 42,309 |
+| messages per session | 111 | 327 | 705 | 731 | 42,313 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -373,7 +373,7 @@ Neither figure covers 15 sessions with no run record at all — without one, nei
 | `create_pr` | 141 | 45 | 0 | 31.9% |
 | `search_issues` | 121 | 0 | 3 | 0% |
 | `get_pr_diff` | 119 | 3 | 0 | 2.5% |
-| `request_close_issue` | 87 | 1 | 0 | 1.1% |
+| `request_close_issue` | 88 | 1 | 0 | 1.1% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `get_pr_reviews` | 63 | 0 | 0 | 0% |
