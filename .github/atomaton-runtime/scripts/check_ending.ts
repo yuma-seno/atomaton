@@ -27,14 +27,117 @@ function lineForms(rawLine) {
   return variants;
 }
 
+// src/shared/fence.ts
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  const flush = () => {
+    if (current.text)
+      segments.push(current);
+    current = { text: "", code: false };
+  };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const { depth, rest } = stripQuotes(bare, Number.POSITIVE_INFINITY);
+    if (open !== null && depth < open.depth) {
+      flush();
+      open = null;
+    }
+    if (open === null) {
+      const fence = FENCE.exec(rest);
+      if (fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"))) {
+        flush();
+        open = { char: fence[1][0], length: fence[1].length, depth };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    const fence = FENCE.exec(stripQuotes(bare, open.depth).rest);
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      flush();
+      open = null;
+    }
+  }
+  flush();
+  return segments;
+}
+var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+function stripQuotes(line, limit) {
+  let rest = line;
+  let depth = 0;
+  while (depth < limit) {
+    const marker = /^ {0,3}> ?/.exec(rest);
+    if (marker === null)
+      break;
+    rest = rest.slice(marker[0].length);
+    depth += 1;
+  }
+  return { depth, rest };
+}
+function codeSegments(text) {
+  return fenceSegments(text).flatMap((segment) => segment.code ? [segment] : spans(segment.text));
+}
+function spans(text) {
+  const segments = [];
+  let prose = "";
+  let at = 0;
+  while (at < text.length) {
+    if (text[at] !== "`") {
+      prose += text[at];
+      at += 1;
+      continue;
+    }
+    const opening = runLength(text, at);
+    const lineEnd = text.indexOf(`
+`, at);
+    const closing = closingRun(text, at + opening, opening, lineEnd === -1 ? text.length : lineEnd);
+    if (closing === -1) {
+      prose += text.slice(at, at + opening);
+      at += opening;
+      continue;
+    }
+    if (prose)
+      segments.push({ text: prose, code: false });
+    prose = "";
+    segments.push({ text: text.slice(at, closing + opening), code: true });
+    at = closing + opening;
+  }
+  if (prose)
+    segments.push({ text: prose, code: false });
+  return segments;
+}
+function runLength(text, at) {
+  let length = 0;
+  while (text[at + length] === "`")
+    length += 1;
+  return length;
+}
+function closingRun(text, from, length, end) {
+  let at = from;
+  for (;; ) {
+    const found = text.indexOf("`", at);
+    if (found === -1 || found + length > end)
+      return -1;
+    const run = runLength(text, found);
+    if (run === length)
+      return found;
+    at = found + run;
+  }
+}
+
 // src/domain/work/mention.ts
 var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
 var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
-var CODE = /```[\s\S]*?```|`[^`\n]*`/g;
 function mentionsIn(text) {
   const found = [];
   const seen = new Set;
-  for (const match of text.replace(CODE, " ").matchAll(new RegExp(MENTION.source, "g"))) {
+  const prose = codeSegments(text).map((segment) => segment.code ? " " : segment.text).join("");
+  for (const match of prose.matchAll(new RegExp(MENTION.source, "g"))) {
     const login = match[2];
     const key = login.toLowerCase();
     if (seen.has(key))

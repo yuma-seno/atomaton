@@ -6,9 +6,21 @@ import { writeFileSync as writeFileSync2 } from "fs";
 import { parseArgs } from "util";
 
 // src/entrypoints/machinery/lib/atomaton-data.ts
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "fs";
 import { tmpdir } from "os";
-import { dirname, join } from "path";
+import { dirname, join, relative } from "path";
 
 // src/adapters/github/gh.ts
 function run(cmd) {

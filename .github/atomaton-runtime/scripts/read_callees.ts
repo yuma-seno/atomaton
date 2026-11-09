@@ -82,6 +82,59 @@ function splitConcatenatedJson(text) {
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
 var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
 
+// src/shared/fence.ts
+function fenceSegments(text) {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const segments = [];
+  let open = null;
+  let current = { text: "", code: false };
+  const flush = () => {
+    if (current.text)
+      segments.push(current);
+    current = { text: "", code: false };
+  };
+  for (const line of lines) {
+    const bare = line.replace(/\r?\n$/, "");
+    const { depth, rest } = stripQuotes(bare, Number.POSITIVE_INFINITY);
+    if (open !== null && depth < open.depth) {
+      flush();
+      open = null;
+    }
+    if (open === null) {
+      const fence = FENCE.exec(rest);
+      if (fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"))) {
+        flush();
+        open = { char: fence[1][0], length: fence[1].length, depth };
+        current = { text: line, code: true };
+      } else {
+        current.text += line;
+      }
+      continue;
+    }
+    current.text += line;
+    const fence = FENCE.exec(stripQuotes(bare, open.depth).rest);
+    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
+      flush();
+      open = null;
+    }
+  }
+  flush();
+  return segments;
+}
+var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+function stripQuotes(line, limit) {
+  let rest = line;
+  let depth = 0;
+  while (depth < limit) {
+    const marker = /^ {0,3}> ?/.exec(rest);
+    if (marker === null)
+      break;
+    rest = rest.slice(marker[0].length);
+    depth += 1;
+  }
+  return { depth, rest };
+}
+
 // src/domain/work/mention.ts
 var LOGIN_PATTERN = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
 var MENTION = new RegExp(`(^|[^\\w@/-])@(${LOGIN_PATTERN})\\b(?!\\/)`, "g");
@@ -164,37 +217,6 @@ function isQuotation(body) {
 function proseOnly(text) {
   return fenceSegments(text).map((segment) => segment.code ? `
 ` : segment.text).join("");
-}
-function fenceSegments(text) {
-  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
-  const segments = [];
-  let open = null;
-  let current = { text: "", code: false };
-  for (const line of lines) {
-    const bare = line.replace(/\r?\n$/, "");
-    const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(bare);
-    if (open === null) {
-      const opens = fence !== null && (fence[1][0] !== "`" || !fence[2].includes("`"));
-      if (opens) {
-        if (current.text)
-          segments.push(current);
-        open = { char: fence[1][0], length: fence[1].length };
-        current = { text: line, code: true };
-      } else {
-        current.text += line;
-      }
-      continue;
-    }
-    current.text += line;
-    if (fence && fence[1][0] === open.char && fence[1].length >= open.length && fence[2].trim() === "") {
-      segments.push(current);
-      current = { text: "", code: false };
-      open = null;
-    }
-  }
-  if (current.text)
-    segments.push(current);
-  return segments;
 }
 
 // src/domain/work/control-commands.ts
