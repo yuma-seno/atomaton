@@ -9,14 +9,35 @@ import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
  */
 const refs = (...tags: string[]) => tags.map((tag) => `refs/tags/${tag} sha-${tag}`).join("\n");
 
+/** What the fake `gh` answers for the run the dispatch is supposed to have started. */
+interface FakeRun {
+  /** `gh run list` stdout. */
+  readonly list: string;
+  /** `gh run view` stdout. */
+  readonly view: string;
+}
+
+const successRun = (id = 7): FakeRun => ({
+  list: JSON.stringify([{ databaseId: id, status: "in_progress", conclusion: null }]),
+  view: JSON.stringify({ databaseId: id, status: "completed", conclusion: "success" }),
+});
+
 /**
  * Run with a config of the test's own, rather than in this repository's checkout.
  *
  * The dispatch reads `deploy.your_workflow` now — which is the fix, and which makes
  * the ambient `config.yaml` an input. A test that let the repository's own file
  * answer would pass here and say nothing about an adopter's.
+ *
+ * The wait is one attempt and no interval, so the test exercises the answer rather
+ * than the clock. The run it waits for is the fake's, not a real one.
  */
-function dispatch(before: string, tagsNow: string | { code: number }, config: Record<string, unknown> = {}) {
+function dispatch(
+  before: string,
+  tagsNow: string | { code: number },
+  config: Record<string, unknown> = {},
+  run: FakeRun = successRun(),
+) {
   const listing =
     typeof tagsNow === "string"
       ? { match: ["api", "matching-refs/tags"], stdout: tagsNow }
@@ -25,8 +46,17 @@ function dispatch(before: string, tagsNow: string | { code: number }, config: Re
   try {
     return runWithFakeGh(scriptPath("dispatch_new_tags.ts"), ["--repo", "o/r"], {
       cwd: dir,
-      rules: [listing, { match: ["workflow", "run"], stdout: "" }],
-      env: { [TAGS_BEFORE_VAR]: before },
+      rules: [
+        listing,
+        { match: ["run", "list"], stdout: run.list },
+        { match: ["run", "view"], stdout: run.view },
+        { match: ["workflow", "run"], stdout: "" },
+      ],
+      env: {
+        [TAGS_BEFORE_VAR]: before,
+        ATOMATON_RUN_WAIT_ATTEMPTS: "1",
+        ATOMATON_RUN_WAIT_INTERVAL_MS: "0",
+      },
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -71,6 +101,32 @@ describe("dispatch_new_tags.ts", () => {
     const r = dispatch("[]", refs("v1.0.0", "v1.1.0"));
     expect(r.status).toBe(0);
     expect(dispatched(r.ghCalls)).toEqual(["v1.0.0", "v1.1.0"]);
+  });
+
+  /**
+   * The #507 defect: the merge-side run went green when GitHub accepted the
+   * dispatch, while the tag's own run was still queued and the release it would
+   * publish did not exist. Green has to mean the run finished.
+   */
+  test("it waits for the dispatched run, and reads how it ended", () => {
+    const r = dispatch("[]", refs("v1.0.0"));
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.some((call) => call[0] === "run" && call[1] === "view")).toBe(true);
+  });
+
+  test("a tag deployment that ended red fails this job", () => {
+    const r = dispatch("[]", refs("v1.0.0"), {}, {
+      list: JSON.stringify([{ databaseId: 9, status: "in_progress", conclusion: null }]),
+      view: JSON.stringify({ databaseId: 9, status: "completed", conclusion: "failure" }),
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("ended 'failure'");
+  });
+
+  test("a run that never appears fails rather than reporting success", () => {
+    const r = dispatch("[]", refs("v1.0.0"), {}, { list: "[]", view: "{}" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("Could not start a deployment");
   });
 
   /** The ordinary case: most deployments tag nothing, and must say nothing. */

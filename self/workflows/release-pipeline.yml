@@ -1,0 +1,276 @@
+# Release Pipeline — declare a release, merge it, wait for it to publish, apply it
+# to this repository's own .github/, and merge that too, on one button press.
+#
+# ## Why this is one workflow
+#
+# The three steps already existed separately: `Release` prepares the version pull
+# request, merging it publishes, and `Self Deploy` prepares the .github/ pull
+# request. What was missing was the hand that carried a release from one to the
+# next, and a person was that hand. This workflow is the hand. Everything it merges
+# is generated from a declaration; nothing in it is a change someone wrote, so
+# nothing in it needs someone to read it.
+#
+# ## What starts it, and what can reach the token
+#
+# A person, by dispatching it. The first job refuses a bot for the same reason the
+# two called workflows do: `SELF_DEPLOY_TOKEN` is a person's identity, and an agent
+# must not be able to reach it. The called workflows keep that refusal for their own
+# direct dispatch and skip it when called from here, because this job has already
+# made the decision.
+#
+# ## Checks still gate each merge
+#
+# "No review" is not "no checks". Both pull requests are machine-generated against
+# governed paths, and the ruleset still requires `atomaton-check`. This waits for
+# that check -- and for every other check on the pull request -- before merging. A
+# red change is not merged: the pipeline fails and leaves the pull request open, so
+# a person can read what the machine refused.
+#
+# ## What green means
+#
+# The release pull request was merged, the `Deploy` run that merge started finished
+# successfully, and the release tag is visible. `Deploy` itself waits for the tag's
+# publish run, so its success is the publish's success rather than a receipt for a
+# dispatch. Only then does the pipeline apply the release.
+#
+# ## The first application
+#
+# This file is hand-written. Its source is `self/workflows/`, and the copy under
+# `.github/workflows/` is the one GitHub runs; the two are kept identical here.
+# A change that reaches only `self/` -- because the token that wrote it could not
+# write a workflow -- arrives with the next self-deploy, and the release after that
+# is the first one it can carry. Once both copies are in place, this is the only
+# button a release needs.
+name: Release Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.2.0. Leave empty to bump the last segment of the declared version.'
+        required: false
+        default: ''
+        type: string
+      deploy:
+        description: 'Apply the published release to this repository''s .github/ as well.'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+# One release at a time, and the second waits rather than cancelling the first: a
+# release is a version of the whole of main, and two interleaved declarations would
+# race for which version the next one is derived from.
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+
+jobs:
+  refuse-bot:
+    name: Refuse a non-human trigger
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse a non-human trigger
+        env:
+          ACTOR: ${{ github.triggering_actor }}
+        run: |
+          case "$ACTOR" in
+            *'[bot]'|github-actions)
+              echo "::error::$ACTOR is not a person. This workflow is dispatched by hand, on purpose."
+              exit 1
+              ;;
+          esac
+          echo "dispatched by $ACTOR"
+
+  release:
+    name: Prepare the release pull request
+    needs: refuse-bot
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+    with:
+      version: ${{ inputs.version }}
+
+  merge-release:
+    name: Merge the release pull request
+    needs: release
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    # The merge's own Deploy job (sixty minutes), the tag's publish it waits for
+    # (seventy-five), and the queue before each. A budget shorter than that path
+    # reports a timeout as a failed release.
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
+    steps:
+      - name: Check the token is present
+        env:
+          TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::SELF_DEPLOY_TOKEN is unset. It needs a PAT that may merge pull requests. See CONTRIBUTING.md."
+            exit 1
+          fi
+
+      - name: Merge the release pull request, and wait for the release
+        env:
+          # Reads use the workflow's own token, so the PAT is only ever the thing
+          # that merges. `gh run watch` also refuses a fine-grained PAT's scopes;
+          # an Actions token has what it needs.
+          GH_TOKEN: ${{ github.token }}
+          MERGE_TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.release.outputs.pr }}
+          CHANGED: ${{ needs.release.outputs.changed }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Same version, no pull request. If the release is missing, the publish
+          # is what did not finish, and it is re-run rather than re-declared.
+          if [ "$CHANGED" != "true" ]; then
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+              echo "$TAG is already published; nothing to merge."
+              exit 0
+            fi
+            echo "::error::package.json already declares $TAG but no release exists. Re-run the publish: gh workflow run atomaton-deploy.yml --ref $TAG -f target=publish"
+            exit 1
+          fi
+
+          if [ -z "$PR" ]; then
+            echo "::error::Release reported a changed version but no pull request number."
+            exit 1
+          fi
+
+          # A pull request created a moment ago may have no checks registered yet,
+          # and `gh pr checks` calls that an error. Wait for the first one to
+          # appear; then watch all of them.
+          for _ in $(seq 1 60); do
+            count=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup | length')
+            if [ "$count" -gt 0 ]; then break; fi
+            sleep 10
+          done
+          count=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup | length')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No checks appeared on #$PR, so there is nothing saying it passed. Not merging."
+            exit 1
+          fi
+          gh pr checks "$PR" --repo "$REPO" --watch --fail-fast --interval 10
+
+          # The PAT, and only here: this is the one write the pipeline makes
+          # itself. `--delete-branch` is left off deliberately -- a failure to
+          # delete a branch after a successful merge would report the merge as
+          # failed, and the branch name is reused on a retry anyway.
+          GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR" --repo "$REPO" --merge
+
+          SHA=$(gh pr view "$PR" --repo "$REPO" --json mergeCommit --jq '.mergeCommit.oid // empty')
+          if [ -z "$SHA" ]; then
+            echo "::error::#${PR} merged but GitHub reported no merge commit, so the Deploy run cannot be found."
+            exit 1
+          fi
+
+          # The push this merge caused is the run to watch. It may not exist for a
+          # few seconds, and reading it is a plain list so a transient failure is a
+          # retry rather than the answer.
+          # `--event push` and not merely the commit: once `tag-release.sh` has
+          # created the tag, the tag's own `workflow_dispatch` run names the same
+          # commit and is newer, and watching that instead would skip the run whose
+          # success says the tag was created at all.
+          RUN=""
+          for _ in $(seq 1 60); do
+            RUN=$(gh run list --repo "$REPO" --workflow atomaton-deploy.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+            if [ -n "$RUN" ]; then break; fi
+            sleep 10
+          done
+          if [ -z "$RUN" ]; then
+            echo "::error::No Deploy run appeared for ${SHA}. See https://github.com/${REPO}/actions"
+            exit 1
+          fi
+
+          echo "Waiting for Deploy run ${RUN} for ${SHA}."
+          if ! gh run watch "$RUN" --repo "$REPO" --exit-status --interval 10; then
+            echo "::error::The Deploy run for ${SHA} failed: https://github.com/${REPO}/actions/runs/${RUN}"
+            exit 1
+          fi
+
+          # `Deploy` now waits for the tag's publish run, so this should already be
+          # true. It is checked anyway: it is the fact the next stage needs, and a
+          # release that is tagged but not published is exactly the state this
+          # pipeline exists to keep out of the next step.
+          for _ in $(seq 1 60); do
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+              echo "Published $TAG."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$TAG was not published after Deploy succeeded. See https://github.com/${REPO}/actions"
+          exit 1
+
+  self-deploy:
+    name: Prepare the self-deploy pull request
+    needs: merge-release
+    if: inputs.deploy
+    uses: ./.github/workflows/self-deploy.yml
+    secrets: inherit
+    with:
+      # The exact tag this run published, never `latest`: a concurrent or delayed
+      # release could make `latest` a different one by the time it is read.
+      version: ${{ needs.release.outputs.tag }}
+
+  merge-self-deploy:
+    name: Merge the self-deploy pull request
+    needs: self-deploy
+    if: needs.self-deploy.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    # The checks on a pull request that rewrites .github/ can be the full CI run.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    steps:
+      - name: Check the token is present
+        env:
+          TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::SELF_DEPLOY_TOKEN is unset. It needs a PAT that may merge pull requests. See CONTRIBUTING.md."
+            exit 1
+          fi
+
+      - name: Merge the self-deploy pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ needs.self-deploy.outputs.pr }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$PR" ]; then
+            echo "::error::Self Deploy reported a change but no pull request number."
+            exit 1
+          fi
+
+          for _ in $(seq 1 60); do
+            count=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup | length')
+            if [ "$count" -gt 0 ]; then break; fi
+            sleep 10
+          done
+          count=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup | length')
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No checks appeared on #$PR, so there is nothing saying it passed. Not merging."
+            exit 1
+          fi
+          gh pr checks "$PR" --repo "$REPO" --watch --fail-fast --interval 10
+
+          GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR" --repo "$REPO" --merge
+          echo "Applied the release: merged #${PR}."

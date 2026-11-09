@@ -1,12 +1,12 @@
-# Atomaton Release — declare a version in `package.json`, as a pull request, on a
-# button press.
+# Release — declare a version in `package.json`, as a pull request, on a button
+# press.
 #
 # ## Why this file is hand-written and lives in `self/`
 #
-# The same three reasons as `atomaton-self-deploy.yml`, and the same consequences:
-# it is not in the deliverable, so no adopter receives a workflow naming a secret
-# they do not have; no agent triggers it and no agent step reads its token; and it
-# does one thing a person asks for, by pressing a button.
+# The same three reasons as `self-deploy.yml`, and the same consequences: it is not
+# in the deliverable, so no adopter receives a workflow naming a secret they do not
+# have; no agent triggers it and no agent step reads its token; and it does one thing
+# a person asks for, by pressing a button.
 #
 # ## What a release is here
 #
@@ -48,13 +48,14 @@
 # carries an identity that does start runs; it is a PAT, held by a person pressing a
 # button, and no agent step reads it.
 #
-# ## What it does not do
+# ## Who merges
 #
-# It does not merge. `package.json` is in `merge.governed_paths`, so the pull
-# request needs a person. Deciding that a set of work is ready to ship is a
-# judgement no agent is positioned to make, and a version is that judgement written
-# as a number.
-name: Atomaton Release
+# This workflow does not. It prepares one pull request and stops, which is what
+# makes it usable on its own and as a step in `release-pipeline.yml`. That pipeline
+# is the ordinary route: it calls this file, waits for the required check, and merges
+# the pull request with the same PAT. The two are separable on purpose -- a release
+# is still possible when the pipeline itself is broken.
+name: Release
 
 on:
   workflow_dispatch:
@@ -64,6 +65,29 @@ on:
         required: false
         default: ''
         type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release. Empty bumps the last segment of the declared version.'
+        required: false
+        default: ''
+        type: string
+    secrets:
+      SELF_DEPLOY_TOKEN:
+        required: true
+    outputs:
+      version:
+        description: The version the pull request declares.
+        value: ${{ jobs.release.outputs.version }}
+      tag:
+        description: The tag that version publishes, with its leading "v".
+        value: ${{ jobs.release.outputs.tag }}
+      pr:
+        description: The pull request number, or empty when there was no diff.
+        value: ${{ jobs.release.outputs.pr }}
+      changed:
+        description: Whether a pull request was opened or updated.
+        value: ${{ jobs.release.outputs.changed }}
 
 # Read-only. Every write in this job goes through the PAT, which keeps the two
 # identities apart: if something here can write, it is because a person's token
@@ -75,6 +99,12 @@ jobs:
   release:
     name: Prepare the release pull request
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.new }}
+      tag: ${{ steps.version.outputs.tag }}
+      changed: ${{ steps.write.outputs.changed }}
+      pr: ${{ steps.open.outputs.pr }}
     steps:
       # A bot must not reach this. The agent runner's token carries `actions:
       # write`, so dispatching this file is within what that token could
@@ -82,7 +112,13 @@ jobs:
       # is a denylist, and this is a token that can open a pull request against a
       # governed path. So the check is also here, where it is a property of the job
       # rather than of what an agent happens to be offered.
+      #
+      # The one exception is a reusable call: the caller is `release-pipeline.yml`,
+      # whose own first job refuses a bot before it gets here. Skipping the check
+      # there is what lets the same file serve a person's direct dispatch and the
+      # pipeline without the pipeline looking like a bot.
       - name: Refuse a non-human trigger
+        if: github.event_name != 'workflow_call'
         env:
           ACTOR: ${{ github.triggering_actor }}
         run: |
@@ -210,6 +246,7 @@ jobs:
 
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
           echo "new=${NEW}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEW}" >> "$GITHUB_OUTPUT"
           echo "declaring ${CURRENT} -> ${NEW}"
 
       - name: Write the version
@@ -244,6 +281,7 @@ jobs:
           fi
 
       - name: Open the pull request
+        id: open
         if: steps.write.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.SELF_DEPLOY_TOKEN }}
@@ -260,15 +298,15 @@ jobs:
           git add package.json
 
           # Through a file, not `-m`, for the reason spelled out in
-          # atomaton-self-deploy.yml: a multi-line message written inline has to
-          # start its continuation lines at column 0 to keep them out of the commit
-          # body's indentation -- and column 0 leaves this block scalar, which makes
-          # the whole workflow unparseable.
+          # self-deploy.yml: a multi-line message written inline has to start its
+          # continuation lines at column 0 to keep them out of the commit body's
+          # indentation -- and column 0 leaves this block scalar, which makes the
+          # whole workflow unparseable.
           MSG=$(mktemp)
           {
             echo "release: declare ${NEW}"
             echo
-            echo "Prepared by self/workflows/atomaton-release.yml, dispatched by ${ACTOR}."
+            echo "Prepared by self/workflows/release.yml, dispatched by ${ACTOR}."
             echo
             echo "package.json version ${CURRENT} -> ${NEW}. Merging this tags v${NEW}"
             echo "and publishes it; nothing else declares a version."
@@ -284,11 +322,11 @@ jobs:
           {
             echo "Declares version \`${NEW}\` in \`package.json\` (was \`${CURRENT}\`)."
             echo
-            echo "Prepared by \`self/workflows/atomaton-release.yml\`, dispatched by @${ACTOR}. No agent was involved."
+            echo "Prepared by \`self/workflows/release.yml\`, dispatched by @${ACTOR}. No agent was involved."
             echo
             echo "Merging this **is** the release: \`deploy.on_merge\` runs \`tag-release.sh\`, which derives \`v${NEW}\` from this declaration, and the tag's own deployment publishes it."
             echo
-            echo "\`package.json\` is in \`merge.governed_paths\`, so this needs a person to merge. That is the point: a version is a claim about what is being shipped, and deciding that is not an agent's to make."
+            echo "Dispatched through **Release Pipeline**, that pipeline merges this after \`atomaton-check\` passes. Dispatched on its own, this pull request waits for a person: \`package.json\` is in \`merge.governed_paths\`."
           } > /tmp/body.md
 
           EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number // empty')
@@ -301,3 +339,13 @@ jobs:
               --body-file /tmp/body.md \
               --head "$BRANCH"
           fi
+
+          # Read back rather than parsed out of `gh pr create`: the URL is what it
+          # prints, and an edit prints nothing at all. The list is the one answer
+          # true for both paths.
+          PR=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number // empty')
+          if [ -z "$PR" ]; then
+            echo "::error::the release pull request for ${BRANCH} could not be found after it was created."
+            exit 1
+          fi
+          echo "pr=${PR}" >> "$GITHUB_OUTPUT"

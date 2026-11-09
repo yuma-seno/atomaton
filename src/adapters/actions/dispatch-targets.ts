@@ -16,7 +16,7 @@
  * | `dispatchPrValidation` | `pull_request.opened`, for an agent's pull request |
  * | `dispatchCi` | `push` to a pull request's head branch |
  * | `dispatchCd` | `push` to the branch a merge landed on |
- * | `dispatchTagDeploy` | `push` of a tag a deployment created |
+ * | `dispatchTagDeploy` | `push` of a tag a deployment created, and the publish that follows |
  * | `dispatchPostMergeAgent` | `pull_request.closed`, when an agent did the merging |
  * | `dispatchRunner` (`dispatch.ts`) | every hand-off from one agent to the next |
  *
@@ -44,6 +44,7 @@
  * is one nobody notices.
  */
 import { dispatchWorkflow } from "../../adapters/github/gh.ts";
+import { runWaitOptions, waitForDispatchRun, type WorkflowRun } from "../../adapters/github/workflow-runs.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { commentOnWithId } from "../../adapters/github/work-tree.ts";
 import { getDeploySection, getWorkflowName } from "../../adapters/runner/config.ts";
@@ -320,18 +321,32 @@ export function dispatchCd(baseRef: string): boolean {
 }
 
 /**
- * Deploy a tag one of this run's deployments just created.
+ * Deploy a tag one of this run's deployments just created, and return the run that
+ * was started.
  *
  * The same hole as `dispatchCd`, one event along: a deployment that cuts a release
  * creates its tag with GITHUB_TOKEN, so no `push` arrives for it and `on_tag` never
  * fires. See `scripts/dispatch_new_tags.ts` for how a run knows which tags are new,
  * and why the dispatching is a job of its own.
  *
+ * The run is returned rather than a boolean because the caller has to WAIT for it.
+ * A dispatch that GitHub accepted is not a deployment that happened: `Deploy` on the
+ * merge went green before the release it was supposed to publish existed, and the
+ * self-deploy that followed it failed looking for a release not yet created. The
+ * caller waits for this run and fails its job if it did not succeed, so green means
+ * published.
+ *
  * `repo` is required rather than optional: the only caller runs in a job checked out
  * for the scripts, not for the repository being deployed.
  */
-export function dispatchTagDeploy(repo: string, tag: string): boolean {
-  return dispatchDeploy(`dispatchTagDeploy: ${tag}`, "tag", tag, repo);
+export function dispatchTagDeploy(repo: string, tag: string): WorkflowRun | null {
+  const { workflow, args } = deployDispatch("tag", tag, repo);
+  if (!dispatchWorkflow(`dispatchTagDeploy: ${tag}`, workflow, args, log)) return null;
+  // The run appearing and the run finishing are different waits. A dispatch that
+  // has not shown up in ten minutes is a wrong workflow name or a broken API, not
+  // a slow build, so that wait is capped well below the publish's.
+  const wait = runWaitOptions();
+  return waitForDispatchRun(repo, workflow, tag, { ...wait, attempts: Math.min(wait.attempts, 60) });
 }
 
 /**
@@ -349,20 +364,32 @@ export function dispatchTagDeploy(repo: string, tag: string): boolean {
  * branches on and the value sent here are the same three names.
  */
 function dispatchDeploy(context: string, trigger: DeployTrigger, ref: string, repo?: string): boolean {
+  const { workflow, args } = deployDispatch(trigger, ref, repo);
+  return dispatchWorkflow(context, workflow, args, log);
+}
+
+/** The workflow and argv a deployment dispatch uses, shared by both callers. */
+function deployDispatch(
+  trigger: DeployTrigger,
+  ref: string,
+  repo?: string,
+): { readonly workflow: string; readonly args: string[] } {
   const configured = getWorkflowName("cd");
-  const args = [
-    ...(repo ? ["--repo", repo] : []),
-    // No `--ref` rather than a guessed one. This used to fall back to `"main"`,
-    // in a file that argues a hundred lines above that guessing a workflow name
-    // "would dispatch a workflow that does not exist" -- and on a repository whose
-    // default branch is `develop`, the guess made the dispatch fail, logged as a
-    // WARN, so the merge landed and nothing deployed. Omitted, `gh workflow run`
-    // uses the repository's real default branch, which is what `getBaseBranch()`
-    // already relies on for the same reason.
-    ...(ref ? ["--ref", ref] : []),
-    // Only the shipped workflow understands why it was started. A project's own
-    // deployment workflow gets the bare dispatch it has always got.
-    ...(configured ? [] : ["-f", `trigger=${trigger}`]),
-  ];
-  return dispatchWorkflow(context, configured || DEFAULT_CD_WORKFLOW, args, log);
+  return {
+    workflow: configured || DEFAULT_CD_WORKFLOW,
+    args: [
+      ...(repo ? ["--repo", repo] : []),
+      // No `--ref` rather than a guessed one. This used to fall back to `"main"`,
+      // in a file that argues a hundred lines above that guessing a workflow name
+      // "would dispatch a workflow that does not exist" -- and on a repository whose
+      // default branch is `develop`, the guess made the dispatch fail, logged as a
+      // WARN, so the merge landed and nothing deployed. Omitted, `gh workflow run`
+      // uses the repository's real default branch, which is what `getBaseBranch()`
+      // already relies on for the same reason.
+      ...(ref ? ["--ref", ref] : []),
+      // Only the shipped workflow understands why it was started. A project's own
+      // deployment workflow gets the bare dispatch it has always got.
+      ...(configured ? [] : ["-f", `trigger=${trigger}`]),
+    ],
+  };
 }

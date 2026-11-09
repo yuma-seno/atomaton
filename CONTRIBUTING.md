@@ -96,11 +96,20 @@ pull request carries that judgement in it. `version` in `package.json` is the si
 declaration, and `self/atomaton/scripts/tag-release.sh` derives the tag from it — so
 there is no tag to push and nothing that can disagree.
 
-To declare one, dispatch **Atomaton Release**:
+The ordinary route is **Release Pipeline**. It declares the version, merges that
+pull request once its checks pass, waits for the release to be published, and then
+applies the release to this repository's own `.github/` by opening and merging a
+second pull request:
 
 ```bash
-gh workflow run atomaton-release.yml --ref main -f version=0.2.0
+gh workflow run release-pipeline.yml --ref main -f version=0.2.0
 ```
+
+Or press **Run workflow** on **Release Pipeline** in the Actions tab. Both pull
+requests it merges are generated from the version declaration, so neither is a
+change someone wrote and neither needs someone to read it. It still waits for
+`atomaton-check`: no review is not no checks, and a red change is left open rather
+than merged.
 
 The `version` input is optional. Leave it empty (the default) to bump the last
 segment of the declared version — `0.2.9` becomes `0.2.10`, and a prerelease
@@ -109,10 +118,18 @@ number is typed, and the same checks run on it. There is nothing to bump on the
 first release, when `package.json` declares no version yet, so that one names a
 version.
 
-Or press **Run workflow** on **Atomaton Release** in the Actions tab. It writes the
-version into `package.json` and opens a pull request; it merges nothing.
-`package.json` is in `merge.governed_paths`, so a person reviews it — a version is a
-claim about what is being shipped, and deciding that is not an agent's to make.
+The declaration itself is still **Release** on its own, which is what to reach for
+when the pipeline is broken or when a release has to carry a change to the pipeline
+itself:
+
+```bash
+gh workflow run release.yml --ref main -f version=0.2.0
+```
+
+It writes the version into `package.json` and opens a pull request; it merges
+nothing. `package.json` is in `merge.governed_paths`, so a person reviews it — a
+version is a claim about what is being shipped, and deciding that is not an agent's
+to make.
 
 The mirror of that rule is for every other pull request: **do not edit `version` in
 one.** A work change merged without a version edit publishes nothing, and that is the
@@ -195,12 +212,13 @@ A release does not change how this repository's own agents run. `.github/` has t
 be rebuilt from it, which is a second, deliberate step.
 
 ```bash
-gh workflow run atomaton-self-deploy.yml --ref main -f version=latest
+gh workflow run self-deploy.yml --ref main -f version=latest
 ```
 
-Or press **Run workflow** on **Atomaton Self Deploy** in the Actions tab. It opens a
-pull request and merges nothing: `.github/**` is in `merge.governed_paths`, so a person
-reviews it.
+Or press **Run workflow** on **Self Deploy** in the Actions tab. **Release Pipeline**
+already does this for the release it just published; dispatch it on its own to apply
+an older release, or when the pipeline itself is broken. It opens a pull request and
+merges nothing: `.github/**` is in `merge.governed_paths`, so a person reviews it.
 
 What the job does, in three lines:
 
@@ -228,8 +246,8 @@ with the `workflow` scope, set as an Actions secret in this repository:
 gh secret set SELF_DEPLOY_TOKEN
 ```
 
-**No agent can reach it.** It is named in `self/workflows/atomaton-self-deploy.yml`
-and nowhere else; `atomaton-runner.yml` does not mention it, and `atoma` hands a tool
+**No agent can reach it.** It is named in the three hand-written workflows under
+`self/workflows/` and nowhere else; `atomaton-runner.yml` does not mention it, and `atoma` hands a tool
 server only the credentials that server's own `env` declares. The workflow also
 refuses a bot as `triggering_actor`, because the agent runner's token carries
 `actions: write` and could therefore dispatch a workflow in principle —
@@ -252,7 +270,7 @@ directions, which is what stops a change from being half-applied.
 **Workflows are the one exception.** GitHub refuses to let a GitHub App token
 write `.github/workflows/**`, so an agent can change `self/workflows/**` and cannot
 change the deployed copy. A workflow change therefore goes in `self/` alone, and
-the deployed copy catches up the next time **Atomaton Self Deploy** runs rather
+the deployed copy catches up the next time **Self Deploy** runs rather
 than the moment the pull request merges. The direction that matters is still held:
 the test compares against the base the pull request branched from, and fails when
 `.github/workflows/**` moved without `self/` moving with it — the edit that the
@@ -409,7 +427,7 @@ a shell any more.
   deliverable still builds.
 - `dist/.github/*` is generated: never hand-edit it.
 - `.github/*` is *deployed*, not generated on merge. It is a release plus `self/`
-  copied over it, rebuilt by [Atomaton Self Deploy](#applying-a-release-to-this-repository).
+  copied over it, rebuilt by [Self Deploy](#applying-a-release-to-this-repository).
   So a change under `src/` does not reach the live agents until someone
   dispatches that, and CI does not reject a diff that touches `.github/`.
 - What is genuinely yours to edit lives in `self/`, not in `.github/`. Edit both,
