@@ -176,8 +176,18 @@ import { TypedOutputsStep } from "./base.ts";
  * compact ends as `context_limit` rather than `failed` -- a soft stop the runner reads
  * back, so the thread says the window filled instead of filing it with providers that
  * hung up.
+ *
+ * **A compaction keeps the system prompt, and its summary is counted.** Written by
+ * the core from v0.4.8 (yuma-seno/atoma#23): a compaction replaced every message,
+ * system prompt included, so the rest of the run continued without its report
+ * contract and dispatch rules, and the summarizing inference's usage was dropped from
+ * every report. The replacement now keeps the system prompt, the summary request
+ * carries only the part being replaced -- a prefix of the conversation, so the
+ * provider's cache can match it -- and the summary is counted in `usage`. It writes
+ * `ATOMA_INFERENCE_USAGE` with an extra `kind=compaction` field and does not move
+ * `last_prompt_tokens`, which stays the budget's measurement of the conversation.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.7";
+export const ATOMA_DEFAULT_VERSION = "v0.4.8";
 
 export const ATOMA_VERSION_DESC =
   "Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.";
