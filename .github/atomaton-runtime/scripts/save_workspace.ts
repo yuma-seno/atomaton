@@ -6,9 +6,21 @@ import { existsSync as existsSync2, readdirSync as readdirSync2 } from "fs";
 import { parseArgs } from "util";
 
 // src/entrypoints/machinery/lib/atomaton-data.ts
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "fs";
 import { tmpdir } from "os";
-import { dirname, join } from "path";
+import { dirname, join, relative } from "path";
 
 // src/adapters/github/gh.ts
 function run(cmd) {
@@ -42,6 +54,47 @@ function gitIn(cwd, ...args) {
 function workspaceTargetPrefix(rootIssue) {
   return workspaceDir(rootIssue);
 }
+var DIRECTORY_MODE = 493;
+var FILE_MODE = 420;
+var EXECUTABLE_FILE_MODE = 493;
+function copyWorkspace(source, destination) {
+  const skipped = [];
+  const copy = (from, to) => {
+    let entries;
+    try {
+      entries = readdirSync(from, { withFileTypes: true });
+    } catch {
+      skipped.push(relative(source, from) || ".");
+      return false;
+    }
+    mkdirSync(to, { recursive: true });
+    chmodSync(to, DIRECTORY_MODE);
+    for (const entry of entries) {
+      if (entry.name === ".git")
+        continue;
+      const sourcePath = join(from, entry.name);
+      const targetPath = join(to, entry.name);
+      try {
+        if (entry.isDirectory()) {
+          copy(sourcePath, targetPath);
+        } else if (entry.isSymbolicLink()) {
+          symlinkSync(readlinkSync(sourcePath), targetPath);
+        } else if (entry.isFile()) {
+          copyFileSync(sourcePath, targetPath);
+          const executable = (statSync(sourcePath).mode & 73) !== 0;
+          chmodSync(targetPath, executable ? EXECUTABLE_FILE_MODE : FILE_MODE);
+        } else {
+          skipped.push(relative(source, sourcePath));
+        }
+      } catch {
+        rmSync(targetPath, { recursive: true, force: true });
+        skipped.push(relative(source, sourcePath));
+      }
+    }
+    return true;
+  };
+  return copy(source, destination) ? skipped : undefined;
+}
 function saveWorkspace(prefix, sourceDir, commitMessage) {
   if (!existsSync(sourceDir))
     return true;
@@ -62,8 +115,16 @@ function saveWorkspace(prefix, sourceDir, commitMessage) {
       const target = join(worktreeDir, prefix);
       rmSync(target, { recursive: true, force: true });
       mkdirSync(dirname(target), { recursive: true });
-      cpSync(sourceDir, target, { recursive: true });
-      gitIn(worktreeDir, "add", "--all", prefix);
+      const skipped = copyWorkspace(sourceDir, target);
+      if (skipped === undefined) {
+        console.error(`[${DATA_BRANCH}] cannot read ${sourceDir}; leaving the previous workspace snapshot alone`);
+        break;
+      }
+      for (const path of skipped) {
+        console.error(`::warning::workspace snapshot: left ${path} out, because the user saving it cannot read it`);
+      }
+      gitIn(worktreeDir, "rm", "-r", "--cached", "--quiet", "--ignore-unmatch", "--", prefix);
+      gitIn(worktreeDir, "add", "--all", "--", prefix);
       if (gitIn(worktreeDir, "diff", "--cached", "--quiet").code === 0) {
         saved = true;
         break;
@@ -129,9 +190,15 @@ function main() {
     console.error(`[atomaton-workspace] ${source} does not exist; nothing to save`);
     return;
   }
-  const count = readdirSync2(source).length;
   const prefix = workspaceTargetPrefix(root);
-  const saved = saveWorkspace(prefix, source, `atomaton: workspace for issue #${root}${values.agent ? ` (${values.agent})` : ""} \u2014 ${count} entries`);
+  let count = 0;
+  let saved = false;
+  try {
+    count = readdirSync2(source).length;
+    saved = saveWorkspace(prefix, source, `atomaton: workspace for issue #${root}${values.agent ? ` (${values.agent})` : ""} \u2014 ${count} entries`);
+  } catch (error) {
+    console.error(`[atomaton-workspace] could not save ${prefix}: ${error.message}`);
+  }
   console.error(saved ? `[atomaton-workspace] saved ${count} entries to ${prefix}` : `[atomaton-workspace] WARN could not save ${prefix}; the next run on this issue starts without these files`);
 }
 if (import.meta.main)
