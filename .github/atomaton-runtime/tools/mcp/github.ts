@@ -20391,13 +20391,19 @@ function dispatchCd(baseRef) {
   return dispatchDeploy("dispatchCd", "merge", baseRef);
 }
 function dispatchDeploy(context, trigger, ref, repo) {
+  const { workflow, args } = deployDispatch(trigger, ref, repo);
+  return dispatchWorkflow(context, workflow, args, log6);
+}
+function deployDispatch(trigger, ref, repo) {
   const configured = getWorkflowName("cd");
-  const args = [
-    ...repo ? ["--repo", repo] : [],
-    ...ref ? ["--ref", ref] : [],
-    ...configured ? [] : ["-f", `trigger=${trigger}`]
-  ];
-  return dispatchWorkflow(context, configured || DEFAULT_CD_WORKFLOW, args, log6);
+  return {
+    workflow: configured || DEFAULT_CD_WORKFLOW,
+    args: [
+      ...repo ? ["--repo", repo] : [],
+      ...ref ? ["--ref", ref] : [],
+      ...configured ? [] : ["-f", `trigger=${trigger}`]
+    ]
+  };
 }
 
 // src/adapters/github/branch-rules.ts

@@ -24,6 +24,23 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function ghRead(...args) {
+  let result = gh(...args);
+  for (const delay of [2000, 6000]) {
+    if (result.code === 0 || !looksTransient(result))
+      return result;
+    console.error(`::warning::gh ${args.slice(0, 2).join(" ")} failed transiently, retrying: ${result.stderr || result.stdout}`);
+    Bun.sleepSync(delay);
+    result = gh(...args);
+  }
+  return result;
+}
+function looksTransient(result) {
+  const text = `${result.stderr} ${result.stdout}`;
+  if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
+    return true;
+  return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
 function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
   if (code) {
@@ -32,6 +49,76 @@ function dispatchWorkflow(context, workflow, args = [], log = (m) => console.err
   }
   log(`${context}: dispatched ${workflow}`);
   return true;
+}
+
+// src/adapters/github/workflow-runs.ts
+var RUN_WAIT_ATTEMPTS_VAR = "ATOMATON_RUN_WAIT_ATTEMPTS";
+var RUN_WAIT_INTERVAL_MS_VAR = "ATOMATON_RUN_WAIT_INTERVAL_MS";
+var DEFAULT_ATTEMPTS = 420;
+var DEFAULT_INTERVAL_MS = 1e4;
+function positiveInt(raw, fallback) {
+  const value = Number((raw ?? "").trim());
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+function nonNegativeInt(raw, fallback) {
+  const value = Number((raw ?? "").trim());
+  return Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+function runWaitOptions(env = process.env) {
+  return {
+    attempts: positiveInt(env[RUN_WAIT_ATTEMPTS_VAR], DEFAULT_ATTEMPTS),
+    intervalMs: nonNegativeInt(env[RUN_WAIT_INTERVAL_MS_VAR], DEFAULT_INTERVAL_MS)
+  };
+}
+function parseRun(raw) {
+  if (typeof raw !== "object" || raw === null)
+    return null;
+  const record = raw;
+  if (typeof record.databaseId !== "number" || typeof record.status !== "string")
+    return null;
+  return {
+    id: record.databaseId,
+    status: record.status,
+    conclusion: typeof record.conclusion === "string" ? record.conclusion : null
+  };
+}
+function newestDispatchRun(repo, workflow, ref) {
+  const { code, stdout } = ghRead("run", "list", "--repo", repo, "--workflow", workflow, "--branch", ref, "--event", "workflow_dispatch", "--limit", "1", "--json", "databaseId,status,conclusion");
+  if (code !== 0)
+    return null;
+  try {
+    const runs = JSON.parse(stdout || "[]");
+    if (!Array.isArray(runs))
+      return null;
+    return parseRun(runs[0]);
+  } catch {
+    return null;
+  }
+}
+function waitForDispatchRun(repo, workflow, ref, options = runWaitOptions()) {
+  for (let attempt = 0;attempt < options.attempts; attempt += 1) {
+    const run = newestDispatchRun(repo, workflow, ref);
+    if (run)
+      return run;
+    if (attempt + 1 < options.attempts)
+      Bun.sleepSync(options.intervalMs);
+  }
+  return null;
+}
+function waitForRunCompletion(repo, runId, options = runWaitOptions()) {
+  for (let attempt = 0;attempt < options.attempts; attempt += 1) {
+    const { code, stdout } = ghRead("run", "view", String(runId), "--repo", repo, "--json", "databaseId,status,conclusion");
+    if (code === 0) {
+      try {
+        const run = parseRun(JSON.parse(stdout || "{}"));
+        if (run && run.status === "completed")
+          return run;
+      } catch {}
+    }
+    if (attempt + 1 < options.attempts)
+      Bun.sleepSync(options.intervalMs);
+  }
+  return null;
 }
 
 // src/domain/work/agent-name.ts
@@ -484,16 +571,22 @@ function log(message) {
   console.error(`[atomaton-github] ${message}`);
 }
 function dispatchTagDeploy(repo, tag) {
-  return dispatchDeploy(`dispatchTagDeploy: ${tag}`, "tag", tag, repo);
+  const { workflow, args } = deployDispatch("tag", tag, repo);
+  if (!dispatchWorkflow(`dispatchTagDeploy: ${tag}`, workflow, args, log))
+    return null;
+  const wait = runWaitOptions();
+  return waitForDispatchRun(repo, workflow, tag, { ...wait, attempts: Math.min(wait.attempts, 60) });
 }
-function dispatchDeploy(context, trigger, ref, repo) {
+function deployDispatch(trigger, ref, repo) {
   const configured = getWorkflowName("cd");
-  const args = [
-    ...repo ? ["--repo", repo] : [],
-    ...ref ? ["--ref", ref] : [],
-    ...configured ? [] : ["-f", `trigger=${trigger}`]
-  ];
-  return dispatchWorkflow(context, configured || DEFAULT_CD_WORKFLOW, args, log);
+  return {
+    workflow: configured || DEFAULT_CD_WORKFLOW,
+    args: [
+      ...repo ? ["--repo", repo] : [],
+      ...ref ? ["--ref", ref] : [],
+      ...configured ? [] : ["-f", `trigger=${trigger}`]
+    ]
+  };
 }
 
 // src/adapters/github/git-tags.ts
@@ -558,14 +651,28 @@ function main() {
     console.error("This deployment created no tags.");
     return;
   }
+  const wait = runWaitOptions();
   let failed = 0;
   for (const tag of added) {
-    if (!dispatchTagDeploy(repo, tag)) {
+    const run = dispatchTagDeploy(repo, tag);
+    if (!run) {
       failed += 1;
       console.error(`::error::Could not start a deployment for the new tag ${tag}.`);
       continue;
     }
-    console.error(`Started a deployment for the new tag ${tag}.`);
+    console.error(`Started a deployment for the new tag ${tag} (run ${run.id}).`);
+    const finished = waitForRunCompletion(repo, run.id, wait);
+    if (!finished) {
+      failed += 1;
+      console.error(`::error::The deployment for ${tag} (run ${run.id}) could not be read to a conclusion.`);
+      continue;
+    }
+    if (finished.conclusion !== "success") {
+      failed += 1;
+      console.error(`::error::The deployment for ${tag} (run ${run.id}) ended '${finished.conclusion ?? "unknown"}', so it was not published.`);
+      continue;
+    }
+    console.error(`Deployed ${tag} (run ${run.id}).`);
   }
   if (failed > 0)
     process.exit(1);
