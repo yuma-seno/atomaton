@@ -209,7 +209,7 @@ const deployJob = matrixJob(
 );
 
 /**
- * Start a deploy run for each tag the deployments above created.
+ * Start a deploy run for each tag the deployments above created, and wait for it.
  *
  * A deployment that cuts a release creates its tag with GITHUB_TOKEN, and GitHub
  * starts no workflow run for its own token's events — so `on_tag` never fired for a
@@ -218,6 +218,12 @@ const deployJob = matrixJob(
  * argument, including why this is a job of its own: dispatching needs
  * `actions: write`, and the job that runs a project's deployment commands must not
  * have it.
+ *
+ * It also waits for the dispatched run to finish, because a dispatch is not a
+ * deployment. Without the wait this job went green as soon as GitHub accepted the
+ * request, and the release it was supposed to publish did not exist yet; whatever
+ * ran next failed looking for it. The timeout below therefore covers the other run's
+ * own sixty-minute deployment job, not just the dispatch.
  *
  * Skipped when `tags_before` is empty, which is how the planning job says there is
  * nothing to watch for — no `on_tag` entry, nothing deploying, or a run that was
@@ -234,7 +240,10 @@ const dispatchNewTagsJob = new DefinedJob(
       JobCondition.is(deployJob.rawResult, "success"),
     ),
     "runs-on": "ubuntu-latest",
-    "timeout-minutes": 5,
+    // The tag deployment this waits for has a sixty-minute job of its own. This one
+    // only polls, so it needs barely more than that, but a wait that is shorter than
+    // the thing it waits for reports a timeout as a publish failure.
+    "timeout-minutes": 75,
     // The one job here that may start a workflow, and it runs nothing a project
     // wrote. `contents: read` is for the checkout that brings the script.
     permissions: { contents: "read", actions: "write" },

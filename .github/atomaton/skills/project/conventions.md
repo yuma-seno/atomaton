@@ -52,7 +52,7 @@ merge needs to carry it.
 
 **Never touch `version` in `package.json`.** The version is the release declaration:
 merging an edit to it publishes to adopters, and that decision belongs to a person,
-made on the pull request the **Atomaton Release** workflow opens — never inside a
+made on the pull request **Release Pipeline** opens — never inside a
 work pull request. A version left alone is a merge that publishes nothing, which is
 the normal case. A work pull request that arrives with a version change in it is a
 merge-blocking defect: flag it, and have the edit taken back out before merge.
@@ -82,8 +82,8 @@ values that exist only after manual setup, so the JSON would stop describing the
 whole configuration.
 
 The workflows that run agents are generated from `src/workflows/` and shipped.
-`self/workflows/` holds the two that are not: `atomaton-self-deploy.yml` and
-`probe-dumpable.yml`.
+`self/workflows/` holds the three that are not: `release.yml`, `self-deploy.yml`,
+and `release-pipeline.yml`.
 
 ## Adding a static file to the deliverable
 
@@ -122,9 +122,11 @@ the moment it merges. Two breakages reached the running system exactly that way.
 
 ### Applying a release
 
-Dispatch **Atomaton Self Deploy** (`self/workflows/atomaton-self-deploy.yml`) from the
-Actions tab. It opens a pull request and merges nothing. `.github/**` is in
-`merge.governed_paths`, so a person reviews it.
+The ordinary route is **Release Pipeline**, which publishes the release and then
+opens and merges the deploy pull request. To apply a release on its own, dispatch
+**Self Deploy** (`self/workflows/self-deploy.yml`) from the Actions tab. It opens a
+pull request and merges nothing. `.github/**` is in `merge.governed_paths`, so a
+person reviews it.
 
 What it does:
 

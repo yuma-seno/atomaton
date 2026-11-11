@@ -1563,6 +1563,25 @@ describe("generated workflows", () => {
   });
 
   /**
+   * The dispatching job now waits for the tag run instead of returning once the
+   * dispatch is accepted. Its bound therefore has to outlast the deployment it is
+   * waiting for; a shorter one turns a slow publish into a reported timeout.
+   */
+  test("the job that waits for a tag deployment outlasts that deployment", () => {
+    type WorkflowDocument = {
+      jobs?: Record<string, { "timeout-minutes"?: number }>;
+    };
+    const deploy = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-deploy.yml", "utf8")) as WorkflowDocument;
+    const waiting = deploy.jobs?.["dispatch-new-tags"]?.["timeout-minutes"];
+    const publishing = deploy.jobs?.deploy?.["timeout-minutes"];
+    expect(waiting, "dispatch-new-tags declares its bound").toBeGreaterThan(0);
+    expect(publishing, "deploy declares its bound").toBeGreaterThan(0);
+    expect(waiting as number, "waiting for a run must not time out before the run does").toBeGreaterThan(
+      publishing as number,
+    );
+  });
+
+  /**
    * Deployments run one at a time, in declared order, and stop at the first failure.
    *
    * What the single job provided by running them in a bash loop, and the one thing a

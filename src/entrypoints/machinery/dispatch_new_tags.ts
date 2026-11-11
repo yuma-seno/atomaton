@@ -18,6 +18,15 @@
  * dispatches: `--ref <tag>`, `trigger=tag`, once per tag, in the order GitHub lists
  * them.
  *
+ * ## It waits, so green means published
+ *
+ * A dispatch is a receipt for a request, not a deployment. This job used to exit as
+ * soon as GitHub accepted the request, so the merge-side `Deploy` reported success
+ * while the tag's own run was still queued; the release did not exist yet, and the
+ * step after it failed looking for one. Each dispatched run is now watched to its
+ * conclusion, and a run that ended without success fails this job. `Deploy` going
+ * green therefore means the release it was for has been published.
+ *
  * ## Why this is a job of its own
  *
  * Because dispatching needs `actions: write`, and the job that runs a project's
@@ -54,6 +63,7 @@
 import { parseArgs } from "node:util";
 import { dispatchTagDeploy } from "../../adapters/actions/dispatch-targets.ts";
 import { readTagNames, tagsAdded } from "../../adapters/github/git-tags.ts";
+import { runWaitOptions, waitForRunCompletion } from "../../adapters/github/workflow-runs.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface DispatchNewTagsArgs {
@@ -113,14 +123,29 @@ function main(): void {
   // which is the same decision `dispatchCd` makes from `deploy.your_workflow` -- one
   // fact, answered in two places, and this copy did not know the setting existed.
   // The dispatch it reports as failed is the same failure either way.
+  const wait = runWaitOptions();
   let failed = 0;
   for (const tag of added) {
-    if (!dispatchTagDeploy(repo, tag)) {
+    const run = dispatchTagDeploy(repo, tag);
+    if (!run) {
       failed += 1;
       console.error(`::error::Could not start a deployment for the new tag ${tag}.`);
       continue;
     }
-    console.error(`Started a deployment for the new tag ${tag}.`);
+    console.error(`Started a deployment for the new tag ${tag} (run ${run.id}).`);
+
+    const finished = waitForRunCompletion(repo, run.id, wait);
+    if (!finished) {
+      failed += 1;
+      console.error(`::error::The deployment for ${tag} (run ${run.id}) could not be read to a conclusion.`);
+      continue;
+    }
+    if (finished.conclusion !== "success") {
+      failed += 1;
+      console.error(`::error::The deployment for ${tag} (run ${run.id}) ended '${finished.conclusion ?? "unknown"}', so it was not published.`);
+      continue;
+    }
+    console.error(`Deployed ${tag} (run ${run.id}).`);
   }
   if (failed > 0) process.exit(1);
 }

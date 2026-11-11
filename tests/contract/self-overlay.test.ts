@@ -221,7 +221,7 @@ describe("`self/` and `.github/` hold the same overlay", () => {
         deployed,
         `${DEPLOYED}/workflows/${file} moved on its own. ${OVERLAY}/ is the source and the next ` +
           `self-deploy reverts ${DEPLOYED}/, so edit ${OVERLAY}/workflows/${file} instead; the ` +
-          `deployed copy catches up when Atomaton Self Deploy runs`,
+          `deployed copy catches up when Self Deploy runs`,
       ).toBe(lead);
     }
   });
@@ -259,7 +259,7 @@ describe("`self/` and `.github/` hold the same overlay", () => {
    * Every hand-written workflow in the overlay must parse, and must declare a
    * trigger.
    *
-   * This is the test that was missing when it mattered. `atomaton-self-deploy.yml`
+   * This is the test that was missing when it mattered. `self-deploy.yml`
    * shipped with a `git commit -m` whose continuation lines started at column 0 --
    * which leaves the block scalar and makes the file invalid YAML. Everything
    * passed: typecheck, synth, all four overlay tests, all of CI.
@@ -296,13 +296,15 @@ describe("`self/` and `.github/` hold the same overlay", () => {
   });
 
   /**
-   * The self-deploy workflow is the one thing here that cannot be regenerated, and
-   * the one holding a token. Pinning both facts: it exists in the overlay, and
-   * nothing in the deliverable knows about the secret.
+   * The three workflows that drive this repository's own release cannot be
+   * regenerated, and one of them holds a token. Pinning both facts: they exist in
+   * the overlay, and nothing in the deliverable knows about the secret.
    */
-  test("the self-deploy workflow is this repository's own, and the deliverable never names its token", () => {
-    expect(existsSync(join(OVERLAY, "workflows/atomaton-self-deploy.yml"))).toBe(true);
-    expect(existsSync(join(BUILT, "workflows/atomaton-self-deploy.yml")), "it must not be shipped").toBe(false);
+  test("the release workflows are this repository's own, and the deliverable never names their token", () => {
+    for (const file of ["release.yml", "self-deploy.yml", "release-pipeline.yml"]) {
+      expect(existsSync(join(OVERLAY, "workflows", file)), `${file} is this repository's own`).toBe(true);
+      expect(existsSync(join(BUILT, "workflows", file)), `${file} must not be shipped`).toBe(false);
+    }
 
     // An adopter receiving a reference to this secret would get a workflow that
     // cannot run, and -- worse -- a name suggesting Atomaton expects a PAT.

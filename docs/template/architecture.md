@@ -154,7 +154,7 @@ exactly why `checks.from_pull_request` is given no secret. Review is the gate,
 here as everywhere.
 
 `self/` is this repository's own overlay onto `.github/`, copied verbatim by
-`self/workflows/atomaton-self-deploy.yml`. It mirrors `.github/` exactly, so
+`self/workflows/self-deploy.yml`. It mirrors `.github/` exactly, so
 nothing goes in it that does not belong in `.github/` — and an overlay file is a
 copy rather than a build, so both halves change in the same pull request.
 `self-overlay.test.ts` holds them to each other in both directions — except for
