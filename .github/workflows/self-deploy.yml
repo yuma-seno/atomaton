@@ -141,7 +141,11 @@ jobs:
           REQUESTED: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [ "$REQUESTED" = "latest" ]; then
+          # An empty input means the default. GitHub sends an empty string when a
+          # person clears the field, not the declared default, and `gh release view
+          # ""` would otherwise read the latest release while still writing an empty
+          # tag -- which becomes an invalid `self-deploy/` branch downstream.
+          if [ -z "$REQUESTED" ] || [ "$REQUESTED" = "latest" ]; then
             TAG=$(gh release view --json tagName -q .tagName)
           else
             TAG="$REQUESTED"

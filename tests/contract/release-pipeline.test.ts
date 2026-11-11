@@ -63,7 +63,8 @@ describe("Release Pipeline", () => {
     ]);
     expect(needs(jobs.release)).toEqual(["refuse-bot"]);
     expect(needs(jobs["merge-release"])).toEqual(["release"]);
-    expect(needs(jobs["self-deploy"])).toEqual(["merge-release"]);
+    // `release` as well as `merge-release`, because the tag comes from its output.
+    expect(needs(jobs["self-deploy"])).toEqual(["release", "merge-release"]);
     expect(needs(jobs["merge-self-deploy"])).toEqual(["self-deploy"]);
 
     expect(jobs.release?.uses).toBe("./.github/workflows/release.yml");
@@ -82,6 +83,31 @@ describe("Release Pipeline", () => {
       expect(merge, `${name} must merge`).toBeGreaterThan(-1);
       expect(checks, `${name} must not merge before the checks have passed`).toBeLessThan(merge);
       expect(merged, `${name} must not bypass the ruleset`).not.toContain("--admin");
+    }
+  });
+
+  /**
+   * This failed the first time the pipeline ran: `self-deploy` read
+   * `needs.release.outputs.tag` while naming only `merge-release` in `needs`, so
+   * the tag evaluated to empty and the branch became `self-deploy/`, which git
+   * refuses. GitHub exposes a job's outputs only to jobs that name it directly.
+   */
+  test("a job reads outputs only from a job it needs", () => {
+    const references = (value: unknown): string[] => {
+      if (typeof value === "string") {
+        return [...value.matchAll(/\bneeds\.([A-Za-z0-9_-]+)\.(?:outputs|result)\b/g)]
+          .map((match) => match[1] ?? "")
+          .filter((name) => name !== "");
+      }
+      if (Array.isArray(value)) return value.flatMap(references);
+      if (typeof value === "object" && value !== null) return Object.values(value).flatMap(references);
+      return [];
+    };
+
+    for (const [name, job] of Object.entries(jobs)) {
+      for (const dependency of references(job)) {
+        expect(needs(job), `${name} reads needs.${dependency} but does not list it in needs`).toContain(dependency);
+      }
     }
   });
 
