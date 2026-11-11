@@ -216,7 +216,11 @@ jobs:
 
   self-deploy:
     name: Prepare the self-deploy pull request
-    needs: merge-release
+    # `release` is needed only so its outputs can be read: GitHub exposes
+    # `needs.<job>.outputs` to a job that names that job in `needs`, not to a job
+    # that names something downstream of it. Without this, the tag below is empty
+    # and the branch becomes an invalid `self-deploy/`.
+    needs: [release, merge-release]
     if: inputs.deploy
     uses: ./.github/workflows/self-deploy.yml
     secrets: inherit
