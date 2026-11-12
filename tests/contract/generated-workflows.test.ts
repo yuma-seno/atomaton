@@ -616,6 +616,17 @@ describe("generated workflows", () => {
     // The launch sits before the branch, so a failure inside it is caught by the
     // same `|| EXIT_CODE=$?` and never reads as machinery's.
     expect(launchAt, "atoma runs before the ending is classified").toBeLessThan(branchAt);
+    // And the `||` arm is the launch's ONLY catch — the launch is not itself
+    // captured into `EXIT_CODE`. A capture takes stdout, and the launch script
+    // prints nothing there by design, so every success read as the empty string:
+    // the ending checks saw a code that was neither 0 nor 2, `atoma_failed` was
+    // published for a green run, and the result comment said "ended without
+    // writing a report" over a report it was displaying. The launch runs as its
+    // own statement; the only `EXIT_CODE=$( ...)` the step may hold is the sed
+    // that reads the re-ask decision's stdout.
+    const launchLine = run.split("\n").find((line) => line.includes("launch_atoma.ts"));
+    expect(launchLine, "the launch runs as a statement, not a capture").toContain("|| EXIT_CODE=$?");
+    expect(launchLine, "the launch is not wrapped in a stdout capture").not.toContain("EXIT_CODE=$(");
     expect(run, "sudo is preflighted, so its refusal is caught while it is still nameable").toContain("sudo -n -u");
     expect(
       /write_tools_file\.ts[^\n]*\|\|/.test(run),

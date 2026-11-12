@@ -905,7 +905,13 @@ if ! sudo -n -u "${TOOL_USER}" sudo -n -E -u "${UNTRUSTED_USER}" true 2>/dev/nul
 fi
 
 EXIT_CODE=0
-EXIT_CODE=$(${scriptCommandWithArgs(launchAtomaRef, {
+# NOT a capture: '$( )' takes stdout, and the launch script prints nothing there
+# by design -- a capture read as empty on every success, so the ending checks ran
+# on a code that was neither 0 nor 2, every green run published 'atoma_failed',
+# and the result comment said "ended without writing a report" over a report it
+# was displaying, with the chain dead. The '||' arm is the only writer after the
+# initial 0.
+${scriptCommandWithArgs(launchAtomaRef, {
   "run-dir": `${RUN_DIR}`,
   "tool-cache": `${TOOL_CACHE}`,
   "tools-file": `${RUN_DIR}/tools.yaml`,
@@ -915,7 +921,7 @@ EXIT_CODE=$(${scriptCommandWithArgs(launchAtomaRef, {
   "min-budget-secs": `${MIN_AGENT_BUDGET_SECS}`,
   out: `${RUN_DIR}/atomaton_output.txt`,
   logs: `${RUN_DIR}/atomaton_logs.txt`,
-})}) || EXIT_CODE=$?
+})} || EXIT_CODE=$?
 
 echo "=== Atoma Logs ===" >&2
 cat "${RUN_DIR}/atomaton_logs.txt" >&2
