@@ -833,11 +833,21 @@ const runAgentStep = new TypedOutputsStep(
     // step that reports it: "Post result comment" converts the failure into the
     // turn-ending comment it owes the thread, and the colour is decided there —
     // an agent failure whose notice posted is green, the machinery's is red even
-    // beside its notice. The boundary flag in the run below is how the two are
-    // told apart. Without this, a failure that was
+    // beside its notice. The boundary flag in the ending step below is how the
+    // two are told apart. Without this, a failure that was
     // already reported as a comment also turned the run red -- the same news
     // twice, in Notifications, where it drowns the runs whose red is their only
     // signal.
+    //
+    // This step is the FIRST of two. GitHub bounds one expression at 21,000
+    // characters, and the run script grew past it -- every workflow_dispatch was
+    // refused at parse time, so no agent run could start at all. The cut falls
+    // after the first turn and its logs: everything before it decides WHETHER
+    // atoma runs, everything after it reads HOW the run ended. The handoff at
+    // the bottom carries only what the ending step cannot recompute -- the
+    // environment a second turn needs, and atoma's exit code. A machinery
+    // failure before atoma still fails THIS step, with the flag unwritten,
+    // which is exactly how "Post result comment" tells the two apart.
     "continue-on-error": true,
     // No credentials here, and that is the point of the step above.
     //
@@ -1057,6 +1067,63 @@ sudo -n -u "${TOOL_USER}" env "\${AGENT_ENV[@]}" \\
 
 echo "=== Atoma Logs ===" >&2
 cat "${RUN_DIR}/atomaton_logs.txt" >&2
+
+# The handoff to the ending step, and the only state it cannot recompute: the
+# environment a second turn runs under, and the exit code atoma returned. The
+# array travels as one newline-joined variable -- no entry here contains a
+# newline -- and GitHub's heredoc form is what lets a multi-line value cross
+# steps at all. One printf per entry, so the separator between entries is
+# exactly one newline: an entry that arrived with padding would reach sudo env
+# as a name with spaces in it, and every server would refuse to start.
+{
+  echo "ATOMA_AGENT_ENV<<AGENT_ENV_EOF"
+  for entry in "\${AGENT_ENV[@]}"; do
+    printf '%s\\n' "$entry"
+  done
+  echo "AGENT_ENV_EOF"
+} >> "$GITHUB_ENV"
+echo "ATOMA_EXIT_CODE=\${EXIT_CODE}" >> "$GITHUB_ENV"
+`,
+  },
+);
+
+/**
+ * The half of the run that reads how it ended.
+ *
+ * The two steps exist because GitHub bounds ONE expression at 21,000 characters
+ * and the combined script outgrew it -- every dispatch was refused at parse
+ * time, so no agent run could start (measured: `gh workflow run` answered HTTP
+ * 422 with exactly this message). Nothing about the logic moved; the cut falls
+ * after the first turn's logs, and this step receives the environment and the
+ * exit code rather than deriving them again, so the two invocations of atoma
+ * cannot drift apart.
+ *
+ * `continue-on-error` for the same reason the first step carries it: an atoma
+ * failure exits this step with atoma's own code and the boundary flag written,
+ * and the run's colour is decided by "Post result comment", not by the step.
+ * A machinery failure leaves the flag unwritten, which is what turns red.
+ *
+ * Skipped when the first step failed, because a run whose machinery failed
+ * before atoma has no ending to read -- and "Post result comment" reports that
+ * shape from the first step's own outcome, not from anything written here.
+ */
+const endingStep = new TypedOutputsStep(
+  {
+    name: "Process the run's ending",
+    id: "atoma-ending",
+    if: `${runAgentStep.rawOutcome} == 'success'`,
+    "continue-on-error": true,
+    shell: "bash",
+    run: `AGENT="\${{ inputs.agent }}"
+# The environment the first turn ran under, handed over by the step above.
+# Rebuilt rather than re-derived, so the two invocations of atoma cannot drift.
+# Empty lines are dropped: a trailing newline in the handoff arrives as one.
+AGENT_ENV=()
+while IFS= read -r entry; do
+  [ -n "$entry" ] && AGENT_ENV+=("$entry")
+done <<< "$ATOMA_AGENT_ENV"
+EXIT_CODE="$ATOMA_EXIT_CODE"
+TOOLS_ARG="--tools-file ${RUN_DIR}/tools.yaml"
 
 # A run's last message is its report AND its call: it dispatches the next agent by a
 # bare \`/name\` line and hands the work to a person by naming them, and it may do at
@@ -1416,27 +1483,33 @@ const postResultCommentStep = new TypedOutputsStep(
       // about a pull request.
       type: "${{ inputs.type }}",
       notify: notifyStep.outputs.notify,
-      directive: runAgentStep.outputs.directive,
-      "chain-continues": runAgentStep.outputs.chain_continues,
-      "ended-because": runAgentStep.outputs.ended_because,
+      directive: endingStep.outputs.directive,
+      "chain-continues": endingStep.outputs.chain_continues,
+      "ended-because": endingStep.outputs.ended_because,
       // Whether the agent's step came back at all, and whether the failure was atoma's
       // own. Together they are the whole of what a crash needs: the first says there IS
       // one, the second decides the run's colour. See post_result_comment.ts's "The exit
       // code is that colour".
-      outcome: runAgentStep.outcome,
-      "atoma-failed": runAgentStep.outputs.atoma_failed,
+      //
+      // The agent now spans two steps: "Run agent" fails only when the machinery
+      // failed before atoma, and every atoma-shaped failure -- including the
+      // machinery's, arriving as atoma's exit code -- exits the ending step. So
+      // the outcome this script is told is the FIRST step's when it failed, and
+      // the ending step's otherwise.
+      outcome: `\${{ ${runAgentStep.rawOutcome} == 'failure' && 'failure' || ${endingStep.rawOutcome} }}`,
+      "atoma-failed": endingStep.outputs.atoma_failed,
       // Whether the run left a report, so the mention can tell the two silences apart:
       // a hand-off that ended the session through a tool, and a run that simply never
       // said anything. Observed off the session, not inferred from the empty output
       // file -- both look the same there.
-      reported: runAgentStep.outputs.reported,
+      reported: endingStep.outputs.reported,
       // Where this run's own messages begin, so a salvage cannot reach below it into
       // an earlier run's conclusion. See `lastAgentText`.
       "messages-before": buildContextStep.outputs.messages_before,
       // Written into the comment, because that is where the next run reads it:
       // the no-progress limit counts consecutive runs from the thread rather than
       // from a counter -- see domain/work/progress.ts.
-      changed: runAgentStep.outputs.changed,
+      changed: endingStep.outputs.changed,
       "run-url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
       // Passed in, because the script used to open these by their bare names --
       // relative paths that stopped resolving when the run's files moved out
@@ -1454,10 +1527,11 @@ const postResultCommentStep = new TypedOutputsStep(
       // ending itself. See `ending-comment.ts`, and #441 for what a guess about the
       // session's shape cost instead.
       "ending-comment": `${RUN_DIR}/ending-comment.json`,
-      // Written by the run above when the closing message called more than one thing
-      // and was still not fixed the second time: its calls are left as text, and this
-      // is what makes the comment say so and the machinery make the call itself.
-      "ending-invalid": runAgentStep.outputs.ending_invalid,
+      // Written by the ending step when the closing message called more than one
+      // thing and was still not fixed the second time: its calls are left as text,
+      // and this is what makes the comment say so and the machinery make the call
+      // itself.
+      "ending-invalid": endingStep.outputs.ending_invalid,
       // The people the run was told it may call, read before it started. The comment's
       // escaping and the ending check's counting are the same set because they are the
       // same file -- see lib/callees.ts.
@@ -1481,7 +1555,10 @@ const recordRunMetadataStep = new TypedOutputsStep({
   // here covers both original composite-action steps' separate conditions
   // in one go.
   name: "Record run metadata",
-  if: `${runAgentStep.rawOutcome} == 'success' && ${postResultCommentStep.rawOutputs.comment_id} != ''`,
+  // The ending step, not "Run agent": the metadata records a run that COMPLETED --
+  // read its ending, written its outputs -- which is exactly what the ending step
+  // succeeding means. When the machinery failed before atoma, both are skipped.
+  if: `${endingStep.rawOutcome} == 'success' && ${postResultCommentStep.rawOutputs.comment_id} != ''`,
   shell: "bash",
   run: `${scriptCommandWithArgs(recordRunMetadataRef, {
     session: `${RUN_DIR}/session.json`,
@@ -1527,7 +1604,7 @@ const dirtyStep = new TypedOutputsStep(
   {
     name: "Check for uncommitted changes",
     id: "dirty",
-    if: `${runAgentStep.rawOutcome} == 'success'`,
+    if: `${endingStep.rawOutcome} == 'success'`,
     shell: "bash",
     run: `if [ -n "$(git status --porcelain)" ]; then
   echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -1577,7 +1654,7 @@ const loopControlStep = new TypedOutputsStep(
   {
     name: "Manage auto-dispatch loop control",
     id: "loop-control",
-    if: `${runAgentStep.rawOutcome} == 'success'`,
+    if: `${endingStep.rawOutcome} == 'success'`,
     shell: "bash",
     env: { GH_TOKEN: "${{ github.token }}" },
     // The target number and nothing else. The tally is counted from that object's
@@ -1615,13 +1692,13 @@ const turnEndingStep = new TypedOutputsStep(
     if: "always()",
     shell: "bash",
     run: `${scriptCommandWithArgs(decideTurnEndingRef, {
-      outcome: runAgentStep.outcome,
-      "ended-because": runAgentStep.outputs.ended_because,
+      outcome: `\${{ ${runAgentStep.rawOutcome} == 'failure' && 'failure' || ${endingStep.rawOutcome} }}`,
+      "ended-because": endingStep.outputs.ended_because,
       "loop-limit-reached": loopControlStep.outputs.loop_limit_reached,
-      "chain-continues": runAgentStep.outputs.chain_continues,
-      parked: runAgentStep.outputs.parked,
-      directive: runAgentStep.outputs.directive,
-      reported: runAgentStep.outputs.reported,
+      "chain-continues": endingStep.outputs.chain_continues,
+      parked: endingStep.outputs.parked,
+      directive: endingStep.outputs.directive,
+      reported: endingStep.outputs.reported,
     })}\n`,
   },
   ["ended", "should_release", "dispatch_to", "chain_over_to"] as const,
@@ -2385,6 +2462,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
   writeCredentialsStep,
   startStopWatcherStep,
   runAgentStep,
+  endingStep,
   tokenUsageStep,
   postResultCommentStep,
   recordRunMetadataStep,
@@ -2394,7 +2472,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
   // the run reads from one workspace and writes to another with nothing saying so.
   new TypedOutputsStep({
     name: "Save the agent's workspace",
-    if: `${runAgentStep.rawOutcome} == 'success'`,
+    if: `${endingStep.rawOutcome} == 'success'`,
     shell: "bash",
     run: `${scriptCommandWithArgs(saveWorkspaceRef, {
       "root-issue": restoreWorkspaceStep.outputs.root_issue,
@@ -2445,7 +2523,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
     // footer now. When the comment was skipped, or stayed silent by design (a
     // closed sub-issue), `notified` is empty or false and this notice still speaks:
     // the fallback is unchanged.
-    if: `(${runAgentStep.rawOutputs.ended_because} == 'runtime' || ${runAgentStep.rawOutputs.ended_because} == 'iterations' || ${runAgentStep.rawOutputs.ended_because} == 'loop') && ${postResultCommentStep.rawOutputs.notified} != 'true'`,
+    if: `(${endingStep.rawOutputs.ended_because} == 'runtime' || ${endingStep.rawOutputs.ended_because} == 'iterations' || ${endingStep.rawOutputs.ended_because} == 'loop') && ${postResultCommentStep.rawOutputs.notified} != 'true'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
@@ -2457,7 +2535,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
       number: "\${NUMBER}",
       agent: "\${AGENT}",
       notify: "\${NOTIFY}",
-      "ended-because": runAgentStep.outputs.ended_because,
+      "ended-because": endingStep.outputs.ended_because,
     })}
 `,
   }),
