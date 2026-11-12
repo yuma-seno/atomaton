@@ -881,7 +881,13 @@ jobs:
           fi
 
           EXIT_CODE=0
-          EXIT_CODE=$(bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/launch_atoma.ts" --run-dir "${RUNNER_TEMP}/atomaton-run" --tool-cache "${RUNNER_TEMP}/atomaton-tool-cache" --tools-file "${RUNNER_TEMP}/atomaton-run/tools.yaml" --credentials-file "$RUNNER_TEMP/atomaton-credentials/credentials.json" --stop-file "${RUNNER_TEMP}/atomaton-run/stop-requested" --deadline-at "${{ steps.deadline.outputs.at }}" --min-budget-secs "300" --out "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt") || EXIT_CODE=$?
+          # NOT a capture: '$( )' takes stdout, and the launch script prints nothing there
+          # by design -- a capture read as empty on every success, so the ending checks ran
+          # on a code that was neither 0 nor 2, every green run published 'atoma_failed',
+          # and the result comment said "ended without writing a report" over a report it
+          # was displaying, with the chain dead. The '||' arm is the only writer after the
+          # initial 0.
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/launch_atoma.ts" --run-dir "${RUNNER_TEMP}/atomaton-run" --tool-cache "${RUNNER_TEMP}/atomaton-tool-cache" --tools-file "${RUNNER_TEMP}/atomaton-run/tools.yaml" --credentials-file "$RUNNER_TEMP/atomaton-credentials/credentials.json" --stop-file "${RUNNER_TEMP}/atomaton-run/stop-requested" --deadline-at "${{ steps.deadline.outputs.at }}" --min-budget-secs "300" --out "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" || EXIT_CODE=$?
 
           echo "=== Atoma Logs ===" >&2
           cat "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" >&2
