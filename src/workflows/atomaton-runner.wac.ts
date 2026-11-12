@@ -196,17 +196,12 @@ const TOOLS_DIR_PATH = TOOLS_DIR;
 const TOOL_DEFAULTS_PATH = TOOL_DEFAULTS_FILE;
 
 /**
- * The OS user every tool server runs as.
+ * The OS user that holds credentials: `atoma` and the servers this project ships.
  *
- * One user for all of them, so no tool's environment differs from another's --
- * which is the property the container it replaced could not give. And not in
- * sudoers, because with sudo nothing else means anything: `sudo cat
- * /proc/<pid>/environ` reads any process, whatever else is arranged.
- *
- * See config.yaml's `tools.servers.shell` for what that leaves protected and what
- * it leaves exposed. The short version: the provider API key is never in a tool
- * server, the servers this project ships protect their own credentials, and a
- * credential routed to a third-party server is readable by the shell.
+ * A different uid from the shell -- see `UNTRUSTED_USER` -- so a shell command
+ * cannot read the environment block of a server that holds a key. And not in
+ * sudoers, except for one downward rule: this user may run a command as the
+ * untrusted user, and as nobody else.
  *
  * ## The three facts this arrangement rests on
  *
@@ -230,11 +225,31 @@ const TOOL_DEFAULTS_PATH = TOOL_DEFAULTS_FILE;
  * stayed open.
  *
  * **A different uid closes the environ hole outright.** That is the mechanism
- * taken, and it is why this user exists rather than a container: the container
+ * taken, and it is why this user has a peer rather than a container: the container
  * answered the same question with `--user 1234:0`, which is the same problem
  * without the container.
  */
 const TOOL_USER = "atomaton-tools";
+
+/**
+ * The OS user that runs `shell` and every server a project adds.
+ *
+ * It holds none of the run's credentials, and it has no sudo at all. `TOOL_USER`
+ * has exactly one sudoers grant, which runs a command as this user -- downward
+ * only, so there is no path from either class to root.
+ *
+ * The shell server spawns `bash` in its own process, so dropping the server is
+ * enough: every command it runs is already this user's child. The same wrapper is
+ * put around a third-party server's entry, so an added server is in this class
+ * without its implementation knowing.
+ *
+ * What this does NOT separate is the filesystem. Both users write the work tree,
+ * so the shell can still leave a file a trusted tool later executes -- a
+ * `.git/hooks/pre-push`, for example, run by `github` with `GH_TOKEN`. That is a
+ * shared-workspace channel rather than a uid one, and it is documented in
+ * `docs/tools/boundaries.md` as remaining.
+ */
+const UNTRUSTED_USER = "atomaton-untrusted";
 
 /**
  * Where that user's caches go.
@@ -298,9 +313,9 @@ echo "cache_key=atomaton-reranker-$(echo "\${MODEL}" | tr '/:' '--')" >> "$GITHU
  * and that is a deliberate save rather than a side effect of where a file happened
  * to sit.
  *
- * Created early (before anything writes into it) and handed to the tool user later
- * (once that user exists). Both halves are load-bearing: three steps write here
- * before the user is created, and `atoma run` writes the session as that user.
+ * Created early (before anything writes into it) and handed to the tool users later
+ * (once they exist). Both halves are load-bearing: three steps write here before
+ * either user is created, and `atoma run` writes the session as the trusted one.
  */
 const RUN_DIR = "\${RUNNER_TEMP}/atomaton-run";
 
@@ -343,8 +358,9 @@ const STOP_FILE = `${RUN_DIR}/stop-requested`;
  * expand is a path it can get wrong in a way that looks like an empty directory.
  *
  * Owned by the tool user with an ACL back to the runner, the same arrangement as
- * `RUN_DIR`: the runner unpacks into it before the agent starts and packs it up
- * afterwards, while everything the agent does in it happens as the tool user.
+ * `RUN_DIR`, and writable by both tool users: the runner unpacks into it before the
+ * agent starts and packs it up afterwards, while everything the agent does in it
+ * happens as either of them.
  */
 const WORKSPACE_DIR = WORKSPACE_PATH;
 
@@ -920,16 +936,17 @@ done
 
 # No --prompt-file or stdin is needed: the cached session contains both stable
 # GitHub context and the agent's chronological working history.
-# Run as the user the tool servers will inherit. Every server atoma starts is a
-# child of this process, so one \`sudo -u\` here is what puts all of them on that
-# user -- there is nothing per-server to configure or to forget.
+# Run as the user the credential-holding servers inherit. Every server atoma starts
+# is a child of this process, so this is what puts the trusted class on that user.
+# The shell and every server a project adds are dropped a second time by
+# \`run_as_untrusted.sh\`, from their own entries in the generated tools file.
 #
 # \`env\` in front rather than \`--preserve-env\`: the latter needs a sudoers
 # permission that a self-hosted runner may not grant, and both were measured, so
 # the portable one is used. Only what a server actually reads is passed; the
 # credentials are not here at all, they are in the file atoma deletes.
 #
-# HOME stays the runner's so the toolchain resolves. It is not writable by this
+# HOME stays the runner's so the toolchain resolves. It is not writable by either
 # user, uniformly for every tool, and the caches are redirected below.
 # Built as an array so a setting that is EMPTY is not passed at all. \`env NAME=\`
 # sets the empty string, and atoma reads an empty base URL as a base URL -- which
@@ -946,6 +963,9 @@ AGENT_ENV=(
   PATH="$PATH"
   AGENT="$AGENT"
   ${MACHINERY_ROOT_VAR}="$${MACHINERY_ROOT_VAR}"
+  # The uid \`run_as_untrusted.sh\` drops each untrusted server to. The sudo rule
+  # and both users are created in the step that prepares the tool servers.
+  ATOMATON_UNTRUSTED_USER="${UNTRUSTED_USER}"
   GITHUB_REPOSITORY="$GITHUB_REPOSITORY"
   BRANCH="\${BRANCH:-}"
   NUMBER="$NUMBER"
@@ -1009,6 +1029,14 @@ echo "agent time budget: $BUDGET seconds"
 # distinguish the two, and the log will say.
 if ! sudo -n -u "${TOOL_USER}" true 2>/dev/null; then
   echo "::error::cannot run the tool servers as ${TOOL_USER}: sudo refused; atoma never started"
+  exit 1
+fi
+
+# And the downward grant the wrapper uses. The shell and every third-party server
+# reach their uid through this, so a missing rule is the same class of failure as
+# above -- and the real invocation cannot say which sudo failed.
+if ! sudo -n -u "${TOOL_USER}" sudo -n -E -u "${UNTRUSTED_USER}" true 2>/dev/null; then
+  echo "::error::cannot run the shell and third-party servers as ${UNTRUSTED_USER}: the sudo rule is missing; atoma never started"
   exit 1
 fi
 
@@ -2164,31 +2192,58 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
   //   need somewhere real, so the caches are redirected by the environment the
   //   agent step passes.
   new TypedOutputsStep({
-    name: "Put the tool servers on a user without sudo",
+    name: "Put the tool servers on users without sudo",
     shell: "bash",
     run: `sudo useradd -M -U -s /usr/sbin/nologin "${TOOL_USER}" 2>/dev/null || true
 id "${TOOL_USER}"
+sudo useradd -M -U -s /usr/sbin/nologin "${UNTRUSTED_USER}" 2>/dev/null || true
+id "${UNTRUSTED_USER}"
 
-# Traverse-only down to the workspace, walked rather than hardcoded: the path
-# between HOME and the workspace is the runner's business, not ours.
-DIR="$GITHUB_WORKSPACE"
-while [ "$DIR" != "/" ]; do
-  DIR=$(dirname "$DIR")
-  # Stop before "/" itself, and before anything world-traversable already: a
-  # self-hosted runner's workspace is often nowhere near $HOME, and walking to the
-  # root would put an ACL on "/".
-  [ "$DIR" = "/" ] && break
-  sudo setfacl -m "u:${TOOL_USER}:x" "$DIR"
-  [ "$DIR" = "$HOME" ] && break
+# The one privilege the tool user has: run a command as the untrusted user.
+#
+# Downward only. It names the target user rather than ALL, so there is no rule
+# that could run anything as root, and the untrusted user is given no sudoers
+# entry at all. SETENV is what lets \`run_as_untrusted.sh\` keep the environment
+# atoma gave a server -- how a third-party server receives the credential its own
+# \`env:\` block named. That is not an escalation: the process receiving it is the
+# untrusted user.
+SUDOERS_TMP=$(mktemp)
+echo "${TOOL_USER} ALL=(${UNTRUSTED_USER}) NOPASSWD: SETENV: ALL" > "$SUDOERS_TMP"
+sudo visudo -cf "$SUDOERS_TMP"
+sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/atomaton-untrusted
+rm -f "$SUDOERS_TMP"
+
+# Traverse-only down to the workspace and the run's temp directory, walked rather
+# than hardcoded: the path between HOME and either is the runner's business, not
+# ours. Both tool users need it: the trusted one to reach the work tree the runner
+# owns, and the untrusted one to reach the machinery and the run's own files.
+for start in "$GITHUB_WORKSPACE" "\${RUNNER_TEMP}"; do
+  DIR="$start"
+  while [ "$DIR" != "/" ]; do
+    DIR=$(dirname "$DIR")
+    # Stop before "/" itself, and before anything world-traversable already: a
+    # self-hosted runner's workspace is often nowhere near $HOME, and walking to the
+    # root would put an ACL on "/".
+    [ "$DIR" = "/" ] && break
+    sudo setfacl -m "u:${TOOL_USER}:x" "$DIR"
+    sudo setfacl -m "u:${UNTRUSTED_USER}:x" "$DIR"
+    [ "$DIR" = "$HOME" ] && break
+  done
 done
 
 # Full access inside the tree, and as a default so later files inherit it. \`X\`
 # rather than \`x\`: execute on directories, not on every file.
+#
+# Both users: the shell writes the work, and every trusted server reads and
+# changes it at the same paths. The separation is of environment blocks, not of
+# the filesystem -- see docs/tools/boundaries.md.
 sudo setfacl -R -m "u:${TOOL_USER}:rwX" "$GITHUB_WORKSPACE"
+sudo setfacl -R -m "u:${UNTRUSTED_USER}:rwX" "$GITHUB_WORKSPACE"
 sudo setfacl -R -d -m "u:${TOOL_USER}:rwX" "$GITHUB_WORKSPACE"
+sudo setfacl -R -d -m "u:${UNTRUSTED_USER}:rwX" "$GITHUB_WORKSPACE"
 sudo setfacl -R -d -m "u:$(id -un):rwX" "$GITHUB_WORKSPACE"
 
-# Somewhere real for the caches, since $HOME is not writable by this user.
+# Somewhere real for the caches, since $HOME is not writable by either tool user.
 sudo install -d -o "${TOOL_USER}" -m 0700 "${TOOL_CACHE}"
 
 # And both ways round, recursively, for the same reason the run directory below
@@ -2200,10 +2255,15 @@ sudo install -d -o "${TOOL_USER}" -m 0700 "${TOOL_CACHE}"
 # the restored weights unwritable by the server that loads them, which is the
 # exactly, and the downloaded weights unreadable by the save that should keep them.
 #
+# The untrusted user is here as well: the shell's package managers write these
+# caches, and the trusted servers read them when they run the same toolchain.
+#
 # -R as well as -d: a default ACL only reaches files created after it is set, and
 # the restore already wrote several hundred of them.
 sudo setfacl -R -m "u:${TOOL_USER}:rwX" "${TOOL_CACHE}"
+sudo setfacl -R -m "u:${UNTRUSTED_USER}:rwX" "${TOOL_CACHE}"
 sudo setfacl -R -d -m "u:${TOOL_USER}:rwX" "${TOOL_CACHE}"
+sudo setfacl -R -d -m "u:${UNTRUSTED_USER}:rwX" "${TOOL_CACHE}"
 sudo setfacl -R -m "u:$(id -un):rwX" "${TOOL_CACHE}"
 sudo setfacl -R -d -m "u:$(id -un):rwX" "${TOOL_CACHE}"
 
@@ -2221,14 +2281,23 @@ sudo setfacl -R -m "u:${TOOL_USER}:rwX" "${RUN_DIR}"
 sudo setfacl -R -d -m "u:${TOOL_USER}:rwX" "${RUN_DIR}"
 sudo setfacl -R -d -m "u:$(id -un):rwX" "${RUN_DIR}"
 
+# The untrusted user: read and traverse, and deliberately not write.
+#
+# The tools file lives here and the runner re-reads it for the second turn. A shell
+# that could rewrite it would be choosing how the NEXT turn starts -- a trusted
+# server entry pointed at a command of its choosing would run with the credentials
+# this whole step exists to keep away from it. No default ACL either: the session
+# written after this point is not something the shell needs to read.
+sudo setfacl -R -m "u:${UNTRUSTED_USER}:rX" "${RUN_DIR}"
+
 # The agent's scratch workspace, on the same terms. The runner unpacks into it
 # before the agent starts and packs it up afterwards, and everything the agent does
-# in it happens as the tool user -- so both need to read and write what the other
-# creates, including files that do not exist yet.
+# in it happens as the tool users -- so all of them need to read and write what
+# the others create, including files that do not exist yet.
 #
 # \`/tmp\` is already world-writable, so this is not what makes the directory
-# usable; it is what stops the two identities tripping over each other's file
-# modes inside it.
+# usable; it is what stops the identities tripping over each other's file modes
+# inside it.
 # The machinery, read-only. It left the work tree, which is where it used to pick
 # up the tool user's access as a side effect of the recursive ACL below -- so
 # without this the tool servers cannot read their own scripts and no server starts.
@@ -2236,34 +2305,52 @@ sudo setfacl -R -d -m "u:$(id -un):rwX" "${RUN_DIR}"
 # \`rX\` rather than \`rwX\`: read everywhere, execute only where execute is already
 # set for somebody. "Make tool hooks executable" ran earlier, so the hooks get it
 # and the ordinary files do not. Nothing here is the agent's to modify.
+#
+# The untrusted user reads it for the same reason: its server programs, their
+# bundles and the wrapper are all here, and it has no access to the work tree
+# copy of anything.
 sudo setfacl -R -m "u:${TOOL_USER}:rX" "$${MACHINERY_ROOT_VAR}"
+sudo setfacl -R -m "u:${UNTRUSTED_USER}:rX" "$${MACHINERY_ROOT_VAR}"
 
 # And the libraries the servers import, which sit beside the machinery for module
 # resolution to find. Read-only for the same reason.
 if [ -d "\${RUNNER_TEMP}/node_modules" ]; then
   sudo setfacl -R -m "u:${TOOL_USER}:rX" "\${RUNNER_TEMP}/node_modules"
+  sudo setfacl -R -m "u:${UNTRUSTED_USER}:rX" "\${RUNNER_TEMP}/node_modules"
 fi
 
 mkdir -p "${WORKSPACE_DIR}"
 sudo setfacl -R -m "u:${TOOL_USER}:rwX" "${WORKSPACE_DIR}"
+sudo setfacl -R -m "u:${UNTRUSTED_USER}:rwX" "${WORKSPACE_DIR}"
 sudo setfacl -R -d -m "u:${TOOL_USER}:rwX" "${WORKSPACE_DIR}"
+sudo setfacl -R -d -m "u:${UNTRUSTED_USER}:rwX" "${WORKSPACE_DIR}"
 sudo setfacl -R -d -m "u:$(id -un):rwX" "${WORKSPACE_DIR}"
 
 # And a directory for the credentials file that the TOOL USER owns, so atoma can
 # unlink it. Owned by them, writable by us: the runner writes the file into it and
 # hands it over, and the delete that keeps the file and the servers from coexisting
 # then succeeds. Without this the delete fails and every credential stays readable.
+#
+# NOTHING for the untrusted user, and that is the point of the second uid. The
+# directory is 0700 and no ACL names the other user, so the shell cannot read the
+# file before atoma deletes it and cannot list the directory afterwards. The
+# parent's traversal grant stops at \${RUNNER_TEMP}; it does not descend into this.
 sudo install -d -o "${TOOL_USER}" -m 0700 "${CREDENTIALS_DIR}"
 sudo setfacl -m "u:$(id -un):rwx" "${CREDENTIALS_DIR}"
 
 # Close the world-writable directories on PATH.
 #
-# The design rests on the tool user having no sudo. That is worth nothing while it
-# can write a directory the RUNNER's own later steps search: this job goes on to
-# run \`git status\`, \`grep\` and \`gh issue comment\` as the runner, which does have
-# passwordless sudo. Measured on ubuntu-latest: /opt/pipx_bin,
+# The design rests on the untrusted user having no sudo. That is worth nothing
+# while it can write a directory the RUNNER's own later steps search: this job goes
+# on to run \`git status\`, \`grep\` and \`gh issue comment\` as the runner, which does
+# have passwordless sudo. Measured on ubuntu-latest: /opt/pipx_bin,
 # /usr/local/.ghcup/bin and /usr/local/bin are all drwxrwxrwx and all precede
 # /usr/bin.
+#
+# The same writability is a path into the trusted class: a \`gh\` planted in one of
+# those directories is executed by the server that holds GH_TOKEN. The shipped
+# servers narrow their own PATH as well; this closes the directories for everything
+# else.
 #
 # Computed from PATH rather than named, so an image that adds a fourth is covered.
 #
@@ -2284,12 +2371,12 @@ done
 # Git as the tool user, over a checkout the runner owns.
 #
 # \`actions/checkout\` writes this into the runner's own gitconfig, which the tool
-# user can read through the traversal granted above -- but that is a default of a
+# users can read through the traversal granted above -- but that is a default of a
 # third-party action, and \`commit_and_push\` and every \`git\` the agent runs
 # depend on it. Said explicitly, at system level, so it does not.
 sudo git config --system --add safe.directory "$GITHUB_WORKSPACE" 2>/dev/null || true
 
-echo "tool servers will run as ${TOOL_USER} (no sudo), caches in ${TOOL_CACHE}"
+echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shell and third-party), caches in ${TOOL_CACHE}"
 `,
   }),
   // Immediately before the agent, because its output is what keys the secret

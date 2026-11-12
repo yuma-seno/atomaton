@@ -160,6 +160,11 @@ export const AGENT_ENV_NAMES: readonly string[] = [
   "PATH",
   // The run's identity, which decides what every tool acts on.
   "AGENT",
+  // The uid the shell and third-party servers are dropped to. A declared secret
+  // shadowing it would point `run_as_untrusted.sh` somewhere of the project's
+  // choosing -- and at least one name that is not a user makes every untrusted
+  // server fail to start, which is a run that cannot use the shell at all.
+  "ATOMATON_UNTRUSTED_USER",
   // Imported, not spelled. Which tree the machinery is in has one owner, and
   // `tests/contract/machinery-root.test.ts` caught this line writing the name out
   // the first time it was added here -- which is the whole of what that test is for.

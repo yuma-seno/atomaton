@@ -120,7 +120,8 @@ describe("tools.yaml is valid YAML with the shape atoma expects", () => {
     });
 
     /**
-     * The shell server is started plainly, and that is now the property to defend.
+     * The shell server and every server a project adds are started through
+     * `run_as_untrusted.sh`, and that is the property to defend now.
      *
      * It ran in a rootless podman container once: twenty-five lines of argv,
      * an overlay of $HOME, a generated /etc/passwd and subordinate id ranges. The
@@ -128,19 +129,24 @@ describe("tools.yaml is valid YAML with the shape atoma expects", () => {
      * every other tool, and a write to $HOME there succeeded and then was not
      * there for anything else -- silent, and measured in 18 of 2,118 shell calls.
      *
-     * Isolation now comes from the OS user every server runs as, arranged by the
-     * runner, not from anything in this file. So a container reappearing here
-     * would reintroduce the divergence without saying so, which is what this test
-     * is for.
+     * Isolation now comes from the OS user the runner puts a leaf server on, and
+     * the wrapper is how that user is chosen. A container reappearing here would
+     * reintroduce the divergence without saying so, which is what this test is
+     * for. The wrapper's own path is checked on both sides: `bash` is the command
+     * atoma starts, and the argument after it is this project's script.
      */
-    test(`${path}: the shell server is started plainly, with no container`, () => {
+    test(`${path}: the shell server is wrapped, with no container`, () => {
       const shell = parse(path).shell;
-      expect(shell?.command, "the shell server must be started directly").toBe("bun");
+      expect(shell?.command, "the shell server must be started through the wrapper").toBe("bash");
       const args = (shell?.args ?? []) as string[];
-      expect(args[0]).toBe("run");
+      const wrapper = args[0] ?? "";
+      expect(wrapper, "the wrapper that drops to the untrusted user").toContain("run_as_untrusted.sh");
+      expect(wrapper.endsWith("/run_as_untrusted.sh"), "and it is named in full").toBe(true);
+      expect(args[1], "which then starts the server itself").toBe("bun");
+      expect(args[2]).toBe("run");
       expect(args.at(-1)).toContain("mcp/shell.ts");
       // Named individually rather than as "no flags": each one is a mechanism that
-      // would put the shell somewhere the other tools are not.
+      // would put the shell in another container or raise its privilege.
       for (const forbidden of ["podman", "docker", "--user", "-v", "unshare", "chroot", "sudo"]) {
         expect(args, `${path}: shell args must not contain ${forbidden}`).not.toContain(forbidden);
       }

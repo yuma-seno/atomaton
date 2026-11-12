@@ -59,8 +59,9 @@ function log(message: string): void {
   console.error(`[atomaton-attachments] ${message}`);
 }
 
-// Same OS user as every other tool server, including the one that runs arbitrary
-// commands -- so this process makes itself unreadable to its peers and drops
+// On the trusted OS user: this process holds a credential, and the shell and every
+// third-party server run as a different one, so neither can read its environment.
+// Within this class it still makes itself unreadable to its peers and drops
 // writable directories from its PATH. See `../lib/harden.ts`.
 hardenCredentialHolder(log);
 

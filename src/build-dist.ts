@@ -178,11 +178,13 @@ function copyStaticAtomatonContent(): void {
   // The runtime's own data, beside the scripts that read it and outside the directory
   // an adopter edits. `defaults.yaml` is read by `write_tools_file.ts` at the start of
   // every run and by `validate_deliverable.ts` on every pull request; `packages.json`
-  // is what the install step reads. Neither is a copy of anything in `.github/atomaton/`.
+  // is what the install step reads. `run_as_untrusted.sh` is the wrapper the generated
+  // tools file names for every server on the untrusted user; it has to be beside the
+  // servers it starts. None is a copy of anything in `.github/atomaton/`.
   const srcRuntimeTools = from(TOOLS_DIR);
   const distRuntimeTools = into(TOOLS_DIR);
   mkdirSync(distRuntimeTools, { recursive: true });
-  for (const file of ["defaults.yaml", "packages.json"]) {
+  for (const file of ["defaults.yaml", "packages.json", "run_as_untrusted.sh"]) {
     cpSync(join(srcRuntimeTools, file), join(distRuntimeTools, file));
   }
   // The delegate's own files: the roster, and each definition's `agent.md` and

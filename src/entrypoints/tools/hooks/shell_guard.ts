@@ -297,7 +297,7 @@ function invokedPrograms(command: string, depth = 0): string[] {
  */
 const PROCESS_ENVIRONMENT_READ: [RegExp, string] = [
   /^(?=[\s\S]*\/proc)(?=[\s\S]*\benviron\b)/,
-  "Reading a process's environment through /proc is disabled: tool servers run as the same user and each holds only the credentials it declares.",
+  "Reading a process's environment through /proc is disabled: credential-holding tool servers run as a different OS user and the shell has no sudo.",
 ];
 
 /**

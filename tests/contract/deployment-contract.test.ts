@@ -233,4 +233,28 @@ describe("the machinery layout is declared once", () => {
     expect(existsSync("src/content/README.md")).toBe(true);
     expect(readFileSync("src/build-dist.ts", "utf8")).toContain('"README.md"');
   });
+
+  /**
+   * The wrapper the generated tools file names has to ship beside the servers it
+   * starts.
+   *
+   * The wrapper is not a bundled script: `build-dist.ts` bundles every `.ts` under
+   * the runtime tools tree, but a `.sh` is data to it, so it is in the explicit copy
+   * list with `defaults.yaml` and `packages.json`. A wrapper removed from that list
+   * would still be named by every `shell` entry `tools-file.ts` writes -- and the
+   * failure would be "bash: no such file", once, on a runner, for every server in
+   * the untrusted class at once.
+   */
+  test("run_as_untrusted.sh exists and ships beside the servers", () => {
+    const wrapper = join(RUNTIME_TOOLS, "run_as_untrusted.sh");
+    expect(existsSync(wrapper), `${wrapper} must exist`).toBe(true);
+
+    const build = readFileSync(BUILD_DIST, "utf8");
+    const list = /for \(const file of \[([^\]]*)\]\) \{\s*cpSync\(join\(srcRuntimeTools/.exec(build)?.[1];
+    expect(list, "build-dist.ts's runtime-tools copy list").toBeTruthy();
+    expect(list!.includes('"run_as_untrusted.sh"'), "the wrapper is in that list").toBe(true);
+
+    // And it did ship: `pretest` runs synth first, so dist/ is the current build.
+    expect(existsSync(join(process.cwd(), "dist/.github/atomaton-runtime/tools/run_as_untrusted.sh"))).toBe(true);
+  });
 });
