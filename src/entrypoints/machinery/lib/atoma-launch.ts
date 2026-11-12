@@ -68,8 +68,26 @@ export function launchAtoma(opts: LaunchOpts): number {
   const run = spawnSync(argv[0]!, argv.slice(1), {
     encoding: "buffer",
   });
+  // A spawn that never happened has no exit code, and reading its absence as 0
+  // would report "atoma succeeded" — the exact lie the inline bash's
+  // `|| EXIT_CODE=$?` could not tell. The shell's own conventions name the two
+  // ways an exec can fail (not found, not executable); reuse them so the logs
+  // read the way the old step's did.
+  let status = run.status;
+  if (run.error) {
+    const code = (run.error as NodeJS.ErrnoException).code === "ENOENT" ? 127 : (run.error as NodeJS.ErrnoException).code === "EACCES" ? 126 : 1;
+    const line = `${argv[0]}: ${run.error.message}`;
+    if (opts.appendLogs) appendFileSync(opts.logsFile, `${line}\n`);
+    else writeFileSync(opts.logsFile, `${line}\n`);
+    status = code;
+  } else if (status === null && run.signal === "SIGTERM") {
+    // Killed rather than exited — the stop watcher's SIGTERM. The shell reports
+    // 128+n; keep that spelling so the ending classification reads the same
+    // numbers it always has.
+    status = 143;
+  }
   writeFileSync(opts.outFile, run.stdout?.toString() ?? "");
   if (opts.appendLogs) appendFileSync(opts.logsFile, run.stderr?.toString() ?? "");
   else writeFileSync(opts.logsFile, run.stderr?.toString() ?? "");
-  return run.status ?? 0;
+  return status ?? 1;
 }

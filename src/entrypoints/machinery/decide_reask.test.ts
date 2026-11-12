@@ -16,7 +16,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hermeticEnv, removeTemp, scriptPath } from "./testing/harness.ts";
@@ -62,6 +62,10 @@ function makeSudo(dir: string): string {
       "",
     ].join("\n"),
   );
+  // Windows resolves `sudo` through PATHEXT to sudo.cmd below, where execute
+  // bits do not exist; a POSIX runner needs the bit, or the exec fails and the
+  // second turn reads as failed.
+  if (process.platform !== "win32") chmodSync(join(bin, "sudo"), 0o755);
   // The sh spelling is what a Linux runner executes; the .cmd spelling is what
   // Windows resolves through PATHEXT when these tests run on a checkout.
   writeFileSync(
