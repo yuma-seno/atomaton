@@ -51,6 +51,8 @@ import { ref as writeToolsFileRef } from "../entrypoints/machinery/write_tools_f
 import { ref as extractDirectiveRef } from "../entrypoints/machinery/extract_directive.ts";
 import { ref as checkEndingRef } from "../entrypoints/machinery/check_ending.ts";
 import { ref as injectEndingRejectionRef } from "../entrypoints/machinery/inject_ending_rejection.ts";
+import { ref as shouldContinueStalledRef } from "../entrypoints/machinery/should_continue_stalled.ts";
+import { ref as injectStalledContinuationRef } from "../entrypoints/machinery/inject_stalled_continuation.ts";
 import { ref as postResultCommentRef } from "../entrypoints/machinery/post_result_comment.ts";
 import { ref as recordRunMetadataRef } from "../entrypoints/machinery/record_run_metadata.ts";
 import { ref as saveAgentSessionRef } from "../entrypoints/machinery/save_agent_session.ts";
@@ -1038,7 +1040,45 @@ cat "${RUN_DIR}/atomaton_logs.txt" >&2
 # asked again -- a run that was stopped or ran out of time was cut off mid-sentence,
 # and asking it to finish the sentence would be asking it to ignore the person who
 # said stop.
+#
+# Whether this run changed anything, read from the ops log. It is asked here, before
+# any second turn, because that is one of the facts \`should_continue_stalled.ts\`
+# needs; the step's own output is written from the final read below, so it includes
+# whatever the second turn did. The signal:
+#
+# A commit is the obvious one; opening a pull request and merging one both move the
+# work along without necessarily pushing during THIS run, and reading either as
+# "changed nothing" would stop a chain at the moment it was working.
+#
+# \`merge_base_into_branch\` is the fourth, and it is only progress in its \`merged\`
+# outcome. That is the route #264 added: a reviewer sees \`behind\` or \`conflicting\`,
+# the engineer brings the base in, the merge is clean and pushed, and no
+# commit_and_push follows because there is nothing left to commit -- so without this
+# the whole point of the route is recorded as a run that changed nothing, and two of
+# those stop the chain and call a person. Its other outcomes pushed nothing and must
+# keep counting as nothing: \`up_to_date\` found there was nothing to do, \`conflicts\`
+# is waiting on the agent, and \`failed\` is a failure.
+changed_so_far() {
+  if [ -f "${RUN_DIR}/atomaton_ops.log" ]; then
+    grep -qE '"op":"(commit_and_push|create_pr|merge_pr)"|"op":"merge_base_into_branch".*"status":"merged"' "${RUN_DIR}/atomaton_ops.log"
+  else
+    return 1
+  fi
+}
+CHANGED=false
+if changed_so_far; then
+  CHANGED=true
+fi
+
 ENDING_INVALID=false
+
+# The one second turn this run is allowed, and why it is being asked. An ending that
+# calls two things and a run that stopped on a sentence having changed nothing are
+# different failures with the same remedy: a user turn in the session, then the same
+# atoma invocation again. They share one block so a run gets at most ONE extra turn,
+# and the ending is checked first -- a message that calls somebody has handed the
+# work on and must not also be read as stalled.
+REASK=
 if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ]; then
   ${scriptCommandWithArgs(checkEndingRef, {
     "output-file": `${RUN_DIR}/atomaton_output.txt`,
@@ -1046,23 +1086,50 @@ if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ]; then
     "problem-file": `${RUN_DIR}/ending-problem.txt`,
     "people-file": `${RUN_DIR}/callees.json`,
   })}
+
+  if [ -s "${RUN_DIR}/ending-problem.txt" ]; then
+    REASK=ending
+  else
+    STALLED=$(${scriptCommandWithArgs(shouldContinueStalledRef, {
+      session: `${RUN_DIR}/session.json`,
+      "output-file": `${RUN_DIR}/atomaton_output.txt`,
+      "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
+      "people-file": `${RUN_DIR}/callees.json`,
+      changed: "\${CHANGED}",
+    })}) || STALLED=false
+    if [ "$STALLED" = "true" ]; then
+      REASK=stalled
+    fi
+  fi
 fi
 
-if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ] && [ -s "${RUN_DIR}/ending-problem.txt" ]; then
+if [ -n "$REASK" ]; then
   REASK_BUDGET=$(( ${deadlineStep.outputs.at} - $(date +%s) ))
   if [ "$REASK_BUDGET" -lt "${MIN_AGENT_BUDGET_SECS}" ]; then
-    # No time for a second turn. The message is not a call, so nothing in it is made,
-    # and the result comment says so -- see post_result_comment.ts's --ending-invalid.
-    echo "::warning::the closing message calls more than one thing and there is no time left to ask again; nothing it calls will be started"
-    ENDING_INVALID=true
+    # No time for a second turn. An ending that calls two things is posted with its
+    # calls left as text, and the result comment says so -- see post_result_comment.ts's
+    # --ending-invalid. A stalled run simply keeps the message it ended on.
+    if [ "$REASK" = "ending" ]; then
+      echo "::warning::the closing message calls more than one thing and there is no time left to ask again; nothing it calls will be started"
+      ENDING_INVALID=true
+    else
+      echo "::warning::the run stopped on a sentence having changed nothing, and there is no time left to ask again"
+    fi
   else
-    echo "::warning::the closing message calls more than one thing; asking for it again"
     cp "${RUN_DIR}/session.json" "${RUN_DIR}/session_before_reask.json"
-    ${scriptCommandWithArgs(injectEndingRejectionRef, {
-      session: `${RUN_DIR}/session.json`,
-      "problem-file": `${RUN_DIR}/ending-problem.txt`,
-    })}
-    # The same invocation as above, with no prompt: the rejection is a user message in
+    if [ "$REASK" = "ending" ]; then
+      echo "::warning::the closing message calls more than one thing; asking for it again"
+      ${scriptCommandWithArgs(injectEndingRejectionRef, {
+        session: `${RUN_DIR}/session.json`,
+        "problem-file": `${RUN_DIR}/ending-problem.txt`,
+      })}
+    else
+      echo "::warning::the run stopped on a sentence having changed nothing; asking for it again"
+      ${scriptCommandWithArgs(injectStalledContinuationRef, {
+        session: `${RUN_DIR}/session.json`,
+      })}
+    fi
+    # The same invocation as above, with no prompt: the note is a user message in
     # the session now, and a run with no prompt source continues from the session --
     # the documented path, and the reason this does not use \`--prompt-file\`.
     SECOND_EXIT=0
@@ -1082,6 +1149,8 @@ if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ] && [ -s "${RUN_DIR}/ending-
 
     if [ "$SECOND_EXIT" = "0" ] && [ -s "${RUN_DIR}/atomaton_output_again.txt" ]; then
       mv "${RUN_DIR}/atomaton_output_again.txt" "${RUN_DIR}/atomaton_output.txt"
+      # The second message is a closing message too, whichever reason asked for it,
+      # so it gets the same check. It is not asked again: one extra turn is the bound.
       ${scriptCommandWithArgs(checkEndingRef, {
         "output-file": `${RUN_DIR}/atomaton_output.txt`,
         "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
@@ -1105,10 +1174,12 @@ if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ] && [ -s "${RUN_DIR}/ending-
     else
       # The second attempt failed or was cut off without the person asking. The first
       # run's ending is the one this run actually had, so put the session back as it
-      # was and post that message with its calls refused, rather than reporting a
-      # failure of the machinery's own retry as the run's outcome.
+      # was. An ending that broke the rule keeps its calls refused; a stalled run's
+      # own message stands.
       cp "${RUN_DIR}/session_before_reask.json" "${RUN_DIR}/session.json"
-      ENDING_INVALID=true
+      if [ "$REASK" = "ending" ]; then
+        ENDING_INVALID=true
+      fi
     fi
   fi
 fi
@@ -1214,22 +1285,11 @@ echo "parked=\${PARKED}" >> "$GITHUB_OUTPUT"
 
 # Whether this run changed anything, read from the same log and for a related
 # reason: domain/work/progress.ts stops a chain that is not getting anywhere, and the
-# most direct signal of that is a run that pushed nothing.
-#
-# A commit is the obvious one; opening a pull request and merging one both move the
-# work along without necessarily pushing during THIS run, and reading either as
-# "changed nothing" would stop a chain at the moment it was working.
-#
-# \`merge_base_into_branch\` is the fourth, and it is only progress in its \`merged\`
-# outcome. That is the route #264 added: a reviewer sees \`behind\` or \`conflicting\`,
-# the engineer brings the base in, the merge is clean and pushed, and no
-# commit_and_push follows because there is nothing left to commit -- so without this
-# the whole point of the route is recorded as a run that changed nothing, and two of
-# those stop the chain and call a person. Its other outcomes pushed nothing and must
-# keep counting as nothing: \`up_to_date\` found there was nothing to do, \`conflicts\`
-# is waiting on the agent, and \`failed\` is a failure.
+# most direct signal of that is a run that pushed nothing. The second turn, if there
+# was one, appended to the same log, so this is the final answer -- the earlier read
+# above was for the stalled check, before there was anything else to include.
 CHANGED=false
-if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -qE '"op":"(commit_and_push|create_pr|merge_pr)"|"op":"merge_base_into_branch".*"status":"merged"' "${RUN_DIR}/atomaton_ops.log"; then
+if changed_so_far; then
   CHANGED=true
 fi
 echo "changed=\${CHANGED}" >> "$GITHUB_OUTPUT"
