@@ -45,57 +45,109 @@ export interface TextSegment {
  * in a one-line example is still the machinery's word for what the run did -- and it
  * is not what a mention wants, which is why `codeSegments` is the wider one.
  *
- * An indented code block is not recognised, and deliberately. Deciding whether
- * `    ` starts one needs list context: `    @name` is a list item's continuation
- * paragraph -- prose GitHub notifies from -- and the same indent at the top level is
- * code, and nothing in the line says which. So a fence indented four spaces is prose
- * here, which is narrower than the regex this replaced.
+ * ## A fence indented four spaces
  *
- * The header's ranking is what picks that side of the ambiguity: escaping a name that
- * was already safe costs a comment that reads oddly, while leaving one unescaped
- * notifies a stranger and leaves no trace here. Guessing "code" would take the
- * mistake nobody finds out about, so the guess goes the other way even though it can
- * put backticks in a sample.
+ * Four spaces at the start of a block is an indented code block; the same four
+ * spaces after a paragraph line continue that paragraph. The line alone does not
+ * say which, so this used to read every indented fence as prose -- which put
+ * backticks inside a sample a person had quoted that way, the failure the module
+ * exists to prevent.
+ *
+ * It is now code when the fence PAIRS UP and STARTS A BLOCK: a closing fence
+ * follows before the indented block ends, and the line before the opener is blank,
+ * ends a block, or enters a blockquote. That is the shape a comment quoting a
+ * sample has, at the top level, under a list item and inside a quote --
+ * `    ```` ` opening and `    ```` ` closing -- and GitHub renders it as one code
+ * block, so reading it as prose is wrong in all of this module's uses.
+ *
+ * What is still prose, and why the rule stops there:
+ *
+ *   - an indented fence that continues a paragraph. An indented block cannot
+ *     interrupt a paragraph, so `prose` followed directly by `    ```` ` is
+ *     paragraph text on GitHub, and escaping a mention in it is the cheap mistake.
+ *   - an indented code block with no fence markers. The same four spaces after a
+ *     list item's `1. ` are that item's continuation paragraph, and deciding needs
+ *     the item's content column; guessing "code" there would leave a mention
+ *     unescaped.
+ *
+ * Both residuals are pinned in `fence.test.ts`. The remaining ranking is unchanged:
+ * escaping a name that was already safe costs a comment that reads oddly, while
+ * leaving one unescaped notifies a stranger and leaves no trace here.
  */
 export function fenceSegments(text: string): TextSegment[] {
   const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const segments: TextSegment[] = [];
-  let open: { char: string; length: number; depth: number } | null = null;
+  let open: { char: string; length: number; depth: number; indent: number | null } | null = null;
   let current: TextSegment = { text: "", code: false };
+  /** Whether the line before ended a block, so this one may start a new one. */
+  let startsBlock = true;
+  /** The blockquote depth of the line before. */
+  let previousDepth = 0;
 
   const flush = (): void => {
     if (current.text) segments.push(current);
     current = { text: "", code: false };
   };
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]!;
     const bare = line.replace(/\r?\n$/, "");
     // The quote depth the line is written at, and its text with every marker gone.
     const { depth, rest } = stripQuotes(bare, Number.POSITIVE_INFINITY);
+    // Entering a blockquote starts a block in it: `>     ```` ` is the opening line
+    // of an indented code block, not the continuation of the paragraph outside the
+    // quote.
+    if (depth > previousDepth) startsBlock = true;
+    previousDepth = depth;
 
     if (open !== null && depth < open.depth) {
       // The blockquote the fence opened in has ended, and a fence ends with its container.
       flush();
       open = null;
+      startsBlock = true;
     }
 
     if (open === null) {
       const fence = FENCE.exec(rest);
       if (fence !== null && (fence[1]![0] !== "`" || !fence[2]!.includes("`"))) {
         flush();
-        open = { char: fence[1]![0]!, length: fence[1]!.length, depth };
+        open = { char: fence[1]![0]!, length: fence[1]!.length, depth, indent: null };
         current = { text: line, code: true };
-      } else {
-        current.text += line;
+        startsBlock = false;
+        continue;
       }
+
+      const indented = INDENTED_FENCE.exec(rest);
+      const opensIndented =
+        indented !== null &&
+        startsBlock &&
+        (indented[2]![0] !== "`" || !indented[3]!.includes("`")) &&
+        hasIndentedCloser(lines, index, depth, indented[1]!.length, indented[2]!);
+      if (opensIndented) {
+        flush();
+        open = {
+          char: indented[2]![0]!,
+          length: indented[2]!.length,
+          depth,
+          indent: indented[1]!.length,
+        };
+        current = { text: line, code: true };
+        startsBlock = false;
+        continue;
+      }
+
+      current.text += line;
+      // A fence-looking line that continues a paragraph is paragraph text, so the
+      // paragraph is not over. Anything else follows the ordinary block rules.
+      startsBlock = indented !== null && !startsBlock ? false : endsBlock(rest);
       continue;
     }
 
     current.text += line;
-    const fence = FENCE.exec(stripQuotes(bare, open.depth).rest);
-    if (fence && fence[1]![0] === open.char && fence[1]!.length >= open.length && fence[2]!.trim() === "") {
+    if (closesFence(stripQuotes(bare, open.depth).rest, open)) {
       flush();
       open = null;
+      startsBlock = true;
     }
   }
 
@@ -105,6 +157,91 @@ export function fenceSegments(text: string): TextSegment[] {
 
 /** A fence line, once the blockquote markers in front of it are gone. */
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/** A fence line indented enough to be an indented code block, and its indent. */
+const INDENTED_FENCE = /^( {4,})(`{3,}|~{3,})(.*)$/;
+
+/** An ATX heading: the line starts a block, so the next line may too. */
+const ATX_HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+
+/** A thematic break: a block of its own. */
+const THEMATIC_BREAK = /^ {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+
+/** A list item marker: the item's content starts a paragraph. */
+const LIST_ITEM = /^ {0,3}(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)/;
+
+/**
+ * Whether `rest` ends the block it is on, so the next line may start a new one.
+ *
+ * A blank line, a heading, a thematic break and a list marker each do. So does a
+ * fence line: a fence is a block of its own whether this module reads it as code
+ * or (unpaired) as prose. Everything else is paragraph text, and an indented block
+ * cannot interrupt a paragraph.
+ */
+function endsBlock(rest: string): boolean {
+  if (rest.trim() === "") return true;
+  return (
+    ATX_HEADING.test(rest) ||
+    THEMATIC_BREAK.test(rest) ||
+    LIST_ITEM.test(rest) ||
+    FENCE.test(rest) ||
+    INDENTED_FENCE.test(rest)
+  );
+}
+
+/** Whether `rest` closes the fence `open`. */
+function closesFence(
+  rest: string,
+  open: { char: string; length: number; depth: number; indent: number | null },
+): boolean {
+  // An indented opener is only closed by an indented closer. Accepting an
+  // unindented one as well would read the prose between them as code -- the
+  // direction that notifies a stranger -- and a pair written at one indent is
+  // the shape this rule is for.
+  if (open.indent === null) {
+    const normal = FENCE.exec(rest);
+    return (
+      normal !== null &&
+      normal[1]![0] === open.char &&
+      normal[1]!.length >= open.length &&
+      normal[2]!.trim() === ""
+    );
+  }
+  const indented = INDENTED_FENCE.exec(rest);
+  if (indented === null) return false;
+  const indent = indented[1]!.length;
+  return (
+    indent >= 4 &&
+    indent <= open.indent + 3 &&
+    indented[2]![0] === open.char &&
+    indented[2]!.length >= open.length &&
+    indented[3]!.trim() === ""
+  );
+}
+
+/**
+ * Whether a closing fence for the candidate opener at `opener` follows in the same
+ * block, before the blockquote it opened in ends.
+ */
+function hasIndentedCloser(
+  lines: string[],
+  opener: number,
+  depth: number,
+  indent: number,
+  marker: string,
+): boolean {
+  for (let index = opener + 1; index < lines.length; index += 1) {
+    const bare = lines[index]!.replace(/\r?\n$/, "");
+    const { depth: lineDepth, rest } = stripQuotes(bare, depth);
+    if (lineDepth < depth) return false;
+    // A non-blank line out at the margin ends the indented block, so a fence below
+    // it opens a new block rather than closing this one. Reading across it would
+    // call the line's prose code and leave a mention in it unescaped.
+    if (rest.trim() !== "" && rest.length - rest.trimStart().length < indent) return false;
+    if (closesFence(rest, { char: marker[0]!, length: marker.length, depth, indent })) return true;
+  }
+  return false;
+}
 
 /**
  * How deep in a blockquote `line` sits, and the line with that many `>` markers and
