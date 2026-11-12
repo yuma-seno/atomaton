@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { leftClosingReport } from "./closing-report.ts";
+import { lastTurnCalledTools, leftClosingReport } from "./closing-report.ts";
 import type { Session, SessionMessage } from "../work/session.ts";
 
 /**
@@ -88,5 +88,48 @@ describe("leftClosingReport", () => {
       ] as SessionMessage[],
     };
     expect(leftClosingReport(old)).toBe(true);
+  });
+});
+
+describe("lastTurnCalledTools", () => {
+  test("a final turn with only words called nothing", () => {
+    expect(lastTurnCalledTools(sessionOf({ role: "user", content: "do it" }, { role: "assistant", content: "Done." }))).toBe(
+      false,
+    );
+  });
+
+  test("a tool call is the last turn when the tool ended the session", () => {
+    expect(
+      lastTurnCalledTools(
+        sessionOf(
+          { role: "assistant", content: "Opening the pull request." },
+          { role: "assistant", content: "", tool_calls: [{ function: { name: "create_pr" } }] },
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  /** An earlier call belongs to the work, and the last turn is what ended the run. */
+  test("only the last assistant turn is read", () => {
+    expect(
+      lastTurnCalledTools(
+        sessionOf(
+          { role: "assistant", content: "", tool_calls: [{ function: { name: "read" } }] },
+          { role: "tool", content: "ok" },
+          { role: "assistant", content: "That was the last thing to read." },
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  /** An empty array is the shape a provider leaves when it called nothing. */
+  test("an empty tool_calls array called nothing", () => {
+    expect(lastTurnCalledTools(sessionOf({ role: "assistant", content: "", tool_calls: [] }))).toBe(false);
+  });
+
+  test("an absent or assistant-less session called nothing", () => {
+    expect(lastTurnCalledTools(undefined)).toBe(false);
+    expect(lastTurnCalledTools({} as Session)).toBe(false);
+    expect(lastTurnCalledTools(sessionOf({ role: "user", content: "do it" }))).toBe(false);
   });
 });

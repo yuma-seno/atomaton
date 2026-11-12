@@ -76,11 +76,35 @@ function textOf(content: SessionMessage["content"]): string {
  * not write the session it was told to write is not one to record as having reported.
  */
 export function leftClosingReport(session: Session | undefined): boolean {
+  const last = lastAssistantMessage(session);
+  return last === undefined ? false : textOf(last.content).trim() !== "";
+}
+
+/**
+ * Whether the last assistant turn asked for a tool.
+ *
+ * A completed run normally ends on a text-only turn -- a tool call would have been
+ * carried out and the loop would have gone round again -- with one exception: a tool
+ * that ends the session itself leaves its call as the last assistant message while
+ * the core still records `completed`. Reading that message is how a caller tells a
+ * report from a session-ending call.
+ *
+ * The same walk as `leftClosingReport`, and for the same reason: the last turn is
+ * the only one that says how the run ended. An earlier call belongs to the work.
+ */
+export function lastTurnCalledTools(session: Session | undefined): boolean {
+  const last = lastAssistantMessage(session);
+  if (last === undefined) return false;
+  const calls = last.tool_calls;
+  return Array.isArray(calls) && calls.length > 0;
+}
+
+/** The last assistant message, or `undefined` when the session has none. */
+function lastAssistantMessage(session: Session | undefined): SessionMessage | undefined {
   const messages = session?.messages ?? [];
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
-    if (message?.role !== "assistant") continue;
-    return textOf(message.content).trim() !== "";
+    if (message?.role === "assistant") return message;
   }
-  return false;
+  return undefined;
 }

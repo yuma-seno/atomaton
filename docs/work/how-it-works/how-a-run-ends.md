@@ -44,6 +44,28 @@ A run that was cut short never made a call either — its last message is a frag
 of the work — so every mention in a salvaged fragment is escaped as well, and the
 machinery's mention is what reaches a person.
 
+## A run that stops on a sentence
+
+A message with no tool call ends the run. That is normally a report, but sometimes it
+is the sentence that introduced the next step — "Running the full suite." — and the
+run is recorded `completed` with nothing pushed. The punctuation is not the signal:
+the first shape found ended on a colon, and the next two ended on a full stop.
+
+So a run with all four of these facts is asked once more, in its own session:
+
+- it ended `completed` of its own accord — not stopped by a person, cut off by the
+  clock, or failed;
+- its last turn called no tool. A tool that ends the session leaves its call as the
+  last assistant message, and that call was the run's ending;
+- it changed nothing: no commit, pull request or merge on the node;
+- its closing message called nobody, so the work has not already been handed on.
+
+The note says that the run ended on a message that called no tool, asks for the call
+the sentence announced, and gives the way out a legitimate "nothing needs changing"
+run takes: say so and give the grounds. This is the same single re-ask the one-call
+rule uses, so a run never takes two extra turns. A run that investigated and found
+nothing to change pays one more turn; the work a premature stop loses costs more.
+
 ## A failure that gets reported is also an ending
 
 When the agent itself fails, the failure is converted into the comment it owed the

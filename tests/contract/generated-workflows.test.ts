@@ -380,6 +380,50 @@ describe("generated workflows", () => {
   });
 
   /**
+   * A run that stopped on a sentence having changed nothing gets one more turn, and
+   * a run whose closing message broke the one-call rule gets the same one. They share
+   * one re-ask block, so no run can take two extra turns — which is why the check,
+   * the note, and the bound are pinned together here.
+   *
+   * Held on the generated YAML because it is the composition that matters: the scripts
+   * pass their own tests whether or not the runner ever calls them, and a second
+   * extra turn would be invisible in either.
+   */
+  test("a stalled run is asked once to continue, through the same single re-ask", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const agent = steps.find((candidate) => candidate.name === "Run agent");
+    const run = agent?.run ?? "";
+
+    const checks = run.split("\n").filter((line) => line.includes("bun run") && line.includes("should_continue_stalled.ts"));
+    expect(checks.length, "the stall is judged once, before the second turn").toBe(1);
+    expect(checks[0], "the session is where the ending and the last turn are").toContain("--session");
+    expect(checks[0], "and the ops log's answer travels in").toContain("--changed");
+
+    const injections = run
+      .split("\n")
+      .filter((line) => line.includes("bun run") && line.includes("inject_stalled_continuation.ts"));
+    expect(injections.length, "and its note is injected once").toBe(1);
+    expect(injections[0]).toContain("--session");
+
+    // One first turn and one re-ask. Two `atoma run` invocations is the bound.
+    const turns = run.split("\n").filter((line) => /^\s*atoma run\s*\\$/.test(line));
+    expect(turns.length, "the first turn and the one re-ask, and no more").toBe(2);
+
+    // Both reasons share that one block, which is the bound. The ending check after
+    // the second turn is not behind either reason, so a rule-breaking closing message
+    // from the stalled branch is refused like any other.
+    expect(run).toContain('if [ -n "$REASK" ]');
+    const endingChecks = run
+      .split("\n")
+      .filter((line) => line.includes("bun run") && line.includes("check_ending.ts"));
+    expect(endingChecks.length, "checked after each turn, and never a third time").toBe(2);
+  });
+
+  /**
    * A failure the run managed to report must not also turn the run red.
    *
    * `continue-on-error` leaves the failure in `steps.atoma.outcome` — every condition
