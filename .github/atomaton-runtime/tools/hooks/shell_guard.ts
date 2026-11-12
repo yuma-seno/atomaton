@@ -220,7 +220,7 @@ function invokedPrograms(command, depth = 0) {
 }
 var PROCESS_ENVIRONMENT_READ = [
   /^(?=[\s\S]*\/proc)(?=[\s\S]*\benviron\b)/,
-  "Reading a process's environment through /proc is disabled: tool servers run as the same user and each holds only the credentials it declares."
+  "Reading a process's environment through /proc is disabled: credential-holding tool servers run as a different OS user and the shell has no sudo."
 ];
 var ROUTED_GIT_COMMANDS = new Set([
   "add",

@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.67",
+  "version": "v0.21.68",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -83,6 +83,7 @@
     ".github/atomaton-runtime/tools/mcp/shell.ts",
     ".github/atomaton-runtime/tools/mcp/web.ts",
     ".github/atomaton-runtime/tools/packages.json",
+    ".github/atomaton-runtime/tools/run_as_untrusted.sh",
     ".github/atomaton/README.md",
     ".github/atomaton/agent-definitions/architect.md",
     ".github/atomaton/agent-definitions/atomaton.md",

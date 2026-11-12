@@ -7,7 +7,7 @@ import { dirname as dirname2 } from "path";
 import { parseArgs } from "util";
 
 // src/domain/machinery/tools-file.ts
-import { isAbsolute, join as join2, resolve } from "path";
+import { isAbsolute as isAbsolute2, join as join3, resolve as resolve2 } from "path";
 
 // src/shared/tool-output.ts
 var TOOL_OUTPUT_BUDGET = 8000;
@@ -59,6 +59,28 @@ function toolDefaults(path = defaultPath()) {
   return cached;
 }
 
+// src/domain/machinery/untrusted-servers.ts
+import { isAbsolute, join as join2, resolve } from "path";
+var RUN_AS_UNTRUSTED = "run_as_untrusted.sh";
+var SHIPPED_UNTRUSTED = new Set(["shell"]);
+function isUntrustedServer(name, shippedNames) {
+  return SHIPPED_UNTRUSTED.has(name) || !shippedNames.has(name);
+}
+function asUntrustedServer(server, toolsDir) {
+  if (typeof server.command !== "string")
+    return server;
+  const args = Array.isArray(server.args) ? server.args : [];
+  return {
+    ...server,
+    command: "bash",
+    args: [wrapperPath(toolsDir), server.command, ...args]
+  };
+}
+function wrapperPath(toolsDir) {
+  const from = isAbsolute(toolsDir) ? toolsDir : resolve(toolsDir);
+  return join2(from, RUN_AS_UNTRUSTED).split("\\").join("/");
+}
+
 // src/domain/machinery/tools-file.ts
 function toolsFileFrom(tools, hookBase, defaultsPath) {
   const out = {};
@@ -66,6 +88,7 @@ function toolsFileFrom(tools, hookBase, defaultsPath) {
   const watch = mergedWatch(tools?.watch, defaults);
   if (Object.keys(watch).length > 0)
     out.hooks = absoluteHooks(watch, hookBase);
+  const shippedNames = new Set(Object.keys(defaults.servers));
   for (const [name, server] of Object.entries(mergedServers(tools?.servers, defaults))) {
     const { settings: _delivery, ...forTheCore } = server;
     if (isRecord(forTheCore.hooks))
@@ -73,7 +96,7 @@ function toolsFileFrom(tools, hookBase, defaultsPath) {
     if (Object.hasOwn(defaults.servers, name) && forTheCore.max_output_chars === undefined) {
       forTheCore.max_output_chars = TOOL_OUTPUT_BACKSTOP;
     }
-    out[name] = forTheCore;
+    out[name] = isUntrustedServer(name, shippedNames) ? asUntrustedServer(forTheCore, hookBase) : forTheCore;
   }
   return out;
 }
@@ -117,10 +140,10 @@ function absoluteHooks(hooks, base) {
 function absolutePath(script, base) {
   if (typeof script !== "string" || script.length === 0)
     return script;
-  if (isAbsolute(script))
+  if (isAbsolute2(script))
     return script;
-  const from = isAbsolute(base) ? base : resolve(base);
-  return join2(from, script).split("\\").join("/");
+  const from = isAbsolute2(base) ? base : resolve2(base);
+  return join3(from, script).split("\\").join("/");
 }
 function reservedServerNames(tools) {
   return Object.keys(tools?.servers ?? {}).filter((name) => name === "hooks");
