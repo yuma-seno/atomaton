@@ -21034,6 +21034,51 @@
     ]
   },
   {
+    "path": "sessions/issue-489/engineer.json",
+    "agent": "engineer",
+    "messages": 71,
+    "calls": 38,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "load_skill": 1,
+      "bash": 27,
+      "fetch": 3,
+      "read": 7
+    },
+    "acts": {
+      "other": 6,
+      "open": 14,
+      "search": 7
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-12T17:10:10Z",
+        "ended_because": "failed",
+        "iterations": 25,
+        "messages": 71,
+        "seconds": 3469,
+        "server_calls": {
+          "files": {
+            "read": 7
+          },
+          "shell": {
+            "bash": 27
+          },
+          "web": {
+            "fetch": 3
+          }
+        },
+        "started": "2026-11-12T16:12:21Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-492/engineer.json",
     "agent": "engineer",
     "messages": 347,
