@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.69",
+  "version": "v0.21.70",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -7,6 +7,7 @@
     ".github/atomaton-runtime/scripts/check_live_tools.ts",
     ".github/atomaton-runtime/scripts/check_sub_issue_closure.ts",
     ".github/atomaton-runtime/scripts/claim_turn.ts",
+    ".github/atomaton-runtime/scripts/decide_reask.ts",
     ".github/atomaton-runtime/scripts/decide_turn_ending.ts",
     ".github/atomaton-runtime/scripts/dispatch_agent.ts",
     ".github/atomaton-runtime/scripts/dispatch_if_siblings_done.ts",
@@ -24,6 +25,7 @@
     ".github/atomaton-runtime/scripts/inject_ending_rejection.ts",
     ".github/atomaton-runtime/scripts/inject_stalled_continuation.ts",
     ".github/atomaton-runtime/scripts/inject_uncommitted_notice.ts",
+    ".github/atomaton-runtime/scripts/launch_atoma.ts",
     ".github/atomaton-runtime/scripts/manage_dispatch_loop.ts",
     ".github/atomaton-runtime/scripts/manage_turn_labels.ts",
     ".github/atomaton-runtime/scripts/merge_tool_packages.ts",
@@ -60,6 +62,7 @@
     ".github/atomaton-runtime/scripts/should_continue_stalled.ts",
     ".github/atomaton-runtime/scripts/stop_on_close.ts",
     ".github/atomaton-runtime/scripts/stop_on_pr_close.ts",
+    ".github/atomaton-runtime/scripts/summarize_run.ts",
     ".github/atomaton-runtime/scripts/sweep_stale_locks.ts",
     ".github/atomaton-runtime/scripts/validate_deliverable.ts",
     ".github/atomaton-runtime/scripts/validate_pull_request.ts",
