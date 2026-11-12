@@ -556,32 +556,59 @@ jobs:
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_turn_labels.ts" --phase "running" --number "${NUMBER}"
         if: steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
-      - name: Put the tool servers on a user without sudo
+      - name: Put the tool servers on users without sudo
         shell: bash
         run: |
           sudo useradd -M -U -s /usr/sbin/nologin "atomaton-tools" 2>/dev/null || true
           id "atomaton-tools"
+          sudo useradd -M -U -s /usr/sbin/nologin "atomaton-untrusted" 2>/dev/null || true
+          id "atomaton-untrusted"
 
-          # Traverse-only down to the workspace, walked rather than hardcoded: the path
-          # between HOME and the workspace is the runner's business, not ours.
-          DIR="$GITHUB_WORKSPACE"
-          while [ "$DIR" != "/" ]; do
-            DIR=$(dirname "$DIR")
-            # Stop before "/" itself, and before anything world-traversable already: a
-            # self-hosted runner's workspace is often nowhere near $HOME, and walking to the
-            # root would put an ACL on "/".
-            [ "$DIR" = "/" ] && break
-            sudo setfacl -m "u:atomaton-tools:x" "$DIR"
-            [ "$DIR" = "$HOME" ] && break
+          # The one privilege the tool user has: run a command as the untrusted user.
+          #
+          # Downward only. It names the target user rather than ALL, so there is no rule
+          # that could run anything as root, and the untrusted user is given no sudoers
+          # entry at all. SETENV is what lets `run_as_untrusted.sh` keep the environment
+          # atoma gave a server -- how a third-party server receives the credential its own
+          # `env:` block named. That is not an escalation: the process receiving it is the
+          # untrusted user.
+          SUDOERS_TMP=$(mktemp)
+          echo "atomaton-tools ALL=(atomaton-untrusted) NOPASSWD: SETENV: ALL" > "$SUDOERS_TMP"
+          sudo visudo -cf "$SUDOERS_TMP"
+          sudo install -m 0440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/atomaton-untrusted
+          rm -f "$SUDOERS_TMP"
+
+          # Traverse-only down to the workspace and the run's temp directory, walked rather
+          # than hardcoded: the path between HOME and either is the runner's business, not
+          # ours. Both tool users need it: the trusted one to reach the work tree the runner
+          # owns, and the untrusted one to reach the machinery and the run's own files.
+          for start in "$GITHUB_WORKSPACE" "${RUNNER_TEMP}"; do
+            DIR="$start"
+            while [ "$DIR" != "/" ]; do
+              DIR=$(dirname "$DIR")
+              # Stop before "/" itself, and before anything world-traversable already: a
+              # self-hosted runner's workspace is often nowhere near $HOME, and walking to the
+              # root would put an ACL on "/".
+              [ "$DIR" = "/" ] && break
+              sudo setfacl -m "u:atomaton-tools:x" "$DIR"
+              sudo setfacl -m "u:atomaton-untrusted:x" "$DIR"
+              [ "$DIR" = "$HOME" ] && break
+            done
           done
 
           # Full access inside the tree, and as a default so later files inherit it. `X`
           # rather than `x`: execute on directories, not on every file.
+          #
+          # Both users: the shell writes the work, and every trusted server reads and
+          # changes it at the same paths. The separation is of environment blocks, not of
+          # the filesystem -- see docs/tools/boundaries.md.
           sudo setfacl -R -m "u:atomaton-tools:rwX" "$GITHUB_WORKSPACE"
+          sudo setfacl -R -m "u:atomaton-untrusted:rwX" "$GITHUB_WORKSPACE"
           sudo setfacl -R -d -m "u:atomaton-tools:rwX" "$GITHUB_WORKSPACE"
+          sudo setfacl -R -d -m "u:atomaton-untrusted:rwX" "$GITHUB_WORKSPACE"
           sudo setfacl -R -d -m "u:$(id -un):rwX" "$GITHUB_WORKSPACE"
 
-          # Somewhere real for the caches, since $HOME is not writable by this user.
+          # Somewhere real for the caches, since $HOME is not writable by either tool user.
           sudo install -d -o "atomaton-tools" -m 0700 "${RUNNER_TEMP}/atomaton-tool-cache"
 
           # And both ways round, recursively, for the same reason the run directory below
@@ -593,10 +620,15 @@ jobs:
           # the restored weights unwritable by the server that loads them, which is the
           # exactly, and the downloaded weights unreadable by the save that should keep them.
           #
+          # The untrusted user is here as well: the shell's package managers write these
+          # caches, and the trusted servers read them when they run the same toolchain.
+          #
           # -R as well as -d: a default ACL only reaches files created after it is set, and
           # the restore already wrote several hundred of them.
           sudo setfacl -R -m "u:atomaton-tools:rwX" "${RUNNER_TEMP}/atomaton-tool-cache"
+          sudo setfacl -R -m "u:atomaton-untrusted:rwX" "${RUNNER_TEMP}/atomaton-tool-cache"
           sudo setfacl -R -d -m "u:atomaton-tools:rwX" "${RUNNER_TEMP}/atomaton-tool-cache"
+          sudo setfacl -R -d -m "u:atomaton-untrusted:rwX" "${RUNNER_TEMP}/atomaton-tool-cache"
           sudo setfacl -R -m "u:$(id -un):rwX" "${RUNNER_TEMP}/atomaton-tool-cache"
           sudo setfacl -R -d -m "u:$(id -un):rwX" "${RUNNER_TEMP}/atomaton-tool-cache"
 
@@ -614,14 +646,23 @@ jobs:
           sudo setfacl -R -d -m "u:atomaton-tools:rwX" "${RUNNER_TEMP}/atomaton-run"
           sudo setfacl -R -d -m "u:$(id -un):rwX" "${RUNNER_TEMP}/atomaton-run"
 
+          # The untrusted user: read and traverse, and deliberately not write.
+          #
+          # The tools file lives here and the runner re-reads it for the second turn. A shell
+          # that could rewrite it would be choosing how the NEXT turn starts -- a trusted
+          # server entry pointed at a command of its choosing would run with the credentials
+          # this whole step exists to keep away from it. No default ACL either: the session
+          # written after this point is not something the shell needs to read.
+          sudo setfacl -R -m "u:atomaton-untrusted:rX" "${RUNNER_TEMP}/atomaton-run"
+
           # The agent's scratch workspace, on the same terms. The runner unpacks into it
           # before the agent starts and packs it up afterwards, and everything the agent does
-          # in it happens as the tool user -- so both need to read and write what the other
-          # creates, including files that do not exist yet.
+          # in it happens as the tool users -- so all of them need to read and write what
+          # the others create, including files that do not exist yet.
           #
           # `/tmp` is already world-writable, so this is not what makes the directory
-          # usable; it is what stops the two identities tripping over each other's file
-          # modes inside it.
+          # usable; it is what stops the identities tripping over each other's file modes
+          # inside it.
           # The machinery, read-only. It left the work tree, which is where it used to pick
           # up the tool user's access as a side effect of the recursive ACL below -- so
           # without this the tool servers cannot read their own scripts and no server starts.
@@ -629,34 +670,52 @@ jobs:
           # `rX` rather than `rwX`: read everywhere, execute only where execute is already
           # set for somebody. "Make tool hooks executable" ran earlier, so the hooks get it
           # and the ordinary files do not. Nothing here is the agent's to modify.
+          #
+          # The untrusted user reads it for the same reason: its server programs, their
+          # bundles and the wrapper are all here, and it has no access to the work tree
+          # copy of anything.
           sudo setfacl -R -m "u:atomaton-tools:rX" "$ATOMATON_MACHINERY_ROOT"
+          sudo setfacl -R -m "u:atomaton-untrusted:rX" "$ATOMATON_MACHINERY_ROOT"
 
           # And the libraries the servers import, which sit beside the machinery for module
           # resolution to find. Read-only for the same reason.
           if [ -d "${RUNNER_TEMP}/node_modules" ]; then
             sudo setfacl -R -m "u:atomaton-tools:rX" "${RUNNER_TEMP}/node_modules"
+            sudo setfacl -R -m "u:atomaton-untrusted:rX" "${RUNNER_TEMP}/node_modules"
           fi
 
           mkdir -p "/tmp/atomaton-workspace"
           sudo setfacl -R -m "u:atomaton-tools:rwX" "/tmp/atomaton-workspace"
+          sudo setfacl -R -m "u:atomaton-untrusted:rwX" "/tmp/atomaton-workspace"
           sudo setfacl -R -d -m "u:atomaton-tools:rwX" "/tmp/atomaton-workspace"
+          sudo setfacl -R -d -m "u:atomaton-untrusted:rwX" "/tmp/atomaton-workspace"
           sudo setfacl -R -d -m "u:$(id -un):rwX" "/tmp/atomaton-workspace"
 
           # And a directory for the credentials file that the TOOL USER owns, so atoma can
           # unlink it. Owned by them, writable by us: the runner writes the file into it and
           # hands it over, and the delete that keeps the file and the servers from coexisting
           # then succeeds. Without this the delete fails and every credential stays readable.
+          #
+          # NOTHING for the untrusted user, and that is the point of the second uid. The
+          # directory is 0700 and no ACL names the other user, so the shell cannot read the
+          # file before atoma deletes it and cannot list the directory afterwards. The
+          # parent's traversal grant stops at ${RUNNER_TEMP}; it does not descend into this.
           sudo install -d -o "atomaton-tools" -m 0700 "$RUNNER_TEMP/atomaton-credentials"
           sudo setfacl -m "u:$(id -un):rwx" "$RUNNER_TEMP/atomaton-credentials"
 
           # Close the world-writable directories on PATH.
           #
-          # The design rests on the tool user having no sudo. That is worth nothing while it
-          # can write a directory the RUNNER's own later steps search: this job goes on to
-          # run `git status`, `grep` and `gh issue comment` as the runner, which does have
-          # passwordless sudo. Measured on ubuntu-latest: /opt/pipx_bin,
+          # The design rests on the untrusted user having no sudo. That is worth nothing
+          # while it can write a directory the RUNNER's own later steps search: this job goes
+          # on to run `git status`, `grep` and `gh issue comment` as the runner, which does
+          # have passwordless sudo. Measured on ubuntu-latest: /opt/pipx_bin,
           # /usr/local/.ghcup/bin and /usr/local/bin are all drwxrwxrwx and all precede
           # /usr/bin.
+          #
+          # The same writability is a path into the trusted class: a `gh` planted in one of
+          # those directories is executed by the server that holds GH_TOKEN. The shipped
+          # servers narrow their own PATH as well; this closes the directories for everything
+          # else.
           #
           # Computed from PATH rather than named, so an image that adds a fourth is covered.
           #
@@ -677,12 +736,12 @@ jobs:
           # Git as the tool user, over a checkout the runner owns.
           #
           # `actions/checkout` writes this into the runner's own gitconfig, which the tool
-          # user can read through the traversal granted above -- but that is a default of a
+          # users can read through the traversal granted above -- but that is a default of a
           # third-party action, and `commit_and_push` and every `git` the agent runs
           # depend on it. Said explicitly, at system level, so it does not.
           sudo git config --system --add safe.directory "$GITHUB_WORKSPACE" 2>/dev/null || true
 
-          echo "tool servers will run as atomaton-tools (no sudo), caches in ${RUNNER_TEMP}/atomaton-tool-cache"
+          echo "tool servers run as atomaton-tools (credentials) and atomaton-untrusted (shell and third-party), caches in ${RUNNER_TEMP}/atomaton-tool-cache"
       - name: Resolve which repository secrets may reach this run
         id: secret-names
         shell: bash
@@ -806,16 +865,17 @@ jobs:
 
           # No --prompt-file or stdin is needed: the cached session contains both stable
           # GitHub context and the agent's chronological working history.
-          # Run as the user the tool servers will inherit. Every server atoma starts is a
-          # child of this process, so one `sudo -u` here is what puts all of them on that
-          # user -- there is nothing per-server to configure or to forget.
+          # Run as the user the credential-holding servers inherit. Every server atoma starts
+          # is a child of this process, so this is what puts the trusted class on that user.
+          # The shell and every server a project adds are dropped a second time by
+          # `run_as_untrusted.sh`, from their own entries in the generated tools file.
           #
           # `env` in front rather than `--preserve-env`: the latter needs a sudoers
           # permission that a self-hosted runner may not grant, and both were measured, so
           # the portable one is used. Only what a server actually reads is passed; the
           # credentials are not here at all, they are in the file atoma deletes.
           #
-          # HOME stays the runner's so the toolchain resolves. It is not writable by this
+          # HOME stays the runner's so the toolchain resolves. It is not writable by either
           # user, uniformly for every tool, and the caches are redirected below.
           # Built as an array so a setting that is EMPTY is not passed at all. `env NAME=`
           # sets the empty string, and atoma reads an empty base URL as a base URL -- which
@@ -832,6 +892,9 @@ jobs:
             PATH="$PATH"
             AGENT="$AGENT"
             ATOMATON_MACHINERY_ROOT="$ATOMATON_MACHINERY_ROOT"
+            # The uid `run_as_untrusted.sh` drops each untrusted server to. The sudo rule
+            # and both users are created in the step that prepares the tool servers.
+            ATOMATON_UNTRUSTED_USER="atomaton-untrusted"
             GITHUB_REPOSITORY="$GITHUB_REPOSITORY"
             BRANCH="${BRANCH:-}"
             NUMBER="$NUMBER"
@@ -895,6 +958,14 @@ jobs:
           # distinguish the two, and the log will say.
           if ! sudo -n -u "atomaton-tools" true 2>/dev/null; then
             echo "::error::cannot run the tool servers as atomaton-tools: sudo refused; atoma never started"
+            exit 1
+          fi
+
+          # And the downward grant the wrapper uses. The shell and every third-party server
+          # reach their uid through this, so a missing rule is the same class of failure as
+          # above -- and the real invocation cannot say which sudo failed.
+          if ! sudo -n -u "atomaton-tools" sudo -n -E -u "atomaton-untrusted" true 2>/dev/null; then
+            echo "::error::cannot run the shell and third-party servers as atomaton-untrusted: the sudo rule is missing; atoma never started"
             exit 1
           fi
 

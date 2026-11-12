@@ -6603,7 +6603,7 @@ var require_dist = __commonJS(function(exports, module) {
 // src/entrypoints/tools/mcp/delegate.ts
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join as join2 } from "path";
 import { existsSync } from "fs";
 import { parseArgs } from "util";
 
@@ -17881,6 +17881,25 @@ function machineryPath(relative) {
   return root ? `${root}/${relative}` : relative;
 }
 
+// src/domain/machinery/untrusted-servers.ts
+import { isAbsolute, join, resolve } from "path";
+var RUN_AS_UNTRUSTED = "run_as_untrusted.sh";
+var SHIPPED_UNTRUSTED = new Set(["shell"]);
+function asUntrustedServer(server, toolsDir) {
+  if (typeof server.command !== "string")
+    return server;
+  const args = Array.isArray(server.args) ? server.args : [];
+  return {
+    ...server,
+    command: "bash",
+    args: [wrapperPath(toolsDir), server.command, ...args]
+  };
+}
+function wrapperPath(toolsDir) {
+  const from = isAbsolute(toolsDir) ? toolsDir : resolve(toolsDir);
+  return join(from, RUN_AS_UNTRUSTED).split("\\").join("/");
+}
+
 // src/shared/tool-output.ts
 var TOOL_OUTPUT_BUDGET = 8000;
 var TOOL_OUTPUT_BACKSTOP = TOOL_OUTPUT_BUDGET * 2;
@@ -18041,6 +18060,7 @@ var AGENT_ENV_NAMES = [
   "HOME",
   "PATH",
   "AGENT",
+  "ATOMATON_UNTRUSTED_USER",
   MACHINERY_ROOT_VAR,
   "GITHUB_REPOSITORY",
   "BRANCH",
@@ -18132,7 +18152,7 @@ function frontmatter(text, defPath) {
 function rolePrompt(text) {
   return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
 }
-function readToolsFile(path) {
+function readToolsFile(path, toolsDir) {
   let parsed;
   try {
     parsed = Bun.YAML.parse(readFileSync(path, "utf8"));
@@ -18146,7 +18166,8 @@ function readToolsFile(path) {
   if (Object.keys(watch).length > 0)
     out.hooks = watch;
   for (const [name, server] of Object.entries(parsed.servers ?? {})) {
-    out[name] = { max_output_chars: TOOL_OUTPUT_BACKSTOP, ...server };
+    const entry = { max_output_chars: TOOL_OUTPUT_BACKSTOP, ...server };
+    out[name] = asUntrustedServer(entry, toolsDir);
   }
   return out;
 }
@@ -18163,7 +18184,7 @@ if (!ROSTER_KEY) {
   console.error("[atomaton-delegate] no --roster given. Pass the roster key this server should offer, " + "which is its own name in `tools/defaults.yaml`: `delegate` offers the writing folders " + "and `delegate_readonly` the read-only ones. There is no default, because which entry is " + "wanted is what tells the two apart.");
   process.exit(2);
 }
-var { defs, problems } = resolveRoster(join(DELEGATES_ROOT, "delegates.yaml"), (path) => readFileSync(path, "utf8"), (path) => existsSync(path));
+var { defs, problems } = resolveRoster(join2(DELEGATES_ROOT, "delegates.yaml"), (path) => readFileSync(path, "utf8"), (path) => existsSync(path));
 if (problems.length > 0) {
   for (const problem of problems)
     console.error(`[atomaton-delegate] ${problem}`);
@@ -18175,7 +18196,7 @@ if (MINE.length === 0) {
   process.exit(2);
 }
 var DEFAULTS = MINE.map((def) => {
-  const tools = readToolsFile(def.toolsFile);
+  const tools = readToolsFile(def.toolsFile, machineryPath(TOOLS_DIR));
   const servers = serverNamesOf(tools);
   const canWrite = servers.includes("files");
   const hasShell = servers.includes("shell");
@@ -18224,9 +18245,9 @@ async function handleDelegateRun(def, args) {
   if (Object.keys(credentials).length === 0) {
     throw new Error("Cannot delegate: this run holds no provider credential, so the sub-run could not call a model. " + "Do the work here instead.");
   }
-  const dir = mkdtempSync(join(tmpdir(), "atomaton-delegate-"));
-  const toolsFile = join(dir, "tools.yaml");
-  const credentialsFile = join(dir, "credentials.json");
+  const dir = mkdtempSync(join2(tmpdir(), "atomaton-delegate-"));
+  const toolsFile = join2(dir, "tools.yaml");
+  const credentialsFile = join2(dir, "credentials.json");
   try {
     writeFileSync(toolsFile, Bun.YAML.stringify(def.tools, null, 2));
     writeFileSync(credentialsFile, JSON.stringify(credentials), { mode: 384 });
