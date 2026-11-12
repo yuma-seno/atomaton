@@ -21,9 +21,11 @@ describe("the parked turn's wiring (#208)", () => {
   const steps = Object.values(workflow.jobs ?? {}).flatMap((job) => job.steps ?? []);
 
   test("the agent step publishes the parked signal from its own ops log", () => {
-    const read = steps.find((s) => (s.run ?? "").includes("parked=${PARKED}"));
+    // The grep moved into `summarize_run.ts` with the rest of the step's logic;
+    // the step publishes it because the script appends to its `$GITHUB_OUTPUT`.
+    const read = steps.find((s) => (s.run ?? "").includes("summarize_run.ts"));
     expect(read, "the step that reads the ops log must publish the signal").toBeDefined();
-    expect(read?.run ?? "").toContain('"op":"dispatch-elsewhere"');
+    expect(readFileSync("src/entrypoints/machinery/summarize_run.ts", "utf8")).toContain('"op":"dispatch-elsewhere"');
   });
 
   test("the ending decision consumes it", () => {

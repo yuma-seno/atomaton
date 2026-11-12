@@ -225,6 +225,28 @@ export const RELEASE_MANIFEST = ".github/atomaton-release.json";
 export const MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
 
 /**
+ * The OS user that holds credentials: `atoma` and the servers this project ships.
+ *
+ * A different uid from `UNTRUSTED_USER` below, so a shell command cannot read the
+ * environment block of a server that holds a key. And not in sudoers, except for
+ * one downward rule: this user may run a command as the untrusted user, and as
+ * nobody else. See `docs/tools/boundaries.md` for what the split closes and what
+ * it deliberately leaves open.
+ */
+export const TOOL_USER = "atomaton-tools";
+
+/**
+ * The OS user that runs `shell` and every server a project adds.
+ *
+ * It holds none of the run's credentials, and it has no sudo at all. `TOOL_USER`
+ * has exactly one sudoers grant, which runs a command as this user — downward
+ * only, so there is no path from either class to root. The wrapper that performs
+ * the drop is `run_as_untrusted.sh`, named by the generated tools file
+ * (`domain/machinery/untrusted-servers.ts` decides who goes through it).
+ */
+export const UNTRUSTED_USER = "atomaton-untrusted";
+
+/**
  * Which directory under `src/` builds each deployed tree.
  *
  * The deployed layout above is a published interface: an adopter's tree is replaced

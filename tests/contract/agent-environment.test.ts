@@ -1,6 +1,6 @@
 /**
- * agent-environment.test.ts — what the runner puts in the agent's environment,
- * and what a project may therefore not declare, are one list.
+ * agent-environment.test.ts — what the agent's servers receive, and what a
+ * project may therefore not declare, are one list.
  *
  * ## The failure this exists for
  *
@@ -17,42 +17,39 @@
  * drift of the same list, `ATOMA_COPILOT_TOKEN`, is what the comment was written
  * about; this is the second.
  *
- * So the names live in `domain/delivery/declared-secrets.ts` and the generator reads them.
- * This is the half a constant cannot do on its own: the shell is still written by
- * hand, with its own comments and its `${BRANCH:-}` and its cache paths, so
- * nothing but reading the generated file proves the two still agree.
+ * So the names live in `domain/delivery/declared-secrets.ts` and the generator
+ * reads them. The environment itself is built by `buildAgentEnv` in
+ * `entrypoints/machinery/lib/agent-env.ts` — it moved out of the runner's inline
+ * bash when that step outgrew GitHub's 21,000-character expression bound — and
+ * this test now calls the function directly: the names the agent's servers will
+ * receive, compared against the names a project may not shadow. Reading the
+ * generated YAML cannot hold the two together any more; calling the function can.
  */
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { AGENT_ENV_NAMES, TOOL_SECRETS } from "../../src/domain/delivery/declared-secrets.ts";
+import { buildAgentEnv } from "../../src/entrypoints/machinery/lib/agent-env.ts";
 
-/** The names the generated step actually passes, in the order it passes them. */
-function namesInGeneratedStep(): string[] {
-  const yaml = readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8");
-  const start = yaml.indexOf("AGENT_ENV=(");
-  expect(start, "the runner builds the agent's environment as `AGENT_ENV`").toBeGreaterThan(-1);
-  const handedOver = yaml.indexOf('"${AGENT_ENV[@]}"', start);
-  expect(handedOver, "the array is handed to `env` in the same step").toBeGreaterThan(start);
-
-  // The array's own body, and nothing after it: the shell between its `)` and the
-  // `sudo` line assigns other things, and counting those would make this test about
-  // the step rather than about the agent's environment.
-  const body = /AGENT_ENV=\(\r?\n([\s\S]*?)\r?\n\s*\)/.exec(yaml.slice(start, handedOver))?.[1] ?? "";
-  expect(body, "the array has entries").not.toBe("");
-  const declared = [...body.matchAll(/^\s*([A-Za-z_][A-Za-z0-9_]*)=/gm)].map((m) => m[1]!);
-
-  // Then the loop that appends a base URL and a provider only when they are set —
-  // named by a `for name in A B` rather than assigned, and as much a part of what
-  // the agent is given as the array is.
-  const appended =
-    /for name in ([A-Za-z0-9_ ]+); do[\s\S]*?AGENT_ENV\+=/.exec(yaml.slice(start, handedOver))?.[1]?.trim().split(/\s+/) ??
-    [];
-  return [...declared, ...appended];
+/** A source environment with every input the runner's step carries, and a value apiece. */
+function fakeSource(): Record<string, string> {
+  const source: Record<string, string> = {};
+  for (const name of AGENT_ENV_NAMES) {
+    if (name === "OPENAI_BASE_URL" || name === "ATOMA_PROVIDER") continue;
+    source[name] = `value-of-${name}`;
+  }
+  // The provider inputs arrive under their `_IN` spell, promoted when non-empty.
+  source.OPENAI_BASE_URL_IN = "https://base.example";
+  source.ATOMA_PROVIDER_IN = "openrouter";
+  return source;
 }
 
 describe("the agent's environment", () => {
+  /** The names `buildAgentEnv` produces, from the fake source above. */
+  function namesBuilt(): string[] {
+    return buildAgentEnv(fakeSource(), { toolCache: "/cache", runDir: "/run" }).map((entry) => entry.slice(0, entry.indexOf("=")));
+  }
+
   test("is exactly the list the reserved names are built from", () => {
-    expect(new Set(namesInGeneratedStep())).toEqual(new Set(AGENT_ENV_NAMES));
+    expect(new Set(namesBuilt())).toEqual(new Set(AGENT_ENV_NAMES));
   });
 
   /**
@@ -64,7 +61,29 @@ describe("the agent's environment", () => {
     expect(unreserved, `these are in the agent's environment and not reserved: ${unreserved.join(", ")}`).toEqual([]);
   });
 
-  /** The twelve that had drifted, named so a revert is a failing test rather than a diff. */
+  /**
+   * Two entries are conditional, and the condition matters more than the value: a
+   * base URL of `""` is not "unset" to atoma, it is a base URL — pointing every
+   * request at "/chat/completions". So an empty `_IN` must arrive as no entry at
+   * all, and a set one under its promoted name.
+   */
+  test("the provider settings are promoted only when set, under their own names", () => {
+    const env = buildAgentEnv(fakeSource(), { toolCache: "/cache", runDir: "/run" });
+    expect(env).toContain("OPENAI_BASE_URL=https://base.example");
+    expect(env).toContain("ATOMA_PROVIDER=openrouter");
+    expect(env.some((entry) => entry.startsWith("OPENAI_BASE_URL_IN="))).toBe(false);
+    expect(env.some((entry) => entry.startsWith("ATOMA_PROVIDER_IN="))).toBe(false);
+
+    const silent = buildAgentEnv(
+      { ...fakeSource(), OPENAI_BASE_URL_IN: "", ATOMA_PROVIDER_IN: undefined },
+      { toolCache: "/cache", runDir: "/run" },
+    );
+    expect(silent.some((entry) => entry.startsWith("OPENAI_BASE_URL="))).toBe(false);
+    expect(silent.some((entry) => entry.startsWith("ATOMA_PROVIDER="))).toBe(false);
+    expect(silent.some((entry) => entry.startsWith("ATOMA_PROVIDER_IN="))).toBe(false);
+  });
+
+  /** The names that had drifted, named so a revert is a failing test rather than a diff. */
   test("the names that were missing stay reserved", () => {
     for (const name of [
       "HOME",
@@ -78,24 +97,5 @@ describe("the agent's environment", () => {
     ]) {
       expect(TOOL_SECRETS.reserved.has(name), name).toBe(true);
     }
-  });
-
-  /**
-   * The name the wrapper drops a server to, and the name the sudoers rule allows,
-   * have to be one user. `run_as_untrusted.sh` reads the first from the environment
-   * and calls `sudo -u` with it; the rule in `/etc/sudoers.d/` is written against the
-   * second. Two spellings of one fact agree until somebody changes one -- and a
-   * disagreement is not a failed tool call, it is a server that starts as the
-   * credential-holding user because sudo refused, or a run that cannot start the
-   * shell at all.
-   */
-  test("ATOMATON_UNTRUSTED_USER names the same user the sudoers rule targets", () => {
-    const yaml = readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8");
-    const passed = /ATOMATON_UNTRUSTED_USER="([^"]+)"/.exec(yaml)?.[1] ?? "";
-    expect(passed, "the wrapper's target, as the agent step passes it").toBeTruthy();
-
-    const allowed = /echo "([\w-]+) ALL=\(([\w-]+)\)/.exec(yaml)?.[2] ?? "";
-    expect(allowed, "the sudoers rule's target").toBeTruthy();
-    expect(passed).toBe(allowed);
   });
 });

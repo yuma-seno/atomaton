@@ -19,6 +19,8 @@ import {
   TOOLS_DIR,
   TOOL_DEFAULTS_FILE,
   TOOL_HOOKS_DIR as TOOL_HOOKS_DIRECTORY,
+  TOOL_USER,
+  UNTRUSTED_USER,
 } from "../domain/machinery/machinery-layout.ts";
 import { defineCallableWorkflow } from "./actions/reusable-workflow.ts";
 import { scriptCommand, scriptCommandWithArgs } from "./actions/script-call.ts";
@@ -48,11 +50,9 @@ import { ref as restoreAgentSessionRef } from "../entrypoints/machinery/restore_
 import { ref as reconcileGithubSessionRef } from "../entrypoints/machinery/reconcile_github_session.ts";
 import { ref as mergeToolPackagesRef } from "../entrypoints/machinery/merge_tool_packages.ts";
 import { ref as writeToolsFileRef } from "../entrypoints/machinery/write_tools_file.ts";
-import { ref as extractDirectiveRef } from "../entrypoints/machinery/extract_directive.ts";
-import { ref as checkEndingRef } from "../entrypoints/machinery/check_ending.ts";
-import { ref as injectEndingRejectionRef } from "../entrypoints/machinery/inject_ending_rejection.ts";
-import { ref as shouldContinueStalledRef } from "../entrypoints/machinery/should_continue_stalled.ts";
-import { ref as injectStalledContinuationRef } from "../entrypoints/machinery/inject_stalled_continuation.ts";
+import { ref as summarizeRunRef } from "../entrypoints/machinery/summarize_run.ts";
+import { ref as launchAtomaRef } from "../entrypoints/machinery/launch_atoma.ts";
+import { ref as decideReaskRef } from "../entrypoints/machinery/decide_reask.ts";
 import { ref as postResultCommentRef } from "../entrypoints/machinery/post_result_comment.ts";
 import { ref as recordRunMetadataRef } from "../entrypoints/machinery/record_run_metadata.ts";
 import { ref as saveAgentSessionRef } from "../entrypoints/machinery/save_agent_session.ts";
@@ -194,62 +194,6 @@ const PROMPT_TEMPLATE = PROMPT_TEMPLATE_FILE;
 const SKILLS_DIR = SKILLS_DIRECTORY;
 const TOOLS_DIR_PATH = TOOLS_DIR;
 const TOOL_DEFAULTS_PATH = TOOL_DEFAULTS_FILE;
-
-/**
- * The OS user that holds credentials: `atoma` and the servers this project ships.
- *
- * A different uid from the shell -- see `UNTRUSTED_USER` -- so a shell command
- * cannot read the environment block of a server that holds a key. And not in
- * sudoers, except for one downward rule: this user may run a command as the
- * untrusted user, and as nobody else.
- *
- * ## The three facts this arrangement rests on
- *
- * Each was measured on this runner rather than reasoned about, and each is why one
- * of the alternatives below was not taken. They are here because the code depends
- * on them and nothing else states them.
- *
- * **`PR_SET_DUMPABLE(0)` does not survive `execve`.** A process can make its own
- * `/proc/<pid>/environ` unreadable to the same user, but the flag is cleared when
- * it execs something else. So atoma cannot set it on a server's behalf, and a
- * wrapper cannot set it for a program: the program has to call it in its own
- * process. That is why the servers this project ships call it themselves, and why
- * a third-party server cannot be made to.
- *
- * **`LD_PRELOAD` would have closed both holes and does not work here.** A shared
- * library's constructor runs after `exec`, inside the new process, so the flag
- * would stick -- and `LD_PRELOAD` is itself an environment variable, so every
- * descendant would inherit it. It fails on `gh`, which is written in Go and
- * statically linked: a static binary ignores `LD_PRELOAD` entirely. `github` runs
- * `gh` with `GH_TOKEN` in its environment, so the child-process hole would have
- * stayed open.
- *
- * **A different uid closes the environ hole outright.** That is the mechanism
- * taken, and it is why this user has a peer rather than a container: the container
- * answered the same question with `--user 1234:0`, which is the same problem
- * without the container.
- */
-const TOOL_USER = "atomaton-tools";
-
-/**
- * The OS user that runs `shell` and every server a project adds.
- *
- * It holds none of the run's credentials, and it has no sudo at all. `TOOL_USER`
- * has exactly one sudoers grant, which runs a command as this user -- downward
- * only, so there is no path from either class to root.
- *
- * The shell server spawns `bash` in its own process, so dropping the server is
- * enough: every command it runs is already this user's child. The same wrapper is
- * put around a third-party server's entry, so an added server is in this class
- * without its implementation knowing.
- *
- * What this does NOT separate is the filesystem. Both users write the work tree,
- * so the shell can still leave a file a trusted tool later executes -- a
- * `.git/hooks/pre-push`, for example, run by `github` with `GH_TOKEN`. That is a
- * shared-workspace channel rather than a uid one, and it is documented in
- * `docs/tools/boundaries.md` as remaining.
- */
-const UNTRUSTED_USER = "atomaton-untrusted";
 
 /**
  * Where that user's caches go.
@@ -833,21 +777,20 @@ const runAgentStep = new TypedOutputsStep(
     // step that reports it: "Post result comment" converts the failure into the
     // turn-ending comment it owes the thread, and the colour is decided there —
     // an agent failure whose notice posted is green, the machinery's is red even
-    // beside its notice. The boundary flag in the ending step below is how the
-    // two are told apart. Without this, a failure that was
+    // beside its notice. The boundary flag in the run below is how the two are
+    // told apart. Without this, a failure that was
     // already reported as a comment also turned the run red -- the same news
     // twice, in Notifications, where it drowns the runs whose red is their only
     // signal.
     //
-    // This step is the FIRST of two. GitHub bounds one expression at 21,000
-    // characters, and the run script grew past it -- every workflow_dispatch was
-    // refused at parse time, so no agent run could start at all. The cut falls
-    // after the first turn and its logs: everything before it decides WHETHER
-    // atoma runs, everything after it reads HOW the run ended. The handoff at
-    // the bottom carries only what the ending step cannot recompute -- the
-    // environment a second turn needs, and atoma's exit code. A machinery
-    // failure before atoma still fails THIS step, with the flag unwritten,
-    // which is exactly how "Post result comment" tells the two apart.
+    // The run script is thin now, because GitHub bounds one expression at
+    // 21,000 characters and this step had grown past it -- every
+    // workflow_dispatch was refused at parse time, so no agent run could start
+    // (measured: HTTP 422, "Exceeded max expression length 21000"). What
+    // remains here is the glue and the contracts: the tools file, the sudo
+    // preflights, the boundary flag, and one call per script. The environment
+    // is `lib/agent-env.ts`, the invocation `lib/atoma-launch.ts`, the second
+    // turn `decide_reask.ts`, the step outputs `summarize_run.ts`.
     "continue-on-error": true,
     // No credentials here, and that is the point of the step above.
     //
@@ -929,104 +872,15 @@ ${scriptCommandWithArgs(writeToolsFileRef, {
   out: `${RUN_DIR}/tools.yaml`,
   "hook-base": `${MACHINERY}/${TOOLS_DIR_PATH}`,
 })} || { echo "::error::could not write the tools file from the machinery config; atoma never started"; exit 1; }
-TOOLS_ARG="--tools-file ${RUN_DIR}/tools.yaml"
 
-# Settings, not credentials. These two are repository VARIABLES -- which provider
-# to use and which host to reach -- so they belong in the environment; the
-# credentials do not, and are not here any more.
-#
-# Each is re-exported only when non-empty: exporting an empty ATOMA_PROVIDER would
-# defeat Atoma's provider auto-detection.
-for name in OPENAI_BASE_URL ATOMA_PROVIDER; do
-  eval "value=\\\${\${name}_IN:-}"
-  if [ -n "$value" ]; then
-    export "\${name}=\${value}"
-  fi
-done
-
-# No --prompt-file or stdin is needed: the cached session contains both stable
-# GitHub context and the agent's chronological working history.
-# Run as the user the credential-holding servers inherit. Every server atoma starts
-# is a child of this process, so this is what puts the trusted class on that user.
-# The shell and every server a project adds are dropped a second time by
-# \`run_as_untrusted.sh\`, from their own entries in the generated tools file.
-#
-# \`env\` in front rather than \`--preserve-env\`: the latter needs a sudoers
-# permission that a self-hosted runner may not grant, and both were measured, so
-# the portable one is used. Only what a server actually reads is passed; the
-# credentials are not here at all, they are in the file atoma deletes.
-#
-# HOME stays the runner's so the toolchain resolves. It is not writable by either
-# user, uniformly for every tool, and the caches are redirected below.
-# Built as an array so a setting that is EMPTY is not passed at all. \`env NAME=\`
-# sets the empty string, and atoma reads an empty base URL as a base URL -- which
-# would defeat the guard above and point every request at "/chat/completions".
-#
-# Adding a name here means adding it to \`AGENT_ENV_NAMES\` in
-# domain/delivery/declared-secrets.ts as well: a name the agent's process already means
-# something by is a name \`tools.secrets\` must not be able to mean something else
-# by. This is not an import -- the values below are shell and belong here -- so
-# tests/contract/agent-environment.test.ts is what holds the two together. It has
-# caught this drifting twice.
-AGENT_ENV=(
-  HOME="$HOME"
-  PATH="$PATH"
-  AGENT="$AGENT"
-  ${MACHINERY_ROOT_VAR}="$${MACHINERY_ROOT_VAR}"
-  # The uid \`run_as_untrusted.sh\` drops each untrusted server to. The sudo rule
-  # and both users are created in the step that prepares the tool servers.
-  ATOMATON_UNTRUSTED_USER="${UNTRUSTED_USER}"
-  GITHUB_REPOSITORY="$GITHUB_REPOSITORY"
-  BRANCH="\${BRANCH:-}"
-  NUMBER="$NUMBER"
-  NOTIFY="$NOTIFY"
-  TYPE="$TYPE"
-  ATOMATON_RELOAD_COUNT="$ATOMATON_RELOAD_COUNT"
-  ATOMATON_DISPATCHED_BY="$ATOMATON_DISPATCHED_BY"
-  ATOMATON_ASK_ID="\${ATOMATON_ASK_ID:-}"
-  # The run's own id, beside the ask: the tools write both onto their endings
-  # (#285), and the pair is what the watch compares.
-  GITHUB_RUN_ID="$GITHUB_RUN_ID"
-  ATOMATON_OPS_LOG="$ATOMATON_OPS_LOG"
-  # This run's own directory, and the URL for the run itself. The tools use the
-  # first to record which comment ended the run's turn (ending-comment.ts, so
-  # the result footer can be appended onto it later), and the second to link the
-  # artifacts they leave back to the run that made them (create_pr's
-  # "Opened by" line). The directory is per-run; the machinery step is given the
-  # file's path as an argument rather than the variable, because it is not an
-  # agent process.
-  ATOMATON_RUN_DIR="${RUN_DIR}"
-  ATOMATON_RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-  # Caches, because $HOME is read-only to this user. CARGO_HOME is not a cache
-  # directory -- redirecting it also hides ~/.cargo/config.toml -- but cargo has no
-  # separate cache variable, and a project needing that config can commit
-  # .cargo/config.toml, which cargo reads from the work tree.
-  XDG_CACHE_HOME="${TOOL_CACHE}"
-  XDG_CONFIG_HOME="${TOOL_CACHE}/config"
-  XDG_DATA_HOME="${TOOL_CACHE}/data"
-  BUN_INSTALL_CACHE_DIR="${TOOL_CACHE}/bun"
-  npm_config_cache="${TOOL_CACHE}/npm"
-  PIP_CACHE_DIR="${TOOL_CACHE}/pip"
-  CARGO_HOME="${TOOL_CACHE}/cargo"
-)
-for name in OPENAI_BASE_URL ATOMA_PROVIDER; do
-  eval "value=\\\${\${name}:-}"
-  if [ -n "$value" ]; then AGENT_ENV+=("\${name}=\${value}"); fi
-done
-
-# What is left of the job, handed to atoma as its own limit. See deadlineStep: the
-# agent stops itself with time to spare instead of being killed mid-call, which is
-# the difference between a session saved for the next run and one that never was.
-#
-# No iteration ceiling is passed at all. atoma stopped having a default one, and a
-# count of turns was never the thing that ran out: a turn that lists a directory
-# and a turn that compiles the project cost that counter the same.
-BUDGET=$(( ${deadlineStep.outputs.at} - $(date +%s) ))
-if [ "$BUDGET" -lt ${MIN_AGENT_BUDGET_SECS} ]; then
-  echo "::warning::only $BUDGET seconds of the job are left; giving the agent the ${MIN_AGENT_BUDGET_SECS}-second floor"
-  BUDGET=${MIN_AGENT_BUDGET_SECS}
-fi
-echo "agent time budget: $BUDGET seconds"
+# The agent's environment, the budget and the invocation are \`lib/agent-env.ts\`
+# and \`lib/atoma-launch.ts\` now. The step had grown past GitHub's 21,000-character
+# bound on one expression -- every dispatch was refused at parse time, so no agent
+# run could start -- and the logic moved into files that can be unit-tested. The
+# entries the environment carries are the contract with \`AGENT_ENV_NAMES\`, and
+# \`agent-environment.test.ts\` holds the two together by calling \`buildAgentEnv\`;
+# the provider base URL and provider name are promoted there, only when non-empty,
+# for the reason the guard below still names.
 
 # Preflighting \`sudo\`, because the real invocation cannot separate a sudo refusal
 # from atoma's own exit: \`|| EXIT_CODE=$?\` below catches both, and a failure once
@@ -1051,233 +905,41 @@ if ! sudo -n -u "${TOOL_USER}" sudo -n -E -u "${UNTRUSTED_USER}" true 2>/dev/nul
 fi
 
 EXIT_CODE=0
-sudo -n -u "${TOOL_USER}" env "\${AGENT_ENV[@]}" \\
-  atoma run \\
-  --agent-def "${MACHINERY}/${AGENT_DEF_DIR}/\${AGENT}.md" \\
-  --in-session "${RUN_DIR}/session.json" \\
-  --out-session "${RUN_DIR}/session.json" \\
-  --template "${MACHINERY}/${PROMPT_TEMPLATE}" \\
-  --skills-dir "${MACHINERY}/${SKILLS_DIR}" \\
-  --max-runtime-secs "$BUDGET" \\
-  --stop-file "${STOP_FILE}" \\
-  --loop-retries \\
-  --credentials-file "${CREDENTIALS_FILE}" \\
-  \${TOOLS_ARG} \\
-  > "${RUN_DIR}/atomaton_output.txt" 2> "${RUN_DIR}/atomaton_logs.txt" || EXIT_CODE=$?
+EXIT_CODE=$(${scriptCommandWithArgs(launchAtomaRef, {
+  "run-dir": `${RUN_DIR}`,
+  "tool-cache": `${TOOL_CACHE}`,
+  "tools-file": `${RUN_DIR}/tools.yaml`,
+  "credentials-file": `${CREDENTIALS_FILE}`,
+  "stop-file": `${STOP_FILE}`,
+  "deadline-at": deadlineStep.outputs.at,
+  "min-budget-secs": `${MIN_AGENT_BUDGET_SECS}`,
+  out: `${RUN_DIR}/atomaton_output.txt`,
+  logs: `${RUN_DIR}/atomaton_logs.txt`,
+})}) || EXIT_CODE=$?
 
 echo "=== Atoma Logs ===" >&2
 cat "${RUN_DIR}/atomaton_logs.txt" >&2
 
-# The handoff to the ending step, and the only state it cannot recompute: the
-# environment a second turn runs under, and the exit code atoma returned. The
-# array travels as one newline-joined variable -- no entry here contains a
-# newline -- and GitHub's heredoc form is what lets a multi-line value cross
-# steps at all. One printf per entry, so the separator between entries is
-# exactly one newline: an entry that arrived with padding would reach sudo env
-# as a name with spaces in it, and every server would refuse to start.
-{
-  echo "ATOMA_AGENT_ENV<<AGENT_ENV_EOF"
-  for entry in "\${AGENT_ENV[@]}"; do
-    printf '%s\\n' "$entry"
-  done
-  echo "AGENT_ENV_EOF"
-} >> "$GITHUB_ENV"
-echo "ATOMA_EXIT_CODE=\${EXIT_CODE}" >> "$GITHUB_ENV"
-`,
-  },
-);
-
-/**
- * The half of the run that reads how it ended.
- *
- * The two steps exist because GitHub bounds ONE expression at 21,000 characters
- * and the combined script outgrew it -- every dispatch was refused at parse
- * time, so no agent run could start (measured: `gh workflow run` answered HTTP
- * 422 with exactly this message). Nothing about the logic moved; the cut falls
- * after the first turn's logs, and this step receives the environment and the
- * exit code rather than deriving them again, so the two invocations of atoma
- * cannot drift apart.
- *
- * `continue-on-error` for the same reason the first step carries it: an atoma
- * failure exits this step with atoma's own code and the boundary flag written,
- * and the run's colour is decided by "Post result comment", not by the step.
- * A machinery failure leaves the flag unwritten, which is what turns red.
- *
- * Skipped when the first step failed, because a run whose machinery failed
- * before atoma has no ending to read -- and "Post result comment" reports that
- * shape from the first step's own outcome, not from anything written here.
- */
-const endingStep = new TypedOutputsStep(
-  {
-    name: "Process the run's ending",
-    id: "atoma-ending",
-    if: `${runAgentStep.rawOutcome} == 'success'`,
-    "continue-on-error": true,
-    shell: "bash",
-    run: `AGENT="\${{ inputs.agent }}"
-# The environment the first turn ran under, handed over by the step above.
-# Rebuilt rather than re-derived, so the two invocations of atoma cannot drift.
-# Empty lines are dropped: a trailing newline in the handoff arrives as one.
-AGENT_ENV=()
-while IFS= read -r entry; do
-  [ -n "$entry" ] && AGENT_ENV+=("$entry")
-done <<< "$ATOMA_AGENT_ENV"
-EXIT_CODE="$ATOMA_EXIT_CODE"
-TOOLS_ARG="--tools-file ${RUN_DIR}/tools.yaml"
-
-# A run's last message is its report AND its call: it dispatches the next agent by a
-# bare \`/name\` line and hands the work to a person by naming them, and it may do at
-# most one of those (see domain/work/ending-calls.ts). Two is not a hand-off plus a
-# notification, it is two people who both believe they were asked.
-#
-# The check is a fact, not an error, so it never fails this step; the answer goes to
-# a file the rest of this bash reads. Only a run that ended of its own accord is
-# asked again -- a run that was stopped or ran out of time was cut off mid-sentence,
-# and asking it to finish the sentence would be asking it to ignore the person who
-# said stop.
-#
-# Whether this run changed anything, read from the ops log. It is asked here, before
-# any second turn, because that is one of the facts \`should_continue_stalled.ts\`
-# needs; the step's own output is written from the final read below, so it includes
-# whatever the second turn did. The signal:
-#
-# A commit is the obvious one; opening a pull request and merging one both move the
-# work along without necessarily pushing during THIS run, and reading either as
-# "changed nothing" would stop a chain at the moment it was working.
-#
-# \`merge_base_into_branch\` is the fourth, and it is only progress in its \`merged\`
-# outcome. That is the route #264 added: a reviewer sees \`behind\` or \`conflicting\`,
-# the engineer brings the base in, the merge is clean and pushed, and no
-# commit_and_push follows because there is nothing left to commit -- so without this
-# the whole point of the route is recorded as a run that changed nothing, and two of
-# those stop the chain and call a person. Its other outcomes pushed nothing and must
-# keep counting as nothing: \`up_to_date\` found there was nothing to do, \`conflicts\`
-# is waiting on the agent, and \`failed\` is a failure.
-changed_so_far() {
-  if [ -f "${RUN_DIR}/atomaton_ops.log" ]; then
-    grep -qE '"op":"(commit_and_push|create_pr|merge_pr)"|"op":"merge_base_into_branch".*"status":"merged"' "${RUN_DIR}/atomaton_ops.log"
-  else
-    return 1
-  fi
-}
-CHANGED=false
-if changed_so_far; then
-  CHANGED=true
-fi
-
+# The one second turn this run is allowed: a closing message that broke the
+# one-call rule, or a run that stopped on a sentence having changed nothing.
+# The whole decision -- the ending checks after each turn, the injections, the
+# bounded second invocation, and what a person's stop during it means -- is
+# \`decide_reask.ts\` now, and it answers with the exit code the ending
+# classification below consumes (a stop during the second turn makes the run a
+# soft stop) and whether the closing message's calls were refused.
 ENDING_INVALID=false
-
-# The one second turn this run is allowed, and why it is being asked. An ending that
-# calls two things and a run that stopped on a sentence having changed nothing are
-# different failures with the same remedy: a user turn in the session, then the same
-# atoma invocation again. They share one block so a run gets at most ONE extra turn,
-# and the ending is checked first -- a message that calls somebody has handed the
-# work on and must not also be read as stalled.
-REASK=
-if [ "$EXIT_CODE" = "0" ] && [ ! -f "${STOP_FILE}" ]; then
-  ${scriptCommandWithArgs(checkEndingRef, {
-    "output-file": `${RUN_DIR}/atomaton_output.txt`,
-    "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
-    "problem-file": `${RUN_DIR}/ending-problem.txt`,
-    "people-file": `${RUN_DIR}/callees.json`,
-  })}
-
-  if [ -s "${RUN_DIR}/ending-problem.txt" ]; then
-    REASK=ending
-  else
-    STALLED=$(${scriptCommandWithArgs(shouldContinueStalledRef, {
-      session: `${RUN_DIR}/session.json`,
-      "output-file": `${RUN_DIR}/atomaton_output.txt`,
-      "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
-      "people-file": `${RUN_DIR}/callees.json`,
-      changed: "\${CHANGED}",
-    })}) || STALLED=false
-    if [ "$STALLED" = "true" ]; then
-      REASK=stalled
-    fi
-  fi
-fi
-
-if [ -n "$REASK" ]; then
-  REASK_BUDGET=$(( ${deadlineStep.outputs.at} - $(date +%s) ))
-  if [ "$REASK_BUDGET" -lt "${MIN_AGENT_BUDGET_SECS}" ]; then
-    # No time for a second turn. An ending that calls two things is posted with its
-    # calls left as text, and the result comment says so -- see post_result_comment.ts's
-    # --ending-invalid. A stalled run simply keeps the message it ended on.
-    if [ "$REASK" = "ending" ]; then
-      echo "::warning::the closing message calls more than one thing and there is no time left to ask again; nothing it calls will be started"
-      ENDING_INVALID=true
-    else
-      echo "::warning::the run stopped on a sentence having changed nothing, and there is no time left to ask again"
-    fi
-  else
-    cp "${RUN_DIR}/session.json" "${RUN_DIR}/session_before_reask.json"
-    if [ "$REASK" = "ending" ]; then
-      echo "::warning::the closing message calls more than one thing; asking for it again"
-      ${scriptCommandWithArgs(injectEndingRejectionRef, {
-        session: `${RUN_DIR}/session.json`,
-        "problem-file": `${RUN_DIR}/ending-problem.txt`,
-      })}
-    else
-      echo "::warning::the run stopped on a sentence having changed nothing; asking for it again"
-      ${scriptCommandWithArgs(injectStalledContinuationRef, {
-        session: `${RUN_DIR}/session.json`,
-      })}
-    fi
-    # The same invocation as above, with no prompt: the note is a user message in
-    # the session now, and a run with no prompt source continues from the session --
-    # the documented path, and the reason this does not use \`--prompt-file\`.
-    SECOND_EXIT=0
-    sudo -n -u "${TOOL_USER}" env "\${AGENT_ENV[@]}" \\
-      atoma run \\
-      --agent-def "${MACHINERY}/${AGENT_DEF_DIR}/\${AGENT}.md" \\
-      --in-session "${RUN_DIR}/session.json" \\
-      --out-session "${RUN_DIR}/session.json" \\
-      --template "${MACHINERY}/${PROMPT_TEMPLATE}" \\
-      --skills-dir "${MACHINERY}/${SKILLS_DIR}" \\
-      --max-runtime-secs "$REASK_BUDGET" \\
-      --stop-file "${STOP_FILE}" \\
-      --loop-retries \\
-      --credentials-file "${CREDENTIALS_FILE}" \\
-      \${TOOLS_ARG} \\
-      > "${RUN_DIR}/atomaton_output_again.txt" 2>> "${RUN_DIR}/atomaton_logs.txt" || SECOND_EXIT=$?
-
-    if [ "$SECOND_EXIT" = "0" ] && [ -s "${RUN_DIR}/atomaton_output_again.txt" ]; then
-      mv "${RUN_DIR}/atomaton_output_again.txt" "${RUN_DIR}/atomaton_output.txt"
-      # The second message is a closing message too, whichever reason asked for it,
-      # so it gets the same check. It is not asked again: one extra turn is the bound.
-      ${scriptCommandWithArgs(checkEndingRef, {
-        "output-file": `${RUN_DIR}/atomaton_output.txt`,
-        "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}`,
-        "problem-file": `${RUN_DIR}/ending-problem.txt`,
-        "people-file": `${RUN_DIR}/callees.json`,
-      })}
-      if [ -s "${RUN_DIR}/ending-problem.txt" ]; then
-        echo "::warning::the closing message still calls more than one thing; nothing it calls will be started"
-        ENDING_INVALID=true
-      fi
-    elif [ -f "${STOP_FILE}" ]; then
-      # The person stopped while the machinery was asking again. That outranks the
-      # retry: keep the second attempt's ending (a stop) and whatever it managed to
-      # write, which is often nothing.
-      EXIT_CODE=2
-      if [ -s "${RUN_DIR}/atomaton_output_again.txt" ]; then
-        mv "${RUN_DIR}/atomaton_output_again.txt" "${RUN_DIR}/atomaton_output.txt"
-      else
-        : > "${RUN_DIR}/atomaton_output.txt"
-      fi
-    else
-      # The second attempt failed or was cut off without the person asking. The first
-      # run's ending is the one this run actually had, so put the session back as it
-      # was. An ending that broke the rule keeps its calls refused; a stalled run's
-      # own message stands.
-      cp "${RUN_DIR}/session_before_reask.json" "${RUN_DIR}/session.json"
-      if [ "$REASK" = "ending" ]; then
-        ENDING_INVALID=true
-      fi
-    fi
-  fi
-fi
+REASK_RESULT=$(${scriptCommandWithArgs(decideReaskRef, {
+  "run-dir": `${RUN_DIR}`,
+  "tool-cache": `${TOOL_CACHE}`,
+  "tools-file": `${RUN_DIR}/tools.yaml`,
+  "credentials-file": `${CREDENTIALS_FILE}`,
+  "stop-file": `${STOP_FILE}`,
+  "deadline-at": deadlineStep.outputs.at,
+  "min-budget-secs": `${MIN_AGENT_BUDGET_SECS}`,
+  "exit-code": "\${EXIT_CODE}",
+})}) || { echo "::error::the second-turn decision failed; the run's ending is unknown"; exit 1; }
+EXIT_CODE=$(printf '%s' "$REASK_RESULT" | sed -n 's/^exit_code=//p')
+ENDING_INVALID=$(printf '%s' "$REASK_RESULT" | sed -n 's/^ending_invalid=//p')
 
 # The watcher has nothing left to watch for. Killed rather than left to the job,
 # because a poller that outlives the run it was polling for spends API budget on an
@@ -1318,76 +980,16 @@ elif [ "$EXIT_CODE" != "0" ]; then
   exit $EXIT_CODE
 fi
 
-# Store multiline result as a step output.
-# Use a random delimiter to prevent early termination if the agent
-# output happens to contain the delimiter string on its own line.
-RESULT_EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
-{
-  echo "result<<\${RESULT_EOF}"
-  cat "${RUN_DIR}/atomaton_output.txt"
-  echo "\${RESULT_EOF}"
-} >> "$GITHUB_OUTPUT"
-
-if [ "$ENDING_INVALID" = "true" ]; then
-  # The message's calls were refused, so nothing it named is started. The comment is
-  # posted with them left as text, and the machinery makes the one call it still can.
-  echo "directive=" >> "$GITHUB_OUTPUT"
-else
-  ${scriptCommandWithArgs(extractDirectiveRef, { "output-file": `${RUN_DIR}/atomaton_output.txt`, "def-dir": `${MACHINERY}/${AGENT_DEF_DIR}` })}
-fi
-echo "ending_invalid=\${ENDING_INVALID}" >> "$GITHUB_OUTPUT"
-
-# Detect whether a tool call already triggered an automatic follow-up
-# dispatch ON THIS NODE during this run (a hand-off to a colleague:
-# merge_pr -> re-invoked agent), as opposed to the agent genuinely
-# finishing with nothing further happening.
-#
-# A dispatch onto a DIFFERENT node -- launch_sub_agent starting children,
-# create_pr starting the reviewer on the pull request -- is deliberately NOT this
-# flag. Those start work UNDER this node, which is a PARK (read below, #208): the node
-# holds its \`atomaton/in-progress\` guard because the turn is parked on that work, not
-# because anything is running on it, and the parked run is not a link in this node's
-# chain. See \`ops-log.ts\` for the two op names and \`domain/work/turn.ts\` for what
-# each ending implies.
-#
-# Every dispatch site writes a structured \`{"op":...}\` entry to the ops log (see
-# lib/ops-log.ts's logDispatch()), and WHICH entry it writes carries that
-# distinction -- \`"op":"dispatch"\` is this node, \`"op":"dispatch-elsewhere"\` is
-# another. Checking that one stable, documented JSON field is far more robust than
-# grepping the agent's raw stderr TEXT for hand-written strings like
-# "dispatched: agent=...", which silently broke once already when a refactor
-# changed a log message's wording without updating the grep pattern to match. The
-# trailing quote does the work: \`"op":"dispatch"\` cannot match
-# \`"op":"dispatch-elsewhere"\`.
-CHAIN_CONTINUES=false
-if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -q '"op":"dispatch"' "${RUN_DIR}/atomaton_ops.log"; then
-  CHAIN_CONTINUES=true
-fi
-echo "chain_continues=\${CHAIN_CONTINUES}" >> "$GITHUB_OUTPUT"
-
-# Whether this run PARKED its turn on work under this node (#208): a child-starting
-# tool (\`launch_sub_agent\`, \`create_pr\`) dispatches onto ANOTHER node, and the ops log
-# says so with \`dispatch-elsewhere\`. The trailing quote is the same instrument the
-# chain check uses: \`"op":"dispatch-elsewhere"\` cannot be matched by the
-# \`"op":"dispatch"\` pattern above, so one run cannot read as both handing off and
-# parking. A parked run keeps the \`atomaton/in-progress\` label -- the aggregation
-# re-invocation is the collection of its turn, not a new one.
-PARKED=false
-if [ -f "${RUN_DIR}/atomaton_ops.log" ] && grep -q '"op":"dispatch-elsewhere"' "${RUN_DIR}/atomaton_ops.log"; then
-  PARKED=true
-fi
-echo "parked=\${PARKED}" >> "$GITHUB_OUTPUT"
-
-# Whether this run changed anything, read from the same log and for a related
-# reason: domain/work/progress.ts stops a chain that is not getting anywhere, and the
-# most direct signal of that is a run that pushed nothing. The second turn, if there
-# was one, appended to the same log, so this is the final answer -- the earlier read
-# above was for the stalled check, before there was anything else to include.
-CHANGED=false
-if changed_so_far; then
-  CHANGED=true
-fi
-echo "changed=\${CHANGED}" >> "$GITHUB_OUTPUT"
+# The step outputs the post steps consume -- the report under a delimiter it
+# cannot contain, the directive (empty when the closing message's calls were
+# refused), and the three facts read from the ops log -- are \`summarize_run.ts\`
+# now. The greps there carry weights: \`"op":"dispatch"\` ends in a quote so it
+# cannot match \`"op":"dispatch-elsewhere"\`, which is what keeps one run from
+# reading as both handing off and parking.
+${scriptCommandWithArgs(summarizeRunRef, {
+  "run-dir": `${RUN_DIR}`,
+  "ending-invalid": "\${ENDING_INVALID}",
+})}
 `,
   },
   // `reported` rides along with `ended_because`: both are read out of the saved
@@ -1483,33 +1085,27 @@ const postResultCommentStep = new TypedOutputsStep(
       // about a pull request.
       type: "${{ inputs.type }}",
       notify: notifyStep.outputs.notify,
-      directive: endingStep.outputs.directive,
-      "chain-continues": endingStep.outputs.chain_continues,
-      "ended-because": endingStep.outputs.ended_because,
+      directive: runAgentStep.outputs.directive,
+      "chain-continues": runAgentStep.outputs.chain_continues,
+      "ended-because": runAgentStep.outputs.ended_because,
       // Whether the agent's step came back at all, and whether the failure was atoma's
       // own. Together they are the whole of what a crash needs: the first says there IS
       // one, the second decides the run's colour. See post_result_comment.ts's "The exit
       // code is that colour".
-      //
-      // The agent now spans two steps: "Run agent" fails only when the machinery
-      // failed before atoma, and every atoma-shaped failure -- including the
-      // machinery's, arriving as atoma's exit code -- exits the ending step. So
-      // the outcome this script is told is the FIRST step's when it failed, and
-      // the ending step's otherwise.
-      outcome: `\${{ ${runAgentStep.rawOutcome} == 'failure' && 'failure' || ${endingStep.rawOutcome} }}`,
-      "atoma-failed": endingStep.outputs.atoma_failed,
+      outcome: runAgentStep.outcome,
+      "atoma-failed": runAgentStep.outputs.atoma_failed,
       // Whether the run left a report, so the mention can tell the two silences apart:
       // a hand-off that ended the session through a tool, and a run that simply never
       // said anything. Observed off the session, not inferred from the empty output
       // file -- both look the same there.
-      reported: endingStep.outputs.reported,
+      reported: runAgentStep.outputs.reported,
       // Where this run's own messages begin, so a salvage cannot reach below it into
       // an earlier run's conclusion. See `lastAgentText`.
       "messages-before": buildContextStep.outputs.messages_before,
       // Written into the comment, because that is where the next run reads it:
       // the no-progress limit counts consecutive runs from the thread rather than
       // from a counter -- see domain/work/progress.ts.
-      changed: endingStep.outputs.changed,
+      changed: runAgentStep.outputs.changed,
       "run-url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
       // Passed in, because the script used to open these by their bare names --
       // relative paths that stopped resolving when the run's files moved out
@@ -1527,11 +1123,10 @@ const postResultCommentStep = new TypedOutputsStep(
       // ending itself. See `ending-comment.ts`, and #441 for what a guess about the
       // session's shape cost instead.
       "ending-comment": `${RUN_DIR}/ending-comment.json`,
-      // Written by the ending step when the closing message called more than one
-      // thing and was still not fixed the second time: its calls are left as text,
-      // and this is what makes the comment say so and the machinery make the call
-      // itself.
-      "ending-invalid": endingStep.outputs.ending_invalid,
+      // Written by the run above when the closing message called more than one thing
+      // and was still not fixed the second time: its calls are left as text, and this
+      // is what makes the comment say so and the machinery make the call itself.
+      "ending-invalid": runAgentStep.outputs.ending_invalid,
       // The people the run was told it may call, read before it started. The comment's
       // escaping and the ending check's counting are the same set because they are the
       // same file -- see lib/callees.ts.
@@ -1555,10 +1150,7 @@ const recordRunMetadataStep = new TypedOutputsStep({
   // here covers both original composite-action steps' separate conditions
   // in one go.
   name: "Record run metadata",
-  // The ending step, not "Run agent": the metadata records a run that COMPLETED --
-  // read its ending, written its outputs -- which is exactly what the ending step
-  // succeeding means. When the machinery failed before atoma, both are skipped.
-  if: `${endingStep.rawOutcome} == 'success' && ${postResultCommentStep.rawOutputs.comment_id} != ''`,
+  if: `${runAgentStep.rawOutcome} == 'success' && ${postResultCommentStep.rawOutputs.comment_id} != ''`,
   shell: "bash",
   run: `${scriptCommandWithArgs(recordRunMetadataRef, {
     session: `${RUN_DIR}/session.json`,
@@ -1604,7 +1196,7 @@ const dirtyStep = new TypedOutputsStep(
   {
     name: "Check for uncommitted changes",
     id: "dirty",
-    if: `${endingStep.rawOutcome} == 'success'`,
+    if: `${runAgentStep.rawOutcome} == 'success'`,
     shell: "bash",
     run: `if [ -n "$(git status --porcelain)" ]; then
   echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -1654,7 +1246,7 @@ const loopControlStep = new TypedOutputsStep(
   {
     name: "Manage auto-dispatch loop control",
     id: "loop-control",
-    if: `${endingStep.rawOutcome} == 'success'`,
+    if: `${runAgentStep.rawOutcome} == 'success'`,
     shell: "bash",
     env: { GH_TOKEN: "${{ github.token }}" },
     // The target number and nothing else. The tally is counted from that object's
@@ -1692,13 +1284,13 @@ const turnEndingStep = new TypedOutputsStep(
     if: "always()",
     shell: "bash",
     run: `${scriptCommandWithArgs(decideTurnEndingRef, {
-      outcome: `\${{ ${runAgentStep.rawOutcome} == 'failure' && 'failure' || ${endingStep.rawOutcome} }}`,
-      "ended-because": endingStep.outputs.ended_because,
+      outcome: runAgentStep.outcome,
+      "ended-because": runAgentStep.outputs.ended_because,
       "loop-limit-reached": loopControlStep.outputs.loop_limit_reached,
-      "chain-continues": endingStep.outputs.chain_continues,
-      parked: endingStep.outputs.parked,
-      directive: endingStep.outputs.directive,
-      reported: endingStep.outputs.reported,
+      "chain-continues": runAgentStep.outputs.chain_continues,
+      parked: runAgentStep.outputs.parked,
+      directive: runAgentStep.outputs.directive,
+      reported: runAgentStep.outputs.reported,
     })}\n`,
   },
   ["ended", "should_release", "dispatch_to", "chain_over_to"] as const,
@@ -2462,7 +2054,6 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
   writeCredentialsStep,
   startStopWatcherStep,
   runAgentStep,
-  endingStep,
   tokenUsageStep,
   postResultCommentStep,
   recordRunMetadataStep,
@@ -2472,7 +2063,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
   // the run reads from one workspace and writes to another with nothing saying so.
   new TypedOutputsStep({
     name: "Save the agent's workspace",
-    if: `${endingStep.rawOutcome} == 'success'`,
+    if: `${runAgentStep.rawOutcome} == 'success'`,
     shell: "bash",
     run: `${scriptCommandWithArgs(saveWorkspaceRef, {
       "root-issue": restoreWorkspaceStep.outputs.root_issue,
@@ -2523,7 +2114,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
     // footer now. When the comment was skipped, or stayed silent by design (a
     // closed sub-issue), `notified` is empty or false and this notice still speaks:
     // the fallback is unchanged.
-    if: `(${endingStep.rawOutputs.ended_because} == 'runtime' || ${endingStep.rawOutputs.ended_because} == 'iterations' || ${endingStep.rawOutputs.ended_because} == 'loop') && ${postResultCommentStep.rawOutputs.notified} != 'true'`,
+    if: `(${runAgentStep.rawOutputs.ended_because} == 'runtime' || ${runAgentStep.rawOutputs.ended_because} == 'iterations' || ${runAgentStep.rawOutputs.ended_because} == 'loop') && ${postResultCommentStep.rawOutputs.notified} != 'true'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
@@ -2535,7 +2126,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
       number: "\${NUMBER}",
       agent: "\${AGENT}",
       notify: "\${NOTIFY}",
-      "ended-because": endingStep.outputs.ended_because,
+      "ended-because": runAgentStep.outputs.ended_because,
     })}
 `,
   }),

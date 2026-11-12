@@ -13,6 +13,7 @@ import {
 } from "../../src/domain/delivery/declared-secrets.ts";
 import { CHECK_JOB_NAME } from "../../src/workflows/atomaton-check.wac.ts";
 import { MODEL_CACHE_DIR } from "../../src/domain/machinery/model-cache.ts";
+import { buildAgentEnv } from "../../src/entrypoints/machinery/lib/agent-env.ts";
 
 describe("generated workflows", () => {
   /**
@@ -46,9 +47,11 @@ describe("generated workflows", () => {
     expect(cached, "an action input cannot read a shell variable").not.toContain("${RUNNER_TEMP}");
     expect(cached).toContain("runner.temp");
 
-    // The other end: what the server is told to use. Same base, same name.
-    const agent = steps.find((step) => (step.run ?? "").includes("XDG_CACHE_HOME="));
-    const xdg = /XDG_CACHE_HOME="([^"]+)"/.exec(agent?.run ?? "")?.[1] ?? "";
+    // The other end: what the server is told to use. Same base, same name. The
+    // environment no longer spells it in the step's bash — the launch call passes
+    // the tool cache to `buildAgentEnv`, which makes it `XDG_CACHE_HOME`'s value.
+    const agent = steps.find((step) => (step.run ?? "").includes("launch_atoma.ts"));
+    const xdg = /--tool-cache "([^"]+)"/.exec(agent?.run ?? "")?.[1] ?? "";
     expect(xdg, "the server's cache base").toBeTruthy();
     const base = xdg.replace("${RUNNER_TEMP}", "").replace(/^\//, "");
     expect(
@@ -422,15 +425,11 @@ describe("generated workflows", () => {
     );
 
     const run = step?.run ?? "";
-    // The agent spans two steps now, and either shape of failure reaches here:
-    // "Run agent" fails only when the machinery failed before atoma, and every
-    // atoma-shaped failure exits the ending step -- so the outcome this script is
-    // told is the first step's when it failed and the ending step's otherwise.
     expect(run, "the step's own outcome is what tells a crash from a soft stop").toContain(
-      '--outcome "${{ steps.atoma.outcome == \'failure\' && \'failure\' || steps.atoma-ending.outcome }}"',
+      '--outcome "${{ steps.atoma.outcome }}"',
     );
     expect(run, "and whose the failure was decides the run's colour").toContain(
-      '--atoma-failed "${{ steps.atoma-ending.outputs.atoma_failed }}"',
+      '--atoma-failed "${{ steps.atoma.outputs.atoma_failed }}"',
     );
   });
 
@@ -458,20 +457,24 @@ describe("generated workflows", () => {
     expect(read?.run).toContain("read_callees.ts");
 
     const agent = steps.find((candidate) => candidate.name === "Run agent");
-    const ending = steps.find((candidate) => candidate.name === "Process the run's ending");
     expect(agent?.env?.GH_TOKEN, "the agent step keeps no credentials").toBeUndefined();
-    expect(ending?.env?.GH_TOKEN, "and neither does the step that reads the ending").toBeUndefined();
 
     // Both calls of the check, in the first-turn and the second-turn branches, take
-    // the file rather than the API. They live in the ending step: the ending is
-    // checked after each turn, and both turns' checks run there.
-    const checks = (ending?.run ?? "").split("\n").filter((line) => line.includes("check_ending.ts"));
+    // the file rather than the API. The checks moved into `decide_reask.ts` with
+    // the rest of the second-turn decision; the step's own run text names the
+    // decision script and nothing else.
+    const decideReask = readFileSync("src/entrypoints/machinery/decide_reask.ts", "utf8");
+    const checks = decideReask.split("\n").filter((line) => line.includes('sibling("check_ending.ts"'));
     expect(checks.length, "the ending is checked after each turn").toBe(2);
-    for (const line of checks) {
+    // The participants travel as one shared list, and the stalled check reads the
+    // same file: one set of callees, read before the run started, is what makes a
+    // mention a call anywhere in the decision.
+    for (const line of [...decideReask.split("\n").filter((line) => line.includes("const checkArgs =")), ...decideReask.split("\n").filter((line) => line.includes("should_continue_stalled.ts"))]) {
       expect(line).toContain("--people-file");
       expect(line).not.toContain("--notify");
     }
-    expect((agent?.run ?? ""), "the first step runs atoma, not the ending checks").not.toContain("check_ending.ts");
+    expect((agent?.run ?? ""), "the step runs the decision, not the ending checks").not.toContain("check_ending.ts");
+    expect(agent?.run ?? "", "and the decision is what the step calls").toContain("decide_reask.ts");
 
     const notice = steps.find((candidate) => candidate.name === "Tell the run who it may call");
     expect(notice?.run, "the notice reads the same file").toContain("--people-file");
@@ -496,37 +499,40 @@ describe("generated workflows", () => {
     const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
     const steps = workflow.jobs?.run?.steps ?? [];
     const agent = steps.find((candidate) => candidate.name === "Run agent");
-    const ending = steps.find((candidate) => candidate.name === "Process the run's ending");
-    // The re-ask belongs to the ending step: it is the second turn's decision, and
-    // the second turn runs there. What the first step must still carry is the
-    // invocation itself, so the two turns are held across the two run texts.
-    const run = ending?.run ?? "";
+    // The re-ask decision is `decide_reask.ts` now; what the step's run text must
+    // still show is that it is called once, beside the launch, so the bound
+    // "two turns, no more" is held across the two files.
+    const run = agent?.run ?? "";
+    const decide = readFileSync("src/entrypoints/machinery/decide_reask.ts", "utf8");
 
-    const checks = run.split("\n").filter((line) => line.includes("bun run") && line.includes("should_continue_stalled.ts"));
+    const checks = decide.split("\n").filter((line) => line.includes("should_continue_stalled.ts"));
     expect(checks.length, "the stall is judged once, before the second turn").toBe(1);
     expect(checks[0], "the session is where the ending and the last turn are").toContain("--session");
     expect(checks[0], "and the ops log's answer travels in").toContain("--changed");
 
-    const injections = run
+    const injections = decide
       .split("\n")
-      .filter((line) => line.includes("bun run") && line.includes("inject_stalled_continuation.ts"));
+      .filter((line) => line.includes("inject_stalled_continuation.ts"));
     expect(injections.length, "and its note is injected once").toBe(1);
     expect(injections[0]).toContain("--session");
 
-    // One first turn and one re-ask. Two `atoma run` invocations is the bound —
-    // the first in the step that runs atoma, the second here.
-    const turns = [...((agent?.run ?? "") + "\n" + run).split("\n")].filter((line) =>
-      /^\s*atoma run\s*\\$/.test(line),
-    );
-    expect(turns.length, "the first turn and the one re-ask, and no more").toBe(2);
+    // One first turn and one re-ask. The launch library is the only place atoma
+    // is spawned, called once by the step and once by the re-ask decision.
+    const launchCalls = (run.split("\n").filter((line) => line.includes("launch_atoma.ts"))).length;
+    expect(launchCalls, "the step launches atoma exactly once").toBe(1);
+    expect(decide.split("\n").filter((line) => line.includes("launchAtoma(")).length, "and the re-ask launches through the same function, once")
+      .toBe(1);
+    const spawnSites = readFileSync("src/entrypoints/machinery/lib/atoma-launch.ts", "utf8")
+      .split("\n")
+      .filter((line) => line.trim() === '"atoma", "run",');
+    expect(spawnSites.length, "so `atoma run` exists in exactly one place").toBe(1);
 
     // Both reasons share that one block, which is the bound. The ending check after
     // the second turn is not behind either reason, so a rule-breaking closing message
     // from the stalled branch is refused like any other.
-    expect(run).toContain('if [ -n "$REASK" ]');
-    const endingChecks = run
+    const endingChecks = decide
       .split("\n")
-      .filter((line) => line.includes("bun run") && line.includes("check_ending.ts"));
+      .filter((line) => line.includes("check_ending.ts"));
     expect(endingChecks.length, "checked after each turn, and never a third time").toBe(2);
   });
 
@@ -548,23 +554,18 @@ describe("generated workflows", () => {
 
     const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
     const steps = workflow.jobs?.run?.steps ?? [];
-    // Both halves of the agent: the first runs atoma, the second reads how it
-    // ended. Either one carrying an atoma-shaped failure must reach the step
-    // that reports it rather than stop the job.
-    for (const name of ["Run agent", "Process the run's ending"]) {
-      const step = steps.find((candidate) => candidate.name === name);
-      expect(step, `${name}`).toBeDefined();
-      expect(
-        step?.["continue-on-error"],
-        `${name}: the failure must reach the steps that report it, not stop them`,
-      ).toBe(true);
-    }
+    const step = steps.find((candidate) => candidate.name === "Run agent");
+    expect(step, "the agent step").toBeDefined();
+    expect(
+      step?.["continue-on-error"],
+      "the failure must reach the steps that report it, not stop them",
+    ).toBe(true);
   });
 
   /**
    * The boundary between the agent's own failure and the machinery's has to exist,
-   * or every failure inside the agent's two steps arrives as the agent's and takes
-   * the agent's colour — including the machinery's, which the rule says is red.
+   * or every failure inside "Run agent" arrives as the agent's and takes the
+   * agent's colour — including the machinery's, which the rule says is red.
    *
    * The flag is `atoma_failed`, and three facts held together, because any one
    * missing reintroduces the hole:
@@ -573,70 +574,66 @@ describe("generated workflows", () => {
    *      branch — neither success nor the soft stop — so a failure before atoma
    *      (the tools file, the sudo preflight) and one after it (the reads that
    *      turn a 0/2 exit into an ending) both leave it unset.
-   *   2. the fallible machinery before atoma stops ITS step at its own site: the
+   *   2. the fallible machinery before atoma stops the step at its own site: the
    *      bash runs with `-e`, so nothing falls through — the guard's job is to
    *      NAME the failure and to exit before the flag can be written.
    *   3. "Post result comment" receives the flag, so its exit code can tell the two
    *      apart.
    *
-   * The agent spans two steps ("Run agent" runs atoma; "Process the run's ending"
-   * reads how it ended and writes every output), so the ordering is held across
-   * both run texts: the invocation and the preflights in the first, the branch
-   * test, the flag and the exit in the second.
+   * The invocation itself lives in `lib/atoma-launch.ts` — the one place atoma is
+   * spawned, shared with the second turn — so the ordering is held on the run
+   * text (which calls the scripts, in order) and on the script files (which
+   * carry the argv).
    *
    * Held on the generated YAML: the ordering, the guard and the wiring all live in
-   * the steps' own run text, and a test on the source would pass while the
+   * the step's own run text, and a test on the source would pass while the
    * generation dropped any of them.
    */
   test("the agent's own failure is distinguished from the machinery's", () => {
-    type WorkflowStep = { name?: string; run?: string; env?: Record<string, string>; if?: string };
+    type WorkflowStep = { name?: string; run?: string; env?: Record<string, string> };
     type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
 
     const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as WorkflowDocument;
     const steps = workflow.jobs?.run?.steps ?? [];
     const agent = steps.find((candidate) => candidate.name === "Run agent");
-    const ending = steps.find((candidate) => candidate.name === "Process the run's ending");
     const report = steps.find((candidate) => candidate.name === "Post result comment");
-    expect(agent, "the step that runs atoma").toBeDefined();
-    expect(ending, "the step that reads how the run ended").toBeDefined();
+    expect(agent, "the agent step").toBeDefined();
     expect(report, "the step that decides the colour").toBeDefined();
 
-    // The first step owns everything that decides WHETHER atoma runs.
-    const agentRun = agent?.run ?? "";
-    expect(agentRun, "the agent invocation").toContain("--agent-def");
-    expect(agentRun, "sudo is preflighted, so its refusal is caught while it is still nameable").toContain("sudo -n -u");
-    expect(
-      /write_tools_file\.ts[^\n]*\|\|/.test(agentRun),
-      "the tools-file failure is named at its own site — `-e` stops the step; the guard gives it the name",
-    ).toBe(true);
-    expect(agentRun, "the failure flag is not this step's business").not.toContain("atoma_failed=true");
-    expect(agentRun, "no earlier boundary flag survives the rename").not.toContain("atoma_reached");
-
-    // The second step owns everything that reads HOW the run ended.
-    const run = ending?.run ?? "";
+    const run = agent?.run ?? "";
+    const launchAt = run.indexOf("launch_atoma.ts");
     const flagAt = run.indexOf('atoma_failed=true');
     const branchAt = run.indexOf('[ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]');
     const readsAt = run.indexOf('read_run_ending.ts" --session');
     const exitAt = run.indexOf("exit $EXIT_CODE");
+    expect(launchAt, "atoma is launched through the one launch script").toBeGreaterThan(-1);
     expect(flagAt, "the failure flag is written as a step output").toBeGreaterThan(-1);
     expect(branchAt, "the success/soft-stop branch test").toBeGreaterThan(-1);
     expect(flagAt, "the flag is written only after the 0/2 branch has been tested").toBeGreaterThan(branchAt);
     expect(readsAt, "the ending reads sit inside the 0/2 branch").toBeGreaterThan(branchAt);
     expect(readsAt, "and ahead of the flag, so their failure leaves it unset").toBeLessThan(flagAt);
     expect(exitAt, "the failure branch exits with atoma's own code").toBeGreaterThan(flagAt);
-    // And the ending step only exists once atoma has actually run.
-    expect(ending?.if, "a machinery failure before atoma leaves no ending to read").toContain(
-      "steps.atoma.outcome == 'success'",
-    );
+    // The launch sits before the branch, so a failure inside it is caught by the
+    // same `|| EXIT_CODE=$?` and never reads as machinery's.
+    expect(launchAt, "atoma runs before the ending is classified").toBeLessThan(branchAt);
+    expect(run, "sudo is preflighted, so its refusal is caught while it is still nameable").toContain("sudo -n -u");
+    expect(
+      /write_tools_file\.ts[^\n]*\|\|/.test(run),
+      "the tools-file failure is named at its own site — `-e` stops the step; the guard gives it the name",
+    ).toBe(true);
+    expect(run, "no earlier boundary flag survives the rename").not.toContain("atoma_reached");
+
+    // The argv the runner no longer spells is held on the launch library: the
+    // definition the run uses, and the credentials file atoma deletes.
+    const launch = readFileSync("src/entrypoints/machinery/lib/atoma-launch.ts", "utf8");
+    expect(launch, "the definition the agent runs").toContain("--agent-def");
+    expect(launch, "the credentials travel by file, not environment").toContain("--credentials-file");
 
     // Through the argv, not an `env:` mapping. The post step keeps one credential and
     // nothing else, and the exact interpolation is what carries it: an empty value here
     // would read as the machinery's and turn every failure red.
     expect(report?.run, "the distinction reaches the script that decides the colour").toContain(
-      '--atoma-failed "${{ steps.atoma-ending.outputs.atoma_failed }}"',
-    );
-    expect(report?.run, "and the outcome reads the step that could have failed").toContain(
-      "steps.atoma.outcome == 'failure' && 'failure' || steps.atoma-ending.outcome",
+      '--atoma-failed "${{ steps.atoma.outputs.atoma_failed }}"',
     );
   });
 
@@ -935,20 +932,50 @@ describe("generated workflows", () => {
       ],
     ]);
 
-    const runner = readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8");
-    const start = runner.indexOf("AGENT_ENV=(");
-    expect(start, "the agent step no longer builds an environment list").toBeGreaterThan(-1);
-    const list = runner.slice(start, runner.indexOf("atoma run", start));
+    // The environment a server sees is what `buildAgentEnv` produces — the
+    // generated YAML no longer spells the list, the lib does — so the names a
+    // server reads are compared against what the lib builds, and against what
+    // the generated step actually passes to it (`--tool-cache`, `--run-dir`)
+    // resolves into those entries.
+    const entries = buildAgentEnv(
+      {
+        ...Object.fromEntries([...read].filter((name) => !NOT_PASSED.has(name)).map((name) => [name, `value-of-${name}`])),
+        HOME: "/home/runner",
+        PATH: "/usr/bin",
+        AGENT: "engineer",
+        ATOMATON_MACHINERY_ROOT: "/machinery",
+        ATOMATON_UNTRUSTED_USER: "atomaton-untrusted",
+        GITHUB_REPOSITORY: "o/r",
+        GITHUB_RUN_ID: "123",
+        ATOMATON_OPS_LOG: "/run/atomaton_ops.log",
+        GITHUB_SERVER_URL: "https://github.com",
+        OPENAI_BASE_URL_IN: "",
+        ATOMA_PROVIDER_IN: "",
+      },
+      { toolCache: "/cache", runDir: "/run" },
+    );
+    const passed = new Set(entries.map((entry) => entry.slice(0, entry.indexOf("="))));
 
     for (const name of [...read].sort()) {
       if (NOT_PASSED.has(name)) continue;
       expect(
-        list.includes(`${name}=`),
-        `a tool server reads ${name} and the agent step does not pass it. ` +
-          `sudo resets the environment, so it arrives as unset — add it to AGENT_ENV, ` +
+        passed.has(name),
+        `a tool server reads ${name} and the agent environment does not carry it. ` +
+          `sudo resets the environment, so it arrives as unset — add it to buildAgentEnv, ` +
           `or to NOT_PASSED in this test with the reason it is safe to omit.`,
       ).toBe(true);
     }
+
+    // And the generated step really hands the lib its inputs: the tool cache and
+    // run directory the entries are built from are the same constants the ACLs
+    // and the cache action use.
+    const agentStep = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8")) as {
+      jobs?: Record<string, { steps?: Array<{ name?: string; run?: string }> }>;
+    };
+    const agentRun = agentStep.jobs?.run?.steps?.find((step) => step.name === "Run agent")?.run ?? "";
+    expect(agentRun, "the step calls the environment builder").toContain("launch_atoma.ts");
+    expect(agentRun, "and passes it the tool cache the ACLs grant").toContain("--tool-cache");
+    expect(agentRun, "and the run directory the tools write to").toContain("--run-dir");
   });
 
   /**
@@ -1202,16 +1229,12 @@ describe("generated workflows", () => {
    * and nothing anywhere would fail.
    */
   test("every op the runner treats as progress is one something actually writes", () => {
-    type WorkflowStep = { name?: string; run?: string };
-    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
-
-    const workflow = Bun.YAML.parse(
-      readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8"),
-    ) as WorkflowDocument;
-    const steps = workflow.jobs?.run?.steps ?? [];
-    const grep = steps
-      .map((step) => step.run ?? "")
-      .find((run) => run.includes('"op":"(commit_and_push'));
+    // The progress grep lives in `changedSoFar` (`lib/agent-env.ts`) now — it moved
+    // out of the agent step's bash with the rest of its logic — and the lib is
+    // what the re-ask decision and the run summary both call, so it is the one
+    // place the op names are spelled.
+    const lib = readFileSync("src/entrypoints/machinery/lib/agent-env.ts", "utf8");
+    const grep = lib.split("\n").find((line) => line.includes('"op":"(commit_and_push'));
     expect(grep, "the runner must read what the run changed out of the ops log").toBeDefined();
 
     const ops = /"op":"\(([a-z_|]+)\)"/.exec(grep ?? "")?.[1]?.split("|") ?? [];
@@ -1236,6 +1259,13 @@ describe("generated workflows", () => {
     expect(github, 'nothing writes an ops-log entry for "merge_base_into_branch"').toContain(
       'logOp("merge_base_into_branch"',
     );
+
+    // And both consumers go through the one function, so a second grep cannot
+    // drift from the first.
+    for (const consumer of ["decide_reask.ts", "summarize_run.ts"]) {
+      const source = readFileSync(join("src/entrypoints/machinery", consumer), "utf8");
+      expect(source, `${consumer} must read progress through changedSoFar`).toContain("changedSoFar(");
+    }
   });
 
   /**
@@ -1575,11 +1605,19 @@ describe("generated workflows", () => {
     }
 
     // Nor does the agent get its definition, prompt, skills or tools from there.
+    // The argv is built in `lib/atoma-launch.ts` — it resolves every one of these
+    // inside the machinery root its caller's environment names — and the step's
+    // own run text must not name a checkout path for any of them.
     const agent = steps.find((step) => step.name === "Run agent");
+    const launch = readFileSync("src/entrypoints/machinery/lib/atoma-launch.ts", "utf8");
     for (const flag of ["--agent-def", "--template", "--skills-dir"]) {
-      const line = (agent?.run ?? "").split("\n").find((l) => l.includes(flag)) ?? "";
-      expect(line, `${flag} must resolve inside the machinery root`).toContain("ATOMATON_MACHINERY_ROOT");
+      expect(launch, `${flag} must be built by the launch library`).toContain(flag);
+      expect((agent?.run ?? "").includes(flag), `${flag} must not be spelled in the step; the launch library resolves it`)
+        .toBe(false);
     }
+    expect(launch, "and every one resolves under the machinery root the environment names").toContain(
+      "opts.machineryRoot",
+    );
   });
 
   // The tool servers are machinery too, and were the last part still read from
