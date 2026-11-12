@@ -168,6 +168,26 @@ describe("withoutTags on a fenced sample", () => {
     expect(withoutTags(body)).toContain(`> ${AGENT_TAG.write("engineer")}`);
     expect(NOTIFY_TAG.readProse(body)).toBe("bob");
   });
+
+  /**
+   * The same failure one indent along: a fence indented four spaces at a block
+   * start is an indented code block on GitHub, so a tag quoted inside it is a
+   * sample and not the machinery speaking.
+   */
+  test("a fence indented four spaces is a sample too", () => {
+    const body = [
+      "A person explaining the format:",
+      "",
+      "    ```html",
+      `    ${AGENT_TAG.write("engineer")}`,
+      "    ```",
+      "",
+      NOTIFY_TAG.write("bob"),
+    ].join("\n");
+    expect(AGENT_TAG.read(proseOnly(body))).toBeUndefined();
+    expect(withoutTags(body)).toContain(`    ${AGENT_TAG.write("engineer")}`);
+    expect(NOTIFY_TAG.readProse(body)).toBe("bob");
+  });
 });
 
 /**

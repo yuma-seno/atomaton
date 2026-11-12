@@ -34,14 +34,56 @@ describe("where the code is", () => {
   });
 
   /**
-   * Four spaces of indent is an indented code block, not a fence -- and a fence
-   * under a list item is indented to the item's content column, which is the same
-   * four spaces. Telling the two apart needs a block parser with list context, so
-   * this side reads both as prose. That is narrower than the regex this replaced,
-   * which matched a fence at any indent; the asymmetry is argued in `fence.ts`.
+   * #499: four spaces at the start of a block is an indented code block on GitHub,
+   * so a fence quoted that way pairs up and is one code block. This used to be
+   * prose, which put backticks inside the sample.
    */
-  test("a fence may be indented by up to three spaces and no more", () => {
-    expect(prose("    ```\nafter")).toBe("    ```\nafter");
+  test("an indented fence at a block start is code", () => {
+    const text = ["before", "", "    ```", "    commit by @torvalds", "    ```", "after"].join("\n");
+    expect(prose(text)).toBe("before\n\nafter");
+    expect(fenceSegments(text).filter((segment) => segment.code)).toHaveLength(1);
+  });
+
+  /** The same shape under a list item, where the indent is the item's content column. */
+  test("an indented fence under a list item is code when it pairs up", () => {
+    const text = ["1. step", "", "    ```sh", "    npm i @scope/pkg", "    ```", "after"].join("\n");
+    expect(prose(text)).toBe("1. step\n\nafter");
+  });
+
+  /** A fence right after the item's marker, with no blank line, is still a fence. */
+  test("an indented fence right after a list marker is code", () => {
+    const text = ["- step", "    ```", "    @torvalds", "    ```", "after"].join("\n");
+    expect(prose(text)).toBe("- step\nafter");
+  });
+
+  /**
+   * The conservative side, pinned. Four spaces after a paragraph line continue the
+   * paragraph, so the fence lines are text and a mention in them notifies. Reading
+   * this as code would leave a stranger unescaped.
+   */
+  test("an indented fence that continues a paragraph stays prose", () => {
+    const text = ["This is prose", "    ```", "    @torvalds", "    ```", "after"].join("\n");
+    expect(prose(text)).toBe(text);
+  });
+
+  /** Without a closer there is no pair, so the safe side remains prose. */
+  test("an unclosed indented fence stays prose", () => {
+    expect(prose("    ```\n    @torvalds\nafter")).toBe("    ```\n    @torvalds\nafter");
+  });
+
+  /** Tildes pair the same way, and a longer closer closes a shorter opener. */
+  test("indented tilde fences and longer closers pair", () => {
+    expect(prose(["    ~~~", "    @torvalds", "    ~~~~", "after"].join("\n"))).toBe("after");
+  });
+
+  /**
+   * The pair has to sit in one block. A line out at the margin ends the indented
+   * code, so the fence below it opens a new block; reading across would call the
+   * margin line code and leave a mention in it unescaped.
+   */
+  test("a line out at the margin ends the indented block, so there is no pair", () => {
+    const text = ["    ```", "prose by @torvalds", "    ```", "after"].join("\n");
+    expect(prose(text)).toBe(text);
   });
 
   test("an inline span is code, and a longer run holds a shorter one", () => {
@@ -80,6 +122,12 @@ describe("where the code is", () => {
 
   test("a doubly quoted fence is code too", () => {
     expect(prose([">> ```", ">> code", ">> ```", "after"].join("\n"))).toBe("after");
+  });
+
+  /** The issue's shape one container along: indented code inside a blockquote. */
+  test("an indented fence inside a blockquote is code too", () => {
+    const text = ["Quote:", ">     ```", ">     @torvalds", ">     ```", "after"].join("\n");
+    expect(prose(text)).toBe("Quote:\nafter");
   });
 
   /** A `>` written inside the sample is sample text, not the quote's own marker. */
