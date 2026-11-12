@@ -44,9 +44,17 @@ describe("what every run starts with", () => {
 });
 
 describe("what a project adds", () => {
-  test("a name Atomaton does not ship is a new server", () => {
+  /**
+   * A server a project adds is a third-party program, so it runs as the untrusted
+   * user. The wrapper is a command prefix rather than anything in the server, so
+   * the entry keeps saying what the server is and gains only how it is started.
+   */
+  test("a name Atomaton does not ship is a new server, run as the untrusted user", () => {
     const out = toolsFileFrom({ servers: { warehouse: { command: "bun", args: ["run", "x.ts"] } } }, HOOK_BASE);
-    expect(out.warehouse).toEqual({ command: "bun", args: ["run", "x.ts"] });
+    expect(out.warehouse).toEqual({
+      command: "bash",
+      args: [`${HOOK_BASE}/run_as_untrusted.sh`, "bun", "run", "x.ts"],
+    });
   });
 
   /**
@@ -58,7 +66,9 @@ describe("what a project adds", () => {
     const out = toolsFileFrom({ servers: { shell: { request_timeout_secs: 7200 } } }, HOOK_BASE);
     const entry = out.shell as Record<string, unknown>;
     expect(entry.request_timeout_secs, "what they said").toBe(7200);
-    expect(entry.command, "and what they did not").toBe(toolDefaults().servers.shell!.command);
+    expect(entry.args, "and the argv they did not").toContain(
+      (toolDefaults().servers.shell!.args as string[])[1],
+    );
   });
 
   test("their file-wide hook is appended to the machinery's, not instead of it", () => {
@@ -94,6 +104,46 @@ describe("what a project adds", () => {
   test("keys this file has never heard of are passed through", () => {
     const out = toolsFileFrom({ servers: { remote: { url: "https://example.com/mcp", headers: { A: "b" } } } }, HOOK_BASE);
     expect(out.remote).toEqual({ url: "https://example.com/mcp", headers: { A: "b" } });
+  });
+});
+
+/**
+ * Two OS users: the servers this project ships hold the credentials, and `shell`
+ * plus every server a project adds run somewhere they cannot be read. The wrapper
+ * is what chooses that, so the rule has to be visible in the generated entry
+ * rather than inferred from an implementation.
+ */
+describe("servers on the untrusted user", () => {
+  test("the shipped shell is wrapped", () => {
+    const entry = shipped().shell as Record<string, unknown>;
+    expect(entry.command).toBe("bash");
+    expect((entry.args as string[])[0]).toBe(`${HOOK_BASE}/run_as_untrusted.sh`);
+    expect((entry.args as string[]).at(-1)).toContain("mcp/shell.ts");
+  });
+
+  /** The servers that hold credentials stay where the credentials are. */
+  test("the shipped credential holders are not", () => {
+    for (const name of ["files", "files_readonly", "github", "web", "search", "atomaton", "atomaton_env", "attachments", "delegate", "delegate_readonly"]) {
+      const entry = shipped()[name] as Record<string, unknown> | undefined;
+      expect(entry, `${name} must be in every tools file`).toBeDefined();
+      expect(entry!.command, `${name} must stay on the trusted user`).toBe(
+        (toolDefaults().servers[name]!.command as string),
+      );
+    }
+  });
+
+  /** A remote server has no local process, so there is nothing to drop. */
+  test("a remote server is left alone", () => {
+    const out = toolsFileFrom({ servers: { remote: { url: "https://example.com/mcp" } } }, HOOK_BASE);
+    expect(out.remote).toEqual({ url: "https://example.com/mcp" });
+  });
+
+  /** A relative tools directory still produces an absolute wrapper path. */
+  test("a relative tools directory produces an absolute wrapper path", () => {
+    const out = toolsFileFrom(undefined, "pr-head/.github/atomaton-runtime/tools");
+    const args = (out.shell as { args: string[] }).args;
+    expect(isAbsolute(args[0]!), args[0]).toBe(true);
+    expect(args[0]!.split("\\").join("/").endsWith("/.github/atomaton-runtime/tools/run_as_untrusted.sh")).toBe(true);
   });
 });
 
@@ -184,7 +234,9 @@ describe("max_output_chars", () => {
    */
   test("a server Atomaton does not ship keeps the core's default", () => {
     const out = toolsFileFrom({ servers: { warehouse: { command: "bun", args: ["run", "x.ts"] } } }, HOOK_BASE);
-    expect(out.warehouse).toEqual({ command: "bun", args: ["run", "x.ts"] });
+    const entry = out.warehouse as Record<string, unknown>;
+    expect(entry).not.toHaveProperty("max_output_chars");
+    expect(entry.command, "still wrapped, because it is a third-party server").toBe("bash");
   });
 
   test("a project that names its own number keeps it", () => {

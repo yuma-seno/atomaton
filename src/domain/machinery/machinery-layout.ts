@@ -11,7 +11,7 @@
  * The question was asked properly and answered no. Every constraint this system
  * relies on is shaped around a ROOT rather than around individual files:
  *
- *   - `setfacl -R` grants the tool user read on `ATOMATON_MACHINERY_ROOT`. A path
+ *   - `setfacl -R` grants both tool users read on `ATOMATON_MACHINERY_ROOT`. A path
  *     outside it is unreadable to the servers, and the symptom is "no server
  *     started" rather than "that path was wrong".
  *   - `merge.governed_paths` defaults to `.github/**`, which is what keeps a change to a

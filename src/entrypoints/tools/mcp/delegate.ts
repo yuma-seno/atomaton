@@ -57,7 +57,8 @@ import { parseArgs } from "node:util";
 import { buildMcpTools, defineMcpTool, serveMcpServer, z, type BuiltMcpTool, type McpToolResult } from "../../../adapters/mcp/mcp-tool.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
 import { machineryPath } from "../../../adapters/runner/machinery.ts";
-import { DELEGATES_DIR } from "../../../domain/machinery/machinery-layout.ts";
+import { DELEGATES_DIR, TOOLS_DIR } from "../../../domain/machinery/machinery-layout.ts";
+import { asUntrustedServer } from "../../../domain/machinery/untrusted-servers.ts";
 import { requestedServersIn, resolveRoster, serverNamesOf, type DelegateDef } from "../../../domain/machinery/delegates.ts";
 import { reportFrom } from "../../../domain/machinery/delegates.ts";
 import { TOOL_OUTPUT_BACKSTOP } from "../../../shared/tool-output.ts";
@@ -69,10 +70,10 @@ function log(message: string): void {
   console.error(`[atomaton-delegate] ${message}`);
 }
 
-// Same OS user as every other tool server, including the one that runs arbitrary
-// commands — so this process makes itself unreadable to its peers and drops
-// writable directories from its PATH. It holds the provider keys, which is exactly
-// the situation `../lib/harden.ts` exists for.
+// On the trusted OS user: the shell and every third-party server run as a
+// different one, so none of them can read this environment. It holds the provider
+// keys, which is exactly the situation `../lib/harden.ts` exists for — and within
+// this class it still guards them against its peers too.
 hardenCredentialHolder(log);
 
 /**
@@ -163,15 +164,23 @@ function rolePrompt(text: string): string {
 }
 
 /**
- * The sub-run's tools file, read and given the core's output cap.
+ * The sub-run's tools file, read, given the core's output cap, and put on the
+ * untrusted user.
  *
  * The cap is added here rather than written into the YAML, for the reason
  * `domain/machinery/tools-file.ts` gives about the project's own file: the servers
  * spend `TOOL_OUTPUT_BUDGET` from `shared/tool-output.ts`, and a YAML copy of the
  * number the core is asked for is the same fact spelled twice, agreeing until
  * somebody changes one.
+ *
+ * Every server a sub-run starts is wrapped, including `files`. The sub-run has no
+ * credential-holding server: atoma reads the provider key from the file this
+ * process hands it and deletes that file before starting anything, and the
+ * definitions below declare no `env`. So there is nothing a trusted uid would buy
+ * here, and a project that edits its own `delegates/<folder>/tools.yaml` to add a
+ * server gets the untrusted class without that server needing to be known here.
  */
-function readToolsFile(path: string): Record<string, unknown> {
+function readToolsFile(path: string, toolsDir: string): Record<string, unknown> {
   let parsed: { watch?: Record<string, unknown>; servers?: Record<string, unknown> };
   try {
     parsed = Bun.YAML.parse(readFileSync(path, "utf8")) as typeof parsed;
@@ -185,7 +194,8 @@ function readToolsFile(path: string): Record<string, unknown> {
   const watch = parsed.watch ?? {};
   if (Object.keys(watch).length > 0) out.hooks = watch;
   for (const [name, server] of Object.entries(parsed.servers ?? {})) {
-    out[name] = { max_output_chars: TOOL_OUTPUT_BACKSTOP, ...(server as Record<string, unknown>) };
+    const entry = { max_output_chars: TOOL_OUTPUT_BACKSTOP, ...(server as Record<string, unknown>) };
+    out[name] = asUntrustedServer(entry, toolsDir);
   }
   return out;
 }
@@ -322,7 +332,7 @@ if (MINE.length === 0) {
 }
 
 const DEFAULTS: ResolvedDelegate[] = MINE.map((def) => {
-  const tools = readToolsFile(def.toolsFile);
+  const tools = readToolsFile(def.toolsFile, machineryPath(TOOLS_DIR));
   const servers = serverNamesOf(tools);
   // `files` and not `files_readonly`: the writing delegate is the one that can change
   // the tree, and the allowlist is what makes the other read-only rather than the

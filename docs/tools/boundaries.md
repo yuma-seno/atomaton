@@ -22,30 +22,34 @@ below. Read it before routing a credential to a third-party server.
 
 ## What a tool can and cannot be protected from
 
-Every tool server runs as **one dedicated OS user with no sudo**. One user, so no
-tool sees a different filesystem, a different `$HOME` or a different toolchain from
-another. No sudo, because with it nothing else means anything: `sudo cat
-/proc/<pid>/environ` reads any process whatever else is arranged.
+Every tool server runs as one of **two OS users, and neither has sudo**. The
+servers this project ships — the ones that hold credentials — run as
+`atomaton-tools`. The `shell` server and every server a project adds run as
+`atomaton-untrusted`. The only sudoers entry lets the first run a command as the
+second: downward, to that user, and to nobody else.
+
+Both users see the same work tree and the same `/tmp`, so an agent still writes
+one file and every tool reads it at the same path. What the split buys is the
+`/proc/<pid>/environ` channel: one user cannot read another's environment block.
 
 That is a deliberate trade, and knowing which way it went is more useful than a
 claim of full isolation.
 
 **Three things cannot all be true.**
 
-1. every tool sees the same environment
+1. every tool sees the same filesystem
 2. a credential in one tool is hidden from the shell tool
 3. any third-party MCP server works
 
 (3) means a server takes its credential the way it was written to, which is an
-environment variable. (1) means the shell shares the filesystem and the user with
-it. Given both, (2) fails — and not through one hole that can be closed.
-`/proc/<pid>/environ` is readable between processes of one user; a file called
-`gh` in a world-writable directory on PATH is executed by the server looking for
-`gh`; a config file under `$HOME` tells another tool what to run. Each of those
-has an answer below — and the point is that the *list* of channels is not
-enumerable, so closing the three that are known is not the same as a guarantee.
+environment variable. (1) means the shell can write any file a trusted tool later
+executes, and can read anything those tools leave in the tree. (2) is true of the
+environment channel and **not** of the shared workspace: the shell cannot read a
+server's environment block, but it can leave a `.git/hooks/pre-push` that `github`
+runs with `GH_TOKEN`, or a configuration file a server reads. The filesystem
+channels are not enumerable, so closing the one that was open is not a guarantee.
 
-**What was chosen:** (1) and (2) for the tools this project ships. (3) as a
+**What was chosen:** (1), (2) for the channels a uid can close, and (3) as a
 documented limit rather than a guarantee.
 
 ### Protected
@@ -54,20 +58,31 @@ documented limit rather than a guarantee.
 makes itself unreadable to processes of the same user, so no tool can reach it.
 
 **Credentials in the servers this project ships** — `files`, `github`, `web`,
-`search`, `atomaton`, `attachments`, `delegate`. Each makes itself unreadable at
-startup and removes world-writable directories from its own PATH, so neither
-reading its environment nor planting a binary it would run works.
+`search`, `atomaton`, `attachments`, `delegate`. They run as `atomaton-tools`; the
+shell and third-party servers run as `atomaton-untrusted` and cannot read their
+environment blocks or the 0700 credentials directory. Within the trusted class,
+each server still makes itself unreadable at startup and removes world-writable
+directories from its own PATH, so neither reading its environment nor planting a
+binary it would run works from a peer there either.
 
 **The provider key in a delegated sub-run.** `delegate` holds the provider keys,
 because a tool server receives a credential only through its `env:` block. It
 hands them to the sub-run through `--credentials-file` rather than the
 environment, and spawns the sub-run with every credential name removed — so the
 key is never in the sub-run's environment block, and `atoma` deletes the file
-before starting any tool server. The sub-run's own `files`/`shell` servers
-therefore hold no credential, exactly as they do in the outer run. See
-[delegating a piece of work](how-it-works/delegating-a-piece-of-work.md).
+before starting any tool server. The sub-run's own `files`/`shell` servers run as
+`atomaton-untrusted` and hold no credential, exactly as they do in the outer run.
+See [delegating a piece of work](how-it-works/delegating-a-piece-of-work.md).
 
 ### Not protected, deliberately
+
+**The workspace is shared, and that is a code-execution channel.** The shell and
+the credential-holding tools write the same files at the same paths. A command can
+leave something the trusted class later runs: `.git/hooks/pre-push` executed by
+`github` with `GH_TOKEN` in its environment is the known case, and repository
+configuration under `.git/` reaches the same class. The uid split does not close
+this, and neither does the shell guard; what limits it is that `github` holds only
+`GH_TOKEN`, which the shell can already use through the github tools.
 
 **`GH_TOKEN`, from the shell tool.** It expires when the job ends, the agent can
 already use it through the github server's tools, and `actions/checkout` leaves the
@@ -76,8 +91,15 @@ server's environment would not have covered it anyway.
 
 **A credential you route to a THIRD-PARTY server** through `tools.secrets`. That
 server cannot be made to protect itself — the mechanism has to be called by the
-process it protects, and nothing can call it on another program's behalf. Assume a
-credential you give a third-party server is readable by the shell tool.
+process it protects, and nothing can call it on another program's behalf. It runs
+as `atomaton-untrusted`, so assume the shell tool can read its environment. It
+cannot read the credentials of the servers shipped here, which is the part the
+second user bought.
+
+**Two third-party servers share one uid.** They are both in the untrusted class,
+so one can read the other's environment block if it is actively trying. Treat a
+credential given to one third-party server as reachable by every other, and by the
+shell.
 
 If that matters for a particular credential, the options are to give it only to a
 server shipped here, or not to route it at all and let the tool that needs it be a
@@ -86,33 +108,36 @@ which runs in its own job.
 
 **The shell guard is not a boundary either.** It is a text match over a command
 line that redirects the agent to the MCP tool which does the job properly, not a
-sandbox, and nothing about it is load-bearing. The two controls that are: per-tool
-credential confinement, below, and
+sandbox, and nothing about it is load-bearing. The three controls that are: the two
+users, per-tool credential confinement below, and
 [the governed-paths merge gate](../pull-requests/boundaries.md).
 
 ### What the filesystem does
 
 Writes outside the repository **fail** rather than appearing to work. `$HOME` is
-read-only, the same for every tool, and package-manager caches are redirected to a
-writable directory by the runner. An error an agent can read beats a success it
-cannot trust.
+read-only, the same for both tool users, and package-manager caches are redirected
+to a writable directory by the runner. An error an agent can read beats a success
+it cannot trust.
 
 ### Which credentials a tool server can reach
 
 A credential reaches the Atoma process and the servers that name it. Nothing else
-— not the shell, not another tool server's declared credentials by ordinary
-means, not a later workflow step.
+— not a later workflow step, and not a server in the other class. The classes
+differ in what the limit means inside them.
 
-Two limits are worth stating plainly rather than discovering.
+**A credential declared for a shipped server** is on `atomaton-tools`. The shell
+and third-party servers cannot read it. Another shipped server can reach it only
+by a deliberate attempt, which is what the servers' own hardening and the PATH
+narrowing are for.
 
-**Tool servers are not isolated from each other.** They run as the same user, so
-a deliberate attempt from one can reach another's environment. Treat a credential
-declared for one tool as reachable by all of them if something is actively trying.
+**A credential declared for a third-party server** is on `atomaton-untrusted`.
+Treat it as reachable by the shell and by every other third-party server. That is
+the cost of running a program whose implementation cannot be changed.
 
 **None of this stops intent, only accident.** An agent reads issue text written by
 anyone who can open an issue, and a prompt injection can ask it to do whatever a
-tool allows. What remains is the two controls that always mattered: declare only
-the credentials a tool genuinely needs, and read the diff when a governed file
+tool allows. What remains is the controls that always mattered: declare only the
+credentials a tool genuinely needs, and read the diff when a governed file
 changes.
 
 Which of your secrets a run is handed is settled before any of this, by
@@ -154,10 +179,11 @@ second cap the same text meets on its way into a session.
 
 `runs_on` sets the machine for the jobs that run **your** commands. It does not
 reach the agent's own run, which stays on Linux, because what isolates a tool
-server from the others is Linux-only top to bottom: `useradd` for the user with
-no sudo, `setfacl` for the ACLs, `prctl(PR_SET_DUMPABLE)`, `/proc/<pid>/environ`
-being the thing closed. Making that configurable would mean an agent's shell
-running with every one of those protections silently absent.
+server from the others is Linux-only top to bottom: `useradd` for the two users
+with no sudo, one sudoers rule for the downward drop, `setfacl` for the ACLs,
+`prctl(PR_SET_DUMPABLE)`, `/proc/<pid>/environ` being the thing closed. Making that
+configurable would mean an agent's shell running with every one of those
+protections silently absent.
 
 ## The three facts the arrangement rests on
 
@@ -179,5 +205,6 @@ static binary ignores `LD_PRELOAD` entirely. The `github` server runs `gh` with
 `GH_TOKEN` in its environment, so the child-process hole would have stayed open.
 
 **A different uid closes the environ hole outright.** That is the mechanism taken,
-and it is why there is a user rather than a container: the container answered the
-same question with `--user 1234:0`, which is the same problem without the container.
+and it is why there are two users rather than a container: the container answered
+the same question with `--user 1234:0`, which is the same problem without the
+container.

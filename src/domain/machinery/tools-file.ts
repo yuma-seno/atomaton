@@ -58,11 +58,26 @@
  * exactly that caller: every hook came out relative, the core resolved it against
  * the temp directory it had just been handed the file in, and every agent pull
  * request was refused with three identical `Hook script not found` problems.
+ *
+ * ## Why some servers are wrapped here
+ *
+ * The `shell` server and every server a project adds run as a second OS user; the
+ * servers this project ships keep the credentials and stay where they are. That
+ * decision belongs here because this is the one place every run's server entries
+ * pass through: `write_tools_file.ts` writes the file from it, and
+ * `validate_deliverable.ts` validates a pull request through it. See
+ * `untrusted-servers.ts` for the rule and `run_as_untrusted.sh` for the exec.
+ *
+ * It is deliberately not in `defaults.yaml`. A project's own server needs the same
+ * treatment, and a wrapper written into the shipped file would cover only the
+ * shipped ones -- and would put an OS user name into a file an adopter reads as
+ * configuration.
  */
 import { isAbsolute, join, resolve } from "node:path";
 import { TOOL_OUTPUT_BACKSTOP } from "../../shared/tool-output.ts";
 import { toolDefaults } from "./shipped-servers.ts";
 import type { ConfiguredServer, ToolDefaults, ToolsSection } from "./tool-server.ts";
+import { asUntrustedServer, isUntrustedServer } from "./untrusted-servers.ts";
 
 export type { ConfiguredServer, ToolsSection } from "./tool-server.ts";
 
@@ -85,6 +100,7 @@ export function toolsFileFrom(
   const watch = mergedWatch(tools?.watch, defaults);
   if (Object.keys(watch).length > 0) out.hooks = absoluteHooks(watch, hookBase);
 
+  const shippedNames = new Set(Object.keys(defaults.servers));
   for (const [name, server] of Object.entries(mergedServers(tools?.servers, defaults))) {
     const { settings: _delivery, ...forTheCore } = server;
     if (isRecord(forTheCore.hooks)) forTheCore.hooks = absoluteHooks(forTheCore.hooks, hookBase);
@@ -92,7 +108,7 @@ export function toolsFileFrom(
     if (Object.hasOwn(defaults.servers, name) && forTheCore.max_output_chars === undefined) {
       forTheCore.max_output_chars = TOOL_OUTPUT_BACKSTOP;
     }
-    out[name] = forTheCore;
+    out[name] = isUntrustedServer(name, shippedNames) ? asUntrustedServer(forTheCore, hookBase) : forTheCore;
   }
   return out;
 }

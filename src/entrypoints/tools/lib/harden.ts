@@ -1,10 +1,13 @@
 /**
  * harden.ts — what a tool server that holds a credential does to itself at startup.
  *
- * Two things, and both exist because every tool server now runs as ONE dedicated
- * OS user. That arrangement is what gives every tool the same environment,
- * and it is also what makes these two necessary: same user means the shell server
- * is a peer, not a stranger.
+ * Two things, and both exist because tool servers run as OS users with no sudo.
+ * The runner puts the credential holders on one user and the shell and
+ * third-party servers on another, so a shell command cannot read a holder's
+ * environment block by ordinary means. The holders are still peers of EACH OTHER,
+ * though, and a world-writable directory on PATH is writable by either user --
+ * so these two are still the difference between a credential that is declared
+ * and one that is delivered.
  *
  * ## 1. Become unreadable
  *
@@ -15,13 +18,19 @@
  * environment block and still readable BY THIS PROCESS. It locks the door from
  * outside, not the value.
  *
+ * The peers that matter now are the other credential holders: `github` holds
+ * `GH_TOKEN`, `delegate` holds the provider keys, and they are one uid. The shell
+ * is a different uid and cannot read either. Cross-uid reads are the property the
+ * extra user was added for, and this remains the property that keeps the trusted
+ * class from being an open book to itself.
+ *
  * atoma does this for itself, which is why the provider API key was never at
  * risk. It does not carry to a child: the flag is reset on `execve`, also
  * measured, so it cannot be set for a server by whatever launches it. The server
  * has to call it, here.
  *
  * The one cost: no debugger, `strace` or `perf` attaches to this process as the
- * same user any more. That needs `sudo`, and the user these run as does not have
+ * same user any more. That needs `sudo`, and the users these run as do not have
  * it — so debugging a server means running it by hand.
  *
  * ## 2. Narrow PATH
@@ -29,7 +38,8 @@
  * See `domain/machinery/tool-hardening.ts`. Briefly: three directories on the runner's PATH
  * are world-writable, so a peer can put a file called `gh` in one and the server
  * that looks `gh` up hands it the token. Nothing is read; the credential is
- * delivered.
+ * delivered. A world-writable directory is writable by the untrusted user too, so
+ * the second uid does not close this and the narrowing still does.
  *
  * ## What this does not close
  *
@@ -41,8 +51,10 @@
  * value in `.git/config` inside the work tree.
  *
  * A third-party server. It will not call this, and nothing can call it on its
- * behalf. See docs/tools/boundaries.md, "What a tool can and cannot be
- * protected from".
+ * behalf. It runs as the untrusted user, so the costs are bounded to that class:
+ * the other third-party servers and the shell can reach its environment, and the
+ * shipped credential holders cannot. See docs/tools/boundaries.md, "What a tool
+ * can and cannot be protected from".
  */
 import { statSync } from "node:fs";
 import { classifyPathEntries, pathWithoutWorldWritable } from "../../../domain/machinery/tool-hardening.ts";

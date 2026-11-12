@@ -79,4 +79,23 @@ describe("the agent's environment", () => {
       expect(TOOL_SECRETS.reserved.has(name), name).toBe(true);
     }
   });
+
+  /**
+   * The name the wrapper drops a server to, and the name the sudoers rule allows,
+   * have to be one user. `run_as_untrusted.sh` reads the first from the environment
+   * and calls `sudo -u` with it; the rule in `/etc/sudoers.d/` is written against the
+   * second. Two spellings of one fact agree until somebody changes one -- and a
+   * disagreement is not a failed tool call, it is a server that starts as the
+   * credential-holding user because sudo refused, or a run that cannot start the
+   * shell at all.
+   */
+  test("ATOMATON_UNTRUSTED_USER names the same user the sudoers rule targets", () => {
+    const yaml = readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8");
+    const passed = /ATOMATON_UNTRUSTED_USER="([^"]+)"/.exec(yaml)?.[1] ?? "";
+    expect(passed, "the wrapper's target, as the agent step passes it").toBeTruthy();
+
+    const allowed = /echo "([\w-]+) ALL=\(([\w-]+)\)/.exec(yaml)?.[2] ?? "";
+    expect(allowed, "the sudoers rule's target").toBeTruthy();
+    expect(passed).toBe(allowed);
+  });
 });

@@ -192,7 +192,7 @@ the repository.
 Three mechanisms are built around these two directories being roots, and a
 redirected path breaks all three at once:
 
-- The run grants the tool user read access to the machinery root. A file outside
+- The run grants both tool users read access to the machinery root. A file outside
   it is unreadable to the servers, and the symptom is "no server started" rather
   than "that path was wrong".
 - `merge.governed_paths` defaults to `.github/**`. That is what keeps a change to

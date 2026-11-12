@@ -82,6 +82,98 @@ describe("generated workflows", () => {
     }
   });
 
+  /**
+   * Two OS users, and exactly one privilege between them.
+   *
+   * The whole point of the split is that a shell command cannot read a credential
+   * holder's environment block. That is a property of the generated runner, not of
+   * any server, so it is asserted on the generated YAML: the users exist, the one
+   * sudoers rule goes downward and names its target, and each ACL is the direction
+   * it should be. A rule that named `ALL` as its target would be equivalent to
+   * giving the tool user root, and an `rwX` on the run directory would let the shell
+   * rewrite the tools file the next turn starts from.
+   *
+   * The names are typed here rather than imported. They are the contract with
+   * `/etc/passwd` and with the sudoers file, so a rename is a thing this test should
+   * have to be told about.
+   */
+  test("the untrusted user exists, can be reached only downward, and is read-only on the run's own files", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-runner.yml", "utf8"),
+    ) as WorkflowDocument;
+    const steps = workflow.jobs?.run?.steps ?? [];
+    const prepare = steps.find(
+      (step) => step.name === "Put the tool servers on users without sudo",
+    );
+    expect(prepare, "the step that creates the two users").toBeDefined();
+    const run = prepare?.run ?? "";
+
+    for (const user of ["atomaton-tools", "atomaton-untrusted"]) {
+      expect(run, `${user} must exist, with no home and no shell`).toContain(
+        `sudo useradd -M -U -s /usr/sbin/nologin "${user}"`,
+      );
+    }
+
+    // One rule. `SETENV` carries the environment atoma gave a third-party server,
+    // and the parenthesised target is what keeps this privilege downward: a rule
+    // permitting `(ALL)` would be the same as root.
+    expect(run, "the one sudoers rule").toContain(
+      'echo "atomaton-tools ALL=(atomaton-untrusted) NOPASSWD: SETENV: ALL" > "$SUDOERS_TMP"',
+    );
+    expect(run, "validated before it is installed").toContain('sudo visudo -cf "$SUDOERS_TMP"');
+    expect(run, "and installed as a root-owned sudoers file").toContain(
+      "/etc/sudoers.d/atomaton-untrusted",
+    );
+    expect(run, "the untrusted user gets no rule of its own").not.toMatch(
+      /atomaton-untrusted ALL=/,
+    );
+    expect(run, "and nothing may target every user").not.toMatch(/\(ALL\)/);
+
+    // Traversal to the work tree and the run's temp directory, for both.
+    expect(run).toContain('sudo setfacl -m "u:atomaton-untrusted:x" "$DIR"');
+
+    // The work tree and the caches are shared: the shell writes work the trusted
+    // servers read, and package managers on either side write the same caches.
+    for (const dir of ['"$GITHUB_WORKSPACE"', '"${RUNNER_TEMP}/atomaton-tool-cache"']) {
+      expect(run, `write access for the shell user on ${dir}`).toContain(
+        `sudo setfacl -R -m "u:atomaton-untrusted:rwX" ${dir}`,
+      );
+      expect(run, `and for files created later in ${dir}`).toContain(
+        `sudo setfacl -R -d -m "u:atomaton-untrusted:rwX" ${dir}`,
+      );
+    }
+
+    // The run's own directory is read-only for the shell. It holds the tools file,
+    // which the runner re-reads for a second turn -- write access there would let a
+    // command choose what the next turn starts.
+    expect(run, "the run directory is readable, not writable").toContain(
+      'sudo setfacl -R -m "u:atomaton-untrusted:rX" "${RUNNER_TEMP}/atomaton-run"',
+    );
+    expect(run, "no writable ACL on the run directory").not.toMatch(
+      /u:atomaton-untrusted:rwX[^\n]*atomaton-run"/,
+    );
+
+    // The machinery is read-only for both: the programs and the wrapper are read
+    // from there, and nothing there is the agent's to modify.
+    for (const user of ["atomaton-tools", "atomaton-untrusted"]) {
+      expect(run, `${user} must read the machinery`).toContain(
+        `sudo setfacl -R -m "u:${user}:rX" "$ATOMATON_MACHINERY_ROOT"`,
+      );
+    }
+
+    // Both drops are preflighted, so a missing rule fails with a message that names
+    // it rather than with a tool server that never starts.
+    const agent = steps.find((step) => step.name === "Run agent");
+    const agentRun = agent?.run ?? "";
+    expect(agentRun, "the first drop").toContain('sudo -n -u "atomaton-tools" true');
+    expect(agentRun, "and the downward one the wrapper uses").toContain(
+      'sudo -n -E -u "atomaton-untrusted" true',
+    );
+  });
+
   test("routes recover mode and reports invalid command syntax", () => {
     type WorkflowStep = { name?: string; run?: string };
     type WorkflowDocument = {
