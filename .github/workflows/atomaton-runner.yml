@@ -926,23 +926,80 @@ jobs:
           # asked again -- a run that was stopped or ran out of time was cut off mid-sentence,
           # and asking it to finish the sentence would be asking it to ignore the person who
           # said stop.
-          ENDING_INVALID=false
-          if [ "$EXIT_CODE" = "0" ] && [ ! -f "${RUNNER_TEMP}/atomaton-run/stop-requested" ]; then
-            bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_ending.ts" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
+          #
+          # Whether this run changed anything, read from the ops log. It is asked here, before
+          # any second turn, because that is one of the facts `should_continue_stalled.ts`
+          # needs; the step's own output is written from the final read below, so it includes
+          # whatever the second turn did. The signal:
+          #
+          # A commit is the obvious one; opening a pull request and merging one both move the
+          # work along without necessarily pushing during THIS run, and reading either as
+          # "changed nothing" would stop a chain at the moment it was working.
+          #
+          # `merge_base_into_branch` is the fourth, and it is only progress in its `merged`
+          # outcome. That is the route #264 added: a reviewer sees `behind` or `conflicting`,
+          # the engineer brings the base in, the merge is clean and pushed, and no
+          # commit_and_push follows because there is nothing left to commit -- so without this
+          # the whole point of the route is recorded as a run that changed nothing, and two of
+          # those stop the chain and call a person. Its other outcomes pushed nothing and must
+          # keep counting as nothing: `up_to_date` found there was nothing to do, `conflicts`
+          # is waiting on the agent, and `failed` is a failure.
+          changed_so_far() {
+            if [ -f "${RUNNER_TEMP}/atomaton-run/atomaton_ops.log" ]; then
+              grep -qE '"op":"(commit_and_push|create_pr|merge_pr)"|"op":"merge_base_into_branch".*"status":"merged"' "${RUNNER_TEMP}/atomaton-run/atomaton_ops.log"
+            else
+              return 1
+            fi
+          }
+          CHANGED=false
+          if changed_so_far; then
+            CHANGED=true
           fi
 
-          if [ "$EXIT_CODE" = "0" ] && [ ! -f "${RUNNER_TEMP}/atomaton-run/stop-requested" ] && [ -s "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" ]; then
+          ENDING_INVALID=false
+
+          # The one second turn this run is allowed, and why it is being asked. An ending that
+          # calls two things and a run that stopped on a sentence having changed nothing are
+          # different failures with the same remedy: a user turn in the session, then the same
+          # atoma invocation again. They share one block so a run gets at most ONE extra turn,
+          # and the ending is checked first -- a message that calls somebody has handed the
+          # work on and must not also be read as stalled.
+          REASK=
+          if [ "$EXIT_CODE" = "0" ] && [ ! -f "${RUNNER_TEMP}/atomaton-run/stop-requested" ]; then
+            bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_ending.ts" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
+
+            if [ -s "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" ]; then
+              REASK=ending
+            else
+              STALLED=$(bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/should_continue_stalled.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json" --changed "${CHANGED}") || STALLED=false
+              if [ "$STALLED" = "true" ]; then
+                REASK=stalled
+              fi
+            fi
+          fi
+
+          if [ -n "$REASK" ]; then
             REASK_BUDGET=$(( ${{ steps.deadline.outputs.at }} - $(date +%s) ))
             if [ "$REASK_BUDGET" -lt "300" ]; then
-              # No time for a second turn. The message is not a call, so nothing in it is made,
-              # and the result comment says so -- see post_result_comment.ts's --ending-invalid.
-              echo "::warning::the closing message calls more than one thing and there is no time left to ask again; nothing it calls will be started"
-              ENDING_INVALID=true
+              # No time for a second turn. An ending that calls two things is posted with its
+              # calls left as text, and the result comment says so -- see post_result_comment.ts's
+              # --ending-invalid. A stalled run simply keeps the message it ended on.
+              if [ "$REASK" = "ending" ]; then
+                echo "::warning::the closing message calls more than one thing and there is no time left to ask again; nothing it calls will be started"
+                ENDING_INVALID=true
+              else
+                echo "::warning::the run stopped on a sentence having changed nothing, and there is no time left to ask again"
+              fi
             else
-              echo "::warning::the closing message calls more than one thing; asking for it again"
               cp "${RUNNER_TEMP}/atomaton-run/session.json" "${RUNNER_TEMP}/atomaton-run/session_before_reask.json"
-              bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/inject_ending_rejection.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt"
-              # The same invocation as above, with no prompt: the rejection is a user message in
+              if [ "$REASK" = "ending" ]; then
+                echo "::warning::the closing message calls more than one thing; asking for it again"
+                bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/inject_ending_rejection.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt"
+              else
+                echo "::warning::the run stopped on a sentence having changed nothing; asking for it again"
+                bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/inject_stalled_continuation.ts" --session "${RUNNER_TEMP}/atomaton-run/session.json"
+              fi
+              # The same invocation as above, with no prompt: the note is a user message in
               # the session now, and a run with no prompt source continues from the session --
               # the documented path, and the reason this does not use `--prompt-file`.
               SECOND_EXIT=0
@@ -962,6 +1019,8 @@ jobs:
 
               if [ "$SECOND_EXIT" = "0" ] && [ -s "${RUNNER_TEMP}/atomaton-run/atomaton_output_again.txt" ]; then
                 mv "${RUNNER_TEMP}/atomaton-run/atomaton_output_again.txt" "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt"
+                # The second message is a closing message too, whichever reason asked for it,
+                # so it gets the same check. It is not asked again: one extra turn is the bound.
                 bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/check_ending.ts" --output-file "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --def-dir "${ATOMATON_MACHINERY_ROOT}/.github/atomaton/agent-definitions" --problem-file "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json"
                 if [ -s "${RUNNER_TEMP}/atomaton-run/ending-problem.txt" ]; then
                   echo "::warning::the closing message still calls more than one thing; nothing it calls will be started"
@@ -980,10 +1039,12 @@ jobs:
               else
                 # The second attempt failed or was cut off without the person asking. The first
                 # run's ending is the one this run actually had, so put the session back as it
-                # was and post that message with its calls refused, rather than reporting a
-                # failure of the machinery's own retry as the run's outcome.
+                # was. An ending that broke the rule keeps its calls refused; a stalled run's
+                # own message stands.
                 cp "${RUNNER_TEMP}/atomaton-run/session_before_reask.json" "${RUNNER_TEMP}/atomaton-run/session.json"
-                ENDING_INVALID=true
+                if [ "$REASK" = "ending" ]; then
+                  ENDING_INVALID=true
+                fi
               fi
             fi
           fi
@@ -1083,22 +1144,11 @@ jobs:
 
           # Whether this run changed anything, read from the same log and for a related
           # reason: domain/work/progress.ts stops a chain that is not getting anywhere, and the
-          # most direct signal of that is a run that pushed nothing.
-          #
-          # A commit is the obvious one; opening a pull request and merging one both move the
-          # work along without necessarily pushing during THIS run, and reading either as
-          # "changed nothing" would stop a chain at the moment it was working.
-          #
-          # `merge_base_into_branch` is the fourth, and it is only progress in its `merged`
-          # outcome. That is the route #264 added: a reviewer sees `behind` or `conflicting`,
-          # the engineer brings the base in, the merge is clean and pushed, and no
-          # commit_and_push follows because there is nothing left to commit -- so without this
-          # the whole point of the route is recorded as a run that changed nothing, and two of
-          # those stop the chain and call a person. Its other outcomes pushed nothing and must
-          # keep counting as nothing: `up_to_date` found there was nothing to do, `conflicts`
-          # is waiting on the agent, and `failed` is a failure.
+          # most direct signal of that is a run that pushed nothing. The second turn, if there
+          # was one, appended to the same log, so this is the final answer -- the earlier read
+          # above was for the stalled check, before there was anything else to include.
           CHANGED=false
-          if [ -f "${RUNNER_TEMP}/atomaton-run/atomaton_ops.log" ] && grep -qE '"op":"(commit_and_push|create_pr|merge_pr)"|"op":"merge_base_into_branch".*"status":"merged"' "${RUNNER_TEMP}/atomaton-run/atomaton_ops.log"; then
+          if changed_so_far; then
             CHANGED=true
           fi
           echo "changed=${CHANGED}" >> "$GITHUB_OUTPUT"

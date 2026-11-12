@@ -14,14 +14,17 @@ function textOf(content) {
   return content.map((block) => block.type === "text" ? block.text : "").join("");
 }
 function leftClosingReport(session) {
+  const last = lastAssistantMessage(session);
+  return last === undefined ? false : textOf(last.content).trim() !== "";
+}
+function lastAssistantMessage(session) {
   const messages = session?.messages ?? [];
   for (let i = messages.length - 1;i >= 0; i -= 1) {
     const message = messages[i];
-    if (message?.role !== "assistant")
-      continue;
-    return textOf(message.content).trim() !== "";
+    if (message?.role === "assistant")
+      return message;
   }
-  return false;
+  return;
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts

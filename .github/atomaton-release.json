@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.66",
+  "version": "v0.21.67",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -22,6 +22,7 @@
     ".github/atomaton-runtime/scripts/inject_callees_notice.ts",
     ".github/atomaton-runtime/scripts/inject_dispatcher_notice.ts",
     ".github/atomaton-runtime/scripts/inject_ending_rejection.ts",
+    ".github/atomaton-runtime/scripts/inject_stalled_continuation.ts",
     ".github/atomaton-runtime/scripts/inject_uncommitted_notice.ts",
     ".github/atomaton-runtime/scripts/manage_dispatch_loop.ts",
     ".github/atomaton-runtime/scripts/manage_turn_labels.ts",
@@ -56,6 +57,7 @@
     ".github/atomaton-runtime/scripts/save_agent_session.ts",
     ".github/atomaton-runtime/scripts/save_workspace.ts",
     ".github/atomaton-runtime/scripts/scan_secrets.ts",
+    ".github/atomaton-runtime/scripts/should_continue_stalled.ts",
     ".github/atomaton-runtime/scripts/stop_on_close.ts",
     ".github/atomaton-runtime/scripts/stop_on_pr_close.ts",
     ".github/atomaton-runtime/scripts/sweep_stale_locks.ts",
