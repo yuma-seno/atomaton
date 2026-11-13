@@ -246,15 +246,19 @@ export const ATTACH_SCHEMA = z.object({
  *
  * A target is allowed to contain a space and a `#`, both of which end the path in a
  * URL — an unencoded `#` would make the link open the branch at a fragment that does
- * not exist, and a space is not even a legal URL character. `encodeURIComponent` per
- * segment rather than once over the whole path, so the `/` separators survive. Both
- * URLs below are the same encoding over a different host and path prefix, which is why
- * this is one function rather than the same loop twice.
+ * not exist, and a space is not even a legal URL character. A parenthesis is the third
+ * and the least obvious: `encodeURIComponent` leaves both alone, and CommonMark ends a
+ * link destination at an unbalanced `)`, so `a).png` closes the image early and renders
+ * as broken markdown instead of a picture.
+ *
+ * `encodeURIComponent` per segment rather than once over the whole path, so the `/`
+ * separators survive. Both URLs below are the same encoding over a different host and
+ * path prefix, which is why this is one function rather than the same loop twice.
  */
 function encodedPath(target: string): string {
   return target
     .split("/")
-    .map((segment) => encodeURIComponent(segment))
+    .map((segment) => encodeURIComponent(segment).replace(/\(/g, "%28").replace(/\)/g, "%29"))
     .join("/");
 }
 
