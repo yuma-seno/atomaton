@@ -46,10 +46,10 @@ import { resolveLimit } from "./limits.ts";
 /**
  * How many times one piece of work may rebuild its environment.
  *
- * Three, matching `CI_RETRY_LIMIT` and for the same reason: enough for a fix that
- * needed another look, few enough that a genuinely stuck run reaches a person
- * quickly. There is no measured history to pick a better number from -- the tool
- * does not exist yet -- so it borrows the one limit here that has worked.
+ * Three: enough for a fix that needed another look, few enough that a genuinely
+ * stuck run reaches a person quickly. There is no measured history to pick a
+ * better number from -- the tool does not exist yet -- so it borrows the reasoning
+ * the validation routing used for its own ceiling.
  */
 export const DEFAULT_RELOAD_LIMIT = 3;
 

@@ -10,9 +10,8 @@
  *
  * The consequence was not a broken build, which would at least be legible. It was
  * a build that passes for the agent and fails in CI, and the failure comes back to
- * an engineer who cannot reproduce it. `validate_pull_request.ts` retries up to
- * `CI_RETRY_LIMIT`, so one issue can spend three inferences investigating a
- * failure that exists only on the other machine.
+ * an engineer who cannot reproduce it -- and to a person who then has to decide,
+ * run by run, whether the pull request can work at all.
  *
  * The workaround, which this repository was itself using, is to put the setup at
  * the front of a `checks.from_pull_request` entry -- `bun install --frozen-lockfile`

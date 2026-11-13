@@ -201,8 +201,65 @@ describe("stop_on_pr_close.ts", () => {
       ],
     });
     // It would otherwise poll, find nothing, and keep going — while the person who merged
-    // has every reason to believe it is winding down.
+    // has every reason to believe it is winding down. This failure is also not
+    // transient-shaped (no stderr, no 5xx), so it exits once without a retry.
     expect(r.status).toBe(1);
+    expect(r.ghCalls.filter((c) => c[0] === "issue" && c[1] === "comment")).toHaveLength(1);
+  });
+
+  /**
+   * The single retry, and the invariant the review on this PR demanded be pinned: a
+   * failed post may be retried EXACTLY once, and only where it cannot post twice.
+   *
+   * The 502 means GitHub did not confirm the write — either it did not happen, or it
+   * happened and the answer was lost. Retrying blind is the one way this comment gets
+   * doubled (the run polls the thread; a second identical stop is noise a person has
+   * to read). So before the retry, the thread is re-read: a stop newer than the claim
+   * — ours landing despite the error, or somebody else's — means the run stops either
+   * way, and the retry would be the duplicate.
+   *
+   * The post rules match on `--body`, not on "issue comment". The fake matches
+   * needles as SUBSTRINGS of any argv element, and the thread's own read path
+   * (`repos/.../issues/455/comments`) contains both of those words — so a post rule
+   * spelled that way also matches the re-read, which breaks the per-attempt
+   * discrimination these rules exist for. `--body` is carried by posts alone.
+   */
+  describe("a failed post gets one retry, only behind a re-read", () => {
+    const TRANSIENT = "gh: HTTP 502";
+
+    test("a transient-shaped failure posts once more, and only once more", () => {
+      const r = runWithFakeGh(scriptPath("stop_on_pr_close.ts"), MERGED_ARGS, {
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [
+          { match: ["api", "comments"], code: 0, stdout: CLAIMED_THREAD },
+          // The first post fails transiently; each `gh` call is a fresh fake process,
+          // so the retry is separated from the failure by `attempt`.
+          { match: ["--body"], code: 1, stdout: TRANSIENT, attempt: 1 },
+          { match: ["--body"], code: 0 },
+        ],
+      });
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.filter((c) => c[0] === "issue" && c[1] === "comment")).toHaveLength(2);
+    });
+
+    test("a stop the re-read finds means no retry at all", () => {
+      const r = runWithFakeGh(scriptPath("stop_on_pr_close.ts"), MERGED_ARGS, {
+        env: { GITHUB_REPOSITORY: "owner/repo" },
+        rules: [
+          // The gate's read: a live run. The read AFTER the failed post answers a
+          // different thread — a stop has appeared newer than the claim, whatever
+          // wrote it — so the re-read is where the fixture changes, by attempt.
+          { match: ["api", "comments"], code: 0, stdout: CLAIMED_THREAD, attempt: 1 },
+          { match: ["api", "comments"], code: 0, stdout: STOPPED_SINCE_CLAIM },
+          { match: ["--body"], code: 1, stdout: TRANSIENT },
+        ],
+      });
+      expect(r.status).toBe(0);
+      // One attempt only. The stop request the retry would have posted is the
+      // duplicate this invariant exists to prevent; and a wrongly-issued retry
+      // would fail the same rule again and turn the exit red.
+      expect(r.ghCalls.filter((c) => c[0] === "issue" && c[1] === "comment")).toHaveLength(1);
+    });
   });
 
   test("a missing --number is a usage error, not a silent success", () => {

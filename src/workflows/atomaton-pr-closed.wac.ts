@@ -10,7 +10,7 @@ import { ref as resolveOrchestratorParentRef } from "../entrypoints/machinery/re
 import { ref as aggregateSubIssuesRef } from "../entrypoints/machinery/aggregate_sub_issues.ts";
 import { ref as parsePrMetadataRef } from "../entrypoints/machinery/parse_pr_metadata.ts";
 import { ref as dispatchPostMergeRef } from "../entrypoints/machinery/dispatch_post_merge.ts";
-import { ref as dispatchRejectedRef } from "../entrypoints/machinery/dispatch_rejected.ts";
+import { ref as notifyRejectedRef } from "../entrypoints/machinery/notify_pr_rejected.ts";
 import { ref as manageTurnLabelsRef } from "../entrypoints/machinery/manage_turn_labels.ts";
 import { ref as stopOnPrCloseRef } from "../entrypoints/machinery/stop_on_pr_close.ts";
 import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
@@ -47,13 +47,15 @@ import { LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 // A close WITHOUT a merge is the other outcome of the same event, and it used
 // to start nothing at all: every job was gated on `merged == true`, so a
 // person closing a pull request unmerged left the branch behind, the issue
-// open, and nobody told (#267). `dispatch-rejected` now returns that close to
-// the origin agent as a rejection -- as a judgement for the agent to make, not
-// a verdict the machine has reached; `decideRejectionHandoff` holds the branch
-// list and why the machine closes nothing on this side. It is gated on the
-// pull request's head branch being this repository's: a merge is the one
-// outcome an outside contributor cannot produce, a close is not, and an
-// agent only starts when a repository member triggered it.
+// open, and nobody told (#267). `notify-rejected` now tells a person -- the
+// closer, named by the origin agent whose branch is still there to resume.
+// Starting the agent as a re-invocation was what this job used to do, and
+// starting a run no call asked for is what the machinery no longer does;
+// `decideRejectionHandoff` holds the branch list and why the machine closes
+// nothing on this side. It is gated on the pull request's head branch being
+// this repository's: a merge is the one outcome an outside contributor cannot
+// produce, a close is not, and a notice that names an agent is written under
+// the same gate that once gated starting one.
 //
 // NOTE: this workflow never runs for an agent's own actions -- GITHUB_TOKEN's own
 // actions raise no event cascade, so `pull_request_target: closed` fires only for a
@@ -216,37 +218,42 @@ const reinvokeJob = new DefinedJob(
 );
 
 /**
- * Return the close to the origin agent as a rejection (#267).
+ * A pull request closed WITHOUT merging tells a person, naming the agent that can
+ * resume (#267).
  *
  * The other outcome of the same event: a close that merged nothing. It used to
  * start nothing -- every job was gated on `merged == true` -- so a rejected
  * pull request left its branch behind, its issue open, and nobody told. The
- * job hands the close to `dispatch_rejected.ts`, which reads the issue `parse`
- * produced, the origin agent from the pull request body, and the issue's state
- * from GitHub, and applies `decideRejectionHandoff`: return the close to the
- * agent when the issue is still open and the agent is named; do nothing when it
- * is not. The machine closes nothing here.
+ * machinery's answer used to be a re-invocation: hand the close to the origin
+ * agent and let it judge. Starting a run no call asked for is what that was, so
+ * the job now posts a mention on the linked issue instead -- naming the agent
+ * whose branch is still there to resume, and leaving the decision with the
+ * person who closed the pull request. `notify_pr_rejected.ts` reads the issue
+ * `parse` produced, the origin agent from the pull request body, and the
+ * issue's state from GitHub, and applies `decideRejectionHandoff`: tell a
+ * person when the issue is still open and the agent is named; say nothing when
+ * it is not. The machine closes nothing here and starts nothing here.
  *
  * ## Why it needs `parse`, and nothing else
  *
  * The linked issue is parse's output -- read once, for both outcomes, rather
  * than a second reader of the same body tag. Everything else (the origin agent,
- * the state of the issue) is decided in the script, the place that has the
- * inputs for it; the job carries only the event test that picks this outcome --
- * plus the membership test, which lives on the job because it is about the
- * EVENT, not about what the body asks for (see the job's comment: the head
- * repository, not the author's association).
+ * the state of the issue, who is told) is decided in the script, the place that
+ * has the inputs for it; the job carries only the event test that picks this
+ * outcome -- plus the membership test, which lives on the job because it is
+ * about the EVENT, not about what the body asks for (see the job's comment: the
+ * head repository, not the author's association).
  *
- * ## Why a failed dispatch fails the job
+ * ## Why a failed notice fails the job
  *
  * The merge route has a fallback: when its re-invocation does not go out, the
  * aggregate job aggregates the parent anyway -- better than a silent wait. This
- * route has none. A close that woke nobody is the exact defect #267 exists to
+ * route has none. A close that told nobody is the exact defect #267 exists to
  * remove, so the script exits non-zero and the job goes red rather than
- * reporting a green run that handed off nothing.
+ * reporting a green run that left the close unheard.
  */
 const rejectedStep = new TypedOutputsStep({
-  name: "Return the close to the origin agent as a rejection",
+  name: "Tell a person the pull request was closed without merging",
   id: "rejected",
   shell: "bash",
   env: {
@@ -256,12 +263,16 @@ const rejectedStep = new TypedOutputsStep({
     PR_NUMBER: githubEvent<PullRequestClosedEvent>((e) => e.pull_request.number),
     OWNER: "${{ github.repository_owner }}",
     REPO: githubEvent<PullRequestClosedEvent>((e) => e.repository.name),
+    // A bot's actions raise no event cascade, so whoever closed the pull
+    // request is a person, and the person acting on the close is the one the
+    // notice is for.
+    CLOSER: "${{ github.actor }}",
   },
-  run: `${scriptCommand(dispatchRejectedRef)}\n`,
+  run: `${scriptCommand(notifyRejectedRef)}\n`,
 });
 
-const dispatchRejectedJob = new DefinedJob(
-  "dispatch-rejected",
+const notifyRejectedJob = new DefinedJob(
+  "notify-rejected",
   {
     "runs-on": "ubuntu-latest",
     "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
@@ -311,9 +322,9 @@ const dispatchRejectedJob = new DefinedJob(
  * ## Why there is no merge gate
  *
  * Both outcomes of `closed` can leave a run working: a merge of the pull request it is
- * reviewing, and a person closing that pull request unmerged. `dispatch-rejected` handles
- * the second only in the sense that it hands the ISSUE a new instruction; it does not
- * touch the run on the pull request itself.
+ * reviewing, and a person closing that pull request unmerged. `notify-rejected`
+ * handles the second only in the sense that it tells a person on the ISSUE; it does
+ * not touch the run on the pull request itself.
  *
  * ## Why there is no bot test here
  *
@@ -481,7 +492,7 @@ PR #\${PR_NUMBER} merged: \${PR_TITLE} (\${PR_URL})"
       }),
     ],
   ),
-  dispatchRejectedJob,
+  notifyRejectedJob,
   stopRunJob,
   stripTurnLabelsJob,
 ]);

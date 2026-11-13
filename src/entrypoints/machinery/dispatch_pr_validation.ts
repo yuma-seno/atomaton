@@ -29,10 +29,10 @@
  *
  * ## What `asked-by-person` changes
  *
- * Who a FAILED check goes back to. An agent that broke its own pull request fixes
- * it; a person who asked for a run is owed the answer themselves, and handing their
- * request to an agent would be the machinery deciding on their behalf. See
- * `ValidationInput.askedByPerson`.
+ * One thing now: whether the "CI is running" comment is worth a person's thread
+ * while validation waits. It no longer routes the verdict — a red check tells a
+ * person either way, and a green one is gated on where the thread's ball sits,
+ * not on who asked. See `notifyCiWaiting` and `ValidationInput.hold`.
  *
  * Usage:
  *   dispatch_pr_validation.ts --repo OWNER/REPO --number N [--branch B]

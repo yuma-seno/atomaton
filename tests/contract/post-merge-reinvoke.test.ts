@@ -78,13 +78,14 @@ describe("post-merge re-invocation", () => {
   });
 
   /**
-   * The rejection half (#267): the close that merged nothing is returned to the
-   * origin agent, and only that close -- the merged outcome belongs to the
-   * three jobs above. It reads the issue from `parse` and decides everything
+   * The rejection half (#267): the close that merged nothing is TOLD, not started --
+   * the machinery posts a mention on the linked issue naming the agent that can
+   * resume, and starts nothing itself. Only that close: the merged outcome belongs
+   * to the three jobs above. It reads the issue from `parse` and decides everything
    * else itself, so `parse` is the one thing it waits on.
    */
-  test("the close that merged nothing goes to dispatch-rejected, and only that close", () => {
-    const rejected = jobs()["dispatch-rejected"];
+  test("the close that merged nothing goes to notify-rejected, and only that close", () => {
+    const rejected = jobs()["notify-rejected"];
     expect(rejected, "run `bun run synth` first").toBeDefined();
     expect(rejected?.if ?? "").toContain("github.event.pull_request.merged == false");
     expect(needs(rejected), "it reads the linked issue from parse").toContain("parse");
@@ -93,11 +94,11 @@ describe("post-merge re-invocation", () => {
 
   /**
    * The membership gate the reviewer required on #269, and the one test that
-   * catches its absence: this is the only event-driven dispatch in the
+   * catches its absence: this is the only event-driven job in the
    * repository that fires on an outcome an outside contributor can produce, so
    * without this test the boundary in `docs/work/boundaries.md` -- an agent
-   * only starts when a repository member triggered it -- is a paragraph, not a
-   * property. A fork's pull request closed unmerged must start nothing,
+   * only works where a repository member asked for one -- is a paragraph, not a
+   * property. A fork's pull request closed unmerged must write nothing,
    * however its body is written.
    *
    * The signal is the head repository, not `author_association`: an agent's
@@ -105,8 +106,8 @@ describe("post-merge re-invocation", () => {
    * an association test would be false for every pull request the machinery
    * opened (the trap recorded on `atomaton-sub-issue-closed.wac.ts`).
    */
-  test("dispatch-rejected fires only for a pull request whose head branch is this repository's", () => {
-    const rejected = jobs()["dispatch-rejected"];
+  test("notify-rejected fires only for a pull request whose head branch is this repository's", () => {
+    const rejected = jobs()["notify-rejected"];
     expect(rejected, "run `bun run synth` first").toBeDefined();
     expect(rejected?.if ?? "").toContain("github.event.pull_request.head.repo.full_name == github.repository");
   });

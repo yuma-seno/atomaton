@@ -1,14 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { parseMangledCommand } from "./comment-command.ts";
 import {
   askSuperseded,
-  latestAsk,
   latestRequestedAgent,
   requestOutstanding,
   shapedThread,
+  threadHold,
   turnEvents,
   whoseTurn,
-  type AskReaders,
   type IdentifiedComment,
   type ThreadEntry,
   type TurnReaders,
@@ -360,140 +358,88 @@ describe("latestRequestedAgent", () => {
 });
 
 /**
- * The newest ask somebody stands behind, for the question "was this request answered
- * by a push".
+ * Where the ball sits when a validation's verdict lands — the hold a green verdict's
+ * dispatch gates on.
  *
- * The readers are stubbed the way the real ones behave: a command is a line anywhere
- * in a body (a result comment carries its directive at the end), a dispatch marker is
- * a request, and the machinery names its author with a tag the real adapter reads
- * from `atomaton:agent`.
+ * Composed through `shapedThread` with the same stub readers the other describes use,
+ * because the hold is a function of exactly the two facts the shaping produces
+ * (`events`, `openClaim`): a test that fed those facts by hand would pass while the
+ * shaping and the hold disagreed about what they mean.
  */
-describe("latestAsk", () => {
-  const askReaders: AskReaders = {
-    ...readers,
-    // The real parser is `parseCommentCommand`, which scans every line and reads the
-    // dispatch marker as a request. The stub keeps that shape.
-    requestedAgent: (body) => {
-      for (const raw of body.split("\n")) {
-        const line = raw.trim();
-        if (line.startsWith("/")) return line.slice(1).split(/\s/)[0]!;
-        if (line.startsWith("DISPATCH ")) return line.slice("DISPATCH ".length).split(/\s/)[0]!;
-      }
-      return "";
-    },
-    authoringAgent: (body) => /BY (\S+)/.exec(body)?.[1] ?? "",
+describe("threadHold", () => {
+  const hold = (comments: readonly ThreadEntry[]) => {
+    const shaped = shapedThread(comments, readers);
+    return threadHold(shaped.events, shaped.openClaim);
   };
 
-  /** A comment with a time, as the adapter's read carries it. */
-  const timed = (t: string, entry: ThreadEntry): ThreadEntry & { at: string } => ({ ...entry, at: t });
-
-  // #211's thread, end to end: the reviewer's directive, the machinery's marker
-  // taking it up, the engineer's result. The newest REQUEST is the marker -- and the
-  // marker is the take-up, not the ask, so the ask underneath is what comes back.
-  test("the ask a dispatch marker took up is what it finds, and its author wrote it", () => {
-    const thread = [
-      timed("08:40:00", machine("RESULT handoff BY reviewer\nreview found problems\n/engineer")),
-      timed("08:40:20", machine("DISPATCH engineer")),
-      timed("08:44:00", machine("RESULT done BY engineer\npushed the fix")),
-    ];
-    expect(latestAsk("/reviewer", thread, askReaders)).toEqual({
-      agent: "engineer",
-      author: { kind: "agent", agent: "reviewer" },
-      at: "08:40:00",
-    });
+  // No news at all: the standing request the node was opened with is untouched, and
+  // fulfilling it is what a verdict's dispatch is for.
+  test("an empty thread is free", () => {
+    expect(hold([])).toEqual({ kind: "free" });
   });
 
-  test("a person's command is an ask by a person", () => {
-    expect(latestAsk("/reviewer", [timed("09:00:00", human("/engineer"))], askReaders)).toEqual({
-      agent: "engineer",
-      author: { kind: "person" },
-      at: "09:00:00",
-    });
+  // A call nobody has taken up — a person's command, or the body's own line riding
+  // in as the oldest event. This is the one state besides parked where machinery may
+  // start a run, because the call is what the run fulfils.
+  test("an ask nobody has taken up is free", () => {
+    expect(hold([human("/engineer")])).toEqual({ kind: "free" });
   });
 
-  // The directive the runner extracted and posted back may have been mangled by the
-  // model's markdown. `extract_directive` dispatched it through `lineForms`, so the
-  // ask reader must see the same line: otherwise the ask disappears, `latestAsk`
-  // returns undefined, and the green verdict re-dispatches the agent the push already
-  // answered (#219).
-  test("a directive the model's markdown mangled is still an ask", () => {
-    const real: AskReaders = { ...askReaders, requestedAgent: (body) => parseMangledCommand(body).agent };
-    for (const form of ["- /engineer", "> /engineer", "`/engineer`"]) {
-      const thread = [timed("08:40:00", machine(`RESULT handoff BY reviewer\nreview found problems\n\n${form}`))];
-      expect(latestAsk("/reviewer", thread, real), form).toEqual({
-        agent: "engineer",
-        author: { kind: "agent", agent: "reviewer" },
-        at: "08:40:00",
-      });
-    }
+  // The create_pr shape: a run parked the turn on work under this node, and the
+  // machinery is the promised collector. The verdict IS the collection.
+  test("a parked turn's collection is the machinery keeping its own promise", () => {
+    expect(hold([machine("WAITING")])).toEqual({ kind: "parked" });
   });
 
-  // The body's `/<agent>` line is the node's standing request: a push is part of the
-  // work it asked for, not an answer to it. Consuming it would hand the pull request
-  // back to its opener on every push.
-  test("the body's own line is not an ask a push can answer", () => {
-    expect(latestAsk("/reviewer", [], askReaders)).toBeUndefined();
+  // #208: a park holds the turn, so the claim survives the waiting ending. The park
+  // is read off the newest EVENT; the claim without a waiting event under it is a
+  // run still working, which is the next test.
+  test("a claim under a park is the park, not a run in flight", () => {
+    expect(hold([machine("WAITING"), machine("CLAIM 9 RUN 8")])).toEqual({ kind: "parked" });
   });
 
-  test("a thread whose only request is a dispatch marker has no ask", () => {
-    expect(latestAsk("", [timed("08:40:20", machine("DISPATCH engineer"))], askReaders)).toBeUndefined();
+  // A claimed ask with no waiting ending under it: a run holds the claim and has not
+  // reported. Starting another would race it; its own report is the thread's next word.
+  test("a claim the run is still working is in flight", () => {
+    expect(hold([machine("/engineer"), machine("CLAIM 9 RUN 8")])).toEqual({ kind: "in-flight" });
   });
 
-  // The one comment that stops the walk. Routing a newer push's answer to an OLDER
-  // asker would be wrong in a way dispatching nobody is not, so an ask the thread
-  // cannot attribute ends the search rather than being stepped over.
-  test("machinery that asks without naming its author is not routable", () => {
-    const thread = [timed("08:30:00", human("/reviewer")), timed("08:35:00", machine("/engineer"))];
-    expect(latestAsk("", thread, askReaders)).toBeUndefined();
+  // The node's next agent was named by the run that ended; that call is the chain's
+  // to carry, and validation starting a different agent would put two runs on a node.
+  test("a hand-off the chain owns is not validation's to start", () => {
+    expect(hold([machine("RESULT handoff BY reviewer\n/engineer")])).toEqual({ kind: "chain" });
   });
 
-  // The shaping is the same one every reader uses, so a comment the guard is
-  // removing cannot answer this question either.
-  test("a person's comment the guard is removing cannot become the ask", () => {
-    const thread = [
-      timed("08:40:00", machine("RESULT handoff BY reviewer\n/engineer")),
-      timed("08:40:10", machine("CLAIM 9 RUN 8")),
-      timed("08:41:00", human("/atomaton")),
-    ];
-    expect(latestAsk("", thread, askReaders)).toEqual({
-      agent: "engineer",
-      author: { kind: "agent", agent: "reviewer" },
-      at: "08:40:00",
-    });
+  // The run said its piece and gave the turn away. Reviving the standing request
+  // behind that handback's back is deciding for the person.
+  test("a turn the run gave back is a person's", () => {
+    expect(hold([machine("RESULT done BY engineer")])).toEqual({ kind: "with-person" });
   });
 
-  test("an entry with no time yields an ask with none", () => {
-    expect(latestAsk("", [human("/engineer")], askReaders)).toEqual({
-      agent: "engineer",
-      author: { kind: "person" },
-      at: "",
-    });
+  // A person's command is a real event: it takes the ball back, including from the
+  // machinery's park. A dispatch after this fulfils THEIR call.
+  test("a person's command after a park takes the ball back", () => {
+    expect(hold([machine("WAITING"), human("/reviewer")])).toEqual({ kind: "free" });
   });
 
-  test("an ordinary comment is not an ask", () => {
-    expect(latestAsk("", [timed("08:00:00", human("looks good"))], askReaders)).toBeUndefined();
+  // ...but a remark is not a command. The park stands; the collection happens as
+  // promised. (A remark during a park is also the comment the guard may remove.)
+  test("a person's remark during a park leaves the park standing", () => {
+    expect(hold([machine("WAITING"), human("looks good")])).toEqual({ kind: "parked" });
   });
 
-  // The machinery's notice preserving a removed comment: the words inside it are the
-  // removed author's, and the machinery already told that author the comment would not
-  // be acted on. So the walk steps over the notice and finds the ask underneath — the
-  // one the removed comment raced. Without `quoted`, the notice's own `/engineer` line
-  // reads as an ask with no authoring tag, and the walk stops there (undefined) —
-  // which is the behaviour `quoted` exists to correct.
-  test("the walk finds the ask underneath a quotation", () => {
-    const notice: ThreadEntry & { at: string } = {
-      body: "A comment was removed. As it was written:\n\n/engineer",
-      isHuman: false,
-      quoted: true,
-      at: "08:41:00",
-    };
-    const thread = [timed("08:40:00", machine("RESULT handoff BY reviewer\n/engineer")), notice];
-    expect(latestAsk("", thread, askReaders)).toEqual({
-      agent: "engineer",
-      author: { kind: "agent", agent: "reviewer" },
-      at: "08:40:00",
-    });
-    expect(latestAsk("", [thread[0]!, { ...notice, quoted: undefined }], askReaders)).toBeUndefined();
+  // The dispatch marker is an event (`asked`) like a command: a marker nobody
+  // answered yet reads as free, because the verifier's wait resolves before the run
+  // claims. But once the run claims, the ball is in flight.
+  test("a marker's claim closes the free state", () => {
+    expect(hold([machine("DISPATCH engineer"), machine("CLAIM 4 RUN 3")])).toEqual({ kind: "in-flight" });
+  });
+
+  // `unreadable` is not produced here — a failed thread read never reaches this
+  // function, because the caller answers `unreadable` for itself before composing
+  // the facts. The hold's own world stays shaped-thread facts in, one answer out.
+  test("the hold is only ever asked of a thread that could be read", () => {
+    expect(Object.keys(hold([machine("RESULT done BY engineer")]))).toEqual(["kind"]);
   });
 });
 

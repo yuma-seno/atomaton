@@ -338,6 +338,25 @@ export function commentOn(repo: string, number: number, body: string): boolean {
 }
 
 /**
+ * Post one comment and keep what GitHub said when it did not land.
+ *
+ * `commentOn` answers "did it land", which is enough for an action the thread can
+ * see either way. A caller whose comment IS the action -- the stop request, which a
+ * run polls for and nothing else delivers -- needs the failure's text, or its error
+ * message names a failure it cannot describe. Same call, and both channels kept:
+ * stderr is where the real CLI writes its errors, and the fake under the tests
+ * writes its fixture text to stdout.
+ */
+export function commentOnDetailed(
+  repo: string,
+  number: number,
+  body: string,
+): { ok: boolean; stderr: string; stdout: string } {
+  const result = gh("issue", "comment", String(number), "--repo", repo, "--body", body);
+  return { ok: result.code === 0, stderr: result.stderr, stdout: result.stdout };
+}
+
+/**
  * Post one comment and return the new comment's id, or null when it did not land.
  *
  * Through `gh api --method POST /issues/{n}/comments`, and NOT `gh issue comment`,

@@ -44,13 +44,13 @@ day, and a guess that was too large would be silently ignored by the job timeout
 
 ## What bounds a chain of runs
 
-Validation hands a pull request back to the engineer at most three times, and two
-counters stop the chain itself — `chain.after_handoffs`, and
+Two counters stop a chain of runs — `chain.after_handoffs`, and
 `chain.after_runs_without_change` when the runs stop changing anything. Both
 defaults are in [the work reference](reference.md); neither is repeated here, so
 this page cannot go stale against them, and
 [why there are two](how-it-works/why-there-are-two-counters.md) is a question of
-its own.
+its own. Validation adds no bound of its own: a red result dispatches nobody —
+a person is told, and the work moves only when they ask for it.
 
 **There is no token or cost ceiling**: the bounds are on how many runs happen, not
 on what they spend.

@@ -140,8 +140,10 @@ The workflow Atomaton runs against an agent's pull request before anyone reviews
 it. Defaults to `atomaton-check.yml`. Name yours exactly as the file is called, or
 the dispatch fails silently and every merge is refused for a missing check.
 
-Its result decides what happens next: the reviewer is dispatched when it passes,
-the engineer when it fails.
+Its result decides what happens next: when it passes, the agent the calls name
+runs — but only where a call is waiting for one; everywhere else the verdict is
+handed to a person with a mention. When it fails, nothing is dispatched at all: a
+person is told, and asks whoever should fix it.
 
 ## `deploy.your_workflow`
 

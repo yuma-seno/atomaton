@@ -35,7 +35,8 @@ environment:
   max_reloads: 3
 ```
 
-Three by default, the same as `CI_RETRY_LIMIT`. `0` means the default, not
+Three by default, the same ceiling the validation routing once used for its CI
+hand-backs. `0` means the default, not
 "never" — to stop reloading entirely, remove `atomaton_env` from an agent's
 `mcp_servers` in its definition.
 

@@ -21,9 +21,11 @@
  *
  * ## Counting rather than storing
  *
- * `CI_RETRY_LIMIT` is the only cross-run limit in this repository that works, and
- * its own comment says why: it is "counted from its own comments rather than held
- * anywhere, so it survives a re-dispatch and needs no state of its own".
+ * The validation routing counted its CI hand-backs from the comments it left, for
+ * the reason this file needed: the count is "from its own comments rather than held
+ * anywhere, so it survives a re-dispatch and needs no state of its own". That
+ * routing no longer hands anything back automatically, and this is the same idea
+ * pointed at the chain it still bounds.
  *
  * So this does the same. Walk the target's comments from the newest backwards,
  * stop at the first one a person wrote, and count the agent result comments in

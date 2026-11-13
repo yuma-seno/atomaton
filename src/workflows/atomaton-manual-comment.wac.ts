@@ -293,23 +293,24 @@ Atomaton command error: \${ERROR}"
  * The run a person is asking for is a judgement about a commit, and starting it
  * immediately means it reads a CI result that does not exist yet -- so it either
  * waits with nothing able to wake it, or reviews a commit whose checks have not
- * run. Validation is the thing that runs CI and waits, and it already dispatches
- * whoever the result calls for.
+ * run. Validation is the thing that runs CI and waits, and it is the one place that
+ * decides what a result may start.
  *
  * So this is the same path an agent's handoff takes, and the same one a push takes.
  * One place knows how to wait, and every agent start on a pull request goes through
  * it.
  *
- * `asked-by-person` is what makes the failure route differ: an agent that broke its
- * own pull request fixes it, and a person who asked for a run is owed the answer
- * themselves. See `ValidationInput.askedByPerson`.
+ * `asked-by-person` is one bit now: whether the CI-waiting comment is worth a
+ * person's thread while validation waits. It no longer routes the verdict -- a
+ * failed check tells a person either way, and a green one is gated on where the
+ * thread's ball sits. See `notifyCiWaiting` in `validate_pull_request.ts`.
  *
  * There is deliberately no "CI is waiting" comment in this workflow, though the wait
  * is minutes long. It used to be one, posted the moment the command was handed over
  * -- and it said "`<agent>` will start once CI finishes" before validation had
  * decided anything: validation reuses a CI run that already finished, so its most
- * common case promised a wait that did not exist, and when checks fail the agent the
- * result dispatches is the engineer, not the one the command named (#271). The
+ * common case promised a wait that did not exist -- and it promised an agent on
+ * outcomes where nobody is dispatched at all (#271). The
  * comment now lives where the wait is known -- `validate_pull_request.ts`'s
  * `notifyCiWaiting`, posted only when CI actually runs and only for a person's
  * command.

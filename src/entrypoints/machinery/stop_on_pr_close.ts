@@ -55,7 +55,8 @@
 import { parseArgs } from "node:util";
 import { LLM_CONTEXT_TAG, STOP_TAG } from "../../adapters/github/tags.ts";
 import { openClaimStopState } from "../../adapters/github/thread.ts";
-import { commentOn } from "../../adapters/github/work-tree.ts";
+import { commentOnDetailed } from "../../adapters/github/work-tree.ts";
+import { looksTransient } from "../../adapters/github/gh.ts";
 import { stopOnPullRequestCloseNotice } from "../../domain/work/closed-target.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -124,8 +125,36 @@ function main(): void {
   // Fatal when it does not land: this comment IS the stop. Without it the run polls, finds
   // nothing, and keeps going — while the person who merged has every reason to believe it
   // is winding down.
-  if (!commentOn(repo, number, stopOnPrCloseBody({ number, merged }))) {
-    console.error(`::error::Could not post the stop request on #${number}`);
+  //
+  // One retry, and only behind a re-read. The write here either landed or did not, and
+  // a 5xx says only that GitHub did not confirm it — retrying blind could post the stop
+  // twice, and the second is a second comment saying the same thing on a thread the
+  // run is polling. So a failed post re-reads the claim state first: a stop newer than
+  // the claim (ours, landed despite the error, or somebody else's) means the run will
+  // stop either way and the retry is skipped; a transient-shaped failure gets its one
+  // retry; anything else fails with GitHub's own words, which is the part this script
+  // used to throw away -- `commentOn` answered only "did it land", and the #536 close
+  // failed as `Could not post the stop request` with no cause attached.
+  let posted = commentOnDetailed(repo, number, stopOnPrCloseBody({ number, merged }));
+  if (!posted.ok) {
+    let state2;
+    try {
+      state2 = openClaimStopState(repo, number);
+    } catch (e) {
+      console.error(`::error::Could not re-read the thread on #${number} after a failed stop post: ${(e as Error).message}`);
+      process.exit(1);
+    }
+    if (state2.requested) {
+      console.error(`#${number} has a stop newer than its claim, so the run will stop despite the failed post.`);
+      return;
+    }
+    if (looksTransient({ code: 1, stdout: posted.stdout, stderr: posted.stderr })) {
+      console.error(`::warning::the stop post failed transiently, retrying once: ${posted.stderr || posted.stdout}`);
+      posted = commentOnDetailed(repo, number, stopOnPrCloseBody({ number, merged }));
+    }
+  }
+  if (!posted.ok) {
+    console.error(`::error::Could not post the stop request on #${number}: ${posted.stderr || posted.stdout}`);
     process.exit(1);
   }
 

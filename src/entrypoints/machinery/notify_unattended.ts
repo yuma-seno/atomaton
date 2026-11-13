@@ -10,7 +10,9 @@
  * request that waits unannounced is the failure this exists to prevent. It is the
  * same failure `unattendedNotice` covers at creation time, one round later: the
  * pull request was attended when it was opened, and the agent it named is not
- * coming because CI failed and the request came from a person.
+ * coming -- the verdicts that send nobody out are red results, a deliverable that
+ * cannot start a run, and green results everywhere the thread's ball is not
+ * waiting for the work.
  *
  * ## Who is told
  *

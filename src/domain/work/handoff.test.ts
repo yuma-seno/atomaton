@@ -46,10 +46,10 @@ describe("decideRejectionHandoff", () => {
     ).toEqual({ kind: "nothing", why: "already-closed" });
   });
 
-  test("returns the close to the origin agent when the issue is still open", () => {
+  test("tells a person, naming the origin agent, when the issue is still open", () => {
     expect(
       decideRejectionHandoff({ parentIssue: 5, parentAlreadyClosed: false, originAgent: "engineer" }),
-    ).toEqual({ kind: "reinvoke-origin-agent", parentIssue: 5, agent: "engineer" });
+    ).toEqual({ kind: "notify-person", parentIssue: 5, agent: "engineer" });
   });
 
   test("nothing (no-origin-agent) for a pull request no run of ours opened", () => {

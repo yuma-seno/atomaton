@@ -539,104 +539,72 @@ export function latestRequestedAgent(body: string, comments: readonly ThreadEntr
 }
 
 /**
- * Who made an ask, as `latestAsk` reports it.
+ * Where the ball sits when a validation's verdict lands, as `threadHold` answers it.
  *
- * A person's command and an agent's hand-off directive are the two asks somebody
- * stands behind: a push that answers either can be handed back to its author. The
- * machinery makes requests too -- the dispatch marker -- but a marker is the
- * machinery TAKING UP an ask rather than one it is making, so there is nobody to
- * return its answer to, and it is no author here.
+ * The question the verdict's dispatch gates on: machinery may hand work to an agent
+ * only where a CALL is waiting for it. Everything else hands the turn to a person
+ * with a mention instead.
  */
-export type AskAuthor = { kind: "person" } | { kind: "agent"; agent: string };
-
-/** The newest ask in a thread that a push could answer, as `latestAsk` returns it. */
-export interface LatestAsk {
-  /** The agent the ask names. */
-  agent: string;
-  /** Who made it -- and who therefore judges the answer to it. */
-  author: AskAuthor;
+export type ThreadHold =
   /**
-   * When the ask was written, as the entry carried it. Empty when the entry had no
-   * time, which a caller must treat as unreadable rather than as "very old".
+   * Nothing has happened on this node, or the newest event is a request nobody has
+   * taken up -- a person's command, or the standing line the node was opened with.
+   * A dispatch here is fulfilling that request, which is the one case machinery
+   * may start.
    */
-  at: string;
-}
+  | { kind: "free" }
+  /**
+   * The newest event is a `waiting` ending: a run parked the turn on work under
+   * this node, and the machinery is the promised collector of it. Validation
+   * finishing is exactly that collection when the park was `create_pr`'s.
+   */
+  | { kind: "parked" }
+  /**
+   * A run holds an open claim and has not reported. Starting another run would
+   * race the one that is working; its own report is the thread's next word.
+   */
+  | { kind: "in-flight" }
+  /**
+   * The newest event is a `handed-off` ending: the run named this node's next
+   * agent, and the chain's dispatch of that agent is what carries the call.
+   * Validation starting a different agent would put two runs on one node.
+   */
+  | { kind: "chain" }
+  /**
+   * The newest event handed the node back to a person -- `returned`, which covers
+   * an ordinary finish as much as a stop or a limit. The handback IS the decision:
+   * the run said its piece and gave the turn away, and machinery reviving the
+   * standing request behind the run's back is what deciding for the person means.
+   */
+  | { kind: "with-person" }
+  /**
+   * The thread could not be read. The dispatch that would auto-start must not
+   * guess, and the conservative answer when nobody can tell is the one that
+   * starts nothing -- the same rule the guard and the stop poster hold.
+   */
+  | { kind: "unreadable" };
 
 /**
- * How to read the agent a machinery comment was written by.
+ * Where the ball sits, from the one walk the shaping already took.
  *
- * Extends `TurnReaders` because the question is adjacent to the turn's without
- * being one of it: the runner tags its result comment with the agent that produced
- * it, and that tag's wire format is the caller's (`adapters/github/tags.ts`), not
- * this module's.
+ * `events` in the order the walk produced them (oldest first) and `openClaim` as
+ * `shapedThread` left it. A claim survives a `waiting` ending on purpose (#208) --
+ * the park holds the turn -- so the park is read off the NEWEST EVENT, and only a
+ * claim without one under it means a run is working right now.
+ *
+ * Pure: shaped-thread facts in, one answer out. The thread read that feeds it is
+ * the caller's, so a read that failed never reaches here -- the caller answers
+ * `unreadable` for itself.
  */
-export interface AskReaders extends TurnReaders {
-  /** The agent the machinery tagged this comment as written by, or "" when it did not. */
-  authoringAgent: (body: string) => string;
-}
-
-/**
- * The newest ask a person or an agent made in a thread, with who made it and when.
- *
- * ## Why the dispatch markers are not asks
- *
- * `latestRequestedAgent` reads them as requests, and rightly so for the turn: a
- * marker is the node being handed to an agent. But the marker is the machinery
- * taking up a request, not one it is making -- the ask it took up sits in the
- * comment before it. This is the question "who asked, so the answer can be handed
- * back to them", and a marker has no author to hand anything back to. So the walk
- * skips markers and finds the ask underneath: the reviewer's directive, the
- * person's command.
- *
- * ## Why the body is not an ask either
- *
- * The body's `/<agent>` line is the node's standing request: it asks for the work,
- * and a push is part of that work, not an answer to it. Reading it as consumable
- * would hand the pull request back to its opener on every push; the standing
- * request is routed instead by `latestRequestedAgent`, which dispatches the named
- * agent and is the caller's fallback when this returns undefined. Only an ask
- * somebody COMPLETED a turn by making -- a person's command, an agent's directive
- * -- is one a push can answer.
- *
- * ## The one comment that stops the walk
- *
- * Machinery that asks without saying who it is for -- a directive-carrying comment
- * with no authoring tag -- returns undefined rather than being walked past. The
- * asks under it are older, and routing a newer push's answer to an older asker
- * would be wrong in a way dispatching nobody is not. Undefined is the caller's cue
- * to route by the standing request, which is the behaviour that predated this fold.
- *
- * ## Why quotations are skipped
- *
- * The notice preserving a removed person's comment carries the removed text verbatim,
- * and its words are the removed author's -- but the notice itself is the machinery
- * PRESERVING a comment, not making an ask, and the machinery already told the author
- * the comment would not be acted on. Stepped over, the walk finds the ask underneath:
- * the one the removed comment raced. A quotation is an entry like any other here, and
- * never the ask the walk returns.
- *
- * Entries may carry `at` (the comment's creation time). The ask reports it, so the
- * caller can tell an ask the push postdates from one it predates; an entry without
- * one yields an ask with `at: ""`, which the caller must treat as unreadable.
- */
-export function latestAsk<T extends ThreadEntry & { at?: string }>(
-  body: string,
-  comments: readonly T[],
-  readers: AskReaders,
-): LatestAsk | undefined {
-  const { comments: kept } = shapedThread(comments, readers);
-  for (let index = kept.length - 1; index >= 0; index -= 1) {
-    const entry = kept[index]!;
-    if (entry.quoted) continue;
-    const agent = readers.requestedAgent(entry.body);
-    if (agent === "") continue;
-    if (readers.isDispatchMarker(entry.body)) continue;
-    if (entry.isHuman) return { agent, author: { kind: "person" }, at: entry.at ?? "" };
-    const author = readers.authoringAgent(entry.body);
-    if (author === "") return undefined;
-    return { agent, author: { kind: "agent", agent: author }, at: entry.at ?? "" };
+export function threadHold(events: readonly TurnEvent[], openClaim: { ask: number; run: number } | undefined): ThreadHold {
+  const newest = events[events.length - 1];
+  if (openClaim !== undefined) {
+    return newest === "waiting" ? { kind: "parked" } : { kind: "in-flight" };
   }
-  return undefined;
+  if (newest === undefined || newest === "asked") return { kind: "free" };
+  if (newest === "waiting") return { kind: "parked" };
+  if (newest === "handed-off") return { kind: "chain" };
+  return { kind: "with-person" };
 }
 
 /**
