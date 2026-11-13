@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 110 | 5.5% | 499 | 6,099 | 23 | 22.1 |
-| Last 30 days | 607 | 5.3% | 243 | 9,859 | 13 | 18.2 |
-| Last year | 672 | 5.4% | 257 | 10,246 | 15 | 19.2 |
-| All time | 672 | 5.4% | 257 | 10,246 | 15 | 19.2 |
+| Last 7 days | 111 | 6.3% | 488 | 6,099 | 23 | 22.1 |
+| Last 30 days | 608 | 5.4% | 244 | 9,859 | 13 | 18.2 |
+| Last year | 673 | 5.5% | 257 | 10,246 | 15 | 19.2 |
+| All time | 673 | 5.5% | 257 | 10,246 | 15 | 19.2 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,7 +22,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 636 |
-| `failed` | 25 |
+| `failed` | 26 |
 | `stopped` | 11 |
 
 ## Last 7 days
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,895,877 | 10,836,578 | 29,805,044 | 29,805,044 | 243,655,052 |
-| messages per session | 224 | 374 | 439 | 439 | 9,410 |
+| messages per session | 224 | 374 | 439 | 439 | 9,412 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -120,7 +120,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,211,508 | 5,067,507 | 20,308,488 | 39,097,860 | 697,862,967 |
-| messages per session | 111 | 307 | 463 | 731 | 36,165 |
+| messages per session | 111 | 307 | 463 | 731 | 36,167 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -215,7 +215,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,337,902 | 5,781,615 | 28,119,706 | 73,718,100 | 967,266,372 |
-| messages per session | 123 | 331 | 705 | 731 | 45,078 |
+| messages per session | 123 | 331 | 705 | 731 | 45,080 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -337,7 +337,7 @@ Neither figure covers 15 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,337,902 | 5,781,615 | 28,119,706 | 73,718,100 | 967,266,372 |
-| messages per session | 114 | 330 | 705 | 731 | 45,156 |
+| messages per session | 114 | 330 | 705 | 731 | 45,158 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -450,7 +450,7 @@ A tool can answer and report that it answered badly — a search that came back 
 
 | last seen | server | reports | sessions | problem |
 | --- | --- | ---: | ---: | --- |
-| 2026-11-12 | `search` | 1 | 1 | could not preload the reranker (EACCES), results are first-stage ordered |
+| 2026-11-13 | `search` | 1 | 1 | could not preload the reranker (EACCES), results are first-stage ordered |
 
 ## Never used
 
