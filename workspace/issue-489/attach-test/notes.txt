@@ -1,2 +1,0 @@
-attach_file 実機確認用のテキストファイル。
-#489 の検証: 非メディア形式が uploads.github.com に通るかを確認する。
