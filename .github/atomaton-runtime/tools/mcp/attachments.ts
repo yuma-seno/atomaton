@@ -6603,7 +6603,7 @@ var require_dist = __commonJS(function(exports, module) {
 // src/entrypoints/tools/mcp/attachments.ts
 import { mkdirSync, mkdtempSync, rmSync, statSync as statSync2, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { dirname, isAbsolute, join, resolve, sep } from "path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "path";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -18071,6 +18071,8 @@ hardenCredentialHolder(log2);
 var UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024;
 var MAX_READ_BYTES = 128 * 1024 * 1024;
 var REQUEST_ABORT_MS = 120000;
+var ATTACH_BUDGET_MS = 150000;
+var MAX_ATTACH_FILES = 10;
 var TMP_ROOT = "/tmp";
 var ATTACHMENT_DIR = "/tmp/atomaton-workspace/attachments";
 var DRAFT_FILE_MODE = "100644";
@@ -18091,6 +18093,14 @@ var FETCH_ATTACHMENT_SCHEMA = objectType({
   url: stringType().min(1).describe("The attachment URL to fetch: `https://github.com/user-attachments/files/<id>/<name>`, or a " + "`private-user-images.githubusercontent.com` URL. Every other host is refused."),
   filename: stringType().min(1).optional().describe("What to save it as, such as `\u30DA\u30C0\u30EB.docx`. Defaults to the URL's last segment, which is often a generic " + "`default.docx` rather than the name the comment shows. A file name, not a path."),
   dir: stringType().min(1).optional().describe(`The directory to save into. Defaults to \`${ATTACHMENT_DIR}\`, which survives into the next run on this ` + `issue; an absolute path under ${TMP_ROOT} only.`)
+});
+var ATTACH_FILE_SCHEMA = objectType({
+  path: stringType().min(1).describe("A local file: a path inside this run's checkout, or an absolute one under /tmp."),
+  name: stringType().min(1).optional().describe("The name GitHub receives and shows on a link. Defaults to the file's own name."),
+  alt: stringType().optional().describe("Alt text, for an image only. Defaults to the name without its extension. Refused on a video (a player has " + "no alt attribute) and on any other file (it renders as a link whose text is the name).")
+});
+var ATTACH_SCHEMA = objectType({
+  files: arrayType(ATTACH_FILE_SCHEMA).min(1).max(MAX_ATTACH_FILES).describe(`The files to attach, at most ${MAX_ATTACH_FILES}. Every one is validated before any is uploaded, because an ` + "upload cannot be undone.")
 });
 function blobUrlFor(repo, branch, target) {
   const path = target.split("/").map((segment) => encodeURIComponent(segment)).join("/");
@@ -18280,6 +18290,320 @@ async function fetchAttachment(a) {
   const { bytes, contentType } = await downloadAttachment(url.href, dest);
   return JSON.stringify({ path: dest, bytes, content_type: contentType, source_url: url.href }, null, 2);
 }
+var OFFICE_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+var OFFICE_PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+var OFFICE_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+var ATTACH_TYPES = [
+  { extension: "png", contentType: "image/png", rendering: "image" },
+  { extension: "gif", contentType: "image/gif", rendering: "image" },
+  { extension: "jpg", contentType: "image/jpeg", rendering: "image" },
+  { extension: "jpeg", contentType: "image/jpeg", rendering: "image" },
+  { extension: "svg", contentType: "image/svg+xml", rendering: "image" },
+  { extension: "webp", contentType: "image/webp", rendering: "image" },
+  { extension: "mp4", contentType: "video/mp4", rendering: "video" },
+  { extension: "mov", contentType: "video/quicktime", rendering: "video" },
+  { extension: "webm", contentType: "video/webm", rendering: "video" },
+  { extension: "pdf", contentType: "application/pdf", rendering: "file" },
+  { extension: "docx", contentType: OFFICE_DOCX, rendering: "file" },
+  { extension: "pptx", contentType: OFFICE_PPTX, rendering: "file" },
+  { extension: "xlsx", contentType: OFFICE_XLSX, rendering: "file" },
+  { extension: "xls", contentType: "application/vnd.ms-excel", rendering: "file" },
+  { extension: "xlsm", contentType: "application/vnd.ms-excel.sheet.macroEnabled.12", rendering: "file" },
+  { extension: "odt", contentType: "application/vnd.oasis.opendocument.text", rendering: "file" },
+  { extension: "fodt", contentType: "application/vnd.oasis.opendocument.text-flat-xml", rendering: "file" },
+  { extension: "ods", contentType: "application/vnd.oasis.opendocument.spreadsheet", rendering: "file" },
+  { extension: "fods", contentType: "application/vnd.oasis.opendocument.spreadsheet-flat-xml", rendering: "file" },
+  { extension: "odp", contentType: "application/vnd.oasis.opendocument.presentation", rendering: "file" },
+  { extension: "fodp", contentType: "application/vnd.oasis.opendocument.presentation-flat-xml", rendering: "file" },
+  { extension: "odg", contentType: "application/vnd.oasis.opendocument.graphics", rendering: "file" },
+  { extension: "fodg", contentType: "application/vnd.oasis.opendocument.graphics-flat-xml", rendering: "file" },
+  { extension: "odf", contentType: "application/vnd.oasis.opendocument.formula", rendering: "file" },
+  { extension: "rtf", contentType: "application/rtf", rendering: "file" },
+  { extension: "doc", contentType: "application/msword", rendering: "file" },
+  { extension: "txt", contentType: "text/plain", rendering: "file" },
+  { extension: "md", contentType: "text/markdown", rendering: "file" },
+  { extension: "copilotmd", contentType: "text/markdown", rendering: "file" },
+  { extension: "csv", contentType: "text/csv", rendering: "file" },
+  { extension: "tsv", contentType: "text/tab-separated-values", rendering: "file" },
+  { extension: "log", contentType: "text/plain", rendering: "file" },
+  { extension: "json", contentType: "application/json", rendering: "file" },
+  { extension: "jsonc", contentType: "application/json", rendering: "file" },
+  { extension: "c", contentType: "text/x-c", rendering: "file" },
+  { extension: "cs", contentType: "text/plain", rendering: "file" },
+  { extension: "cpp", contentType: "text/x-c++", rendering: "file" },
+  { extension: "css", contentType: "text/css", rendering: "file" },
+  { extension: "drawio", contentType: "application/xml", rendering: "file" },
+  { extension: "dmp", contentType: "application/octet-stream", rendering: "file" },
+  { extension: "html", contentType: "text/html", rendering: "file" },
+  { extension: "htm", contentType: "text/html", rendering: "file" },
+  { extension: "java", contentType: "text/x-java", rendering: "file" },
+  { extension: "js", contentType: "text/javascript", rendering: "file" },
+  { extension: "ipynb", contentType: "application/json", rendering: "file" },
+  { extension: "patch", contentType: "text/x-diff", rendering: "file" },
+  { extension: "php", contentType: "application/x-httpd-php", rendering: "file" },
+  { extension: "cpuprofile", contentType: "application/json", rendering: "file" },
+  { extension: "pdb", contentType: "application/octet-stream", rendering: "file" },
+  { extension: "py", contentType: "text/x-python", rendering: "file" },
+  { extension: "sh", contentType: "text/x-sh", rendering: "file" },
+  { extension: "sql", contentType: "text/plain", rendering: "file" },
+  { extension: "ts", contentType: "text/typescript", rendering: "file" },
+  { extension: "tsx", contentType: "text/typescript", rendering: "file" },
+  { extension: "xml", contentType: "application/xml", rendering: "file" },
+  { extension: "yaml", contentType: "text/yaml", rendering: "file" },
+  { extension: "yml", contentType: "text/yaml", rendering: "file" },
+  { extension: "zip", contentType: "application/zip", rendering: "file" },
+  { extension: "gz", contentType: "application/gzip", rendering: "file" },
+  { extension: "tgz", contentType: "application/gzip", rendering: "file" },
+  { extension: "debug", contentType: "text/plain", rendering: "file" },
+  { extension: "msg", contentType: "application/vnd.ms-outlook", rendering: "file" },
+  { extension: "eml", contentType: "message/rfc822", rendering: "file" },
+  { extension: "bmp", contentType: "image/bmp", rendering: "file" },
+  { extension: "tif", contentType: "image/tiff", rendering: "file" },
+  { extension: "tiff", contentType: "image/tiff", rendering: "file" },
+  { extension: "mp3", contentType: "audio/mpeg", rendering: "file" },
+  { extension: "wav", contentType: "audio/wav", rendering: "file" }
+];
+var IMAGE_LIMIT_BYTES = 10 * 1024 * 1024;
+var VIDEO_LIMIT_BYTES = 100 * 1024 * 1024;
+function ceilingFor(rendering) {
+  if (rendering === "image")
+    return IMAGE_LIMIT_BYTES;
+  if (rendering === "video")
+    return VIDEO_LIMIT_BYTES;
+  return UPLOAD_LIMIT_BYTES;
+}
+function ceilingReason(rendering, ceiling) {
+  if (rendering === "image")
+    return `GitHub's ceiling for an image is ${ceiling} bytes`;
+  if (rendering === "video") {
+    return `a video is sent up to ${ceiling} bytes, which is a paid plan's limit; the endpoint is what refuses a free plan's`;
+  }
+  return `GitHub's ceiling for a file that is not an image or a video is ${ceiling} bytes`;
+}
+function supportedExtensions() {
+  return ATTACH_TYPES.map((type) => `.${type.extension}`).join(", ");
+}
+function attachTypeFor(name) {
+  const dot = name.lastIndexOf(".");
+  const extension = dot === -1 ? "" : name.slice(dot + 1).toLowerCase();
+  const found = ATTACH_TYPES.find((type) => type.extension === extension);
+  if (!found) {
+    const named = dot === -1 ? `${name} has no extension` : `'${name}' is not a file type this tool attaches`;
+    throw new Error(`${named}. Supported: ${supportedExtensions()}`);
+  }
+  return found;
+}
+function escapeLabel(text) {
+  return text.replace(/[\\[\]\n\r]/g, (character) => character === `
+` || character === "\r" ? " " : `\\${character}`);
+}
+function isSingleImage(markdown, url) {
+  if (!markdown.startsWith("!["))
+    return false;
+  let index = 2;
+  while (index < markdown.length) {
+    const character = markdown[index];
+    if (character === "\\") {
+      index += 2;
+      continue;
+    }
+    if (character === "]")
+      break;
+    index += 1;
+  }
+  if (markdown[index] !== "]")
+    return false;
+  return markdown.slice(index + 1) === `(${url})`;
+}
+var ALT_PROBE_URL = "https://example.invalid/probe";
+function sourceWithinRun(filePath) {
+  const base = resolve(process.cwd());
+  const roots = [base, TMP_ROOT];
+  const source = isAbsolute(filePath) ? resolve(filePath) : resolve(base, filePath);
+  if (!roots.some((root) => source === root || source.startsWith(root + sep))) {
+    throw new Error(`'${filePath}' resolves to '${source}', which is outside the places an attachment may be read from ` + `(${roots.join(", ")}). Pass an absolute path, or one relative to ${base}.`);
+  }
+  return source;
+}
+function assertFileName(name, filePath) {
+  if (name === "." || name === ".." || /[/\\\0]/.test(name)) {
+    throw new Error(`'${name}' is not a file name for '${filePath}'. Pass the name alone \u2014 an attachment is uploaded under one ` + "name, and a slash would be read as a path.");
+  }
+}
+function resolveAttachFiles(files) {
+  const out = [];
+  for (const file of files) {
+    const source = sourceWithinRun(file.path);
+    let size;
+    try {
+      const stats = statSync2(source);
+      if (stats.isDirectory()) {
+        throw new Error(`'${file.path}' is a directory (${source}); an attachment is one regular file.`);
+      }
+      if (!stats.isFile()) {
+        throw new Error(`'${file.path}' is not a regular file (${source}); a pipe or a device is read forever rather than uploaded.`);
+      }
+      size = stats.size;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("is a directory") || message.includes("is not a regular file"))
+        throw error;
+      throw new Error(`could not read '${file.path}': no such file at ${source}`);
+    }
+    if (size === 0) {
+      throw new Error(`'${file.path}' is empty (${source}); an empty file uploads and renders as a broken attachment.`);
+    }
+    const name = file.name ?? basename(source);
+    assertFileName(name, file.path);
+    const type = attachTypeFor(name);
+    const ceiling = ceilingFor(type.rendering);
+    if (size > ceiling) {
+      throw new Error(`${source} is ${size} bytes, and ${ceilingReason(type.rendering, ceiling)}. ` + `'.${type.extension}' is a ${type.rendering}, so nothing was uploaded.`);
+    }
+    out.push({
+      path: file.path,
+      source,
+      name,
+      alt: altFor(file, name, type),
+      size,
+      rendering: type.rendering,
+      contentType: type.contentType
+    });
+  }
+  return out;
+}
+function altFor(file, name, type) {
+  if (type.rendering === "video" && file.alt !== undefined) {
+    throw new Error(`'${file.path}' is a video, and a video renders as a player with no alt attribute, so \`alt\` is refused ` + "rather than silently dropped.");
+  }
+  if (type.rendering === "file" && file.alt !== undefined) {
+    throw new Error(`'${file.path}' renders as a link, not an image, so \`alt\` would be dropped. The link text is the file's ` + "`name`; drop the alt text.");
+  }
+  if (type.rendering !== "image")
+    return null;
+  const alt = file.alt ?? name.replace(/\.[^.]*$/, "").replaceAll(".", " ");
+  if (!isSingleImage(`![${escapeLabel(alt)}](${ALT_PROBE_URL})`, ALT_PROBE_URL)) {
+    throw new Error(`'${file.path}': alt text '${alt}' cannot be rendered into an image without closing it early, so nothing ` + "was uploaded. Remove the brackets and backslashes from `alt`.");
+  }
+  return alt;
+}
+function markdownFor(file, url) {
+  if (file.rendering === "image")
+    return `![${escapeLabel(file.alt ?? "")}](${url})`;
+  if (file.rendering === "video")
+    return url;
+  return `[${escapeLabel(file.name)}](${url})`;
+}
+var PRODUCTION_HOSTS = { api: "https://api.github.com", uploads: "https://uploads.github.com" };
+function attachHeaders(token) {
+  return { authorization: `token ${token}`, accept: "application/vnd.github+json" };
+}
+async function repositoryIdFor(repo, token, hosts = PRODUCTION_HOSTS, signal = AbortSignal.timeout(REQUEST_ABORT_MS)) {
+  const url = `${hosts.api.replace(/\/+$/, "")}/repos/${repo}`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: attachHeaders(token),
+    redirect: "manual",
+    signal
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    if (response.status === 404) {
+      throw new Error(`GET ${url} answered 404, so the repository's numeric id could not be read and nothing was uploaded. Either ` + "the token cannot see this repository, or GITHUB_REPOSITORY names one that does not exist.");
+    }
+    throw new Error(`GET ${url} answered ${response.status}, so nothing was uploaded.`);
+  }
+  const body = await response.json();
+  if (typeof body.id !== "number" || body.id <= 0) {
+    throw new Error(`GET ${url} answered without a numeric repository id, so nothing was uploaded.`);
+  }
+  return body.id;
+}
+async function uploadAttachment(file, repositoryId, token, hosts = PRODUCTION_HOSTS, signal = AbortSignal.timeout(REQUEST_ABORT_MS)) {
+  const url = new URL("/user-attachments/assets", `${hosts.uploads.replace(/\/+$/, "")}/`);
+  url.searchParams.set("name", file.name);
+  url.searchParams.set("content_type", file.contentType);
+  url.searchParams.set("repository_id", String(repositoryId));
+  const started = Date.now();
+  log2(`attach_file ${file.source} ${file.size}B as ${file.name}`);
+  const response = await fetch(url.href, {
+    method: "POST",
+    headers: { ...attachHeaders(token), "content-type": "application/octet-stream" },
+    body: Bun.file(file.source),
+    redirect: "manual",
+    signal
+  });
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => "")).trim().slice(0, 500);
+    throw new Error(uploadRefusal(response.status, response.headers, file, url.href, detail));
+  }
+  let asset;
+  try {
+    asset = await response.json();
+  } catch {
+    throw new Error(`${url.href} answered 200 with a body that is not JSON, so the asset URL could not be read.`);
+  }
+  if (typeof asset.url !== "string" || !asset.url) {
+    throw new Error(`${url.href} answered 200 without an asset URL.`);
+  }
+  let parsed;
+  try {
+    parsed = new URL(asset.url);
+  } catch {
+    throw new Error(`${url.href} answered with '${asset.url}', which is not an absolute URL.`);
+  }
+  if (!attachmentUrlAllowed(parsed)) {
+    throw new Error(`${url.href} answered with '${asset.url}', which is not an attachment address \u2014 this tool returns only ` + "`https://github.com/user-attachments/...` and `https://private-user-images.githubusercontent.com/...`.");
+  }
+  log2(`attach_file ${file.name} ${file.size}B in ${Date.now() - started}ms`);
+  return asset.url;
+}
+function uploadRefusal(status, headers, file, url, detail) {
+  if (status === 404) {
+    return `${url} answered 404 for '${file.name}', so nothing was attached. This endpoint answers 404 rather than 403 ` + "when the credential cannot write, so it means one of two things: the run's token has no write access to the " + "repository, or this token's kind \u2014 a github-actions[bot] installation token \u2014 is not one the endpoint accepts " + "for attachments. Which of the two it is has not been measured; if the github tools can write to this " + "repository, the token's kind is the answer.";
+  }
+  if (status === 422) {
+    return `${url} answered 422 for '${file.name}', so nothing was attached: the endpoint refused the file itself. ` + `Its message: ${detail || "(none)"}`;
+  }
+  if (status === 429) {
+    const retryAfter = headers.get("retry-after");
+    return `${url} answered 429 for '${file.name}': rate limited, and nothing was attached. ` + (retryAfter ? `Retry after ${retryAfter} seconds.` : "No Retry-After header was sent, so wait and try again.") + " This tool does not retry on its own.";
+  }
+  if (status >= 300 && status < 400) {
+    return `${url} answered ${status} with a redirect to '${headers.get("location") ?? "(no location)"}'. This tool does ` + "not follow redirects on an upload, so nothing was attached.";
+  }
+  return `${url} answered ${status} for '${file.name}', so nothing was attached. ${detail}`.trim();
+}
+async function attachFile(a, options = {}) {
+  const token = (process.env.GH_TOKEN ?? "").trim();
+  if (!token) {
+    throw new Error("GH_TOKEN is not in this server's environment, so nothing can be uploaded. This is the one tool here that " + "sends a credential; the server receives it through `tools.servers.attachments.env` in tools.yaml, which " + "the runner writes from the run's own token.");
+  }
+  const budget = options.budgetMs ?? ATTACH_BUDGET_MS;
+  const hosts = options.hosts ?? PRODUCTION_HOSTS;
+  const deadline = Date.now() + budget;
+  const signalFor = (what) => {
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      throw new Error(`the ${budget}-millisecond budget for one attach_file call ran out before ${what}, so nothing ` + "more was sent. Attach fewer files at once; each upload is a separate request and this bound exists so " + "atoma does not discard the call, which would leave undeletable assets and return no URLs.");
+    }
+    return AbortSignal.timeout(Math.min(REQUEST_ABORT_MS, left));
+  };
+  const repo = resolveRepo();
+  const files = resolveAttachFiles(a.files);
+  const uploaded = [];
+  try {
+    const id = await repositoryIdFor(repo, token, hosts, signalFor("the repository was read"));
+    for (const file of files) {
+      const url = await uploadAttachment(file, id, token, hosts, signalFor(`'${file.name}' was uploaded`));
+      uploaded.push({ path: file.path, url, markdown: markdownFor(file, url), contentType: file.contentType });
+    }
+  } catch (error) {
+    const kept = uploaded.length === 0 ? "Nothing was uploaded before it." : `The ${uploaded.length} uploaded before it cannot be deleted from GitHub, so their URLs are still worth ` + `having: ${uploaded.map((entry) => `${entry.path} -> ${entry.url}`).join("; ")}`;
+    throw new Error(`${error.message} ${kept}`);
+  }
+  return JSON.stringify({ files: uploaded, uploaded: uploaded.length }, null, 2);
+}
 function remoteTip(branch) {
   const read = readOriginBranch(branch);
   if (!read.known) {
@@ -18380,6 +18704,7 @@ async function publishDraft(a) {
 }
 var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " + "The branch is this repository's own setting \u2014 `tools.servers.attachments.settings.branch` in config.yaml, " + "default `business-docs` \u2014 and is deliberately not an argument: naming a branch from the outside is what let a " + "publish land on somebody's work branch. " + "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " + "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " + "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " + "refused \u2014 an orphan branch is safe because it is not the reviewed one.";
 var FETCH_ATTACHMENT_DESCRIPTION = "Fetch one file a person attached to an issue and save it under /tmp, so a document can be opened, edited and " + "delivered (`publish_draft`) instead of pasted into the conversation. It reads " + "`https://github.com/user-attachments/files/<id>/<name>` and `https://private-user-images.githubusercontent.com/...` " + "and refuses every other host. It carries no credential \u2014 what it fetches is what an anonymous reader gets \u2014 and " + "the 302 GitHub answers is followed inside this call, because the signed URL it points at expires in five minutes " + "and a Location kept for a second call would already be dead. Returns the saved `path`, the decoded `bytes`, the " + "`content_type` and the `source_url`. A body over 25MB \u2014 the attachment ceiling \u2014 is refused and nothing is " + "written: `content-length` is checked first and the count is kept as the body streams, so up to the ceiling is held " + "in memory and the read is abandoned at the first chunk past it. A 200 carrying HTML is refused the same way \u2014 a " + "page rather than a document, and a path to it would be a path to a web page. `filename` names the saved file, since " + "an asset URL's last segment is often a generic `default.docx` while the comment shows the name it was attached as. " + "An attachment on a private repository is not measured: no credential is sent, so it comes back refused, and whether " + "GitHub answers a 404 or a page is unknown.";
+var ATTACH_DESCRIPTION = "Upload files to GitHub's attachment store and return a URL and pasteable markdown for each, so an image, a video " + "or a document appears in a comment or an issue body the way it does when a person drags one in \u2014 rather than " + "linked from a branch (`publish_draft`). Every file is checked before any is uploaded: the extension must be one " + `GitHub accepts (${supportedExtensions()}), and an image may be ${IMAGE_LIMIT_BYTES} bytes, a video ${VIDEO_LIMIT_BYTES} ` + `(the server refuses what the plan does not allow), and anything else ${UPLOAD_LIMIT_BYTES}. An empty file, a ` + "directory and a pipe are refused. Only the extension is checked; the bytes are not inspected, so a mislabelled " + "file uploads and renders as what its name says. Returns, per file, `path`, `url`, `markdown` and `contentType`, " + "and the count as `uploaded`. The markdown is `![alt](url)` for an image, `[name](url)` for anything else, and the " + "URL ALONE for a video: markdown has no video syntax and GitHub renders a bare URL as a player only when it is the " + "whole content of a paragraph, so put it on its own paragraph with nothing else in it. An upload cannot be " + "deleted afterwards \u2014 there is no endpoint for it \u2014 so a refused file is an error rather than a skipped one, and " + "a failure part-way returns the URLs already made, so put the files that matter first. Sends the run's GitHub " + "token to two hosts: api.github.com, for the repository's numeric id, and uploads.github.com, where the bytes go. " + `The whole call shares one ${ATTACH_BUDGET_MS}-millisecond budget and takes at most ${MAX_ATTACH_FILES} files, ` + "because a call atoma discards would leave assets that cannot be deleted and return no URL.";
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "publish_draft",
@@ -18392,6 +18717,12 @@ var { tools, dispatch } = buildMcpTools([
     description: FETCH_ATTACHMENT_DESCRIPTION,
     schema: FETCH_ATTACHMENT_SCHEMA,
     handler: fetchAttachment
+  }),
+  defineMcpTool({
+    name: "attach_file",
+    description: ATTACH_DESCRIPTION,
+    schema: ATTACH_SCHEMA,
+    handler: attachFile
   })
 ]);
 async function main() {
@@ -18401,15 +18732,30 @@ if (import.meta.main)
   main();
 export {
   ATTACHMENT_DIR,
+  ATTACH_BUDGET_MS,
+  ATTACH_SCHEMA,
+  ATTACH_TYPES,
   FETCH_ATTACHMENT_SCHEMA,
+  IMAGE_LIMIT_BYTES,
+  MAX_ATTACH_FILES,
   PUBLISH_DRAFT_SCHEMA,
   REQUEST_ABORT_MS,
   UPLOAD_LIMIT_BYTES,
+  VIDEO_LIMIT_BYTES,
+  attachFile,
+  attachTypeFor,
   attachmentPathFor,
   attachmentUrlAllowed,
   attachmentUrlFrom,
   blobUrlFor,
   downloadAttachment,
   indexInfoFor,
-  resolveDraftFiles
+  isSingleImage,
+  markdownFor,
+  repositoryIdFor,
+  resolveAttachFiles,
+  resolveDraftFiles,
+  supportedExtensions,
+  uploadAttachment,
+  uploadRefusal
 };
