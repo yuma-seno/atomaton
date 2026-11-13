@@ -24040,9 +24040,9 @@
     ]
   },
   {
-    "path": "sessions/pr-543/reviewer.json",
+    "path": "sessions/pr-543/archive/reviewer-1.json",
     "agent": "reviewer",
-    "messages": 186,
+    "messages": 188,
     "calls": 119,
     "failed": 1,
     "refused": 0,
@@ -24093,6 +24093,83 @@
           }
         },
         "started": "2026-11-13T13:08:05Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/pr-543/reviewer.json",
+    "agent": "reviewer",
+    "messages": 248,
+    "calls": 172,
+    "failed": 2,
+    "refused": 0,
+    "skills": [
+      "project/conventions",
+      "writing/japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "fetch": 36,
+      "grep": 62,
+      "read": 66,
+      "get_check_runs": 1,
+      "get_issue": 1,
+      "glob": 3,
+      "list": 1,
+      "load_skill": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T13:29:21Z",
+        "ended_because": "failed",
+        "iterations": 62,
+        "messages": 186,
+        "seconds": 1276,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 50,
+            "list": 1,
+            "read": 52
+          },
+          "github": {
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 2,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          },
+          "web": {
+            "fetch": 5
+          }
+        },
+        "started": "2026-11-13T13:08:05Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-13T14:05:46Z",
+        "ended_because": "completed",
+        "iterations": 50,
+        "messages": 248,
+        "seconds": 1788,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 3,
+            "grep": 38,
+            "list": 1,
+            "read": 51
+          },
+          "github": {
+            "get_issue": 1
+          },
+          "web": {
+            "fetch": 34
+          }
+        },
+        "started": "2026-11-13T13:35:58Z"
       }
     ]
   }
