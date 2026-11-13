@@ -191,7 +191,6 @@ var CHANGED_TAG = stringTag("changed", "yes|no");
 var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
-var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
@@ -323,33 +322,6 @@ function parseCommandLine(rawLine) {
     return { ...NOTHING, agent: dispatchMatch[1] };
   return;
 }
-function lineForms(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
-function parseMangledCommand(body) {
-  if (!body)
-    return NOTHING;
-  for (const rawLine of body.split(`
-`)) {
-    for (const form of lineForms(rawLine)) {
-      const parsed = parseCommentCommand(form);
-      if (parsed.agent !== "" || parsed.control !== "")
-        return parsed;
-    }
-  }
-  return NOTHING;
-}
 
 // src/domain/work/actor.ts
 var BOT_TYPE = "Bot";
@@ -421,11 +393,6 @@ var readers = {
   },
   endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
-var askReaders = {
-  ...readers,
-  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
-  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
-};
 var endingWalkReaders = {
   ending: readers.ending,
   quoted: isQuotation,
@@ -475,8 +442,9 @@ function openClaimStopState(repo, number) {
 }
 
 // src/adapters/github/work-tree.ts
-function commentOn(repo, number, body) {
-  return gh("issue", "comment", String(number), "--repo", repo, "--body", body).code === 0;
+function commentOnDetailed(repo, number, body) {
+  const result = gh("issue", "comment", String(number), "--repo", repo, "--body", body);
+  return { ok: result.code === 0, stderr: result.stderr, stdout: result.stdout };
 }
 
 // src/domain/work/closed-target.ts
@@ -571,8 +539,26 @@ function main() {
     console.error(`#${number} has already been asked to stop since the run claimed it. Nothing to add.`);
     return;
   }
-  if (!commentOn(repo, number, stopOnPrCloseBody({ number, merged }))) {
-    console.error(`::error::Could not post the stop request on #${number}`);
+  let posted = commentOnDetailed(repo, number, stopOnPrCloseBody({ number, merged }));
+  if (!posted.ok) {
+    let state2;
+    try {
+      state2 = openClaimStopState(repo, number);
+    } catch (e) {
+      console.error(`::error::Could not re-read the thread on #${number} after a failed stop post: ${e.message}`);
+      process.exit(1);
+    }
+    if (state2.requested) {
+      console.error(`#${number} has a stop newer than its claim, so the run will stop despite the failed post.`);
+      return;
+    }
+    if (looksTransient({ code: 1, stdout: posted.stdout, stderr: posted.stderr })) {
+      console.error(`::warning::the stop post failed transiently, retrying once: ${posted.stderr || posted.stdout}`);
+      posted = commentOnDetailed(repo, number, stopOnPrCloseBody({ number, merged }));
+    }
+  }
+  if (!posted.ok) {
+    console.error(`::error::Could not post the stop request on #${number}: ${posted.stderr || posted.stdout}`);
     process.exit(1);
   }
   console.error(`#${number} was ${merged ? "merged" : "closed"} while a run held it. The run has been asked to stop.`);
