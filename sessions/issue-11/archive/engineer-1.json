@@ -1,0 +1,112 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #11: 採用したリポジトリが最新に追いつく経路がない（通知と取り込み）\n**Labels:** atomaton/waiting-for-person\n\n採用者は、このリポジトリを watch していない限り新しいリリースが出たことに気づけない。取り込みの障壁は「差分を読むのが面倒」より前に**「出たことを知らない」**にある。\n\n## いまあるもの\n\n- **バージョンの記録** — `.github/atomaton-release.json` が `version` と `files[]` を持つ\n- **上流で削除されたファイル** — 同ファイルの `files[]` と `noLongerShipped()` で列挙できる。デプロイ手順が `rm -rf .github` → 展開 → `cp -r self/. .github/` の3行なので、**上流が消したファイルは本当に消える**\n- **このリポジトリ自身の乖離** — `self/` が `.github/` の上書き元になり、契約テストが2方向を固定する（`.github/` の全ファイルが `dist/.github/` か `self/` にあること、`self/X` と `.github/X` がバイト一致すること）。2つ目は「エージェントが `.github/` 側だけ改善して、次の self-deploy で黙って戻される」経路を閉じる\n\n## やること\n\n### B. 新しいリリースが出たことを知らせる\n\nスケジュール実行のワークフローが、`atomaton-release.json` の `version` と最新リリースを比較し、違えば **Issue を1つ立てる／更新する**。必要な権限は `contents: read` と `issues: write` だけで、追加のシークレットは要らない。Issue に載せるもの: 現在のバージョン、最新、その間のリリースノート、取り込むコマンド、**上流で削除されたファイルの一覧**。\n\n### C. 取り込みを1コマンドにする\n\nいま案内しているのはレシピ（手順）で、スクリプトが無い。やること: 指定タグ（既定は最新）の zip を取得して展開、削除されたファイルを報告（消すかは人間が決める）、採用者のものとして扱うパスを触らない、変更を「置き換えて良い生成物」と「両方のもの＝判断が要る」に分けて要約する。\n\n**C の形は先に決める必要がある**: 採用者にも `self/`（自分のものをディレクトリにまとめる）と同じ構造を提供するのか、採用者は git マージのままにするのか。後者なら C は「zip を落として展開し、削除を報告する」だけに縮む。\n\n## 自動 PR について\n\n**`workflow_dispatch` のみ（人間がボタンを押す）／成果物の外（`self/` にあり採用者には配布されない）／エージェントに届かない（ランナーが名前を挙げていないので全ツールサーバから除去され、ジョブ自身も `triggering_actor` がボットなら拒否する）。** 「PR が自分の実行環境を決められない」という線は越えていない。越えるのは「CI が自動で更新 PR を作る」形のほうで、人間が押すボタンは別の話。\n\n技術的な前提は確認済み: **`GITHUB_TOKEN` は `.github/workflows/**` に書けない。パスでもブランチでもなく identity で拒否される**ので、パスを工夫して回避する道は無い。\n\n## 急がない理由\n\nこのリポジトリはドッグフーディングで自分の最新を取り込み続けているので、**上流の変更に気づけない問題がこのリポジトリでは起きない。** 困るのは他の採用者が出てきてからで、それまでは実装が寝ているだけになる。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-11",
+        "author": "yuma-seno",
+        "created_at": "2026-09-27T14:44:02Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n\n#11 の B と C について意見を求める。実装先として「テンプレートリポジトリ」を新設する案が出ており、その設計と、#11 の本文が「C の形は先に決める必要がある」としている論点が重なった。今日このリポジトリで実測した事実を渡すので、判断の材料にしてほしい。\n\n## 実測（今日、このリポジトリで確認した）\n\n- **リリース資産の形**: `releases/latest/download/atomaton-delivery.zip` は安定 URL。中身は `.github/` 直下に 121 エントリで、repo root で展開すれば `.github/` がそのまま入る。`.github/atomaton-release.json` はリリースに同梱され、`version` と 96 パスの `files[]` を持つ\n- **`GITHUB_TOKEN` は `.github/workflows/**` に書けない**（#11 の記載どおり、パスでもブランチでもなく identity で拒否）。同期が workflows を置き換える形なら、**PAT か GitHub App が必須**で、採用者の初期設定に secret が 1 つ増える\n- **`docs/` はリリースに含まれない**。マニフェストのパスは `.github/**` のみ。つまり採用者が受け取る成果物に `docs/setup.md`（8 手順の初期設定）は無く、`.github/atomaton/README.md` はパスの説明だけで手順を持たない\n\n## 提案しているテンプレートの形\n\n```\n.github/                    # 現行リリースで埋める。以後は同期が置き換える\n  workflows/atomaton-*.yml  # リリースが運ぶ 8 本\n  workflows/sync-upstream.yml  # ここ固有。リリースに含まれないので生き残る\n  atomaton/                 # config.yaml, prompt-template.md, skills/ ...\nREADME.md / README.ja.md    # 説明と初期設定（多言語）\n```\n\n同期ワークフローは `schedule` + `workflow_dispatch` で latest を検知し、`.github/atomaton-release.json` の `version` と比較 → 違えば zip を展開し、`files[]` と突き合わせて上流が消したパスを列挙し、**PR を開く**（自動マージしない）。採用者はこの repo を「Use this template」で複製して使う。\n\n## 意見を求めたい論点\n\n1. **C の形**。採用者にも `self/` 相当（自分のものをディレクトリにまとめ、同期はそこに触れない）を提供するか、git マージのままにするか。#11 本文が「先に決める必要がある」としている当のもので、上のテンプレート案は前者を暗に前提している\n2. **同期が PR を開くこと**。#11 の「自動 PR について」は `workflow_dispatch` のみ・成果物の外・エージェントに届かない、を条件に線を越えないとしている。`schedule` 起点で PR を開く形はこの線のどちら側か。人が押すボタンと、スケジュールで動くものは同じ扱いでよいか\n3. **初期設定の手順書が成果物に無い問題**。README に置く（テンプレート repo にしか存在しない）か、`docs/setup.md` を配布対象に加える（成果物側の修正）か\n4. **テンプレート repo 自身の `.github/`** をどう保つか。現行リリースを入れておく（複製した瞬間から動く）／空にして初回同期で埋める（常にその時の latest が入る）／自身も同期を回す（テンプレートが常に最新を配る）\n\nB（通知）だけなら `contents: read` と `issues: write` で済むという #11 の記載は、同期が workflows を書くなら成り立たない（C を同じワークフローに載せる場合）。B と C を分けるべきかもあわせて意見がほしい。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6230562132,
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T06:13:24Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "（この /atomaton は機構の停止中に投稿され、run が起動しませんでした。あらためてコメントで再送します。）\n",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6230761251,
+        "author": "yuma-seno",
+        "created_at": "2026-10-17T06:37:40Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n再送します。上の依頼（#11 の B と C についての意見を求める件、テンプレートリポジトリ案との重なり）を続けてください。\n",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6257689820,
+        "author": "yuma-seno",
+        "created_at": "2026-10-19T01:26:07Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "<!-- atomaton:ended=done -->\n結論から:4点すべてについて、**テンプレート案は概ね正しい方向ですが、1点だけ「.github/ を同期が置き換える」という前提を修正すべき**です。置き換えの単位はディレクトリではなくリリースマニフェスト(`files[]`)にしてください。そうすると「self/相当を配るか、git マージのままか」という二択は実は第三の形に解けます。以下、順に。\n\n## 1. C の形 — マニフェスト駆動の選択置換(self/相当は配らない)\n\nこのリポジトリはすでにこの問いに答えを持っています。`docs/runtime/boundaries.md:17-22` の所有権テーブルが3行で:\n\n| 行 | パス | 扱い |\n|---|---|---|\n| 生成物 | `.github/atomaton-runtime/**`, `.github/workflows/**` | 全体置換 |\n| 採用者のもの | `config.yaml`, `skills/project/**` | 触らない |\n| 両方 | `agent-definitions/**`, `prompt-template.md`, `rulesets/**`, `skills/**` | デフォルトを出荷、チューニングも期待 |\n\nそして `docs/runtime/tasks/move-to-a-newer-release.md:3-13` の現行レシピは「vendor として git diff で判断」、`:43-47` は「 customization は config.yaml と skills/project/ に置け」と教えています。#11 の C の仕様(「採用者のものとして扱うパスを触らない」「置き換えて良い生成物」と「両方のもの」に分けて要約)は、このテーブルをそのまま機械化した記述になっています。つまり **C の仕様は既にこの第三の形を書いていて、テンプレート案の「.github/ 全体を同期が置き換える」はそれを崩している**。\n\n推奨する置換ルール:\n\n- **置き換える**: 新マニフェストの `files[]` のうち生成物ルート(`atomaton-runtime/**`, `workflows/**`)にあるもの\n- **触らない**: マニフェストにないパス — ここに `sync-upstream.yml` も採用者自身のワークフローも入る。「リリースが同名ファイルを持たないので生き残る」という現行案の前提は偶然の shadowing で、上流がある日同名を出荷すると静かに上書きされます。マニフェスト基準なら規則で生き残る\n- **書かない**: `config.yaml` と `skills/project/**` — ただし上流側の config.yaml が変わったら **差分を報告のみ**(書かないと新キーが採用者から不可視になるため)\n- **PR に載せる**: 「Both」行の更新。採用者が手を入れたファイルだけがマージ時に衝突し、それがまさに「判断が要る」集合。判断の場所は PR レビューになる\n- **報告**: 旧マニフェスト vs 新マニフェストの差分が「上流が消したファイル」(`src/domain/machinery/release-manifest.ts:64` の `noLongerShipped()` と同型の計算で、書き込み権限不要)\n\nこうすると採用者に新しいルートディレクトリもオーバーレイ契約も移植不要で、今の docs の二root原則(`.github/atomaton/` は採用者、`atomaton-runtime/` は上流)がそのまま正であり続けます。**「self/相当を提供するか」への答えは「提供しない」** — 確定性はオーバーレイでなくマニフェスト規則から得られます。\n\n## 2. schedule 起点の PR — 線の「理由」からは内側。ただし理由で判定すること\n\n#11 が線を引いた実質は「**人がいないまま何も着地しないこと**」と「**agent の実行基盤を、その基盤が動かす機構が書き換えられないこと**」です。schedule で動いて PR を開いて止まるジョブは、マージが人間に gate されている限り両方を満たします。Issue を立てる B と同じ行為(PR も issue も、マージされるまで何も着地させない)なので、整合的です。\n\nボタンと schedule を同じ扱いにしてよいか: **着地の瞬間については同じ、それ以前は違う**。違う部分を埋めるのが次の3つの保証で、テンプレの docs に明記すべきものです:\n\n1. **自動マージを一切持たない**(チェックが緑でも)。merge の gate は採用者のブランチ保護(`.github/**` を対象に、このリポジトリと同じ merge gates の構造)\n2. **同期トークンは PR を開けるだけの権限**(`contents:write` + `pull-requests:write`)。ただし実測のとおり workflows を書くのに PAT/App が必須なので、トークン種別では守れない — 守りは1のブランチ保護に置く\n3. **`triggering_actor` が bot なら拒否**するガードは採用者側にも残す(defense-in-depth。agent が dispatch できても開けるのは PR だけで、それは gate を通れない)\n\n## 3. 手順書 — テンプレ README へ。成果物には入れない\n\n構造的な理由が2つあります。初期設定手順は sync ワークフローと secret という**テンプレにしか存在しないファイルを参照する**ので、成果物に入れると「自身が含まないファイルの手順」を配ることになる(`.github/` だけ手動コピーする人に対して自己矛盾)。もう一つは、成果物の契約が「`.github/` に落ちてくるもの」単独である方が、マニフェストの root 契約が単純なまま保てる点。`docs/setup.md` は上流側の正(canonical)のまま、テンプレ README はテンプレの journey を書いて上流 docs にリンク。\n\n手動コピー経路の「更新どうすれば」の隙間は、**B の通知 Issue がまさにその時に手順を届ける装置**です(B がコマンドを載せる仕様は #11 に既にある)。なので成果物側の修正は `.github/atomaton/README.md` への2行のポインタで足りるかと思います。\n\n## 4. テンプレ自身の .github/ — 現行リリースで埋める + テンプレ自身も同期を回す\n\n- **空にする案は成立しません**: Actions は `.github/workflows/` しか読まず、sync ワークフロー自身が空の `.github/` からは起動できない。bootstrap 用の手動ステップが要り、その代償に割に合うのは「clone 時点で最新」だけですが、それは(c)が継続的に与えます\n- **(a)+(c) を推奨**: clone した瞬間から動き、テンプレが**自分の配るものと同じ同期機構を自分で回す** — 動かなければ採用者が遭遇する前に壊れ方が分かる。テンプレは最初の採用者です\n- **順序の注意**: 本日このリポジトリに scheduled ワークフローは1本もありません(`.github/workflows/` を grep して `schedule:`/`cron:` の一致なし)。つまり B も C も無い状態でテンプレを作ると、「複製した瞬間から動く」中身が**更新経路の無い凍結コピー**になり、#11 が存在する理由そのものを配布することになる。**テンプレ新設は B+C の着陸後**に。\n\n## 5. B と C は分ける。B は今、出せる\n\n- **B 単体**: `GITHUB_TOKEN` + `issues:write` + `contents:read`、secret 追加ゼロ、schedule 1本。テンプレ不要で、このリポジトリの成果物に今入れられる(このリポジトリでは dogfooding により常に no-op)。次のリリースに乗れば、一度でも手動更新した採用者は以後通知を受け取る。#11 の権限記述が文字通り成立するのは B だけ\n- **C(同期)**: workflows を書くので PAT/App が必須(実測の identity 拒否)。テンプレと一緒に initial setup に secret 1つとして載せる\n- 同じワークフローに載せると、B が secret 要件を貰ってテンプレまで何も出せなくなる。**B が引き金、C が動作** — 通知 Issue が C の入口(dispatch リンクとコマンド)を載せる構成で合成し、entangle しない\n\n---\n\n**根拠**: `docs/runtime/boundaries.md:17-22`(所有権3行テーブル)、`docs/runtime/tasks/move-to-a-newer-release.md:7-13`(現行 vendor レシピ)と `:26-38`(manifest で削除検出する既存の `comm` レシピ)、`src/domain/machinery/release-manifest.ts:64`(`noLongerShipped`)、`.github/atomaton-release.json:2`(現行 `v0.21.7`)、`self/` の中身は `atomaton/` と `workflows/` のみ(上流のオーバーレイが狭いことの確認)、`.github/workflows/` に schedule なし(B 未実装の確認)、#11 本文の3条件と「急がない理由」。\n\n**確かめられなかったこと**: テンプレートリポジトリは実在しないので、「Use this template → 同期 → PR」の実流れは一度も実行されていません。また採用者リポジトリでの `GITHUB_TOKEN` による workflows 書き込み拒否は、このリポジトリでの実測(ご指摘のもの)をそのまま引き受けており、別リポジトリ条件での再測はしていません。\n\n**次に起きること**: 何も dispatch していません。ご判断用の材料です。採用いただけるなら、自然な分解は (1) B をこのリポジトリに実装する1 issue(ワークフロー1本+スクリプト、権限 `issues:write` のみ)、(2) テンプレ設計+マニフェスト置換スクリプトを1 issue — の2本で、どちらもご指示をいただいてから立てます。\n\n\n\n---\n_Tokens: 212477 total (194162 prompt + 18315 completion, 101824 of the prompt cached)_\n@yuma-seno — **atomaton** task completed. No agent will be automatically executed next. Please review the results or provide instructions for the next step.\n\n---\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/39185340270) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6257778055,
+        "author": "github-actions[bot]",
+        "created_at": "2026-10-19T01:34:41Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n少し話が複雑になりすぎてる。一度簡潔にまとめて欲しい、",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6653296834,
+        "author": "yuma-seno",
+        "created_at": "2026-11-05T08:24:38Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "要点だけに絞ります。\n\n**推奨まとめ(5行)**\n\n1. **C の形**: `self/` 相当は配らない。「新マニフェストの `files[]` かつ生成物ルート(`atomaton-runtime/**`, `workflows/**`)は置換、`config.yaml` と `skills/project/**` は触らない、それ以外は PR に載せてレビュー」という3行ルールで解決。テンプレ案の「`.github/` 全体置換」は、`sync-upstream.yml` が生き残るのが同名ファイルの偶然(shadowing)になるのが唯一の弱点。\n2. **schedule で PR を開く**: 問題なし。着地は人間のマージで gate される限り、Issue を立てる B と同じ行為。条件は「自動マージなし+ブランチ保護」だけ。\n3. **手順書**: テンプレ README に置く。成果物には手順を入れない(含まないファイルの手順を配ることになる)。B の通知 Issue がコマンドを届ける役。\n4. **テンプレの `.github/`**: 現行リリースで埋めておき、テンプレ自身も同期を回す(テンプレが最初の採用者)。\n5. **B と C は分ける**: B は secret 不要で今このリポジトリから出せる。C は PAT/App 必須なのでテンプレと一緒。順序は **B → C**。\n\n**テンプレ新設は B+C が着陸してから。** このリポジトリには今 schedule のワークフローが1本も無く、B+C 無しのテンプレは「更新経路の無い凍結コピー」を配ることになる。\n\n何も dispatch していません。この方針で良ければ、B の実装(ワークフロー1本)だけ先に `/engineer` へ出します。\n\n\n@yuma-seno — **atomaton** task completed. No agent will be automatically executed next. Please review the results or provide instructions for the next step.\n\n---\n_Tokens: 32926 total (32239 prompt + 687 completion, 17920 of the prompt cached)_\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/41994244751) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6653317416,
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-05T08:25:46Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\n#11 の **B(通知)だけ**を先に実装してください。C(取り込みの 1 コマンド化)とテンプレートリポジトリは今回のスコープ外です——「採用者が出てきてから検討する」という判断で保留し、その判断は PR 合流後にこの Issue の close コメントへ明記します。上のスレッドにある「マニフェスト駆動の選択置換」やテンプレート案の設計は今回実装しません。\n\n## スコープ(B だけ)\n\n- スケジュール(`schedule`)と `workflow_dispatch`(人が押せる)で動くワークフロー 1 本。このリポジトリの既存の `.wac.ts` 作法で書くこと。\n- 手元の `.github/atomaton-release.json` の `version` と、GitHub の最新リリースの tag を比較。\n- **一致すれば静かに終了**(このリポジトリは self-deploy で常に一致するので、通常は何も起きないのが正しい状態)。\n- 違えば**通知 Issue を 1 つ開く/更新する**(既存の通知 Issue が開いていればそれを更新し、開いた Issue を無限に増やさない)。内容:\n  - 手元の version と最新の tag\n  - その間のリリースノート(各リリースの本文。長すぎる場合は冒頭のみ)\n  - 取り込み手順の案内(既存の `docs/runtime/tasks/move-to-a-newer-release.md` へのリンク。C は無いので現行レシピのまま)\n  - 上流で削除されたファイルの一覧(手元の `files[]` と最新リリースに同梱されるマニフェストの `files[]` の差分。既存の `noLongerShipped()` 相当があれば流用)\n- 権限は `contents: read` と `issues: write` のみ。**secret を 1 つも増やさない**。\n- タグとワークフローの命名は既存の規約に従うこと。\n\n## 判断が要る点(あなたの判断で決めて良い)\n\n- `schedule` の頻度(既存運用に合わせる)\n- リリースノートの取得と整形の方法\n- 削除ファイル一覧の計算の実装場所(既存モジュールの流用か新規か)\n\n## 検証\n\n- ワークフローが手元の構成で合成(synth)され、contract テストが通ること。\n- 「一致するなら何もしない」「違うなら Issue が開く/更新される」を fake-gh で固定すること。\n",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 6860162516,
+        "author": "yuma-seno",
+        "created_at": "2026-11-13T17:28:19Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "053c4d642b602c1e7d0378b5e5166bd143cd04ba86e5c9e80e72d35b2ffc76bb",
+      "event_count": 8,
+      "agent": "engineer"
+    }
+  }
+}
