@@ -9,12 +9,21 @@
  *     server (and every script THEY spawn in turn) resolves `gh` to this
  *     file instead of the real CLI.
  *
- *   FAKE_GH_RESPONSES = JSON array of { match: string[]; stdout?: string; code?: number }.
+ *   FAKE_GH_RESPONSES = JSON array of { match: string[]; stdout?: string; code?: number; writes?: {name,from}[] }.
  *     A rule matches a real invocation when EVERY string in `match` is a
  *     substring of at least one argv element (order-independent, and works
  *     for combined tokens like "repos/owner/repo/issues/5"). The first
  *     matching rule (in array order) wins -- list more specific rules
  *     first when multiple calls could otherwise collide.
+ *
+ *     `writes` is for the subcommands that put a FILE on disk rather than an
+ *     answer on stdout -- `gh release download` is the one today. Each entry
+ *     copies `from` (a path the fixture made) to `name` inside the directory
+ *     named by `-D`, or inside the current directory when there is no `-D`.
+ *     It exists because a rule can only carry text, and an asset is bytes: a
+ *     fixture for "read this out of the release's zip" needs a real zip, and
+ *     generating one from a string in `stdout` would test a decoder against a
+ *     picture of itself.
  *   FAKE_GH_LOG = path this appends one JSON line (the full argv array) to
  *     per invocation, so tests can assert on exact commands issued (e.g.
  *     the body of a posted comment), not just the script's own stdout.
@@ -46,6 +55,7 @@ interface Rule {
   stdout?: string;
   code?: number;
   attempt?: number;
+  writes?: { name: string; from: string }[];
 }
 
 const rules: Rule[] = process.env.FAKE_GH_RESPONSES ? JSON.parse(process.env.FAKE_GH_RESPONSES) : [];
@@ -112,6 +122,14 @@ if (bogus) {
 
 const found = rules.find(matches);
 if (found) {
+  if (found.writes?.length) {
+    const { copyFileSync, mkdirSync } = await import("node:fs");
+    const { join, resolve } = await import("node:path");
+    const dirAt = args.indexOf("-D");
+    const into = resolve(dirAt === -1 ? "." : (args[dirAt + 1] ?? "."));
+    mkdirSync(into, { recursive: true });
+    for (const file of found.writes) copyFileSync(file.from, join(into, file.name));
+  }
   console.log(found.stdout ?? "");
   process.exit(found.code ?? 0);
 }

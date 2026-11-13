@@ -9,7 +9,11 @@
  * documented upgrade (`docs/runtime/tasks/move-to-a-newer-release.md`) starts with
  * `gh release download` — so the barrier is not the diff, it is not knowing there
  * is anything to download. This is the announcement, and it is the whole of it:
- * nothing is fetched, unpacked or written into the tree from here.
+ * nothing is written into the tree from here.
+ *
+ * It does download the release's asset, into a temporary directory it then deletes,
+ * to read the manifest inside it. That is the only way to learn what the release
+ * dropped — see `upstreamManifest`. What it never does is apply the release.
  *
  * ## The two versions, and which repository each comes from
  *
@@ -38,13 +42,17 @@
  *
  * It never writes `.github/`. The deleted-file list is a list to read: the paths
  * on it are the release's own, but which of them the owner wants gone is theirs,
- * and `unzip -o` never deletes anyway. The settle-by-close above is the one write
- * that is not about a release, and it can only close an issue this script opened.
+ * and `unzip -o` never deletes anyway. The asset it reads that list out of is
+ * downloaded to a temp directory and removed again, so nothing of the release lands
+ * in the tree. The settle-by-close above is the one write that is not about a
+ * release, and it can only close an issue this script opened.
  *
  * Usage:
  *   notify_new_release.ts --repo OWNER/REPO   (or set GITHUB_REPOSITORY)
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
 import { machineryPath } from "../../adapters/runner/machinery.ts";
@@ -67,6 +75,15 @@ export const ref = defineScript<NotifyNewReleaseArgs>(import.meta.url);
  * adopted tree reaches upstream by name, and the name is what it is.
  */
 export const UPSTREAM_REPOSITORY = "yuma-seno/atomaton";
+
+/**
+ * The release asset, as `self/atomaton/scripts/publish-release.sh` names it.
+ *
+ * A fixed name rather than one carrying the version: that is what makes
+ * `releases/latest/download/atomaton-delivery.zip` a stable URL, and the version is
+ * carried by the release itself.
+ */
+export const ASSET_NAME = "atomaton-delivery.zip";
 
 /** Where the recipe the notice points at lives, as an adopter can reach it. */
 const UPGRADE_DOC = `https://github.com/${UPSTREAM_REPOSITORY}/blob/main/docs/runtime/tasks/move-to-a-newer-release.md`;
@@ -176,9 +193,9 @@ export function noticeBody(input: NoticeInput): string {
     "Nothing has been changed for you: this is a notice, and the upgrade is a decision.",
     "",
     "```bash",
-    `gh release download ${input.latestVersion} -R ${UPSTREAM_REPOSITORY} -p atomaton-delivery.zip`,
-    "unzip -o atomaton-delivery.zip   # the archive holds .github/, so run this at the repository root",
-    "rm atomaton-delivery.zip",
+    `gh release download ${input.latestVersion} -R ${UPSTREAM_REPOSITORY} -p ${ASSET_NAME}`,
+    `unzip -o ${ASSET_NAME}   # the archive holds .github/, so run this at the repository root`,
+    `rm ${ASSET_NAME}`,
     "git diff .github/                # every difference is now a decision",
     "```",
     "",
@@ -195,9 +212,9 @@ export function noticeBody(input: NoticeInput): string {
   } else {
     lines.push(
       "Extracting never deletes, so these stay in the tree unless somebody removes them.",
-      "The list comes from the previous release's own manifest rather than from your tree, so",
-      "nothing you wrote is on it — but a path here can still be one you edited on purpose, and",
-      "that is the judgement to make before deleting.",
+      "The list is the difference between your release's manifest and the one inside the",
+      "release above, so nothing you wrote is on it — but a path here can still be one you",
+      "edited on purpose, and that is the judgement to make before deleting.",
       "",
       ...input.removed.map((path) => `- \`${path}\``),
     );
@@ -314,51 +331,111 @@ function releaseNotes(): ReleaseNote[] | null {
 }
 
 /**
- * The manifest the latest release shipped, or null.
+ * The manifest the released ASSET carries, or null.
  *
- * Read from the repository at that tag rather than out of the zip: the asset is a
- * download and an unpack for one JSON file, and the file is the same file.
+ * ## Not the copy committed at the tag
+ *
+ * That copy is this repository's own deployed `.github/`, written by the previous
+ * release and committed by the self-deploy pull request. So the tree at `vX` serves
+ * the manifest naming `v(X-1)` — measured here, where `v0.21.74`'s tree holds
+ * `"version": "v0.21.73"`. Reading it made the deletion list answer "what my release
+ * shipped that the previous one did not", which is the opposite question: the paths
+ * the announced release itself dropped are already in the previous list, so
+ * `noLongerShipped` filtered them out and the section the release exists for showed
+ * a plausible, shorter list. Silent, because a list that is merely incomplete reads
+ * exactly like a complete one.
+ *
+ * ## Why the zip, and why through a file
+ *
+ * The manifest inside the asset is built from `package.json` at build time
+ * (`src/build-dist.ts`) and `publish-release.sh` refuses to publish unless the tag
+ * equals that version, so it is the one copy that cannot lag. `gh` decodes stdout as
+ * UTF-8 and trims it — `ghBytes` exists for precisely this — so the asset is written
+ * into a directory and one member is printed out of it, rather than piped.
  */
 function upstreamManifest(tag: string): ReleaseManifest | null {
-  const result = ghRead(
-    "api",
-    "-H",
-    "Accept: application/vnd.github.raw",
-    `repos/${UPSTREAM_REPOSITORY}/contents/${RELEASE_MANIFEST}?ref=${tag}`,
-  );
-  if (result.code !== 0) {
-    log(`WARN could not read ${RELEASE_MANIFEST} at ${tag}: ${result.stderr.trim() || `gh exited ${result.code}`}`);
-    return null;
-  }
+  const dir = mkdtempSync(join(tmpdir(), "atomaton-release-"));
   try {
-    const parsed = JSON.parse(result.stdout) as Partial<ReleaseManifest>;
+    const asset = join(dir, ASSET_NAME);
+    const downloaded = ghRead(
+      "release", "download", tag, "-R", UPSTREAM_REPOSITORY, "-p", ASSET_NAME, "-D", dir,
+    );
+    if (downloaded.code !== 0) {
+      log(
+        `WARN could not download ${tag}'s ${ASSET_NAME}: ${downloaded.stderr.trim() || `gh exited ${downloaded.code}`}`,
+      );
+      return null;
+    }
+    if (!existsSync(asset)) {
+      log(`WARN ${tag}'s download reported success but left no ${ASSET_NAME}`);
+      return null;
+    }
+
+    // `unzip -p` reads one member to stdout, so nothing is extracted onto the disk
+    // that this run would then have to trust. It is present on the runner image this
+    // workflow uses; a missing binary is a null like any other read failure.
+    let printed: { code: number; stdout: string; stderr: string };
+    try {
+      const proc = Bun.spawnSync({ cmd: ["unzip", "-p", asset, RELEASE_MANIFEST], stdout: "pipe", stderr: "pipe" });
+      printed = {
+        code: proc.exitCode ?? 1,
+        stdout: proc.stdout?.toString("utf8") ?? "",
+        stderr: proc.stderr?.toString("utf8") ?? "",
+      };
+    } catch (error) {
+      log(`WARN could not run unzip on ${tag}'s ${ASSET_NAME}: ${(error as Error).message}`);
+      return null;
+    }
+    if (printed.code !== 0) {
+      log(`WARN ${tag}'s ${ASSET_NAME} holds no readable ${RELEASE_MANIFEST}: ${printed.stderr.trim()}`);
+      return null;
+    }
+
+    const parsed = JSON.parse(printed.stdout) as Partial<ReleaseManifest>;
     if (!Array.isArray(parsed.files)) {
-      log(`WARN ${RELEASE_MANIFEST} at ${tag} holds no file list`);
+      log(`WARN ${RELEASE_MANIFEST} in ${tag}'s ${ASSET_NAME} holds no file list`);
       return null;
     }
     return { version: String(parsed.version ?? tag), files: parsed.files.map(String) };
-  } catch {
-    log(`WARN ${RELEASE_MANIFEST} at ${tag} was not valid JSON`);
+  } catch (error) {
+    log(`WARN could not read ${RELEASE_MANIFEST} out of ${tag}'s ${ASSET_NAME}: ${(error as Error).message}`);
     return null;
+  } finally {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch {
+      // The OS owns a temp directory it will not let go of.
+    }
   }
 }
 
 /**
  * The open notice's number, `0` for none, or null when the list could not be read.
  *
- * The query is the title's own words, and the marker is then checked in the body
- * here rather than through the search index. Title words are certainly indexed; a
- * hidden HTML comment is not something this can be sure of from here, and a query
- * the index does not match would leave this run opening a fresh notice every day —
- * the one failure that compounds. Checking the body in TypeScript makes the other
- * direction safe too: an issue whose title happens to match, and which no run of
- * this wrote, is not edited.
+ * ## Why the marker is checked here rather than searched for
+ *
+ * The query is the title's own words, and the marker is then checked in the body in
+ * TypeScript. Title words are certainly indexed; a hidden HTML comment is not
+ * something this can be sure of from here, and a query the index does not match
+ * would leave this run opening a fresh notice every day — the one failure that
+ * compounds. Checking the body makes the other direction safe too: an issue whose
+ * title happens to match, and which no run of this wrote, is not edited.
+ *
+ * ## Why the state is filtered here too
+ *
+ * `--state open` is passed, and the answer is held to it again below. Whether `gh`
+ * applies a state filter when `--search` is alongside it is not something this
+ * repository can measure — the fake `gh` matches argv and has no search API — and
+ * getting it wrong is expensive in one direction: a CLOSED notice read as open would
+ * be edited every day instead of a new one being opened after the owner closed it.
+ * So the request asks for `state` and the answer is filtered on it, which is correct
+ * whichever way the flag behaves.
  */
 function existingNotice(repo: string): number | null {
   const result = ghRead(
     "issue", "list", "--repo", repo, "--state", "open",
     "--search", `"Template release" in:title`,
-    "--json", "number,body",
+    "--json", "number,body,state",
   );
   if (result.code !== 0) {
     log(`WARN could not look for an existing notice in ${repo}: ${result.stderr.trim() || `gh exited ${result.code}`}`);
@@ -376,8 +453,14 @@ function existingNotice(repo: string): number | null {
     return null;
   }
   const found = parsed.find((entry) => {
-    const issue = entry as { number?: unknown; body?: unknown };
-    return typeof issue.body === "string" && issue.body.includes(NOTICE_MARKER);
+    const issue = entry as { number?: unknown; body?: unknown; state?: unknown };
+    // `state` absent is left to the server's own filter; present and not open is
+    // not a notice this run may touch.
+    return (
+      typeof issue.body === "string" &&
+      issue.body.includes(NOTICE_MARKER) &&
+      (issue.state === undefined || issue.state === "OPEN")
+    );
   }) as { number?: unknown } | undefined;
   const number = Number(found?.number ?? 0);
   return Number.isInteger(number) && number > 0 ? number : 0;
@@ -454,7 +537,7 @@ function main(): void {
     window: notes === null ? null : releaseWindow(notes, local.manifest.version),
     windowWhy: `the release list could not be read.`,
     removed: shipped === null ? null : noLongerShipped(shipped, local.manifest.files),
-    removedWhy: `${RELEASE_MANIFEST} could not be read at ${latest.tag}.`,
+    removedWhy: `${RELEASE_MANIFEST} could not be read out of ${latest.tag}'s release asset.`,
   };
 
   const title = noticeTitle(input);

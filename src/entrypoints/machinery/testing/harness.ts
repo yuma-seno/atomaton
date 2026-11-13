@@ -33,6 +33,14 @@ export interface FakeGhRule {
    * writes one rule per attempt.
    */
   attempt?: number;
+  /**
+   * Files this rule puts on disk, for a subcommand that downloads rather than answers.
+   *
+   * `gh release download` writes an asset and prints nothing useful, so a fixture for
+   * a caller that reads inside that asset cannot be built out of `stdout` alone. Each
+   * entry is copied to `name` in the directory `-D` names (or the working directory).
+   */
+  writes?: { name: string; from: string }[];
 }
 
 export interface RunWithFakeGhResult {
