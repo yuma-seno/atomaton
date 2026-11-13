@@ -21402,8 +21402,8 @@
   {
     "path": "sessions/issue-489/reviewer.json",
     "agent": "reviewer",
-    "messages": 138,
-    "calls": 79,
+    "messages": 228,
+    "calls": 136,
     "failed": 2,
     "refused": 0,
     "skills": [
@@ -21415,16 +21415,17 @@
       "load_skill": 2,
       "get_pr_diff": 1,
       "get_pr": 1,
-      "read": 36,
+      "read": 55,
       "list": 1,
       "glob": 3,
-      "grep": 26,
-      "fetch": 3,
-      "get_check_runs": 2,
+      "grep": 55,
+      "fetch": 5,
+      "get_check_runs": 3,
       "get_pr_reviews": 1,
       "get_issue_comments": 1,
-      "check_merge_readiness": 1,
-      "merge_pr": 1
+      "check_merge_readiness": 2,
+      "merge_pr": 1,
+      "search_code": 5
     },
     "acts": {},
     "runs": [
@@ -21497,6 +21498,31 @@
           }
         },
         "started": "2026-11-13T04:45:43Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T09:08:55Z",
+        "ended_because": "completed",
+        "iterations": 27,
+        "messages": 228,
+        "seconds": 737,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 29,
+            "read": 19
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1
+          },
+          "search": {
+            "search_code": 5
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-13T08:56:38Z"
       }
     ]
   },
