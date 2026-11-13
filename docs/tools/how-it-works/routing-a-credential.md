@@ -16,6 +16,14 @@ rather than inheriting it. `github`, `search`, `atomaton`, `attachments` and
 `atomaton_env` reach GitHub's API; the declaration on each is what keeps the same
 token out of `shell`.
 
+Declaring it and spending it are two decisions. Within `attachments`, only
+`attach_file` sends the token, and it sends it to two hosts: `api.github.com`, to
+read the repository's numeric id, and `uploads.github.com`, where the bytes go —
+the endpoint GitHub CLI's own `--attach` posts to. The other two tools there are
+`fetch_attachment`, which reads anonymously, and `publish_draft`, which uses the
+credential already in the checkout's `.git/config`. Each tool's description says
+which it is.
+
 ## Which layer decides what
 
 | Layer | Decides |
