@@ -282,6 +282,82 @@
     "runs": []
   },
   {
+    "path": "sessions/issue-11/archive/engineer-2.json",
+    "agent": "engineer",
+    "messages": 366,
+    "calls": 189,
+    "failed": 6,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "read": 33,
+      "bash": 112,
+      "write": 6,
+      "edit": 32,
+      "commit_and_push": 2,
+      "create_pr": 2,
+      "fetch": 2
+    },
+    "acts": {
+      "other": 100,
+      "edit": 12
+    },
+    "runs": [
+      {
+        "compactions": 1,
+        "ended": "2026-11-13T18:15:14Z",
+        "ended_because": "completed",
+        "iterations": 129,
+        "messages": 185,
+        "seconds": 2757,
+        "server_calls": {
+          "files": {
+            "edit": 16,
+            "grep": 2,
+            "list": 12,
+            "read": 75,
+            "write": 5
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1
+          },
+          "shell": {
+            "bash": 75
+          }
+        },
+        "started": "2026-11-13T17:29:17Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T19:13:55Z",
+        "ended_because": "completed",
+        "iterations": 76,
+        "messages": 362,
+        "seconds": 1216,
+        "server_calls": {
+          "files": {
+            "edit": 16,
+            "read": 8,
+            "write": 1
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1
+          },
+          "shell": {
+            "bash": 60
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-13T18:53:39Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-11/atomaton.json",
     "agent": "atomaton",
     "messages": 34,
@@ -362,24 +438,30 @@
   {
     "path": "sessions/issue-11/engineer.json",
     "agent": "engineer",
-    "messages": 362,
-    "calls": 189,
-    "failed": 6,
+    "messages": 215,
+    "calls": 115,
+    "failed": 5,
     "refused": 0,
-    "skills": [],
+    "skills": [
+      "writing/japanese"
+    ],
     "reported": true,
     "tools": {
-      "read": 33,
-      "bash": 112,
-      "write": 6,
-      "edit": 32,
-      "commit_and_push": 2,
-      "create_pr": 2,
-      "fetch": 2
+      "bash": 80,
+      "read": 9,
+      "fetch": 2,
+      "edit": 16,
+      "write": 1,
+      "commit_and_push": 1,
+      "create_pr": 1,
+      "load_skill": 1,
+      "get_issue": 1,
+      "get_issue_comments": 2,
+      "request_close_issue": 1
     },
     "acts": {
-      "other": 100,
-      "edit": 12
+      "other": 70,
+      "edit": 10
     },
     "runs": [
       {
@@ -432,6 +514,30 @@
           }
         },
         "started": "2026-11-13T18:53:39Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-13T19:38:38Z",
+        "ended_because": "completed",
+        "iterations": 17,
+        "messages": 215,
+        "seconds": 338,
+        "server_calls": {
+          "atomaton_env": {
+            "request_close_issue": 1
+          },
+          "files": {
+            "read": 1
+          },
+          "github": {
+            "get_issue": 1,
+            "get_issue_comments": 2
+          },
+          "shell": {
+            "bash": 20
+          }
+        },
+        "started": "2026-11-13T19:33:00Z"
       }
     ]
   },
