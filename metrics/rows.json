@@ -21153,23 +21153,27 @@
   {
     "path": "sessions/issue-489/reviewer.json",
     "agent": "reviewer",
-    "messages": 74,
-    "calls": 39,
+    "messages": 103,
+    "calls": 57,
     "failed": 2,
     "refused": 0,
     "skills": [
-      "project/conventions"
+      "project/conventions",
+      "writing/japanese"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
-      "load_skill": 1,
+      "load_skill": 2,
       "get_pr_diff": 1,
       "get_pr": 1,
-      "read": 20,
+      "read": 24,
       "list": 1,
       "glob": 3,
-      "grep": 11,
-      "fetch": 1
+      "grep": 20,
+      "fetch": 2,
+      "get_check_runs": 1,
+      "get_pr_reviews": 1,
+      "get_issue_comments": 1
     },
     "acts": {},
     "runs": [
@@ -21196,6 +21200,29 @@
           }
         },
         "started": "2026-11-13T03:55:15Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T04:38:33Z",
+        "ended_because": "completed",
+        "iterations": 9,
+        "messages": 103,
+        "seconds": 348,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 9,
+            "read": 4
+          },
+          "github": {
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr_reviews": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-13T04:32:45Z"
       }
     ]
   },
