@@ -136,7 +136,7 @@ jobs:
           CLOSED_NUM: ${{ needs.parse.outputs.parent_issue }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/aggregate_sub_issues.ts" --repo "${OWNER}/${REPO}" --parent "${PARENT}" --closed-num "${CLOSED_NUM}"
-  dispatch-rejected:
+  notify-rejected:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -150,7 +150,7 @@ jobs:
         with:
           bun-version: 1.4.2
         uses: oven-sh/setup-bun@v2
-      - name: Return the close to the origin agent as a rejection
+      - name: Tell a person the pull request was closed without merging
         id: rejected
         shell: bash
         env:
@@ -160,8 +160,9 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
+          CLOSER: ${{ github.actor }}
         run: |
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_rejected.ts"
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/notify_pr_rejected.ts"
   stop-run:
     runs-on: ubuntu-latest
     timeout-minutes: 5

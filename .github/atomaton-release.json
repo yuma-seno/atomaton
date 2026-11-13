@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.73",
+  "version": "v0.21.74",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -14,7 +14,6 @@
     ".github/atomaton-runtime/scripts/dispatch_new_tags.ts",
     ".github/atomaton-runtime/scripts/dispatch_post_merge.ts",
     ".github/atomaton-runtime/scripts/dispatch_pr_validation.ts",
-    ".github/atomaton-runtime/scripts/dispatch_rejected.ts",
     ".github/atomaton-runtime/scripts/extract_directive.ts",
     ".github/atomaton-runtime/scripts/fetch_events.ts",
     ".github/atomaton-runtime/scripts/get_config_value.ts",
@@ -30,6 +29,7 @@
     ".github/atomaton-runtime/scripts/manage_turn_labels.ts",
     ".github/atomaton-runtime/scripts/merge_tool_packages.ts",
     ".github/atomaton-runtime/scripts/notify_limit_reached.ts",
+    ".github/atomaton-runtime/scripts/notify_pr_rejected.ts",
     ".github/atomaton-runtime/scripts/notify_unattended.ts",
     ".github/atomaton-runtime/scripts/parse_comment_command.ts",
     ".github/atomaton-runtime/scripts/parse_pr_metadata.ts",

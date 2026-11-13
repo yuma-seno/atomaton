@@ -7,58 +7,44 @@ import { parseArgs } from "util";
 
 // src/domain/work/pr-validation.ts
 var PASSING = new Set(["success", "skipped", "neutral"]);
-var CI_RETRY_LIMIT = 3;
 function contextsPassed(verdict) {
   return verdict === "passed";
-}
-function answeredByPush(latestAsk, headCommittedAt) {
-  if (!latestAsk?.at || !headCommittedAt)
-    return;
-  const askAt = Date.parse(latestAsk.at);
-  const commitAt = Date.parse(headCommittedAt);
-  if (Number.isNaN(askAt) || Number.isNaN(commitAt))
-    return;
-  return commitAt > askAt ? latestAsk.author : undefined;
 }
 function handTo(agent) {
   const named = agent.trim();
   return named === "" ? {} : { next: { agent: named } };
 }
+function askFor(engineerAgent) {
+  const named = engineerAgent.trim();
+  return named === "" ? "" : ` Comment /${named} on this pull request to ask for it.`;
+}
 function decideValidationOutcome(input) {
-  const { conclusion, reviewerAgent, engineerAgent, askedByPerson = false, priorRetries = 0, headCommittedAt } = input;
+  const { conclusion, reviewerAgent, engineerAgent } = input;
   const deliverableProblems = input.deliverableProblems ?? [];
   if (deliverableProblems.length > 0) {
     const count = `${deliverableProblems.length} problem${deliverableProblems.length === 1 ? "" : "s"}`;
-    if (priorRetries >= CI_RETRY_LIMIT) {
-      return {
-        verdict: "retries-exhausted",
-        summary: `The deliverable is still not internally consistent (${count}) after ${priorRetries} attempts. ` + `Stopping rather than dispatching the engineer again; a human should look.`
-      };
-    }
     return {
       verdict: "deliverable-invalid",
-      ...handTo(engineerAgent),
-      summary: `.github/atomaton/ is not internally consistent (${count}), so CI was not run.`
+      summary: `.github/atomaton/ is not internally consistent (${count}), so CI was not run.` + `${askFor(engineerAgent)}`
     };
   }
   const normalised = conclusion.trim().toLowerCase();
   const passed = PASSING.has(normalised);
   if (passed) {
-    const answered = answeredByPush(input.latestAsk, headCommittedAt);
-    if (answered) {
-      if (answered.kind === "agent") {
-        return {
-          verdict: "passed",
-          ...handTo(answered.agent),
-          summary: `CI concluded ${normalised}. The push answered the request ${answered.agent} made, so it is ${answered.agent}'s to judge.`
-        };
-      }
-      return {
-        verdict: "passed",
-        summary: `CI concluded ${normalised}. The push answered the request a person made, so nobody is dispatched.`
-      };
+    const hold = input.hold ?? { kind: "with-person" };
+    if (hold.kind === "free" || hold.kind === "parked") {
+      return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
     }
-    return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
+    const because = {
+      "in-flight": "a run already holds this pull request, and its own report is the thread's next word",
+      chain: "the thread's newest word handed the work to another agent, and that call is the chain's to carry",
+      "with-person": "the thread's newest word handed the turn back to a person",
+      unreadable: "the thread could not be read to rule out a run in flight"
+    };
+    return {
+      verdict: "passed",
+      summary: `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind] ?? because["with-person"]}.` + `${reviewerAgent.trim() === "" ? "" : ` Comment /${reviewerAgent.trim()} to start the review yourself.`}`
+    };
   }
   if (!normalised) {
     return {
@@ -66,22 +52,9 @@ function decideValidationOutcome(input) {
       summary: "CI never reported a conclusion. Nothing was dispatched; a human should look."
     };
   }
-  if (priorRetries >= CI_RETRY_LIMIT) {
-    return {
-      verdict: "retries-exhausted",
-      summary: `CI concluded ${normalised} after ${priorRetries} attempts at fixing it. ` + `Stopping rather than dispatching the engineer again; a human should look.`
-    };
-  }
-  if (askedByPerson) {
-    return {
-      verdict: "failed",
-      summary: `CI concluded ${normalised}. This run was asked for by a person, so nobody was dispatched.`
-    };
-  }
   return {
     verdict: "failed",
-    ...handTo(engineerAgent),
-    summary: `CI concluded ${normalised}. Returning to the engineer with the failing job.`
+    summary: `CI concluded ${normalised}. Nobody was dispatched to fix it.` + `${askFor(engineerAgent)}`
   };
 }
 
@@ -407,7 +380,6 @@ var CHANGED_TAG = stringTag("changed", "yes|no");
 var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
-var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
@@ -465,33 +437,6 @@ function parseCommandLine(rawLine) {
   if (dispatchMatch)
     return { ...NOTHING, agent: dispatchMatch[1] };
   return;
-}
-function lineForms(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
-function parseMangledCommand(body) {
-  if (!body)
-    return NOTHING;
-  for (const rawLine of body.split(`
-`)) {
-    for (const form of lineForms(rawLine)) {
-      const parsed = parseCommentCommand(form);
-      if (parsed.agent !== "" || parsed.control !== "")
-        return parsed;
-    }
-  }
-  return NOTHING;
 }
 
 // src/domain/work/actor.ts
@@ -554,25 +499,18 @@ function latestRequestedAgent(body, comments, readers) {
   }
   return readers.requestedAgent(body);
 }
-function latestAsk(body, comments, readers) {
-  const { comments: kept } = shapedThread(comments, readers);
-  for (let index = kept.length - 1;index >= 0; index -= 1) {
-    const entry = kept[index];
-    if (entry.quoted)
-      continue;
-    const agent = readers.requestedAgent(entry.body);
-    if (agent === "")
-      continue;
-    if (readers.isDispatchMarker(entry.body))
-      continue;
-    if (entry.isHuman)
-      return { agent, author: { kind: "person" }, at: entry.at ?? "" };
-    const author = readers.authoringAgent(entry.body);
-    if (author === "")
-      return;
-    return { agent, author: { kind: "agent", agent: author }, at: entry.at ?? "" };
+function threadHold(events, openClaim) {
+  const newest = events[events.length - 1];
+  if (openClaim !== undefined) {
+    return newest === "waiting" ? { kind: "parked" } : { kind: "in-flight" };
   }
-  return;
+  if (newest === undefined || newest === "asked")
+    return { kind: "free" };
+  if (newest === "waiting")
+    return { kind: "parked" };
+  if (newest === "handed-off")
+    return { kind: "chain" };
+  return { kind: "with-person" };
 }
 
 // src/adapters/github/thread.ts
@@ -595,11 +533,6 @@ var readers = {
     return answers !== undefined && answers > 0 ? answers : undefined;
   },
   endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
-};
-var askReaders = {
-  ...readers,
-  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
-  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
 var endingWalkReaders = {
   ending: readers.ending,
@@ -632,9 +565,6 @@ function listComments(repo, number) {
   }
   return flat;
 }
-function commentBodies(repo, number) {
-  return listComments(repo, number).map((comment) => comment.body ?? "");
-}
 function readComments(repo, number, excludeCommentId) {
   const excluded = String(excludeCommentId ?? "").trim();
   const comments = listComments(repo, number).filter((comment) => String(comment.id) !== excluded).map(entryOf);
@@ -654,10 +584,7 @@ function latestRequestOn(repo, number, isKnownAgent) {
       ...readers,
       requestedAgent: (text) => known(readers.requestedAgent(text))
     }),
-    latestAsk: latestAsk(body, shaped.comments, {
-      ...askReaders,
-      requestedAgent: (text) => known(askReaders.requestedAgent(text))
-    })
+    hold: threadHold(shaped.events, shaped.openClaim)
   };
 }
 
@@ -730,14 +657,9 @@ function findExistingCiRun(runs, workflow, headSha) {
   const run = newest(onThisCommit.filter(hasVerdict)) ?? newest(onThisCommit.filter(waitable));
   return run ? { id: run.id, status: run.status, conclusion: run.conclusion } : undefined;
 }
-function countPriorRetries(repo, number) {
-  const bodies = commentBodies(repo, number);
-  return bodies.filter((body) => !isQuotation(body) && CI_RETRY_TAG.hasProse(body)).length;
-}
-function reportFailure(repo, number, attempt, runUrl, summary, details = []) {
+function reportFailure(repo, number, runUrl, summary, details = []) {
   const body = [
     LLM_CONTEXT_TAG.write("include"),
-    CI_RETRY_TAG.write(attempt),
     `Atomaton: ${summary}`,
     ...details.length > 0 ? ["", ...details.map((detail) => `- ${detail}`)] : [],
     "",
@@ -865,21 +787,24 @@ function main() {
     log(`::warning::${baseRef} requires no status checks, so CI results gate nothing here. ` + "Import .github/atomaton/rulesets/main.json if that was not intended.");
   }
   const { conclusion, runUrl } = deliverableProblems.length > 0 ? { conclusion: "", runUrl: "" } : runCiAndWait(repo, values.number ?? "", workflow, branch, headSha, Number(values["timeout-seconds"] ?? "1800"), isTrue(values["asked-by-person"]));
-  const priorRetries = countPriorRetries(repo, values.number ?? "");
-  const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
-  const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
+  let hold;
+  let threadRequest;
+  try {
+    threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
+    hold = threadRequest.hold;
+  } catch (e) {
+    log(`could not read the thread for the routing gate: ${e.message}`);
+    hold = { kind: "unreadable" };
+  }
   const bodyRead = readPullRequest(repo, Number(values.number), "body");
   const prBody = bodyRead.known ? bodyRead.value.body ?? "" : "";
   const engineerAgent = ORIGIN_AGENT_TAG.readProse(prBody) ?? "";
   const outcome = decideValidationOutcome({
     conclusion,
-    reviewerAgent: threadRequest.newestRequestedAgent,
+    reviewerAgent: threadRequest?.newestRequestedAgent ?? "",
     engineerAgent,
-    askedByPerson: isTrue(values["asked-by-person"]),
-    priorRetries,
-    deliverableProblems,
-    latestAsk: threadRequest.latestAsk,
-    headCommittedAt
+    hold,
+    deliverableProblems
   });
   const conclusionForContexts = contextsPassed(outcome.verdict) ? "success" : "failure";
   for (const check of requiredContexts.map((name) => ({ name, conclusion: conclusionForContexts }))) {
@@ -890,7 +815,7 @@ function main() {
       log(`wrote check "${check.name}" as ${check.conclusion}`);
   }
   if (outcome.verdict !== "passed") {
-    reportFailure(repo, values.number ?? "", priorRetries + 1, runUrl, outcome.summary, deliverableProblems);
+    reportFailure(repo, values.number ?? "", runUrl, outcome.summary, deliverableProblems);
   }
   write(`next_agent=${outcome.next?.agent ?? ""}`);
   write(`conclusion=${conclusion}`);
@@ -900,7 +825,6 @@ function main() {
 if (import.meta.main)
   main();
 export {
-  countPriorRetries,
   findExistingCiRun,
   pickDispatchedRun,
   ref2 as ref

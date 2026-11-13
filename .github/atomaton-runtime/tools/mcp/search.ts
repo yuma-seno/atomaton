@@ -17619,7 +17619,6 @@ var CHANGED_TAG = stringTag("changed", "yes|no");
 var LLM_CONTEXT_TAG = stringTag("llm-context", "include|exclude");
 var AGGREGATED_TAG = numericTag("aggregated");
 var SUB_RESULT_TAG = numericTag("sub-result");
-var CI_RETRY_TAG = numericTag("ci-retry");
 var QUOTES_TAG = numericTag("quotes");
 function isQuotation(body) {
   return QUOTES_TAG.has(body);
@@ -18302,33 +18301,6 @@ function parseCommandLine(rawLine) {
     return { ...NOTHING, agent: dispatchMatch[1] };
   return;
 }
-function lineForms(rawLine) {
-  let line = rawLine.trim();
-  if (!line)
-    return [];
-  line = line.replace(/^(?:[-*+]\s+|>\s*)+/, "");
-  const variants = [line];
-  if (line.startsWith("`") && line.endsWith("`") && line.length > 2) {
-    variants.push(line.slice(1, -1).trim());
-  }
-  if (line.startsWith("/`") && line.endsWith("`") && line.length > 3) {
-    variants.push("/" + line.slice(2, -1).trim());
-  }
-  return variants;
-}
-function parseMangledCommand(body) {
-  if (!body)
-    return NOTHING;
-  for (const rawLine of body.split(`
-`)) {
-    for (const form of lineForms(rawLine)) {
-      const parsed = parseCommentCommand(form);
-      if (parsed.agent !== "" || parsed.control !== "")
-        return parsed;
-    }
-  }
-  return NOTHING;
-}
 
 // src/adapters/github/thread.ts
 var readers = {
@@ -18350,11 +18322,6 @@ var readers = {
     return answers !== undefined && answers > 0 ? answers : undefined;
   },
   endingAgent: (body) => AGENT_TAG.readProse(body) ?? ""
-};
-var askReaders = {
-  ...readers,
-  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
-  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? ""
 };
 var endingWalkReaders = {
   ending: readers.ending,
