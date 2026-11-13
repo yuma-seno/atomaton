@@ -40,11 +40,12 @@
  *
  * ## `attach_file` is the one tool here that spends the token
  *
- * It POSTs the bytes to `uploads.github.com`, the single endpoint gh's own `--attach`
- * uses, and that request is authenticated: `GH_TOKEN` is read from this process's
- * environment — which the runner routes to this server alone — and sent to that one
- * host. The other two deliberately send nothing, so the boundary comment in
- * `defaults.yaml` names which tool spends it.
+ * It sends the token to two hosts, and both are names rather than anything derived
+ * from a caller's argument: `api.github.com`, for the one read of the repository's
+ * numeric id the upload requires, and `uploads.github.com`, where the bytes go — the
+ * single endpoint gh's own `--attach` uses. `uploads.github.com` is the host this
+ * change added. The other two tools deliberately send nothing, so the boundary
+ * comment in `defaults.yaml` names which one spends it and where.
  *
  * An upload cannot be undone: there is no endpoint to delete an asset. That is why
  * every file is validated before the first byte goes out, and why a failure part-way
@@ -98,6 +99,33 @@ const MAX_READ_BYTES = 128 * 1024 * 1024;
  * `attachments-fetch.test.ts` reads both and holds them in that order.
  */
 export const REQUEST_ABORT_MS = 120_000;
+
+/**
+ * How long `attach_file` may spend in total, counting every request it makes.
+ *
+ * The other two tools make one round trip each, so `REQUEST_ABORT_MS` is the whole of
+ * their budget. `attach_file` makes one read plus one POST per file, so without a shared
+ * deadline it has no bound worth the name: at `REQUEST_ABORT_MS` per request a single
+ * file can take 240 seconds, which is past the entry's `request_timeout_secs` — and a
+ * call atoma discards is a call whose answer nobody reads while the server keeps
+ * uploading, so the assets it creates cannot be deleted and nothing ever learns their
+ * URLs. That is the exact damage the all-or-nothing validation exists to prevent.
+ *
+ * The margin below is what makes this server's own answer arrive first. The inequality
+ * `attachments-fetch.test.ts` holds for the entry — its `request_timeout_secs` above the
+ * server's own bound, in seconds — is read against this number too.
+ */
+export const ATTACH_BUDGET_MS = 150_000;
+
+/**
+ * How many files one call may attach.
+ *
+ * The deadline above bounds the time; this bounds the request count inside it, so a call
+ * cannot spend the budget on twenty handshakes and report that the twenty-first was out
+ * of time. Ten is well past what a comment needs and keeps the worst case two requests
+ * per file inside a budget a person will wait for.
+ */
+export const MAX_ATTACH_FILES = 10;
 
 /**
  * The one directory outside the checkout a run may write to.
@@ -206,7 +234,11 @@ export const ATTACH_SCHEMA = z.object({
   files: z
     .array(ATTACH_FILE_SCHEMA)
     .min(1)
-    .describe("The files to attach. Every one is validated before any is uploaded, because an upload cannot be undone."),
+    .max(MAX_ATTACH_FILES)
+    .describe(
+      `The files to attach, at most ${MAX_ATTACH_FILES}. Every one is validated before any is uploaded, because an ` +
+        "upload cannot be undone.",
+    ),
 });
 
 /**
@@ -939,9 +971,12 @@ export function markdownFor(file: Pick<AttachFile, "rendering" | "name" | "alt">
 /**
  * The two hosts `attach_file` talks to, kept as one value so the pairing cannot drift.
  *
+ * Both receive the token: `api.github.com` for the one-off read of the repository's
+ * numeric id, and `uploads.github.com` for the upload itself — the endpoint gh's own
+ * `--attach` posts to. Neither is derived from a URL a caller supplies.
+ *
  * These are arguments only so a contract test can point them at a local server; a run
- * always gets the constants. The upload host is `uploads.github.com` — the one endpoint
- * gh's own `--attach` posts to — and it is never derived from a URL a caller supplies.
+ * always gets the constants.
  */
 export interface AttachHosts {
   api: string;
@@ -950,7 +985,7 @@ export interface AttachHosts {
 
 const PRODUCTION_HOSTS: AttachHosts = { api: "https://api.github.com", uploads: "https://uploads.github.com" };
 
-/** The headers both calls carry. The token is the run's, and this is the only tool here that sends it. */
+/** The headers both calls carry, to both hosts. The token is the run's, and this is the only tool here that sends it. */
 function attachHeaders(token: string): Record<string, string> {
   return { authorization: `token ${token}`, accept: "application/vnd.github+json" };
 }
@@ -961,13 +996,18 @@ function attachHeaders(token: string): Record<string, string> {
  * Not the `owner/name` it is spelled with everywhere else: `repository_id` is the REST
  * `id`, and that is what ties the asset to the repository it was attached in.
  */
-export async function repositoryIdFor(repo: string, token: string, hosts: AttachHosts = PRODUCTION_HOSTS): Promise<number> {
+export async function repositoryIdFor(
+  repo: string,
+  token: string,
+  hosts: AttachHosts = PRODUCTION_HOSTS,
+  signal: AbortSignal = AbortSignal.timeout(REQUEST_ABORT_MS),
+): Promise<number> {
   const url = `${hosts.api.replace(/\/+$/, "")}/repos/${repo}`;
   const response = await fetch(url, {
     method: "GET",
     headers: attachHeaders(token),
     redirect: "manual",
-    signal: AbortSignal.timeout(REQUEST_ABORT_MS),
+    signal,
   });
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
@@ -998,6 +1038,7 @@ export async function uploadAttachment(
   repositoryId: number,
   token: string,
   hosts: AttachHosts = PRODUCTION_HOSTS,
+  signal: AbortSignal = AbortSignal.timeout(REQUEST_ABORT_MS),
 ): Promise<string> {
   const url = new URL("/user-attachments/assets", `${hosts.uploads.replace(/\/+$/, "")}/`);
   url.searchParams.set("name", file.name);
@@ -1011,7 +1052,7 @@ export async function uploadAttachment(
     headers: { ...attachHeaders(token), "content-type": "application/octet-stream" },
     body: Bun.file(file.source),
     redirect: "manual",
-    signal: AbortSignal.timeout(REQUEST_ABORT_MS),
+    signal,
   });
 
   if (!response.ok) {
@@ -1103,12 +1144,30 @@ export function uploadRefusal(
 /**
  * Attach files to the thread: this is the tool that spends the token.
  *
- * Every file is validated first (`resolveAttachFiles`), then uploaded one at a time. A
- * failure stops the loop — gh's behaviour — and the error carries the URLs already
- * returned, because an asset cannot be deleted and dropping the URL would leave a file on
- * GitHub that nothing knows the address of.
+ * ## One deadline for the whole call
+ *
+ * Every request here is given `min(REQUEST_ABORT_MS, time left)` out of one
+ * `ATTACH_BUDGET_MS`, rather than each getting its own two-minute timeout. The reason is
+ * in `ATTACH_BUDGET_MS`: a call that outlives the entry's `request_timeout_secs` is
+ * discarded by atoma while this process keeps uploading, which leaves undeletable assets
+ * and delivers no URL. So the bound is the call's, and a request that would run past it
+ * is refused before it is sent rather than cut off half way through a body.
+ *
+ * ## Validation first, then uploads
+ *
+ * Every file is validated by `resolveAttachFiles` before the first byte. The loop then
+ * stops at the first failure — gh's behaviour — and the error carries the URLs already
+ * returned: an asset cannot be deleted, so dropping a URL that exists would leave a file
+ * on GitHub that nothing knows the address of.
+ *
+ * Exported because both of those are contracts rather than details: a test drives the
+ * deadline and the partial-failure return against a stub instead of taking gh's word for
+ * them.
  */
-async function attachFile(a: z.infer<typeof ATTACH_SCHEMA>): Promise<string> {
+export async function attachFile(
+  a: z.infer<typeof ATTACH_SCHEMA>,
+  options: { hosts?: AttachHosts; budgetMs?: number } = {},
+): Promise<string> {
   const token = (process.env.GH_TOKEN ?? "").trim();
   if (!token) {
     throw new Error(
@@ -1117,23 +1176,40 @@ async function attachFile(a: z.infer<typeof ATTACH_SCHEMA>): Promise<string> {
         "the runner writes from the run's own token.",
     );
   }
+
+  const budget = options.budgetMs ?? ATTACH_BUDGET_MS;
+  const hosts = options.hosts ?? PRODUCTION_HOSTS;
+  const deadline = Date.now() + budget;
+  /** The abort for one request: the server's own bound, or what is left of the call's budget. */
+  const signalFor = (what: string): AbortSignal => {
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      throw new Error(
+        `the ${budget}-millisecond budget for one attach_file call ran out before ${what}, so nothing ` +
+          "more was sent. Attach fewer files at once; each upload is a separate request and this bound exists so " +
+          "atoma does not discard the call, which would leave undeletable assets and return no URLs.",
+      );
+    }
+    return AbortSignal.timeout(Math.min(REQUEST_ABORT_MS, left));
+  };
+
   const repo = resolveRepo();
   const files = resolveAttachFiles(a.files);
-  const id = await repositoryIdFor(repo, token);
 
   const uploaded: { path: string; url: string; markdown: string; contentType: string }[] = [];
-  for (const file of files) {
-    try {
-      const url = await uploadAttachment(file, id, token);
+  try {
+    const id = await repositoryIdFor(repo, token, hosts, signalFor("the repository was read"));
+    for (const file of files) {
+      const url = await uploadAttachment(file, id, token, hosts, signalFor(`'${file.name}' was uploaded`));
       uploaded.push({ path: file.path, url, markdown: markdownFor(file, url), contentType: file.contentType });
-    } catch (error) {
-      const kept =
-        uploaded.length === 0
-          ? "Nothing was uploaded before it."
-          : `The ${uploaded.length} uploaded before it cannot be deleted from GitHub, so their URLs are still worth ` +
-            `having: ${uploaded.map((entry) => `${entry.path} -> ${entry.url}`).join("; ")}`;
-      throw new Error(`${(error as Error).message} ${kept}`);
     }
+  } catch (error) {
+    const kept =
+      uploaded.length === 0
+        ? "Nothing was uploaded before it."
+        : `The ${uploaded.length} uploaded before it cannot be deleted from GitHub, so their URLs are still worth ` +
+          `having: ${uploaded.map((entry) => `${entry.path} -> ${entry.url}`).join("; ")}`;
+    throw new Error(`${(error as Error).message} ${kept}`);
   }
 
   return JSON.stringify({ files: uploaded, uploaded: uploaded.length }, null, 2);
@@ -1365,8 +1441,10 @@ const ATTACH_DESCRIPTION =
   "URL ALONE for a video: markdown has no video syntax and GitHub renders a bare URL as a player only when it is the " +
   "whole content of a paragraph, so put it on its own paragraph with nothing else in it. An upload cannot be " +
   "deleted afterwards — there is no endpoint for it — so a refused file is an error rather than a skipped one, and " +
-  "a failure part-way returns the URLs already made. Sends the run's GitHub token to uploads.github.com, which is " +
-  "the only host this server sends a credential to.";
+  "a failure part-way returns the URLs already made, so put the files that matter first. Sends the run's GitHub " +
+  "token to two hosts: api.github.com, for the repository's numeric id, and uploads.github.com, where the bytes go. " +
+  `The whole call shares one ${ATTACH_BUDGET_MS}-millisecond budget and takes at most ${MAX_ATTACH_FILES} files, ` +
+  "because a call atoma discards would leave assets that cannot be deleted and return no URL.";
 
 const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
