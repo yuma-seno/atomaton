@@ -18102,9 +18102,38 @@ var ATTACH_FILE_SCHEMA = objectType({
 var ATTACH_SCHEMA = objectType({
   files: arrayType(ATTACH_FILE_SCHEMA).min(1).max(MAX_ATTACH_FILES).describe(`The files to attach, at most ${MAX_ATTACH_FILES}. Every one is validated before any is uploaded, because an ` + "upload cannot be undone.")
 });
+function encodedPath(target) {
+  return target.split("/").map((segment) => encodeURIComponent(segment).replace(/\(/g, "%28").replace(/\)/g, "%29")).join("/");
+}
 function blobUrlFor(repo, branch, target) {
-  const path = target.split("/").map((segment) => encodeURIComponent(segment)).join("/");
-  return `https://github.com/${repo}/blob/${encodeURIComponent(branch)}/${path}`;
+  return `https://github.com/${repo}/blob/${encodeURIComponent(branch)}/${encodedPath(target)}`;
+}
+function rawUrlFor(repo, branch, target) {
+  return `https://raw.githubusercontent.com/${repo}/${encodeURIComponent(branch)}/${encodedPath(target)}`;
+}
+var INLINE_IMAGE_EXTENSIONS = [
+  "png",
+  "gif",
+  "jpg",
+  "jpeg",
+  "svg",
+  "webp",
+  "bmp",
+  "tif",
+  "tiff"
+];
+function extensionOf(target) {
+  const name = target.slice(target.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
+}
+function inlineImageFor(repo, branch, target) {
+  if (!INLINE_IMAGE_EXTENSIONS.includes(extensionOf(target)))
+    return null;
+  const name = target.slice(target.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  const raw = rawUrlFor(repo, branch, target);
+  return { raw_url: raw, markdown: `![${escapeLabel(dot <= 0 ? name : name.slice(0, dot))}](${raw})` };
 }
 function indexInfoFor(entries) {
   return entries.map((entry) => `${DRAFT_FILE_MODE} blob ${entry.blob}	${entry.target}\x00`).join("");
@@ -18696,13 +18725,17 @@ async function publishDraft(a) {
       branch,
       commit_sha: commitSha,
       created: base === undefined,
-      files: drafts.map((draft) => ({ target: draft.target, blob_url: blobUrlFor(repo, branch, draft.target) }))
+      files: drafts.map((draft) => ({
+        target: draft.target,
+        blob_url: blobUrlFor(repo, branch, draft.target),
+        ...inlineImageFor(repo, branch, draft.target) ?? {}
+      }))
     }, null, 2);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 }
-var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. " + "The branch is this repository's own setting \u2014 `tools.servers.attachments.settings.branch` in config.yaml, " + "default `business-docs` \u2014 and is deliberately not an argument: naming a branch from the outside is what let a " + "publish land on somebody's work branch. " + "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " + "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " + "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " + "refused \u2014 an orphan branch is safe because it is not the reviewed one.";
+var PUBLISH_DRAFT_DESCRIPTION = "Publish documents onto an orphan branch and report the branch, the commit and a blob URL per file. An IMAGE " + `(${INLINE_IMAGE_EXTENSIONS.join(", ")}) also gets ` + "`raw_url` and `markdown`: a comment renders " + "`![alt](raw_url)` in place, so the picture shows the way a native attachment does \u2014 where the blob URL is a link " + "labelled with itself. Paste that markdown, not the blob one. A VIDEO gets neither: a raw URL is an image reference " + "and GitHub turns a URL into a player only for its own attachment host, so publish a video and link its blob URL. " + "A raw URL is not as stable as a native attachment: the same path always resolves to what the branch holds now, so " + "replacing the file changes what an old comment shows and rewriting the branch breaks the link. " + "The branch is this repository's own setting \u2014 `tools.servers.attachments.settings.branch` in config.yaml, " + "default `business-docs` \u2014 and is deliberately not an argument: naming a branch from the outside is what let a " + "publish land on somebody's work branch. " + "The branch is created as a root commit the first time and appended to by fast-forward afterwards, so a document's " + "history accumulates and a diff can be read. Nothing is checked out: the commit is built from objects and pushed as " + "a refspec, so the run's work tree, HEAD and index are untouched. Publishing onto the remote's default branch is " + "refused \u2014 an orphan branch is safe because it is not the reviewed one.";
 var FETCH_ATTACHMENT_DESCRIPTION = "Fetch one file a person attached to an issue and save it under /tmp, so a document can be opened, edited and " + "delivered (`publish_draft`) instead of pasted into the conversation. It reads " + "`https://github.com/user-attachments/files/<id>/<name>` and `https://private-user-images.githubusercontent.com/...` " + "and refuses every other host. It carries no credential \u2014 what it fetches is what an anonymous reader gets \u2014 and " + "the 302 GitHub answers is followed inside this call, because the signed URL it points at expires in five minutes " + "and a Location kept for a second call would already be dead. Returns the saved `path`, the decoded `bytes`, the " + "`content_type` and the `source_url`. A body over 25MB \u2014 the attachment ceiling \u2014 is refused and nothing is " + "written: `content-length` is checked first and the count is kept as the body streams, so up to the ceiling is held " + "in memory and the read is abandoned at the first chunk past it. A 200 carrying HTML is refused the same way \u2014 a " + "page rather than a document, and a path to it would be a path to a web page. `filename` names the saved file, since " + "an asset URL's last segment is often a generic `default.docx` while the comment shows the name it was attached as. " + "An attachment on a private repository is not measured: no credential is sent, so it comes back refused, and whether " + "GitHub answers a 404 or a page is unknown.";
 var ATTACH_DESCRIPTION = "Upload files to GitHub's attachment store and return a URL and pasteable markdown for each, so an image, a video " + "or a document appears in a comment or an issue body the way it does when a person drags one in \u2014 rather than " + "linked from a branch (`publish_draft`). Every file is checked before any is uploaded: the extension must be one " + `GitHub accepts (${supportedExtensions()}), and an image may be ${IMAGE_LIMIT_BYTES} bytes, a video ${VIDEO_LIMIT_BYTES} ` + `(the server refuses what the plan does not allow), and anything else ${UPLOAD_LIMIT_BYTES}. An empty file, a ` + "directory and a pipe are refused. Only the extension is checked; the bytes are not inspected, so a mislabelled " + "file uploads and renders as what its name says. Returns, per file, `path`, `url`, `markdown` and `contentType`, " + "and the count as `uploaded`. The markdown is `![alt](url)` for an image, `[name](url)` for anything else, and the " + "URL ALONE for a video: markdown has no video syntax and GitHub renders a bare URL as a player only when it is the " + "whole content of a paragraph, so put it on its own paragraph with nothing else in it. An upload cannot be " + "deleted afterwards \u2014 there is no endpoint for it \u2014 so a refused file is an error rather than a skipped one, and " + "a failure part-way returns the URLs already made, so put the files that matter first. Sends the run's GitHub " + "token to two hosts: api.github.com, for the repository's numeric id, and uploads.github.com, where the bytes go. " + `The whole call shares one ${ATTACH_BUDGET_MS}-millisecond budget and takes at most ${MAX_ATTACH_FILES} files, ` + "because a call atoma discards would leave assets that cannot be deleted and return no URL.";
 var { tools, dispatch } = buildMcpTools([
@@ -18737,6 +18770,7 @@ export {
   ATTACH_TYPES,
   FETCH_ATTACHMENT_SCHEMA,
   IMAGE_LIMIT_BYTES,
+  INLINE_IMAGE_EXTENSIONS,
   MAX_ATTACH_FILES,
   PUBLISH_DRAFT_SCHEMA,
   REQUEST_ABORT_MS,
@@ -18749,9 +18783,12 @@ export {
   attachmentUrlFrom,
   blobUrlFor,
   downloadAttachment,
+  extensionOf,
   indexInfoFor,
+  inlineImageFor,
   isSingleImage,
   markdownFor,
+  rawUrlFor,
   repositoryIdFor,
   resolveAttachFiles,
   resolveDraftFiles,
