@@ -5,8 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hermeticEnv, makeConfigDir } from "../../src/entrypoints/machinery/testing/harness.ts";
 import {
+  INLINE_IMAGE_EXTENSIONS,
   blobUrlFor,
+  extensionOf,
   indexInfoFor,
+  inlineImageFor,
+  isSingleImage,
+  rawUrlFor,
   resolveDraftFiles,
 } from "../../src/entrypoints/tools/mcp/attachments.ts";
 import { defaultBranchFrom } from "../../src/adapters/github/branch-reads.ts";
@@ -257,6 +262,69 @@ describe("the strings whose exact shape decides what lands on the branch", () =>
     expect(listing.split("\0").filter(Boolean)).toHaveLength(2);
   });
 
+  /**
+   * An image gets a second URL, because a blob URL renders as a link labelled with
+   * itself and a picture is supposed to be seen.
+   *
+   * Measured on #489's thread: `![描画テスト](https://raw.githubusercontent.com/.../attach-render-test.png)`
+   * renders in place in a comment on this private repository, because GitHub proxies the
+   * raw host through camo. That is the fact this rests on, and it is the reason
+   * `attach_file` is not the only way a run can put a picture in a comment.
+   */
+  describe("an image is published so a comment renders it", () => {
+    test("the raw URL is the same path on the host a comment renders from", () => {
+      expect(rawUrlFor("owner/repo", "business-docs", "designs/12/shot.png")).toBe(
+        "https://raw.githubusercontent.com/owner/repo/business-docs/designs/12/shot.png",
+      );
+    });
+
+    test("a target with a space or a # is encoded here too, and its separators are not", () => {
+      expect(rawUrlFor("owner/repo", "business-docs", "designs/12/a b.png")).toBe(
+        "https://raw.githubusercontent.com/owner/repo/business-docs/designs/12/a%20b.png",
+      );
+      expect(rawUrlFor("owner/repo", "business-docs", "designs/12/a#b.png")).toContain("a%23b.png");
+      expect(rawUrlFor("owner/repo", "business-docs", "a/b/c.png").split("/business-docs/")[1]).toBe("a/b/c.png");
+    });
+
+    test("an image gets raw_url and markdown, and the markdown is one whole image", () => {
+      const image = inlineImageFor("owner/repo", "business-docs", "designs/12/shot.png");
+      expect(image).not.toBeNull();
+      expect(image!.raw_url).toBe("https://raw.githubusercontent.com/owner/repo/business-docs/designs/12/shot.png");
+      // The alt text is the file's name without its extension.
+      expect(image!.markdown).toBe(`![shot](${image!.raw_url})`);
+      // Parsed back rather than trusted: escaping and parsing have to agree, or the
+      // picture renders as a link to somewhere else.
+      expect(isSingleImage(image!.markdown, image!.raw_url)).toBe(true);
+    });
+
+    test("every documented image extension is offered a raw URL, and nothing else is", () => {
+      for (const extension of INLINE_IMAGE_EXTENSIONS) {
+        expect(inlineImageFor("o/r", "b", `designs/1/a.${extension}`), extension).not.toBeNull();
+        // Case is folded: a `.PNG` off a camera is still a PNG.
+        expect(inlineImageFor("o/r", "b", `designs/1/a.${extension.toUpperCase()}`), extension).not.toBeNull();
+      }
+      // A video is the case worth naming: a raw URL is an image reference, and a player
+      // only comes from GitHub's own attachment host, so this stays a blob link.
+      for (const target of ["designs/1/report.pdf", "designs/1/clip.mp4", "designs/1/notes.md", "Makefile"]) {
+        expect(inlineImageFor("o/r", "b", target), target).toBeNull();
+      }
+    });
+
+    test("an alt text that would close the image early is escaped instead", () => {
+      const image = inlineImageFor("owner/repo", "business-docs", "designs/12/a](https://evil.example/b).png");
+      expect(image).not.toBeNull();
+      expect(isSingleImage(image!.markdown, image!.raw_url), image!.markdown).toBe(true);
+      expect(image!.markdown).not.toContain("](https://evil.example/b)(");
+    });
+
+    test("the extension is read from the last segment, and a dotfile has none", () => {
+      expect(extensionOf("designs/12/shot.PNG")).toBe("png");
+      expect(extensionOf("a.b/shot")).toBe("");
+      expect(extensionOf(".png")).toBe("");
+      expect(extensionOf("no/extension")).toBe("");
+    });
+  });
+
   test("the URL a person pastes is the blob view, which renders the document", () => {
     expect(blobUrlFor("owner/repo", "business-docs", "designs/12/one.md")).toBe(
       "https://github.com/owner/repo/blob/business-docs/designs/12/one.md",
@@ -405,6 +473,58 @@ describe("publishing onto a real remote", () => {
       });
       expect(Buffer.compare(stored, bytes)).toBe(0);
       expect(published.files[0].blob_url).toContain("designs/12/original.docx");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  /**
+   * The whole tool, on a real image: bytes land on the branch, and the answer carries a
+   * raw URL and markdown a comment renders.
+   *
+   * The blob URL is asserted beside it, because the promise is that an image GAINS two
+   * fields rather than trading one for the others — a caller publishing a mix of files
+   * gets one shape back with the image's two extra keys on it.
+   */
+  test("an image is published with the raw URL and markdown a comment renders", async () => {
+    const { root, remote, work } = makeGitFixture();
+    try {
+      // A one-pixel PNG's opening bytes: enough that the round trip is bytes rather
+      // than text, which is the part a text-shaped publish would damage.
+      const bytes = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+      const image = join(root, "shot.png");
+      const document = join(root, "report.pdf");
+      writeFileSync(image, bytes);
+      writeFileSync(document, "%PDF-1.4\n");
+
+      const published = payloadOf(
+        await callPublish(work, {
+          files: [
+            { path: image, target: "designs/12/shot.png" },
+            { path: document, target: "designs/12/report.pdf" },
+          ],
+          message: "publish an image",
+        }),
+      );
+
+      expect(git(root, "--git-dir", remote, "ls-tree", "-r", "--name-only", DEFAULT_DOCS_BRANCH).split("\n").sort()).toEqual([
+        "designs/12/report.pdf",
+        "designs/12/shot.png",
+      ]);
+
+      const [shot, report] = published.files;
+      expect(shot.blob_url).toBe(`https://github.com/owner/repo/blob/${DEFAULT_DOCS_BRANCH}/designs/12/shot.png`);
+      expect(shot.raw_url).toBe(
+        `https://raw.githubusercontent.com/owner/repo/${DEFAULT_DOCS_BRANCH}/designs/12/shot.png`,
+      );
+      expect(shot.markdown).toBe(`![shot](${shot.raw_url})`);
+      expect(isSingleImage(shot.markdown, shot.raw_url)).toBe(true);
+
+      // A document's answer is unchanged: no new keys, which is the minimal-change half
+      // of the contract.
+      expect(report.blob_url).toContain("/designs/12/report.pdf");
+      expect(report.raw_url).toBeUndefined();
+      expect(report.markdown).toBeUndefined();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
