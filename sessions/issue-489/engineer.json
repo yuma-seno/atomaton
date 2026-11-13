@@ -1411,13 +1411,29 @@
       "role": "tool",
       "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/parse_pr_metadata.test.ts:24:    const out = parseGithubOutput(await Bun.file(outputFile).text());\\nsrc/entrypoints/machinery/parse_pr_metadata.test.ts:38:    const out = parseGithubOutput(await Bun.file(outputFile).text());\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:26:    const out = parseGithubOutput(await Bun.file(outputFile).text());\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:51:    expect(parseGithubOutput(await Bun.file(outputFile).text()).agent).toBe(\\\"engineer\\\");\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:69:    expect(parseGithubOutput(await Bun.file(outputFile).text()).agent).toBe(\\\"engineer\\\");\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:83:    expect(parseGithubOutput(await Bun.file(outputFile).text()).agent).toBe(\\\"atomaton\\\");\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:100:    expect((await Bun.file(outputFile).text()).trim()).toBe(\\\"\\\");\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:114:    expect((await Bun.file(outputFile).text()).trim()).toBe(\\\"\\\");\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:130:    expect(parseGithubOutput(await Bun.file(outputFile).text()).agent).toBe(\\\"atomaton\\\");\\nsrc/entrypoints/machinery/resolve_entry_agent.test.ts:144:    const out = await Bun.file(outputFile).text();\\n===\\n{\\n  \\\"compilerOptions\\\": {\\n    \\\"target\\\": \\\"ESNext\\\",\\n    \\\"module\\\": \\\"ESNext\\\",\\n    \\\"moduleResolution\\\": \\\"bundler\\\",\\n    \\\"lib\\\": [\\\"ESNext\\\"],\\n    \\\"types\\\": [\\\"bun\\\"],\\n    \\\"strict\\\": true,\\n    \\\"noUncheckedIndexedAccess\\\": true,\\n    \\\"noImplicitOverride\\\": true,\\n    \\\"exactOptionalPropertyTypes\\\": false,\\n    \\\"skipLibCheck\\\": true,\\n    \\\"resolveJsonModule\\\": true,\\n    \\\"esModuleInterop\\\": true,\\n    \\\"forceConsistentCasingInFileNames\\\": true,\\n    \\\"noEmit\\\": true,\\n    \\\"allowJs\\\": false,\\n    \\\"allowImportingTsExtensions\\\": true,\\n    \\\"verbatimModuleSyntax\\\": true\\n  },\\n  \\\"include\\\": [\\n    \\\"src/**/*.ts\\\",\\n    \\\"types/**/*.d.ts\\\",\\n    \\\"tests/**/*.ts\\\",\\n    \\\"wac.config.ts\\\"\\n  ]\\n}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":112}",
       "tool_call_id": "call-61280761-1211-43e0-bce1-720fe20d69da"
+    },
+    {
+      "role": "user",
+      "content": "/engineer",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-13T00:14:08Z",
+        "event_type": "issue_comment",
+        "id": 6839801575,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 7,
-      "snapshot_hash": "de71f869a18ce7eeb1cf47f71225018c6eede6b00c19940d274c5d3be0ba8ded",
+      "event_count": 8,
+      "snapshot_hash": "caef7b73cb2c9e20cc3f51fea87fdb132da5dae4bad95390f4ac2260f98940a7",
       "version": 1
     }
   },
@@ -1458,6 +1474,16 @@
         }
       },
       "started": "2026-11-12T23:49:18Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-13T00:19:55Z",
+      "ended_because": "failed",
+      "iterations": 0,
+      "messages": 104,
+      "seconds": 301,
+      "server_calls": {},
+      "started": "2026-11-13T00:14:54Z"
     }
   ]
 }
