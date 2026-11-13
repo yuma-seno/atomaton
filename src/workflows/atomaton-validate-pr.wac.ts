@@ -255,14 +255,17 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
         })}
 `,
       }),
-      // Nobody was named, so a person is told rather than left to notice.
+      // Nobody was dispatched, so a person is told rather than left to notice.
       //
-      // Two ways to arrive here, and both are silent without this step: the pull
-      // request names no agent and mentions nobody, or a person asked for the run
-      // and CI failed -- which goes back to them by design, because an agent
-      // working from a request it did not make is the machinery deciding on their
-      // behalf. Either way the check is written and the work waits, and the one
-      // thing that must not happen is that it waits unannounced.
+      // Three families of routes arrive here, and each is silent without this
+      // step: the result names no agent, the result dispatches nobody on purpose
+      // -- a red run, or a deliverable that cannot start one -- because the
+      // machinery no longer hands a verdict back to an agent without a call, and
+      // the verdict went green but the thread's ball is not waiting for the work:
+      // a run in flight, a chain already carrying the call, or a turn a run
+      // handed back to a person. Either way the check is written and the work
+      // waits, and the one thing that must not happen is that it waits
+      // unannounced.
       new TypedOutputsStep({
         name: "Tell a person nobody was dispatched",
         if: `${validateStep.rawOutputs.next_agent} == ''`,
