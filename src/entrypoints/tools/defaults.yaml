@@ -149,12 +149,13 @@ servers:
       GH_TOKEN: "${GH_TOKEN}"
     hooks:
       {}
-  # Where a document a person attached to an issue comes in, and where a document
-  # that leaves the building goes out. Neither direction can run through the shell:
-  # `curl` and `wget` are routed away from it, and every mutating `git` subcommand
-  # is refused. So `fetch_attachment` GETs the attachment URL and writes the bytes
-  # under `/tmp`, and `publish_draft` builds a commit out of objects and pushes one
-  # raw refspec onto an orphan branch.
+  # Where a file a person attached to an issue comes in, where one a run produces
+  # goes back out, and where a run attaches one of its own. None of the three can
+  # run through the shell: `curl` and `wget` are routed away from it, and every
+  # mutating `git` subcommand is refused. So `fetch_attachment` GETs the attachment
+  # URL and writes the bytes under `/tmp`, `publish_draft` builds a commit out of
+  # objects and pushes one raw refspec onto an orphan branch, and `attach_file`
+  # POSTs a file's bytes to GitHub's own upload endpoint.
   #
   # Added as its own server rather than a tool on `github`: a published document
   # leaves the reviewed tree, and an agent that does that should have to name the
@@ -162,15 +163,16 @@ servers:
   #
   # `publish_draft` runs `git` in this process, which inherits the checkout's own
   # `.git/config` -- where `actions/checkout` left the credential. No token is read
-  # here and none is passed. The server also reads `AGENT` (for the commit
-  # identity), which the runner passes to it already.
+  # for that. The server also reads `AGENT` (for the commit identity), which the
+  # runner passes to it already.
   #
-  # `GH_TOKEN` is still declared below, and neither tool sends it: the fetch reads
-  # anonymously and the push uses the credential already in `.git/config`. Dropping
-  # the declaration is a change of its own, because `docs/tools/reference.md` states
-  # per server which credential it holds.
+  # `GH_TOKEN` is declared below and exactly ONE tool sends it: `attach_file`, to
+  # `uploads.github.com`, which is the endpoint GitHub CLI's own `--attach` posts
+  # to. `fetch_attachment` reads anonymously and `publish_draft` uses the
+  # credential already in `.git/config`, so the tools of one server differ in
+  # whether they spend it and each description says which it is.
   attachments:
-    description: "Fetches a file a person attached to an issue and publishes documents onto an orphan branch. `fetch_attachment` saves the file under /tmp, so a document can be opened and edited — and then published — instead of being pasted into the conversation; it reads only GitHub's two attachment hosts and carries no credential. `publish_draft` puts drafts on a branch and returns a blob URL for each."
+    description: "The three directions a file moves, none of which the shell can do. `fetch_attachment` saves a file a person attached under /tmp, so a document can be opened and edited — and then published — instead of being pasted into the conversation; it reads only GitHub's two attachment hosts and sends no credential. `attach_file` uploads an image, a video or a document to GitHub's own attachment store and returns a URL and pasteable markdown for each, so it appears in a comment the way a drag-and-drop does; it is the one tool here that sends the run's GitHub token, to `uploads.github.com` only. `publish_draft` puts drafts on an orphan branch and returns a blob URL for each."
     unprefixed: true
     command: bun
     args:
@@ -184,11 +186,12 @@ servers:
     # for the answer. The same shape as `delegate`'s 660 over its sub-run's
     # 600-second limit.
     #
-    # Both tools are served by the same value: `fetch_attachment` moves up to 25MB
-    # over the network, and `publish_draft` runs a handful of `git` commands (two
-    # `ls-remote`s, a `fetch`, a `push`), which is seconds on a repository of any
-    # ordinary size -- and unlike a download a push is safe to be cut off, because it
-    # either happened or did not and the answer is in the ref.
+    # Every tool is served by the same value: `fetch_attachment` moves up to 25MB
+    # over the network, `attach_file` up to 100MB (a video on a paid plan), and
+    # `publish_draft` runs a handful of `git` commands (two `ls-remote`s, a `fetch`,
+    # a `push`), which is seconds on a repository of any ordinary size -- and unlike
+    # a transfer a push is safe to be cut off, because it either happened or did not
+    # and the answer is in the ref.
     request_timeout_secs: 180
     hooks:
       {}

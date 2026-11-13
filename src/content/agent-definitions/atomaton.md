@@ -43,11 +43,12 @@ mcp_servers:
   - web
   - search
   - atomaton
-  # Where a document a person attached to an issue comes in, and where a produced one
-  # goes out. `shell` can do neither: `curl` and `wget` are refused there, and so is
-  # every mutating `git` subcommand. A server nobody names is never started, so this
-  # line is what makes `fetch_attachment` callable at all on an issue a person
-  # dispatches here.
+  # Where a document a person attached to an issue comes in, where one this run
+  # produces goes out, and where this run attaches a picture or a video of its own.
+  # `shell` can do none of them: `curl` and `wget` are refused there, and so is every
+  # mutating `git` subcommand. A server nobody names is never started, so this line is
+  # what makes `fetch_attachment`, `attach_file` and `publish_draft` callable at all on
+  # an issue a person dispatches here.
   - attachments
   # The writing delegate: a sub-run holding `files` and `shell`, for the reading
   # and searching that would otherwise fill this session with transcripts. See

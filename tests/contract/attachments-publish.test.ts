@@ -174,7 +174,7 @@ function payloadOf(response: any): any {
 }
 
 describe("the tool the agents are handed", () => {
-  test("tools/list offers publish_draft and fetch_attachment, and nothing else", async () => {
+  test("tools/list offers publish_draft, fetch_attachment and attach_file, and nothing else", async () => {
     const response = await sendRequest("attachments.ts", {
       jsonrpc: "2.0",
       id: 1,
@@ -182,7 +182,7 @@ describe("the tool the agents are handed", () => {
       params: {},
     });
     const names = (response.result.tools as { name: string }[]).map((tool) => tool.name);
-    expect(names.sort()).toEqual(["fetch_attachment", "publish_draft"]);
+    expect(names.sort()).toEqual(["attach_file", "fetch_attachment", "publish_draft"]);
   }, 30_000);
 
   /** The interface #111's skill is written against, pin names and all. */
