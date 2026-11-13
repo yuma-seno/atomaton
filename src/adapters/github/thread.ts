@@ -35,22 +35,21 @@
  */
 import { gh, ghRead, splitConcatenatedJson } from "./gh.ts";
 import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, STOP_TAG, TOOK_TAG } from "./tags.ts";
-import { parseCommentCommand, parseMangledCommand } from "../../domain/work/comment-command.ts";
+import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
   askSuperseded,
-  latestAsk,
   latestRequestedAgent,
   newestEventEntry,
   requestOutstanding,
   shapedThread,
+  threadHold,
   wasLaunched,
   whoseTurn,
-  type AskReaders,
   type IdentifiedComment,
-  type LatestAsk,
   type ShapedThread,
   type ThreadEntry,
+  type ThreadHold,
   type TurnEvent,
   type TurnHolder,
   type TurnReaders,
@@ -98,28 +97,6 @@ export const readers: TurnReaders = {
     return answers !== undefined && answers > 0 ? answers : undefined;
   },
   endingAgent: (body) => AGENT_TAG.readProse(body) ?? "",
-};
-
-/**
- * The same readers, plus who the machinery says wrote a comment.
- *
- * Every result comment the runner posts opens with `atomaton:agent=<name>` — so the
- * directive at the end of one has an author to hand the answer back to. A machinery
- * comment without the tag has no author, and `latestAsk` treats it as one it cannot
- * route an answer to.
- *
- * `requestedAgent` is the tolerant parse here, and only here. The ask is read out of
- * an AGENT's result comment, which is the model's final text posted verbatim — the
- * same text `extract_directive` read the handoff from, through `lineForms`. Read
- * strictly, a directive it dispatched from `- /engineer` would not be an ask, and the
- * green verdict would re-dispatch the agent the push answered. `readers` stays strict:
- * a command a person typed is not a model's markdown, and `whoseTurn`,
- * `requestOutstanding` and the guard all read it as the machinery acts on it.
- */
-const askReaders: AskReaders = {
-  ...readers,
-  requestedAgent: (body) => parseMangledCommand(proseOnly(body)).agent,
-  authoringAgent: (body) => AGENT_TAG.readProse(body) ?? "",
 };
 
 /**
@@ -766,7 +743,7 @@ export function isAskSuperseded(
  * `/<agent>` line `create_pr` writes. It is the oldest entry, so a person's later
  * comment wins over it, which is the point: the body is what the node was opened
  * asking for, and a comment is what somebody is asking for now. It is the fallback
- * for `newestRequestedAgent` and never an answerable ask — see `LatestAsk`.
+ * for `newestRequestedAgent`.
  */
 export interface ThreadRequest {
   /**
@@ -776,16 +753,13 @@ export interface ThreadRequest {
    */
   newestRequestedAgent: string;
   /**
-   * The newest ask a person or an agent made, with who made it and when. Undefined
-   * when the newest ask is the body's own line, a dispatch marker, or machinery the
-   * thread does not identify. This is the ask a push can answer: when the
-   * pull request's head commit postdates it, the push is the answer, and the verdict
-   * hands back to `author` rather than to `newestRequestedAgent`.
-   *
-   * See `domain/work/pr-validation.ts` for the routing, `domain/work/thread.ts`'s
-   * `latestAsk` for why markers and the body are excluded.
+   * Where the ball sits when the verdict lands — `threadHold`, from the same walk.
+   * This is what decides whether the verdict's dispatch may start at all: a call
+   * waiting for it (`free`, or the park that promised the machinery would collect)
+   * may be fulfilled; a run in flight, a chain already started, or a turn handed to
+   * a person hands the verdict to a mention instead.
    */
-  latestAsk?: LatestAsk;
+  hold: ThreadHold;
 }
 
 /**
@@ -797,8 +771,7 @@ export interface ThreadRequest {
  *
  * `isKnownAgent` filters the name each answer routes by: a name with no definition is
  * skipped rather than returned, so a typo falls back to the next request instead of
- * dispatching nobody. It does not filter the ASK's author — that agent ran, so it has
- * a definition by construction.
+ * dispatching nobody.
  */
 export function latestRequestOn(
   repo: string,
@@ -816,11 +789,6 @@ export function latestRequestOn(
       ...readers,
       requestedAgent: (text) => known(readers.requestedAgent(text)),
     }),
-    // The ask is read the way the HANDOFF was read -- see `askReaders`. A directive
-    // the runner dispatched must be the same directive a push is seen to answer.
-    latestAsk: latestAsk(body, shaped.comments, {
-      ...askReaders,
-      requestedAgent: (text) => known(askReaders.requestedAgent(text)),
-    }),
+    hold: threadHold(shaped.events, shaped.openClaim),
   };
 }

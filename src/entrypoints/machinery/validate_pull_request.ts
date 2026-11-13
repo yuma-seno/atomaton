@@ -78,8 +78,7 @@
  *
  * Usage:
  *   validate_pull_request.ts --repo owner/name --number N --branch atomaton/issue-N
- *     --workflow ci.yml --reviewer reviewer --engineer engineer
- *     --deliverable-report FILE [--timeout-seconds 1800]
+ *     --workflow ci.yml --def-dir DIR --deliverable-report FILE [--timeout-seconds 1800]
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -87,8 +86,10 @@ import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-va
 import { dispatchWorkflow, gh, ghRead } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
 import { readPullRequest } from "../../adapters/github/pull-request.ts";
-import { CI_RETRY_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG, isQuotation } from "../../adapters/github/tags.ts";
-import { commentBodies, latestRequestOn } from "../../adapters/github/thread.ts";
+import { LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
+import type { ThreadHold } from "../../domain/work/thread.ts";
+import type { ThreadRequest } from "../../adapters/github/thread.ts";
+import { latestRequestOn } from "../../adapters/github/thread.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -121,9 +122,11 @@ export interface ValidatePullRequestArgs {
   /**
    * Whether a person asked for this run, rather than an agent.
    *
-   * It decides who a failed check goes back to, and the two answers differ on
-   * purpose: an agent that broke its own pull request fixes it, and a person who
-   * asked for a run is owed the answer themselves. See `ValidationInput.askedByPerson`.
+   * It decides one thing now: whether the "CI is running" comment is worth a
+   * person's thread. It no longer routes the verdict -- a red check tells a person
+   * either way -- and the flag stays only because the waiting comment is the one
+   * thing a person-asked run owes that an agent's own push does not.
+   * See `notifyCiWaiting`.
    */
   "asked-by-person"?: string;
   /** Defaults to 1800. The job's own `timeout-minutes` is deliberately longer,
@@ -271,57 +274,28 @@ export function findExistingCiRun(runs: CiRun[], workflow: string, headSha: stri
 }
 
 /**
- * Comments this script has left on the pull request, each marking one hand-back.
+ * Leave whoever acts next what they need to act on.
  *
- * Exported for its test: the quotation exclusion is the part that is easy to get
- * subtly wrong, and getting it wrong counts the removed text the notice preserves as
- * retries this script never made.
- */
-export function countPriorRetries(repo: string, number: string): number {
-  // The count is the retry bound, so the read must not answer a number it could not
-  // determine. It used to: `catch { return 0; }`, which is the retry history reset the
-  // moment GitHub was unreachable -- and a reset count lets the engineer/CI loop run
-  // past its bound at one model run per turn. Not being able to look and finding no
-  // retries are different answers, and only one of them means "carry on".
-  //
-  // So the read throws, as `latestRequestOn` below already does: the script stops with
-  // the reason on stderr rather than deciding a verdict on a number it invented. The
-  // comment's own five lines said this and the code did the opposite.
-  //
-  // `commentBodies`, the shared reader: `--paginate` with the pages split, because a
-  // pull request past one page of comments still carries its retry markers.
-  const bodies = commentBodies(repo, number);
-  // The notice quoting a removed comment carries that comment verbatim, and a
-  // `ci-retry` marker inside it is the DELETED author's words -- counting it would
-  // fire the retry limit early, on a turn the notice's own line says will not be
-  // acted on. See `isQuotation`. `hasProse` for the same reason one tag over: a
-  // person quoting the marker inside a fenced sample has not asked for a retry
-  // (#304).
-  return bodies.filter((body) => !isQuotation(body) && CI_RETRY_TAG.hasProse(body)).length;
-}
-
-/**
- * Leave the engineer what it needs to act, and leave the count its next turn
- * reads.
+ * The failing job's URL rather than its log: whoever picks this up can fetch what
+ * they want from there, and pasting a log costs tokens on every read whether or not
+ * the relevant lines are in the part that fits.
  *
- * The failing job's URL rather than its log: the engineer can fetch what it wants
- * from there, and pasting a log costs tokens on every retry whether or not the
- * relevant lines are in the part that fits.
+ * Nobody is dispatched by this verdict any more -- the comment is addressed to the
+ * person the mention reaches, and read by the run that eventually follows as the
+ * thread's record of what failed and where.
  */
 function reportFailure(
   repo: string,
   number: string,
-  attempt: number,
   runUrl: string,
   summary: string,
   details: readonly string[] = [],
 ): void {
   // `summary` is also a step output, which is one line by construction, so the list
-  // of problems travels here rather than being folded into it. The engineer needs
-  // all of them at once: one per round trip costs a model run each.
+  // of problems travels here rather than being folded into it. Whoever acts next
+  // needs all of them at once: one per round trip costs a model run each.
   const body = [
     LLM_CONTEXT_TAG.write("include"),
-    CI_RETRY_TAG.write(attempt),
     `Atomaton: ${summary}`,
     ...(details.length > 0 ? ["", ...details.map((detail) => `- ${detail}`)] : []),
     "",
@@ -567,9 +541,7 @@ function main(): void {
   // required". This is the caller that cannot treat the two alike: it mirrors one
   // check run per required context, and `passed` below is `every()` over that
   // list, which is `true` for an empty one. So a failed read would report a
-  // FAILING run as passed, suppress the failure comment, and — because that
-  // comment is also the retry tally — leave the retry limit that bounds the
-  // engineer/CI loop unable to ever fire.
+  // FAILING run as passed and suppress the failure comment that names the defect.
   const required = readBranchRules(repo, baseRef);
   if (!required.known) {
     log(`cannot validate: ${required.why}`);
@@ -581,9 +553,8 @@ function main(): void {
     // Not a misconfiguration and not something to fix: a free account cannot have
     // branch rules on a private repository, and this template is meant to be adopted
     // by people who have one. The verdict below is still decided by what CI actually
-    // concluded, so a red run still fails, still posts its brief, and still advances
-    // the retry tally. What is gone is GitHub refusing the merge -- merge_pr
-    // holds that line instead, and says so.
+    // concluded, so a red run still fails and still posts its brief. What is gone is
+    // GitHub refusing the merge -- merge_pr holds that line instead, and says so.
     log(`::notice::${required.why}. Atomaton enforces the CI result itself when merging.`);
   } else if (requiredContexts.length === 0) {
     // A different situation, and worth saying once: the rules ARE readable and
@@ -612,25 +583,26 @@ function main(): void {
           isTrue(values["asked-by-person"]),
         );
 
-  // How many times validation already sent this pull request back. Counted from
-  // its own comments rather than held anywhere, so it survives a re-dispatch and
-  // needs no state of its own.
-  const priorRetries = countPriorRetries(repo, values.number ?? "");
-
-  // Read after the wait, so a directive or command posted while CI ran is seen: the
-  // thread read answers for the moment the verdict is decided, not the moment the
-  // push landed. One read answers both questions the routing asks of the thread --
-  // who it asks for (the default, dispatch markers included), and the newest ask a
-  // push could answer (markers excluded, with who made it and when). See
-  // `latestRequestOn`.
+  // Read after the wait, so the thread's answer is for the moment the verdict is
+  // decided, not the moment the push landed. One read answers both questions the
+  // routing asks of the thread: who its newest call names (the body's line as the
+  // fallback), and where the ball sits -- the hold the green verdict's dispatch
+  // gates on. See `latestRequestOn`.
   //
-  // The head commit's time rides with them: the push this validation judged produced
-  // that commit, so "newer than the ask" is how the verdict below recognises the
-  // push as an answer. The SHA was read before the wait, and is the commit CI ran
-  // against -- a newer push cancels this validation rather than moving it.
-  const threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
-  const headCommittedAt = gh("api", `repos/${repo}/commits/${headSha}`, "--jq", ".commit.committer.date").stdout ?? "";
-  // Degraded rather than fatal, unlike the read above: by this point CI has run and the
+  // A read that fails is answered `unreadable` rather than fatal, deliberately
+  // unlike the reads above: by this point CI has run, the checks must be written
+  // either way, and the hold's unreadable arm is the direction that starts nothing
+  // -- the same answer the guard gives when it cannot tell.
+  let hold: ThreadHold;
+  let threadRequest: ThreadRequest | undefined;
+  try {
+    threadRequest = latestRequestOn(repo, values.number ?? "", (name) => hasAgentDefinition(name, defDir));
+    hold = threadRequest.hold;
+  } catch (e) {
+    log(`could not read the thread for the routing gate: ${(e as Error).message}`);
+    hold = { kind: "unreadable" };
+  }
+  // Degraded rather than fatal, unlike the reads above: by this point CI has run and the
   // verdict is mostly decided, and an empty body only means the origin agent is unknown.
   const bodyRead = readPullRequest<{ body?: string }>(repo, Number(values.number), "body");
   const prBody = bodyRead.known ? (bodyRead.value.body ?? "") : "";
@@ -638,13 +610,10 @@ function main(): void {
 
   const outcome = decideValidationOutcome({
     conclusion,
-    reviewerAgent: threadRequest.newestRequestedAgent,
+    reviewerAgent: threadRequest?.newestRequestedAgent ?? "",
     engineerAgent,
-    askedByPerson: isTrue(values["asked-by-person"]),
-    priorRetries,
+    hold,
     deliverableProblems,
-    latestAsk: threadRequest.latestAsk,
-    headCommittedAt,
   });
 
   // One check run per required context, all carrying the same conclusion. The list
@@ -676,17 +645,17 @@ function main(): void {
     else log(`wrote check "${check.name}" as ${check.conclusion}`);
   }
 
-  // Posted whenever CI did not pass, including the turn that gives up: the
-  // comment is both the engineer's brief and the tally the next turn counts, and
-  // the last one is what tells a human why nothing is moving.
+  // Posted whenever CI did not pass: the failing-run URL and the problem list are
+  // what whoever acts next needs, and the last one is what tells a human why
+  // nothing is moving. Nobody is dispatched by these verdicts, so the comment's
+  // reader is the person the mention reaches, and the run that eventually follows.
   //
   // Read from the verdict, not re-derived from `checks`. It used to be
   // `checks.every((c) => c.conclusion === "success")`, which is `true` for the
   // empty list a base branch with no required checks produces -- so a failing
-  // run posted no comment, the engineer was dispatched with no brief, and the
-  // tally that bounds that loop never advanced. See `ValidationOutcome.verdict`.
+  // run posted no comment and the engineer was dispatched with no brief.
   if (outcome.verdict !== "passed") {
-    reportFailure(repo, values.number ?? "", priorRetries + 1, runUrl, outcome.summary, deliverableProblems);
+    reportFailure(repo, values.number ?? "", runUrl, outcome.summary, deliverableProblems);
   }
 
   write(`next_agent=${outcome.next?.agent ?? ""}`);
@@ -694,8 +663,8 @@ function main(): void {
   // Whether the verdict this run judged the work `passed`, passed to the dispatch as
   // `--verdict-passed`. The answers-request check reads it when the thread's last
   // event is the dispatched agent's own `returned` verdict: green confirms it (#282 —
-  // the same reviewer, the same head, again), red refutes it (the engineer's "done"
-  // was wrong about its own push, and the retry must go). The thread cannot carry
+  // the same reviewer, the same head, again), red refutes it (the "done" the opener
+  // left on its own push was wrong about the work). The thread cannot carry
   // this — a verdict comment does not name the commit it judged — so the caller that
   // judged it supplies it.
   write(`verdict_passed=${contextsPassed(outcome.verdict)}`);

@@ -6,7 +6,7 @@ import {
   resolveHandoffLimit,
   type ChainComment,
 } from "./dispatch-chain.ts";
-import { AGENT_TAG, CI_RETRY_TAG, isQuotation, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { AGENT_TAG, isQuotation, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 
 /**
  * These replace `manage_dispatch_loop.test.ts`, which was green and testing
@@ -28,9 +28,9 @@ const agent = (name = "engineer"): ChainComment => ({
   authorType: "Bot",
   body: `${AGENT_TAG.write(name)}\nDone. Handing off.`,
 });
-const ci = (attempt = 1): ChainComment => ({
+const machinery = (): ChainComment => ({
   authorType: "Bot",
-  body: `${CI_RETRY_TAG.write(attempt)}\nCI failed.`,
+  body: `${LLM_CONTEXT_TAG.write("include")}\nAtomaton: CI concluded failure. Nobody was dispatched to fix it.`,
 });
 const operational = (): ChainComment => ({
   authorType: "Bot",
@@ -78,13 +78,13 @@ describe("counting agent handoffs since a person last spoke", () => {
   });
 
   /**
-   * A bot comment that is not an agent result -- a CI retry notice, a label
-   * notification -- neither counts nor resets. It is noise in the middle of a
+   * A bot comment that is not an agent result -- a machinery notice about CI, a
+   * label notification -- neither counts nor resets. It is noise in the middle of a
    * chain, and treating it as a person's intervention is exactly the mistake that
    * made the old limit unreachable.
    */
   test("other bot comments neither count nor reset", () => {
-    const chain = [person("/engineer"), agent("engineer"), ci(1), operational(), agent("engineer")];
+    const chain = [person("/engineer"), agent("engineer"), machinery(), operational(), agent("engineer")];
     expect(tally(chain)).toBe(2);
   });
 

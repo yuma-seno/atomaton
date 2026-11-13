@@ -214,14 +214,16 @@ export function lineForms(rawLine: string): string[] {
  * result comment verbatim, so a directive dispatched from `- /engineer` sits in the
  * thread as a line the strict parser cannot see.
  *
- * That gap matters to a reader of the THREAD asking "what was asked here, so a push
- * can be recognised as the answer": the ask disappears, and the agent the push
- * already answered is dispatched again. See `latestAsk`.
+ * That gap mattered to a reader of the THREAD asking "what was asked here, so a push
+ * can be recognised as the answer" -- the question the routing asked through
+ * `latestAsk`, since removed with the auto-start paths it served. What still needs
+ * the tolerant parse is the handoff path itself: `extract_directive.ts` reads the
+ * directive the model wrote, whatever shape its markdown left it in.
  *
  * Not a looser definition of a command, and not used wherever `parseCommentCommand`
  * is: a command a person typed is read strictly, because a bullet in a person's
- * prose was never a request the machinery acted on. Only the ask path needs the
- * tolerance the handoff path already has.
+ * prose was never a request the machinery acted on. Only the agent's own directive
+ * needs the tolerance the handoff path already has.
  */
 export function parseMangledCommand(body: string): ParsedCommentCommand {
   if (!body) return NOTHING;

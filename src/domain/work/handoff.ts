@@ -12,13 +12,13 @@
  *     it: the machine closes the issue itself.
  *   - `decideRejectionHandoff` — what follows a close WITHOUT a merge (#267).
  *     Whether the person meant "rejected" or "shipped some other way" is not
- *     readable from the event, so when nobody can be asked, nothing happens.
+ *     readable from the event, so when nobody can be told, nothing happens.
  *
  * This module says nothing about GitHub, `gh`, or dispatch mechanics --
  * pure decision, testable with plain objects. The actual mechanism (gh pr
  * merge, gh workflow run, closing the issue) lives in mcp/github.ts's
  * mergePr()/dispatchPostMergeAgent()/closeIssueAndDispatch(), and in
- * dispatch-targets.ts's dispatchRejectedPrAgent() for the rejection route.
+ * notify_pr_rejected.ts for the rejection route.
  *
  * Before this module existed, the post-merge 4-way branch lived inline inside
  * mergePr(), interleaved with the `gh`/dispatch calls that carry it out --
@@ -69,12 +69,12 @@ export function decidePostMergeHandoff(signals: PostMergeSignals): PostMergeHand
 /**
  * The hand-off for a pull request that was closed WITHOUT merging.
  *
- * `nothing` carries why nothing should happen; `reinvoke-origin-agent` names the
- * agent to return the close to, on the issue the pull request delivers.
+ * `nothing` carries why nothing should happen; `notify-person` names the agent the
+ * closing person can ask for, on the issue the pull request delivers.
  */
 export type RejectionHandoff =
   | { kind: "nothing"; why: "no-parent" | "already-closed" | "no-origin-agent" }
-  | { kind: "reinvoke-origin-agent"; parentIssue: number; agent: string };
+  | { kind: "notify-person"; parentIssue: number; agent: string };
 
 /**
  * Decides what should happen when a pull request is closed without merging --
@@ -83,25 +83,25 @@ export type RejectionHandoff =
  * started nothing at all (#267).
  *
  * A close is a person's decision, but WHICH decision it is -- "rejected" or
- * "shipped some other way" -- is not readable from the event. Rather than
- * guess, the close is returned to the agent that opened the pull request, which
- * can read the thread and decide; the machine closes nothing itself. That is
- * the same principle as returning a review result to the pull request's origin
- * agent (#215): the judgement is the agent's.
+ * "shipped some other way" -- is not readable from the event. The machinery used
+ * to return the close to the agent that opened the pull request and let it judge;
+ * starting an agent without a call is what that was, so the close is now told to a
+ * PERSON, with the origin agent named for the resume the person can ask for. The
+ * machine closes nothing itself, and starts nothing itself.
  *
- *   1. no linked issue -> nothing. There is nobody to return the close to.
+ *   1. no linked issue -> nothing. There is nobody to tell.
  *   2. the issue is already closed -> nothing. The person closing the pull
- *      request is saying the issue is finished; starting a run on it would put
- *      an agent on a thread a person has ended.
- *   3. an origin agent is tagged -> return the close to THEM. The branch the
- *      pull request came from still exists and is theirs to resume.
- *   4. no origin agent tagged (a person's own pull request) -> nothing. The
- *      same rule the review path holds: no directive is written for a pull
- *      request no run of ours opened.
+ *      request is saying the issue is finished.
+ *   3. an origin agent is tagged -> tell a person, naming that agent: the branch
+ *      the pull request came from still exists and is theirs to resume on the
+ *      person's word.
+ *   4. no origin agent tagged (a person's own pull request) -> nothing. There is
+ *      no agent to name, and a person closing their own pull request needs no
+ *      notice about it.
  *
- * A fifth case never reaches this decision: the workflow's `dispatch-rejected`
- * job gates on the pull request's head branch being this repository's, so an
- * outside contribution's close is stopped before the body is read (see
+ * A fifth case never reaches this decision: the workflow's `notify-rejected` job
+ * gates on the pull request's head branch being this repository's, so an outside
+ * contribution's close is stopped before the body is read (see
  * `isOwnPullRequest` for why the head repository and not the association).
  *
  * The signals are `PostMergeSignals` shared for shape, not for meaning: for a
@@ -120,7 +120,7 @@ export function decideRejectionHandoff(signals: PostMergeSignals): RejectionHand
   if (signals.parentIssue === undefined) return { kind: "nothing", why: "no-parent" };
   if (signals.parentAlreadyClosed) return { kind: "nothing", why: "already-closed" };
   if (signals.originAgent) {
-    return { kind: "reinvoke-origin-agent", parentIssue: signals.parentIssue, agent: signals.originAgent };
+    return { kind: "notify-person", parentIssue: signals.parentIssue, agent: signals.originAgent };
   }
   return { kind: "nothing", why: "no-origin-agent" };
 }

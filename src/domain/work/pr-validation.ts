@@ -3,39 +3,39 @@
  * it passed, who works next, and what to say about it.
  *
  * The decision half of the pair whose I/O half is `scripts/validate_pull_request.ts`.
- * Everything here is a pure function of a conclusion string, a count, and the one
- * thread fact routing needs -- the newest ask and when it was made -- so the whole
- * truth table is testable without a `gh` in the loop. The same split
+ * Everything here is a pure function of a conclusion string, the one thread fact
+ * routing needs, and who the thread's calls name -- so the whole truth table is
+ * testable without a `gh` in the loop. The same split
  * `domain/delivery/merge-readiness.ts` uses.
+ *
+ * ## The one rule the table serves
+ *
+ * Machinery starts an agent only where a CALL is waiting: a person's command, an
+ * agent's hand-off, the `/<agent>` line the pull request was opened with. Where the
+ * thread's ball is anywhere else -- a run in flight, a chain already started, a turn
+ * a run handed back to a person -- the verdict hands the work to a mention instead.
+ * The routing used to send a green verdict back to whoever made the newest ask, and
+ * a red one to the engineer who opened the pull request, both without a call: the
+ * asker was re-run to judge its own answer, and the opener was re-run to fix a
+ * failure nobody asked it to fix, in both cases while its own report was still being
+ * written. The mention is what replaced them.
  */
-import type { AskAuthor, LatestAsk } from "./thread.ts";
+import type { ThreadHold } from "./thread.ts";
 import type { NextTurn } from "./turn.ts";
 
 /** Conclusions GitHub reports for a completed run that should count as passing. */
 const PASSING = new Set(["success", "skipped", "neutral"]);
 
 /**
- * How many times validation may hand the same pull request back to the engineer.
+ * What this validation run concluded, as one of four distinguishable answers.
  *
- * Bounds a loop nothing else bounds. `manage_dispatch_loop.ts`'s counter only
- * advances on a directive an agent wrote, and here the engineer is dispatched by
- * a workflow, so failing CI would otherwise cycle forever at the cost of a model
- * run per turn. Three is enough for a fix that needed another look and few enough
- * that a genuinely stuck pull request reaches a human quickly.
- */
-export const CI_RETRY_LIMIT = 3;
-
-/**
- * What this validation run concluded, as one of five distinguishable answers.
- *
- * `passed`                CI is green; the reviewer works next.
- * `failed`                CI is red and the engineer gets another attempt.
- * `no-conclusion`         the run timed out, was cancelled, or could not be found.
- * `retries-exhausted`     red again after `CI_RETRY_LIMIT` attempts; stop.
- * `deliverable-invalid`   the pull request would merge a `.github/atomaton/` that
+ * `passed`               CI is green; the call the thread names works next, where the ball is with one.
+ * `failed`               CI is red. Nobody is dispatched; a person is told, and names who fixes it.
+ * `no-conclusion`        the run timed out, was cancelled, or could not be found.
+ * `deliverable-invalid`  the pull request would merge a `.github/atomaton/` that
  *                        cannot start a run, so CI was never dispatched.
  */
-export type ValidationVerdict = "passed" | "failed" | "no-conclusion" | "retries-exhausted" | "deliverable-invalid";
+export type ValidationVerdict = "passed" | "failed" | "no-conclusion" | "deliverable-invalid";
 
 export interface ValidationOutcome {
   /**
@@ -51,9 +51,9 @@ export interface ValidationOutcome {
    * required list as legitimate and only warns. The consequences chained. The
    * failure comment was skipped while `nextAgent` still said `engineer`, so the
    * engineer was dispatched with no brief, no summary and no failing-run URL —
-   * and that same comment is the retry tally, so `priorRetries` stayed at zero
-   * and `CI_RETRY_LIMIT` could never fire. The engineer/CI loop this constant
-   * exists to bound ran unbounded, one model run per turn.
+   * and the failure comment was the retry tally, so nothing bounded the loop the
+   * verdict used to feed. This constant is the `[]-every()` lesson's other half:
+   * we read the checks, and there were none.
    *
    * `adapters/github/branch-rules.ts` records the same `[].every()` defect being fixed once
    * already. It was fixed at the input — "we could not read the required checks"
@@ -70,12 +70,12 @@ export interface ValidationOutcome {
    * request, and this is who it gives it to.
    */
   next?: NextTurn;
-  /** One line for the comment that accompanies a hand-back to the engineer. */
+  /** One line for the comment that tells whoever is left holding the work. */
   summary: string;
 }
 
 /**
- * The run being judged, and who is available to work on it.
+ * The run being judged, and what the thread says about who holds the ball.
  *
  * An object rather than positional parameters because `reviewerAgent` and
  * `engineerAgent` are adjacent, same-typed, and mean opposite things: swapping
@@ -85,37 +85,37 @@ export interface ValidationOutcome {
  * ## Where the two names come from
  *
  * Neither is a setting and neither is a literal. `reviewerAgent` is what the pull
- * request asks for -- the `/<agent>` line in its own body, which is the same line a
- * person would type. `engineerAgent` is who opened it, from the
- * `atomaton:origin-agent` tag. Both are read from the pull request, so a project
- * that renames an agent gets the new name everywhere without touching this file.
+ * request asks for -- the `/<agent>` line in its own body, or the newer call a
+ * comment made. `engineerAgent` is who opened it, from the `atomaton:origin-agent`
+ * tag. Both are read from the pull request and its thread, so a project that
+ * renames an agent gets the new name everywhere without touching this file.
  *
- * Either may be empty, and empty is a real answer: nobody was asked. The verdict
+ * Neither dispatches on its own: `reviewerAgent` runs only where the hold says a
+ * call is waiting (`free` or `parked`), and `engineerAgent` is never dispatched at
+ * all -- it is the name a notification carries, the agent a person can ask for.
+ *
+ * Either may be empty, and empty is a real answer: nobody was named. The verdict
  * then dispatches nobody and the caller tells a person, which is the one outcome
  * that cannot be silently wrong.
  */
 export interface ValidationInput {
   /** GitHub's own conclusion for the dispatched run. Empty means it never reached one. */
   conclusion: string;
-  /** Agent to dispatch when CI passes, from the pull request's own `/<agent>` line. */
+  /** The agent the thread's newest call names: the body's `/<agent>` line, or a comment's. */
   reviewerAgent: string;
-  /** Agent to dispatch when CI fails and retries remain, from `atomaton:origin-agent`. */
+  /** The agent that opened the pull request, from `atomaton:origin-agent` -- named in notifications. */
   engineerAgent: string;
   /**
-   * Whether the run being judged was asked for by a person rather than by an agent.
+   * Where the ball sits when the verdict lands, from `threadHold`.
    *
-   * It decides who a FAILED check goes back to, and the two answers are different
-   * on purpose. An agent that opened a pull request and broke CI is the one that
-   * should fix it -- it has the context and it is already in the loop. A person who
-   * asked for a run and got a red check is owed the answer themselves: handing
-   * their request to an agent would be the machinery deciding on their behalf, and
-   * the agent would be working from a request it did not make.
-   *
-   * So a person's failed run dispatches nobody, and the caller mentions them.
+   * The gate on the green verdict's dispatch. A call waiting for the work (`free`)
+   * and the park that promised the machinery would collect it (`parked`) let the
+   * standing request run; a run in flight, a chain already started, or a turn
+   * handed back to a person hand the verdict to a mention instead. Absent reads as
+   * `with-person` -- the direction that starts nothing, which is the side that
+   * cannot start a run nobody asked for.
    */
-  askedByPerson?: boolean;
-  /** How many times this pull request has already been handed back. */
-  priorRetries?: number;
+  hold?: ThreadHold;
   /**
    * Ways the pull request's own `.github/atomaton/` is inconsistent, from
    * `validate_deliverable.ts`. Empty is the normal case.
@@ -128,26 +128,6 @@ export interface ValidationInput {
    * hand anyone. Here there is one, and its author is the agent that just wrote it.
    */
   deliverableProblems?: readonly string[];
-  /**
-   * The newest ask in the thread that a push could answer -- a person's command or
-   * an agent's hand-off directive -- with who made it and when. Absent when the
-   * newest ask is the pull request body's own `/<agent>` line, a dispatch marker,
-   * or machinery the thread does not identify.
-   *
-   * This is what makes a fix request consumable. The reviewer asks the engineer to
-   * fix something; the engineer's push is the answer; the next green validation
-   * must hand the answer back to the reviewer rather than re-run the engineer on a
-   * request it already fulfilled -- which is what kept #211's pull request green
-   * and unattended, the thread's newest request still naming the engineer the
-   * fix had been asked OF. See `answeredByPush`.
-   */
-  latestAsk?: LatestAsk;
-  /**
-   * When the pull request's head commit was created, or empty when it could not be
-   * read. The push this validation judges produced that commit, so "the commit is
-   * newer than the ask" is how a push is recognised as the answer to one.
-   */
-  headCommittedAt?: string;
 }
 
 /**
@@ -172,32 +152,6 @@ export function contextsPassed(verdict: ValidationVerdict): boolean {
 }
 
 /**
- * Whether the push this validation judged answers the newest ask, and who made it.
- *
- * A push answers an ask when the commit it produced is NEWER than the ask: the ask
- * asked for work, and the commit is work that did not exist when the ask was made.
- * A commit the ask postdates was already there when the ask was made -- the ask was
- * made ABOUT it, re-review it or fix it again -- and stands, whoever made it.
- *
- * Either timestamp missing or unreadable is "not answered", and so is a tie: the
- * standing request keeps routing, which is the behaviour that predated this
- * question. Unknown is not old.
- *
- * What the ask NAMES does not gate this, only who made it. The realistic asks are
- * fix requests -- a reviewer's directive at the engineer, a person's command at the
- * engineer -- and their author is exactly who the answer belongs to; the body's own
- * line, the one ask a push must never consume, never reaches here as a
- * `latestAsk` at all.
- */
-function answeredByPush(latestAsk: LatestAsk | undefined, headCommittedAt: string | undefined): AskAuthor | undefined {
-  if (!latestAsk?.at || !headCommittedAt) return undefined;
-  const askAt = Date.parse(latestAsk.at);
-  const commitAt = Date.parse(headCommittedAt);
-  if (Number.isNaN(askAt) || Number.isNaN(commitAt)) return undefined;
-  return commitAt > askAt ? latestAsk.author : undefined;
-}
-
-/**
  * The hand-off, or nothing when the caller has nobody configured for the role.
  *
  * An unset `reviewerAgent` or `engineerAgent` is a project that has not named one,
@@ -207,6 +161,18 @@ function answeredByPush(latestAsk: LatestAsk | undefined, headCommittedAt: strin
 function handTo(agent: string): { next?: NextTurn } {
   const named = agent.trim();
   return named === "" ? {} : { next: { agent: named } };
+}
+
+/**
+ * The sentence fragment that says who can be asked for the fix, when a name exists.
+ *
+ * `engineerAgent` -- the pull request's origin agent -- is not dispatched by this
+ * verdict; it is the name a person needs to act on the verdict. Empty, the whole
+ * clause goes: a person's own pull request has nobody to suggest.
+ */
+function askFor(engineerAgent: string): string {
+  const named = engineerAgent.trim();
+  return named === "" ? "" : ` Comment /${named} on this pull request to ask for it.`;
 }
 
 /**
@@ -220,33 +186,23 @@ function handTo(agent: string): { next?: NextTurn } {
  * the pull request and decides.
  */
 export function decideValidationOutcome(input: ValidationInput): ValidationOutcome {
-  const { conclusion, reviewerAgent, engineerAgent, askedByPerson = false, priorRetries = 0, headCommittedAt } = input;
+  const { conclusion, reviewerAgent, engineerAgent } = input;
 
-  // Judged first, and treated exactly as a red CI run: failing checks so the
-  // merge is blocked, a comment so the engineer knows what to fix, and the same
-  // retry bound. Failing the workflow step instead would have written no check at
-  // all, which leaves the required context pending forever and dispatches nobody
+  // Judged first, and treated as the red CI run it stands in for: failing checks so
+  // the merge is blocked, a comment so whoever acts next has the problems at once.
+  // Nobody is dispatched — the pull request's own agent is named in the mention
+  // instead, and a person asks for the fix. Failing the workflow step instead would
+  // have written no check at all, which leaves the required context pending forever
   // — a pull request only a human can rescue, for a mistake an agent makes in the
   // ordinary course of editing its own tool surface.
-  //
-  // The engineer can act on it because the run that carries it reads its
-  // machinery from the default branch, not from this pull request: a broken
-  // `.github/atomaton/` here does not stop the agent sent to fix it.
   const deliverableProblems = input.deliverableProblems ?? [];
   if (deliverableProblems.length > 0) {
     const count = `${deliverableProblems.length} problem${deliverableProblems.length === 1 ? "" : "s"}`;
-    if (priorRetries >= CI_RETRY_LIMIT) {
-      return {
-        verdict: "retries-exhausted",
-        summary:
-          `The deliverable is still not internally consistent (${count}) after ${priorRetries} attempts. ` +
-          `Stopping rather than dispatching the engineer again; a human should look.`,
-      };
-    }
     return {
       verdict: "deliverable-invalid",
-      ...handTo(engineerAgent),
-      summary: `.github/atomaton/ is not internally consistent (${count}), so CI was not run.`,
+      summary:
+        `.github/atomaton/ is not internally consistent (${count}), so CI was not run.` +
+        `${askFor(engineerAgent)}`,
     };
   }
 
@@ -254,28 +210,31 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
   const passed = PASSING.has(normalised);
 
   if (passed) {
-    // A green run after a fix was pushed does not route by the standing request:
-    // the newest ask in the thread is the fix request the push ANSWERED, and
-    // routing by it would re-run the agent the fix was asked of -- the #211
-    // stall, a green pull request nobody returns to. The answer goes to whoever
-    // asked: the reviewer whose directive it was reviews it, and a person's
-    // request is owed to the person, which is the same rule a red run already
-    // follows through `askedByPerson`.
-    const answered = answeredByPush(input.latestAsk, headCommittedAt);
-    if (answered) {
-      if (answered.kind === "agent") {
-        return {
-          verdict: "passed",
-          ...handTo(answered.agent),
-          summary: `CI concluded ${normalised}. The push answered the request ${answered.agent} made, so it is ${answered.agent}'s to judge.`,
-        };
-      }
-      return {
-        verdict: "passed",
-        summary: `CI concluded ${normalised}. The push answered the request a person made, so nobody is dispatched.`,
-      };
+    // The hold is the whole gate. A green verdict starts the standing request only
+    // where a call is waiting for it: the ball with nobody yet, an ask nobody has
+    // taken up, or the park whose collection this validation is. Everywhere else --
+    // a run in flight (its own report is the thread's next word), a chain that
+    // already carries the call, a turn a run handed back to a person -- the verdict
+    // is delivered as a mention, and the person decides. This is the rule the
+    // re-ask-the-asker routing replaced: a green run there re-started whoever made
+    // the newest ask, call or no call, and its report was still being written when
+    // the machinery started the next run over it.
+    const hold = input.hold ?? { kind: "with-person" as const };
+    if (hold.kind === "free" || hold.kind === "parked") {
+      return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
     }
-    return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
+    const because: Record<string, string> = {
+      "in-flight": "a run already holds this pull request, and its own report is the thread's next word",
+      chain: "the thread's newest word handed the work to another agent, and that call is the chain's to carry",
+      "with-person": "the thread's newest word handed the turn back to a person",
+      unreadable: "the thread could not be read to rule out a run in flight",
+    };
+    return {
+      verdict: "passed",
+      summary:
+        `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind] ?? because["with-person"]}.` +
+        `${reviewerAgent.trim() === "" ? "" : ` Comment /${reviewerAgent.trim()} to start the review yourself.`}`,
+    };
   }
 
   if (!normalised) {
@@ -285,28 +244,15 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
     };
   }
 
-  if (priorRetries >= CI_RETRY_LIMIT) {
-    return {
-      verdict: "retries-exhausted",
-      summary:
-        `CI concluded ${normalised} after ${priorRetries} attempts at fixing it. ` +
-        `Stopping rather than dispatching the engineer again; a human should look.`,
-    };
-  }
-
-  // A person's failed run goes back to the person. See `askedByPerson`: an agent
-  // that broke its own pull request is the one to fix it, and a person who asked
-  // for a run is owed the answer rather than a run they did not ask for.
-  if (askedByPerson) {
-    return {
-      verdict: "failed",
-      summary: `CI concluded ${normalised}. This run was asked for by a person, so nobody was dispatched.`,
-    };
-  }
-
+  // Red, and nobody is dispatched. The engineer who opened the pull request is the
+  // one who made the change, so the mention names it and the person asks for the
+  // fix; the failing-run URL and the checks ride on the comment this verdict's
+  // caller posts. The automatic retry this replaced started the opener without a
+  // call, on a verdict nobody had asked it to act on.
   return {
     verdict: "failed",
-    ...handTo(engineerAgent),
-    summary: `CI concluded ${normalised}. Returning to the engineer with the failing job.`,
+    summary:
+      `CI concluded ${normalised}. Nobody was dispatched to fix it.` +
+      `${askFor(engineerAgent)}`,
   };
 }

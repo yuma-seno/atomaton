@@ -4,8 +4,8 @@
  *
  * The failure this prevents is not a broken build. It is a build that passes for
  * the agent and fails in CI, on a machine the agent cannot see, which comes back
- * to an engineer as a defect that does not reproduce -- and `CI_RETRY_LIMIT`
- * spends three inferences on it before a human hears about it.
+ * to an engineer who cannot reproduce it -- and to a person held there to judge,
+ * run by run, whether the pull request can work at all.
  *
  * Pinned against the generated YAML rather than the `.wac.ts`, because the
  * generated file is what an adopter receives and what actually runs. A fourth job

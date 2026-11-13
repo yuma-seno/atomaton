@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { FAKE_GH_IMPL } from "./testing/fake-gh-env.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { parseGithubOutput, removeTemp, runWithFakeGh, scriptPath } from "./testing/harness.ts";
-import { countPriorRetries, findExistingCiRun, pickDispatchedRun } from "./validate_pull_request.ts";
+import { findExistingCiRun, pickDispatchedRun } from "./validate_pull_request.ts";
 
 type Run = Parameters<typeof pickDispatchedRun>[0][number];
 type CiRun = Parameters<typeof findExistingCiRun>[0][number];
@@ -169,109 +169,6 @@ describe("findExistingCiRun", () => {
       ciRun({ id: 2, created_at: "2026-08-15T10:05:00Z" }),
     ];
     expect(findExistingCiRun(runs, ci, "abc123")?.id).toBe(2);
-  });
-});
-
-/**
- * The retry count, as the real script reads it with a fake `gh` answering. The count
- * is the retry bound, and the notice the guard posts preserving a removed comment is
- * on the same page as this script's own markers: its text is VERBATIM, so a `ci-retry`
- * marker inside the quoted text would be counted as a retry this script never made --
- * firing the limit early, on a turn the notice's own line says will not be acted on.
- */
-const VALIDATE_SRC = join(import.meta.dir, "validate_pull_request.ts");
-
-function retries(bodies: string[]): number {
-  const script = `
-    const { countPriorRetries } = await import(${JSON.stringify(VALIDATE_SRC)});
-    process.stdout.write(String(countPriorRetries("o/r", "7")));
-  `;
-  const proc = Bun.spawnSync({
-    cmd: [process.execPath, "-e", script],
-    stdout: "pipe",
-    stderr: "pipe",
-    env: {
-      ...process.env,
-      ATOMATON_FAKE_GH: FAKE_GH_IMPL,
-      FAKE_GH_RESPONSES: JSON.stringify([
-        // The shared `listComments` returns whole comment objects, so the fixture is
-        // the API's shape and the bodies sit inside it.
-        { match: ["repos/o/r/issues/7/comments"], stdout: JSON.stringify(bodies.map((body, i) => ({ id: i + 1, body }))) },
-      ]),
-      // Nothing here may reach the real CLI; see `fake-gh-env.ts`.
-      GH_TOKEN: "fake-gh-must-be-used",
-      GITHUB_TOKEN: "fake-gh-must-be-used",
-    },
-  });
-  const out = proc.stdout.toString();
-  if (proc.exitCode !== 0) throw new Error(`child failed: ${proc.stderr.toString() || out}`);
-  return Number(out.trim());
-}
-
-/**
- * The same run with the comment read failing, reporting the child's exit code and
- * stderr instead of a count.
- */
-function failingRetries(): { code: number; stderr: string } {
-  const script = `
-    const { countPriorRetries } = await import(${JSON.stringify(VALIDATE_SRC)});
-    process.stdout.write(String(countPriorRetries("o/r", "7")));
-  `;
-  const proc = Bun.spawnSync({
-    cmd: [process.execPath, "-e", script],
-    stdout: "pipe",
-    stderr: "pipe",
-    env: {
-      ...process.env,
-      ATOMATON_FAKE_GH: FAKE_GH_IMPL,
-      // A 404 is an answer, not a blip: `ghRead` does not retry it, so this fails at once.
-      FAKE_GH_RESPONSES: JSON.stringify([
-        { match: ["repos/o/r/issues/7/comments"], code: 1, stdout: "gh: Not Found (HTTP 404)" },
-      ]),
-      // Nothing here may reach the real CLI; see `fake-gh-env.ts`.
-      GH_TOKEN: "fake-gh-must-be-used",
-      GITHUB_TOKEN: "fake-gh-must-be-used",
-    },
-  });
-  return { code: proc.exitCode ?? 0, stderr: proc.stderr.toString() };
-}
-
-describe("countPriorRetries", () => {
-  /**
-   * The count is the retry BOUND, so a read that failed must not answer a number: 0
-   * means "this pull request has not been sent back yet", which lets the engineer/CI
-   * loop run past its limit at one model run per turn. The function used to
-   * `catch { return 0; }` exactly here, while the comment above it said why not.
-   */
-  test("a failed read is not zero retries", () => {
-    const { code, stderr } = failingRetries();
-    expect(code, "a count it could not determine must stop the script, not become 0").not.toBe(0);
-    expect(stderr).toContain("could not read comments on #7");
-  });
-
-  test("counts this script's own markers", () => {
-    expect(retries(["<!-- atomaton:ci-retry=1 -->\nCI failed.", "<!-- atomaton:ci-retry=2 -->\nCI failed."])).toBe(2);
-  });
-
-  // The quoted text is verbatim: if it quoted a CI failure comment, it carries the
-  // `ci-retry` marker that comment carried. Counting it would fire the retry limit
-  // early.
-  test("the notice quoting a removed comment is not a retry", () => {
-    const notice = [
-      "<!-- atomaton:llm-context=exclude -->",
-      "<!-- atomaton:quotes=5 -->",
-      "@octocat Your comment was removed because the ball is with an agent on this issue/PR.",
-      "<details><summary>Your comment, as you wrote it</summary>",
-      "",
-      "```",
-      "<!-- atomaton:ci-retry=1 -->",
-      "CI failed.",
-      "```",
-      "",
-      "</details>",
-    ].join("\n");
-    expect(retries([notice])).toBe(0);
-    expect(retries([notice, "<!-- atomaton:ci-retry=2 -->\nCI failed."])).toBe(1);
   });
 });
 

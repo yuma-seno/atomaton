@@ -5,16 +5,16 @@ import { FAKE_GH_IMPL } from "../../entrypoints/machinery/testing/fake-gh-env.ts
 /**
  * The two answers the validation routing asks of one thread, as the adapter wires them.
  *
- * The folds are tested in `domain/work/thread.test.ts`; what this pins is that the ask
- * and the standing request are handed DIFFERENT readers here, which is the whole
- * defensibility of the routing. The ask is read the way the handoff was read — an
- * agent's result comment carries the model's own text, where markdown may have mangled
- * the directive — while the standing request keeps the strict parse a dispatch and the
- * guard act on.
+ * The folds are tested in `domain/work/thread.test.ts`; what this pins is that ONE
+ * `gh` listing answers both questions the routing asks -- who the thread's newest
+ * request names, and where the ball sits when the verdict lands -- because a
+ * validation runs on every push to every agent pull request and the API has a rate
+ * limit. The standing request keeps the strict parse a dispatch and the guard act
+ * on; the hold is the newest event plus the open claim, straight from the walk.
  *
- * A regression that put both back on the strict parse restores #219: the directive the
- * runner posted back as `- /engineer` stops being an ask, so the green verdict
- * re-dispatches the agent the push already answered.
+ * A thread read that failed throws, and the script turns that into the hold that
+ * starts nothing -- pinned in `domain/work/pr-validation.test.ts` as "an unreadable
+ * thread starts nothing".
  *
  * ## Why a child process
  *
@@ -175,12 +175,12 @@ describe("runInFlight", () => {
 });
 
 describe("latestRequestOn", () => {
-  // #219's shape on the mangled variant: the reviewer's result comment ends with
-  // `- /engineer`, the machinery takes it up, and the engineer publishes its fix. The
-  // newest request in the thread is the marker naming the engineer, but the ASK is the
-  // reviewer's directive — `- /engineer` included, because that is the line the handoff
-  // was read from.
-  test("a markdown-mangled directive is the ask, while the marker is the standing request", () => {
+  // The marker is what routes. The reviewer's result comment ends with `- /engineer`
+  // — the model's markdown mangling the directive — and the machinery's marker taking
+  // it up is the request the strict readers answer, at `newestRequestedAgent`. What
+  // the mangled line is NOT, any longer, is a second ask with an author: the ask a
+  // push could answer is a question the routing no longer asks.
+  test("the marker is the standing request, however the model mangled the directive", () => {
     const request = latestRequest(
       "/reviewer\n\nPart of #219",
       [
@@ -188,14 +188,12 @@ describe("latestRequestOn", () => {
         comment(2, "2026-10-19T17:41:46Z", "<!-- atomaton:dispatch=engineer -->\nAtomaton: `engineer` starting."),
         comment(3, "2026-10-19T18:05:00Z", "<!-- atomaton:agent=engineer -->\nFixed it."),
       ],
-    ) as { newestRequestedAgent: string; latestAsk?: unknown };
+    ) as { newestRequestedAgent: string; hold?: unknown };
 
     expect(request.newestRequestedAgent).toBe("engineer");
-    expect(request.latestAsk).toEqual({
-      agent: "engineer",
-      author: { kind: "agent", agent: "reviewer" },
-      at: "2026-10-19T17:41:32Z",
-    });
+    // ...and one unclaimed ask is the state a verdict may act in: the call is waiting
+    // for exactly this delivery.
+    expect(request.hold).toEqual({ kind: "free" });
   });
 
   // The strict half, and the reason the tolerance is scoped: a person's markdown bullet
@@ -204,22 +202,55 @@ describe("latestRequestOn", () => {
   test("a person's bulleted command is not the standing request", () => {
     const request = latestRequest("/reviewer", [
       comment(1, "2026-10-19T18:00:00Z", "- /engineer", "User"),
-    ]) as { newestRequestedAgent: string };
+    ]) as { newestRequestedAgent: string; hold?: unknown };
 
     expect(request.newestRequestedAgent).toBe("reviewer");
+    // And a person's comment IS an event: nobody has taken it up, so the ball is
+    // where a green verdict may hand the standing request to its agent.
+    expect(request.hold).toEqual({ kind: "free" });
   });
 
-  // The body's own `/<agent>` line is the standing request and never the ask: a push is
-  // part of the work it asked for, so consuming it would hand the pull request back to
-  // its opener on every push.
-  test("the body's own line is the standing request, never the ask", () => {
+  // The body's own `/<agent>` line is the standing request: a push is part of the
+  // work it asked for, and the hold below is the state that lets the verdict act on
+  // it -- that is the standing request's whole purpose now.
+  test("the body's own line is the standing request", () => {
     const request = latestRequest("/reviewer\n\nPart of #219", []) as {
       newestRequestedAgent: string;
-      latestAsk?: unknown;
+      hold?: unknown;
     };
 
     expect(request.newestRequestedAgent).toBe("reviewer");
-    expect(request.latestAsk).toBeUndefined();
+    expect(request.hold).toEqual({ kind: "free" });
+  });
+
+  // The hold half, from real tags. A run parked the turn on the pull request it
+  // opened (the `create_pr` ending), and the validating machinery is the promised
+  // collector: the green verdict may start the reviewer the body names.
+  test("a parked turn is the park that lets the collection happen", () => {
+    const request = latestRequest("/reviewer", [
+      comment(1, "2026-10-19T18:00:00Z", "<!-- atomaton:agent=engineer -->\nPull request opened.\n\n<!-- atomaton:ended=waiting answers=0 run=2 -->"),
+    ]) as { hold?: unknown };
+
+    expect(request.hold).toEqual({ kind: "parked" });
+  });
+
+  // The run said its piece and gave the turn back. Nothing dispatches into that.
+  test("an agent result that returned the turn puts the ball with a person", () => {
+    const request = latestRequest("/reviewer", [
+      comment(1, "2026-10-19T18:00:00Z", "<!-- atomaton:agent=engineer -->\nReviewed. Found problems.\n\n<!-- atomaton:ended=done answers=0 run=2 -->"),
+    ]) as { hold?: unknown };
+
+    expect(request.hold).toEqual({ kind: "with-person" });
+  });
+
+  // A claimed ask nobody has reported on: a run is working right now.
+  test("a claim the run is still holding is in flight", () => {
+    const request = latestRequest("/reviewer", [
+      comment(1, "2026-10-19T18:00:00Z", "<!-- atomaton:dispatch=engineer -->\nAtomaton: `engineer` starting."),
+      comment(2, "2026-10-19T18:00:10Z", "<!-- atomaton:took=1 run=4 -->"),
+    ]) as { hold?: unknown };
+
+    expect(request.hold).toEqual({ kind: "in-flight" });
   });
 
   // The tag decides an attribution, and the fence decides it is a sample (#304): a
