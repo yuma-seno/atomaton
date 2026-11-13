@@ -21036,24 +21036,27 @@
   {
     "path": "sessions/issue-489/engineer.json",
     "agent": "engineer",
-    "messages": 104,
-    "calls": 57,
-    "failed": 2,
+    "messages": 206,
+    "calls": 109,
+    "failed": 3,
     "refused": 0,
     "skills": [
       "project/conventions"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
       "load_skill": 1,
-      "bash": 45,
+      "bash": 82,
       "fetch": 4,
-      "read": 7
+      "read": 9,
+      "edit": 12,
+      "write": 1
     },
     "acts": {
-      "other": 6,
-      "open": 24,
-      "search": 15
+      "other": 28,
+      "open": 31,
+      "search": 21,
+      "edit": 2
     },
     "runs": [
       {
@@ -21102,6 +21105,25 @@
         "seconds": 301,
         "server_calls": {},
         "started": "2026-11-13T00:14:54Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T01:55:50Z",
+        "ended_because": "failed",
+        "iterations": 48,
+        "messages": 206,
+        "seconds": 3691,
+        "server_calls": {
+          "files": {
+            "edit": 12,
+            "read": 2,
+            "write": 1
+          },
+          "shell": {
+            "bash": 37
+          }
+        },
+        "started": "2026-11-13T00:54:19Z"
       }
     ]
   },
