@@ -155,7 +155,7 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           default: "",
         },
         asked_by_person: {
-          description: "Whether a person asked for this run, which decides who a failed check goes back to",
+          description: "Whether a person asked for this run, which decides whether the CI-waiting comment is posted for them",
           required: false,
           type: "string",
           default: "false",

@@ -148,13 +148,13 @@ function main(): void {
       console.error(`#${number} has a stop newer than its claim, so the run will stop despite the failed post.`);
       return;
     }
-    if (looksTransient({ code: 1, stdout: "", stderr: posted.stderr })) {
-      console.error(`::warning::the stop post failed transiently, retrying once: ${posted.stderr}`);
+    if (looksTransient({ code: 1, stdout: posted.stdout, stderr: posted.stderr })) {
+      console.error(`::warning::the stop post failed transiently, retrying once: ${posted.stderr || posted.stdout}`);
       posted = commentOnDetailed(repo, number, stopOnPrCloseBody({ number, merged }));
     }
   }
   if (!posted.ok) {
-    console.error(`::error::Could not post the stop request on #${number}: ${posted.stderr}`);
+    console.error(`::error::Could not post the stop request on #${number}: ${posted.stderr || posted.stdout}`);
     process.exit(1);
   }
 

@@ -15,7 +15,7 @@ dispatched explicitly instead.
 
 `atomaton-pr-closed.yml` is the one path that listens rather than being dispatched: it
 uses `pull_request_target`, so a person's merge — or a person's close, which is now
-returned to the issue's agent as a rejection — is detected whoever or whatever
+told to a person on the linked issue — is detected whoever or whatever
 performed it.
 
 This explains more of the machinery than any other single fact about it, which is

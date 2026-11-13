@@ -315,8 +315,9 @@ function reportFailure(
  * minutes long; a person who typed a command and saw nothing happen has no way to
  * tell a queued run from a broken workflow. So validation itself says the one fact
  * that is true while the run goes -- and nothing more. It does not name the agent
- * that will work next, because the result decides that: checks that fail dispatch
- * the engineer who opened the pull request, not the agent the person named. The
+ * that will work next, because nobody is dispatched by a verdict any more: the
+ * result is delivered where the thread's ball says a call is waiting, and everywhere
+ * else a person is told, naming the agent they can ask. The
  * workflow-side comment this replaces promised the agent unconditionally, and said
  * it even when CI was never going to run -- validation reuses a run that already
  * finished, so its most common case was a promise about a wait that did not exist
@@ -326,8 +327,8 @@ function reportFailure(
  * tool that started it says so in its result -- and a comment on every push would be
  * noise on the thread the agent is working in. A reused completed run says nothing
  * either: the person's own command is the record the run was asked for, the verdict
- * that reuse returns is seconds old, and the agent the verdict dispatches starts
- * seconds later. There is no wait left to describe.
+ * that reuse returns is seconds old, and wherever the hold lets a run start at all,
+ * it starts seconds later. There is no wait left to describe.
  *
  * #471 is why the reused case has to include GitHub's own `pull_request` run: with
  * that run out of `findExistingCiRun`'s candidates, a green pull request went on to be
