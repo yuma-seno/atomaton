@@ -21151,6 +21151,55 @@
     ]
   },
   {
+    "path": "sessions/issue-489/reviewer.json",
+    "agent": "reviewer",
+    "messages": 74,
+    "calls": 39,
+    "failed": 2,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "load_skill": 1,
+      "get_pr_diff": 1,
+      "get_pr": 1,
+      "read": 20,
+      "list": 1,
+      "glob": 3,
+      "grep": 11,
+      "fetch": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T04:19:54Z",
+        "ended_because": "failed",
+        "iterations": 17,
+        "messages": 74,
+        "seconds": 1479,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 3,
+            "grep": 11,
+            "list": 1,
+            "read": 20
+          },
+          "github": {
+            "get_pr": 1,
+            "get_pr_diff": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-13T03:55:15Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-492/engineer.json",
     "agent": "engineer",
     "messages": 347,
