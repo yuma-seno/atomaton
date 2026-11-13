@@ -21121,8 +21121,8 @@
   {
     "path": "sessions/issue-489/atomaton.json",
     "agent": "atomaton",
-    "messages": 126,
-    "calls": 60,
+    "messages": 135,
+    "calls": 64,
     "failed": 3,
     "refused": 1,
     "skills": [
@@ -21141,7 +21141,7 @@
       "grep": 9,
       "glob": 4,
       "search_code": 1,
-      "fetch": 19,
+      "fetch": 23,
       "bash": 2,
       "write": 1,
       "publish_draft": 1,
@@ -21236,6 +21236,20 @@
           }
         },
         "started": "2026-11-13T09:13:00Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T09:27:28Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 135,
+        "seconds": 266,
+        "server_calls": {
+          "web": {
+            "fetch": 4
+          }
+        },
+        "started": "2026-11-13T09:23:02Z"
       }
     ]
   },
