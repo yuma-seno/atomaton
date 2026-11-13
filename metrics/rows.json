@@ -24176,8 +24176,8 @@
   {
     "path": "sessions/pr-543/reviewer.json",
     "agent": "reviewer",
-    "messages": 277,
-    "calls": 193,
+    "messages": 299,
+    "calls": 206,
     "failed": 2,
     "refused": 0,
     "skills": [
@@ -24186,16 +24186,16 @@
     ],
     "reported": true,
     "tools": {
-      "read": 70,
-      "grep": 90,
-      "fetch": 22,
+      "read": 73,
+      "grep": 96,
+      "fetch": 23,
       "list": 1,
       "glob": 1,
       "load_skill": 2,
       "get_pr": 1,
-      "get_check_runs": 2,
-      "get_branch": 1,
-      "check_merge_readiness": 1,
+      "get_check_runs": 3,
+      "get_branch": 2,
+      "check_merge_readiness": 2,
       "get_pr_reviews": 1,
       "list_pr_review_comments": 1
     },
@@ -24277,6 +24277,29 @@
           }
         },
         "started": "2026-11-13T14:20:09Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T14:51:39Z",
+        "ended_because": "completed",
+        "iterations": 6,
+        "messages": 299,
+        "seconds": 68,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 6,
+            "read": 3
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_branch": 1,
+            "get_check_runs": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-13T14:50:31Z"
       }
     ]
   }
