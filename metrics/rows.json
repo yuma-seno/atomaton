@@ -24038,5 +24038,62 @@
         "started": "2026-11-13T08:56:38Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-543/reviewer.json",
+    "agent": "reviewer",
+    "messages": 186,
+    "calls": 119,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "get_pr_diff": 2,
+      "get_pr": 1,
+      "load_skill": 1,
+      "list": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "get_issue_comments": 1,
+      "glob": 2,
+      "grep": 51,
+      "read": 52,
+      "fetch": 5,
+      "get_check_runs": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T13:29:21Z",
+        "ended_because": "failed",
+        "iterations": 62,
+        "messages": 186,
+        "seconds": 1276,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 50,
+            "list": 1,
+            "read": 52
+          },
+          "github": {
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 2,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          },
+          "web": {
+            "fetch": 5
+          }
+        },
+        "started": "2026-11-13T13:08:05Z"
+      }
+    ]
   }
 ]
