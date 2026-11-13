@@ -16,6 +16,17 @@ Name the version rather than taking `latest`, and read the upstream changes betw
 yours and the next one (`gh release view`, or compare the two tags) rather than
 rediscovering them in a diff.
 
+**You do not have to watch for it.** `atomaton-new-release.yml`, which ships with the
+release, runs once a day and compares `.github/atomaton-release.json` against the
+latest release. When they differ it opens one issue — updated in place rather than
+opened again — carrying both versions, the release notes in between, the command
+above, and the paths upstream no longer ships. Nothing is downloaded or changed by
+it: the upgrade stays your decision. Once a notice's version is the one you are on,
+it closes itself, so an open one always means an upgrade is still waiting. It needs
+no secret: `contents: read` to read the releases and `issues: write` to write the
+notice. Run it by hand from the Actions tab if you would rather ask now than wait
+for the next day.
+
 **Which release do I have?** `.github/atomaton-release.json` says. It ships with the
 release and records the version and every path the release contains:
 

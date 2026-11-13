@@ -78,6 +78,12 @@ This one is dispatched rather than triggered:
 And `atomaton-runner.yml` is the shared executor: a reusable workflow the routing
 workflows call, rather than four copies of the same job.
 
+`atomaton-new-release.yml` is the one that listens for nothing at all. It compares
+`.github/atomaton-release.json` against the latest release, nightly, and opens (or
+updates) a single issue when they differ — the only way a repository that has been
+quiet for a while learns that a newer release exists. What it does with the answer
+is [move to a newer release](../../runtime/tasks/move-to-a-newer-release.md).
+
 Why so much of this is dispatched rather than listened for is
 [GitHub raises no event for its own token](github-raises-no-event-for-its-own-token.md).
 
