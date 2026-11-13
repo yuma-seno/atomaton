@@ -20959,32 +20959,35 @@
   {
     "path": "sessions/issue-489/atomaton.json",
     "agent": "atomaton",
-    "messages": 74,
-    "calls": 43,
-    "failed": 2,
+    "messages": 106,
+    "calls": 50,
+    "failed": 3,
     "refused": 1,
     "skills": [
       "project/conventions",
       "research/web-search",
-      "engineering/secrets-in-a-check"
+      "engineering/secrets-in-a-check",
+      "writing/japanese"
     ],
     "reported": true,
     "tools": {
       "get_issue": 1,
-      "list": 2,
-      "read": 10,
-      "load_skill": 3,
+      "list": 3,
+      "read": 11,
+      "load_skill": 4,
       "get_issue_comments": 1,
-      "grep": 4,
-      "glob": 3,
+      "grep": 5,
+      "glob": 4,
       "search_code": 1,
       "fetch": 15,
-      "bash": 1,
+      "bash": 2,
       "write": 1,
-      "publish_draft": 1
+      "publish_draft": 1,
+      "attach_file": 1
     },
     "acts": {
-      "other": 1
+      "other": 1,
+      "edit": 1
     },
     "runs": [
       {
@@ -21030,6 +21033,29 @@
         "seconds": 71,
         "server_calls": {},
         "started": "2026-11-12T15:16:50Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-13T08:45:55Z",
+        "ended_because": "completed",
+        "iterations": 6,
+        "messages": 106,
+        "seconds": 645,
+        "server_calls": {
+          "attachments": {
+            "attach_file": 1
+          },
+          "files": {
+            "glob": 1,
+            "grep": 1,
+            "list": 1,
+            "read": 1
+          },
+          "shell": {
+            "bash": 1
+          }
+        },
+        "started": "2026-11-13T08:35:10Z"
       }
     ]
   },
