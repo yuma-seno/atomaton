@@ -25,13 +25,21 @@ const thread = (body: string, comments: string[]) => [
 
 /**
  * The same comment list, with each comment's author named, for the tests that need the
- * walk to know who wrote what. Ids are 100 + index, like `thread`.
+ * walk to know who wrote what. Ids are 100 + index, like `thread`. An optional third
+ * element is the comment's `created_at`, which only the tests that need a lock's AGE
+ * (a park's grace) supply — the walk reads the field as "when it was written, or
+ * absent when the read did not have it".
  */
-const threadAs = (specs: ReadonlyArray<readonly [string, boolean]>) => [
+const threadAs = (specs: ReadonlyArray<readonly [string, boolean, string?]>) => [
   {
     match: ["api", "/issues/9/comments"],
     stdout: JSON.stringify(
-      specs.map(([body, human], i) => ({ id: 100 + i, body, user: { type: human ? "User" : "Bot" } })),
+      specs.map(([body, human, at], i) => ({
+        id: 100 + i,
+        body,
+        user: { type: human ? "User" : "Bot" },
+        ...(at === undefined ? {} : { created_at: at }),
+      })),
     ),
   },
 ];
@@ -725,13 +733,17 @@ describe("guard_comment_during_run.ts", () => {
   });
 
   /**
-   * A park is never abandoned by this guard, however old, because the aggregation resumes
-   * it and reads what was written during the wait (#208). A missed park is the sweep's to
-   * release, on the park's own clock — the guard taking that decision would delete the
-   * comment the resumed run needed. The `completed` status is supplied deliberately: a rule
-   * that did not exclude parks would read it and keep the comment.
+   * A park past its grace with NOTHING open under it is released by the verdict the
+   * guard now asks (`lockAbandoned` is `lockVerdict(...) === "release"` — the whole
+   * verdict, not the narrower park-exempting reading it replaced): no aggregation is
+   * coming, so the person's comment is kept, and it reaches a node whose turn nothing
+   * holds. The fixture supplies what the verdict actually reads, because without them
+   * the park cannot be told from "nobody could say": the waiting ending's
+   * `created_at` puts the park past `PARK_COLLECTION_MINUTES`, and the graphql link
+   * read answers "nothing open under this node". The `completed` run is the point —
+   * a finished run's claim does not keep a missed park alive.
    */
-  test("a parked node keeps deleting, even when its run has finished", () => {
+  test("keeps a person's comment on a park past its grace with nothing open under it", () => {
     const configDir = makeConfigDir({});
     try {
       const r = runWithFakeGh(
@@ -743,9 +755,132 @@ describe("guard_comment_during_run.ts", () => {
           rules: [
             ...threadAs([
               [OPEN_CLAIM, false],
-              ["<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=waiting answers=55 run=7 -->", false],
+              [
+                "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=waiting answers=55 run=7 -->",
+                false,
+                // Two hours old: past PARK_COLLECTION_MINUTES (thirty minutes).
+                new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+              ],
               ["a remark", true],
             ]),
+            {
+              match: ["graphql"],
+              stdout: JSON.stringify({
+                data: {
+                  repository: {
+                    issueOrPullRequest: {
+                      __typename: "Issue",
+                      subIssues: { nodes: [] },
+                      closedByPullRequestsReferences: { nodes: [] },
+                      timelineItems: { nodes: [] },
+                    },
+                  },
+                },
+              }),
+            },
+            { match: ["actions/runs/7"], stdout: "completed" },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/102"))).toBe(false);
+      expect(noticeOf(r.ghCalls)).toBe("");
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The other side of the same verdict: a park whose collection may still be coming
+   * keeps the thread's word, and the guard deletes. Two ways for that to be true —
+   * the grace has not passed, or work is still open under the node — and both are
+   * pinned, because they are the checks the verdict runs in order. Each runs with a
+   * `completed` claim run on purpose: a finished run's claim does not by itself make
+   * the park releasable.
+   */
+  test("keeps deleting on a park whose grace has not passed", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "102", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([
+              [OPEN_CLAIM, false],
+              [
+                "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=waiting answers=55 run=7 -->",
+                false,
+                // Five minutes old: well inside PARK_COLLECTION_MINUTES.
+                new Date(Date.now() - 5 * 60_000).toISOString(),
+              ],
+              ["a remark", true],
+            ]),
+            {
+              match: ["graphql"],
+              stdout: JSON.stringify({
+                data: {
+                  repository: {
+                    issueOrPullRequest: {
+                      __typename: "Issue",
+                      subIssues: { nodes: [] },
+                      closedByPullRequestsReferences: { nodes: [] },
+                      timelineItems: { nodes: [] },
+                    },
+                  },
+                },
+              }),
+            },
+            readBack(102, "a remark"),
+            { match: ["actions/runs/7"], stdout: "completed" },
+            { match: ["api", "DELETE"] },
+            { match: ["issue", "comment"] },
+          ],
+        },
+      );
+      expect(r.status).toBe(0);
+      expect(r.ghCalls.some((c) => c.includes("DELETE") && c.join(" ").includes("comments/102"))).toBe(true);
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps deleting on a park with work still open under it", () => {
+    const configDir = makeConfigDir({});
+    try {
+      const r = runWithFakeGh(
+        scriptPath("guard_comment_during_run.ts"),
+        ["--number", "9", "--comment-id", "102", "--commenter", "octocat", "--parsed", "true", "--state", "open"],
+        {
+          cwd: configDir,
+          env: { GITHUB_REPOSITORY: "owner/repo" },
+          rules: [
+            ...threadAs([
+              [OPEN_CLAIM, false],
+              [
+                "<!-- atomaton:llm-context=exclude -->\n<!-- atomaton:ended=waiting answers=55 run=7 -->",
+                false,
+                new Date(Date.now() - 2 * 60 * 60_000).toISOString(),
+              ],
+              ["a remark", true],
+            ]),
+            {
+              match: ["graphql"],
+              stdout: JSON.stringify({
+                data: {
+                  repository: {
+                    issueOrPullRequest: {
+                      __typename: "Issue",
+                      subIssues: { nodes: [{ number: 12, title: "child", state: "OPEN" }] },
+                      closedByPullRequestsReferences: { nodes: [] },
+                      timelineItems: { nodes: [] },
+                    },
+                  },
+                },
+              }),
+            },
             readBack(102, "a remark"),
             { match: ["actions/runs/7"], stdout: "completed" },
             { match: ["api", "DELETE"] },

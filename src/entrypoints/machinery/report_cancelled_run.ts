@@ -91,7 +91,18 @@ function main(): void {
 
   // The header carries `llm-context=exclude` already: this is addressed to the person
   // who stopped the run, and the next run can do nothing with it but carry it.
-  gh("issue", "comment", values.number, "--body", body);
+  const posted = gh("issue", "comment", values.number, "--body", body);
+  if (posted.code !== 0) {
+    // A comment that did not land leaves the claim standing — the exact this-change
+    // removes, with nobody coming to heal it — and the step is the last chance the
+    // job has to say so. Red is the signal the thread was denied; the job's own log
+    // is where the reason has to be, because the thread got nothing.
+    console.error(
+      `::error::could not post the cancelled run's ending on #${values.number}: ` +
+        `${posted.stderr || posted.stdout}`,
+    );
+    process.exitCode = 1;
+  }
 }
 
 if (import.meta.main) main();

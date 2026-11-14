@@ -267,7 +267,7 @@ async function main(): Promise<void> {
       // the outside sweep used to release. A completed run cannot be about to write
       // its ending, so taking the line over here is not a race; the fresh claim
       // carries the same ask and the same obligation. Same read the guard makes
-      // (`abandonedClaim`): an unreadable run stays the conservative answer.
+      // (`lockAbandoned`): an unreadable run stays the conservative answer.
       if (!runFinishedOn(repo, existing.run)) {
         record(false);
         return;

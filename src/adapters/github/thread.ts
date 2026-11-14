@@ -838,8 +838,8 @@ function holdHealed(
 
   // The lock facts from the SAME read — `lockOf` folds what `shapedThread` already
   // walked — plus the two outside reads the verdict needs. A claim without a run id
-  // passes `{read:false}` and lands on the claim's own clock, the rule
-  // `readNodeLock` follows.
+  // passes `{read:false}` and lands on the claim's own clock
+  // (`CLAIM_WITHOUT_RUN_MINUTES`), the fallback the judgement states.
   const lock = lockOf(shaped.comments, shaped);
   const verdict = lockVerdict({
     claim: lock.claim,

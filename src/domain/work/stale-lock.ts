@@ -27,9 +27,9 @@
  *     aggregation is about to collect it. `PARK_COLLECTION_MINUTES` is that grace.
  *
  * Both constants are far longer than the thing they wait for, because the two errors are
- * not symmetric: holding a dead lock another sweep costs another sweep, while releasing
- * a live one removes the guard from a node a run is working on — the interruption the
- * guard exists to close.
+ * not symmetric: holding a dead lock one read longer costs nothing but the read, while
+ * releasing a live one removes the guard from a node a run is working on — the
+ * interruption the guard exists to close.
  *
  * `unknown` is a third answer rather than a silent `fresh`: a read that failed is not an
  * answer, and both callers say so instead of acting on a guess.
@@ -76,8 +76,8 @@ export const CLAIM_WITHOUT_RUN_MINUTES = 360;
  * A park holds the turn open on purpose (#208): the run ended inside a child-starting
  * call, and the parent is re-invoked when the last child closes — seconds after it
  * closes, through its own path. So a park with nothing open under it that has survived
- * this long has missed that path, and half an hour keeps this sweep out of the
- * aggregation's way while still bounding a missed park.
+ * this long has missed that path, and half an hour bounds a missed park without
+ * crowding the aggregation while it works.
  */
 export const PARK_COLLECTION_MINUTES = 30;
 
@@ -127,14 +127,16 @@ export function parkOverdue(parkedSince: string, nowMs: number): boolean {
 }
 
 /**
- * What the sweep — or the guard — should do about one node's lock.
+ * What a reader of one node's lock should do with it.
  *
- * - `release` — the run is over and nothing is coming: write the ending that answers the
- *   claim and hand the node back to a person.
+ * - `release` — the run is over and nothing is coming: the guard keeps the person's
+ *   comment, the dispatch hold treats the ask as free, and the next run's own ending
+ *   closes the thread.
  * - `hold` — something may still hold it, or a park's collection is legitimately still on
- *   its way. Write nothing.
- * - `undetermined` — the question could not be answered. Write nothing either, but say
- *   so: silence here is indistinguishable from "there was nothing to do".
+ *   its way. Every reader keeps the thread's word.
+ * - `undetermined` — the question could not be answered. Every reader stays on the side
+ *   that acts on nothing: deleting or dispatching on a guess is the harm, and silence
+ *   here must not read as "there was nothing to do".
  */
 export type LockVerdict = "release" | "hold" | "undetermined";
 
@@ -147,14 +149,20 @@ export type LockVerdict = "release" | "hold" | "undetermined";
  * A PARK does have one — the aggregation — and that is why three more facts are required
  * before releasing one: nothing is left open under the node, the grace has passed, and the
  * links could be read at all. All three are about not racing the machinery's own resume. A
- * park released a sweep early would post "nothing was decided" beside a parent that then
- * decides something.
+ * park released early would hand a person's next command onto a node a parent is about to
+ * decide something about.
  *
  * `claim` is absent in one real state: a person removed the claim by hand to get out of a
  * lock and left the park standing, which before this was the only way out of a stuck one.
  * There is no run to ask about then, and the park clock plus the open children are what is
  * left — which is enough, because a park is the newer of the two facts and carries its own
  * ending.
+ *
+ * Two shapes are NOT released however old the lock looks, and both are about not racing
+ * work that is really there. A park whose collection may still be coming keeps its grace
+ * and its open-work checks above. And an UNANSWERABLE claim — an unreadable run, an
+ * unreadable time — lands on `undetermined`, never on `release`: `unknown` is not `stale`,
+ * because acting on a guess here is a live run's node handed away.
  */
 export function lockVerdict(args: {
   /** The open claim, or `undefined` when the thread leaves none. */
@@ -187,39 +195,10 @@ export function lockVerdict(args: {
     const parkedClaim = claimFreshness(args.claim, args.run, args.nowMs);
     return parkedClaim === "fresh" ? "hold" : parkedClaim === "unknown" ? "undetermined" : "release";
   }
-  // Nothing claims the turn, so no reader holds it: the guard keeps a person's comment
-  // and there is nothing for a sweep to release.
+  // Nothing claims the turn, so no reader holds it: there is no lock to release, and
+  // a person's comment reaches a node whose turn nothing holds.
   if (args.claim === undefined) return "hold";
   const freshness = claimFreshness(args.claim, args.run, args.nowMs);
   if (freshness === "unknown") return "undetermined";
   return freshness === "fresh" ? "hold" : "release";
 }
-
-/**
- * Whether the lock is one NOBODY is coming back for — the guard's question.
- *
- * The guard deletes a person's comment made while the ball is with an agent, and until
- * #469 "with an agent" was read off the claim alone: a `took` line with no ending after
- * it. A claim outlives its run whenever a run dies without reporting, and in that state
- * the guard removes every comment a person writes — the node reads as busy forever,
- * nothing heals the thread, and there is no way back in (#462).
- *
- * That question no longer has its own function. The guard asks `lockVerdict` itself —
- * `adapters/github/node-lock.ts`'s `lockAbandoned` is `lockVerdict(...) === "release"` —
- * because the outside sweep that used to be the only park releaser is gone and the read
- * is where a missed park now recovers: a park past its grace with nothing open under it
- * has no aggregation coming, so keeping the person's comment is the safe side there too.
- * The distinction this function used to carry ("narrower than the sweep's verdict") was
- * a distinction between two callers of one judgement, and with one caller gone the two
- * spellings would only drift.
- *
- * Two shapes are NOT released however old the claim looks, and both are about not racing
- * work that is really there:
- *
- *   - a park whose collection may still be coming. The run ended on purpose and the turn
- *     is held open for the aggregation, which resumes the node and reads what was written
- *     during the wait (#208). The park's own clock is `lockVerdict`'s grace.
- *   - a claim nobody can judge (an unreadable run, an unreadable time). `unknown` is not
- *     `stale`: removing a live run's comments is the harm this guard exists to prevent, so
- *     a failed read keeps the old behaviour.
- */
