@@ -137,17 +137,21 @@ export function commandsAfterStop(original: string): string[] {
  * not because it went unnoticed: the escape route is now TWO others, and both are the
  * reason this one can stay as narrow as it is.
  *
- *   - the scheduled sweep (`entrypoints/machinery/lib/stale-sweep.ts`) releases a claim
- *     whose run has finished, and a park whose collection never came, from outside any
- *     run — so the node comes back without a person having to know `/stop` exists;
+ *   - a cancelled run closes its own claim from inside (`report_cancelled_run.ts`),
+ *     and a claim whose run finished and never answered is ignored on the read — by
+ *     the claim path (`claim_turn.ts`'s dead-claim exception) and by the dispatch
+ *     hold (`latestRequestOn` in `adapters/github/thread.ts`, the judgement
+ *     `domain/work/stale-lock.ts` makes) — so the node comes back without a person
+ *     having to know `/stop` exists;
  *   - the guard no longer deletes a comment made under a stale lock
- *     (`domain/work/stale-lock.ts`), so the way in is open even before the sweep runs.
+ *     (`domain/work/stale-lock.ts`), so the way in is open even before anything
+ *     else heals.
  *
  * Widening this would be a second spelling of the same judgement, made from inside a run
  * with less information than either of those has: `/stop` sees one node's thread and
  * nothing about whether the run it names is still going. So it keeps its two gates and
  * answers the park a person is explicitly abandoning, which is a different act from the
- * sweep handing back a lock nobody is coming for.
+ * read handing back a lock nobody is coming for.
  */
 export function parkExit(
   openClaim: { ask: number; run: number; parked: boolean; claimed: boolean } | undefined,

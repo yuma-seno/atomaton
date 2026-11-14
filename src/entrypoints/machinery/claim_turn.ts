@@ -33,6 +33,20 @@
  * gated off it. The other run — its claim is older — holds the turn, and a backed
  * off run leaves no ending, because it took no turn the thread names.
  *
+ * ## The dead-claim exception (heal-on-read)
+ *
+ * An older claim blocks only while its RUN can still be working. A claim whose run
+ * has finished and never answered is a dead claim — the state a cancelled or
+ * vanished run leaves — and backing off to it would wedge the ask: no run claims
+ * it, no ending answers it, and the outside sweep that used to release it is gone.
+ * So the comparison consults the run (`adapters/github/run-status.ts`): a
+ * `completed` run's claim is skipped, a live or unreadable one still blocks — the
+ * conservative side is the one that does not release a working run's turn. On the
+ * marker the same exception takes the dead line over, because a marker holds one
+ * line and a dead one would keep every future dispatch out. The cancelled run's
+ * own inside report (`report_cancelled_run.ts`) is what makes this rare: most
+ * stopped runs close their claims themselves.
+ *
  * ## Why a marker is claimed in place
  *
  * A dispatch marker is the machinery's own comment, and its id IS the ask
@@ -78,6 +92,7 @@ import { gh } from "../../adapters/github/gh.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG, TOOK_TAG } from "../../adapters/github/tags.ts";
 import { listComments } from "../../adapters/github/thread.ts";
+import { readRunStatus } from "../../adapters/github/run-status.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ClaimTurnArgs {
@@ -92,6 +107,19 @@ export const ref = defineScript<ClaimTurnArgs>(import.meta.url);
 
 /** Delays between reads while waiting for the listing to show the claim. */
 const READ_DELAYS_MS = [1_000, 2_000, 4_000];
+
+/**
+ * Whether the run behind a claim has finished and can no longer write its ending.
+ *
+ * The heal-on-read lookup `raceOutcome` and the marker takeover ask. A run that
+ * cannot be read is NOT finished — releasing a live run's claim is the harm the
+ * conservative answer avoids, the same rule `domain/work/stale-lock.ts` states —
+ * so an unreadable read lands on "the claim may be live" and blocks.
+ */
+function runFinishedOn(repo: string, run: number): boolean {
+  const status = readRunStatus(repo, run);
+  return status.read && status.status === "completed";
+}
 
 /**
  * Every comment on the node, oldest first, as the claim reads them.
@@ -151,17 +179,26 @@ function patchCommentBody(repo: string, commentId: number, body: string): { code
  * Split out of `main` so the read-after-write and the id comparison are testable
  * without GitHub: the caller hands in the comments as they stand and the id the
  * run's own claim carries.
+ *
+ * `runFinished` is the heal-on-read half (see the module comment on the marker
+ * takeover): an older claim whose RUN has finished and never answered is a dead
+ * claim, not a live holder, so it does not back this run off. The lookup is the
+ * caller's — pure here, I/O in `main` — and a claim that names no run, or a run
+ * that could not be read, stays the conservative answer: it blocks.
  */
 export function raceOutcome(
   comments: readonly { id: number; body: string }[],
   mine: { id: number; ask: number },
+  runFinished?: (run: number) => boolean,
 ): "held" | "backed-off" {
   for (const comment of comments) {
     if (comment.id >= mine.id) break; // oldest first; nothing newer can have claimed first
     // Prose only: a comment quoting a took tag in a fenced sample has not claimed
     // anything (#304).
     const claim = TOOK_TAG.readProse(comment.body);
-    if (claim !== undefined && claim.ask === mine.ask) return "backed-off";
+    if (claim === undefined || claim.ask !== mine.ask) continue;
+    if (runFinished !== undefined && claim.run > 0 && runFinished(claim.run)) continue;
+    return "backed-off";
   }
   return "held";
 }
@@ -223,6 +260,44 @@ async function main(): Promise<void> {
       // claim on the thread — the states the claim exists to make readable. The
       // separate-claim path below never had this problem: it deleted the comment IT
       // had just posted and left every older one standing.
+      //
+      // THE EXCEPTION is the heal-on-read half: a claim whose RUN has finished and
+      // never answered is a dead claim, not a live holder — the marker would wedge
+      // the ask forever (no run claims it, no ending answers it), which is the state
+      // the outside sweep used to release. A completed run cannot be about to write
+      // its ending, so taking the line over here is not a race; the fresh claim
+      // carries the same ask and the same obligation. Same read the guard makes
+      // (`abandonedClaim`): an unreadable run stays the conservative answer.
+      if (!runFinishedOn(repo, existing.run)) {
+        record(false);
+        return;
+      }
+      // Strip the dead claim's line and write this run's in its place — one line,
+      // as the marker has always held.
+      const stripped = original
+        .split("\n")
+        .filter((line) => !TOOK_TAG.hasProse(line))
+        .join("\n");
+      const takenOver = patchCommentBody(repo, ask, claimOnMarkerBody(stripped, { ask, run: runId }));
+      if (takenOver.code !== 0) {
+        throw new Error(`could not claim the dispatch marker on #${number}: ${takenOver.stderr || takenOver.stdout}`);
+      }
+      const readBack = readComments(repo, number).find((comment) => comment.id === ask);
+      const nowOurs = readBack === undefined ? undefined : TOOK_TAG.readProse(readBack.body);
+      if (nowOurs === undefined || nowOurs.run !== runId) {
+        throw new Error(`the takeover of the claim on #${number} did not read back as this run's`);
+      }
+      const outcome = raceOutcome(readComments(repo, number), { id: ask, ask }, (run) =>
+        runFinishedOn(repo, run),
+      );
+      if (outcome === "held") {
+        record(true);
+        return;
+      }
+      const restored = patchCommentBody(repo, ask, original);
+      if (restored.code !== 0) {
+        throw new Error(`could not take back the claim on #${number}: ${restored.stderr || restored.stdout}`);
+      }
       record(false);
       return;
     }
@@ -258,8 +333,12 @@ async function main(): Promise<void> {
 
     // The separate-claim comparison still runs: a claim posted on this ask
     // BEFORE the marker could carry one (the shape this replaced, or a claim
-    // somebody wrote) is older and holds, and this run takes its line back.
-    const outcome = raceOutcome(readComments(repo, number), { id: ask, ask });
+    // somebody wrote) is older and holds, and this run takes its line back —
+    // unless that older claim's run is finished and never answered, which the
+    // heal inside `raceOutcome` ignores.
+    const outcome = raceOutcome(readComments(repo, number), { id: ask, ask }, (run) =>
+      runFinishedOn(repo, run),
+    );
     if (outcome === "held") {
       record(true);
       return;
@@ -298,7 +377,9 @@ async function main(): Promise<void> {
   }
   if (!visible) throw new Error(`the claim on #${number} never became visible, so the race check cannot be trusted`);
 
-  const outcome = raceOutcome(readComments(repo, number), { id: claimId, ask });
+  const outcome = raceOutcome(readComments(repo, number), { id: claimId, ask }, (run) =>
+    runFinishedOn(repo, run),
+  );
   if (outcome === "held") {
     record(true);
     return;

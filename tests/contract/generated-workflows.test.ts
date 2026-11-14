@@ -230,47 +230,38 @@ describe("generated workflows", () => {
   });
 
   /**
-   * The run watch's scheduled half (#462), and the reason it exists at all.
+   * The run watch has ONE trigger now: the completion of the entry workflows and the
+   * runner.
    *
-   * Every runner run is dispatched by the machinery with `GITHUB_TOKEN`, and GitHub starts
-   * no workflow run for an event its own token triggered — so `workflow_run: completed`
-   * has only ever fired for ENTRY runs, and the watch was pointed away from the runs it
-   * exists for. A schedule does not depend on an event being delivered, so the generated
-   * workflow must carry one, and the two halves must be gated to their own event: a
-   * scheduled run has no `workflow_run` context, and a completion has no lock to sweep.
+   * The scheduled sweep it used to carry is gone — replaced by the cancelled run's
+   * inside report (`report_cancelled_run.ts`), atoma's own budget, and the
+   * heal-on-read paths (`claim_turn.ts`, `latestRequestOn`). What must hold of what
+   * remains: the completion trigger still lists the three workflows, and the
+   * concurrency group still keys on the watched run's display title — one group per
+   * node, so two watches of one node serialize and different nodes do not queue.
    *
-   * The concurrency group is here because of the same absence. It is keyed on the watched
-   * run's display title, which is EMPTY on a schedule, so without the event in the key
-   * every scheduled run would join one group — and GitHub keeps a single PENDING run per
-   * group, so the sweeps would start cancelling each other instead of queueing.
+   * The event stays in the group key even with the schedule gone: it costs nothing,
+   * and a future trigger with no watched run inherits the separation for free.
    */
-  test("the run watch is scheduled as well as triggered, and sweeps under its own group", () => {
+  test("the run watch is completion-triggered only, and groups per watched node", () => {
     type ScheduledWatch = {
-      on?: { schedule?: { cron?: string }[]; workflow_run?: { types?: string[] } };
+      on?: { schedule?: { cron?: string }[]; workflow_run?: { types?: string[]; workflows?: string[] } };
       concurrency?: { group?: string };
       jobs?: Record<string, { if?: string; "timeout-minutes"?: number; steps?: { run?: string; env?: Record<string, string> }[] }>;
     };
     const watch = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-run-watch.yml", "utf8")) as ScheduledWatch;
-    // Both triggers, neither replacing the other: a delivered completion is still
-    // reconciled within seconds, and the schedule reaches what was never delivered.
-    expect(watch.on?.schedule?.[0]?.cron).toBe("*/15 * * * *");
+    // The schedule is gone — nothing may reintroduce it without removing the
+    // heal-on-read paths' reason to be.
+    expect(watch.on?.schedule).toBeUndefined();
     expect(watch.on?.workflow_run?.types).toEqual(["completed"]);
-    // The event is in the group because a schedule has no display title to key on.
+    expect(watch.on?.workflow_run?.workflows).toEqual(["Atomaton Runner", "Atomaton Entry", "Atomaton Manual Comment"]);
+    // The event is still in the group: cheap, and it keeps a run-less trigger from
+    // colliding with a node's watch.
     expect(watch.concurrency?.group).toContain("github.event_name");
     expect(watch.concurrency?.group).toContain("github.event.workflow_run.display_title");
-
-    // Each half is gated to its own event, so neither reads the other's absent context.
-    expect(watch.jobs?.watch?.if).toContain("github.event_name == 'workflow_run'");
-    expect(watch.jobs?.sweep?.if).toContain("github.event_name == 'schedule'");
-    expect(watch.jobs?.sweep?.["timeout-minutes"]).toBeGreaterThan(0);
-
-    // The sweeps serialise against each other, which is what a group with no node needs to
-    // do: two sweeps in flight would read the same thread and both post an ending for it.
-    const sweepStep = watch.jobs?.sweep?.steps?.find((step) => step.run?.includes("sweep_stale_locks.ts"));
-    expect(sweepStep).toBeDefined();
-    // Its run id arrives from the environment — the id the ending it writes has to carry.
-    expect(sweepStep?.env?.GITHUB_RUN_ID).toBe("${{ github.run_id }}");
-    expect(sweepStep?.env?.GITHUB_REPOSITORY).toBe("${{ github.repository }}");
+    // One job, no sweep half.
+    expect(Object.keys(watch.jobs ?? {}).sort()).toEqual(["watch"]);
+    expect(watch.jobs?.sweep).toBeUndefined();
   });
 
   /**

@@ -91,12 +91,16 @@ session is saved, the two ways forward, and the tail of the run's log — under 
 `atomaton:ended` tag every ending carries, so the thread's guard comes off and the
 next comment resumes normally.
 
-Four shapes still post nothing, and each should. A run that never claimed the turn owes
-the thread nothing. A run that found no events never reached the agent at all. A
-cancelled run is a person stopping it on purpose, and its half-written output is not a
-report. And a run whose agent step was *skipped* is a machinery death before the agent
+Three shapes still post nothing, and each should. A run that never claimed the turn
+owes the thread nothing. A run that found no events never reached the agent at all.
+And a run whose agent step was *skipped* is a machinery death before the agent
 started — the one the run watch below exists for, because the report from inside the
-run could not happen.
+run could not happen. A CANCELLED run used to be the fourth, on the reasoning that a
+person stopping a run on purpose needs no report — but the claim it took at start
+does need closing, so a cancelled run now posts one comment of its own: an
+`ended=stopped` ending answering the ask it claimed, saying that nothing was decided
+and how to resume. Without it the claim stands and nothing was ever coming to answer
+it; with it, a person's cancel is a handback, not a wedge.
 
 The colour follows what the comment says, because the thing that reports is a step
 inside the run:
@@ -144,6 +148,29 @@ label the dead run left, by the same turn rule the runner itself applies. It
 cannot double-post against the run's own report: the watched run's completion
 fires only after its own steps are done, so a report that landed at all landed
 first.
+
+The watch fires only on the entry workflows and the runner's own recorded
+completions, and a runner run dispatched by the machinery fires none of them —
+GitHub starts no workflow run for an event its own token triggered. That hole
+used to belong to a scheduled sweep, which read every node wearing the
+in-progress label every fifteen minutes and released the locks whose run had
+finished. The sweep is gone; what took its job is the thread healing on read:
+
+- a cancelled run closes its own claim from inside (above);
+- a run that outlives its budget is ended by atoma itself, and its ending is the
+  ordinary inside report;
+- a run whose runner vanished without either is recovered the moment somebody
+  asks: the guard keeps a person's comment under a dead claim, the claim path
+  ignores a dead older claim, and the dispatch hold
+  ([what keeps two runs off one issue](what-keeps-two-runs-off-one-issue.md))
+  treats a lock whose run has finished as free — so the person's next command
+  starts a run, and that run's own ending closes the thread.
+
+What the sweep did that nothing replaces is the notice for that last case. A
+vanished run leaves no comment saying so; recovery reads as the person's command
+simply working. That trade is deliberate: the sweep cost a scheduled job reading
+every labelled node in the repository forever, and its label enumeration was the
+one place the machinery read a label instead of the thread.
 
 The claim is what makes the watch's question answerable at all. Before it
 existed, the thread said that SOMETHING was asked for but not who had taken it up,

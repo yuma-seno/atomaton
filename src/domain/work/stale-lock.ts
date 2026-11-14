@@ -36,11 +36,13 @@
  *
  * ## Why one rule
  *
- * The sweep (which releases a stale lock from outside) and the guard (which must not
- * delete a person's comment under one) are two actions taken on ONE judgement. Two
- * spellings of it would drift, and the drift is exactly the disagreement that costs a
- * person their comment or leaves a node locked: the sweep releasing what the guard still
- * calls live. So the judgement lives here and both callers ask it.
+ * The dispatch hold (`latestRequestOn`), the claim path (`claim_turn.ts`'s dead-claim
+ * exception) and the guard (which must not delete a person's comment under a live
+ * lock) are actions taken on ONE judgement. Multiple spellings of it would drift, and
+ * the drift is exactly the disagreement that costs a person their comment or leaves a
+ * node locked: one caller releasing what another still calls live. So the judgement
+ * lives here and every caller asks it — the dispatch hold and the guard through
+ * `lockVerdict`, the claim path through `claimFreshness`.
  *
  * Pure: instants arrive as arguments (`nowMs`), never from the clock.
  */
@@ -196,35 +198,28 @@ export function lockVerdict(args: {
 /**
  * Whether the lock is one NOBODY is coming back for — the guard's question.
  *
- * The guard deletes a person's comment made while the ball is with an agent, and until now
- * "with an agent" was read off the claim alone: a `took` line with no ending after it. A
- * claim outlives its run whenever a run dies without reporting, and in that state the
- * guard removes every comment a person writes — the node reads as busy forever, nothing
- * heals the thread, and there is no way back in (#462).
+ * The guard deletes a person's comment made while the ball is with an agent, and until
+ * #469 "with an agent" was read off the claim alone: a `took` line with no ending after
+ * it. A claim outlives its run whenever a run dies without reporting, and in that state
+ * the guard removes every comment a person writes — the node reads as busy forever,
+ * nothing heals the thread, and there is no way back in (#462).
  *
- * So the guard asks the same question the sweep does, of the same function. Deliberately
- * narrower than `lockVerdict`, which answers a different question — whether the SWEEP
- * should write an ending. The guard writes nothing and must not: its answer is only
- * "remove this comment or leave it", and leaving it is the safe side once the run is gone,
- * because the comment then reaches a node whose turn nothing holds.
+ * That question no longer has its own function. The guard asks `lockVerdict` itself —
+ * `adapters/github/node-lock.ts`'s `lockAbandoned` is `lockVerdict(...) === "release"` —
+ * because the outside sweep that used to be the only park releaser is gone and the read
+ * is where a missed park now recovers: a park past its grace with nothing open under it
+ * has no aggregation coming, so keeping the person's comment is the safe side there too.
+ * The distinction this function used to carry ("narrower than the sweep's verdict") was
+ * a distinction between two callers of one judgement, and with one caller gone the two
+ * spellings would only drift.
  *
- * Two shapes are NOT abandoned however old the claim looks, and both are about not racing
+ * Two shapes are NOT released however old the claim looks, and both are about not racing
  * work that is really there:
  *
- *   - a PARK. The run ended on purpose and the turn is held open for the aggregation,
- *     which resumes the node and reads what was written during the wait (#208). The park's
- *     own clock is the sweep's business — it releases a missed one after the grace — so
- *     the guard keeps its rule for the length of the wait.
+ *   - a park whose collection may still be coming. The run ended on purpose and the turn
+ *     is held open for the aggregation, which resumes the node and reads what was written
+ *     during the wait (#208). The park's own clock is `lockVerdict`'s grace.
  *   - a claim nobody can judge (an unreadable run, an unreadable time). `unknown` is not
  *     `stale`: removing a live run's comments is the harm this guard exists to prevent, so
  *     a failed read keeps the old behaviour.
  */
-export function abandonedClaim(args: {
-  readonly claim: ClaimLock | undefined;
-  readonly parked: boolean;
-  readonly run: RunStatusRead;
-  readonly nowMs: number;
-}): boolean {
-  if (args.parked || args.claim === undefined) return false;
-  return claimFreshness(args.claim, args.run, args.nowMs) === "stale";
-}

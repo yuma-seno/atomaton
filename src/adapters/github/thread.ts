@@ -35,6 +35,9 @@
  */
 import { gh, ghRead, splitConcatenatedJson } from "./gh.ts";
 import { AGENT_TAG, DISPATCH_TAG, ENDED_TAG, isQuotation, proseOnly, QUOTES_TAG, STOP_TAG, TOOK_TAG } from "./tags.ts";
+import { readRunStatus } from "./run-status.ts";
+import { openUnderOf } from "./issue-links.ts";
+import { lockVerdict } from "../../domain/work/stale-lock.ts";
 import { parseCommentCommand } from "../../domain/work/comment-command.ts";
 import { isHumanActor } from "../../domain/work/actor.ts";
 import {
@@ -304,7 +307,7 @@ function readComments(repo: string, number: string | number, excludeCommentId?: 
  * of a race or whether to start a run, so an answer nobody could determine must not be
  * the one that lets work through.
  */
-function readThread(repo: string, number: string | number, excludeCommentId?: string | number): { body: string; shaped: ShapedThread } {
+function readThread(repo: string, number: string | number, excludeCommentId?: string | number): { body: string; shaped: ShapedThread<DatedEntry> } {
   const issue = ghRead("api", `repos/${repo}/issues/${number}`, "--jq", ".body");
   if (issue.code !== 0) throw new Error(`could not read #${number}: ${issue.stderr || issue.stdout}`);
 
@@ -789,6 +792,66 @@ export function latestRequestOn(
       ...readers,
       requestedAgent: (text) => known(readers.requestedAgent(text)),
     }),
-    hold: threadHold(shaped.events, shaped.openClaim),
+    hold: holdHealed(repo, number, shaped),
   };
+}
+
+/**
+ * The hold the thread reports, downgraded where the lock behind it is already dead.
+ *
+ * ## Why the thread's answer is not the last word
+ *
+ * `threadHold` reads "a run holds an open claim" off the thread, and that is the
+ * truth about who TOOK the turn and nothing about who is still there. A run killed
+ * by its job — cancelled, the runner lost, a timeout — leaves the claim standing,
+ * and the claim then reads as "in flight" forever: the guard heals itself (it asks
+ * the same run question, `lockAbandoned`) but a validation's verdict landed here and
+ * refused to dispatch, so a person's next command went nowhere and nothing was ever
+ * coming. The outside sweep that released exactly this state is gone; what replaced
+ * it is the read healing itself, at the moment somebody asks.
+ *
+ * So a hold that would start nothing is judged by the lock it stands on — the ONE
+ * judgement `domain/work/stale-lock.ts` makes, the same `lockVerdict` the guard
+ * reads and the claim path (claim_turn's dead-claim exception) applies:
+ *
+ *   - `in-flight` asks about the claim's RUN: finished and unanswered is dead, and
+ *     the hold becomes `free` — the dispatch a person's command was waiting for
+ *     simply goes, and the run that starts claims the ask under the same exception.
+ *   - `parked` asks the park's own rule: nothing left open under the node, the
+ *     grace passed, no live claim re-taken — the aggregation the park waited for is
+ *     not coming, and the standing request is free again.
+ *
+ * Every other answer keeps the thread's word: a live run, an unreadable run, a park
+ * whose collection may still be on its way, work still open under the node. The
+ * outside reads (run status, the links) happen only on this path — the common
+ * `free` and `with-person` holds pay nothing. (The outside sweep that used to do
+ * this job from a schedule is gone; the run watch's module comment records the
+ * trade.)
+ */
+function holdHealed(
+  repo: string,
+  number: string | number,
+  shaped: ShapedThread<DatedEntry>,
+): ThreadHold {
+  const hold = threadHold(shaped.events, shaped.openClaim);
+  if (hold.kind !== "in-flight" && hold.kind !== "parked") return hold;
+
+  // The lock facts from the SAME read — `lockOf` folds what `shapedThread` already
+  // walked — plus the two outside reads the verdict needs. A claim without a run id
+  // passes `{read:false}` and lands on the claim's own clock, the rule
+  // `readNodeLock` follows.
+  const lock = lockOf(shaped.comments, shaped);
+  const verdict = lockVerdict({
+    claim: lock.claim,
+    parked: lock.park !== undefined,
+    parkedSince: lock.park?.at ?? "",
+    openUnder: lock.park !== undefined ? openUnderOf(repo, number) : 0,
+    run:
+      lock.claim !== undefined && lock.claim.run > 0
+        ? readRunStatus(repo, lock.claim.run)
+        : { read: false, why: "the claim names no run" },
+    nowMs: Date.now(),
+  });
+  // `undetermined` is not an answer, and the side that starts nothing stays.
+  return verdict === "release" ? { kind: "free" } : hold;
 }
