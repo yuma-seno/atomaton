@@ -32,7 +32,9 @@
  * interruption the guard exists to close.
  *
  * `unknown` is a third answer rather than a silent `fresh`: a read that failed is not an
- * answer, and both callers say so instead of acting on a guess.
+ * answer, and every reader says so instead of acting on a guess — the guard keeps the
+ * person's comment, the dispatch hold keeps its refusal, and the claim path keeps its
+ * back-off.
  *
  * ## Why one rule
  *

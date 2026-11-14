@@ -439,17 +439,15 @@ function newestWaiting<T extends DatedEntry>(entries: readonly T[]): { at: strin
 }
 
 /**
- * The lock a node's thread holds.
+ * The lock a node's thread holds, and whether a comment on it would be removed.
  *
- * Throws when the thread cannot be read, like every other reader here: a caller deciding
- * whether to release a node or to keep a person's comment must not read a failed read as
- * "nothing holds this".
+ * Both fold the SAME listing once and answer from the walk already made; the lock's
+ * own shape is `lockOf`'s.
+ *
+ * `commentWouldBeRemoved` throws when the thread cannot be read, like every other
+ * reader here: a caller deciding whether to remove a person's comment must not read a
+ * failed read as "keep everything".
  */
-export function lockOn(repo: string, number: string | number): ThreadLock {
-  const entries = listComments(repo, number).map(entryOf);
-  return lockOf(entries, shapedThread(entries, readers));
-}
-
 export function commentWouldBeRemoved(repo: string, number: string | number, commentId: string | number): WouldBeRemoved {
   const entries = listComments(repo, number).map((comment) => ({ id: comment.id, ...entryOf(comment) }));
   const shaped = shapedThread(entries, readers);

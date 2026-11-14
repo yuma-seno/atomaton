@@ -93,10 +93,10 @@ function main(): void {
   // who stopped the run, and the next run can do nothing with it but carry it.
   const posted = gh("issue", "comment", values.number, "--body", body);
   if (posted.code !== 0) {
-    // A comment that did not land leaves the claim standing — the exact this-change
-    // removes, with nobody coming to heal it — and the step is the last chance the
-    // job has to say so. Red is the signal the thread was denied; the job's own log
-    // is where the reason has to be, because the thread got nothing.
+    // A comment that did not land leaves the claim standing — the exact state this
+    // change exists to remove, with nobody coming to heal it — and the step is the
+    // last chance the job has to say so. Red is the signal the thread was denied; the
+    // job's own log is where the reason has to be, because the thread got nothing.
     console.error(
       `::error::could not post the cancelled run's ending on #${values.number}: ` +
         `${posted.stderr || posted.stdout}`,
