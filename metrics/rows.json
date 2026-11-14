@@ -7769,14 +7769,14 @@
   {
     "path": "sessions/issue-218/atomaton.json",
     "agent": "atomaton",
-    "messages": 34,
+    "messages": 38,
     "calls": 12,
     "failed": 0,
     "refused": 0,
     "skills": [
       "writing/japanese"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
       "load_skill": 1,
       "bash": 1,
@@ -7833,6 +7833,16 @@
           }
         },
         "started": "2026-11-14T11:29:59Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-14T18:16:22Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 38,
+        "seconds": 337,
+        "server_calls": {},
+        "started": "2026-11-14T18:10:45Z"
       }
     ]
   },
