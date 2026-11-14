@@ -1,9 +1,10 @@
 ---
 name: architect
 description: Decides how to build something when the answer is not derivable without a second opinion — one outcome that would move several parts at once, a choice whose alternatives cannot be told apart, a concept the code has no word for yet. Writes the decision down; builds nothing.
-# Chat completions rather than the Responses dialect the other agents use: this
-# model is not served on `/responses` by the router. The session header below
-# still pins the deployment, so the prompt cache behaves the same way.
+# Chat Completions, not Responses -- the router does not serve this model on
+# `/responses`. `atomaton` is on the same dialect for the same reason; `engineer`,
+# `reviewer` and `auditor` speak Responses. The session header below still pins
+# one deployment, so the prompt cache holds from one inference to the next.
 provider: orcarouter
 model: google/gemini-4-argon
 # The model's context window, in tokens (atoma#12). Crossing it compacts in place
