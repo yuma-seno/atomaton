@@ -32,14 +32,16 @@ those directories the template ships and which are yours outright.
 
 ## Why the shipped provider is a recommendation
 
-Every shipped agent declares `orcarouter-responses`, and **that default is a
-recommendation, not an arbitrary pick. The reason is adoption cost.** One key
-reaches every vendor in the catalogue, so changing model later is an edit to one
-line rather than another account, another billing relationship and another
-secret. It serves both dialects, so `provider` can move between the pair without
-the vendor moving with it. And it passes provider list price through unchanged —
-including the peak and off-peak tiers some vendors publish — so the hop is not a
-markup.
+Every shipped agent declares an OrcaRouter provider — `orcarouter-responses` for
+`engineer`, `reviewer` and `auditor`; `orcarouter`, the chat-completions
+dialect, for `atomaton` and `architect`, whose models the router does not serve
+on `/responses` — and **that default is a recommendation, not an arbitrary
+pick. The reason is adoption cost.** One key reaches every vendor in the
+catalogue, so changing model later is an edit to one line rather than another
+account, another billing relationship and another secret. It serves both
+dialects, so `provider` can move between the pair without the vendor moving with
+it. And it passes provider list price through unchanged — including the peak and
+off-peak tiers some vendors publish — so the hop is not a markup.
 
 [Get a key from OrcaRouter](https://www.orcarouter.ai/ref/ref_7f3361ad7f7613cd8cf1).
 

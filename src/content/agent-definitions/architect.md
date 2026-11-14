@@ -1,11 +1,15 @@
 ---
 name: architect
 description: Decides how to build something when the answer is not derivable without a second opinion — one outcome that would move several parts at once, a choice whose alternatives cannot be told apart, a concept the code has no word for yet. Writes the decision down; builds nothing.
-provider: orcarouter-responses
-model: openai/gpt-6.1-sol
+# Chat Completions, not Responses -- the router does not serve this model on
+# `/responses`. `atomaton` is on the same dialect for the same reason; `engineer`,
+# `reviewer` and `auditor` speak Responses. The session header below still pins
+# one deployment, so the prompt cache holds from one inference to the next.
+provider: orcarouter
+model: google/gemini-4-argon
 # The model's context window, in tokens (atoma#12). Crossing it compacts in place
-# rather than dying on the provider's 400. 200k, matching the other agents' setting;
-# the underlying model's window is larger, and this is the share a run should keep.
+# rather than dying on the provider's 400. 200k, matching the other agents'
+# setting, and the share a run should keep whatever the model's own window is.
 context_limit: 200000
 # No vision. This agent's work is a decision, and a picture changes almost none
 # of them -- while the images a run would carry cost the most expensive model in

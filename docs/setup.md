@@ -19,7 +19,7 @@ in [the README](../README.md).
 3. **Add the repository secret `ORCAROUTER_API_KEY`.** **Settings > Secrets and
    variables > Actions > New repository secret**, under that name. It is the one
    credential the shipped configuration needs: every shipped agent definition
-   reads `provider: orcarouter-responses`. [Get a key from
+   reads an `orcarouter*` provider. [Get a key from
    OrcaRouter](https://www.orcarouter.ai/ref/ref_7f3361ad7f7613cd8cf1). [Why that
    provider](agents/overview.md#why-the-shipped-provider-is-a-recommendation),
    and [how to run on another
