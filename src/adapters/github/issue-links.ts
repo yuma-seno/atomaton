@@ -25,6 +25,37 @@ import {
   type LinkedPr,
 } from "../../domain/work/issue-links.ts";
 
+/**
+ * Open work under a node — sub-issues AND pull requests — or `undefined` when the
+ * links could not be read.
+ *
+ * Two lists folded into one count, because a parked turn can be waiting on either and
+ * only one of them is a sub-issue:
+ *
+ *   - `children` — `launch_sub_agent` starts an issue under this node and parks on it;
+ *     the aggregation resumes the parent when the last one closes.
+ *   - `pullRequests` — `create_pr` parks on the PULL REQUEST it just opened
+ *     (`entrypoints/tools/mcp/github.ts` posts `ended=waiting` on the issue and
+ *     dispatches validation for the PR). A leaf issue has no sub-issues at all, so
+ *     counting only children would read that park as "nothing is open under this node"
+ *     while a reviewer was working its pull request — and release it mid-review.
+ *
+ * `issueLinks` reports an unreadable relationship as `unavailable` rather than throwing,
+ * and that distinction is load-bearing here: no open work and no knowledge of it must not
+ * both read as "nothing is left under this node".
+ *
+ * Lives beside the read it folds rather than in `node-lock.ts`, which used to own it:
+ * the heal-on-read path in `thread.ts` needs the same count, and importing it from
+ * `node-lock` would run an adapter arrow straight back into the thread reader
+ * `node-lock` itself imports — the cycle the layering test exists to catch.
+ */
+export function openUnderOf(repo: string, number: string | number): number | undefined {
+  const links = issueLinks(repo, Number(number));
+  if (links.unavailable !== undefined) return undefined;
+  const open = (nodes: readonly { state: string }[]) => nodes.filter((node) => node.state === "open").length;
+  return open(links.children) + open(links.pullRequests);
+}
+
 /** How many children and pull requests to ask for. Past this the reader is not reading, they are scrolling. */
 const LINK_LIMIT = 50;
 

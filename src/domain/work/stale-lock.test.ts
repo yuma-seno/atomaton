@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   CLAIM_WITHOUT_RUN_MINUTES,
   PARK_COLLECTION_MINUTES,
-  abandonedClaim,
   claimFreshness,
   lockVerdict,
   parkOverdue,
@@ -11,14 +10,15 @@ import {
 } from "./stale-lock.ts";
 
 /**
- * The one judgement the sweep and the guard share, asked of strings and instants alone.
+ * The one judgement the dispatch hold, the claim path and the guard share, asked of
+ * strings and instants alone.
  *
- * Both callers act on this answer — the sweep writes an ending, the guard stops deleting —
- * so the cases here are the states the whole issue is about: a run that finished and left
- * its claim, a run still going, a park whose collection never came, and every shape where
- * the question cannot be answered. The unanswerable ones matter most: an unreadable run
- * must never come back as `stale`, because that is a live run's comments deleted and a
- * live run's node handed to a person mid-work.
+ * All of them act on this answer — one writes an ending, one ignores a dead claim, one
+ * stops deleting — so the cases here are the states the whole issue is about: a run that
+ * finished and left its claim, a run still going, a park whose collection never came, and
+ * every shape where the question cannot be answered. The unanswerable ones matter most: an
+ * unreadable run must never come back as `stale`, because that is a live run's comments
+ * deleted and a live run's node handed to a person mid-work.
  */
 
 const NOW = Date.parse("2026-11-01T12:00:00Z");
@@ -102,7 +102,7 @@ describe("lockVerdict, an unparked node", () => {
     expect(verdictOf(claim(7), UNREAD)).toBe("undetermined");
   });
 
-  test("no claim holds — the guard keeps the comment and the sweep has nothing to release", () => {
+  test("no claim holds — nothing claims the turn, so there is no lock to release", () => {
     // Both readings are the same edge: with nothing claiming the turn, `shapedThread`
     // already says the ball is with a person, so there is no lock to break.
     expect(verdictOf(undefined, UNREAD)).toBe("hold");
@@ -172,28 +172,39 @@ describe("lockVerdict, a parked node", () => {
   });
 });
 
-describe("abandonedClaim, the guard's half", () => {
-  const abandoned = (args: { claim?: ClaimLock; parked: boolean; run: RunStatusRead }): boolean =>
-    abandonedClaim({ claim: args.claim, parked: args.parked, run: args.run, nowMs: NOW });
+describe("the verdict the guard reads, `lockVerdict === 'release'`", () => {
+  // `lockAbandoned` in adapters/github/node-lock.ts IS this comparison by name — the
+  // guard keeps a person's comment exactly when the verdict below says release. The
+  // park cases here are the guard's too, since the outside sweep that used to be the
+  // only park releaser is gone and the read is where a missed park recovers. The
+  // detailed park matrix lives in the describes above; these pin the shapes the guard
+  // acts on.
+  const unparked = (c: ClaimLock | undefined, run: RunStatusRead): string =>
+    lockVerdict({ claim: c, parked: false, parkedSince: "", openUnder: 0, run, nowMs: NOW });
+  const parked = (args: { claim?: ClaimLock; openUnder: number; run?: RunStatusRead }): string =>
+    lockVerdict({
+      claim: args.claim,
+      parked: true,
+      parkedSince: ago(PARK_COLLECTION_MINUTES + 1),
+      openUnder: args.openUnder,
+      run: args.run ?? { read: true, status: "completed" },
+      nowMs: NOW,
+    });
 
-  test("a finished run's standing claim is abandoned", () => {
-    expect(abandoned({ claim: claim(7), parked: false, run: { read: true, status: "completed" } })).toBe(true);
+  test("a finished run's standing claim is released, so the guard keeps the comment", () => {
+    expect(unparked(claim(7), { read: true, status: "completed" })).toBe("release");
   });
 
-  test("a live run's claim is not, and neither is one nobody could ask about", () => {
+  test("a live run's claim is held, and so is one nobody could ask about", () => {
     // The guard's whole safety margin: the two answers it must never delete on.
-    expect(abandoned({ claim: claim(7), parked: false, run: { read: true, status: "in_progress" } })).toBe(false);
-    expect(abandoned({ claim: claim(7), parked: false, run: UNREAD })).toBe(false);
+    expect(unparked(claim(7), { read: true, status: "in_progress" })).toBe("hold");
+    expect(unparked(claim(7), UNREAD)).toBe("undetermined");
   });
 
-  test("a park is never abandoned by the guard, however old", () => {
-    // The aggregation resumes a park and reads what was written during the wait. A missed
-    // one is the SWEEP's to release, on the park's own clock — the guard must not take that
-    // decision, because it would delete the comment the resumed run needed.
-    expect(abandoned({ claim: claim(7, ago(60 * 24)), parked: true, run: { read: true, status: "completed" } })).toBe(false);
-  });
-
-  test("no claim means nothing is abandoned — there is no run to have finished", () => {
-    expect(abandoned({ claim: undefined, parked: false, run: { read: true, status: "completed" } })).toBe(false);
+  test("a park past its grace with nothing open under it is released", () => {
+    // No aggregation is coming, so keeping the person's comment is the safe side: it
+    // reaches a node whose turn nothing holds.
+    expect(parked({ claim: claim(7, ago(PARK_COLLECTION_MINUTES + 1)), openUnder: 0 })).toBe("release");
+    expect(parked({ openUnder: 0 })).toBe("release");
   });
 });

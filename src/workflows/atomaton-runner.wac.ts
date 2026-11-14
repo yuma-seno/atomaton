@@ -36,6 +36,7 @@ import { ref as resolveIssueBranchRef } from "../entrypoints/machinery/resolve_i
 import { ref as resolvePrBranchRef } from "../entrypoints/machinery/resolve_pr_branch.ts";
 import { ref as manageTurnLabelsRef } from "../entrypoints/machinery/manage_turn_labels.ts";
 import { ref as notifyLimitReachedRef } from "../entrypoints/machinery/notify_limit_reached.ts";
+import { ref as reportCancelledRunRef } from "../entrypoints/machinery/report_cancelled_run.ts";
 import { ref as readRunEndingRef } from "../entrypoints/machinery/read_run_ending.ts";
 import { ref as injectUncommittedNoticeRef } from "../entrypoints/machinery/inject_uncommitted_notice.ts";
 import { ref as injectDispatcherNoticeRef } from "../entrypoints/machinery/inject_dispatcher_notice.ts";
@@ -1148,6 +1149,44 @@ const postResultCommentStep = new TypedOutputsStep(
   ["comment_id", "notified"] as const,
 );
 
+/**
+ * The one inside report a CANCELLED run leaves.
+ *
+ * `Post result comment` is gated on the agent step succeeding or failing, and a
+ * cancellation is neither — deliberately, so a run a person stopped on purpose is
+ * not announced as a death. What that gate also silences is the claim: the run took
+ * the turn at start, and the claim then stands with nothing coming to answer it.
+ * Every reader treats it as "an agent holds the turn" — the guard removes what a
+ * person writes next, a validation's verdict refuses to dispatch — and no run was
+ * ever coming, which is the state the outside sweep existed to heal and now does
+ * not.
+ *
+ * So a cancelled run closes its own claim here, before the job comes down: an
+ * `ended=stopped` turn comment answering the ask the run claimed, naming the run.
+ * The thread's newest word becomes the handback, and the label step below — also
+ * `always()` — releases `atomaton/in-progress` on the same read. `claimed` gates
+ * it, because a run that never took the turn owes the thread nothing; `hasTurn` is
+ * not required, since a claim implies the gate that let the claim through.
+ */
+const reportCancelledStep = new TypedOutputsStep({
+  name: "Report a cancelled run",
+  if: `always() && ${runAgentStep.rawOutcome} == 'cancelled' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+  shell: "bash",
+  env: {
+    GH_TOKEN: "${{ github.token }}",
+    NUMBER: "${{ inputs.number }}",
+    AGENT: "${{ inputs.agent }}",
+    ASK: "${{ inputs.ask }}",
+    RUN_ID: "${{ github.run_id }}",
+  },
+  run: `${scriptCommandWithArgs(reportCancelledRunRef, {
+    number: "\${NUMBER}",
+    agent: "\${AGENT}",
+    ask: "\${ASK}",
+    "run-id": "\${RUN_ID}",
+  })}\n`,
+});
+
 const recordRunMetadataStep = new TypedOutputsStep({
   // Both the comment-tagging and context-snapshot-recording halves of
   // record_run_metadata.ts only apply when a result comment was actually
@@ -2062,6 +2101,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
   runAgentStep,
   tokenUsageStep,
   postResultCommentStep,
+  reportCancelledStep,
   recordRunMetadataStep,
   saveSessionStep,
   // Takes the root issue from the restore step rather than resolving the chain

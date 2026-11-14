@@ -79,6 +79,36 @@ describe("raceOutcome", () => {
     ];
     expect(raceOutcome(comments, { id: 11, ask: 55 })).toBe("held");
   });
+
+  // The heal-on-read exception: a claim blocks only while its RUN can still be working.
+  // A claim whose run finished and never answered is a dead claim — the state a
+  // cancelled or vanished run leaves — and backing off to it would wedge the ask,
+  // because nothing was ever coming to answer it.
+  test("an older claim whose run has finished does not back this run off", () => {
+    const comments = [body(10, 55, 7), body(11, 55, 8)];
+    expect(raceOutcome(comments, { id: 11, ask: 55 }, (run) => run === 7)).toBe("held");
+  });
+
+  test("an older claim whose run may still be working backs this run off", () => {
+    const comments = [body(10, 55, 7), body(11, 55, 8)];
+    expect(raceOutcome(comments, { id: 11, ask: 55 }, (run) => run === 999)).toBe("backed-off");
+  });
+
+  test("a claim that names no run, or a run nobody could ask about, still blocks", () => {
+    // The conservative side is the one that does not release a working run's turn: a
+    // claim without a run id is an older format, and an unreadable status is not an
+    // answer.
+    const noRun = { id: 10, body: claimCommentBody({ ask: 55, run: 0 }) };
+    expect(raceOutcome([noRun, body(11, 55, 8)], { id: 11, ask: 55 }, () => false)).toBe("backed-off");
+    expect(raceOutcome([body(10, 55, 7), body(11, 55, 8)], { id: 11, ask: 55 }, () => false)).toBe("backed-off");
+  });
+
+  test("without the lookup the comparison is the strict older-id one", () => {
+    // The callers that have not been healed yet, and every test above: no lookup, no
+    // exception.
+    const comments = [body(10, 55, 7), body(11, 55, 8)];
+    expect(raceOutcome(comments, { id: 11, ask: 55 })).toBe("backed-off");
+  });
 });
 
 describe("claimCommentBody", () => {

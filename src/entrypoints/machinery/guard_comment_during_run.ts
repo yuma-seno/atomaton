@@ -56,9 +56,9 @@
  * says "an agent is working" on a node where nothing is running and nothing is coming —
  * so this guard deleted every comment a person wrote, on a node nobody could reach. The
  * run the claim names is asked about directly, and a `stale` lock keeps the comment:
- * `domain/work/stale-lock.ts` is that judgement, shared with the sweep so the two cannot
- * disagree about who is working. An unreadable run status is not stale — the delete stays
- * the conservative answer when nobody can tell.
+ * `domain/work/stale-lock.ts` is that judgement, shared with the claim path and the
+ * dispatch hold so none of them can disagree about who is working. An unreadable run
+ * status is not stale — the delete stays the conservative answer when nobody can tell.
  *
  * Usage:
  *   guard_comment_during_run.ts --number N --comment-id ID --commenter LOGIN
@@ -251,14 +251,16 @@ function main(): void {
   // the comment AND lets the dispatch go: the node has no live turn, so the comment is an
   // ordinary turn starter rather than an interruption.
   //
-  // Deliberately only the ANSWERED `stale` counts. A run status that could not be read is
+  // Deliberately only the ANSWERED `release` counts. A run status that could not be read is
   // not "finished" — removing a live run's comments is the harm this guard exists to
-  // prevent — and a park is never stale here, because the aggregation resumes it and reads
-  // what was written during the wait. See `domain/work/stale-lock.ts`.
+  // prevent — and a park whose collection may still be coming, or with work still open
+  // under it, is not released either: the aggregation resumes a live park and reads what
+  // was written during the wait. `domain/work/stale-lock.ts` is the one judgement, shared
+  // with the dispatch hold (`latestRequestOn`) and the claim path.
   let abandoned = false;
   if (hold.removed && hold.lock !== undefined) {
     try {
-      abandoned = lockAbandoned(repo, hold.lock, Date.now());
+      abandoned = lockAbandoned(repo, values.number, hold.lock, Date.now());
     } catch (e) {
       // `lockAbandoned` answers false for a failed run read; this catches anything
       // unexpected, and it keeps the comment: the conservative side is the one that does
@@ -273,7 +275,7 @@ function main(): void {
   if (hold.removed && abandoned && !several) {
     console.error(
       `The run that claimed #${values.number}'s turn has finished with its claim still standing, ` +
-        "so the lock is stale and this comment is kept — the sweep will hand the node back",
+        "so the lock is stale and this comment is kept — the next dispatch heals the thread on read",
     );
   }
   // A parked hold reads differently from a running one, and the person who wrote
