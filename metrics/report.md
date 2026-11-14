@@ -341,7 +341,7 @@ Neither figure covers 17 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,335,493 | 6,099,372 | 28,119,706 | 73,718,100 | 1,051,134,072 |
-| messages per session | 120 | 334 | 583 | 731 | 48,825 |
+| messages per session | 120 | 334 | 583 | 731 | 48,827 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
