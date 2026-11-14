@@ -143,9 +143,9 @@ the dispatch fails silently and every merge is refused for a missing check.
 Its result decides what happens next: when it passes, the agent the calls name
 runs — but only where a call is waiting for one. Where the verdict would be
 handed to a person, a mention carries it; where a run already holds the turn —
-in flight, or a chain carrying the call — nothing is posted, because that run's
-own report is the thread's next word. When CI fails, nothing is dispatched at
-all: a person is told, and asks whoever should fix it.
+in flight, or a chain carrying the call — nothing is posted on the verdict,
+because that run's own report is the thread's next word. When CI fails, nothing
+is dispatched at all: a person is told, and asks whoever should fix it.
 
 ## `deploy.your_workflow`
 
