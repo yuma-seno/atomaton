@@ -7615,7 +7615,7 @@
   {
     "path": "sessions/issue-218/architect.json",
     "agent": "architect",
-    "messages": 17,
+    "messages": 21,
     "calls": 0,
     "failed": 0,
     "refused": 0,
@@ -7633,6 +7633,16 @@
         "seconds": 3,
         "server_calls": {},
         "started": "2026-11-14T09:41:50Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-14T10:00:43Z",
+        "ended_because": "failed",
+        "iterations": 3,
+        "messages": 21,
+        "seconds": 3,
+        "server_calls": {},
+        "started": "2026-11-14T10:00:40Z"
       }
     ]
   },
