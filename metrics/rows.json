@@ -7615,12 +7615,12 @@
   {
     "path": "sessions/issue-218/architect.json",
     "agent": "architect",
-    "messages": 21,
+    "messages": 24,
     "calls": 0,
     "failed": 0,
     "refused": 0,
     "skills": [],
-    "reported": false,
+    "reported": true,
     "tools": {},
     "acts": {},
     "runs": [
@@ -7643,6 +7643,16 @@
         "seconds": 3,
         "server_calls": {},
         "started": "2026-11-14T10:00:40Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-14T11:28:39Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "messages": 24,
+        "seconds": 7,
+        "server_calls": {},
+        "started": "2026-11-14T11:28:32Z"
       }
     ]
   },
