@@ -126,4 +126,4 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/notify_unattended.ts" --repo "${REPO}" --number "${NUMBER}" --summary "${SUMMARY}"
-        if: steps.validate.outputs.next_agent == ''
+        if: steps.validate.outputs.next_agent == '' && steps.validate.outputs.unattended == 'true'

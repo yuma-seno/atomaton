@@ -25,6 +25,7 @@ function decideValidationOutcome(input) {
     const count = `${deliverableProblems.length} problem${deliverableProblems.length === 1 ? "" : "s"}`;
     return {
       verdict: "deliverable-invalid",
+      unattended: true,
       summary: `.github/atomaton/ is not internally consistent (${count}), so CI was not run.` + `${askFor(engineerAgent)}`
     };
   }
@@ -33,7 +34,12 @@ function decideValidationOutcome(input) {
   if (passed) {
     const hold = input.hold ?? { kind: "with-person" };
     if (hold.kind === "free" || hold.kind === "parked") {
-      return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
+      return {
+        verdict: "passed",
+        ...handTo(reviewerAgent),
+        unattended: reviewerAgent.trim() === "",
+        summary: `CI concluded ${normalised}.`
+      };
     }
     const because = {
       "in-flight": "a run already holds this pull request, and its own report is the thread's next word",
@@ -41,19 +47,29 @@ function decideValidationOutcome(input) {
       "with-person": "the thread's newest word handed the turn back to a person",
       unreadable: "the thread could not be read to rule out a run in flight"
     };
+    if (hold.kind === "in-flight" || hold.kind === "chain") {
+      return {
+        verdict: "passed",
+        unattended: false,
+        summary: `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind]}.`
+      };
+    }
     return {
       verdict: "passed",
+      unattended: true,
       summary: `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind] ?? because["with-person"]}.` + `${reviewerAgent.trim() === "" ? "" : ` Comment /${reviewerAgent.trim()} to start the review yourself.`}`
     };
   }
   if (!normalised) {
     return {
       verdict: "no-conclusion",
+      unattended: true,
       summary: "CI never reported a conclusion. Nothing was dispatched; a human should look."
     };
   }
   return {
     verdict: "failed",
+    unattended: true,
     summary: `CI concluded ${normalised}. Nobody was dispatched to fix it.` + `${askFor(engineerAgent)}`
   };
 }
@@ -818,6 +834,7 @@ function main() {
     reportFailure(repo, values.number ?? "", runUrl, outcome.summary, deliverableProblems);
   }
   write(`next_agent=${outcome.next?.agent ?? ""}`);
+  write(`unattended=${outcome.unattended}`);
   write(`conclusion=${conclusion}`);
   write(`verdict_passed=${contextsPassed(outcome.verdict)}`);
   write(`summary=${outcome.summary}`);

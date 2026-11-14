@@ -1,5 +1,5 @@
 {
-  "version": "v0.21.74",
+  "version": "v0.21.75",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
@@ -29,6 +29,7 @@
     ".github/atomaton-runtime/scripts/manage_turn_labels.ts",
     ".github/atomaton-runtime/scripts/merge_tool_packages.ts",
     ".github/atomaton-runtime/scripts/notify_limit_reached.ts",
+    ".github/atomaton-runtime/scripts/notify_new_release.ts",
     ".github/atomaton-runtime/scripts/notify_pr_rejected.ts",
     ".github/atomaton-runtime/scripts/notify_unattended.ts",
     ".github/atomaton-runtime/scripts/parse_comment_command.ts",
@@ -123,6 +124,7 @@
     ".github/workflows/atomaton-deploy.yml",
     ".github/workflows/atomaton-entry.yml",
     ".github/workflows/atomaton-manual-comment.yml",
+    ".github/workflows/atomaton-new-release.yml",
     ".github/workflows/atomaton-pr-closed.yml",
     ".github/workflows/atomaton-run-watch.yml",
     ".github/workflows/atomaton-runner.yml",
