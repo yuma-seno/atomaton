@@ -532,7 +532,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/claim_turn.ts" --number "${NUMBER}" --ask "${ASK}" --run-id "${RUN_ID}"
-        if: steps.context.outputs.new_event_count != '0'
+        if: (steps.context.outputs.new_event_count != '0' || inputs.reload_count != '0')
       - name: Read who this run may call
         shell: bash
         env:
@@ -555,7 +555,7 @@ jobs:
           NUMBER: ${{ inputs.number }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/manage_turn_labels.ts" --phase "running" --number "${NUMBER}"
-        if: steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
+        if: (steps.context.outputs.new_event_count != '0' || inputs.reload_count != '0') && steps.claim.outputs.claimed == 'true'
       - name: Put the tool servers on users without sudo
         shell: bash
         run: |
@@ -803,7 +803,7 @@ jobs:
           nohup bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/watch_for_stop.ts" --number "${NUMBER}" --stop-file "${RUNNER_TEMP}/atomaton-run/stop-requested" --since "${SINCE}" > "${RUNNER_TEMP}/atomaton-run/stop-watch.log" 2>&1 &
           echo $! > "${RUNNER_TEMP}/atomaton-run/stop-watch.pid"
           echo "watching #${NUMBER} for /stop since ${SINCE}"
-        if: steps.context.outputs.new_event_count != '0'
+        if: (steps.context.outputs.new_event_count != '0' || inputs.reload_count != '0')
       - name: Run agent
         id: atoma
         continue-on-error: true
@@ -944,7 +944,7 @@ jobs:
           # cannot match `"op":"dispatch-elsewhere"`, which is what keeps one run from
           # reading as both handing off and parking.
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/summarize_run.ts" --run-dir "${RUNNER_TEMP}/atomaton-run" --ending-invalid "${ENDING_INVALID}"
-        if: steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
+        if: (steps.context.outputs.new_event_count != '0' || inputs.reload_count != '0') && steps.claim.outputs.claimed == 'true'
       - name: Write token usage summary
         shell: bash
         run: |
@@ -973,7 +973,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/post_result_comment.ts" --number "${{ inputs.number }}" --agent "${{ inputs.agent }}" --type "${{ inputs.type }}" --notify "${{ steps.notify.outputs.notify }}" --directive "${{ steps.atoma.outputs.directive }}" --chain-continues "${{ steps.atoma.outputs.chain_continues }}" --ended-because "${{ steps.atoma.outputs.ended_because }}" --outcome "${{ steps.atoma.outcome }}" --atoma-failed "${{ steps.atoma.outputs.atoma_failed }}" --reported "${{ steps.atoma.outputs.reported }}" --messages-before "${{ steps.context.outputs.messages_before }}" --changed "${{ steps.atoma.outputs.changed }}" --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" --session "${RUNNER_TEMP}/atomaton-run/session.json" --output "${RUNNER_TEMP}/atomaton-run/atomaton_output.txt" --logs-file "${RUNNER_TEMP}/atomaton-run/atomaton_logs.txt" --ending-comment "${RUNNER_TEMP}/atomaton-run/ending-comment.json" --ending-invalid "${{ steps.atoma.outputs.ending_invalid }}" --people-file "${RUNNER_TEMP}/atomaton-run/callees.json" --ask "${{ inputs.ask }}" --run-id "${{ github.run_id }}"
-        if: always() && (steps.atoma.outcome == 'success' || steps.atoma.outcome == 'failure') && steps.context.outputs.new_event_count != '0' && steps.claim.outputs.claimed == 'true'
+        if: always() && (steps.atoma.outcome == 'success' || steps.atoma.outcome == 'failure') && (steps.context.outputs.new_event_count != '0' || inputs.reload_count != '0') && steps.claim.outputs.claimed == 'true'
       - name: Report a cancelled run
         shell: bash
         env:
