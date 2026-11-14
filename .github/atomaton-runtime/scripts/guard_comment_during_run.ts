@@ -42,6 +42,26 @@ function looksTransient(result) {
     return true;
   return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
 }
+function graphqlArgs(query, variables) {
+  const args = ["api", "graphql", "-f", `query=${query}`];
+  for (const [key, value] of Object.entries(variables)) {
+    args.push("-F", `${key}=${value}`);
+  }
+  return args;
+}
+function graphqlResult({ code, stdout, stderr }) {
+  if (code !== 0) {
+    throw new Error(`GraphQL query failed: ${stderr || stdout.slice(0, 200)}`);
+  }
+  const result = JSON.parse(stdout);
+  if (result.errors) {
+    throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
+  }
+  return result.data;
+}
+function ghGraphqlRead(query, variables = {}) {
+  return graphqlResult(ghRead(...graphqlArgs(query, variables)));
+}
 function splitConcatenatedJson(text) {
   const results = [];
   let depth = 0;
@@ -278,6 +298,168 @@ function proseOnly(text) {
 ` : segment.text).join("");
 }
 
+// src/adapters/github/run-status.ts
+function readRunStatus(repo, runId) {
+  const read = ghRead("api", `repos/${repo}/actions/runs/${runId}`, "--jq", ".status");
+  if (read.code !== 0) {
+    return { read: false, why: (read.stderr || read.stdout || `gh exited ${read.code}`).trim().split(`
+`)[0] ?? "" };
+  }
+  const status = (read.stdout ?? "").trim();
+  if (status === "")
+    return { read: false, why: "the run read returned no status" };
+  return { read: true, status };
+}
+
+// src/adapters/github/outcome.ts
+function issueOutcome(reason) {
+  const said = (reason ?? "").toLowerCase();
+  return said === "not_planned" || said === "duplicate" ? "abandoned" : "done";
+}
+function pullRequestOutcome(merged) {
+  return merged ? "done" : "abandoned";
+}
+function saysOpen(state) {
+  return (state ?? "").toLowerCase() === "open";
+}
+
+// src/domain/work/issue-links.ts
+function dedupeByNumber(...lists) {
+  const seen = new Map;
+  for (const list of lists)
+    for (const item of list)
+      if (!seen.has(item.number))
+        seen.set(item.number, item);
+  return [...seen.values()].sort((a, b) => a.number - b.number);
+}
+
+// src/adapters/github/issue-links.ts
+function openUnderOf(repo, number) {
+  const links = issueLinks(repo, Number(number));
+  if (links.unavailable !== undefined)
+    return;
+  const open = (nodes) => nodes.filter((node) => node.state === "open").length;
+  return open(links.children) + open(links.pullRequests);
+}
+var LINK_LIMIT = 50;
+var LABEL_LIMIT = 20;
+var QUERY = `
+query($owner:String!, $name:String!, $number:Int!, $limit:Int!, $labelLimit:Int!) {
+  repository(owner:$owner, name:$name) {
+    issueOrPullRequest(number:$number) {
+      __typename
+      ... on Issue {
+        parent { number title state stateReason }
+        subIssues(first:$limit) { nodes { number title state stateReason labels(first:$labelLimit) { nodes { name } } } }
+        closedByPullRequestsReferences(first:$limit, includeClosedPrs:true) {
+          nodes { number title state merged body }
+        }
+        timelineItems(last:$limit, itemTypes:[CROSS_REFERENCED_EVENT]) {
+          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number title state merged body } } } }
+        }
+      }
+      ... on PullRequest {
+        closingIssuesReferences(first:$limit) { nodes { number title state stateReason } }
+      }
+    }
+  }
+}`;
+function normalise(node) {
+  return {
+    number: node.number,
+    title: node.title,
+    state: saysOpen(node.state) ? "open" : issueOutcome(node.stateReason)
+  };
+}
+function asChild(node) {
+  return { ...normalise(node), labels: (node.labels?.nodes ?? []).map((label) => label.name) };
+}
+function asPr(node) {
+  return {
+    number: node.number,
+    title: node.title,
+    state: saysOpen(node.state) ? "open" : pullRequestOutcome(Boolean(node.merged))
+  };
+}
+function issueLinks(repo, number) {
+  const [owner, name] = repo.split("/");
+  if (!owner || !name) {
+    return { children: [], pullRequests: [], unavailable: `"${repo}" is not an owner/name repository` };
+  }
+  let issue = null;
+  try {
+    issue = ghGraphqlRead(QUERY, { owner, name, number, limit: LINK_LIMIT, labelLimit: LABEL_LIMIT }).repository?.issueOrPullRequest ?? null;
+  } catch (error) {
+    const why = error.message;
+    console.error(`[atomaton-github] WARN could not read links for #${number}: ${why}`);
+    return { children: [], pullRequests: [], unavailable: `GitHub could not be reached: ${why}` };
+  }
+  if (!issue)
+    return { children: [], pullRequests: [], unavailable: `#${number} was not found` };
+  if (issue.__typename === "PullRequest") {
+    const closes = issue.closingIssuesReferences?.nodes ?? [];
+    return {
+      kind: "pull_request",
+      parent: closes[0] ? normalise(closes[0]) : undefined,
+      children: [],
+      pullRequests: []
+    };
+  }
+  const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
+  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.readProse(source?.body ?? "") === number).map(asPr);
+  return {
+    kind: "issue",
+    parent: issue.parent ? normalise(issue.parent) : undefined,
+    children: (issue.subIssues?.nodes ?? []).map(asChild),
+    pullRequests: dedupeByNumber(declared, referenced)
+  };
+}
+
+// src/domain/work/stale-lock.ts
+var CLAIM_WITHOUT_RUN_MINUTES = 360;
+var PARK_COLLECTION_MINUTES = 30;
+function ageMinutes(at, nowMs) {
+  const parsed = Date.parse(at);
+  if (!Number.isFinite(parsed))
+    return;
+  return (nowMs - parsed) / 60000;
+}
+function claimFreshness(claim, run, nowMs) {
+  if (claim.run > 0) {
+    if (!run.read)
+      return "unknown";
+    return run.status === "completed" ? "stale" : "fresh";
+  }
+  const age = ageMinutes(claim.at, nowMs);
+  if (age === undefined)
+    return "unknown";
+  return age >= CLAIM_WITHOUT_RUN_MINUTES ? "stale" : "fresh";
+}
+function parkOverdue(parkedSince, nowMs) {
+  const age = ageMinutes(parkedSince, nowMs);
+  return age !== undefined && age >= PARK_COLLECTION_MINUTES;
+}
+function lockVerdict(args) {
+  if (args.parked) {
+    if (args.openUnder === undefined)
+      return "undetermined";
+    if (args.openUnder > 0)
+      return "hold";
+    if (!parkOverdue(args.parkedSince, args.nowMs))
+      return "hold";
+    if (args.claim === undefined)
+      return "release";
+    const parkedClaim = claimFreshness(args.claim, args.run, args.nowMs);
+    return parkedClaim === "fresh" ? "hold" : parkedClaim === "unknown" ? "undetermined" : "release";
+  }
+  if (args.claim === undefined)
+    return "hold";
+  const freshness = claimFreshness(args.claim, args.run, args.nowMs);
+  if (freshness === "unknown")
+    return "undetermined";
+  return freshness === "fresh" ? "hold" : "release";
+}
+
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
 function isControlCommand(name) {
@@ -487,54 +669,16 @@ function commentWouldBeRemoved(repo, number, commentId) {
   return { removed: !shaped.comments.includes(listed), parked: lock.park !== undefined, lock };
 }
 
-// src/adapters/github/run-status.ts
-function readRunStatus(repo, runId) {
-  const read = ghRead("api", `repos/${repo}/actions/runs/${runId}`, "--jq", ".status");
-  if (read.code !== 0) {
-    return { read: false, why: (read.stderr || read.stdout || `gh exited ${read.code}`).trim().split(`
-`)[0] ?? "" };
-  }
-  const status = (read.stdout ?? "").trim();
-  if (status === "")
-    return { read: false, why: "the run read returned no status" };
-  return { read: true, status };
-}
-
-// src/domain/work/stale-lock.ts
-var CLAIM_WITHOUT_RUN_MINUTES = 360;
-function ageMinutes(at, nowMs) {
-  const parsed = Date.parse(at);
-  if (!Number.isFinite(parsed))
-    return;
-  return (nowMs - parsed) / 60000;
-}
-function claimFreshness(claim, run, nowMs) {
-  if (claim.run > 0) {
-    if (!run.read)
-      return "unknown";
-    return run.status === "completed" ? "stale" : "fresh";
-  }
-  const age = ageMinutes(claim.at, nowMs);
-  if (age === undefined)
-    return "unknown";
-  return age >= CLAIM_WITHOUT_RUN_MINUTES ? "stale" : "fresh";
-}
-function abandonedClaim(args) {
-  if (args.parked || args.claim === undefined)
-    return false;
-  return claimFreshness(args.claim, args.run, args.nowMs) === "stale";
-}
-
 // src/adapters/github/node-lock.ts
-function lockAbandoned(repo, lock, nowMs) {
-  if (lock.park !== undefined || lock.claim === undefined)
-    return false;
-  return abandonedClaim({
+function lockAbandoned(repo, number, lock, nowMs) {
+  return lockVerdict({
     claim: lock.claim,
-    parked: false,
-    run: lock.claim.run > 0 ? readRunStatus(repo, lock.claim.run) : { read: false, why: "the claim names no run" },
+    parked: lock.park !== undefined,
+    parkedSince: lock.park?.at ?? "",
+    openUnder: lock.park !== undefined ? openUnderOf(repo, number) : 0,
+    run: lock.claim !== undefined && lock.claim.run > 0 ? readRunStatus(repo, lock.claim.run) : { read: false, why: "the claim names no run" },
     nowMs
-  });
+  }) === "release";
 }
 
 // src/entrypoints/machinery/lib/removed-comment.ts
@@ -645,14 +789,14 @@ function main() {
   let abandoned = false;
   if (hold.removed && hold.lock !== undefined) {
     try {
-      abandoned = lockAbandoned(repo, hold.lock, Date.now());
+      abandoned = lockAbandoned(repo, values.number, hold.lock, Date.now());
     } catch (e) {
       console.error(`Could not check whether the run holding #${values.number} is still going; keeping the comment: ${e}`);
     }
   }
   const removed = hold.removed && !abandoned;
   if (hold.removed && abandoned && !several) {
-    console.error(`The run that claimed #${values.number}'s turn has finished with its claim still standing, ` + "so the lock is stale and this comment is kept \u2014 the sweep will hand the node back");
+    console.error(`The run that claimed #${values.number}'s turn has finished with its claim still standing, ` + "so the lock is stale and this comment is kept \u2014 the next dispatch heals the thread on read");
   }
   const parked = hold.parked;
   if (!removed && !several) {
