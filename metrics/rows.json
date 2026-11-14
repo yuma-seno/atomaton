@@ -25026,7 +25026,7 @@
   {
     "path": "sessions/pr-555/reviewer.json",
     "agent": "reviewer",
-    "messages": 4,
+    "messages": 6,
     "calls": 0,
     "failed": 0,
     "refused": 0,
