@@ -102,7 +102,7 @@ deploy:
 # When a person, not an agent, performs the merge. Any one of these firing is
 # enough.
 merge:
-  policy: manual              # manual = an agent never merges
+  policy: auto                # auto = an agent may merge; manual = an agent never merges
   governed_paths:             # changes here are a person's to merge
     - ".github/**"
   gates: []                   # conditional escalations, each with its reason
