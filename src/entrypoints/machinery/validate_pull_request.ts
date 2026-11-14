@@ -660,6 +660,13 @@ function main(): void {
   }
 
   write(`next_agent=${outcome.next?.agent ?? ""}`);
+  // Whether the person-facing unattended notice should go out. `next_agent == ""`
+  // covers two situations that are not the same, and only one of them is a pull
+  // request waiting unannounced: when the verdict was green but a run already
+  // holds the node, this is `false` and the workflow stays silent -- the running
+  // agent's own report is the thread's next word (#546). See
+  // `ValidationOutcome.unattended`.
+  write(`unattended=${outcome.unattended}`);
   write(`conclusion=${conclusion}`);
   // Whether the verdict this run judged the work `passed`, passed to the dispatch as
   // `--verdict-passed`. The answers-request check reads it when the thread's last

@@ -10,9 +10,15 @@
  * request that waits unannounced is the failure this exists to prevent. It is the
  * same failure `unattendedNotice` covers at creation time, one round later: the
  * pull request was attended when it was opened, and the agent it named is not
- * coming -- the verdicts that send nobody out are red results, a deliverable that
- * cannot start a run, and green results everywhere the thread's ball is not
- * waiting for the work.
+ * coming -- the verdicts that reach here are red results, a deliverable that
+ * cannot start a run, a run that never reported a conclusion, and green results
+ * whose ball sits with a person or behind a thread that could not be read.
+ *
+ * A run that is already WORKING never reaches here: the workflow gates this step
+ * on the validation's `unattended` output, which is `false` when the hold says a
+ * run is in flight or the chain carries the call. There the running agent's own
+ * report is the thread's next word, and an unattended notice would invite a
+ * person to start a run that has already started (#546).
  *
  * ## Who is told
  *

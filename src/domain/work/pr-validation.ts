@@ -72,6 +72,29 @@ export interface ValidationOutcome {
   next?: NextTurn;
   /** One line for the comment that tells whoever is left holding the work. */
   summary: string;
+  /**
+   * Whether the person-facing unattended notice should go out.
+   *
+   * `next_agent == ""` covers two situations that are not the same, and this is
+   * the field that separates them. True: the work is now waiting on a person
+   * with nobody coming — a red result, a deliverable that cannot start a run, no
+   * conclusion at all, or a green result whose ball sits with a person or behind
+   * a thread that could not be read. False: nobody was dispatched because a run
+   * ALREADY holds the node (`in-flight`) or the chain is carrying the call
+   * (`chain`) — the run's own report is the thread's next word, and an unattended
+   * notice there is both noise and a false invitation: it says "comment
+   * `/<agent>` to start one" of a run that is already working, and a person who
+   * obeys is refused by the guard. Observed live on #546 (2026-11-13): the
+   * chain-dispatched reviewer claimed the turn two minutes before the green
+   * verdict landed, and the notice went out anyway.
+   *
+   * It was `next_agent == ""` alone, in the workflow's step gate, because for a
+   * year nobody was ever dispatched without a name and the two situations could
+   * not both occur. The hold gate changed that: green verdicts now land on
+   * threads that runs are already working, routinely — every push whose CI
+   * outlasts the chain's dispatch.
+   */
+  unattended: boolean;
 }
 
 /**
@@ -200,6 +223,7 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
     const count = `${deliverableProblems.length} problem${deliverableProblems.length === 1 ? "" : "s"}`;
     return {
       verdict: "deliverable-invalid",
+      unattended: true,
       summary:
         `.github/atomaton/ is not internally consistent (${count}), so CI was not run.` +
         `${askFor(engineerAgent)}`,
@@ -221,7 +245,12 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
     // the machinery started the next run over it.
     const hold = input.hold ?? { kind: "with-person" as const };
     if (hold.kind === "free" || hold.kind === "parked") {
-      return { verdict: "passed", ...handTo(reviewerAgent), summary: `CI concluded ${normalised}.` };
+      return {
+        verdict: "passed",
+        ...handTo(reviewerAgent),
+        unattended: reviewerAgent.trim() === "",
+        summary: `CI concluded ${normalised}.`,
+      };
     }
     const because: Record<string, string> = {
       "in-flight": "a run already holds this pull request, and its own report is the thread's next word",
@@ -229,8 +258,22 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
       "with-person": "the thread's newest word handed the turn back to a person",
       unreadable: "the thread could not be read to rule out a run in flight",
     };
+    // A run in flight or a chain carrying the call is not an unattended pull
+    // request -- the notice the workflow posts from `unattended` would invite a
+    // person to start a run that is already running (#546). With-person and
+    // unreadable are the states where the work genuinely waits on a person, and
+    // unreadable errs that way on purpose: silence there is the one failure this
+    // notice exists to prevent, while a stray notice costs a refused comment.
+    if (hold.kind === "in-flight" || hold.kind === "chain") {
+      return {
+        verdict: "passed",
+        unattended: false,
+        summary: `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind]}.`,
+      };
+    }
     return {
       verdict: "passed",
+      unattended: true,
       summary:
         `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind] ?? because["with-person"]}.` +
         `${reviewerAgent.trim() === "" ? "" : ` Comment /${reviewerAgent.trim()} to start the review yourself.`}`,
@@ -240,6 +283,7 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
   if (!normalised) {
     return {
       verdict: "no-conclusion",
+      unattended: true,
       summary: "CI never reported a conclusion. Nothing was dispatched; a human should look.",
     };
   }
@@ -251,6 +295,7 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
   // call, on a verdict nobody had asked it to act on.
   return {
     verdict: "failed",
+    unattended: true,
     summary:
       `CI concluded ${normalised}. Nobody was dispatched to fix it.` +
       `${askFor(engineerAgent)}`,
