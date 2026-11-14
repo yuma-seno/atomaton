@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #218: 記憶の機構を用意したい\n**Labels:** atomaton/in-progress\n\nすべてのエージェント共通で、記憶の機構を用意したい。\n現状だとスキルがその主な仕組みだが、PRを出してマージされないと動かないのがつらい。\n\nエージェントが気軽に書き込めてすべてのエージェントで共有される記憶の仕組みがあってもいいのかなと感じた。\n\nもちろん作業の記録を書いていくような場ではなく、作業を始めるにあたってリポジトリの全体像や作業にあたり読むべきフォルダ、作業の進め方やプロジェクトの管理者の特性などをシステムプロンプトに含めて渡すイメージ。\nシステムプロンプト自体を修正させてもいいけど、別ファイルとして用意しておいたほうが更新がされやすいし毎回PRが出て人間がチェックをするのも少し違うのかなと。スキルを作らせるのも考えたけど、システムプロンプトと一緒に強制的に注入したい。\nそこまで頻繁に触られなければキャッシュへの影響も大きくないと思うし。\n\nただ、これはどちらかというとコスト削減の意図が強く、atomatonの思想には合わない可能性もかなり高いと思っている。\nそもそもこれを用意するかどうかの方針の検討から行いたい。",
+      "content": "Issue #218: 記憶の機構を用意したい\n**Labels:** atomaton/waiting-for-person\n\nすべてのエージェント共通で、記憶の機構を用意したい。\n現状だとスキルがその主な仕組みだが、PRを出してマージされないと動かないのがつらい。\n\nエージェントが気軽に書き込めてすべてのエージェントで共有される記憶の仕組みがあってもいいのかなと感じた。\n\nもちろん作業の記録を書いていくような場ではなく、作業を始めるにあたってリポジトリの全体像や作業にあたり読むべきフォルダ、作業の進め方やプロジェクトの管理者の特性などをシステムプロンプトに含めて渡すイメージ。\nシステムプロンプト自体を修正させてもいいけど、別ファイルとして用意しておいたほうが更新がされやすいし毎回PRが出て人間がチェックをするのも少し違うのかなと。スキルを作らせるのも考えたけど、システムプロンプトと一緒に強制的に注入したい。\nそこまで頻繁に触られなければキャッシュへの影響も大きくないと思うし。\n\nただ、これはどちらかというとコスト削減の意図が強く、atomatonの思想には合わない可能性もかなり高いと思っている。\nそもそもこれを用意するかどうかの方針の検討から行いたい。",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-10-18T16:23:26Z",
@@ -171,13 +171,37 @@
     {
       "role": "user",
       "content": "Your previous attempt at this turn returned an empty response (finish_reason: stop). Answer the same request again, and make sure your answer contains something a person can read."
+    },
+    {
+      "role": "user",
+      "content": "/architect",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-14T09:59:44Z",
+        "event_type": "issue_comment",
+        "id": 6875579549,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn returned an empty response (finish_reason: stop). Answer the same request again, and make sure your answer contains something a person can read."
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn returned an empty response (finish_reason: stop). Answer the same request again, and make sure your answer contains something a person can read."
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "architect",
-      "event_count": 13,
-      "snapshot_hash": "57f49f820ecf912658f8b2b95a668ecfae2e28240278cec4a02e8e061d95b442",
+      "event_count": 14,
+      "snapshot_hash": "e5bfd8f3c508236aa509c0309fee4e94d1cae7ced9a33bf658e5b650e5b11884",
       "version": 1
     }
   },
@@ -191,6 +215,16 @@
       "seconds": 3,
       "server_calls": {},
       "started": "2026-11-14T09:41:50Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-14T10:00:43Z",
+      "ended_because": "failed",
+      "iterations": 3,
+      "messages": 21,
+      "seconds": 3,
+      "server_calls": {},
+      "started": "2026-11-14T10:00:40Z"
     }
   ]
 }
