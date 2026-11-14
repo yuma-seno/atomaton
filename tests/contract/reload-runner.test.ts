@@ -1,21 +1,23 @@
-/**
- * Pins the reload's wiring in the generated runner.
- *
- * `reload_environment` ends the run that called it and starts another on the same
- * node, naming its own handoff comment as the ask. That comment is
- * `llm-context=exclude` like every operational notice, so the new run's context
- * snapshot comes back unchanged and `new_event_count` reads 0 — and a gate on the
- * count alone made every reload a no-op: the new run skipped the claim, the agent
- * and the ending, left `atomaton/in-progress` on the node, and said nothing at all.
- *
- * The five steps that open a turn must therefore also open when
- * `inputs.reload_count != '0'` — the only durable trace a reload leaves. If any of
- * them regresses to the event count alone, a reload silently burns a run again and
- * the node stays marked in-progress until a person happens to touch it.
- */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
+/**
+ * The reload's continued turn (#555).
+ *
+ * A run started by `reload_environment` reads zero new events — the handoff
+ * comment is `llm-context=exclude`, so the context snapshot is unchanged — and
+ * used to no-op silently: no claim, no agent, no ending, the in-progress label
+ * left standing, and nothing saying why. Every gate that opens a turn must
+ * therefore open for `reload_count != '0'` as well as for a non-zero count.
+ *
+ * The `${{ }}` half of the contract is the shape, not decoration: an `if:` that
+ * mixes a `${{ }}`-wrapped fragment with literal text evaluates unpredictably —
+ * actionlint's `if-cond` rule reports the shape as "always evaluated to true" —
+ * and a first cut here did exactly that, which would have removed the no-op
+ * protection entirely while every test below still passed. So the generated
+ * workflow must carry the condition BARE: no `${{` anywhere in a gate that
+ * names the input.
+ */
 type Step = { name?: string; if?: string };
 type WorkflowDocument = { jobs?: Record<string, { steps?: Step[] }> };
 
@@ -46,6 +48,20 @@ describe("the reload's continued turn", () => {
     const gates = steps.map((s) => s.if ?? "").filter((gate) => gate.includes("new_event_count"));
     for (const gate of gates) {
       expect(gate, "the event count alone is the old, broken gate").toContain(OPEN);
+    }
+  });
+
+  test("the gates are bare expressions — no ${{ }} mixed with literal text", () => {
+    const gates = steps
+      .map((s) => s.if ?? "")
+      .filter((gate) => gate.includes("reload_count") || gate.includes("new_event_count"));
+    expect(gates.length).toBeGreaterThan(0);
+    for (const gate of gates) {
+      // `${{ inputs.reload_count != '0' }}` spliced into a template made the
+      // condition always-true while looking like a condition. The bare form is
+      // the one GitHub evaluates; a gate carrying `${{` mid-expression is the
+      // bug this test exists to keep out.
+      expect(gate, `not an always-true mixed expression: ${gate}`).not.toContain("${{");
     }
   });
 });

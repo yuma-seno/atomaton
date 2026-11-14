@@ -627,15 +627,6 @@ echo "the agent must be finished by $(date -u -d @\${DEADLINE} +%H:%M:%SZ)"
 );
 
 /**
- * Which repository secrets config.yaml lets this run hand to the agent.
- *
- * A step and not a job: step-level `env:` is evaluated when the step runs, so
- * the "Run agent" step below can use this output as the KEY of a secret lookup.
- * A job would have added a second runner to every agent run to learn the same
- * thing. `tools` is the destination — a credential declared for checks or for a
- * deployment reaches those workflows and never this one.
- */
-/**
  * Whether this run has a turn to take.
  *
  * The usual answer is `new_event_count != '0'`: a run with nothing new to read
@@ -656,9 +647,17 @@ echo "the agent must be finished by $(date -u -d @\${DEADLINE} +%H:%M:%SZ)"
  * `reload_count` is that run's identity, and it is the only durable trace a reload
  * leaves: the tool posts no other marker, which is why the tally travels as a
  * workflow input rather than something counted off the thread.
+ *
+ * The expression stays BARE — no `${{ }}` anywhere in it. GitHub warns that
+ * partially wrapping a condition in `${{ }}` and concatenating literal text
+ * around it evaluates unpredictably (actionlint's `if-cond` rule reports the
+ * shape as "always evaluated to true"), and the mixed form is what a first cut
+ * here wrote: `${{ inputs.reload_count != '0' }}` spliced into the template made
+ * the whole condition a non-empty string, i.e. always true, i.e. no no-op
+ * protection at all. `inputs` is readable bare in a step's `if:` — the same
+ * file's `inputs.type == 'issue'` has always worked — so the wrap buys nothing.
  */
-const reloadIsContinuation = "${{ inputs.reload_count != '0' }}";
-const hasTurn = `(${buildContextStep.rawOutputs.new_event_count} != '0' || ${reloadIsContinuation})`;
+const hasTurn = `(${buildContextStep.rawOutputs.new_event_count} != '0' || inputs.reload_count != '0')`;
 
 /**
  * Claim the turn: the one comment that names which run took up which ask (#285).
