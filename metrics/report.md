@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 119 | 16% | 409 | 3,691 | 17 | 34.6 |
-| Last 30 days | 680 | 6.9% | 257 | 9,859 | 14 | 19.0 |
-| Last year | 745 | 6.8% | 283 | 10,246 | 15 | 20.6 |
-| All time | 745 | 6.8% | 283 | 10,246 | 15 | 20.6 |
+| Last 7 days | 120 | 16.7% | 409 | 3,691 | 17 | 34.6 |
+| Last 30 days | 681 | 7% | 257 | 9,859 | 13 | 19.0 |
+| Last year | 746 | 7% | 283 | 10,246 | 15 | 20.6 |
+| All time | 746 | 7% | 283 | 10,246 | 15 | 20.6 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,12 +22,12 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 694 |
-| `failed` | 40 |
+| `failed` | 41 |
 | `stopped` | 11 |
 
 ## Last 7 days
 
-35 sessions.
+36 sessions.
 
 **Ran to an end without a report:** 3 of 34 sessions whose last run the core recorded as `completed` — 8.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -38,13 +38,14 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,149,579 | 6,808,572 | 12,553,063 | 12,553,063 | 126,381,014 |
-| messages per session | 183 | 366 | 439 | 439 | 7,199 |
+| messages per session | 183 | 366 | 439 | 439 | 7,216 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 14 | 40% |
-| `engineer` | 11 | 31.4% |
-| `atomaton` | 10 | 28.6% |
+| `reviewer` | 14 | 38.9% |
+| `engineer` | 11 | 30.6% |
+| `atomaton` | 10 | 27.8% |
+| `architect` | 1 | 2.8% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
@@ -105,7 +106,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## Last 30 days
 
-251 sessions.
+252 sessions.
 
 **Ran to an end without a report:** 41 of 241 sessions whose last run the core recorded as `completed` — 17%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -116,13 +117,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,211,508 | 5,707,358 | 20,308,488 | 39,097,860 | 780,316,770 |
-| messages per session | 120 | 327 | 463 | 731 | 39,684 |
+| messages per session | 120 | 327 | 463 | 731 | 39,701 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 107 | 42.6% |
-| `engineer` | 81 | 32.3% |
-| `atomaton` | 63 | 25.1% |
+| `reviewer` | 107 | 42.5% |
+| `engineer` | 81 | 32.1% |
+| `atomaton` | 63 | 25% |
+| `architect` | 1 | 0.4% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
@@ -201,7 +203,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## Last year
 
-287 sessions.
+288 sessions.
 
 **Ran to an end without a report:** 52 of 276 sessions whose last run the core recorded as `completed` — 18.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -212,13 +214,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,335,493 | 6,099,372 | 28,119,706 | 73,718,100 | 1,049,720,175 |
-| messages per session | 135 | 341 | 705 | 731 | 48,597 |
+| messages per session | 135 | 341 | 705 | 731 | 48,614 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 117 | 40.8% |
-| `engineer` | 92 | 32.1% |
-| `atomaton` | 78 | 27.2% |
+| `reviewer` | 117 | 40.6% |
+| `engineer` | 92 | 31.9% |
+| `atomaton` | 78 | 27.1% |
+| `architect` | 1 | 0.3% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
@@ -322,7 +325,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## All time
 
-303 sessions.
+304 sessions.
 
 **Ran to an end without a report:** 52 of 276 sessions whose last run the core recorded as `completed` — 18.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -335,13 +338,14 @@ Neither figure covers 16 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,335,493 | 6,099,372 | 28,119,706 | 73,718,100 | 1,049,720,175 |
-| messages per session | 120 | 334 | 583 | 731 | 48,684 |
+| messages per session | 120 | 334 | 583 | 731 | 48,701 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 121 | 39.9% |
-| `engineer` | 101 | 33.3% |
-| `atomaton` | 81 | 26.7% |
+| `reviewer` | 121 | 39.8% |
+| `engineer` | 101 | 33.2% |
+| `atomaton` | 81 | 26.6% |
+| `architect` | 1 | 0.3% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
