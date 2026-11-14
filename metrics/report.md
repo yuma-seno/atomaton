@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 120 | 16.7% | 409 | 3,691 | 17 | 34.6 |
-| Last 30 days | 681 | 7% | 257 | 9,859 | 13 | 19.0 |
-| Last year | 746 | 7% | 283 | 10,246 | 15 | 20.6 |
-| All time | 746 | 7% | 283 | 10,246 | 15 | 20.6 |
+| Last 7 days | 121 | 17.4% | 399 | 3,691 | 17 | 34.6 |
+| Last 30 days | 682 | 7.2% | 257 | 9,859 | 13 | 19.0 |
+| Last year | 747 | 7.1% | 283 | 10,246 | 15 | 20.6 |
+| All time | 747 | 7.1% | 283 | 10,246 | 15 | 20.6 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,7 +22,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 694 |
-| `failed` | 41 |
+| `failed` | 42 |
 | `stopped` | 11 |
 
 ## Last 7 days
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,149,579 | 6,808,572 | 12,553,063 | 12,553,063 | 126,381,014 |
-| messages per session | 183 | 366 | 439 | 439 | 7,216 |
+| messages per session | 183 | 366 | 439 | 439 | 7,220 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -117,7 +117,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,211,508 | 5,707,358 | 20,308,488 | 39,097,860 | 780,316,770 |
-| messages per session | 120 | 327 | 463 | 731 | 39,701 |
+| messages per session | 120 | 327 | 463 | 731 | 39,705 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -214,7 +214,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,335,493 | 6,099,372 | 28,119,706 | 73,718,100 | 1,049,720,175 |
-| messages per session | 135 | 341 | 705 | 731 | 48,614 |
+| messages per session | 135 | 341 | 705 | 731 | 48,618 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -338,7 +338,7 @@ Neither figure covers 16 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,335,493 | 6,099,372 | 28,119,706 | 73,718,100 | 1,049,720,175 |
-| messages per session | 120 | 334 | 583 | 731 | 48,701 |
+| messages per session | 120 | 334 | 583 | 731 | 48,705 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
