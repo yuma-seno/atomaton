@@ -195,14 +195,41 @@
     {
       "role": "user",
       "content": "Your previous attempt at this turn returned an empty response (finish_reason: stop). Answer the same request again, and make sure your answer contains something a person can read."
+    },
+    {
+      "role": "user",
+      "content": "/architect",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-14T11:27:36Z",
+        "event_type": "issue_comment",
+        "id": 6876582827,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "記憶機構の導入に関する設計方針を以下に決定しました。本機構は「レビューの負荷を下げつつ、システムプロンプトの更新を自動化する」という課題を、ガバナンスとツールの分離によって解決します。\n\n### 1. 置き場所と保存の保証\n記憶ファイルは `.github/atomaton/memory.md` に配置します。本リポジトリの `self-deploy` で破棄・再構成される影響を避けるため、`self/atomaton/memory.md` に同一内容のファイルを保持し、`self-deploy` の処理対象に含めることで、リポジトリの構造維持と継続性を保証します。\n\n### 2. 除外の記法\n`governed_paths` のマッチャーを拡張し、`!` 接頭辞による除外パターンをサポートします。`.github/**` を包含した上で `!.github/atomaton/memory.md` を追加することで、このパスのみをガバナンスの例外として扱います。記法検証は既存の厳格な検証ロジックを維持し、パース不能な不正記法は即時拒絶する設計とします。\n\n### 3. レビューの置き換え\n記憶ファイルへの変更を伴う PR は `policy: auto` を適用し、CI 通過をもってエージェントがマージ可能とします。人の関与は毎回の承認から、以下の三層の防御へ置き換えます。\n- **事前宣言**: どの経路を記憶とするかの設定を管理者が一回行う。\n- **エージェントによるレビュー**: 全ての PR に対して `reviewer` 役のエージェントが diff を精査する。\n- **定期監査**: 人が履歴（git commit 理由）を読み、記憶全体の整合性やドリフトを確認する。記憶は全エージェントに配布されるため、不適切な記述があった場合の修正は `revert` 手順で迅速に行います。\n\n### 4. 注入\nエージェント起動時に機械側が `memory.md` の内容を読み取り、プロンプトの末尾に強制的に挿入する製品機能として実装します。ファイルは single file に限定し、容量上限は 5,000 トークンとします。上限超過時は書き込みツールがエラーを返し、エージェントに整理を促す設計とします。\n\n### 5. 書き込みツールの形\nエージェント専用の MCP ツールとして作成します。このツールは base ブランチの現在の状態から新規ブランチを切って PR を発行する `publish_draft` 型の設計とし、作業ツリーの状態とは完全に独立して動作します。対象範囲は `.github/atomaton/memory.md` のみに限定し、`.github` 配下の他ファイルへの干渉は一切許可しません。\n\n### 設計上の判断の理由\n- **なぜこの形か**: 記憶への書き込みを「独立したツールと限定的な例外設定」に絞ることで、`.github` 全体を守るガバナンスという大原則を崩さずに、エージェントが必要なタイミングでプロンプトを更新できる affordance を提供するためです。\n- **何が重いか**: 新しい除外構文の導入と、製品コード側での差し込み機能の実装は、現状のアーキテクチャに対して中程度の複雑性を持ちます。特に CI/CD の設定変更と組み合わせたテストが必要です。\n\n実装準備が整いました。この設計内容に基づき、各担当へ作業を依頼してください。\n\n/atomaton",
+      "finish_reason": "stop",
+      "atoma_metadata": {
+        "github_comment_id": 6876595700,
+        "agent": "architect"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "architect",
-      "event_count": 14,
-      "snapshot_hash": "e5bfd8f3c508236aa509c0309fee4e94d1cae7ced9a33bf658e5b650e5b11884",
-      "version": 1
+      "event_count": 15,
+      "snapshot_hash": "8b93aa16b4e4445afcdbabdb68bae36c8d5103cf3a309f068af0d7d70ef837fe",
+      "version": 1,
+      "type": "issue",
+      "session_number": "218"
     }
   },
   "atoma_runs": [
@@ -225,6 +252,16 @@
       "seconds": 3,
       "server_calls": {},
       "started": "2026-11-14T10:00:40Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-14T11:28:39Z",
+      "ended_because": "completed",
+      "iterations": 1,
+      "messages": 24,
+      "seconds": 7,
+      "server_calls": {},
+      "started": "2026-11-14T11:28:32Z"
     }
   ]
 }
