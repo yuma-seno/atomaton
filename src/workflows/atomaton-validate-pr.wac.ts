@@ -130,7 +130,7 @@ const validateStep = new TypedOutputsStep(
       "deliverable-report": DELIVERABLE_REPORT,
     })}\n`,
   },
-  ["next_agent", "conclusion", "verdict_passed", "summary"] as const,
+  ["next_agent", "unattended", "conclusion", "verdict_passed", "summary"] as const,
 );
 
 export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
@@ -255,20 +255,23 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
         })}
 `,
       }),
-      // Nobody was dispatched, so a person is told rather than left to notice.
+      // Nobody was dispatched, so a person is told rather than left to notice --
+      // but only when nobody is coming.
       //
-      // Three families of routes arrive here, and each is silent without this
-      // step: the result names no agent, the result dispatches nobody on purpose
-      // -- a red run, or a deliverable that cannot start one -- because the
-      // machinery no longer hands a verdict back to an agent without a call, and
-      // the verdict went green but the thread's ball is not waiting for the work:
-      // a run in flight, a chain already carrying the call, or a turn a run
-      // handed back to a person. Either way the check is written and the work
-      // waits, and the one thing that must not happen is that it waits
-      // unannounced.
+      // The verdict hands to a person in two situations that are not the same,
+      // and the script answers which one happened through the `unattended`
+      // output. `true`: the result names no agent, the result dispatches nobody
+      // on purpose -- a red run, or a deliverable that cannot start one -- the
+      // verdict went green but the turn was handed back to a person, or the
+      // thread could not be read. `false`: green, and a run ALREADY holds the
+      // node -- an in-flight run, or the chain carrying the call. There the
+      // notice would invite a person to start a run that is already working
+      // (#546), and the run's own report is the thread's next word, so this step
+      // stays out of the way. Either way the check is written; the one thing that
+      // must not happen is a pull request that waits unannounced.
       new TypedOutputsStep({
         name: "Tell a person nobody was dispatched",
-        if: `${validateStep.rawOutputs.next_agent} == ''`,
+        if: `${validateStep.rawOutputs.next_agent} == '' && ${validateStep.rawOutputs.unattended} == 'true'`,
         shell: "bash",
         env: {
           GH_TOKEN: "${{ github.token }}",

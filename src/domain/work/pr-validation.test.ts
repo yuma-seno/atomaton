@@ -21,6 +21,8 @@ describe("decideValidationOutcome", () => {
     expect(outcome.verdict).toBe("passed");
     expect(contextsPassed(outcome.verdict)).toBe(true);
     expect(outcome.next?.agent).toBe("reviewer");
+    // Somebody was dispatched, so there is nothing unattended to announce.
+    expect(outcome.unattended).toBe(false);
   });
 
   // GitHub's own list of conclusions that satisfy a required check, so a job the
@@ -45,6 +47,8 @@ describe("decideValidationOutcome", () => {
     expect(contextsPassed(outcome.verdict)).toBe(false);
     expect(outcome.next).toBeUndefined();
     expect(outcome.summary).toContain("failure");
+    // The work really is waiting on a person now.
+    expect(outcome.unattended).toBe(true);
   });
 
   test("a red verdict names the agent a person can ask for the fix", () => {
@@ -69,6 +73,7 @@ describe("decideValidationOutcome", () => {
     expect(contextsPassed(outcome.verdict)).toBe(false);
     expect(outcome.next).toBeUndefined();
     expect(outcome.summary).toContain("human");
+    expect(outcome.unattended).toBe(true);
   });
 
   /**
@@ -105,6 +110,7 @@ describe("where the ball sits decides whether a green verdict starts anything", 
   test("a parked turn is the machinery keeping its own promise", () => {
     const outcome = decide("success", { kind: "parked" });
     expect(outcome.next?.agent).toBe("reviewer");
+    expect(outcome.unattended).toBe(false);
   });
 
   // A run is still working on this node. Starting another over it is what put two
@@ -160,6 +166,73 @@ describe("where the ball sits decides whether a green verdict starts anything", 
   test("an absent hold reads as the ball being with a person", () => {
     const outcome = decideValidationOutcome({ conclusion: "success", ...agents });
     expect(outcome.next).toBeUndefined();
+  });
+});
+
+/**
+ * The unattended notice, and the line it must not cross (#547).
+ *
+ * `next_agent == ""` alone used to gate the workflow's "tell a person" step, and
+ * for a year the two situations it covers could not both occur. The hold gate
+ * changed that: a green verdict now routinely lands on a thread a run is already
+ * working -- every push whose CI outlasts the chain's dispatch of the next agent.
+ * On #546 (2026-11-13) the notice went out two minutes after the chain-dispatched
+ * reviewer had claimed the turn, inviting a person to start a review that was
+ * running: noise on the thread, and an invitation the guard refuses.
+ *
+ * So the outcome carries `unattended`, and the workflow's step gate reads it.
+ * True: the work waits on a person with nobody coming. False: a run holds the
+ * node -- `in-flight` or `chain` -- and the run's own report is the thread's next
+ * word. `unreadable` stays true on purpose: silence there would be the exact
+ * failure this notice exists to prevent, while a stray notice costs a refused
+ * comment.
+ */
+describe("whether the work is unattended, not merely undispatched", () => {
+  test("a run in flight is not unattended -- nothing is announced, the run reports", () => {
+    const outcome = decide("success", { kind: "in-flight" });
+    expect(outcome.next).toBeUndefined();
+    expect(outcome.unattended).toBe(false);
+  });
+
+  test("a chain carrying the call is not unattended either", () => {
+    const outcome = decide("success", { kind: "chain" });
+    expect(outcome.unattended).toBe(false);
+  });
+
+  test("a turn handed back to a person IS unattended", () => {
+    const outcome = decide("success", { kind: "with-person" });
+    expect(outcome.unattended).toBe(true);
+  });
+
+  test("an unreadable thread errs toward announcing", () => {
+    const outcome = decide("success", { kind: "unreadable" });
+    expect(outcome.unattended).toBe(true);
+  });
+
+  // The original unattended case, unchanged: green, a call waiting, nobody named.
+  test("green with nobody named is unattended", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "success",
+      reviewerAgent: "",
+      engineerAgent: "engineer",
+      hold: free,
+    });
+    expect(outcome.next).toBeUndefined();
+    expect(outcome.unattended).toBe(true);
+  });
+
+  test("a dispatched verdict is never unattended", () => {
+    expect(decide("success", { kind: "parked" }).unattended).toBe(false);
+    expect(decide("success").unattended).toBe(false);
+  });
+
+  // And the undispatched-but-not-unattended pair's summaries stay honest: they
+  // say a run holds the node, without inviting anybody to start another.
+  test("the in-flight and chain summaries invite nobody", () => {
+    for (const hold of [{ kind: "in-flight" as const }, { kind: "chain" as const }]) {
+      const outcome = decide("success", hold);
+      expect(outcome.summary).not.toContain("Comment /");
+    }
   });
 });
 

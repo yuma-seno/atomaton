@@ -879,6 +879,40 @@ describe("generated workflows", () => {
   });
 
   /**
+   * The unattended notice fires only when nobody is COMING, not merely when
+   * nobody was dispatched (#547).
+   *
+   * `next_agent == ""` alone gated the "tell a person" step, and for a year that
+   * was sound: nobody was ever dispatched without a name. The hold gate changed
+   * it -- a green verdict now lands on threads a run is already working, every
+   * time CI outlasts the chain's dispatch -- and on #546 (2026-11-13) the notice
+   * went out two minutes after the chain-dispatched reviewer claimed the turn,
+   * inviting a person to start a review that was running.
+   *
+   * So the script answers `unattended=`, and the step's gate demands it. Both
+   * halves are pinned here against the GENERATED workflow, because the generated
+   * file is what runs: a regression that re-widens the step's `if`, or drops the
+   * output from the script, must fail here rather than re-appear on a live
+   * thread.
+   */
+  test("the unattended notice is gated on the unattended answer, not on next_agent alone", () => {
+    type WorkflowStep = { name?: string; run?: string; if?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(
+      readFileSync("dist/.github/workflows/atomaton-validate-pr.yml", "utf8"),
+    ) as WorkflowDocument;
+    const steps = workflow.jobs?.validate?.steps ?? [];
+
+    const unattended = steps.find((step) => step.name === "Tell a person nobody was dispatched");
+    expect(unattended, "the person-facing notice step").toBeDefined();
+    // Exact, not `toContain`: a gate that gets WIDER than this -- the regression
+    // #547 recorded -- must fail here, and a `toContain` on one conjunct would
+    // pass a widened `if` untouched.
+    expect(unattended?.if).toBe("steps.validate.outputs.next_agent == '' && steps.validate.outputs.unattended == 'true'");
+  });
+
+  /**
    * Everything a tool server reads from the environment is passed to it.
    *
    * This is the test a review asked for, because the change it reviewed

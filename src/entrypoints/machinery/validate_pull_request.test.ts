@@ -221,8 +221,16 @@ describe("notifyCiWaiting, through the whole script", () => {
    * reuse or wait for, or nothing when CI must be dispatched. The second read (the
    * first poll) always sees the run still going, and the third completed -- never
    * reached here, because the 1s timeout ends the wait after one poll.
+   *
+   * `thread` is what the comments read answers, and defaults to an empty thread:
+   * hold `free`, no reviewer named. The hold gate's other arms are reached by
+   * passing a thread with the tags that produce them.
    */
-  function runValidation(existingRun: Record<string, unknown> | undefined, askedByPerson: boolean): Validation {
+  function runValidation(
+    existingRun: Record<string, unknown> | undefined,
+    askedByPerson: boolean,
+    thread: unknown[] = [],
+  ): Validation {
     const runsRule = { match: ["actions/runs?head_sha="] };
     const runs = (list: Record<string, unknown>[]) => JSON.stringify({ total_count: list.length, workflow_runs: list });
     const rules = [
@@ -232,7 +240,7 @@ describe("notifyCiWaiting, through the whole script", () => {
       { ...runsRule, stdout: runs(existingRun ? [existingRun] : []), attempt: 1 },
       { ...runsRule, stdout: runs([ciActionRun("in_progress", null)]), attempt: 2 },
       { ...runsRule, stdout: runs([ciActionRun("completed", "success")]), attempt: 3 },
-      { match: ["repos/o/r/issues/7/comments"], stdout: "[]" },
+      { match: ["repos/o/r/issues/7/comments"], stdout: JSON.stringify(thread) },
       { match: ["repos/o/r/issues/7"], stdout: "just a body" },
       // Two projections of one pull request, so two rules: the commit and base branch
       // this validation works against, and the body the origin agent is read out of.
@@ -358,5 +366,33 @@ describe("notifyCiWaiting, through the whole script", () => {
     // still reports.
     expect(v.comments.length).toBe(1);
     expect(v.comments[0]).toContain("CI never reported a conclusion");
+  }, WAIT);
+
+  /**
+   * The `unattended` output, as the whole script writes it (#547). The workflow's
+   * "tell a person" step reads this, so the contract test on the generated YAML
+   * pins the gate's demand and these pin the script's answer: an in-flight thread
+   * must answer `false` -- the run's own report is the thread's next word -- while
+   * the empty-thread default stays `true`, the original unattended case.
+   *
+   * The in-flight thread is the #546 shape: a chain dispatch the run claimed and
+   * has not reported on. Green lands, nothing is dispatched, and nothing is
+   * announced.
+   */
+  test("a run already holding the thread answers unattended=false", () => {
+    const v = runValidation(ciActionRun("completed", "success"), true, [
+      { id: 1, body: "<!-- atomaton:dispatch=engineer -->\nAtomaton: `engineer` starting.", user: { type: "Bot" } },
+      { id: 2, body: "<!-- atomaton:took=1 run=4 -->", user: { type: "Bot" } },
+    ]);
+    expect(v.out.conclusion).toBe("success");
+    expect(v.out.next_agent).toBe("");
+    expect(v.out.unattended).toBe("false");
+    expect(v.comments).toEqual([]);
+  }, WAIT);
+
+  test("an empty thread answers unattended=true", () => {
+    const v = runValidation(ciActionRun("completed", "success"), true);
+    expect(v.out.next_agent).toBe("");
+    expect(v.out.unattended).toBe("true");
   }, WAIT);
 });
