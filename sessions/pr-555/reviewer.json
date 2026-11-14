@@ -2,7 +2,7 @@
   "messages": [
     {
       "role": "user",
-      "content": "PR #555: runner: a run arrived by reload opens a turn, or it no-ops silently\n\n## 何が起きていたか\n\n`reload_environment` が壊れていました。エージェントがこのツールを呼ぶと「環境を再構築して新しい run を始める」はずが、新しい run が**何もせず**に終わっていました。初めて実使用されたのは今日(#218 で atomaton が呼んだ run `43590231771`)。\n\n原因は runner のゲートです。reload の引き継ぎ先 run は、自分のハンドオフコメント(運用通知なので `llm-context=exclude`)を ask として立ち上がります。このコメントはコンテキストのフィルタで除外されるため、コンテキストのスナップショットは変わらず `new_event_count` が 0 になります。そしてターンを開く全ステップ(claim / agent / 結果コメント / in-progress ラベル)が `new_event_count != '0'` だけでゲートされていたので、リロード run は何も取らずに終わりました。\n\n実測(run `43590479757` のログ):\n\n```\nContext build complete: 31 events fetched, 12 shared messages, changed=0\nClaim the turn (skipped) / Run agent (skipped)\ndecide_turn_ending: outcome=skipped -> ended=failed\n```\n\nこの run は `atomaton/in-progress` ラベルを残したまま黙って終わり、呼んだ側の run は既に終了しているので、誰も何も言いませんでした。\n\nなお、reload を呼んだ run が保存したセッションには「Rebuilding the environment and starting a new run (1 of 3)…」というツール結果が最後のメッセージとして入っており、続行 run が知るべきことはすべて揃っています。足りなかったのは「動いてよい」という許可だけでした。\n\n## 直し方\n\nゲートを `hasTurn` にまとめました:\n\n```\n(new_event_count != '0' || inputs.reload_count != '0')\n```\n\n- `reload_count` は reload が残す唯一の永続痕跡です(reload はコメントを残さないので、回数はワークフロー入力で運搬される — 既存の `environment-reload.ts` の設計どおり)。\n- 適用先はターンを開く 5 ステップ: claim / stop ウォッチャー / agent / 結果コメント / in-progress ラベル。\n- 通常の run は従来どおり `new_event_count != '0'` だけでゲートされます(挙動不変)。\n- 契約テスト `tests/contract/reload-runner.test.ts` を追加し、この配線を固定。従来の「件数だけ」のゲートに戻ったら失敗するようにしています。\n\n## 確認\n\n- `bun run typecheck` / `bun run synth` クリーン\n- 対象テスト 55 pass(runner / labels / generated-workflows / 新規 reload テスト)\n- contract スイートの残り fail は既知の Windows ベースライン(添付・公開・credential 系のみ、今回の変更とは無関係)\n",
+      "content": "PR #555: runner: a run arrived by reload opens a turn, or it no-ops silently\n**Labels:** atomaton/waiting-for-person\n\n## 何が起きていたか\n\n`reload_environment` が壊れていました。エージェントがこのツールを呼ぶと「環境を再構築して新しい run を始める」はずが、新しい run が**何もせず**に終わっていました。初めて実使用されたのは今日(#218 で atomaton が呼んだ run `43590231771`)。\n\n原因は runner のゲートです。reload の引き継ぎ先 run は、自分のハンドオフコメント(運用通知なので `llm-context=exclude`)を ask として立ち上がります。このコメントはコンテキストのフィルタで除外されるため、コンテキストのスナップショットは変わらず `new_event_count` が 0 になります。そしてターンを開く全ステップ(claim / agent / 結果コメント / in-progress ラベル)が `new_event_count != '0'` だけでゲートされていたので、リロード run は何も取らずに終わりました。\n\n実測(run `43590479757` のログ):\n\n```\nContext build complete: 31 events fetched, 12 shared messages, changed=0\nClaim the turn (skipped) / Run agent (skipped)\ndecide_turn_ending: outcome=skipped -> ended=failed\n```\n\nこの run は `atomaton/in-progress` ラベルを残したまま黙って終わり、呼んだ側の run は既に終了しているので、誰も何も言いませんでした。\n\nなお、reload を呼んだ run が保存したセッションには「Rebuilding the environment and starting a new run (1 of 3)…」というツール結果が最後のメッセージとして入っており、続行 run が知るべきことはすべて揃っています。足りなかったのは「動いてよい」という許可だけでした。\n\n## 直し方\n\nゲートを `hasTurn` にまとめました:\n\n```\n(new_event_count != '0' || inputs.reload_count != '0')\n```\n\n- `reload_count` は reload が残す唯一の永続痕跡です(reload はコメントを残さないので、回数はワークフロー入力で運搬される — 既存の `environment-reload.ts` の設計どおり)。\n- 適用先はターンを開く 5 ステップ: claim / stop ウォッチャー / agent / 結果コメント / in-progress ラベル。\n- 通常の run は従来どおり `new_event_count != '0'` だけでゲートされます(挙動不変)。\n- 契約テスト `tests/contract/reload-runner.test.ts` を追加し、この配線を固定。従来の「件数だけ」のゲートに戻ったら失敗するようにしています。\n\n## 確認\n\n- `bun run typecheck` / `bun run synth` クリーン\n- 対象テスト 55 pass(runner / labels / generated-workflows / 新規 reload テスト)\n- contract スイートの残り fail は既知の Windows ベースライン(添付・公開・credential 系のみ、今回の変更とは無関係)\n",
       "atoma_metadata": {
         "source": "github",
         "layer": "github-context",
@@ -33,8 +33,24 @@
         "event_type": "pr_diff",
         "id": "pr-555-diff",
         "author": "github",
-        "created_at": "2026-11-14T12:22:17Z",
+        "created_at": "2026-11-14T13:37:46Z",
         "sha": "2dfa54aa"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "user",
+      "content": "/reviewer",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "pr_comment",
+        "id": 6878086787,
+        "author": "yuma-seno",
+        "created_at": "2026-11-14T13:37:46Z"
       }
     },
     {
@@ -45,8 +61,8 @@
   "metadata": {
     "github_context": {
       "version": 1,
-      "snapshot_hash": "85897c7c0884652e56219461514ed56d395a5b080d440a6de51db081941adc94",
-      "event_count": 3,
+      "snapshot_hash": "bd67cbef0ac899b1da3da28c50db82d4d89519d6f56975135f41d68f265e9684",
+      "event_count": 4,
       "agent": "reviewer"
     }
   }
