@@ -636,6 +636,31 @@ echo "the agent must be finished by $(date -u -d @\${DEADLINE} +%H:%M:%SZ)"
  * deployment reaches those workflows and never this one.
  */
 /**
+ * Whether this run has a turn to take.
+ *
+ * The usual answer is `new_event_count != '0'`: a run with nothing new to read
+ * takes no turn — the agent never starts and no ending is ever written — and a
+ * claim it left open would be the one thread state the watch reads as "taken up,
+ * never answered", a false notice for a run that legitimately did nothing. An
+ * empty count counts as work, because a crash before the context step wrote the
+ * output must not be the thing that silences a run with a live ask.
+ *
+ * A run started by `reload_environment` is the one case where zero is the normal
+ * number and still a turn. That tool's handoff comment is its own ask, and it is
+ * `llm-context=exclude` like every operational notice, so the context filter drops
+ * it and the snapshot hash comes back unchanged. Gating on the count alone made
+ * every reload a no-op: the new run skipped the claim, the agent and the ending,
+ * left `atomaton/in-progress` on the node, and said nothing at all — the run that
+ * asked for the rebuild had already ended, so nothing else was left to speak.
+ *
+ * `reload_count` is that run's identity, and it is the only durable trace a reload
+ * leaves: the tool posts no other marker, which is why the tally travels as a
+ * workflow input rather than something counted off the thread.
+ */
+const reloadIsContinuation = "${{ inputs.reload_count != '0' }}";
+const hasTurn = `(${buildContextStep.rawOutputs.new_event_count} != '0' || ${reloadIsContinuation})`;
+
+/**
  * Claim the turn: the one comment that names which run took up which ask (#285).
  *
  * `claim_turn.ts` posts `atomaton:took=<ask> run=<run>` at start — the identity the
@@ -644,19 +669,15 @@ echo "the agent must be finished by $(date -u -d @\${DEADLINE} +%H:%M:%SZ)"
  * race check inside cannot itself race; a run that finds an older claim on its ask
  * backs off, and every step that would take the turn is gated on that here.
  *
- * After `buildContextStep` and gated on its `new_event_count != '0'`: a run with
- * no new events to read takes no turn — the agent never starts and no ending is
- * ever written — and a claim it left open would be the one thread state the watch
- * reads as "taken up, never answered", a false notice for a run that legitimately
- * did nothing. With the gate, the claim exists exactly when a turn does; the
- * unclaimed window this adds (the context fetch, seconds) is the one the guard
- * already treats as nobody's ball.
+ * After `buildContextStep` and gated on `hasTurn`, so the claim exists exactly when
+ * a turn does; the unclaimed window this adds (the context fetch, seconds) is the
+ * one the guard already treats as nobody's ball.
  */
 const claimTurnStep = new TypedOutputsStep(
   {
     name: "Claim the turn",
     id: "claim",
-    if: `${buildContextStep.rawOutputs.new_event_count} != '0'`,
+    if: hasTurn,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
@@ -752,7 +773,7 @@ sudo chown ${TOOL_USER} "${CREDENTIALS_FILE}"
  */
 const startStopWatcherStep = new TypedOutputsStep({
   name: "Watch for a stop request",
-  if: `${buildContextStep.rawOutputs.new_event_count} != '0'`,
+  if: hasTurn,
   shell: "bash",
   env: { GH_TOKEN: "${{ github.token }}", NUMBER: "${{ inputs.number }}" },
   run: `SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -770,7 +791,7 @@ const runAgentStep = new TypedOutputsStep(
   {
     name: "Run agent",
     id: "atoma",
-    if: `${buildContextStep.rawOutputs.new_event_count} != '0' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+    if: `${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     // Not "ignore the failure". The failure stays in `steps.atoma.outcome` --
     // `conclusion` is what turns success -- and every condition below reads the
     // outcome exactly as before. What this buys is that the failure reaches the
@@ -1064,10 +1085,11 @@ const postResultCommentStep = new TypedOutputsStep(
     // the claim is what makes "this run answers this ask" a fact rather than a guess, and
     // a run that lost the race to another is not the one to speak.
     //
-    // `new_event_count != '0'` stays for the same reason it always held: it is what the
-    // claim was taken under, so it holds wherever `claimed` does. A crash before the
-    // context step writes that output leaves it empty, and empty is not `'0'` — the gate
-    // opens, and the agent step's own outcome decides.
+    // `hasTurn` stays for the same reason it always held: it is what the claim was
+    // taken under, so it holds wherever `claimed` does. A crash before the context
+    // step writes that output leaves it empty, and empty is not `'0'` — the gate
+    // opens, and the agent step's own outcome decides. A reload's run is the one
+    // whose count reads zero legitimately, and `hasTurn` is what lets it in.
     //
     // The script's own guard does the rest: it always posts something, because an empty
     // output is a shape rather than a fact (a session-ending tool's own comment, a run
@@ -1080,7 +1102,7 @@ const postResultCommentStep = new TypedOutputsStep(
     // `directive` emptiness.
     name: "Post result comment",
     id: "post-result",
-    if: `always() && (${runAgentStep.rawOutcome} == 'success' || ${runAgentStep.rawOutcome} == 'failure') && ${buildContextStep.rawOutputs.new_event_count} != '0' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+    if: `always() && (${runAgentStep.rawOutcome} == 'success' || ${runAgentStep.rawOutcome} == 'failure') && ${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     shell: "bash",
     env: { GH_TOKEN: "${{ github.token }}" },
     run: `${scriptCommandWithArgs(postResultCommentRef, {
@@ -1152,7 +1174,7 @@ const recordRunMetadataStep = new TypedOutputsStep({
   // Both the comment-tagging and context-snapshot-recording halves of
   // record_run_metadata.ts only apply when a result comment was actually
   // posted -- which (per postResultCommentStep's own guard above) only
-  // happens exactly when new_event_count != '0', so gating on comment_id
+  // happens exactly when `hasTurn`, so gating on comment_id
   // here covers both original composite-action steps' separate conditions
   // in one go.
   name: "Record run metadata",
@@ -1809,10 +1831,10 @@ git config user.email "atomaton-\${{ inputs.agent }}@users.noreply.github.com"
     // afterwards. Applies to both issues and PRs -- `gh issue edit` works on
     // PR numbers too since GitHub treats every PR as an issue under the
     // hood. Gated on the same condition as "Run agent" so the label isn't
-    // added for no-op runs that will be skipped entirely
-    // (new_event_count == '0').
+    // added for no-op runs that will be skipped entirely (`hasTurn` is false
+    // only when there is nothing new AND this run did not arrive by reload).
     name: "Add atomaton/in-progress label (the turn is with a run)",
-    if: `${buildContextStep.rawOutputs.new_event_count} != '0' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+    if: `${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
