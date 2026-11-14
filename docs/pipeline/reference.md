@@ -141,9 +141,11 @@ it. Defaults to `atomaton-check.yml`. Name yours exactly as the file is called, 
 the dispatch fails silently and every merge is refused for a missing check.
 
 Its result decides what happens next: when it passes, the agent the calls name
-runs — but only where a call is waiting for one; everywhere else the verdict is
-handed to a person with a mention. When it fails, nothing is dispatched at all: a
-person is told, and asks whoever should fix it.
+runs — but only where a call is waiting for one. Where the verdict would be
+handed to a person, a mention carries it; where a run already holds the turn —
+in flight, or a chain carrying the call — nothing is posted, because that run's
+own report is the thread's next word. When CI fails, nothing is dispatched at
+all: a person is told, and asks whoever should fix it.
 
 ## `deploy.your_workflow`
 

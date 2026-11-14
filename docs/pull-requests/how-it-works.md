@@ -6,10 +6,11 @@ token](../work/how-it-works/github-raises-no-event-for-its-own-token.md) — so
 runs the configured CI on the branch, writes the result as a check run, and then
 acts on the result. The machinery starts an agent only where a call is waiting
 for one: when CI is green and the pull request carries a `/<agent>` line (or a
-comment named one), that agent runs. When CI is red, or the thread's turn is
-already held — a run in flight, a chain started, a run that handed the work back
-to a person — nothing is dispatched, and a person is told instead, with the
-agent they can ask for named in the mention.
+comment named one), that agent runs. When CI is red, or the thread's turn was
+handed back to a person, nothing is dispatched, and a person is told instead,
+with the agent they can ask for named in the mention. Where the turn is held by
+a run in flight, or by a chain already carrying the call, the workflow posts
+nothing at all: that run's own report is the thread's next word.
 
 ## When nobody is named to look at it
 
