@@ -273,6 +273,15 @@ function proseOnly(text) {
 ` : segment.text).join("");
 }
 
+// src/adapters/github/outcome.ts
+function issueOutcome(reason) {
+  const said = (reason ?? "").toLowerCase();
+  return said === "not_planned" || said === "duplicate" ? "abandoned" : "done";
+}
+function pullRequestOutcome(merged) {
+  return merged ? "done" : "abandoned";
+}
+
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
 function isControlCommand(name) {
@@ -603,15 +612,6 @@ var DEFAULT_LABELS = {
 };
 function getLabel(key) {
   return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
-}
-
-// src/adapters/github/outcome.ts
-function issueOutcome(reason) {
-  const said = (reason ?? "").toLowerCase();
-  return said === "not_planned" || said === "duplicate" ? "abandoned" : "done";
-}
-function pullRequestOutcome(merged) {
-  return merged ? "done" : "abandoned";
 }
 
 // src/adapters/github/target-state.ts

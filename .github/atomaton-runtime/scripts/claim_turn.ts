@@ -280,6 +280,19 @@ function proseOnly(text) {
 ` : segment.text).join("");
 }
 
+// src/adapters/github/run-status.ts
+function readRunStatus(repo, runId) {
+  const read = ghRead("api", `repos/${repo}/actions/runs/${runId}`, "--jq", ".status");
+  if (read.code !== 0) {
+    return { read: false, why: (read.stderr || read.stdout || `gh exited ${read.code}`).trim().split(`
+`)[0] ?? "" };
+  }
+  const status = (read.stdout ?? "").trim();
+  if (status === "")
+    return { read: false, why: "the run read returned no status" };
+  return { read: true, status };
+}
+
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
 function isControlCommand(name) {
@@ -398,6 +411,10 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/claim_turn.ts
 var ref = defineScript(import.meta.url);
 var READ_DELAYS_MS = [1000, 2000, 4000];
+function runFinishedOn(repo, run) {
+  const status = readRunStatus(repo, run);
+  return status.read && status.status === "completed";
+}
 function readComments(repo, number) {
   return listComments(repo, number).map((comment) => ({
     id: comment.id,
@@ -417,13 +434,16 @@ ${TOOK_TAG.write(args)}`;
 function patchCommentBody(repo, commentId, body) {
   return gh("api", `repos/${repo}/issues/comments/${commentId}`, "--method", "PATCH", "-f", `body=${body}`);
 }
-function raceOutcome(comments, mine) {
+function raceOutcome(comments, mine, runFinished) {
   for (const comment of comments) {
     if (comment.id >= mine.id)
       break;
     const claim = TOOK_TAG.readProse(comment.body);
-    if (claim !== undefined && claim.ask === mine.ask)
-      return "backed-off";
+    if (claim === undefined || claim.ask !== mine.ask)
+      continue;
+    if (runFinished !== undefined && claim.run > 0 && runFinished(claim.run))
+      continue;
+    return "backed-off";
   }
   return "held";
 }
@@ -465,6 +485,31 @@ async function main() {
     const original = askComment.body;
     const existing = TOOK_TAG.readProse(original);
     if (existing !== undefined) {
+      if (!runFinishedOn(repo, existing.run)) {
+        record(false);
+        return;
+      }
+      const stripped = original.split(`
+`).filter((line) => !TOOK_TAG.hasProse(line)).join(`
+`);
+      const takenOver = patchCommentBody(repo, ask, claimOnMarkerBody(stripped, { ask, run: runId }));
+      if (takenOver.code !== 0) {
+        throw new Error(`could not claim the dispatch marker on #${number}: ${takenOver.stderr || takenOver.stdout}`);
+      }
+      const readBack = readComments(repo, number).find((comment) => comment.id === ask);
+      const nowOurs = readBack === undefined ? undefined : TOOK_TAG.readProse(readBack.body);
+      if (nowOurs === undefined || nowOurs.run !== runId) {
+        throw new Error(`the takeover of the claim on #${number} did not read back as this run's`);
+      }
+      const outcome = raceOutcome(readComments(repo, number), { id: ask, ask }, (run) => runFinishedOn(repo, run));
+      if (outcome === "held") {
+        record(true);
+        return;
+      }
+      const restored = patchCommentBody(repo, ask, original);
+      if (restored.code !== 0) {
+        throw new Error(`could not take back the claim on #${number}: ${restored.stderr || restored.stdout}`);
+      }
       record(false);
       return;
     }
@@ -491,7 +536,7 @@ async function main() {
       record(false);
       return;
     }
-    const outcome = raceOutcome(readComments(repo, number), { id: ask, ask });
+    const outcome = raceOutcome(readComments(repo, number), { id: ask, ask }, (run) => runFinishedOn(repo, run));
     if (outcome === "held") {
       record(true);
       return;
@@ -522,7 +567,7 @@ async function main() {
   }
   if (!visible)
     throw new Error(`the claim on #${number} never became visible, so the race check cannot be trusted`);
-  const outcome = raceOutcome(readComments(repo, number), { id: claimId, ask });
+  const outcome = raceOutcome(readComments(repo, number), { id: claimId, ask }, (run) => runFinishedOn(repo, run));
   if (outcome === "held") {
     record(true);
     return;

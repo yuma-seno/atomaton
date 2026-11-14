@@ -411,6 +411,91 @@ function proseOnly(text) {
 ` : segment.text).join("");
 }
 
+// src/domain/work/issue-links.ts
+function dedupeByNumber(...lists) {
+  const seen = new Map;
+  for (const list of lists)
+    for (const item of list)
+      if (!seen.has(item.number))
+        seen.set(item.number, item);
+  return [...seen.values()].sort((a, b) => a.number - b.number);
+}
+
+// src/adapters/github/issue-links.ts
+var LINK_LIMIT = 50;
+var LABEL_LIMIT = 20;
+var QUERY = `
+query($owner:String!, $name:String!, $number:Int!, $limit:Int!, $labelLimit:Int!) {
+  repository(owner:$owner, name:$name) {
+    issueOrPullRequest(number:$number) {
+      __typename
+      ... on Issue {
+        parent { number title state stateReason }
+        subIssues(first:$limit) { nodes { number title state stateReason labels(first:$labelLimit) { nodes { name } } } }
+        closedByPullRequestsReferences(first:$limit, includeClosedPrs:true) {
+          nodes { number title state merged body }
+        }
+        timelineItems(last:$limit, itemTypes:[CROSS_REFERENCED_EVENT]) {
+          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number title state merged body } } } }
+        }
+      }
+      ... on PullRequest {
+        closingIssuesReferences(first:$limit) { nodes { number title state stateReason } }
+      }
+    }
+  }
+}`;
+function normalise(node) {
+  return {
+    number: node.number,
+    title: node.title,
+    state: saysOpen(node.state) ? "open" : issueOutcome(node.stateReason)
+  };
+}
+function asChild(node) {
+  return { ...normalise(node), labels: (node.labels?.nodes ?? []).map((label) => label.name) };
+}
+function asPr(node) {
+  return {
+    number: node.number,
+    title: node.title,
+    state: saysOpen(node.state) ? "open" : pullRequestOutcome(Boolean(node.merged))
+  };
+}
+function issueLinks(repo, number) {
+  const [owner, name] = repo.split("/");
+  if (!owner || !name) {
+    return { children: [], pullRequests: [], unavailable: `"${repo}" is not an owner/name repository` };
+  }
+  let issue = null;
+  try {
+    issue = ghGraphqlRead(QUERY, { owner, name, number, limit: LINK_LIMIT, labelLimit: LABEL_LIMIT }).repository?.issueOrPullRequest ?? null;
+  } catch (error) {
+    const why = error.message;
+    console.error(`[atomaton-github] WARN could not read links for #${number}: ${why}`);
+    return { children: [], pullRequests: [], unavailable: `GitHub could not be reached: ${why}` };
+  }
+  if (!issue)
+    return { children: [], pullRequests: [], unavailable: `#${number} was not found` };
+  if (issue.__typename === "PullRequest") {
+    const closes = issue.closingIssuesReferences?.nodes ?? [];
+    return {
+      kind: "pull_request",
+      parent: closes[0] ? normalise(closes[0]) : undefined,
+      children: [],
+      pullRequests: []
+    };
+  }
+  const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
+  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.readProse(source?.body ?? "") === number).map(asPr);
+  return {
+    kind: "issue",
+    parent: issue.parent ? normalise(issue.parent) : undefined,
+    children: (issue.subIssues?.nodes ?? []).map(asChild),
+    pullRequests: dedupeByNumber(declared, referenced)
+  };
+}
+
 // src/domain/work/control-commands.ts
 var CONTROL_COMMAND_NAMES = ["stop", "resume"];
 function isControlCommand(name) {
@@ -938,91 +1023,6 @@ function dispatchRunner(d) {
   const elsewhere = d.continuesChain !== true && here !== undefined && String(d.number) !== String(here);
   logDispatch(d.type, d.agent, { number: Number(d.number), ...elsewhere ? { elsewhere: true } : {} });
   return "dispatched";
-}
-
-// src/domain/work/issue-links.ts
-function dedupeByNumber(...lists) {
-  const seen = new Map;
-  for (const list of lists)
-    for (const item of list)
-      if (!seen.has(item.number))
-        seen.set(item.number, item);
-  return [...seen.values()].sort((a, b) => a.number - b.number);
-}
-
-// src/adapters/github/issue-links.ts
-var LINK_LIMIT = 50;
-var LABEL_LIMIT = 20;
-var QUERY = `
-query($owner:String!, $name:String!, $number:Int!, $limit:Int!, $labelLimit:Int!) {
-  repository(owner:$owner, name:$name) {
-    issueOrPullRequest(number:$number) {
-      __typename
-      ... on Issue {
-        parent { number title state stateReason }
-        subIssues(first:$limit) { nodes { number title state stateReason labels(first:$labelLimit) { nodes { name } } } }
-        closedByPullRequestsReferences(first:$limit, includeClosedPrs:true) {
-          nodes { number title state merged body }
-        }
-        timelineItems(last:$limit, itemTypes:[CROSS_REFERENCED_EVENT]) {
-          nodes { ... on CrossReferencedEvent { source { ... on PullRequest { number title state merged body } } } }
-        }
-      }
-      ... on PullRequest {
-        closingIssuesReferences(first:$limit) { nodes { number title state stateReason } }
-      }
-    }
-  }
-}`;
-function normalise(node) {
-  return {
-    number: node.number,
-    title: node.title,
-    state: saysOpen(node.state) ? "open" : issueOutcome(node.stateReason)
-  };
-}
-function asChild(node) {
-  return { ...normalise(node), labels: (node.labels?.nodes ?? []).map((label) => label.name) };
-}
-function asPr(node) {
-  return {
-    number: node.number,
-    title: node.title,
-    state: saysOpen(node.state) ? "open" : pullRequestOutcome(Boolean(node.merged))
-  };
-}
-function issueLinks(repo, number) {
-  const [owner, name] = repo.split("/");
-  if (!owner || !name) {
-    return { children: [], pullRequests: [], unavailable: `"${repo}" is not an owner/name repository` };
-  }
-  let issue = null;
-  try {
-    issue = ghGraphqlRead(QUERY, { owner, name, number, limit: LINK_LIMIT, labelLimit: LABEL_LIMIT }).repository?.issueOrPullRequest ?? null;
-  } catch (error) {
-    const why = error.message;
-    console.error(`[atomaton-github] WARN could not read links for #${number}: ${why}`);
-    return { children: [], pullRequests: [], unavailable: `GitHub could not be reached: ${why}` };
-  }
-  if (!issue)
-    return { children: [], pullRequests: [], unavailable: `#${number} was not found` };
-  if (issue.__typename === "PullRequest") {
-    const closes = issue.closingIssuesReferences?.nodes ?? [];
-    return {
-      kind: "pull_request",
-      parent: closes[0] ? normalise(closes[0]) : undefined,
-      children: [],
-      pullRequests: []
-    };
-  }
-  const declared = (issue.closedByPullRequestsReferences?.nodes ?? []).map(asPr);
-  const referenced = (issue.timelineItems?.nodes ?? []).map((node) => node.source).filter((source) => Boolean(source?.number) && PARENT_ISSUE_TAG.readProse(source?.body ?? "") === number).map(asPr);
-  return {
-    kind: "issue",
-    parent: issue.parent ? normalise(issue.parent) : undefined,
-    children: (issue.subIssues?.nodes ?? []).map(asChild),
-    pullRequests: dedupeByNumber(declared, referenced)
-  };
 }
 
 // src/adapters/github/work-tree.ts
