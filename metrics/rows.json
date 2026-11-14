@@ -24651,5 +24651,65 @@
         "started": "2026-11-13T18:19:02Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-548/reviewer.json",
+    "agent": "reviewer",
+    "messages": 209,
+    "calls": 136,
+    "failed": 2,
+    "refused": 1,
+    "skills": [
+      "project/conventions",
+      "writing/japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "get_pr": 1,
+      "get_issue": 2,
+      "list_prs": 1,
+      "read": 58,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "grep": 62,
+      "glob": 2,
+      "list": 2,
+      "get_check_runs": 1,
+      "get_issue_comments": 1,
+      "load_skill": 2,
+      "get_pr_diff": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-14T04:59:38Z",
+        "ended_because": "completed",
+        "iterations": 68,
+        "messages": 209,
+        "seconds": 1985,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 62,
+            "list": 2,
+            "read": 58
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue": 2,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1,
+            "list_prs": 1
+          }
+        },
+        "started": "2026-11-14T04:26:33Z"
+      }
+    ]
   }
 ]
