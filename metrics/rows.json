@@ -25022,5 +25022,18 @@
         "started": "2026-11-14T10:59:03Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-555/reviewer.json",
+    "agent": "reviewer",
+    "messages": 4,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
   }
 ]
