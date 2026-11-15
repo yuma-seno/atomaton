@@ -1,0 +1,32 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #562: base ブランチの .github/atomaton 配下を編集して独立PRを出すツール\n**Labels:** atomaton/sub-issue, atomaton/launched\n**Sub-issue of:** #218\n\n## 背景\n\nIssue #218 の設計決定(architect のレビュー済み)。プロンプトや skills の修正について、新しい Issue を切らず、呼び出し元 run の worktree に触れずに行える軽量経路として、base ブランチのファイルを直接編集して「独立した PR」を出す MCP ツールを作る。\n\n実装モデルの既存実装は publish_draft(`src/entrypoints/tools/mcp/attachments.ts:1344`、push は `:1459`)。一時 index(`GIT_INDEX_FILE`) + `git hash-object` / `read-tree` / `update-index` / `write-tree` / `commit-tree` / `git push origin <sha>:refs/heads/<branch>` で、worktree・HEAD・index に触れずにコミットを作る。\n\n## スコープ\n\n新 MCP ツール(`src/entrypoints/tools/mcp/github.ts` 配下か専用ファイル):\n\n1. 対象パスは base ブランチ上の `.github/atomaton/**`。ただし `config.yaml`(`src/domain/machinery/machinery-layout.ts:86` の `CONFIG_FILE`)は認証境界なので拒否する。`.github/atomaton/` 以外もエラーで拒否。\n2. 入力は対象パスと、old/new 置換または新内容の全文。base の現在の内容に対して置換を実施し、old が見つからなければエラー(base が先行更新された場合の黙って上書きを防ぐ)。\n3. コミットは worktree に触れずにオブジェクトストア経由で構築し、`atomaton/amend-<短いid>` のようなブランチ名で `origin` に push する。\n4. 双子の同時ステージング: 対象パスに対応する `self/` 側のファイルが base に存在する場合(例: `.github/atomaton/skills/x.md` に対する `self/atomaton/skills/x.md`)、同一トランザクションで双子側にも同一内容をステージする。双子がない場合は .github 側のみをステージし、そのことを返答に明記する(本リポジトリの self-overlay 契約テストが red になり得るのは運用側の既知事項。`self/atomaton/` は現在 config.yaml / scripts / skills のみで prompt-template は双子なし)。\n5. PR 作成: push したブランチから base 向けの PR を開く。\n   - 本文に PARENT_ISSUE_TAG を付けない(付くと親 Issue の集計や再起動が走る。タグの読み取りは `src/adapters/github/work-tree.ts:151-156`、親側の再起動は `src/workflows/atomaton-pr-closed.wac.ts` 参照)。本文には観察元スレッド(呼び出し元の issue/PR)への参照文を書く。\n   - 本文の先頭に `/reviewer` を置く。`dispatchPrValidation`(`src/entrypoints/machinery/dispatch_pr_validation.ts`)を呼んで CI と reviewer を起動する。\n   - 呼び出し元 run に対して `session_ends` を返さない(`recordEndingComment` も呼ばない)。呼び出し元の作業は続行する。\n6. 返答には PR 番号 / URL と push したコミット SHA を書く。\n\n## 受け入れ基準\n\n- run からツールを呼ぶと、worktree・HEAD・index 変更なしで base 向けの独立 PR が開き、CI と reviewer が起動する。本文に PARENT_ISSUE_TAG はない。\n- `config.yaml` と `.github/atomaton/` 以外のパスは拒否される。\n- self/ に双子がある対象は双子も同時に更新され、self-overlay 契約テストが green。双子がない対象は .github 側のみで、返答にその旨がある。\n- old が base の現在の内容と一致しない場合はエラーで、PR は作られない。\n- `bun run typecheck` と `bun run test` が green。\n\n## 検証\n\n- オブジェクトストア経由のコミット生成、対象パスガード、双子検出の単体テスト。\n\n## 依存と完了条件\n\n- 依存: 「governed_paths に『!』否定パターンを実装する」の leaf とは独立(並行可)。自動 merge は governed_paths の除外設定に依存するが、この PR 自体は governed フロー(人の merge)で問題ない。PR は `atomaton/issue-218` を対象にする。\n- 完了条件: この leaf の PR が `atomaton/issue-218` にマージされ、マージ後のブランチ先端で上記の単体/契約テストが green であること。実運用での最初の記憶編集は本 leaf の要件外。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-562",
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-15T00:13:57Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "user",
+      "content": "This run was started by the `atomaton` agent, which is waiting on your result. When you finish, report back to it: end your response with a line holding nothing but `/atomaton`, followed by what you concluded and what it should do next. Do not end with a plain comment and no such line -- the agent that started you would never be told the work is done."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "77e8570d54d1435e676ebbb8f35712b041302a1af80846ea330ecb9c1fac036d",
+      "event_count": 1,
+      "agent": "engineer"
+    }
+  }
+}
