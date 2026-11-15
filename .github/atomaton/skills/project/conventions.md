@@ -156,6 +156,45 @@ directions. Editing `.github/X` alone is worse than not editing it at all: the n
 self-deploy overwrites it from `self/` and the change disappears without a diff.
 
 A file added to `.github/` that is in no release and not in `self/` is not checked
-for, because the next deploy removes it anyway and because `.github/**` is in
-`merge.governed_paths` — no agent can merge a change there, so a person reads it first.
+for, because the next deploy removes it anyway. `.github/**` is in
+`merge.governed_paths` and stays a person's merge — except for the prose carve-out
+below, which is the one deliberate exception.
+
+## Fixing the machinery prose from inside a run
+
+You are not merely allowed to fix the prose you find wrong mid-run — you are asked
+to. A prompt that misleads, a skill that is out of date, a definition that names
+something stale: each one reaches every future run, so a fix beats a report. The
+route is the `open_base_edit_pr` tool on the github server. It builds one commit
+from git objects on the base branch's current tree, pushes it to
+`atomaton/amend-<id>`, and opens a pull request against the base branch — so the
+fix is reviewed on its own instead of riding the issue's pull request and vanishing
+with it. Your checkout, HEAD, index and session are untouched, the run does not end
+for it, and the replacement has to match what the base holds now exactly once: if
+the base has moved, nothing is pushed rather than a stale overwrite.
+
+What to point it at:
+
+| What you found | Where the fix goes | Why |
+| --- | --- | --- |
+| A skill or the prompt template, as this repository runs it | the tool, on its `.github/atomaton/` path | one commit of its own; CI and a reviewer; no issue entanglement |
+| The same fix, made to outlive the next deploy for every adopter | a normal pull request against `src/content/skills/` or `src/content/prompt-template.md` | the deployed copies are release output; the durable master is `src/content/` |
+| `config.yaml`, `package.json`, machinery code, workflows | a normal issue-tree pull request | governed or gated, and none of it is prose |
+
+The tool refuses `config.yaml` itself: it decides which credentials a run may
+reach, and that boundary is not an agent's to move. A `self/` twin on the base
+branch is staged into the same commit automatically — which is what makes the two
+skills in `self/atomaton/skills/` durable under the exemption.
+
+What happens after a merge: `main` changes, the running machinery does not.
+Deployed copies are rebuilt by a self-deploy — release output needs the release
+first — so an edit reaches future runs only then, and never the run that made it.
+Until a release and self-deploy have carried the new matcher out, a prose-fix pull
+request may report a governance blocker and be left for a person; that window
+closes on its own.
+
+Merging here: `merge.policy` is `auto`, and the prompt template and skills are
+exempt from `governed_paths`, so a prose-fix pull request merges without a person
+once CI is green and review passes. Everything else under `.github/` stays a
+person's merge.
 
