@@ -117,6 +117,13 @@ export function agentBudget(
  * follows because there is nothing left to commit — so without this the whole
  * point of the route is recorded as a run that changed nothing. Its other
  * outcomes pushed nothing and must keep counting as nothing.
+ *
+ * `open_base_edit_pr` is deliberately NOT one, though it pushes a commit and opens a
+ * pull request. Both are on another node's thread by design — that is the whole point of
+ * the route — so a run that did only that has moved its OWN work nowhere, and counting it
+ * as progress would let a chain of amendments run unbounded while the issue it was
+ * started for stood still. The cost of leaving it out is the one `stalled-continuation.ts`
+ * already accepts: such a run is asked for one more turn.
  */
 export function changedSoFar(opsLogPath: string | undefined): boolean {
   if (!opsLogPath) return false;
