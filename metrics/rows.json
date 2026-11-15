@@ -7615,13 +7615,20 @@
   {
     "path": "sessions/issue-218/architect.json",
     "agent": "architect",
-    "messages": 24,
-    "calls": 0,
-    "failed": 0,
+    "messages": 56,
+    "calls": 17,
+    "failed": 1,
     "refused": 0,
-    "skills": [],
+    "skills": [
+      "writing/japanese"
+    ],
     "reported": true,
-    "tools": {},
+    "tools": {
+      "load_skill": 1,
+      "read": 13,
+      "grep": 2,
+      "glob": 1
+    },
     "acts": {},
     "runs": [
       {
@@ -7653,6 +7660,22 @@
         "seconds": 7,
         "server_calls": {},
         "started": "2026-11-14T11:28:32Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-15T00:05:26Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "messages": 56,
+        "seconds": 178,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 2,
+            "read": 13
+          }
+        },
+        "started": "2026-11-15T00:02:28Z"
       }
     ]
   },
