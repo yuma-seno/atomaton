@@ -23057,6 +23057,72 @@
     ]
   },
   {
+    "path": "sessions/issue-562/reviewer.json",
+    "agent": "reviewer",
+    "messages": 219,
+    "calls": 141,
+    "failed": 3,
+    "refused": 1,
+    "skills": [
+      "project/conventions",
+      "writing/japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "load_skill": 2,
+      "get_pr_diff": 1,
+      "get_pr": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "glob": 7,
+      "read": 65,
+      "grep": 44,
+      "fetch": 10,
+      "list": 3,
+      "get_check_runs": 1,
+      "get_issue_comments": 1,
+      "check_merge_readiness": 1,
+      "search_code": 2,
+      "merge_pr": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-15T10:58:29Z",
+        "ended_because": "completed",
+        "iterations": 71,
+        "messages": 219,
+        "seconds": 3066,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 7,
+            "grep": 44,
+            "list": 3,
+            "read": 65
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1,
+            "merge_pr": 1
+          },
+          "search": {
+            "search_code": 2
+          },
+          "web": {
+            "fetch": 10
+          }
+        },
+        "started": "2026-11-15T10:07:23Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
