@@ -156,6 +156,56 @@ directions. Editing `.github/X` alone is worse than not editing it at all: the n
 self-deploy overwrites it from `self/` and the change disappears without a diff.
 
 A file added to `.github/` that is in no release and not in `self/` is not checked
-for, because the next deploy removes it anyway and because `.github/**` is in
-`merge.governed_paths` — no agent can merge a change there, so a person reads it first.
+for, because the next deploy removes it anyway. `.github/**` is in
+`merge.governed_paths` and stays a person's merge — except for the prose carve-out
+below, which is the one deliberate exception.
+
+## Fixing the machinery prose from inside a run
+
+You are not merely allowed to fix the prose you find wrong mid-run — you are asked
+to. A prompt that misleads, a skill that is out of date, a definition that names
+something stale: each one reaches every future run, so a fix beats a report. The
+route is the `open_base_edit_pr` tool on the github server. It builds one commit
+from git objects on the base branch's current tree, pushes it to
+`atomaton/amend-<id>`, and opens a pull request against the base branch — so the
+fix is reviewed on its own instead of riding the issue's pull request and vanishing
+with it. Your checkout, HEAD, index and session are untouched, the run does not end
+for it, and the replacement has to match what the base holds now exactly once: if
+the base has moved, nothing is pushed rather than a stale overwrite.
+
+What to point it at:
+
+| What you found | Where the fix goes | Why |
+| --- | --- | --- |
+| A skill or the prompt template, as this repository runs it | the tool, on its `.github/atomaton/` path | one commit of its own; CI and a reviewer; no issue entanglement. Live from the next run. Durable only where a `self/` twin carries it — the prompt template and the shipped skills have none, and their durable fix is `src/content/` |
+| The same fix, made to outlive the next deploy for every adopter | a normal pull request against `src/content/skills/` or `src/content/prompt-template.md` | the deployed copies are release output; the durable master is `src/content/` |
+| `config.yaml`, `package.json`, machinery code, workflows | a normal issue-tree pull request | governed or gated, and none of it is prose |
+
+The tool refuses `config.yaml` itself: it decides which credentials a run may
+reach, and that boundary is not an agent's to move. A `self/` twin on the base
+branch is staged into the same commit automatically — which is what makes the two
+skills in `self/atomaton/skills/` durable under the exemption.
+
+What happens when the fix lands, in three parts:
+
+- **A merged prose edit is read by the next run.** Runs read `.github/atomaton/`
+  straight off the default branch — there is nothing to build or restart — so the
+  fix is live for every agent that starts after the merge. It never reaches the
+  run that wrote it.
+- **The next self-deploy is what can take it back, not what applies it.** It
+  rebuilds `.github/` from the release and `self/`, so an edit whose durable copy
+  — the `self/` twin, or `src/content/` — does not hold the same text is wiped
+  then. The two `self/atomaton/skills/` skills survive every deploy; the prompt
+  template and the shipped skills do not.
+- **The tool and the matcher behind it are code, and code ships with the
+  release.** `open_base_edit_pr` lives in the generated runtime, which a
+  self-deploy replaces — until that has happened, a run has no such tool, and a
+  prose-fix pull request meets the old matcher, which cannot read the `!`
+  exemptions, and stops with a governance blocker left for a person. That window
+  closes by itself on the next release and self-deploy.
+
+Merging here: once the new matcher is live, `merge.policy` is `auto` and the
+prompt template and skills are exempt from `governed_paths`, so a prose-fix pull
+request merges without a person once CI is green and review passes. Everything
+else under `.github/` stays a person's merge.
 
