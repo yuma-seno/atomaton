@@ -215,13 +215,14 @@ export interface GitRunOptions {
 /**
  * Run one `git` command with variables added to its environment.
  *
- * There is one caller: `mcp/attachments.ts`, publishing drafts onto an orphan branch.
- * It builds the tree out of plumbing rather than checking anything out, which means
- * `GIT_INDEX_FILE` has to point at a temporary index — and it must NOT mean assigning
- * to `process.env`, because that variable would stay set for every later `git` in the
- * same server process: the next tool call's `git` would read and write an index that
- * holds only drafts, and the run's own checkout would be the thing that broke. The
- * environment is built for one process and dies with it.
+ * Two callers, and both build a tree out of plumbing rather than checking anything out:
+ * `mcp/attachments.ts`, publishing drafts onto an orphan branch, and
+ * `adapters/github/base-edit.ts`, committing an amendment onto the base branch's own
+ * tree without a switch. That means `GIT_INDEX_FILE` has to point at a temporary index
+ * — and it must NOT mean assigning to `process.env`, because that variable would stay
+ * set for every later `git` in the same server process: the next tool call's `git` would
+ * read and write an index holding only those files, and the run's own checkout would be
+ * the thing that broke. The environment is built for one process and dies with it.
  *
  * It lives here rather than as a local `Bun.spawnSync` in that server because it is
  * `gitRun` with one more thing added, and a second copy of the spawn-and-trim would
