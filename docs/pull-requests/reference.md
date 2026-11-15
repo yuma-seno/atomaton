@@ -37,8 +37,9 @@ Covered by default:
 .github/**
 ```
 
-A pattern is a literal path or a directory followed by `/**` — the same two forms
-`merge.gates` accepts, and the only two.
+A pattern is a literal path or a directory followed by `/**`, optionally prefixed
+with `!` to exclude instead of cover. The list is read in order and **the last
+pattern claiming a file decides**, as `.gitignore` reads them.
 
 **The list replaces the default rather than extending it:**
 
@@ -47,12 +48,27 @@ merge:
   governed_paths:
     - ".github/**"
     - "infra/**"
+    - "!.github/atomaton/skills/**"
 ```
 
-Set it to `[]` to turn the gate off. If you deliberately want a corner of
-`.github/` back — issue templates, say — name the parts you do want governed
-instead. Prefer that to a narrower default: being explicit about the exception
-leaves a record of the decision.
+That third line governs `.github/` except the skills, so a change to a skill is
+an agent's to merge and a change to the configuration beside it is not. An
+exclusion only carves out what a pattern before it covered, and it has to come
+after that pattern: written first, the later `.github/**` claims the file back.
+That ordering is the only way to get this wrong, and the result is a file left
+governed rather than one let through.
+
+A list of nothing but exclusions is refused rather than read as "everything
+except these". Nothing in it covers a file, so it would govern nothing at all
+while reading as a rule — and the merge stops with a message saying so, which is
+the one outcome that cannot be missed.
+
+Use it for the corner of a directory an agent is meant to be able to change, and
+leave everything else governed. Where the exception is the larger part of the
+tree, naming the parts you *do* want governed is still the shorter list — but be
+explicit about the exception either way, so the record of the decision survives.
+
+Set it to `[]` to turn the gate off.
 
 [Why the whole directory](boundaries.md#why-the-whole-directory), and what this
 gate does *not* cover, are separate questions with answers of their own.
@@ -102,9 +118,9 @@ Several gates are several situations.
 | `labels` | the pull request carries any one of these labels |
 | `title_matches` | the title matches this regular expression, case-insensitively |
 
-Patterns take the same two forms as `merge.governed_paths` and no others.
-Anything else, `**/*.sql` included, is rejected when the file is read rather than
-quietly matching nothing.
+Patterns take the same forms as `merge.governed_paths`, `!` included, and no
+others. Anything else, `**/*.sql` included, is rejected when the file is read
+rather than quietly matching nothing.
 
 **Mistakes are errors, not silence.** A misspelled condition, a pattern this
 matcher cannot honour, a gate with no conditions at all: each stops the merge and

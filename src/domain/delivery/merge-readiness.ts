@@ -20,7 +20,7 @@
  */
 
 import type { MergeGateMatch } from "./merge-gates.ts";
-import { pathMatches } from "./path-patterns.ts";
+import { pathClaimedBy } from "./path-patterns.ts";
 
 /** A single check run, reduced to what reporting needs. */
 export interface CheckRun {
@@ -294,14 +294,19 @@ function isGeneratedWorkflow(path: string): boolean {
 }
 
 /**
- * Which of `files` a pattern claims.
+ * Which of `files` the list governs.
  *
  * The matcher itself moved to `path-patterns.ts`, which explains the one pattern
  * form Atomaton accepts and why. `merge.gates` needed the same comparison, and two
  * copies of a security-shaped one is the arrangement that drifts.
+ *
+ * Read as a whole list rather than pattern by pattern, because `!` makes the order
+ * part of the meaning: the last pattern claiming a file decides whether it is
+ * governed. What the list does NOT do is claim a file no pattern names — an
+ * exclusion list alone governs nothing, rather than everything.
  */
 export function governedPathsIn(files: string[], patterns: readonly string[]): string[] {
-  return files.filter((file) => patterns.some((pattern) => pathMatches(file, pattern)));
+  return files.filter((file) => pathClaimedBy(file, patterns));
 }
 
 /**

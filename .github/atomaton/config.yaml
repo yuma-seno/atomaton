@@ -102,6 +102,17 @@ merge:
     # reading rather than a side effect -- a lockfile change is a change to what
     # runs, and it is worth the same look as the version beside it.
     - "package.json"
+    # Exclusions, and they must come after what they carve out of: the last pattern
+    # claiming a file decides, as in `.gitignore`. These two are what an agent
+    # writes when asked to write down how this project works, and requiring a
+    # person for every sentence of it is what #218 exists to undo. `config.yaml`
+    # beside them stays governed -- it decides what a run may reach, the skills do
+    # not -- and so does `package.json` above, which decides what ships.
+    #
+    # A skill under `self/` is still governed, through `self/**`: those are this
+    # project's own and are a copy, so they cannot change in one place anyway.
+    - "!.github/atomaton/prompt-template.md"
+    - "!.github/atomaton/skills/**"
   gates:
     - reason: "This changes the code that decides what an agent may merge. Read it before merging: a weakening here would not be caught anywhere later."
       when:

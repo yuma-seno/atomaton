@@ -54,6 +54,7 @@ interface Answer {
   governanceUnknown?: string;
   stackedMerge?: boolean;
   activeRuns?: { name: string; status: string }[];
+  gateProblems?: string[];
 }
 
 function gather(rules: unknown[], env: Record<string, string>): Answer {
@@ -80,9 +81,9 @@ function gather(rules: unknown[], env: Record<string, string>): Answer {
 }
 
 /** One test's own temp directories: a config to read, and a log the fake appends to. */
-function fixture(): { configDir: string; log: string; cleanUp: () => void } {
+function fixture(config: Record<string, unknown> = {}): { configDir: string; log: string; cleanUp: () => void } {
   const dir = mkdtempSync(join(tmpdir(), "atomaton-merge-signals-"));
-  const configDir = makeConfigDir({});
+  const configDir = makeConfigDir(config);
   return {
     configDir,
     log: join(dir, "gh.log"),
@@ -317,6 +318,43 @@ describe("how gatherMergeSignals reads one pull request", () => {
       expect(answer.ok).toBe(false);
       // Named, because GitHub's message does not say which call it came from.
       expect(answer.error).toContain("pr view 7");
+    } finally {
+      cleanUp();
+    }
+  }, 30_000);
+
+  // A `merge.governed_paths` that cannot be honoured has to stop the merge rather
+  // than govern nothing: the setting decides which changes to an agent's own
+  // limits fall to a person, so reading it as empty hands back exactly that.
+  test("a governed_paths list that can act produces no config problem", () => {
+    const { configDir, log, cleanUp } = fixture({
+      merge: { governed_paths: [".github/**", "!.github/atomaton/skills/**"] },
+    });
+    try {
+      const answer = gather(
+        [{ match: ["pr", "view", "7", "isDraft,author"], stdout: JSON.stringify(PR_VIEW) }, ...REST_OF_THE_READS],
+        { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+      );
+      expect(answer.gateProblems).toEqual([]);
+    } finally {
+      cleanUp();
+    }
+  }, 30_000);
+
+  // The one list the matcher cannot act on: every entry is an exclusion, so
+  // nothing is claimed and the exclusion reads as a rule while changing nothing.
+  test("a governed_paths list of only exclusions is reported, not silently empty", () => {
+    const { configDir, log, cleanUp } = fixture({
+      merge: { governed_paths: ["!.github/atomaton/skills/**"] },
+    });
+    try {
+      const answer = gather(
+        [{ match: ["pr", "view", "7", "isDraft,author"], stdout: JSON.stringify(PR_VIEW) }, ...REST_OF_THE_READS],
+        { ATOMATON_MACHINERY_ROOT: configDir, FAKE_GH_LOG: log },
+      );
+      const problems = (answer.gateProblems ?? []).join(" ");
+      expect(problems).toContain("`merge.governed_paths`");
+      expect(problems).toContain("matches nothing");
     } finally {
       cleanUp();
     }
