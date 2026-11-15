@@ -110,15 +110,20 @@ describe.each(CONFIGS)("%s governed_paths", (config) => {
   // apply rather than as text in a file: what an agent writes down about how this
   // project works is not a merge a person has to perform, and everything deciding
   // what that agent may reach still is.
-  test("the prompt template and the skills are not governed; config.yaml is", () => {
+  test("the prompt template and the skills are not governed; the rest of .github and self/ is", () => {
     const patterns = governedOf(config);
-    const ungoverned = adoptedPathsUnder(".github/atomaton/skills").concat(
-      ".github/atomaton/prompt-template.md",
-    );
+    const ungoverned = adoptedPathsUnder(".github/atomaton/skills")
+      .concat(adoptedPathsUnder("self/atomaton/skills"))
+      .concat(".github/atomaton/prompt-template.md");
     expect(ungoverned.length).toBeGreaterThan(1);
     expect(governedPathsIn(ungoverned, patterns)).toEqual([]);
     expect(governedPathsIn([".github/atomaton/config.yaml"], patterns)).toEqual([
       ".github/atomaton/config.yaml",
+    ]);
+    // `self/**` still governs what is not a skill, and a `self/` skill is durable:
+    // it is its own file, so the exemption is not carved away by the next deploy.
+    expect(governedPathsIn(["self/atomaton/scripts/tag-release.sh"], patterns)).toEqual([
+      "self/atomaton/scripts/tag-release.sh",
     ]);
   });
 });
