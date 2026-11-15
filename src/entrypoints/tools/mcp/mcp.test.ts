@@ -2072,8 +2072,8 @@ describe("mcp/github.ts", () => {
      * describe the merge into the base branch; a sub-issue's pull request merges
      * into its parent issue's branch, which is a checkpoint rather than a delivery,
      * and the parent's own pull request is judged against all three on the whole
-     * aggregate. Under the default `manual` the old answer stopped every child for a
-     * person — five children, five human merges before the parent could be judged.
+     * aggregate. Under `manual` the old answer stopped every child for a person —
+     * five children, five human merges before the parent could be judged.
      */
     test("check_merge_readiness says a stacked merge skipped the delivery checks", async () => {
       const configDir = makeConfigDir({});

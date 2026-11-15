@@ -19,7 +19,7 @@ import { isIssueBranch } from "./branch-names.ts";
 import { getGovernedPaths, getMergeGates, getMergePolicy } from "../../adapters/runner/config.ts";
 import { governedPathsIn, type ActiveRun, type MergeSignals } from "../../domain/delivery/merge-readiness.ts";
 import { isHumanAuthor } from "../../domain/work/actor.ts";
-import { pathPatternProblem } from "../../domain/delivery/path-patterns.ts";
+import { pathPatternListProblem, pathPatternProblem } from "../../domain/delivery/path-patterns.ts";
 import {
   matchMergeGates,
   type ChangedFile,
@@ -70,8 +70,12 @@ function log(message: string): void {
  * project declared could not be evaluated, so the merge is theirs.
  */
 function governedPathProblems(): string[] {
-  return getGovernedPaths()
-    .map((pattern) => pathPatternProblem(pattern))
+  const patterns = getGovernedPaths();
+  const listProblem = pathPatternListProblem(patterns);
+  return [
+    ...patterns.map((pattern) => pathPatternProblem(pattern)),
+    ...(listProblem ? [listProblem] : []),
+  ]
     .filter((problem) => problem !== "")
     .map((problem) => `\`merge.governed_paths\`: ${problem}`);
 }

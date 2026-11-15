@@ -56,6 +56,16 @@ import { readTargetState } from "../../../adapters/github/target-state.ts";
 import { selectCommentRange } from "../../../domain/work/comment-range.ts";
 import { readCommentBody } from "../../../domain/work/comment-body.ts";
 import { hardenCredentialHolder } from "../lib/harden.ts";
+import { amendBranchName, amendPathProblem, baseEditPrBody, editedText } from "../../../domain/machinery/base-edit.ts";
+import {
+  buildCommitOnBase,
+  fetchBaseTip,
+  pushCommit,
+  readBaseFile,
+  readTwin,
+  type StagedFile,
+} from "../../../adapters/github/base-edit.ts";
+import { commentOnWithId } from "../../../adapters/github/work-tree.ts";
 
 function log(msg: string): void {
   console.error(`[atomaton-github] ${msg}`);
@@ -348,6 +358,45 @@ const COMMIT_AND_PUSH_SCHEMA = z.object({
       "still holds unmerged; a path declared while it still holds git's conflict markers is refused. " +
       "One path or a list.",
   ).optional(),
+});
+
+const BASE_FILE_EDIT_SCHEMA = z.object({
+  path: z
+    .string()
+    .min(1)
+    .describe(
+      `Repository path of a file on the base branch, under \`.github/atomaton/\`. \`config.yaml\` is refused: it ` +
+        "decides which credentials a run may reach and is read from a ref of its own, not from a branch tip.",
+    ),
+  old: z
+    .string()
+    .optional()
+    .describe("Text to replace. It must appear exactly once in the file as the base branch holds it now."),
+  new: z.string().optional().describe("What `old` becomes."),
+  content: z
+    .string()
+    .optional()
+    .describe("The whole new file, instead of `old`/`new`. Give one or the other, never both."),
+});
+
+const OPEN_BASE_EDIT_PR_SCHEMA = z.object({
+  title: z.string().min(1).describe("Pull request title."),
+  message: z.string().min(1).describe("Commit message for the single commit this tool builds on the base branch."),
+  files: z.array(BASE_FILE_EDIT_SCHEMA).min(1).describe("The files to amend, each with `old`/`new` or `content`."),
+  body: z
+    .string()
+    .optional()
+    .describe(
+      "Why the change is right, in your own words, appended to the pull request body below the list of files. " +
+        "The tool writes the header, the reviewer line and the file list itself.",
+    ),
+  reviewer: z
+    .string()
+    .optional()
+    .describe(
+      "Which agent reviews this pull request once CI passes. Defaults to 'reviewer'; an empty name writes no " +
+        "reviewer line, and a person is then told the pull request is waiting.",
+    ),
 });
 
 
@@ -1243,6 +1292,185 @@ function createPr(a: z.infer<typeof CREATE_PR_SCHEMA>): McpToolResult {
     }),
     meta: validationDispatched ? { session_ends: true } : {},
   };
+}
+
+/**
+ * Amend a file on the base branch and open a pull request for it, from a branch this
+ * run is not on.
+ *
+ * ## Why this exists beside `commit_and_push`
+ *
+ * A run that finds a prompt, a skill or an agent definition wrong has to write the fix
+ * somewhere. Through `commit_and_push` the fix lands INSIDE the change the run is
+ * delivering: it is reviewed as part of a feature, and it disappears with the feature
+ * if that is rejected — even though the observation was true either way. This route
+ * puts it on its own branch, against the base branch, and the run carries on
+ * untouched.
+ *
+ * ## Why nothing here touches the checkout
+ *
+ * The commit is built from objects (`adapters/github/base-edit.ts`), so `HEAD`, the
+ * index and the working tree are exactly as they were: no switch, no stash, no second
+ * worktree. That is the property the whole tool rests on, and the one a test checks by
+ * looking at a checkout before and after.
+ *
+ * ## What it deliberately does not do
+ *
+ * No `session_ends`: the calling run keeps working, which is the difference between
+ * this and `create_pr`. And no `logDispatch`, because this pull request starts nothing
+ * on this node — a dispatch entry would be read as this run having handed its turn
+ * over (`changedSoFar`, `summarize_run`) when it has done the opposite.
+ *
+ * It is also open to a pull request run, unlike `create_pr`. The rule that closes
+ * `create_pr` there is that a pull request is a leaf and nothing goes under it; this
+ * pull request is under no node at all, so a reviewer that finds a skill wrong while
+ * reviewing can amend it without becoming a parent.
+ */
+async function openBaseEditPr(a: z.infer<typeof OPEN_BASE_EDIT_PR_SCHEMA>): Promise<McpToolResult> {
+  // Every refusal that can be answered from the arguments alone, before a single `git`
+  // runs: a push that comes before a bad path is a branch somebody has to delete.
+  for (const file of a.files) {
+    const problem = amendPathProblem(file.path);
+    if (problem !== undefined) mcpFail(problem);
+  }
+  const duplicated = a.files.map((file) => file.path).filter((path, index, all) => all.indexOf(path) !== index);
+  if (duplicated.length > 0) {
+    mcpFail(
+      `The same path appears more than once (${[...new Set(duplicated)].join(", ")}), so there is no answer to which ` +
+        "change is the file's. Send one entry per path, with everything it changes in that one entry.",
+    );
+  }
+  refuseClosingKeywords(a.message, "commit message");
+
+  const reviewer = (a.reviewer ?? "reviewer").trim();
+  const tip = fetchBaseTip();
+
+  const reads = a.files.map((file) => ({ file, current: readBaseFile(tip.sha, file.path) }));
+  const rewritten = reads.map(({ file, current }) => {
+    if (!current.present && file.content === undefined) {
+      throw new Error(
+        `\`${file.path}\` does not exist on \`${tip.base}\`, so there is nothing to replace. Pass \`content\` with the ` +
+          "whole file to create it.",
+      );
+    }
+    return {
+      path: file.path,
+      // A new file starts as `100644`. An existing one keeps its mode, which matters for
+      // the shell scripts under `scripts/`: written back as `100644` one would stop
+      // being executable and nothing would say so.
+      mode: current.present ? current.mode : "100644",
+      text: editedText(current.present ? current.text : "", file, tip.base),
+    };
+  });
+
+  const twins = rewritten.map((file) => ({ file, twin: readTwin(tip.sha, file.path) }));
+  const staged: StagedFile[] = [];
+  const recorded: { path: string; twin: string | undefined }[] = [];
+  for (const { file, twin } of twins) {
+    staged.push(file);
+    if (twin === undefined) {
+      recorded.push({ path: file.path, twin: undefined });
+      continue;
+    }
+    // The overlay is the source and `.github/` is the copy, so a change that moves one
+    // alone is either reverted at the next deploy or a red `self-overlay.test.ts`. Both
+    // copies go in the same commit, and the reply says which paths had one.
+    staged.push({ path: twin.path, text: file.text, mode: twin.mode });
+    recorded.push({ path: file.path, twin: twin.path });
+  }
+
+  const body = baseEditPrBody({
+    observing: nodeNumber() === undefined ? "" : `#${nodeNumber()}`,
+    base: tip.base,
+    reviewer,
+    files: recorded,
+    // The caller's own words, with the same mention check every other body an agent
+    // writes gets: an `@login` this run cannot confirm as a participant is escaped, so a
+    // pull request does not notify a stranger.
+    note: withCheckedMentions(a.body ?? ""),
+  });
+  // The same two checks `create_pr` applies to a body an agent wrote. Before the push,
+  // so a body that would be refused cannot leave a branch behind that carries a commit
+  // no pull request describes. The command check reads the caller's own text rather than
+  // the assembled body, because the reviewer line this tool writes IS a command on a line
+  // of its own — the one this agent is entitled to ask for, through the argument that
+  // writes it.
+  refuseClosingKeywords(body, "pull request body");
+  refuseCommandLines(a.body ?? "", "pull request body", "Pass the agent as the `reviewer` argument.");
+
+  const commit = buildCommitOnBase(tip.sha, staged, a.message);
+  const branch = amendBranchName(Date.now());
+  pushCommit(commit, branch);
+  // Who opened it, in both spellings `create_pr` writes: the hidden tag is the name a red
+  // CI verdict offers a person (`Comment /<agent> on this pull request`), and the visible
+  // line is the same fact where a person reads the body. Neither is a link to the issue:
+  // the parent-issue tag is what this pull request deliberately does not carry.
+  const originAgent = (process.env.AGENT ?? "").trim();
+  const fullBody = originAgent ? `${body}${ORIGIN_AGENT_TAG.write(originAgent)}\n${openedByLine()}` : body;
+
+  const created = gh("pr", "create", "--repo", REPO, "--title", a.title, "--head", branch, "--base", tip.base, "--body", fullBody);
+  if (created.code) {
+    throw new Error(
+      `The commit ${commit} is pushed to \`${branch}\`, but the pull request could not be opened: ` +
+        `${created.stderr || created.stdout}. Open one from that branch against \`${tip.base}\` by hand; nothing else ` +
+        "is missing.",
+    );
+  }
+  const number = Number(created.stdout.trim().split("/").pop());
+  if (!Number.isFinite(number)) mcpFail(`gh pr create: unexpected output: ${created.stdout.slice(0, 300)}`);
+
+  // Nobody coming, said out loud. The same silent failure `create_pr` guards against: a
+  // pull request with no reviewer and nobody mentioned goes green and waits for somebody
+  // who was never told.
+  if (!isAttended({ ...(reviewer === "" ? {} : { next: { agent: reviewer } }), body: fullBody })) {
+    const openedBy = originAgent || "an agent";
+    const notify = resolveNotify(REPO, number);
+    log(`openBaseEditPr: PR #${number} names no reviewer and mentions nobody; leaving a notice for ${notify || "(nobody resolved)"}`);
+    gh("pr", "comment", String(number), "--repo", REPO, "--body", unattendedNotice(notify, openedBy));
+  }
+
+  // The ask the dispatched validation's run claims: a fresh comment, the same shape
+  // `pushBranch` posts. Without one the dispatch is refused downstream — an
+  // answers-request dispatch with no ask has nothing to verify its wait against (#285).
+  const ask = commentOnWithId(
+    REPO,
+    number,
+    `${LLM_CONTEXT_TAG.write("exclude")}\nAtomaton: opened this pull request from \`${branch}\`. Running CI; the result routes what happens next.`,
+  );
+  let validationDispatched = false;
+  if (ask === null) {
+    report("warning", "could not post the opening comment, so the dispatched run would have no ask to claim; CI validation was NOT dispatched");
+  } else {
+    validationDispatched = dispatchPrValidation(REPO, number, branch, { ask });
+  }
+
+  logOp("open_base_edit_pr", { number, branch, commit, base: tip.base, staged: staged.map((file) => file.path) });
+  log(
+    `openBaseEditPr: PR #${number} on ${tip.base} from ${branch} at ${commit}, ` +
+      `${staged.length} path(s), validation ${validationDispatched ? "dispatched" : "NOT dispatched"}`,
+  );
+
+  return JSON.stringify({
+    number,
+    url: created.stdout.trim(),
+    base: tip.base,
+    branch,
+    commit,
+    // Every path the commit holds, and per requested file whether an overlay twin went
+    // with it. `null` is "the base branch has no twin of this path", which a reader needs
+    // per file: a list of amended files with one exception among them says nothing about
+    // which one it is.
+    staged: staged.map((file) => file.path),
+    files: recorded.map((file) => ({ path: file.path, twin: file.twin ?? null })),
+    validation_dispatched: validationDispatched,
+    ...(validationDispatched
+      ? {}
+      : {
+          note:
+            "The pull request and its commit exist, but CI could not be started, so no required check will appear " +
+            "and no agent is scheduled. Run /reviewer on the pull request, or report this so a person can start it.",
+        }),
+  });
 }
 
 
@@ -2318,6 +2546,22 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
     description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files. A conflict is resolved by declaring it: pass resolved_paths naming each path, after writing the side you want into the file. Nothing else counts as a resolution — a text file's markers are a backstop, and a binary has none, so both sides sit in the index (`git show :2:<path>` the version already on the branch, `git show :3:<path>` the one this run brings) until you choose. While a merge is in progress it refuses until every conflicted path is declared, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush,
+  }),
+  defineMcpTool({
+    name: "open_base_edit_pr",
+    description:
+      "Amend this project's own machinery on the BASE BRANCH and open a separate pull request for it, without touching " +
+      "this run's checkout, HEAD or index — and without ending this run. Use it when what you found wrong is a prompt, a " +
+      "skill, an agent definition or a script under `.github/atomaton/`: through commit_and_push that fix would be " +
+      "reviewed as part of the issue's feature and would vanish with it. The commit is built from git objects on the " +
+      "base branch's current tree, pushed to `atomaton/amend-<id>`, and the pull request targets the base branch with no " +
+      "parent-issue link, so it belongs to no node and nothing waits on it. Each file takes `old`/`new` (the replacement " +
+      "must match exactly once in the file as the base branch holds it now, or nothing is pushed) or `content` (the " +
+      "whole new file). A path with a `self/` twin on the base branch is staged in both copies in the same commit. " +
+      "`config.yaml` is refused: it decides which credentials a run may reach. CI is dispatched, and `validation_dispatched` " +
+      "says whether it started.",
+    schema: OPEN_BASE_EDIT_PR_SCHEMA,
+    handler: openBaseEditPr,
   }),
   defineMcpTool({
     name: "merge_pr",

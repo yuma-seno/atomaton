@@ -91,9 +91,9 @@ describe("the two copies of this repository's own config", () => {
 describe("the shipped template and this repository's own config", () => {
   /**
    * The direction the drift actually went: the template gained a required key and
-   * this repository's copy did not follow. Not a byte comparison — the two differ
-   * on purpose (`merge.policy` is `auto` here and `manual` in the template) — just
-   * the keys that make the deliverable valid.
+   * this repository's copy did not follow. Not a byte comparison — the two are
+   * this repository's own adoption and the shipped template, and may differ by
+   * design. This checks the keys that make the deliverable valid.
    */
   test("both set every agent a workflow starts with no thread to read", () => {
     const shipped = Bun.YAML.parse(readFileSync("src/content/config.yaml", "utf8")) as {

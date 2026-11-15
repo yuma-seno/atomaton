@@ -20,7 +20,7 @@
  */
 
 import type { MergeGateMatch } from "./merge-gates.ts";
-import { pathMatches } from "./path-patterns.ts";
+import { pathClaimedBy } from "./path-patterns.ts";
 
 /** A single check run, reduced to what reporting needs. */
 export interface CheckRun {
@@ -218,11 +218,11 @@ export interface Blocker {
  * check is missing and nothing in this list is in the way.
  *
  * It used to fire only when `checks-missing` was the sole blocker, which is a
- * different and much narrower rule: `merge.policy` defaults to `"manual"`, and
- * that adds a `merge-policy` blocker to every pull request. So on any project
- * using the default -- most of them -- the recovery path could never run at all,
- * and the person who has to do the merge was left waiting on a required check
- * that nothing was going to create.
+ * different and much narrower rule: at the time `merge.policy` defaulted to
+ * `"manual"`, and that added a `merge-policy` blocker to every pull request. So
+ * on any project then using the default -- most of them -- the recovery path
+ * could never run at all, and the person who has to do the merge was left
+ * waiting on a required check that nothing was going to create.
  *
  * The rule is now about the commit rather than about the merge. `merge-policy`,
  * `human-authored`, `governance-change`, `merge-gate`, `gate-config-invalid`,
@@ -294,14 +294,19 @@ function isGeneratedWorkflow(path: string): boolean {
 }
 
 /**
- * Which of `files` a pattern claims.
+ * Which of `files` the list governs.
  *
  * The matcher itself moved to `path-patterns.ts`, which explains the one pattern
  * form Atomaton accepts and why. `merge.gates` needed the same comparison, and two
  * copies of a security-shaped one is the arrangement that drifts.
+ *
+ * Read as a whole list rather than pattern by pattern, because `!` makes the order
+ * part of the meaning: the last pattern claiming a file decides whether it is
+ * governed. What the list does NOT do is claim a file no pattern names — an
+ * exclusion list alone governs nothing, rather than everything.
  */
 export function governedPathsIn(files: string[], patterns: readonly string[]): string[] {
-  return files.filter((file) => patterns.some((pattern) => pathMatches(file, pattern)));
+  return files.filter((file) => pathClaimedBy(file, patterns));
 }
 
 /**
@@ -470,8 +475,8 @@ export function decideMergeReadiness(signals: MergeSignals): MergeReadiness {
   // nothing ships, no run obeys it yet, and the parent's own pull request carries
   // the whole aggregate through every check below. Applying them here would judge
   // the same change twice, the first time on something that is not in effect, and
-  // under the default `merge.policy: manual` it would put every child of a
-  // decomposition in front of a person before the parent could be judged at all.
+  // under `merge.policy: manual` it would put every child of a decomposition in
+  // front of a person before the parent could be judged at all.
   //
   // The exemption is the pull request's BASE, not its diff: the change itself is
   // read at both levels by the reviewer, and the delivery merge is where all of

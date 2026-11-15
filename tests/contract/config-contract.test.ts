@@ -25,7 +25,8 @@ describe("config.yaml", () => {
     // thread to read a name from, so an absent key is a run for nobody. The
     // template ships one so an adopter has a working example to rename.
     expect(c.agents?.on_config_finding).toBe("engineer");
-    expect(c.merge?.policy).toBe("manual");
+    // Shipped default: an agent may merge when nothing else objects (#218).
+    expect(c.merge?.policy).toBe("auto");
     expect(c.chain?.labels).toBeDefined();
   });
 

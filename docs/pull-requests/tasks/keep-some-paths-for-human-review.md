@@ -24,5 +24,23 @@ That is the merge this gate governs. A stacked merge widens nothing yet — the 
 configuration, definitions and tool servers are read from the default branch — and the
 parent's pull request is where the change meets this gate.
 
+## Give a corner of a covered path back
+
+Prefix a pattern with `!` to take a file back out, and put it after the pattern that
+covers it — the last pattern claiming a file decides, as in `.gitignore`:
+
+```yaml
+merge:
+  governed_paths:
+    - ".github/**"
+    - "!.github/atomaton/skills/**"
+```
+
+That governs `.github/` except the skills. Use it where an agent is meant to be able
+to change a corner of a directory and nothing else in it; where the exception is the
+larger part of the tree, listing what you *do* want governed is the shorter way to
+say the same thing. Either way, be explicit about the exception: a pattern that is
+not there is a decision nobody wrote down.
+
 For a condition that a path cannot express — a label, a title, how many files changed —
 use `merge.gates`, in [the pull request reference](../reference.md#mergegates).

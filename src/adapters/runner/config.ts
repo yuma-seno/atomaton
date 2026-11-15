@@ -75,8 +75,8 @@ export function getLabel(key: LabelKey): string {
   return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
 }
 
-/** Look up `merge.policy` from config.yaml. */
-export function getMergePolicy(fallback = "manual"): string {
+/** Look up `merge.policy` from config.yaml. The fallback is the shipped default. */
+export function getMergePolicy(fallback = "auto"): string {
   return loadConfig().merge?.policy ?? fallback;
 }
 

@@ -27,7 +27,8 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { pathMatches } from "../../src/domain/delivery/path-patterns.ts";
+import { governedPathsIn } from "../../src/domain/delivery/merge-readiness.ts";
+import { pathMatches, pathPatternTarget } from "../../src/domain/delivery/path-patterns.ts";
 import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
 
 const CONFIGS = [".github/atomaton/config.yaml", "self/atomaton/config.yaml"];
@@ -42,6 +43,20 @@ function trackedFiles(): string[] {
 interface Gate {
   reason?: string;
   when?: { files_changed?: string[]; files_added?: string[] };
+}
+
+/**
+ * Whether `pattern` names something that exists.
+ *
+ * A `!` is now a form either list may carry, and the name that has to resolve is
+ * the one after it: an exclusion pointed at a path nothing has is an exclusion
+ * that excludes nothing, which is the same silence as a gate that never fires.
+ */
+function namesSomething(pattern: string): boolean {
+  const target = pathPatternTarget(pattern);
+  return target.includes("*")
+    ? trackedFiles().some((file) => pathMatches(file, target))
+    : existsSync(target);
 }
 
 function gatesOf(path: string): Gate[] {
@@ -60,10 +75,7 @@ describe.each(CONFIGS)("%s", (config) => {
   });
 
   test.each(named)("a gate names %s, and it is there", (pattern) => {
-    const matched = pattern.includes("*")
-      ? trackedFiles().some((file) => pathMatches(file, pattern))
-      : existsSync(pattern);
-    expect(matched, `no file matches the gate pattern ${pattern}; the gate cannot fire`).toBe(true);
+    expect(namesSomething(pattern), `no file matches the gate pattern ${pattern}; the gate cannot fire`).toBe(true);
   });
 });
 
@@ -73,3 +85,55 @@ describe("the two copies", () => {
     expect(overlay).toBe(live);
   });
 });
+
+/**
+ * `merge.governed_paths`, held to the same rule as the gates above and to one the
+ * gates do not need: an exclusion has to exclude something.
+ *
+ * A pattern that matches nothing is the failure both halves share — a gate that
+ * never fires and an exclusion that excludes nothing are the same silence, and one
+ * of them (#551) was this repository's own config being read without complaint.
+ * The restates below then check that the list does what it says, because a name
+ * that resolves is not yet a rule that applies.
+ */
+function governedOf(path: string): string[] {
+  const config = Bun.YAML.parse(readFileSync(path, "utf8")) as { merge?: { governed_paths?: string[] } };
+  return config.merge?.governed_paths ?? [];
+}
+
+describe.each(CONFIGS)("%s governed_paths", (config) => {
+  test.each(governedOf(config))("names something that exists: %s", (pattern) => {
+    expect(namesSomething(pattern), `nothing matches ${pattern}; the entry does nothing`).toBe(true);
+  });
+
+  // The carve-out this repository added for #218, checked where it is meant to
+  // apply rather than as text in a file: what an agent writes down about how this
+  // project works is not a merge a person has to perform, and everything deciding
+  // what that agent may reach still is.
+  test("the prompt template and the skills are not governed; the rest of .github and self/ is", () => {
+    const patterns = governedOf(config);
+    const ungoverned = adoptedPathsUnder(".github/atomaton/skills")
+      .concat(adoptedPathsUnder("self/atomaton/skills"))
+      .concat(".github/atomaton/prompt-template.md");
+    expect(ungoverned.length).toBeGreaterThan(1);
+    expect(governedPathsIn(ungoverned, patterns)).toEqual([]);
+    expect(governedPathsIn([".github/atomaton/config.yaml"], patterns)).toEqual([
+      ".github/atomaton/config.yaml",
+    ]);
+    // `self/**` still governs what is not a skill, and a `self/` skill is durable:
+    // it is its own file, so the exemption is not carved away by the next deploy.
+    expect(governedPathsIn(["self/atomaton/scripts/tag-release.sh"], patterns)).toEqual([
+      "self/atomaton/scripts/tag-release.sh",
+    ]);
+  });
+});
+
+/**
+ * The tracked files under `dir`.
+ *
+ * From git rather than the directory, so a deployed copy that happens to be
+ * sitting in the tree unbranched does not satisfy the test above on its own.
+ */
+function adoptedPathsUnder(dir: string): string[] {
+  return trackedFiles().filter((file) => file.startsWith(`${dir}/`));
+}
