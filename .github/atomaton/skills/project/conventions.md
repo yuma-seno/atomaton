@@ -177,7 +177,7 @@ What to point it at:
 
 | What you found | Where the fix goes | Why |
 | --- | --- | --- |
-| A skill or the prompt template, as this repository runs it | the tool, on its `.github/atomaton/` path | one commit of its own; CI and a reviewer; no issue entanglement |
+| A skill or the prompt template, as this repository runs it | the tool, on its `.github/atomaton/` path | one commit of its own; CI and a reviewer; no issue entanglement. Live from the next run. Durable only where a `self/` twin carries it — the prompt template and the shipped skills have none, and their durable fix is `src/content/` |
 | The same fix, made to outlive the next deploy for every adopter | a normal pull request against `src/content/skills/` or `src/content/prompt-template.md` | the deployed copies are release output; the durable master is `src/content/` |
 | `config.yaml`, `package.json`, machinery code, workflows | a normal issue-tree pull request | governed or gated, and none of it is prose |
 
@@ -186,15 +186,26 @@ reach, and that boundary is not an agent's to move. A `self/` twin on the base
 branch is staged into the same commit automatically — which is what makes the two
 skills in `self/atomaton/skills/` durable under the exemption.
 
-What happens after a merge: `main` changes, the running machinery does not.
-Deployed copies are rebuilt by a self-deploy — release output needs the release
-first — so an edit reaches future runs only then, and never the run that made it.
-Until a release and self-deploy have carried the new matcher out, a prose-fix pull
-request may report a governance blocker and be left for a person; that window
-closes on its own.
+What happens when the fix lands, in three parts:
 
-Merging here: `merge.policy` is `auto`, and the prompt template and skills are
-exempt from `governed_paths`, so a prose-fix pull request merges without a person
-once CI is green and review passes. Everything else under `.github/` stays a
-person's merge.
+- **A merged prose edit is read by the next run.** Runs read `.github/atomaton/`
+  straight off the default branch — there is nothing to build or restart — so the
+  fix is live for every agent that starts after the merge. It never reaches the
+  run that wrote it.
+- **The next self-deploy is what can take it back, not what applies it.** It
+  rebuilds `.github/` from the release and `self/`, so an edit whose durable copy
+  — the `self/` twin, or `src/content/` — does not hold the same text is wiped
+  then. The two `self/atomaton/skills/` skills survive every deploy; the prompt
+  template and the shipped skills do not.
+- **The tool and the matcher behind it are code, and code ships with the
+  release.** `open_base_edit_pr` lives in the generated runtime, which a
+  self-deploy replaces — until that has happened, a run has no such tool, and a
+  prose-fix pull request meets the old matcher, which cannot read the `!`
+  exemptions, and stops with a governance blocker left for a person. That window
+  closes by itself on the next release and self-deploy.
+
+Merging here: once the new matcher is live, `merge.policy` is `auto` and the
+prompt template and skills are exempt from `governed_paths`, so a prose-fix pull
+request merges without a person once CI is green and review passes. Everything
+else under `.github/` stays a person's merge.
 
