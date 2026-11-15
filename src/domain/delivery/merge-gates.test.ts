@@ -141,6 +141,17 @@ describe("matchMergeGates", () => {
     }
   });
 
+  // `pathPatternProblem` accepts `!` now, so a gate written with one has to mean
+  // something here too. Reading it pattern by pattern would have accepted it and
+  // fired on nothing it names — a gate that validates and never fires.
+  test("an exclusion in a condition takes the file back out, last match winning", () => {
+    const { gates: exempt } = resolveMergeGates([
+      { reason: "schema change", when: { files_changed: ["db/**", "!db/seed/**"] } },
+    ]);
+    expect(matchMergeGates(exempt, facts({ changedFiles: [file("db/migrations/x.sql", "added")] }))).toHaveLength(1);
+    expect(matchMergeGates(exempt, facts({ changedFiles: [file("db/seed/x.sql", "added")] }))).toEqual([]);
+  });
+
   test("a removal is its own condition", () => {
     const { gates: dropped } = resolveMergeGates([
       { reason: "a migration was deleted", when: { files_removed: ["db/migrations/**"] } },

@@ -45,7 +45,7 @@
  * failure mode to design against, so every key is checked and anything
  * unrecognised is reported.
  */
-import { pathMatches, pathPatternProblem } from "./path-patterns.ts";
+import { pathClaimedBy, pathPatternListProblem, pathPatternProblem } from "./path-patterns.ts";
 
 /**
  * What happened to one file in a pull request.
@@ -157,6 +157,14 @@ function readPatterns(raw: unknown, where: string, problems: string[]): string[]
       continue;
     }
     patterns.push(entry.trim());
+  }
+  // A list made only of exclusions matches nothing, and the reason lives in
+  // `path-patterns.ts` beside the rule it comes from: one matcher decides both
+  // lists, so neither can grow a form the other does not understand.
+  const listProblem = pathPatternListProblem(patterns);
+  if (listProblem) {
+    problems.push(`${where}: ${listProblem}`);
+    return [];
   }
   return patterns;
 }
@@ -282,7 +290,15 @@ export function resolveMergeGates(raw: unknown): MergeGatesResolution {
 
 const ALL_STATUSES: readonly FileStatus[] = ["added", "removed", "modified"];
 
-/** Files with one of `statuses` that any of `patterns` claims. */
+/**
+ * Files with one of `statuses` that the pattern list claims.
+ *
+ * Read through `pathClaimedBy` rather than pattern by pattern, for the same reason
+ * `governedPathsIn` is: `pathPatternProblem` now accepts `!`, and a gate that took
+ * the prefix as a filename character would accept an exclusion and fire on nothing
+ * it names -- the silence this module is written against, reached through a form
+ * the validator had just blessed.
+ */
 function filesMatching(
   files: readonly ChangedFile[],
   statuses: readonly FileStatus[],
@@ -291,7 +307,7 @@ function filesMatching(
   if (patterns.length === 0) return [];
   return files
     .filter((file) => statuses.includes(file.status))
-    .filter((file) => patterns.some((pattern) => pathMatches(file.path, pattern)))
+    .filter((file) => pathClaimedBy(file.path, patterns))
     .map((file) => file.path);
 }
 

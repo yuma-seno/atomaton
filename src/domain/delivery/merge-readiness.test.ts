@@ -447,6 +447,29 @@ describe("governedPathsIn", () => {
   test("an empty pattern list turns the gate off", () => {
     expect(governedPathsIn([".github/workflows/ci.yml"], [])).toEqual([]);
   });
+
+  // The reason `!` exists in this setting at all: a change to what an agent is
+  // told is a change an agent may be asked to make, and requiring a person for
+  // every one meant nobody wrote any. So the file is carved back out of the
+  // directory that covers it.
+  test("an exclusion after the pattern that covers a file takes it back", () => {
+    const patterns = [".github/**", "!.github/atomaton/skills/**"];
+    expect(governedPathsIn([".github/atomaton/skills/x.md"], patterns)).toEqual([]);
+    // Everything the exclusion does not name is still governed, which is what
+    // makes this a carve-out rather than a hole.
+    expect(governedPathsIn([".github/atomaton/config.yaml"], patterns)).toEqual([
+      ".github/atomaton/config.yaml",
+    ]);
+  });
+
+  // Order is the meaning, and the same two lines the other way round govern. Said
+  // as a test because the mistake is one line of YAML and the symptom is silence.
+  test("an exclusion placed before what it excludes governs", () => {
+    const patterns = ["!.github/atomaton/skills/**", ".github/**"];
+    expect(governedPathsIn([".github/atomaton/skills/x.md"], patterns)).toEqual([
+      ".github/atomaton/skills/x.md",
+    ]);
+  });
 });
 
 // `merge.governed_paths` is Atomaton's own gate; these are the project's. Same outcome —
