@@ -7806,14 +7806,14 @@
   {
     "path": "sessions/issue-218/atomaton.json",
     "agent": "atomaton",
-    "messages": 38,
-    "calls": 12,
+    "messages": 52,
+    "calls": 18,
     "failed": 0,
     "refused": 0,
     "skills": [
       "writing/japanese"
     ],
-    "reported": true,
+    "reported": false,
     "tools": {
       "load_skill": 1,
       "bash": 1,
@@ -7824,7 +7824,11 @@
       "delegate_large": 1,
       "create_root_issue": 1,
       "write": 2,
-      "reload_environment": 1
+      "reload_environment": 1,
+      "grep": 2,
+      "glob": 1,
+      "create_sub_issue": 2,
+      "launch_sub_agent": 1
     },
     "acts": {
       "other": 1
@@ -7880,6 +7884,27 @@
         "seconds": 337,
         "server_calls": {},
         "started": "2026-11-14T18:10:45Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-15T00:14:18Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 52,
+        "seconds": 195,
+        "server_calls": {
+          "atomaton": {
+            "launch_sub_agent": 1
+          },
+          "files": {
+            "glob": 1,
+            "grep": 2
+          },
+          "github": {
+            "create_sub_issue": 2
+          }
+        },
+        "started": "2026-11-15T00:11:03Z"
       }
     ]
   },
