@@ -7615,8 +7615,8 @@
   {
     "path": "sessions/issue-218/architect.json",
     "agent": "architect",
-    "messages": 56,
-    "calls": 17,
+    "messages": 64,
+    "calls": 20,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -7625,7 +7625,7 @@
     "reported": true,
     "tools": {
       "load_skill": 1,
-      "read": 13,
+      "read": 16,
       "grep": 2,
       "glob": 1
     },
@@ -7676,6 +7676,20 @@
           }
         },
         "started": "2026-11-15T00:02:28Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-15T00:09:44Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "messages": 64,
+        "seconds": 83,
+        "server_calls": {
+          "files_readonly": {
+            "read": 3
+          }
+        },
+        "started": "2026-11-15T00:08:21Z"
       }
     ]
   },
