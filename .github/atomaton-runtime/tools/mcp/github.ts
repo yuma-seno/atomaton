@@ -6602,7 +6602,7 @@ var require_dist = __commonJS(function(exports, module) {
 
 // src/entrypoints/tools/mcp/github.ts
 import { readFileSync as readFileSync3 } from "fs";
-import { join } from "path";
+import { join as join2 } from "path";
 
 // src/adapters/github/gh.ts
 function run(cmd) {
@@ -6670,6 +6670,20 @@ function nothingToCommit(result) {
 function gitRun(...args) {
   return run(["git", ...args]);
 }
+function gitRunWith(options, ...args) {
+  const proc = Bun.spawnSync({
+    cmd: ["git", ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+    ...options.stdin !== undefined ? { stdin: Buffer.from(options.stdin) } : {},
+    env: { ...process.env, ...options.env }
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : ""
+  };
+}
 function splitConcatenatedJson(text) {
   const results = [];
   let depth = 0;
@@ -6722,6 +6736,26 @@ import { readFileSync } from "fs";
 function pathMatches(file, pattern) {
   return pattern.endsWith("/**") ? file.startsWith(pattern.slice(0, -2)) : file === pattern;
 }
+var NEGATION = "!";
+function pathPatternNegates(pattern) {
+  return pattern.startsWith(NEGATION);
+}
+function pathPatternTarget(pattern) {
+  return pathPatternNegates(pattern) ? pattern.slice(NEGATION.length) : pattern;
+}
+function pathClaimedBy(file, patterns) {
+  let claimed = false;
+  for (const pattern of patterns) {
+    if (pathMatches(file, pathPatternTarget(pattern)))
+      claimed = !pathPatternNegates(pattern);
+  }
+  return claimed;
+}
+function pathPatternListProblem(patterns) {
+  if (patterns.length === 0 || !patterns.every(pathPatternNegates))
+    return "";
+  return "every pattern is an exclusion, so the list matches nothing. An exclusion takes " + "a file back out of a pattern before it in the same list, so name what it covers first.";
+}
 var GLOB_CHARACTERS = /[*?[\]{}]/;
 function pathPatternProblem(pattern) {
   if (typeof pattern !== "string" || pattern.trim() === "") {
@@ -6730,10 +6764,20 @@ function pathPatternProblem(pattern) {
   if (pattern !== pattern.trim()) {
     return `"${pattern}" has surrounding whitespace`;
   }
-  if (pattern.endsWith("/")) {
+  if (pattern === NEGATION) {
+    return `"${pattern}" is a bare "!", which negates no pattern. Write "!<pattern>" naming what to exclude.`;
+  }
+  if (pattern.startsWith(NEGATION + NEGATION)) {
+    return `"${pattern}" starts with "!!". One "!" negates the pattern after it; ` + "a second one is not a form this matcher has, so this would match nothing.";
+  }
+  const target = pathPatternTarget(pattern);
+  if (target !== target.trim()) {
+    return `"${pattern}" has whitespace between the "!" and the pattern it negates`;
+  }
+  if (target.endsWith("/")) {
     return `"${pattern}" ends in a slash, so it would match nothing. ` + `Write "${pattern}**" for everything under it, or drop the slash to match that one path.`;
   }
-  const body = pattern.endsWith("/**") ? pattern.slice(0, -3) : pattern;
+  const body = target.endsWith("/**") ? target.slice(0, -3) : target;
   if (body === "") {
     return `"${pattern}" names no directory. Write the directory before the "/**".`;
   }
@@ -6760,7 +6804,7 @@ function isGeneratedWorkflow(path) {
   return path.startsWith(".github/workflows/");
 }
 function governedPathsIn(files, patterns) {
-  return files.filter((file) => patterns.some((pattern) => pathMatches(file, pattern)));
+  return files.filter((file) => pathClaimedBy(file, patterns));
 }
 var RUNS_NAMED = 2;
 function describeActiveRuns(activeRuns) {
@@ -7172,6 +7216,11 @@ function readPatterns(raw, where, problems) {
     }
     patterns.push(entry.trim());
   }
+  const listProblem = pathPatternListProblem(patterns);
+  if (listProblem) {
+    problems.push(`${where}: ${listProblem}`);
+    return [];
+  }
   return patterns;
 }
 function readLabels(raw, where, problems) {
@@ -7258,7 +7307,7 @@ var ALL_STATUSES = ["added", "removed", "modified"];
 function filesMatching(files, statuses, patterns) {
   if (patterns.length === 0)
     return [];
-  return files.filter((file) => statuses.includes(file.status)).filter((file) => patterns.some((pattern) => pathMatches(file.path, pattern))).map((file) => file.path);
+  return files.filter((file) => statuses.includes(file.status)).filter((file) => pathClaimedBy(file.path, patterns)).map((file) => file.path);
 }
 function matchMergeGates(gates, facts) {
   const matches = [];
@@ -7329,7 +7378,7 @@ var DEFAULT_LABELS = {
 function getLabel(key) {
   return loadConfig().chain?.labels?.[key] ?? DEFAULT_LABELS[key];
 }
-function getMergePolicy(fallback = "manual") {
+function getMergePolicy(fallback = "auto") {
   return loadConfig().merge?.policy ?? fallback;
 }
 function getBaseBranch(fallback = "") {
@@ -20480,7 +20529,12 @@ function log7(message) {
   console.error(`[atomaton-merge-signals] ${message}`);
 }
 function governedPathProblems() {
-  return getGovernedPaths().map((pattern) => pathPatternProblem(pattern)).filter((problem) => problem !== "").map((problem) => `\`merge.governed_paths\`: ${problem}`);
+  const patterns = getGovernedPaths();
+  const listProblem = pathPatternListProblem(patterns);
+  return [
+    ...patterns.map((pattern) => pathPatternProblem(pattern)),
+    ...listProblem ? [listProblem] : []
+  ].filter((problem) => problem !== "").map((problem) => `\`merge.governed_paths\`: ${problem}`);
 }
 var STATUS_MAP = {
   added: "added",
@@ -20726,6 +20780,191 @@ function hardenCredentialHolder(log) {
     log(`also removed ${unreadable.length} PATH entries this process cannot inspect`);
 }
 
+// src/domain/machinery/base-edit.ts
+var DEPLOYED_ROOT = ".github";
+function amendPathProblem(path) {
+  if (path.trim() === "")
+    return "A path is required.";
+  if (path !== path.trim())
+    return `\`${path}\` has surrounding whitespace.`;
+  if (path.startsWith("/")) {
+    return `\`${path}\` is an absolute path. Paths name a file in the repository, such as \`${USER_ROOT}/prompt-template.md\`.`;
+  }
+  if (path.includes("\\")) {
+    return `\`${path}\` uses a backslash. A repository path is written with slashes.`;
+  }
+  if (/[\u0000-\u001f]/.test(path)) {
+    return `\`${JSON.stringify(path)}\` holds a control character, which no repository path does.`;
+  }
+  const segments = path.split("/");
+  if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+    return `\`${path}\` has an empty, \`.\` or \`..\` segment, so the path git would write is not the path written here. ` + "Name the file directly.";
+  }
+  if (path === CONFIG_FILE) {
+    return `\`${path}\` decides which credentials a run may reach, and it is read from a ref of its own rather than from ` + "a branch tip. An edit through a pull request would be a review of a file that governs nothing, so this tool " + "does not write it: change it by hand, in a change a person makes.";
+  }
+  if (!path.startsWith(`${USER_ROOT}/`)) {
+    return `\`${path}\` is outside \`${USER_ROOT}/\`. This tool amends this project's own machinery \u2014 prompts, skills, ` + "agent definitions and the scripts beside them \u2014 and nothing else: the rest of the tree is delivered through " + "the issue the run is working on.";
+  }
+  return;
+}
+function overlayTwinPath(path) {
+  return `self/${path.slice(DEPLOYED_ROOT.length + 1)}`;
+}
+function editedText(current, edit, base) {
+  const replaces = edit.old !== undefined || edit.new !== undefined;
+  if (edit.content !== undefined && replaces) {
+    throw new Error(`"${edit.path}": give either \`content\` (the whole new file) or \`old\` and \`new\` (a replacement), not both \u2014 ` + "there is no answer to which one is the file.");
+  }
+  if (edit.content !== undefined)
+    return edit.content;
+  if (!replaces) {
+    throw new Error(`"${edit.path}": nothing to change. Give \`content\`, or \`old\` and \`new\`.`);
+  }
+  const old = edit.old ?? "";
+  if (old === "") {
+    throw new Error(`"${edit.path}": \`old\` is empty. An empty search matches everywhere, so give the text to replace, or ` + "`content` for a whole-file rewrite.");
+  }
+  if (edit.new === undefined) {
+    throw new Error(`"${edit.path}": \`old\` was given without \`new\`. Give both, or \`content\` for a whole-file rewrite.`);
+  }
+  const count = current.split(old).length - 1;
+  if (count === 0) {
+    throw new Error(`"${edit.path}": \`old\` does not appear in the file as \`${base}\` holds it. The branch moved since this call ` + "was prepared, and nothing was written: read the file on that branch and retry with the text it holds now.");
+  }
+  if (count > 1) {
+    throw new Error(`"${edit.path}": \`old\` appears ${count} times in the file as \`${base}\` holds it, so there is no single ` + "place to apply it. Extend `old` with the lines around the one you mean until it matches once, or pass " + "`content` with the whole file.");
+  }
+  return current.replace(old, () => edit.new);
+}
+function amendBranchName(now) {
+  return `atomaton/amend-${Math.floor(now).toString(36)}`;
+}
+function baseEditPrBody(body) {
+  const where = body.observing === "" ? "the run that made this change" : `the run working on ${body.observing}`;
+  const lines = [
+    ...body.reviewer === "" ? [] : [`/${body.reviewer}`, ""],
+    `Atomaton: ${where} amended this project's own machinery on \`${body.base}\`. That run's checkout is untouched, ` + "and its work continues \u2014 this pull request is separate from it on purpose, so review it as a change to how " + "agents behave rather than as part of a feature.",
+    "",
+    ...body.files.map((file) => file.twin === undefined ? `- \`${file.path}\` \u2014 staged on its own; no \`${overlayTwinPath(file.path)}\` on \`${body.base}\`` : `- \`${file.path}\`, and its overlay twin \`${file.twin}\` with the same content`)
+  ];
+  const twins = body.files.filter((file) => file.twin === undefined).map((file) => `\`${file.path}\``);
+  if (twins.length > 0) {
+    lines.push("", `${twins.join(", ")} ${twins.length === 1 ? "has" : "have"} no \`self/\` twin, so only the deployed copy moved. ` + "In a repository whose deploy rebuilds `.github/` from `self/` and the release, such a file is reverted at " + "the next deploy \u2014 this is the copy to leave a note about, not a defect in this change.");
+  }
+  const note = (body.note ?? "").trim();
+  if (note !== "")
+    lines.push("", "---", "", note);
+  return `${lines.join(`
+`)}
+`;
+}
+
+// src/adapters/github/base-edit.ts
+import { mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+function commitIdentity() {
+  const agent = (process.env.AGENT ?? "").trim() || "engineer";
+  const name = `atomaton-${agent}`;
+  return ["-c", `user.name=${name}`, "-c", `user.email=${name}@users.noreply.github.com`];
+}
+function gitRaw(...args) {
+  const proc = Bun.spawnSync({ cmd: ["git", ...args], stdout: "pipe", stderr: "pipe" });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8") : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8") : ""
+  };
+}
+function readBaseFile(baseSha, path) {
+  const listing = gitRun("ls-tree", baseSha, "--", path);
+  if (listing.code !== 0) {
+    throw new Error(`could not read the tree of ${baseSha.slice(0, 12)}: ${listing.stderr || listing.stdout}`);
+  }
+  const line = listing.stdout.split(`
+`).find((entry) => entry.trim() !== "");
+  if (line === undefined)
+    return { present: false };
+  const [mode, type] = line.trim().split(/\s+/);
+  if (type !== "blob" || mode === undefined) {
+    throw new Error(`\`${path}\` is not a file on this branch (\`${line.trim()}\`), so it cannot be amended.`);
+  }
+  const blob = gitRaw("cat-file", "blob", `${baseSha}:${path}`);
+  if (blob.code !== 0)
+    throw new Error(`could not read \`${path}\` from this branch: ${blob.stderr || blob.stdout}`);
+  return { present: true, text: blob.stdout, mode };
+}
+function fetchBaseTip() {
+  const resolved = baseBranch();
+  if (!resolved.known)
+    throw new Error(`the base branch could not be determined: ${resolved.why}`);
+  const base = resolved.branch;
+  const tip = readOriginBranch(base);
+  if (!tip.known)
+    throw new Error(`\`${base}\` could not be read from origin: ${tip.why}`);
+  if (!tip.present)
+    throw new Error(`origin has no \`${base}\` branch, so there is nothing to amend.`);
+  const remoteRef = `refs/remotes/origin/${base}`;
+  const fetched = gitRun("fetch", "--no-tags", "--no-write-fetch-head", "origin", `+refs/heads/${base}:${remoteRef}`);
+  if (fetched.code !== 0)
+    throw new Error(`could not fetch \`${base}\` from origin: ${fetched.stderr || fetched.stdout}`);
+  const commit = gitRun("rev-parse", `${remoteRef}^{commit}`);
+  if (commit.code !== 0) {
+    throw new Error(`\`${base}\` was fetched but its commit could not be resolved: ${commit.stderr || commit.stdout}`);
+  }
+  return { base, sha: commit.stdout.trim() };
+}
+function indexInfoFor(entries) {
+  return entries.map((entry) => `${entry.mode} blob ${entry.blob}	${entry.target}\x00`).join("");
+}
+function buildCommitOnBase(baseSha, files, message) {
+  const dir = mkdtempSync(join(tmpdir(), "atomaton-amend-"));
+  const env = { env: { GIT_INDEX_FILE: join(dir, "index") } };
+  try {
+    const seeded = gitRunWith(env, "read-tree", baseSha);
+    if (seeded.code !== 0) {
+      throw new Error(`could not start from the base branch's tree: ${seeded.stderr || seeded.stdout}`);
+    }
+    const staged = [];
+    for (const file of files) {
+      const hashed = gitRunWith({ ...env, stdin: file.text }, "hash-object", "-w", "--stdin", "--no-filters");
+      if (hashed.code !== 0) {
+        throw new Error(`could not write \`${file.path}\` into the object store: ${hashed.stderr || hashed.stdout}`);
+      }
+      staged.push({ blob: hashed.stdout, mode: file.mode, target: file.path });
+    }
+    const indexed = gitRunWith({ ...env, stdin: indexInfoFor(staged) }, "update-index", "-z", "--index-info");
+    if (indexed.code !== 0)
+      throw new Error(`could not stage the change: ${indexed.stderr || indexed.stdout}`);
+    const tree = gitRunWith(env, "write-tree");
+    if (tree.code !== 0)
+      throw new Error(`could not write the tree: ${tree.stderr || tree.stdout}`);
+    const missing = files.filter((file) => gitRun("cat-file", "-e", `${tree.stdout}:${file.path}`).code !== 0);
+    if (missing.length > 0) {
+      throw new Error(`git did not accept ${missing.map((file) => `\`${file.path}\``).join(", ")} into the tree, so nothing was ` + "pushed. A path must be repository-relative and may not contain `..`.");
+    }
+    const commit = gitRun(...commitIdentity(), "commit-tree", tree.stdout, "-p", baseSha, "-m", message);
+    if (commit.code !== 0)
+      throw new Error(`could not create the commit: ${commit.stderr || commit.stdout}`);
+    return commit.stdout.trim();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+function pushCommit(commit, branch) {
+  const pushed = gitRun("push", "origin", `${commit}:refs/heads/${branch}`);
+  if (pushed.code === 0)
+    return;
+  const refused = /non-fast-forward|fetch first|rejected/i.test(`${pushed.stderr} ${pushed.stdout}`);
+  throw new Error(refused ? `\`${branch}\` moved on origin while this call was building its commit, so the push was refused rather than ` + "replacing somebody else's. Nothing was pushed; retry, which names a new branch." : `could not push \`${branch}\`: ${pushed.stderr || pushed.stdout}`);
+}
+function readTwin(baseSha, path) {
+  const twinPath = overlayTwinPath(path);
+  const read = readBaseFile(baseSha, twinPath);
+  return read.present ? { path: twinPath, text: read.text, mode: read.mode } : undefined;
+}
+
 // src/entrypoints/tools/mcp/github.ts
 function log8(msg) {
   console.error(`[atomaton-github] ${msg}`);
@@ -20844,6 +21083,19 @@ var SYNC_BRANCH_SCHEMA = objectType({
 var COMMIT_AND_PUSH_SCHEMA = objectType({
   message: stringType().describe("Commit message."),
   resolved_paths: stringArray("Paths whose conflict you have resolved, to be staged before the commit. Required for every path git " + "still holds unmerged; a path declared while it still holds git's conflict markers is refused. " + "One path or a list.").optional()
+});
+var BASE_FILE_EDIT_SCHEMA = objectType({
+  path: stringType().min(1).describe(`Repository path of a file on the base branch, under \`.github/atomaton/\`. \`config.yaml\` is refused: it ` + "decides which credentials a run may reach and is read from a ref of its own, not from a branch tip."),
+  old: stringType().optional().describe("Text to replace. It must appear exactly once in the file as the base branch holds it now."),
+  new: stringType().optional().describe("What `old` becomes."),
+  content: stringType().optional().describe("The whole new file, instead of `old`/`new`. Give one or the other, never both.")
+});
+var OPEN_BASE_EDIT_PR_SCHEMA = objectType({
+  title: stringType().min(1).describe("Pull request title."),
+  message: stringType().min(1).describe("Commit message for the single commit this tool builds on the base branch."),
+  files: arrayType(BASE_FILE_EDIT_SCHEMA).min(1).describe("The files to amend, each with `old`/`new` or `content`."),
+  body: stringType().optional().describe("Why the change is right, in your own words, appended to the pull request body below the list of files. " + "The tool writes the header, the reviewer line and the file list itself."),
+  reviewer: stringType().optional().describe("Which agent reviews this pull request once CI passes. Defaults to 'reviewer'; an empty name writes no " + "reviewer line, and a person is then told the pull request is waiting.")
 });
 function notifyTagPrefix(body, what) {
   if (NOTIFY_TAG.has(body))
@@ -21198,12 +21450,100 @@ ${text}`,
     meta: validationDispatched ? { session_ends: true } : {}
   };
 }
+async function openBaseEditPr(a) {
+  for (const file of a.files) {
+    const problem = amendPathProblem(file.path);
+    if (problem !== undefined)
+      mcpFail(problem);
+  }
+  const duplicated = a.files.map((file) => file.path).filter((path, index, all) => all.indexOf(path) !== index);
+  if (duplicated.length > 0) {
+    mcpFail(`The same path appears more than once (${[...new Set(duplicated)].join(", ")}), so there is no answer to which ` + "change is the file's. Send one entry per path, with everything it changes in that one entry.");
+  }
+  refuseClosingKeywords(a.message, "commit message");
+  const reviewer = (a.reviewer ?? "reviewer").trim();
+  const tip = fetchBaseTip();
+  const reads = a.files.map((file) => ({ file, current: readBaseFile(tip.sha, file.path) }));
+  const rewritten = reads.map(({ file, current }) => {
+    if (!current.present && file.content === undefined) {
+      throw new Error(`\`${file.path}\` does not exist on \`${tip.base}\`, so there is nothing to replace. Pass \`content\` with the ` + "whole file to create it.");
+    }
+    return {
+      path: file.path,
+      mode: current.present ? current.mode : "100644",
+      text: editedText(current.present ? current.text : "", file, tip.base)
+    };
+  });
+  const twins = rewritten.map((file) => ({ file, twin: readTwin(tip.sha, file.path) }));
+  const staged = [];
+  const recorded = [];
+  for (const { file, twin } of twins) {
+    staged.push(file);
+    if (twin === undefined) {
+      recorded.push({ path: file.path, twin: undefined });
+      continue;
+    }
+    staged.push({ path: twin.path, text: file.text, mode: twin.mode });
+    recorded.push({ path: file.path, twin: twin.path });
+  }
+  const body = baseEditPrBody({
+    observing: nodeNumber() === undefined ? "" : `#${nodeNumber()}`,
+    base: tip.base,
+    reviewer,
+    files: recorded,
+    note: withCheckedMentions(a.body ?? "")
+  });
+  refuseClosingKeywords(body, "pull request body");
+  refuseCommandLines(a.body ?? "", "pull request body", "Pass the agent as the `reviewer` argument.");
+  const commit = buildCommitOnBase(tip.sha, staged, a.message);
+  const branch = amendBranchName(Date.now());
+  pushCommit(commit, branch);
+  const originAgent = (process.env.AGENT ?? "").trim();
+  const fullBody = originAgent ? `${body}${ORIGIN_AGENT_TAG.write(originAgent)}
+${openedByLine()}` : body;
+  const created = gh("pr", "create", "--repo", REPO, "--title", a.title, "--head", branch, "--base", tip.base, "--body", fullBody);
+  if (created.code) {
+    throw new Error(`The commit ${commit} is pushed to \`${branch}\`, but the pull request could not be opened: ` + `${created.stderr || created.stdout}. Open one from that branch against \`${tip.base}\` by hand; nothing else ` + "is missing.");
+  }
+  const number = Number(created.stdout.trim().split("/").pop());
+  if (!Number.isFinite(number))
+    mcpFail(`gh pr create: unexpected output: ${created.stdout.slice(0, 300)}`);
+  if (!isAttended({ ...reviewer === "" ? {} : { next: { agent: reviewer } }, body: fullBody })) {
+    const openedBy = originAgent || "an agent";
+    const notify = resolveNotify(REPO, number);
+    log8(`openBaseEditPr: PR #${number} names no reviewer and mentions nobody; leaving a notice for ${notify || "(nobody resolved)"}`);
+    gh("pr", "comment", String(number), "--repo", REPO, "--body", unattendedNotice(notify, openedBy));
+  }
+  const ask = commentOnWithId(REPO, number, `${LLM_CONTEXT_TAG.write("exclude")}
+Atomaton: opened this pull request from \`${branch}\`. Running CI; the result routes what happens next.`);
+  let validationDispatched = false;
+  if (ask === null) {
+    report("warning", "could not post the opening comment, so the dispatched run would have no ask to claim; CI validation was NOT dispatched");
+  } else {
+    validationDispatched = dispatchPrValidation(REPO, number, branch, { ask });
+  }
+  logOp("open_base_edit_pr", { number, branch, commit, base: tip.base, staged: staged.map((file) => file.path) });
+  log8(`openBaseEditPr: PR #${number} on ${tip.base} from ${branch} at ${commit}, ` + `${staged.length} path(s), validation ${validationDispatched ? "dispatched" : "NOT dispatched"}`);
+  return JSON.stringify({
+    number,
+    url: created.stdout.trim(),
+    base: tip.base,
+    branch,
+    commit,
+    staged: staged.map((file) => file.path),
+    files: recorded.map((file) => ({ path: file.path, twin: file.twin ?? null })),
+    validation_dispatched: validationDispatched,
+    ...validationDispatched ? {} : {
+      note: "The pull request and its commit exist, but CI could not be started, so no required check will appear " + "and no agent is scheduled. Run /reviewer on the pull request, or report this so a person can start it."
+    }
+  });
+}
 function mergeMessage() {
   const dir = gitRun("rev-parse", "--git-dir");
   if (dir.code)
     return "";
   try {
-    const text = readFileSync3(join(dir.stdout.trim(), "MERGE_MSG"), "utf8");
+    const text = readFileSync3(join2(dir.stdout.trim(), "MERGE_MSG"), "utf8");
     return text.split(`
 `).map((line) => line.trim()).find((line) => line && !line.startsWith("#")) ?? "";
   } catch {
@@ -21764,6 +22104,12 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
     description: "Stage all worktree changes, create one commit, and push the checked-out branch to origin. Use this after validation and before create_pr; do not call it with unrelated or unreviewed changes present. Returns JSON success status and fails rather than rewriting remote history. A sub-issue's branch is cut from its parent's branch and the work already written against the base branch is carried onto it; where a file both sides changed, this refuses naming those files. A conflict is resolved by declaring it: pass resolved_paths naming each path, after writing the side you want into the file. Nothing else counts as a resolution \u2014 a text file's markers are a backstop, and a binary has none, so both sides sit in the index (`git show :2:<path>` the version already on the branch, `git show :3:<path>` the one this run brings) until you choose. While a merge is in progress it refuses until every conflicted path is declared, and closes the merge as a merge commit once they are (the message then records the base that was taken in).",
     schema: COMMIT_AND_PUSH_SCHEMA,
     handler: commitAndPush
+  }),
+  defineMcpTool({
+    name: "open_base_edit_pr",
+    description: "Amend this project's own machinery on the BASE BRANCH and open a separate pull request for it, without touching " + "this run's checkout, HEAD or index \u2014 and without ending this run. Use it when what you found wrong is a prompt, a " + "skill, an agent definition or a script under `.github/atomaton/`: through commit_and_push that fix would be " + "reviewed as part of the issue's feature and would vanish with it. The commit is built from git objects on the " + "base branch's current tree, pushed to `atomaton/amend-<id>`, and the pull request targets the base branch with no " + "parent-issue link, so it belongs to no node and nothing waits on it. Each file takes `old`/`new` (the replacement " + "must match exactly once in the file as the base branch holds it now, or nothing is pushed) or `content` (the " + "whole new file). A path with a `self/` twin on the base branch is staged in both copies in the same commit. " + "`config.yaml` is refused: it decides which credentials a run may reach. CI is dispatched, and `validation_dispatched` " + "says whether it started.",
+    schema: OPEN_BASE_EDIT_PR_SCHEMA,
+    handler: openBaseEditPr
   }),
   defineMcpTool({
     name: "merge_pr",
