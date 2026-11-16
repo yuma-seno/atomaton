@@ -343,6 +343,18 @@ function resolveDeployJobs(deploy) {
 }
 
 // src/domain/delivery/path-patterns.ts
+var NEGATION = "!";
+function pathPatternNegates(pattern) {
+  return pattern.startsWith(NEGATION);
+}
+function pathPatternTarget(pattern) {
+  return pathPatternNegates(pattern) ? pattern.slice(NEGATION.length) : pattern;
+}
+function pathPatternListProblem(patterns) {
+  if (patterns.length === 0 || !patterns.every(pathPatternNegates))
+    return "";
+  return "every pattern is an exclusion, so the list matches nothing. An exclusion takes " + "a file back out of a pattern before it in the same list, so name what it covers first.";
+}
 var GLOB_CHARACTERS = /[*?[\]{}]/;
 function pathPatternProblem(pattern) {
   if (typeof pattern !== "string" || pattern.trim() === "") {
@@ -351,10 +363,20 @@ function pathPatternProblem(pattern) {
   if (pattern !== pattern.trim()) {
     return `"${pattern}" has surrounding whitespace`;
   }
-  if (pattern.endsWith("/")) {
+  if (pattern === NEGATION) {
+    return `"${pattern}" is a bare "!", which negates no pattern. Write "!<pattern>" naming what to exclude.`;
+  }
+  if (pattern.startsWith(NEGATION + NEGATION)) {
+    return `"${pattern}" starts with "!!". One "!" negates the pattern after it; ` + "a second one is not a form this matcher has, so this would match nothing.";
+  }
+  const target = pathPatternTarget(pattern);
+  if (target !== target.trim()) {
+    return `"${pattern}" has whitespace between the "!" and the pattern it negates`;
+  }
+  if (target.endsWith("/")) {
     return `"${pattern}" ends in a slash, so it would match nothing. ` + `Write "${pattern}**" for everything under it, or drop the slash to match that one path.`;
   }
-  const body = pattern.endsWith("/**") ? pattern.slice(0, -3) : pattern;
+  const body = target.endsWith("/**") ? target.slice(0, -3) : target;
   if (body === "") {
     return `"${pattern}" names no directory. Write the directory before the "/**".`;
   }
@@ -401,6 +423,11 @@ function readPatterns2(raw, where, problems) {
       continue;
     }
     patterns.push(entry.trim());
+  }
+  const listProblem = pathPatternListProblem(patterns);
+  if (listProblem) {
+    problems.push(`${where}: ${listProblem}`);
+    return [];
   }
   return patterns;
 }
