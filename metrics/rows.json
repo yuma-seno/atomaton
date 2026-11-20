@@ -13330,6 +13330,59 @@
     ]
   },
   {
+    "path": "sessions/issue-333/atomaton.json",
+    "agent": "atomaton",
+    "messages": 55,
+    "calls": 41,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "writing/japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "get_issue": 2,
+      "get_issue_comments": 1,
+      "list": 8,
+      "grep": 9,
+      "search_issues": 1,
+      "read": 17,
+      "bash": 2,
+      "load_skill": 1
+    },
+    "acts": {
+      "other": 2
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-20T03:11:28Z",
+        "ended_because": "completed",
+        "iterations": 9,
+        "messages": 55,
+        "seconds": 696,
+        "server_calls": {
+          "files": {
+            "grep": 9,
+            "list": 8,
+            "read": 17
+          },
+          "github": {
+            "get_issue": 2,
+            "get_issue_comments": 1
+          },
+          "search": {
+            "search_issues": 1
+          },
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-11-20T02:59:52Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-341/atomaton.json",
     "agent": "atomaton",
     "messages": 11,
