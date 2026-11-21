@@ -2,13 +2,23 @@
 /**
  * dispatch_ci.ts — start the repository's check workflow against a branch.
  *
- * A pull request opened with `GITHUB_TOKEN` fires no `pull_request` event, so the
- * checks it requires never start on their own. This is the same hole
+ * A pull request opened with `GITHUB_TOKEN` fires no `pull_request` event, so no
+ * run of the check workflow exists for it. This is the same hole
  * `adapters/actions/dispatch-targets.ts` states once — GitHub starts no workflow
  * run for an event its own token triggered — and the bridge there (`dispatchCi`)
- * is what closes it for an agent's pull request. This script is the thin shell
- * between a workflow's step and that bridge, the way `dispatch_update.ts` is for
- * `!upgrade`: the arguments come from the caller, the decision is the bridge's.
+ * is what closes it. This script is the thin shell between a workflow's step and
+ * that bridge, the way `dispatch_update.ts` is for `!upgrade`: the arguments come
+ * from the caller, the decision is the bridge's.
+ *
+ * ## What it does not do
+ *
+ * Register a required status check. A check run derived from a `workflow_dispatch`
+ * run is reported on the commit but does not count toward a required status check;
+ * only one written through the Checks API does (see `validate_pull_request.ts`).
+ * So a pull request whose required context has to appear goes through
+ * `dispatch_pr_validation.ts`, which starts CI and writes that check run. Reaching
+ * for this one left the release pull request waiting for a context nothing would
+ * register.
  *
  * Usage:
  *   dispatch_ci.ts --repo OWNER/REPO --branch BRANCH

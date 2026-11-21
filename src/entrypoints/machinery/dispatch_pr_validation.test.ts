@@ -159,6 +159,41 @@ describe("dispatch_pr_validation.ts", () => {
     }
   });
 
+  /**
+   * The release workflow's shape, exactly as `.github/workflows/release.yml` builds
+   * it: the branch it just pushed, no `--ask`, and `asked-by-person true`.
+   *
+   * The release pull request's body names no `/<agent>`, so validation dispatches
+   * nobody and has no comment to claim -- and an empty ask is only accepted because
+   * the agent dispatch, the one caller that requires an ask, never runs. A bare
+   * `--asked-by-person` is not this: `parseArgs` reads the option as a string and
+   * aborts the step before anything is dispatched, which is why the value is pinned.
+   */
+  test("the release workflow's call -- a branch, no ask, a person asked -- is dispatched", () => {
+    const { root, work } = makeRemote(["release/v0.24.0"]);
+    try {
+      const r = run(
+        [dispatched],
+        [
+          "--repo", "owner/repo",
+          "--number", "573",
+          "--branch", "release/v0.24.0",
+          "--asked-by-person", "true",
+        ],
+        work,
+      );
+      expect(r.status).toBe(0);
+      const argv = workflowRun(r.ghCalls);
+      expect(argv).toContain("atomaton-validate-pr.yml");
+      expect(argv).toContain("number=573");
+      expect(argv).toContain("branch=release/v0.24.0");
+      expect(argv).toContain("asked_by_person=true");
+      expect(argv, "no ask comment, so nothing to claim").toContain("ask=");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   /** Without a target there is nothing to validate, and nothing to ask GitHub about. */
   test("a missing number is a usage error, not a resolution", () => {
     const r = run([], ["--repo", "owner/repo"], process.cwd());

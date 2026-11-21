@@ -144,8 +144,9 @@ deliverable, so no adopter receives it, and `.github/**` is in
 `merge.governed_paths`, so an agent cannot merge the pull request that edits it.
 It runs on the workflow's own token for its own writes — the pull request, the
 push that opens it, the merge — and bridges the events that token cannot start:
-`dispatch_ci.ts` starts the pull request's check, `dispatch_cd.ts` starts the
-deploy after its merge. The application step is the one place a credential is
+`dispatch_pr_validation.ts` hands the pull request to validation, which starts its
+check and writes the required context, `dispatch_cd.ts` starts the deploy after
+its merge. The application step is the one place a credential is
 read: `ATOMATON_UPDATE_TOKEN`, the machinery's own secret, handed to the update
 script that pushes, opens and merges the update's pull request as that identity.
 No second PAT exists.
