@@ -141,6 +141,29 @@ ${scriptCommandWithArgs(guardCommandOnClosedRef, {
   ["blocked"] as const,
 );
 
+/**
+ * `!upgrade`: dispatch the update workflow, which takes a newer release onto this tree.
+ *
+ * The workflow — not a run on this node — because an update is an action on the
+ * deployment, not work on the thread: it pushes its own branch and opens its own
+ * pull request, and the thread that asked gets the answer from that run (the
+ * workflow is started with this thread's number as its `source`). One update at a
+ * time is the workflow's own concurrency group, so two `!upgrade` comments queue
+ * rather than race.
+ */
+const upgradeStep = new TypedOutputsStep({
+  name: "Dispatch the update workflow",
+  if: `${parseCommandStep.rawOutputs.control} == 'upgrade' && ${guardStep.rawOutputs.blocked} != 'true' && ${closedGuardStep.rawOutputs.blocked} != 'true'`,
+  shell: "bash",
+  env: {
+    GH_TOKEN: "${{ github.token }}",
+    GITHUB_REPOSITORY: "${{ github.repository }}",
+    NUMBER: githubEvent<IssueCommentCreatedEvent>((e) => e.issue.number),
+  },
+  run: `gh workflow run atomaton-update.yml --repo "\${GITHUB_REPOSITORY}" -f "source=\${NUMBER}"
+`,
+});
+
 const targetStep = new TypedOutputsStep(
   {
     name: "Resolve target context",
@@ -409,6 +432,7 @@ export const atomaManualComment = new Workflow("atomaton-manual-comment", {
       closedGuardStep,
       targetStep,
       stopStep,
+      upgradeStep,
       resumeStep,
       resumeSubtreeStep,
       dispatchStep,
