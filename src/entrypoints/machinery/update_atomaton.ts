@@ -162,9 +162,11 @@ export function updateBody(report: UpdateReport): string {
   lines.push(
     "## What happens next",
     "",
-    report.conflicts.length === 0
-      ? "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice."
-      : "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge.",
+    report.conflicts.length > 0
+      ? "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge."
+      : plan.kept.length > 0
+        ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right."
+        : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.",
     "",
   );
   return `${lines.join("\n").trimEnd()}\n`;
@@ -183,6 +185,28 @@ export function stopComment(report: UpdateReport, prNumber: number): string {
     "",
     `The plan is applied on #${prNumber}, where the conflicts carry markers naming both sides. ` +
       "Comment on that pull request and ask an agent to resolve them — nothing merges until someone does.",
+  ].join("\n");
+}
+
+/**
+ * The comment a clean-but-kept update leaves in the thread that asked for it.
+ *
+ * `keep` entries are not conflicts: the plan applied cleanly and touched nothing
+ * it was not sure about — but each one is a place this repository's words and
+ * the release disagree, and merging it needs a person's look. The merge gate
+ * treats kept paths like conflicts for exactly this reason: the plan's own
+ * report says "needs a decision here", and the run does not get to say so and
+ * then make it.
+ */
+export function keptComment(report: UpdateReport, prNumber: number): string {
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    `Taking ${report.plan.target} stopped for a look: ${report.plan.kept.length} path(s) the plan will not touch without a person.`,
+    "",
+    ...report.plan.kept.map((entry) => `- \`${entry.path}\` (${entry.upstream})`),
+    "",
+    `The plan is applied on #${prNumber}, which does not merge itself. Read the kept paths there — ` +
+      "each is this repository's words or files against a release that moved elsewhere — and merge by hand when they read right.",
   ].join("\n");
 }
 
@@ -451,10 +475,14 @@ function main(): void {
 
   const notice = findOpenNotice(repo);
 
-  if (conflicts.length === 0) {
-    // The plan was clean and every merge measured clean: put the pull request
-    // through the repository's own checks, and merge when they have passed.
-    //
+  // The merge gate is conflicts AND kept paths. A clean plan with `keep`
+  // entries has applied everything but decided nothing where the plan was not
+  // sure -- and the plan's own report says "needs a decision here", so the run
+  // does not get to say so and then make it. The self-merging path below runs
+  // only when there is neither kind of stop.
+  const selfMerging = conflicts.length === 0 && plan.kept.length === 0;
+  let merging = false;
+  if (selfMerging) {
     // Not `--auto`. Auto-merge is a repository setting, and depending on it made
     // every clean update on a repository that had not flipped the setting stop
     // at a WARN with its pull request standing. The wait it stood in for is one
@@ -474,7 +502,6 @@ function main(): void {
       if (seen !== "0") break;
       Bun.sleepSync(10_000);
     }
-    let merging = false;
     if (seen === "0" || seen === "") {
       log(
         `WARN the required check never registered on #${prNumber} in fifteen minutes — the pull request stands, ` +
@@ -500,32 +527,54 @@ function main(): void {
         );
       }
     }
-    // The notice's promise is now being kept; a notice that stayed open would
-    // keep asking for what is already underway.
+  }
+  // A kept update stops like a conflicted one, and for the same reason in the
+  // plan's own words: the run says "this needs a person", so it leaves the
+  // person the deciding. The notice stays open -- no merge happened, so its
+  // promise is still unkept -- and both advice lists name the paths.
+  if (!selfMerging && plan.kept.length > 0) {
+    const said = keptComment(report, prNumber);
     if (notice !== null && notice !== 0) {
-      const closed = gh("issue", "close", String(notice), "--repo", repo, "--comment",
-        `${NOTICE_MARKER}\n${LLM_CONTEXT_TAG.write("exclude")}\n${doneComment(plan, prNumber, merging)}`);
-      if (closed.code !== 0) log(`WARN could not close the notice #${notice}: ${closed.stderr.trim()}`);
+      const told = gh("issue", "comment", String(notice), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not report to the notice #${notice}: ${told.stderr.trim()}`);
     }
     if (source > 0 && source !== notice) {
-      const said = gh("issue", "comment", String(source), "--repo", repo, "--body", doneComment(plan, prNumber, merging));
-      if (said.code !== 0) log(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
+      const told = gh("issue", "comment", String(source), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not answer in #${source}: ${told.stderr.trim()}`);
     }
-    log(`update to ${targetTag} is on #${prNumber}${merging ? ", merged after the repository's checks passed" : ""}`);
+    log(`update to ${targetTag} is applied on #${prNumber}, held for a person: ${plan.kept.length} kept path(s)`);
+    return;
+  }
+  // Conflicts stop the run the way the plan says: the pull request carries the
+  // markers, and the threads that asked are told where to resolve them. The
+  // notice stays open — no merge happened, so its promise is still unkept.
+  if (conflicts.length > 0) {
+    const said = stopComment(report, prNumber);
+    if (notice !== null && notice !== 0) {
+      const told = gh("issue", "comment", String(notice), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not report to the notice #${notice}: ${told.stderr.trim()}`);
+    }
+    if (source > 0 && source !== notice) {
+      const told = gh("issue", "comment", String(source), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not answer in #${source}: ${told.stderr.trim()}`);
+    }
+    log(`stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s)`);
     return;
   }
 
-  // Stopped — which is the design, not a failure. The pull request carries the
-  // markers; the thread that asked is told where to resolve them.
-  if (notice !== null && notice !== 0) {
-    const said = gh("issue", "comment", String(notice), "--repo", repo, "--body", stopComment(report, prNumber));
-    if (said.code !== 0) log(`WARN could not report to the notice #${notice}: ${said.stderr.trim()}`);
+  // selfMerging and past the poll above: the merge was made, or one of the WARN
+  // paths left the pull request standing. Either way the notice closes only on
+  // a merge that happened, and the thread that asked hears where things stand.
+  if (merging && notice !== null && notice !== 0) {
+    const closed = gh("issue", "close", String(notice), "--repo", repo, "--comment",
+      `${NOTICE_MARKER}\n${LLM_CONTEXT_TAG.write("exclude")}\n${doneComment(plan, prNumber, merging)}`);
+    if (closed.code !== 0) log(`WARN could not close the notice #${notice}: ${closed.stderr.trim()}`);
   }
   if (source > 0 && source !== notice) {
-    const said = gh("issue", "comment", String(source), "--repo", repo, "--body", stopComment(report, prNumber));
+    const said = gh("issue", "comment", String(source), "--repo", repo, "--body", doneComment(plan, prNumber, merging));
     if (said.code !== 0) log(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
   }
-  log(`stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s)`);
+  log(`update to ${targetTag} is on #${prNumber}${merging ? ", merged after the repository's checks passed" : ""}`);
 }
 
 if (import.meta.main) main();

@@ -20,7 +20,7 @@ The natural cut is not by directory — it is by what each part is trusted with:
 | Area | What is in it | What makes it its own area |
 | --- | --- | --- |
 | `src/workflows/` | the workflow generator, and the YAML it emits | it decides `${{ }}` expansion, triggers, `permissions` and `uses:` for every workflow an adopter runs. Read with `security/gh-actions-surface` |
-| `.github/workflows/release.yml` | the one hand-written workflow, the release button | the only workflow no generator produces, and one that reads no secret: the events `GITHUB_TOKEN` suppresses are bridged, and the update's push travels under the machinery's own token |
+| `.github/workflows/release.yml` | the one hand-written workflow, the release button | the only workflow no generator produces, and the one place outside the machinery that reaches `ATOMATON_UPDATE_TOKEN`: the update it runs pushes, opens and merges as that identity, so the file is the strongest single thing an audit should read |
 | `src/entrypoints/machinery/` | the glue each generated step runs | it runs on the default branch with a write token and treats the pull request's tree as data. The whole trust story is which tree a script is executed from and which one it merely reads |
 | `src/adapters/` | GitHub, actions and MCP adapters, including dispatch | the boundary between "we decided" and "GitHub did it": dispatch, the closed-target guard, the ops log |
 | `src/entrypoints/tools/mcp/` | the tool servers an agent is handed | credential routing, the hook layer, and the hooks that can and cannot be a boundary |

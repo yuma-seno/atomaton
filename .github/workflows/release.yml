@@ -584,12 +584,24 @@ jobs:
     # The application inside waits for the repository's own checks before it
     # merges (the same wait `atomaton-update.yml`'s job carries): the check's
     # path on this repository is minutes on its own, and a job killed mid-wait
-    # would leave an applied-but-unmerged update pull request standing.
+    # would leave an applied-but-unmerged update pull request standing. It joins
+    # the update's own concurrency group rather than standing outside it: a
+    # `!upgrade` during this window would otherwise run the same plan against the
+    # same branch from a second checkout, and while nothing corrupts -- one merge
+    # wins -- serialising them here is free.
     timeout-minutes: 60
+    concurrency:
+      group: atomaton-update
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      # The update script reads the rollup and watches the checks its merge waits
+      # behind; a private repository refuses that read to a job without it -- and
+      # here the refusal would not fail loudly, it would land in the WARN branch
+      # and leave the update pull request standing.
+      checks: read
     steps:
       # `main`, and not the dispatch's commit: the version-bump commit this run
       # merged has moved main past it, and the tree the update applies to must

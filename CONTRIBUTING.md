@@ -142,11 +142,13 @@ deploy rather than open a pull request for no diff.
 The workflow is hand-written and lives in `.github/workflows/` — not in the
 deliverable, so no adopter receives it, and `.github/**` is in
 `merge.governed_paths`, so an agent cannot merge the pull request that edits it.
-It runs on the workflow's own token throughout: the three events `GITHUB_TOKEN`
-suppresses — the pull request's checks, the merge's push, and the tag's push — are
-each bridged explicitly (`dispatch_ci.ts`, `dispatch_cd.ts`, and the deploy
-workflow's own `dispatch-new-tags` job), the same pattern the machinery uses for
-an agent's merges. No PAT is named and no secret is read.
+It runs on the workflow's own token for its own writes — the pull request, the
+push that opens it, the merge — and bridges the events that token cannot start:
+`dispatch_ci.ts` starts the pull request's check, `dispatch_cd.ts` starts the
+deploy after its merge. The application step is the one place a credential is
+read: `ATOMATON_UPDATE_TOKEN`, the machinery's own secret, handed to the update
+script that pushes, opens and merges the update's pull request as that identity.
+No second PAT exists.
 
 It happens in two halves, and the second is triggered by the first:
 
@@ -253,10 +255,11 @@ adopter sets:
   gh secret set ATOMATON_UPDATE_TOKEN
   ```
 
-The release button needs no secret of its own. Its pull request, its merge, and
-its deploy dispatch all run on the workflow's own token, with the events that
-token suppresses bridged explicitly; nothing about the release depends on a
-person's identity beyond the person pressing the button.
+The release button reads one secret, and it is the machinery's:
+`ATOMATON_UPDATE_TOKEN` is handed to the update script in the application step,
+which pushes, opens and merges the update's pull request as that identity. The
+release pull request, its merge and the deploy dispatch run on the workflow's own
+token, with their suppressed events bridged.
 
 **No agent can reach it.** `ATOMATON_UPDATE_TOKEN` is named by the update workflow
 and read there as a secret; `atomaton-runner.yml` does not mention it, and `atoma`

@@ -26,7 +26,7 @@
  * already name a file in one of the two releases; anything else in the tree is the
  * adopter's, and this module never lists it, walks it, or writes beside it.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import type { UpdatePlan } from "../../../domain/machinery/update-plan.ts";
@@ -154,7 +154,29 @@ export function applyPlan(
   // Then act. Writes first (parents included), deletions after — order only
   // matters where a release moves a directory's contents around, which no two
   // releases of this tree have done. Containment was validated for every path
-  // up front, so this loop has no refusals left to make.
+  // up front, so this loop has no refusals left to make -- EXCEPT one shape the
+  // plan cannot see: a path changing kind between releases. Upstream deleted
+  // `x` and added `x/y` classifies as `delete x` + `add x/y`, and the write of
+  // `x/y` would hit `mkdirSync` while `x` is still a file. So every parent that
+  // a write needs and the tree holds as a FILE is removed first, before any
+  // write runs: the loop below still writes everything or nothing, because the
+  // type check is a read with no side effects and the deletions it plans are
+  // exactly the plan's own delete entries -- paths upstream removed, which this
+  // tree still holds as the plan found them.
+  for (const path of writes.keys()) {
+    let parent = dirname(path);
+    while (parent !== "." && parent !== "/") {
+      const stats = statSync(resolve(join(root, parent)), { throwIfNoEntry: false });
+      if (stats?.isFile()) {
+        if (!deletes.has(parent)) {
+          return { why: `\`${path}\` needs \`${parent}\` to be a directory, but the tree holds a file there that the plan does not delete` };
+        }
+      }
+      const next = dirname(parent);
+      parent = next;
+    }
+  }
+
   for (const [path, content] of writes) {
     const destination = inside(path);
     if (destination === null) throw new Error(`\`${path}\` resolves outside the tree`);

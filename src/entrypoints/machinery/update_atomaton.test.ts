@@ -358,6 +358,53 @@ describe("a stopped update", () => {
     const toSource = (comments[1] ?? [])[(comments[1] ?? []).indexOf("--body") + 1] ?? "";
     expect(toSource).toContain("stopped at a pull request");
   });
+
+  /**
+   * A plan with `keep` entries is clean -- nothing collided, nothing of the
+   * tree's was overwritten -- and the run does not get to say "this needs a
+   * decision here" and then make it. Kept paths are the plan declining to act
+   * without a person, so the merge gate treats them like conflicts: the pull
+   * request stands with the plan applied, and the notice stays open.
+   */
+  test("a clean plan with kept paths stops for a person, and says which paths", () => {
+    // The keep comes from upstream ADDING a file at a path the tree already
+    // holds as its own -- the plan reports the collision and writes nothing:
+    // an update must not clobber an adopter's file with the release's new one.
+    // Zero conflicts, one keep. (A tree-deletion keep needs the fixture's base
+    // zip to know the file, which it does not when the tree lacks it.)
+    const tree: Tree = { ...BASE_FILES, ".github/atomaton/adopted.md": "the adopter's own file\n" };
+    const target: Tree = { ...TARGET_FILES, ".github/atomaton/adopted.md": "a file upstream started shipping\n" };
+    const { dir } = fixtureRepo(tree, "v0.1.0");
+    const r = runWithFakeGh(scriptPath("update_atomaton.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      env: { ATOMATON_UPDATE_TOKEN: "tok" },
+      rules: rules("v0.2.0", { target, notice: 12 }),
+    });
+    expect(r.status).toBe(0);
+
+    const created = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "create");
+    expect(created).toHaveLength(1);
+    // The stop: no merge was asked for and nothing was watched.
+    expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge")).toEqual([]);
+    expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "checks")).toEqual([]);
+    // The notice is NOT closed: no merge, so its promise is unkept.
+    expect(r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "close")).toEqual([]);
+
+    const body = (created[0] ?? [])[(created[0] ?? []).indexOf("--body") + 1] ?? "";
+    expect(body).toContain("a decision here");
+    expect(body).toContain("the plan will not touch without a person");
+
+    // Whatever conflicted, the tree shows it, and it is not the adopted file:
+    // a keep never gets markers, and the adopter's own file is still theirs.
+    expect(readFileSync(join(dir, ".github/atomaton/adopted.md"), "utf8")).toBe("the adopter's own file\n");
+
+    // The comment names the kept path and where the decision lives.
+    const comments = r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "comment");
+    const comment = (comments[0] ?? [])[(comments[0] ?? []).indexOf("--body") + 1] ?? "";
+    expect(comment).toContain("adopted.md");
+    expect(comment).toContain("#9");
+    expect(comment).toContain("merge by hand");
+  });
 });
 
 describe("an update that is nothing but a name", () => {

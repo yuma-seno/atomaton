@@ -54,13 +54,16 @@ export const atomaUpdate = new Workflow("atomaton-update", {
   // Narrower than ATOMATON_WORKFLOW_PERMISSIONS and deliberately so: this run
   // starts no agent and dispatches nothing. `pull-requests` is what editing the
   // update's pull request needs; `issues` is the notice it answers and closes;
+  // `checks: read` is the rollup and watch its merge waits behind -- a private
+  // repository refuses that read to a job without it, and the refusal would
+  // land in the WARN branch, a pull request left standing instead of an error;
   // `contents: read` is the checkout and the releases it reads. The writes that
   // decide anything -- the push, the pull request's opening, the merge -- travel
   // under the update token, which this workflow's permission block neither grants
   // nor limits. That is the point: the checks the merge is gated on are started
   // by the token's identity, so this workflow's own permissions cannot widen the
   // gate.
-  permissions: { contents: "read", issues: "write", "pull-requests": "write" },
+  permissions: { contents: "read", issues: "write", "pull-requests": "write", checks: "read" },
   concurrency: { group: "atomaton-update", "cancel-in-progress": false },
 }).addJobs(
   startJob(
