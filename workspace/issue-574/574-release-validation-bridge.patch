@@ -1,0 +1,289 @@
+From e46277be00e56332c00efea7b10bae808d200d33 Mon Sep 17 00:00:00 2001
+From: atomaton-engineer <atomaton-engineer@users.noreply.github.com>
+Date: Sat, 21 Nov 2026 16:10:28 +0000
+Subject: [PATCH] release: hand the release pull request to validation, not to
+ CI
+
+The first release through the merged workflow failed at the merge job: fifteen
+minutes after #573 opened, its `statusCheckRollup` held no `atomaton-check`. The
+job that opened the pull request had dispatched `atomaton-check.yml` through
+`dispatchCi`, which starts the CI jobs and nothing else. A check derived from a
+`workflow_dispatch` run is reported on the commit but does not count toward a
+required status check -- only the mirrored check run `validate_pull_request.ts`
+writes through the Checks API does (`validate_pull_request.ts:23-29`). Nothing
+dispatched the validator, because the pull request was opened with GITHUB_TOKEN
+and fired no event.
+
+`dispatch_pr_validation.ts` is the bridge that does both: it starts CI, waits for
+it, and writes the required context. The release pull request now goes through the
+same path an agent's pull request does, so the merge job's wait for
+`.name == "atomaton-check"` is a wait for a check run that is actually written --
+named from the ruleset's own required contexts, which is `atomaton-check` here
+(`.github/atomaton/rulesets/main.json`).
+
+The person flag needs its value: `parseArgs` reads `asked-by-person` as a string,
+so the bare `--asked-by-person` from the write-up would have aborted the step
+before dispatching anything. Verified, and pinned by a machinery test that runs
+the release's exact argv plus a contract assertion on the workflow itself. An
+empty `--ask` is accepted, because the step that would require one -- the agent
+dispatch -- only runs when the pull request names an `/<agent>`, and the release
+body names none.
+
+No version bump. `dispatch_ci.ts` stays for what it does; its header now records
+what it does not do, so the next caller does not make the same choice.
+---
+ .github/workflows/release.yml                 | 53 ++++++++++++-------
+ CONTRIBUTING.md                               |  5 +-
+ src/entrypoints/machinery/dispatch_ci.ts      | 20 +++++--
+ .../machinery/dispatch_pr_validation.test.ts  | 35 ++++++++++++
+ tests/contract/release.test.ts                | 38 +++++++++----
+ 5 files changed, 116 insertions(+), 35 deletions(-)
+
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 99e4376..a3dcb5a 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -56,8 +56,12 @@
+ # agent's own merges:
+ #
+ # - the release pull request fires no `pull_request` event, so its required check
+-#   would never start: `dispatch_ci.ts` starts it, through the same bridge
+-#   (`dispatchCi`) an agent's pull request is checked with;
++#   would never start: `dispatch_pr_validation.ts` starts it, through the same
++#   bridge (`dispatchPrValidation`) an agent's pull request is validated with.
++#   Not `dispatchCi`: a check derived from a `workflow_dispatch` run does not
++#   count toward a required status check -- only the mirror
++#   `validate_pull_request.ts` writes through the Checks API does -- so the CI
++#   jobs ran and the merge job waited for a context nothing would register;
+ # - the merge fires no `push`, so `deploy.on_merge` would never run:
+ #   `dispatch_cd.ts` starts the deploy, through `dispatchCd`;
+ # - the tag `tag-release.sh` creates fires no `push` either, so the publish would
+@@ -70,9 +74,10 @@
+ # so its appearance is this workflow's own doing, and the merge waits for it
+ # directly. The wait that matters is for the REQUIRED check to exist at all -- on
+ # a pull request opened moments ago, `atomaton-check` has not registered yet (the
+-# plan jobs dispatch it late by design), and a merge fired while the visible
+-# checks are green races that dispatch and loses. The measured failure was a merge
+-# the base branch policy refused while every check on screen was green.
++# validator writes it once CI has concluded, which is minutes), and a merge fired
++# while the visible checks are green races that wait and loses. The measured
++# failure was a merge the base branch policy refused while every check on screen
++# was green.
+ #
+ # ## The application is the machinery, not a rebuild
+ #
+@@ -423,13 +428,23 @@ jobs:
+           fi
+           echo "pr=${PR}" >> "$GITHUB_OUTPUT"
+ 
+-          # A pull request opened with GITHUB_TOKEN fires no event, so the check
+-          # the ruleset requires never starts on its own. Through the bridge, like
+-          # every other dispatch: this is the same script an agent's pull request
+-          # is checked through, and the contract that keeps dispatch calls in one
+-          # module (tests/contract/dispatch-sites.test.ts) is not suspended for
+-          # the button that releases the machinery itself.
+-          bun src/entrypoints/machinery/dispatch_ci.ts --repo "$GITHUB_REPOSITORY" --branch "$BRANCH"
++          # A pull request opened with GITHUB_TOKEN fires no event, so nothing
++          # starts the check the ruleset requires. Through the bridge, like every
++          # other dispatch -- but the VALIDATOR's bridge, not the CI one: the CI
++          # workflow runs jobs and registers no context the ruleset accepts, while
++          # atomaton-validate-pr.yml holds `checks: write` and writes the required
++          # check run itself. This is the same script an agent's pull request is
++          # validated through.
++          #
++          # No `--ask`: the release body names no `/<agent>`, so validation
++          # dispatches nobody and claims no comment. An empty ask is the shape for
++          # that; only the agent dispatch, which this PR skips, requires one.
++          # `asked-by-person true` for the one CI-waiting comment: a person pressed
++          # the button, and the wait is minutes long. The value is required --
++          # `parseArgs` takes this option as a string and a bare `--asked-by-person`
++          # aborts the step before anything is dispatched.
++          bun src/entrypoints/machinery/dispatch_pr_validation.ts \
++            --repo "$GITHUB_REPOSITORY" --number "$PR" --branch "$BRANCH" --asked-by-person true
+ 
+   merge-release:
+     name: Merge the release pull request, and wait for the release
+@@ -483,13 +498,13 @@ jobs:
+           fi
+ 
+           # Wait for the REQUIRED check to EXIST, not for the visible checks to
+-          # finish. The check workflow runs in two phases -- plan jobs first, and
+-          # they dispatch the real check -- so on a pull request opened moments
+-          # ago, `atomaton-check` is not in the rollup yet, and every check that
+-          # IS visible can be green while the deciding one does not exist. The
+-          # measured failure was a merge the base branch policy refused in
+-          # exactly that state. The check was dispatched by the previous job, so
+-          # its arrival is a matter of minutes, not a maybe.
++          # finish. It is written by the validator once CI has concluded, so on a
++          # pull request opened moments ago `atomaton-check` is not in the rollup
++          # yet, and every check that IS visible can be green while the deciding
++          # one does not exist. The measured failure was a merge the base branch
++          # policy refused in exactly that state. The previous job hands the pull
++          # request to the validator, so the check's arrival is minutes, not a
++          # maybe.
+           SEEN=""
+           for _ in $(seq 1 90); do
+             SEEN=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name == "atomaton-check")] | length')
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+index d2de327..f1f2562 100644
+--- a/CONTRIBUTING.md
++++ b/CONTRIBUTING.md
+@@ -144,8 +144,9 @@ deliverable, so no adopter receives it, and `.github/**` is in
+ `merge.governed_paths`, so an agent cannot merge the pull request that edits it.
+ It runs on the workflow's own token for its own writes — the pull request, the
+ push that opens it, the merge — and bridges the events that token cannot start:
+-`dispatch_ci.ts` starts the pull request's check, `dispatch_cd.ts` starts the
+-deploy after its merge. The application step is the one place a credential is
++`dispatch_pr_validation.ts` hands the pull request to validation, which starts its
++check and writes the required context, `dispatch_cd.ts` starts the deploy after
++its merge. The application step is the one place a credential is
+ read: `ATOMATON_UPDATE_TOKEN`, the machinery's own secret, handed to the update
+ script that pushes, opens and merges the update's pull request as that identity.
+ No second PAT exists.
+diff --git a/src/entrypoints/machinery/dispatch_ci.ts b/src/entrypoints/machinery/dispatch_ci.ts
+index 8881327..80f9d6e 100644
+--- a/src/entrypoints/machinery/dispatch_ci.ts
++++ b/src/entrypoints/machinery/dispatch_ci.ts
+@@ -2,13 +2,23 @@
+ /**
+  * dispatch_ci.ts — start the repository's check workflow against a branch.
+  *
+- * A pull request opened with `GITHUB_TOKEN` fires no `pull_request` event, so the
+- * checks it requires never start on their own. This is the same hole
++ * A pull request opened with `GITHUB_TOKEN` fires no `pull_request` event, so no
++ * run of the check workflow exists for it. This is the same hole
+  * `adapters/actions/dispatch-targets.ts` states once — GitHub starts no workflow
+  * run for an event its own token triggered — and the bridge there (`dispatchCi`)
+- * is what closes it for an agent's pull request. This script is the thin shell
+- * between a workflow's step and that bridge, the way `dispatch_update.ts` is for
+- * `!upgrade`: the arguments come from the caller, the decision is the bridge's.
++ * is what closes it. This script is the thin shell between a workflow's step and
++ * that bridge, the way `dispatch_update.ts` is for `!upgrade`: the arguments come
++ * from the caller, the decision is the bridge's.
++ *
++ * ## What it does not do
++ *
++ * Register a required status check. A check run derived from a `workflow_dispatch`
++ * run is reported on the commit but does not count toward a required status check;
++ * only one written through the Checks API does (see `validate_pull_request.ts`).
++ * So a pull request whose required context has to appear goes through
++ * `dispatch_pr_validation.ts`, which starts CI and writes that check run. Reaching
++ * for this one left the release pull request waiting for a context nothing would
++ * register.
+  *
+  * Usage:
+  *   dispatch_ci.ts --repo OWNER/REPO --branch BRANCH
+diff --git a/src/entrypoints/machinery/dispatch_pr_validation.test.ts b/src/entrypoints/machinery/dispatch_pr_validation.test.ts
+index e08722b..2f9e683 100644
+--- a/src/entrypoints/machinery/dispatch_pr_validation.test.ts
++++ b/src/entrypoints/machinery/dispatch_pr_validation.test.ts
+@@ -159,6 +159,41 @@ describe("dispatch_pr_validation.ts", () => {
+     }
+   });
+ 
++  /**
++   * The release workflow's shape, exactly as `.github/workflows/release.yml` builds
++   * it: the branch it just pushed, no `--ask`, and `asked-by-person true`.
++   *
++   * The release pull request's body names no `/<agent>`, so validation dispatches
++   * nobody and has no comment to claim -- and an empty ask is only accepted because
++   * the agent dispatch, the one caller that requires an ask, never runs. A bare
++   * `--asked-by-person` is not this: `parseArgs` reads the option as a string and
++   * aborts the step before anything is dispatched, which is why the value is pinned.
++   */
++  test("the release workflow's call -- a branch, no ask, a person asked -- is dispatched", () => {
++    const { root, work } = makeRemote(["release/v0.24.0"]);
++    try {
++      const r = run(
++        [dispatched],
++        [
++          "--repo", "owner/repo",
++          "--number", "573",
++          "--branch", "release/v0.24.0",
++          "--asked-by-person", "true",
++        ],
++        work,
++      );
++      expect(r.status).toBe(0);
++      const argv = workflowRun(r.ghCalls);
++      expect(argv).toContain("atomaton-validate-pr.yml");
++      expect(argv).toContain("number=573");
++      expect(argv).toContain("branch=release/v0.24.0");
++      expect(argv).toContain("asked_by_person=true");
++      expect(argv, "no ask comment, so nothing to claim").toContain("ask=");
++    } finally {
++      rmSync(root, { recursive: true, force: true });
++    }
++  });
++
+   /** Without a target there is nothing to validate, and nothing to ask GitHub about. */
+   test("a missing number is a usage error, not a resolution", () => {
+     const r = run([], ["--repo", "owner/repo"], process.cwd());
+diff --git a/tests/contract/release.test.ts b/tests/contract/release.test.ts
+index 56c5d84..a673e45 100644
+--- a/tests/contract/release.test.ts
++++ b/tests/contract/release.test.ts
+@@ -22,14 +22,22 @@ import { readFileSync } from "node:fs";
+  *   predecessors, because the tag it announces is `release`'s output and GitHub
+  *   exposes outputs only to a job that names their job directly;
+  * - the merge waits for the required check to EXIST before watching anything.
+- *   The check workflow runs in two phases -- plan jobs first, and they dispatch
+- *   the real check -- so on a fresh pull request the deciding check does not
+- *   exist yet, and a merge fired when the visible checks are green races that
+- *   dispatch and loses (measured: the base branch policy refused the merge);
+- * - the workflow runs on `GITHUB_TOKEN` alone, and the three events that token
+- *   suppresses are each dispatched through a bridge (`dispatch_ci.ts`,
++ *   The validator writes it as its last act, after CI has concluded, so on a
++ *   fresh pull request the deciding check does not exist yet, and a merge fired
++ *   when the visible checks are green races that write and loses (measured: the
++ *   base branch policy refused the merge);
++ * - the workflow runs on `GITHUB_TOKEN` alone, and the events that token
++ *   suppresses are each dispatched through a bridge (`dispatch_pr_validation.ts`,
+  *   `dispatch_cd.ts`, `dispatch_update.ts`). A secret here would be one a person
+  *   has to set, and the machinery's own push already travels under its own;
++ * - the release pull request's required check is started through the VALIDATOR,
++ *   not the CI workflow. GitHub starts no workflow run for an event its own token
++ *   triggered, and the context the ruleset requires is the check run
++ *   `validate_pull_request.ts` writes through the Checks API: a check derived
++ *   from a `workflow_dispatch` run is reported on the commit but does not count
++ *   toward a required status check. Dispatching CI directly ran the jobs, left
++ *   the context unregistered, and the merge job spent fifteen minutes waiting for
++ *   it before refusing (measured on #573);
+  * - the application dispatches through the bridge (`dispatch_update.ts`), the same
+  *   script the `!upgrade` comment command runs. The contract that keeps dispatch
+  *   calls in one module is not suspended for the button that releases the
+@@ -117,7 +125,7 @@ describe("Release", () => {
+     }
+   });
+ 
+-  test("the secret it reads is the machinery's own, and the two bridges cover the rest", () => {
++  test("the secret it reads is the machinery's own, and the bridges cover the rest", () => {
+     // One secret, and it is not this workflow's: `ATOMATON_UPDATE_TOKEN` is the
+     // identity the update script needs to push, open its pull request and merge
+     // -- the writes whose events the workflow's own token cannot start. The
+@@ -144,8 +152,20 @@ describe("Release", () => {
+     }
+     const prepared = script(jobs.release);
+     const merged = script(jobs["merge-release"]);
+-    // The pull request fires no event: the check is started through the bridge.
+-    expect(prepared, "the check a ruleset requires is dispatched, not waited for").toContain("dispatch_ci.ts");
++    // The pull request fires no event, and the required context is the validator's
++    // to write: it starts CI and republishes the result as a Checks-API check run.
++    // The CI bridge starts the same jobs and registers nothing the ruleset counts,
++    // which is what the merge job then waits fifteen minutes for.
++    expect(prepared, "the required check is started by the validator, which writes it").toContain(
++      "dispatch_pr_validation.ts",
++    );
++    expect(prepared, "dispatching CI directly registers no required context").not.toContain(
++      "dispatch_ci.ts",
++    );
++    // And the value the person flag carries is not decoration: `parseArgs` reads
++    // `asked-by-person` as a string, so a bare `--asked-by-person` aborts the step
++    // before anything is dispatched.
++    expect(prepared, "the person flag carries its value").toContain("--asked-by-person true");
+     // The merge fires no push: the deploy is dispatched through the bridge.
+     expect(merged, "the deploy a merge would have started is dispatched").toContain("dispatch_cd.ts");
+     // And each dispatching job holds the permission the dispatch needs, or it
+-- 
+2.56.1
+
