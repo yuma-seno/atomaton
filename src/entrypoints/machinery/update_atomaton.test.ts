@@ -108,6 +108,12 @@ function fixtureRepo(entries: Tree, version: string): { dir: string; bare: strin
   }
   mkdirSync(dirname(join(dir, RELEASE_MANIFEST)), { recursive: true });
   writeFileSync(join(dir, RELEASE_MANIFEST), `${manifestJson(version, Object.keys(entries))}\n`);
+  // The configuration the machinery reads in a real adopted tree. It is in
+  // neither release, so the plan must never propose touching it -- a path in
+  // neither release is invisible to the plan, and this is that property under a
+  // file the run itself reads through another door.
+  mkdirSync(dirname(join(dir, ".github/atomaton/config.yaml")), { recursive: true });
+  writeFileSync(join(dir, ".github/atomaton/config.yaml"), "base_branch: main\ndeploy: {}\n");
   gitIn(dir, ["-c", "init.defaultBranch=main", "init"]);
   gitIn(dir, ["add", "-A"]);
   gitIn(dir, ["-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "seed"]);
@@ -163,6 +169,12 @@ function rules(
     { match: ["pr", "list"], stdout: JSON.stringify(options.openPr ? [{ number: options.openPr }] : []) },
     { match: ["pr", "create"], stdout: `https://example.test/owner/repo/pull/9` },
     { match: ["pr", "edit"], stdout: "" },
+    // The rollup poll: the required check exists, so the wait ends on its first
+    // attempt. The answer is the projection `readPullRequest` returns, not a
+    // jq'd count -- the read goes through the one module that reads a pull
+    // request, and the filter is this script's.
+    { match: ["pr", "view"], stdout: JSON.stringify({ statusCheckRollup: [{ name: "atomaton-check" }] }) },
+    { match: ["pr", "checks"], stdout: "" },
     { match: ["pr", "merge"], stdout: "" },
     {
       match: ["issue", "list"],
@@ -239,7 +251,7 @@ describe("a run that is already settled", () => {
 });
 
 describe("a clean update", () => {
-  test("applies the plan, pushes the branch, opens the pull request, asks for the merge", () => {
+  test("applies the plan, pushes the branch, opens the pull request, merges after the checks", () => {
     const { dir, bare } = fixtureRepo(BASE_FILES, "v0.1.0");
     const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: "tok" });
     expect(r.status).toBe(0);
@@ -258,9 +270,23 @@ describe("a clean update", () => {
     expect(create).toContain(updateBranchFor("v0.2.0"));
     expect(create).toContain(updateTitle("v0.2.0"));
 
+    // The merge is the script's own, made after the checks it waited for: the
+    // rollup was polled for the required check's existence, the checks were
+    // watched, and the merge carries no `--auto` -- the script does not depend
+    // on the repository having auto-merge enabled, because the wait is one it
+    // can make itself.
+    const viewed = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "view");
+    expect(viewed.length).toBeGreaterThan(0);
+    const watched = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "checks");
+    expect(watched).toHaveLength(1);
     const merged = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge");
     expect(merged).toHaveLength(1);
-    expect(merged[0]).toContain("--auto");
+    expect(merged[0]).not.toContain("--auto");
+    // The merge is made as the update token -- the identity that opened the pull
+    // request -- so its push is real, and `deploy.on_merge` runs on its own. No
+    // dispatch follows a clean update: the repository's ordinary chain does the
+    // deploying, the way a person's merge would.
+    expect(r.ghCalls.filter((call) => call[0] === "workflow")).toEqual([]);
   });
 
   test("a notice standing open is closed, with the pull request named", () => {
@@ -331,6 +357,53 @@ describe("a stopped update", () => {
     expect(comments).toHaveLength(2);
     const toSource = (comments[1] ?? [])[(comments[1] ?? []).indexOf("--body") + 1] ?? "";
     expect(toSource).toContain("stopped at a pull request");
+  });
+
+  /**
+   * A plan with `keep` entries is clean -- nothing collided, nothing of the
+   * tree's was overwritten -- and the run does not get to say "this needs a
+   * decision here" and then make it. Kept paths are the plan declining to act
+   * without a person, so the merge gate treats them like conflicts: the pull
+   * request stands with the plan applied, and the notice stays open.
+   */
+  test("a clean plan with kept paths stops for a person, and says which paths", () => {
+    // The keep comes from upstream ADDING a file at a path the tree already
+    // holds as its own -- the plan reports the collision and writes nothing:
+    // an update must not clobber an adopter's file with the release's new one.
+    // Zero conflicts, one keep. (A tree-deletion keep needs the fixture's base
+    // zip to know the file, which it does not when the tree lacks it.)
+    const tree: Tree = { ...BASE_FILES, ".github/atomaton/adopted.md": "the adopter's own file\n" };
+    const target: Tree = { ...TARGET_FILES, ".github/atomaton/adopted.md": "a file upstream started shipping\n" };
+    const { dir } = fixtureRepo(tree, "v0.1.0");
+    const r = runWithFakeGh(scriptPath("update_atomaton.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      env: { ATOMATON_UPDATE_TOKEN: "tok" },
+      rules: rules("v0.2.0", { target, notice: 12 }),
+    });
+    expect(r.status).toBe(0);
+
+    const created = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "create");
+    expect(created).toHaveLength(1);
+    // The stop: no merge was asked for and nothing was watched.
+    expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge")).toEqual([]);
+    expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "checks")).toEqual([]);
+    // The notice is NOT closed: no merge, so its promise is unkept.
+    expect(r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "close")).toEqual([]);
+
+    const body = (created[0] ?? [])[(created[0] ?? []).indexOf("--body") + 1] ?? "";
+    expect(body).toContain("a decision here");
+    expect(body).toContain("the plan will not touch without a person");
+
+    // Whatever conflicted, the tree shows it, and it is not the adopted file:
+    // a keep never gets markers, and the adopter's own file is still theirs.
+    expect(readFileSync(join(dir, ".github/atomaton/adopted.md"), "utf8")).toBe("the adopter's own file\n");
+
+    // The comment names the kept path and where the decision lives.
+    const comments = r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "comment");
+    const comment = (comments[0] ?? [])[(comments[0] ?? []).indexOf("--body") + 1] ?? "";
+    expect(comment).toContain("adopted.md");
+    expect(comment).toContain("#9");
+    expect(comment).toContain("merge by hand");
   });
 });
 

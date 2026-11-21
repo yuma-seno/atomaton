@@ -270,7 +270,8 @@ const toolsJob = new DefinedJob(
     //
     // `check_live_tools.ts` above is the check an ADOPTER runs: for them `.github/`
     // IS the deliverable, and the `machineryPath()` default resolves to it correctly.
-    // In this repository `.github/` is the LAST RELEASE -- put there by self-deploy --
+    // In this repository `.github/` is the LAST RELEASE -- applied by the update
+    // machinery --
     // so that check has never seen a pull request's tree. It reports on a release
     // that already passed, which reads exactly like a release that passes.
     //

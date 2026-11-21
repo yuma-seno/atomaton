@@ -143,9 +143,9 @@ from the other.
 
 `.github/atomaton/scripts/` is where a project puts the commands its
 `config.yaml` names. It is not shipped — an adopter creates it — and this
-repository keeps its own there, through `self/`, so that
+repository keeps its own there directly, so that
 `./.github/atomaton/scripts/tag-release.sh` is a path that means the same thing
-here and in an adopted repository. A path under `self/` would be an example
+here and in an adopted repository. A path anywhere else would be an example
 nobody could copy.
 
 Scripts there run with whatever credentials the job declares. That is not a new
@@ -153,15 +153,15 @@ opening: `config.yaml`'s `commands` have always been agent-writable, which is
 exactly why `checks.from_pull_request` is given no secret. Review is the gate,
 here as everywhere.
 
-`self/` is this repository's own overlay onto `.github/`, copied verbatim by
-`self/workflows/self-deploy.yml`. It mirrors `.github/` exactly, so
-nothing goes in it that does not belong in `.github/` — and an overlay file is a
-copy rather than a build, so both halves change in the same pull request.
-`self-overlay.test.ts` holds them to each other in both directions — except for
-`self/workflows/**`, which leads on its own: GitHub refuses to let a GitHub App
-token write `.github/workflows/**`, so an agent can change the source and not the
-deployed copy, and the next self-deploy applies it. The deployed copy may never be
-edited on its own.
+**What is hand-written lives in `.github/` directly, with no mirror.** This
+repository's `release.yml` sits in `.github/workflows/` beside the generated ones,
+and its release scripts sit in `.github/atomaton/scripts/`. The update machinery's
+plan enumerates the release, never the tree: a path the release does not ship is a
+path it never proposes touching, so hand-written files survive every update
+untouched and need no second copy. They used to be mirrored in `self/`, because
+the self-deploy rebuilt `.github/` from scratch and would have deleted anything
+hand-written left in place; the rebuild became a three-way merge, and the mirror
+went with it.
 
 **An upgrade replaces the machinery, and that is the intent.** A project may edit
 anything under `.github/atomaton-runtime/`; the next upgrade puts the shipped
@@ -172,14 +172,14 @@ in git history: it can be read, and it can be put back. `docs/runtime/tasks/move
 uptake as vendoring for this reason, and #435 holds what is left of making that
 easy.
 
-This repository's own release scripts live at `self/atomaton/scripts/`, which is
-`.github/atomaton/scripts/` once deployed. Nothing ships there: the directory is
-the adopter's to create, and this repository keeping its own in it is what makes
-the path in `config.yaml` a line an adopter can copy rather than translate.
+This repository's own release scripts live at `.github/atomaton/scripts/`. Nothing
+ships there: the directory is the adopter's to create, and this repository keeping
+its own in it is what makes the path in `config.yaml` a line an adopter can copy
+rather than translate.
 
 **Atomaton's release starts the servers it would ship, and stops before publishing
-if they disagree with it.** `self/atomaton/scripts/publish-release.sh` runs
-`self/atomaton/scripts/check-live-tools.sh` between building `dist/` and creating
+if they disagree with it.** `.github/atomaton/scripts/publish-release.sh` runs
+`.github/atomaton/scripts/check-live-tools.sh` between building `dist/` and creating
 the release. That script starts every tool server the artifact declares and asks
 `atoma validate --with-live-tools` what each one actually advertises, which is what
 decides whether every `tool_allowlist` / `tool_denylist` pattern still names a tool

@@ -81,16 +81,23 @@ deploy:
 
 # When a person, not an agent, performs the merge. Any one of these firing is
 # enough.
+#
+# ## The one merge that is exempt, and why it is not a hole
+#
+# The update machinery's own pull request changes `.github/**` and merges without
+# a person. That is the design, not an oversight: `governed_paths` is a rule about
+# AGENT merges -- a rule a merge gate and `merge_pr` enforce, and the update's
+# `gh pr merge` consults neither. What stands where a person would are the two
+# things this list exists to guarantee, by other means: every path the pull
+# request changes is named in its body (the plan's whole output is that list), and
+# the release it applies was published by a person pressing the button or asked
+# for with `!upgrade`. A conflicted application stops at its pull request, and
+# there a person decides. The machinery applying a declared release is the
+# person's instruction, carried out.
 merge:
   policy: auto              # this repository lets agents merge
   governed_paths:             # changes here are a person's to merge
     - ".github/**"
-    # This repository's own overlay onto .github/. Everything here BECOMES a
-    # governed path at the next self-deploy -- this list included -- so leaving
-    # it out let a change reach .github/** without meeting the rule that guards
-    # it. The deploy pull request is a person's, but it rebuilds the whole tree,
-    # which is the wrong place to first read a one-line change to a gate.
-    - "self/**"
     # The version declaration. `tag-release.sh` derives the release tag from it,
     # so bumping it and merging IS the release -- and deciding that a set of work
     # is ready to ship is a judgement no agent is positioned to make. Without
@@ -109,17 +116,15 @@ merge:
     # beside them stays governed -- it decides what a run may reach, the skills do
     # not -- and so does `package.json` above, which decides what ships.
     #
-    # The last one is what makes the exemption durable rather than until the next
-    # release: a skill under `self/` is its own durable file, and the edit tool puts
-    # a pair's two sides in one commit, so a change there survives the self-deploy
-    # that rebuilds `.github/`. A skill or the prompt template that lives only
-    # under `.github/` is release output -- its durable copy is `src/content/`
-    # (skills in `src/content/skills/`, the template at
+    # The exemption is durable by construction: the update machinery never
+    # proposes touching a path the release does not ship, so a skill living
+    # directly under `.github/` survives every update untouched. A skill or the
+    # prompt template whose durable copy should reach adopters lives in
+    # `src/content/` (skills in `src/content/skills/`, the template at
     # `src/content/prompt-template.md`), and a fix that should outlive the next
     # deploy is a normal pull request there.
     - "!.github/atomaton/prompt-template.md"
     - "!.github/atomaton/skills/**"
-    - "!self/atomaton/skills/**"
   gates:
     - reason: "This changes the code that decides what an agent may merge. Read it before merging: a weakening here would not be caught anywhere later."
       when:

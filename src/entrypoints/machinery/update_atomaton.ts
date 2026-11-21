@@ -7,7 +7,7 @@
  * runs the same plan for real, on the checkout the workflow ran it in:
  *
  *     plan → apply to the tree → branch → commit → push → pull request
- *        → no conflict: request the auto-merge, close the notice
+ *        → no conflict: wait for the checks, merge, close the notice
  *        → conflicts:   stop at the pull request, report where and why
  *
  * Nothing here decides policy. Whether a path is take/add/delete/merge is the
@@ -26,21 +26,28 @@
  * and a run without it fails loudly and does nothing — a person who pressed the
  * button is standing there, and silence is not an answer.
  *
- * ## Why the stop is a pull request, and why the merge is requested, not done
+ * ## Why the stop is a pull request, and why the token does the writing
  *
  * A pull request is the one place this repository already has everything a
  * resolution needs: visible diffs, checks that refuse broken content, and an agent
- * loop a person can address with a comment. The update asks for the auto-merge
- * (`gh pr merge --auto`) rather than merging outright, so the repository's own
- * checks stand between the release and the default branch even when nothing
- * collided — the plan being clean is the plan's claim, and the checks are what
- * makes it true.
+ * loop a person can address with a comment. The pull request is opened, and when
+ * the plan is clean merged, as the update token -- an identity that starts runs.
+ * A pull request opened with the workflow's own token fires no `pull_request`
+ * event, so its required check would never start; a merge made with it fires no
+ * `push`, so `deploy.on_merge` would never run. The token is what makes this the
+ * same shape as a person pressing the buttons: checks run on the pull request,
+ * and the merge's push starts the deploy.
+ *
+ * The plan being clean is the plan's claim; the checks are what makes it true.
+ * The script waits for the required check to exist and pass before merging, and
+ * a red change stays unmerged.
  *
  * Usage:
  *   update_atomaton.ts --repo OWNER/REPO [--source N] [--tag vX.Y.Z]
  */
 import { parseArgs } from "node:util";
-import { gh, ghRead } from "../../adapters/github/gh.ts";
+import { gh, ghRead, ghAs } from "../../adapters/github/gh.ts";
+import { readPullRequest } from "../../adapters/github/pull-request.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { machineryPath } from "../../adapters/runner/machinery.ts";
 import { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from "../../domain/machinery/update-plan.ts";
@@ -155,9 +162,11 @@ export function updateBody(report: UpdateReport): string {
   lines.push(
     "## What happens next",
     "",
-    report.conflicts.length === 0
-      ? "The auto-merge is requested on this pull request; the repository's checks run first. If they pass, this merges itself and the notice closes."
-      : "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge.",
+    report.conflicts.length > 0
+      ? "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge."
+      : plan.kept.length > 0
+        ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right."
+        : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.",
     "",
   );
   return `${lines.join("\n").trimEnd()}\n`;
@@ -179,13 +188,35 @@ export function stopComment(report: UpdateReport, prNumber: number): string {
   ].join("\n");
 }
 
+/**
+ * The comment a clean-but-kept update leaves in the thread that asked for it.
+ *
+ * `keep` entries are not conflicts: the plan applied cleanly and touched nothing
+ * it was not sure about — but each one is a place this repository's words and
+ * the release disagree, and merging it needs a person's look. The merge gate
+ * treats kept paths like conflicts for exactly this reason: the plan's own
+ * report says "needs a decision here", and the run does not get to say so and
+ * then make it.
+ */
+export function keptComment(report: UpdateReport, prNumber: number): string {
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    `Taking ${report.plan.target} stopped for a look: ${report.plan.kept.length} path(s) the plan will not touch without a person.`,
+    "",
+    ...report.plan.kept.map((entry) => `- \`${entry.path}\` (${entry.upstream})`),
+    "",
+    `The plan is applied on #${prNumber}, which does not merge itself. Read the kept paths there — ` +
+      "each is this repository's words or files against a release that moved elsewhere — and merge by hand when they read right.",
+  ].join("\n");
+}
+
 /** The comment a settled update leaves, when it was asked for from a thread. */
 export function doneComment(plan: UpdatePlan, prNumber: number, merging: boolean): string {
   return [
     LLM_CONTEXT_TAG.write("exclude"),
     `Taking ${plan.target} onto ${plan.base} is applied on #${prNumber}.`,
     merging
-      ? "The auto-merge is requested there; the repository's checks run first, and the merge follows them."
+      ? "The repository's checks passed there, and the merge is made; the merge's push starts the deploy."
       : "The repository's checks run on it; once they pass, it can merge.",
   ].join("\n");
 }
@@ -412,8 +443,17 @@ function main(): void {
     }
     prNumber = existing;
     log(`updated pull request #${existing}`);
+    // An existing pull request was opened under the token on a previous run, so
+    // its check is already running or done; a fresh push to the branch (this
+    // run's) fires the pull_request `synchronize` event, which starts the check
+    // again. Nothing to dispatch here either way.
   } else {
-    const created = gh(
+    // Opened as the update token, not as this workflow's own: GitHub starts no
+    // `pull_request` run for a pull request the workflow's token opened, and the
+    // check the ruleset requires is exactly that event. The token is an identity
+    // that starts runs -- the same fact the push above already relies on.
+    const created = ghAs(
+      token,
       "pr", "create", "--repo", repo, "--base", base, "--head", branch,
       "--title", updateTitle(targetTag), "--body", updateBody(report),
     );
@@ -435,43 +475,106 @@ function main(): void {
 
   const notice = findOpenNotice(repo);
 
-  if (conflicts.length === 0) {
-    // The plan was clean and every merge measured clean: ask for the merge and
-    // let the repository's own checks stand between this and the default branch.
-    const requested = gh("pr", "merge", String(prNumber), "--repo", repo, "--auto", "--merge");
-    const merging = requested.code === 0;
-    if (!merging) {
-      log(
-        `WARN the auto-merge could not be requested on #${prNumber}: ${requested.stderr.trim() || `gh exited ${requested.code}`}` +
-          " — the pull request stands, and merges when the checks pass and a person or a run asks again.",
-      );
+  // The merge gate is conflicts AND kept paths. A clean plan with `keep`
+  // entries has applied everything but decided nothing where the plan was not
+  // sure -- and the plan's own report says "needs a decision here", so the run
+  // does not get to say so and then make it. The self-merging path below runs
+  // only when there is neither kind of stop.
+  const selfMerging = conflicts.length === 0 && plan.kept.length === 0;
+  let merging = false;
+  if (selfMerging) {
+    // Not `--auto`. Auto-merge is a repository setting, and depending on it made
+    // every clean update on a repository that had not flipped the setting stop
+    // at a WARN with its pull request standing. The wait it stood in for is one
+    // this script can make itself: the pull request was opened as the update
+    // token, so its `pull_request` event is real, and the check is coming. The
+    // only wait that matters is for it to EXIST -- the check workflow runs in
+    // two phases, plan jobs first and they dispatch the real check, so a merge
+    // fired while the visible checks are green races that dispatch and loses.
+    // The measured failure was a merge the base branch policy refused in
+    // exactly that state, every check on screen green.
+    let seen = "";
+    for (let attempt = 0; attempt < 90; attempt++) {
+      const rollup = readPullRequest<{ statusCheckRollup?: Array<{ name?: string }>}>(repo, prNumber, "statusCheckRollup");
+      seen = rollup.known
+        ? String((rollup.value.statusCheckRollup ?? []).filter((check) => check.name === "atomaton-check").length)
+        : "0";
+      if (seen !== "0") break;
+      Bun.sleepSync(10_000);
     }
-    // The notice's promise is now being kept; a notice that stayed open would
-    // keep asking for what is already underway.
+    if (seen === "0" || seen === "") {
+      log(
+        `WARN the required check never registered on #${prNumber} in fifteen minutes — the pull request stands, ` +
+          "and merges when a person or a run asks again.",
+      );
+    } else if (
+      gh("pr", "checks", String(prNumber), "--repo", repo, "--watch", "--fail-fast", "--interval", "10").code !== 0
+    ) {
+      // A red change is not merged, and the pull request stands with the checks
+      // that said so.
+      log(`WARN the checks on #${prNumber} did not pass — the pull request stands with them.`);
+    } else {
+      // Merged as the update token, like the opening above: a merge made with
+      // the workflow's own token fires no `push`, and `deploy.on_merge` is what
+      // a push starts. The token's merge IS the push, so the repository's
+      // ordinary deploy chain runs with no bridge at all -- the same shape as a
+      // person pressing merge.
+      const requested = ghAs(token, "pr", "merge", String(prNumber), "--repo", repo, "--merge");
+      merging = requested.code === 0;
+      if (!merging) {
+        log(
+          `WARN the merge could not be made on #${prNumber}: ${requested.stderr.trim() || `gh exited ${requested.code}`}`,
+        );
+      }
+    }
+  }
+  // A kept update stops like a conflicted one, and for the same reason in the
+  // plan's own words: the run says "this needs a person", so it leaves the
+  // person the deciding. The notice stays open -- no merge happened, so its
+  // promise is still unkept -- and both advice lists name the paths.
+  if (!selfMerging && plan.kept.length > 0) {
+    const said = keptComment(report, prNumber);
     if (notice !== null && notice !== 0) {
-      const closed = gh("issue", "close", String(notice), "--repo", repo, "--comment",
-        `${NOTICE_MARKER}\n${LLM_CONTEXT_TAG.write("exclude")}\n${doneComment(plan, prNumber, merging)}`);
-      if (closed.code !== 0) log(`WARN could not close the notice #${notice}: ${closed.stderr.trim()}`);
+      const told = gh("issue", "comment", String(notice), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not report to the notice #${notice}: ${told.stderr.trim()}`);
     }
     if (source > 0 && source !== notice) {
-      const said = gh("issue", "comment", String(source), "--repo", repo, "--body", doneComment(plan, prNumber, merging));
-      if (said.code !== 0) log(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
+      const told = gh("issue", "comment", String(source), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not answer in #${source}: ${told.stderr.trim()}`);
     }
-    log(`update to ${targetTag} is on #${prNumber}${merging ? " with the auto-merge requested" : ""}`);
+    log(`update to ${targetTag} is applied on #${prNumber}, held for a person: ${plan.kept.length} kept path(s)`);
+    return;
+  }
+  // Conflicts stop the run the way the plan says: the pull request carries the
+  // markers, and the threads that asked are told where to resolve them. The
+  // notice stays open — no merge happened, so its promise is still unkept.
+  if (conflicts.length > 0) {
+    const said = stopComment(report, prNumber);
+    if (notice !== null && notice !== 0) {
+      const told = gh("issue", "comment", String(notice), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not report to the notice #${notice}: ${told.stderr.trim()}`);
+    }
+    if (source > 0 && source !== notice) {
+      const told = gh("issue", "comment", String(source), "--repo", repo, "--body", said);
+      if (told.code !== 0) log(`WARN could not answer in #${source}: ${told.stderr.trim()}`);
+    }
+    log(`stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s)`);
     return;
   }
 
-  // Stopped — which is the design, not a failure. The pull request carries the
-  // markers; the thread that asked is told where to resolve them.
-  if (notice !== null && notice !== 0) {
-    const said = gh("issue", "comment", String(notice), "--repo", repo, "--body", stopComment(report, prNumber));
-    if (said.code !== 0) log(`WARN could not report to the notice #${notice}: ${said.stderr.trim()}`);
+  // selfMerging and past the poll above: the merge was made, or one of the WARN
+  // paths left the pull request standing. Either way the notice closes only on
+  // a merge that happened, and the thread that asked hears where things stand.
+  if (merging && notice !== null && notice !== 0) {
+    const closed = gh("issue", "close", String(notice), "--repo", repo, "--comment",
+      `${NOTICE_MARKER}\n${LLM_CONTEXT_TAG.write("exclude")}\n${doneComment(plan, prNumber, merging)}`);
+    if (closed.code !== 0) log(`WARN could not close the notice #${notice}: ${closed.stderr.trim()}`);
   }
   if (source > 0 && source !== notice) {
-    const said = gh("issue", "comment", String(source), "--repo", repo, "--body", stopComment(report, prNumber));
+    const said = gh("issue", "comment", String(source), "--repo", repo, "--body", doneComment(plan, prNumber, merging));
     if (said.code !== 0) log(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
   }
-  log(`stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s)`);
+  log(`update to ${targetTag} is on #${prNumber}${merging ? ", merged after the repository's checks passed" : ""}`);
 }
 
 if (import.meta.main) main();

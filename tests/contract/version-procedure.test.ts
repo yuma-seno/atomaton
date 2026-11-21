@@ -8,23 +8,23 @@ import { readFileSync } from "node:fs";
  * them is loaded into every agent run, so the agreement is pinned here.
  *
  * The agreed procedure (#306): a work pull request never carries the version edit,
- * and a release is declared by a person through **Release Pipeline**, whose pull
+ * and a release is declared by a person through **Release**, whose pull
  * request carries only that edit. Merging it is the release.
  */
-const SKILL = readFileSync("self/atomaton/skills/project/conventions.md", "utf8");
+const SKILL = readFileSync(".github/atomaton/skills/project/conventions.md", "utf8");
 const CONTRIBUTING = readFileSync("CONTRIBUTING.md", "utf8");
 
 describe("the version procedure is stated the same way in both documents", () => {
   test("the skill forbids the edit outright, and names who declares the release", () => {
     expect(SKILL).toContain("**Never touch `version` in `package.json`.");
-    expect(SKILL).toContain("Release Pipeline");
+    expect(SKILL).toContain("Release");
     // The old rule made the bump normal whenever "releasing is the task", which is
     // every work pull request under the practice it contradicted.
     expect(SKILL).not.toContain("unless releasing is the task");
   });
 
   test("CONTRIBUTING names the release as a separate declaration, not a bump", () => {
-    expect(CONTRIBUTING).toContain("**Release Pipeline**");
+    expect(CONTRIBUTING).toContain("**Release**");
     expect(CONTRIBUTING).not.toContain("Bump `version` in `package.json` and merge it");
   });
 });

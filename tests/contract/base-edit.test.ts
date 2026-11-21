@@ -35,7 +35,6 @@ import {
   amendPathProblem,
   baseEditPrBody,
   editedText,
-  overlayTwinPath,
 } from "../../src/domain/machinery/base-edit.ts";
 
 const SCRIPTS_DIR = join(process.cwd(), "src/entrypoints/tools/mcp");
@@ -88,7 +87,6 @@ function makeFixture(): Fixture {
 
   put(seed, ".github/atomaton/config.yaml", `base_branch: "${BASE}"\n`);
   put(seed, ".github/atomaton/skills/project/conventions.md", "line one\nline two\n");
-  put(seed, "self/atomaton/skills/project/conventions.md", "line one\nline two\n");
   put(seed, ".github/atomaton/prompt-template.md", "you are an agent\n");
   put(seed, ".github/atomaton/scripts/run.sh", "#!/usr/bin/env bash\necho hi\n");
   git(seed, "add", ".");
@@ -214,25 +212,22 @@ describe("open_base_edit_pr", () => {
       ),
     );
 
-    // What it reports: the pull request, the commit, and that the twin was staged with it.
+    // What it reports: the pull request, the commit, and the paths it holds.
     expect(payload.number).toBe(41);
     expect(payload.url).toBe("https://github.com/owner/repo/pull/41");
     expect(payload.base).toBe(BASE);
-    expect(payload.files).toEqual([
-      { path: ".github/atomaton/skills/project/conventions.md", twin: "self/atomaton/skills/project/conventions.md" },
-    ]);
+    expect(payload.staged).toEqual([".github/atomaton/skills/project/conventions.md"]);
     expect(payload.validation_dispatched).toBe(true);
     expect(payload.commit).toMatch(/^[0-9a-f]{40}$/);
 
-    // One commit, on the base branch's tip, holding both copies of the file.
+    // One commit, on the base branch's tip, holding the one copy of the file: a
+    // path under `.github/` is the file, not one half of a pair.
     expect(git(fixture.remote, "rev-list", "--count", `${fixture.baseTip}..${payload.branch}`)).toBe("1");
     expect(git(fixture.remote, "rev-parse", `${payload.branch}^`)).toBe(fixture.baseTip);
     expect(git(fixture.remote, "show", `${payload.branch}:.github/atomaton/skills/project/conventions.md`)).toBe(
       "line one\nline 2",
     );
-    expect(git(fixture.remote, "show", `${payload.branch}:self/atomaton/skills/project/conventions.md`)).toBe(
-      "line one\nline 2",
-    );
+    expect(git(fixture.remote, "ls-tree", "--name-only", payload.branch, "self/")).toBe("");
 
     // And the run's own checkout, untouched: same HEAD, same index, same uncommitted work.
     expect(git(fixture.work, "rev-parse", "HEAD")).toBe(head);
@@ -259,7 +254,7 @@ describe("open_base_edit_pr", () => {
     expect(dispatch).toContain("ask=9001");
   }, 60_000);
 
-  test("a path with no overlay twin is staged alone, and the reply says so", async () => {
+  test("the reply's staged list is the paths the commit holds, and nothing else", async () => {
     const fixture = makeFixture();
     const payload = payloadOf(
       await callTool(
@@ -274,11 +269,11 @@ describe("open_base_edit_pr", () => {
       ),
     );
 
-    expect(payload.files).toEqual([{ path: ".github/atomaton/prompt-template.md", twin: null }]);
     expect(payload.staged).toEqual([".github/atomaton/prompt-template.md"]);
-    // The deployed copy moved; no `self/` copy of it exists on the base branch.
+    // And no second copy of anything: `self/` was the self-deploy's mirror, and the
+    // machinery that replaced it has no use for one.
     expect(git(fixture.remote, "show", `${payload.branch}:.github/atomaton/prompt-template.md`)).toBe("you are an agent.");
-    expect(git(fixture.remote, "ls-tree", "--name-only", payload.branch, "self/atomaton/prompt-template.md")).toBe("");
+    expect(git(fixture.remote, "ls-tree", "--name-only", payload.branch, "self/")).toBe("");
   }, 60_000);
 
   /**
@@ -413,7 +408,6 @@ describe("open_base_edit_pr", () => {
       ),
     );
     expect(created.staged).toEqual([".github/atomaton/skills/project/new.md"]);
-    expect(created.files).toEqual([{ path: ".github/atomaton/skills/project/new.md", twin: null }]);
     expect(git(fixture.remote, "show", `${created.branch}:.github/atomaton/skills/project/new.md`)).toBe("a new skill");
 
     const refused = await callTool(
@@ -440,11 +434,6 @@ describe("the rules the tool runs on", () => {
     expect(amendPathProblem("/etc/passwd")).toContain("absolute");
     expect(amendPathProblem(".github/atomaton/../config.yaml")).toContain("`..`");
     expect(amendPathProblem(" .github/atomaton/x.md")).toContain("whitespace");
-  });
-
-  test("a `self/` twin is the same path with the deployed root swapped", () => {
-    expect(overlayTwinPath(".github/atomaton/skills/x.md")).toBe("self/atomaton/skills/x.md");
-    expect(overlayTwinPath(".github/atomaton/scripts/run.sh")).toBe("self/atomaton/scripts/run.sh");
   });
 
   test("a replacement lands at one place, or nowhere", () => {
@@ -476,21 +465,18 @@ describe("the rules the tool runs on", () => {
       observing: "#562",
       base: BASE,
       reviewer: "reviewer",
-      files: [
-        { path: ".github/atomaton/a.md", twin: "self/atomaton/a.md" },
-        { path: ".github/atomaton/b.md", twin: undefined },
-      ],
+      files: [".github/atomaton/a.md", ".github/atomaton/b.md"],
       note: "why this is right",
     });
     expect(body.startsWith("/reviewer\n\n")).toBe(true);
     expect(body).toContain("#562");
-    expect(body).toContain("`self/atomaton/a.md`");
-    expect(body).toContain("no `self/atomaton/b.md`");
+    expect(body).toContain("`.github/atomaton/a.md`");
+    expect(body).toContain("`.github/atomaton/b.md`");
     expect(body).toContain("why this is right");
     expect(body).not.toContain("atomaton:parent-issue");
 
     // No reviewer named: the line goes, and the rest stays readable.
-    const unattended = baseEditPrBody({ observing: "", base: BASE, reviewer: "", files: [{ path: ".github/atomaton/a.md", twin: undefined }] });
+    const unattended = baseEditPrBody({ observing: "", base: BASE, reviewer: "", files: [".github/atomaton/a.md"] });
     expect(unattended.startsWith("Atomaton:")).toBe(true);
     expect(unattended).toContain("the run that made this change");
   });

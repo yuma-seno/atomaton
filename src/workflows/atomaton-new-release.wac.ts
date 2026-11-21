@@ -26,7 +26,7 @@ import { ref as notifyNewReleaseRef } from "../entrypoints/machinery/notify_new_
 //
 // ## In this repository it is a no-op
 //
-// Self-deploy keeps `.github/atomaton-release.json` equal to the latest release, so
+// Applying a release keeps `.github/atomaton-release.json` equal to the latest release, so
 // the comparison finds nothing and the run exits green having written nothing. That
 // is the intended state, not a defect, and the script says so in its log.
 

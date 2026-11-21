@@ -30,7 +30,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gitRun, gitRunWith } from "./gh.ts";
 import { baseBranch, readOriginBranch } from "./branch-reads.ts";
-import { overlayTwinPath } from "../../domain/machinery/base-edit.ts";
 
 /**
  * The commit identity, as `git -c` pairs.
@@ -106,7 +105,7 @@ export function readBaseFile(baseSha: string, path: string): BaseFileRead {
  * read back from there rather than from `ls-remote`. Two reasons, both measured shapes
  * from elsewhere in this repository: a run's checkout may be shallow, so the tip
  * `ls-remote` named a moment earlier can be an object this repository does not have;
- * and `FETCH_HEAD` is what `self-overlay.test.ts` and every `merge-base` caller read to
+ * and `FETCH_HEAD` is a shared ref that every `merge-base` caller reads to
  * decide what a change branched from, so a tool that overwrote it would change the
  * answer of a check running beside it.
  */
@@ -207,25 +206,4 @@ export function pushCommit(commit: string, branch: string): void {
           "replacing somebody else's. Nothing was pushed; retry, which names a new branch."
       : `could not push \`${branch}\`: ${pushed.stderr || pushed.stdout}`,
   );
-}
-
-/** An overlay twin that is on the branch: its path, its bytes and the mode to write. */
-interface Twin {
-  readonly path: string;
-  readonly text: string;
-  readonly mode: string;
-}
-
-/**
- * The `self/` twin of `path`, when the base branch has one.
- *
- * `self/` mirrors `.github/`, and the self-deploy rebuilds the deployed tree from it,
- * so the two must hold the same bytes. Whether this repository has one at all is asked
- * of the base branch's tree rather than assumed: an adopter has no `self/`, and the
- * tool is the same tool there.
- */
-export function readTwin(baseSha: string, path: string): Twin | undefined {
-  const twinPath = overlayTwinPath(path);
-  const read = readBaseFile(baseSha, twinPath);
-  return read.present ? { path: twinPath, text: read.text, mode: read.mode } : undefined;
 }

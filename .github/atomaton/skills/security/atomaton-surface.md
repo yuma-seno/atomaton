@@ -20,13 +20,13 @@ The natural cut is not by directory — it is by what each part is trusted with:
 | Area | What is in it | What makes it its own area |
 | --- | --- | --- |
 | `src/workflows/` | the workflow generator, and the YAML it emits | it decides `${{ }}` expansion, triggers, `permissions` and `uses:` for every workflow an adopter runs. Read with `security/gh-actions-surface` |
-| `self/workflows/` | the three hand-written workflows, all holding `SELF_DEPLOY_TOKEN` | the only workflows no generator produces, and the only place a token this repository owns is written down |
+| `.github/workflows/release.yml` | the one hand-written workflow, the release button | the only workflow no generator produces, and the one place outside the machinery that reaches `ATOMATON_UPDATE_TOKEN`: the update it runs pushes, opens and merges as that identity, so the file is the strongest single thing an audit should read |
 | `src/entrypoints/machinery/` | the glue each generated step runs | it runs on the default branch with a write token and treats the pull request's tree as data. The whole trust story is which tree a script is executed from and which one it merely reads |
 | `src/adapters/` | GitHub, actions and MCP adapters, including dispatch | the boundary between "we decided" and "GitHub did it": dispatch, the closed-target guard, the ops log |
 | `src/entrypoints/tools/mcp/` | the tool servers an agent is handed | credential routing, the hook layer, and the hooks that can and cannot be a boundary |
 | `src/domain/delivery/` | merge gates, governed paths, declared secrets, config validation | the merge gate is a decision surface: a bypass here is worth more than a bug anywhere else |
 | `src/content/` | agents, skills, prompt template, config, skills | the instructions every run of every adopter follows. Read with `security/agent-prompt-surface` |
-| `self/` | this repository's overlay onto `.github/` | applied as soon as it merges, unlike `src/` |
+| `.github/**`, hand-written half | `release.yml`, the release scripts, the customized skills | this repository's own operation, applied as soon as it merges, unlike `src/` — and invisible to the update machinery, whose plan never names a path the release does not ship |
 | `package.json` + `bun.lock` | the toolchain every run installs | supply chain, structurally — `bun audit` for the advisory half |
 
 `src/shared/` is a leaf kernel both halves import, and it is not an area of its own:
@@ -72,13 +72,15 @@ open label policy on. Use the label when it is there and the title prefix always
 ## What is this repository's, and what is the template's
 
 A weakness in `src/` is a weakness in something every adopter receives; a weakness
-in `self/` and `.github/` is this repository's own running configuration. The report
+in `.github/` is this repository's own running configuration. The report
 says which, because the fix and who merges it differ:
 
-- `src/**` reaches this repository only through a release and a self-deploy, so a
+- `src/**` reaches this repository only when the next release is applied, so a
   fix there is ordinary work on the deliverable;
-- `self/**` and `.github/**` apply on merge, and `.github/**` is a person's merge.
+- the hand-written half of `.github/**` applies on merge, and is a person's merge.
 
-The one rule that catches everybody out: a change to `self/X` belongs in the same
-pull request as the identical change to `.github/X`, or the next self-deploy
-overwrites it with no diff to notice it by.
+The one rule that catches everybody out: the hand-written half of `.github/` is a
+person's merge (`.github/**` is in `merge.governed_paths`), and the machinery's
+update never touches a path the release does not ship — so a hand-written file is
+safe where it stands, and a shipped file it customises rides the ordinary
+three-way merge.

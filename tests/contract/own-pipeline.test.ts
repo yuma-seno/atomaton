@@ -74,9 +74,9 @@ describe("this repository's own deployments", () => {
  * checkout.
  */
 describe("the release scripts and where they think they are", () => {
-  const scripts = readdirSync("self/atomaton/scripts")
+  const scripts = readdirSync(".github/atomaton/scripts")
     .filter((name) => name.endsWith(".sh"))
-    .map((name) => join("self/atomaton/scripts", name));
+    .map((name) => join(".github/atomaton/scripts", name));
 
   test("there are scripts to check", () => {
     expect(scripts.length).toBeGreaterThan(0);

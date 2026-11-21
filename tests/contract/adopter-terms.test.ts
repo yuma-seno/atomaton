@@ -105,11 +105,11 @@ const RULES: readonly Rule[] = [
   },
   {
     pattern: /\bself\//,
-    why: "this repository's overlay onto its own `.github/`. Nothing in it ships",
+    why: "this repository's former overlay onto its own `.github/`. Nothing in it shipped, and the mirror is gone; a mention would describe a directory that is not there",
   },
   {
-    pattern: /self-deploy|SELF_DEPLOY_TOKEN/,
-    why: "the workflow that applies a release to this repository, and the credential it needs. An adopter's change takes effect on the next run instead",
+    pattern: /self-deploy|SELF_DEPLOY_TOKEN|RELEASE_TOKEN/,
+    why: "this repository's own release machinery and its credentials. An adopter's change takes effect on the next run instead",
   },
   {
     pattern: /(publish|tag)-release\.sh|check-live-tools\.sh/,

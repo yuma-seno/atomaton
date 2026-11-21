@@ -14,7 +14,7 @@ import { ref as updateAtomatonRef } from "../entrypoints/machinery/update_atomat
 // comment on the notice (or any thread) dispatches this workflow with the thread's
 // number, so the update answers where it was asked. Either way the run is the same
 // script (`update_atomaton.ts`), which plans, applies, opens its pull request and
-// either requests the auto-merge or stops at it.
+// either merges it once the repository's checks have passed or stops at it.
 //
 // ## Why the update token is a secret the owner sets
 //
@@ -23,7 +23,11 @@ import { ref as updateAtomatonRef } from "../entrypoints/machinery/update_atomat
 // checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope
 // that the owner adds once; when it is missing the run fails loudly and changes
 // nothing, because the person who started it is standing there and silence is not
-// an answer. See `update_atomaton.ts`'s own comment for the whole argument.
+// an answer. It is also the identity the pull request is opened and merged as --
+// GitHub starts no `pull_request` run for a pull request this workflow's token
+// opened, and no `push` for a merge it made, and the check the ruleset requires
+// and the deploy the merge chains to are exactly those events. See
+// `update_atomaton.ts`'s own comment for the whole argument.
 //
 // ## One update at a time
 //
@@ -48,19 +52,29 @@ export const atomaUpdate = new Workflow("atomaton-update", {
     },
   },
   // Narrower than ATOMATON_WORKFLOW_PERMISSIONS and deliberately so: this run
-  // starts no agent and dispatches nothing. `pull-requests` is what opening and
-  // editing the update's pull request (and asking for its merge) needs; `issues`
-  // is the notice it answers and closes; `contents: read` is the checkout and the
-  // releases it reads. The push itself travels under the update token, which this
-  // workflow's permission block neither grants nor limits.
-  permissions: { contents: "read", issues: "write", "pull-requests": "write" },
+  // starts no agent and dispatches nothing. `pull-requests` is what editing the
+  // update's pull request needs; `issues` is the notice it answers and closes;
+  // `checks: read` is the rollup and watch its merge waits behind -- a private
+  // repository refuses that read to a job without it, and the refusal would
+  // land in the WARN branch, a pull request left standing instead of an error;
+  // `contents: read` is the checkout and the releases it reads. The writes that
+  // decide anything -- the push, the pull request's opening, the merge -- travel
+  // under the update token, which this workflow's permission block neither grants
+  // nor limits. That is the point: the checks the merge is gated on are started
+  // by the token's identity, so this workflow's own permissions cannot widen the
+  // gate.
+  permissions: { contents: "read", issues: "write", "pull-requests": "write", checks: "read" },
   concurrency: { group: "atomaton-update", "cancel-in-progress": false },
 }).addJobs(
   startJob(
     "update",
     {
       "runs-on": "ubuntu-latest",
-      "timeout-minutes": SCRIPT_JOB_TIMEOUT_MINUTES,
+      // The update's own budget, not the shared five: a clean application waits
+      // for the repository's checks before it merges, and the check's own path
+      // (plan job, dispatched check, matrix) is minutes on its own. A job killed
+      // mid-wait would also kill the notice close that follows.
+      "timeout-minutes": 60,
     },
     [
       // The tree the update lands on: the default branch. The checkout's own
