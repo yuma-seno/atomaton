@@ -8,7 +8,7 @@ import { NOTICE_MARKER } from "./notify_new_release.ts";
 import { updateBranchFor, updateTitle } from "./update_atomaton.ts";
 import { RELEASE_MANIFEST } from "../../domain/machinery/machinery-layout.ts";
 import { ASSET_NAME } from "./notify_new_release.ts";
-import { removeTemp, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
+import { removeTemp, runWithFakeGh, scriptPath, hermeticEnv, type FakeGhRule } from "./testing/harness.ts";
 
 /**
  * The update, end to end against a real git repository and a fake `gh`.
@@ -91,7 +91,7 @@ function zipOf(name: string, version: string, entries: Tree): string {
 
 /** `git` in `dir`, throwing when it fails — the fixtures must stand, not degrade. */
 function gitIn(dir: string, args: string[]): string {
-  const r = spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+  const r = spawnSync("git", args, { cwd: dir, encoding: "utf8", env: hermeticEnv() });
   if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
   return r.stdout;
 }
@@ -119,7 +119,10 @@ function fixtureRepo(entries: Tree, version: string): { dir: string; bare: strin
 
 /** The branch's tip in the bare origin, or null when it was never pushed. */
 function pushedTip(bare: string, branch: string): string | null {
-  const r = spawnSync("git", ["--git-dir", bare, "rev-parse", `refs/heads/${branch}`], { encoding: "utf8" });
+  const r = spawnSync("git", ["--git-dir", bare, "rev-parse", `refs/heads/${branch}`], {
+    encoding: "utf8",
+    env: hermeticEnv(),
+  });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 

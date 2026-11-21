@@ -14,6 +14,7 @@ import { ref as requestStopRef } from "../entrypoints/machinery/request_stop.ts"
 import { ref as resolveResumeAgentRef } from "../entrypoints/machinery/resolve_resume_agent.ts";
 import { ref as resumeSubtreeRef } from "../entrypoints/machinery/resume_subtree.ts";
 import { ref as dispatchPrValidationRef } from "../entrypoints/machinery/dispatch_pr_validation.ts";
+import { ref as dispatchUpdateRef } from "../entrypoints/machinery/dispatch_update.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // Invoke agents via /agent-name slash command in issue/PR comments.
@@ -157,11 +158,15 @@ const upgradeStep = new TypedOutputsStep({
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",
-    GITHUB_REPOSITORY: "${{ github.repository }}",
+    REPO: "${{ github.repository }}",
     NUMBER: githubEvent<IssueCommentCreatedEvent>((e) => e.issue.number),
   },
-  run: `gh workflow run atomaton-update.yml --repo "\${GITHUB_REPOSITORY}" -f "source=\${NUMBER}"
-`,
+  // Through the bridge, not `gh workflow run` in this step: a comment command
+  // starts a run by name, and the contract (`tests/contract/dispatch-sites.test.ts`)
+  // keeps every such call in one module — the closed-target guard and the ops-log
+  // entry travel with it. `NUMBER` is the thread that asked, so the update
+  // answers where the request was made.
+  run: `${scriptCommandWithArgs(dispatchUpdateRef, { repo: "\${REPO}", source: "\${NUMBER}" })}\n`,
 });
 
 const targetStep = new TypedOutputsStep(

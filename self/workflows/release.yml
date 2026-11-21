@@ -82,16 +82,16 @@ on:
         required: false
         default: ''
         type: string
+      # `type: choice` is a workflow_dispatch input shape only — a workflow_call
+      # that declares one is an invalid workflow file, and GitHub answers every
+      # push with a run that failed to parse it. The caller (release-pipeline.yml)
+      # offers the choice in its own dispatch form and passes the picked word
+      # through as a string; the version step's `case` is what validates it.
       bump:
         description: 'Which part of the declared version to bump. Required unless "version" names one.'
         required: false
-        default: '(choose)'
-        type: choice
-        options:
-          - '(choose)'
-          - patch
-          - minor
-          - major
+        default: ''
+        type: string
     secrets:
       SELF_DEPLOY_TOKEN:
         required: true

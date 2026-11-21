@@ -41,6 +41,7 @@
  */
 import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
+import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { machineryPath } from "../../adapters/runner/machinery.ts";
 import { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from "../../domain/machinery/update-plan.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -165,6 +166,10 @@ export function updateBody(report: UpdateReport): string {
 /** The comment a stopped update leaves in the thread that asked for it. */
 export function stopComment(report: UpdateReport, prNumber: number): string {
   return [
+    // Tagged `exclude`: this is addressed to the person (or the agent they will
+    // ask) ON the pull request — the thread that asked learns where the work
+    // stands, and the next run reading this thread gains nothing from it.
+    LLM_CONTEXT_TAG.write("exclude"),
     `Taking ${report.plan.target} stopped at a pull request: ${report.conflicts.length} file(s) changed on both sides.`,
     "",
     ...report.conflicts.map((path) => `- \`${path}\``),
@@ -177,6 +182,7 @@ export function stopComment(report: UpdateReport, prNumber: number): string {
 /** The comment a settled update leaves, when it was asked for from a thread. */
 export function doneComment(plan: UpdatePlan, prNumber: number, merging: boolean): string {
   return [
+    LLM_CONTEXT_TAG.write("exclude"),
     `Taking ${plan.target} onto ${plan.base} is applied on #${prNumber}.`,
     merging
       ? "The auto-merge is requested there; the repository's checks run first, and the merge follows them."
@@ -298,7 +304,7 @@ function main(): void {
     log(`${local.manifest.version} is the release this tree is on; nothing to take`);
     if (source > 0) {
       const said = gh("issue", "comment", String(source), "--repo", repo, "--body",
-        `This tree is already on ${targetTag}, which is the release asked for. Nothing to do.`);
+        `${LLM_CONTEXT_TAG.write("exclude")}\nThis tree is already on ${targetTag}, which is the release asked for. Nothing to do.`);
       if (said.code !== 0) log(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
     }
     return;
@@ -340,7 +346,7 @@ function main(): void {
     log(`${targetTag} changes nothing here; nothing to apply`);
     if (source > 0) {
       const said = gh("issue", "comment", String(source), "--repo", repo, "--body",
-        `${targetTag} differs from ${local.manifest.version} by name only: applying it would change nothing on this tree.`);
+        `${LLM_CONTEXT_TAG.write("exclude")}\n${targetTag} differs from ${local.manifest.version} by name only: applying it would change nothing on this tree.`);
       if (said.code !== 0) log(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
     }
     return;
@@ -444,7 +450,7 @@ function main(): void {
     // keep asking for what is already underway.
     if (notice !== null && notice !== 0) {
       const closed = gh("issue", "close", String(notice), "--repo", repo, "--comment",
-        `${NOTICE_MARKER}\n${doneComment(plan, prNumber, merging)}`);
+        `${NOTICE_MARKER}\n${LLM_CONTEXT_TAG.write("exclude")}\n${doneComment(plan, prNumber, merging)}`);
       if (closed.code !== 0) log(`WARN could not close the notice #${notice}: ${closed.stderr.trim()}`);
     }
     if (source > 0 && source !== notice) {
