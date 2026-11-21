@@ -923,7 +923,7 @@ function buildFooter(args) {
     } else if (args.target !== undefined && args.target.known && args.target.state !== "open") {
       lines.push(`${saved} That thread is closed, so there is nothing left to resume here \u2014 ` + `reopen it to continue._`);
     } else {
-      lines.push(`${saved} Comment \`/resume\` to continue from here, or \`/${args.agent}\` ` + `with an instruction on the following lines._`);
+      lines.push(`${saved} Comment \`!resume\` to continue from here, or \`/${args.agent}\` ` + `with an instruction on the following lines._`);
     }
   } else if (reachedLimit(args.endedBecause)) {
     lines.push(`\u26A0\uFE0F _The run ${howItWasCutShort(args.endedBecause)}. Comment \`/${args.agent}\` to continue._`);
