@@ -76,14 +76,23 @@
 #
 # ## The application is the machinery, not a rebuild
 #
-# `deploy: true` (the default) dispatches `atomaton-update.yml` -- through
-# `dispatch_update.ts`, the same bridge the `!upgrade` comment command runs -- and
-# the machinery does the rest: the same three-way plan every adopter gets, against
-# the manifest, where a file this repository edited and upstream changed opens a
-# pull request and stops for a person, and a clean application merges itself. This
-# replaces the self-deploy, which rebuilt `.github/` from the release and so needed
-# a mirror of every hand-written file in `self/`; three-way merging needs no
-# mirror, and the rebuild's silent deletions went with it.
+# `deploy: true` (the default) runs the update machinery's own script, from THIS
+# checkout, on this repository: `src/entrypoints/machinery/update_atomaton.ts`,
+# the same script an adopter's `!upgrade` runs. Not a dispatch to the deployed
+# update workflow, deliberately: the workflow that exists on the default branch
+# at this moment is the release BEFORE this one, and its script cannot complete
+# a clean application (it opens the pull request with a token that fires no
+# event and merges by asking for auto-merge). Running the code this PR delivers
+# is what makes a release apply itself on the very first try -- the machinery
+# cannot bootstrap itself through the machinery that predates it. This is also
+# why the one secret appears here: the update pushes, opens its pull request,
+# and merges as `ATOMATON_UPDATE_TOKEN`, the identity that starts the checks and
+# carries the push. When the plan is clean the machinery merges itself; when it
+# is not, the update stops at its pull request for a person.
+#
+# This replaces the self-deploy, which rebuilt `.github/` from the release and so
+# needed a mirror of every hand-written file in `self/`; three-way merging needs
+# no mirror, and the rebuild's silent deletions went with it.
 #
 # ## What this needs, once, in the repository's Settings
 #
@@ -120,11 +129,10 @@ permissions:
 
 # One release at a time, and the second waits rather than cancelling the first: a
 # release is a version of the whole of main, and two interleaved declarations would
-# race for which version the next one is derived from. The application runs in its
-# own concurrency group (`atomaton-update`), so this group does not serialise it --
-# and does not need to: the application targets the release this run just
-# published, which only this run could have made, and a second release cannot
-# start while this one holds the group.
+# race for which version the next one is derived from. An update running at the
+# same time as the application below is not a default the machinery breaks under:
+# both name the same update branch -- keyed to the target tag, so one pull request
+# -- and a push that loses the race rechecks a tree that already holds the plan.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -573,37 +581,43 @@ jobs:
     # run that forgot this once built a branch name from an empty tag.
     if: inputs.deploy && needs.merge-release.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The application inside waits for the repository's own checks before it
+    # merges (the same wait `atomaton-update.yml`'s job carries): the check's
+    # path on this repository is minutes on its own, and a job killed mid-wait
+    # would leave an applied-but-unmerged update pull request standing.
+    timeout-minutes: 60
     permissions:
       contents: read
-      # The update dispatch: `gh workflow run` needs it, and without it the step
-      # below fails after the release is already published.
-      actions: write
+      pull-requests: write
+      issues: write
     steps:
-      - name: Checkout
+      # `main`, and not the dispatch's commit: the version-bump commit this run
+      # merged has moved main past it, and the tree the update applies to must
+      # be the tree main holds right now.
+      - name: Checkout main
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Dispatch the update machinery through its bridge
+      - name: Run the update machinery on this tree
         env:
           GH_TOKEN: ${{ github.token }}
+          ATOMATON_UPDATE_TOKEN: ${{ secrets.ATOMATON_UPDATE_TOKEN }}
           REPO: ${{ github.repository }}
           TAG: ${{ needs.release.outputs.tag }}
         run: |
           set -euo pipefail
 
-          # Through the bridge, like every other dispatch. This is the same script
-          # the `!upgrade` comment command runs, and the contract that keeps
-          # dispatch calls in one module (tests/contract/dispatch-sites.test.ts)
-          # is not suspended for the button that releases the machinery itself.
-          #
-          # Fire-and-acknowledge, and the machinery owns the rest: a clean
-          # application merges itself, a conflicted one opens its pull request
-          # and stops for a person, and both are reported on the pull request and
-          # in the notice issue. Waiting here would hold this run open for the
-          # checks the application's pull request needs, and that progress
-          # already lives on the machinery's own run.
-          bun src/entrypoints/machinery/dispatch_update.ts --repo "$REPO"
-          echo "::notice::${TAG} is published; the update machinery is taking it onto this repository's .github/. Progress: the Actions tab, the pull request it opens, and the notice issue."
+          # The update script itself, run on this checkout -- not dispatched to
+          # the deployed workflow. The machinery that exists on the default branch
+          # right now is the release BEFORE this one, and a machinery cannot
+          # bootstrap itself through its predecessor: the first application of a
+          # release has to be made by the code that release carries. This is the
+          # same script, the same arguments, and the same token the machinery's
+          # own workflow would run them with; pinned to the tag this run
+          # published, never `latest`, which a concurrent release could move.
+          bun src/entrypoints/machinery/update_atomaton.ts --repo "$REPO" --tag "$TAG"
+          echo "::notice::${TAG} is published and was taken onto this repository's .github/ by the update machinery. Its pull request carries the plan; a conflicted application is waiting there for a person."

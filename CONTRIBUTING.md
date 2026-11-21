@@ -25,15 +25,13 @@ The deliverable:
 
 This repository's own:
 
-- `self/`: this repository's own files rather than the template's, laid out to mirror
-  `.github/`. Nothing else in `.github/` is ours. See
-  [Applying a release](#applying-a-release-to-this-repository).
-- top-level `.github/`: this repository's adoption of the deliverable. Exactly two
-  sources, and nothing kept alive by remembering: a release archive, with `self/`
-  copied over it. Upgraded deliberately rather than on merge — that lag is what
-  stops a change to `src/` from reconfiguring the live agents the moment it
-  merges. Adopters upgrade as a git-mediated merge instead, since they have tuned
-  files to lose; see [docs/runtime/tasks/move-to-a-newer-release.md](docs/runtime/tasks/move-to-a-newer-release.md), "Move to a newer release".
+- top-level `.github/`: this repository's adoption of the deliverable, applied
+  from releases by the update machinery. The files the release ships come from
+  it through the ordinary three-way plan; the files no release
+  ships — `.github/workflows/release.yml`, the release scripts, the customized
+  skills — live here directly and survive every update untouched. Upgraded
+  deliberately rather than on merge — that lag is what stops a change to `src/`
+  from reconfiguring the live agents the moment it merges.
 - `tests/`: tests of the build-and-deploy machinery. Tests of *shipped behaviour*
   live beside the shipped code instead.
 - `docs/`: adopter-facing documentation.

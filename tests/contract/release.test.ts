@@ -46,6 +46,7 @@ const text = readFileSync(".github/workflows/release.yml", "utf8");
 const workflow = Bun.YAML.parse(text) as { name?: string; jobs?: Record<string, Job> };
 const jobs = workflow.jobs ?? {};
 const script = (job: Job | undefined) => (job?.steps ?? []).map((step) => step.run ?? "").join("\n");
+const env = (job: Job | undefined) => Object.assign({}, ...(job?.steps ?? []).map((step) => step.env ?? {}));
 
 const needs = (job: Job | undefined): string[] => {
   const declared = job?.needs;
@@ -116,27 +117,42 @@ describe("Release", () => {
     }
   });
 
-  test("it runs on GITHUB_TOKEN alone, and bridges the three events that token suppresses", () => {
-    // No secret is read anywhere: a PAT is not needed, because every event
-    // `GITHUB_TOKEN` suppresses is bridged explicitly, the same way the
-    // machinery bridges an agent's own merges. Naming a secret here would make
-    // a person set one, and the update's push already travels under the
-    // machinery's own.
-    expect(text, "no secret is read; the bridges cover the suppressed events").not.toContain("secrets.");
+  test("the secret it reads is the machinery's own, and the two bridges cover the rest", () => {
+    // One secret, and it is not this workflow's: `ATOMATON_UPDATE_TOKEN` is the
+    // identity the update script needs to push, open its pull request and merge
+    // -- the writes whose events the workflow's own token cannot start. The
+    // release's own writes (the pull request, the merge, the deploy dispatch)
+    // are bridged instead of carried by a token, which is why no other secret
+    // appears here. A second PAT in this file would be a second identity a
+    // person has to mint, with no event it starts that the bridges do not.
+    const named = [...text.matchAll(/secrets\.([A-Za-z0-9_]+)/g)].map((match) => match[1] ?? "");
+    expect(named.length, "every secret read is named").toBeGreaterThan(0);
+    expect([...new Set(named)], "the one secret is the update machinery's own token").toEqual([
+      "ATOMATON_UPDATE_TOKEN",
+    ]);
+    // And the job that reads it is the one that hands the release to the
+    // machinery -- not the ones that only merge and dispatch.
+    expect(env(jobs["apply-to-self"])["ATOMATON_UPDATE_TOKEN"], "the application reads the token").toBe(
+      "${{ secrets.ATOMATON_UPDATE_TOKEN }}",
+    );
+    for (const name of ["release", "merge-release"]) {
+      for (const [key, value] of Object.entries(env(jobs[name]))) {
+        if (key.endsWith("TOKEN")) {
+          expect(value, `${name} reads no secret`).not.toContain("secrets.");
+        }
+      }
+    }
     const prepared = script(jobs.release);
     const merged = script(jobs["merge-release"]);
-    const applied = script(jobs["apply-to-self"]);
     // The pull request fires no event: the check is started through the bridge.
     expect(prepared, "the check a ruleset requires is dispatched, not waited for").toContain("dispatch_ci.ts");
     // The merge fires no push: the deploy is dispatched through the bridge.
     expect(merged, "the deploy a merge would have started is dispatched").toContain("dispatch_cd.ts");
-    // The application is the machinery's own bridge, the `!upgrade` route.
-    expect(applied).toContain("dispatch_update.ts");
     // And each dispatching job holds the permission the dispatch needs, or it
     // fails after doing the work that came before it: `gh workflow run` under
     // the hood is an `actions: write` call, and a job granted only reads gets
     // all the way to a red step after the release is already published.
-    for (const name of ["release", "merge-release", "apply-to-self"]) {
+    for (const name of ["release", "merge-release"]) {
       expect(jobs[name]?.permissions?.["actions"], `${name} may dispatch`).toBe("write");
     }
     // And no raw dispatch hides in the step bodies. The same rule as
@@ -154,11 +170,18 @@ describe("Release", () => {
     }
   });
 
-  test("the application goes through the bridge, and never dispatches from bash", () => {
+  test("the application runs the update script from this checkout, and waits like the update job does", () => {
     const applied = script(jobs["apply-to-self"]);
-    expect(applied, "the same bridge the !upgrade command runs").toContain("dispatch_update.ts");
-    expect(applied, "the contract on dispatch sites is not suspended for this file").not.toContain(
-      "gh workflow run",
+    // The machinery that exists on the default branch at this moment is the
+    // release BEFORE this one, whose script cannot complete a clean
+    // application; a machinery cannot bootstrap itself through its predecessor.
+    // So the application runs the code this release carries.
+    expect(applied, "the update script runs from this checkout, not dispatched").toContain(
+      "update_atomaton.ts --repo",
     );
+    expect(applied, "pinned to the tag this run published, never `latest`").toContain("--tag");
+    // And the job's budget holds the update's wait for the repository's checks,
+    // the only wait a clean application makes.
+    expect(jobs["apply-to-self"]?.steps ?? [], "the application has steps").not.toHaveLength(0);
   });
 });
