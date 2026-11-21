@@ -26244,8 +26244,8 @@
   {
     "path": "sessions/pr-572/reviewer.json",
     "agent": "reviewer",
-    "messages": 129,
-    "calls": 82,
+    "messages": 174,
+    "calls": 113,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -26260,14 +26260,15 @@
       "get_pr_reviews": 1,
       "list_pr_review_comments": 1,
       "get_issue_comments": 1,
-      "read": 48,
+      "read": 60,
       "list": 8,
-      "fetch": 3,
-      "grep": 11,
+      "fetch": 4,
+      "grep": 27,
       "glob": 2,
       "search_remote_code": 1,
-      "get_check_runs": 1,
-      "check_merge_readiness": 1
+      "get_check_runs": 2,
+      "check_merge_readiness": 1,
+      "get_branch": 1
     },
     "acts": {},
     "runs": [
@@ -26320,6 +26321,28 @@
           }
         },
         "started": "2026-11-21T12:01:20Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-21T13:41:31Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "messages": 174,
+        "seconds": 94,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 16,
+            "read": 12
+          },
+          "github": {
+            "get_branch": 1,
+            "get_check_runs": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-21T13:39:57Z"
       }
     ]
   }
