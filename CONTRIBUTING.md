@@ -97,10 +97,11 @@ pull request carries that judgement in it. `version` in `package.json` is the si
 declaration, and `.github/atomaton/scripts/tag-release.sh` derives the tag from it — so
 there is no tag to push and nothing that can disagree.
 
-The ordinary route is **Release**. One button: it declares the version, merges that
-pull request once the whole ruleset passes (`--auto`, which waits for
-`atomaton-check` even though the plan job dispatches it and so it does not exist on
-a pull request opened moments ago), waits for the release to be published, and then
+The ordinary route is **Release**. One button: it declares the version, opens the
+pull request that declares it, starts that pull request's check itself (a pull
+request opened with the workflow's own token fires no event, so the check is
+dispatched through the bridge rather than waited for), waits for the required
+check to exist and pass, merges, waits for the release to be published, and then
 dispatches the update machinery to take the release onto this repository's own
 `.github/` — the same three-way plan an adopter gets, which applies itself when it
 is clean and stops at a pull request when it needs a person:
@@ -142,11 +143,12 @@ deploy rather than open a pull request for no diff.
 
 The workflow is hand-written and lives in `.github/workflows/` — not in the
 deliverable, so no adopter receives it, and `.github/**` is in
-`merge.governed_paths`, so an agent cannot merge the pull request that edits it. It
-uses `RELEASE_TOKEN` because a pull request opened with `GITHUB_TOKEN` starts no
-workflow run — so its checks would never appear and it could never be merged — and
-because a `GITHUB_TOKEN` merge starts no `push` either, and the merge's push is
-what runs the deploy.
+`merge.governed_paths`, so an agent cannot merge the pull request that edits it.
+It runs on the workflow's own token throughout: the three events `GITHUB_TOKEN`
+suppresses — the pull request's checks, the merge's push, and the tag's push — are
+each bridged explicitly (`dispatch_ci.ts`, `dispatch_cd.ts`, and the deploy
+workflow's own `dispatch-new-tags` job), the same pattern the machinery uses for
+an agent's merges. No PAT is named and no secret is read.
 
 It happens in two halves, and the second is triggered by the first:
 
@@ -230,29 +232,30 @@ needed a mirror in `self/`. Three-way merging makes upstream removals ordinary t
 matches), and needs no mirror, so `self/` is gone with the rebuild that required
 it.
 
-### The tokens, and why one is a PAT
+### The token, and why the update is the only one
 
 `GITHUB_TOKEN` cannot write `.github/workflows/**`. Not by path rule and not by
-branch: the push is refused on **identity**, measured here. Two secrets carry the
-two writes:
+branch: the push is refused on **identity**, measured here. The update machinery
+replaces those files, so the one secret this repository needs is the same one an
+adopter sets:
 
-- `RELEASE_TOKEN` — a fine-grained or classic PAT with repo scope, set as an
-  Actions secret. It opens the release pull request, so its checks run, and merges
-  it, so its push starts the deploy. It never writes workflows. Set it:
+- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as
+  an Actions secret. The update workflow pushes `.github/` under it, including the
+  workflow files the release carries. Set it:
 
   ```bash
-  gh secret set RELEASE_TOKEN
+  gh secret set ATOMATON_UPDATE_TOKEN
   ```
 
-- `ATOMATON_UPDATE_TOKEN` — the machinery's own secret, the same one an adopter
-  sets. The update workflow pushes `.github/` under it, including the workflow
-  files the release carries.
+The release button needs no secret of its own. Its pull request, its merge, and
+its deploy dispatch all run on the workflow's own token, with the events that
+token suppresses bridged explicitly; nothing about the release depends on a
+person's identity beyond the person pressing the button.
 
-**No agent can reach either.** `RELEASE_TOKEN` is named in the one hand-written
-workflow, `release.yml`, and nowhere else; `ATOMATON_UPDATE_TOKEN` is named by the
-update workflow and read there as a secret. `atomaton-runner.yml` mentions neither,
-and `atoma` hands a tool
-server only the credentials that server's own `env` declares. The release workflow
+**No agent can reach it.** `ATOMATON_UPDATE_TOKEN` is named by the update workflow
+and read there as a secret; `atomaton-runner.yml` does not mention it, and `atoma`
+hands a tool server only the credentials that server's own `env` declares. The
+release workflow
 also
 refuses a bot as `triggering_actor`, because the agent runner's token carries
 `actions: write` and could therefore dispatch a workflow in principle —
@@ -260,9 +263,10 @@ an agent has no route to it today (`gh` and `curl` are both refused by the shell
 guard, and no MCP tool dispatches anything), but that is a denylist, and this token
 can rewrite workflows.
 
-A PAT is acceptable here and not inside Atomaton because what holds it is a person
-pressing a button. The line in #353 — a pull request may not decide its own
-execution environment — is not crossed: nothing an agent produces reaches it.
+A PAT is acceptable here and not inside Atomaton because what holds it is the
+update workflow that a person's button started. The line in #353 — a pull request
+may not decide its own execution environment — is not crossed: nothing an agent
+produces reaches it.
 
 ### Changing something in `.github/`
 

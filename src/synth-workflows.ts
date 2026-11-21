@@ -21,7 +21,7 @@
  * each invented a different workaround. See issue #952.
  *
  * `dist/` is the release, and `.github/workflows/` is updated from a release by
- * self-deploy, so the reachable end of that is another branch's workflow running
+ * the update machinery, so the reachable end of that is another branch's workflow running
  * in the live repository.
  *
  * ## Why the discovery is a directory read and not a narrower glob

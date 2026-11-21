@@ -5,7 +5,7 @@
 # ## Why this file is hand-written, and why nothing mirrors it
 #
 # It is not in the deliverable, so no adopter receives a workflow naming a secret
-# they do not have; no agent triggers it and no agent step reads its tokens; and
+# they do not have; no agent triggers it and no agent step reads a credential; and
 # it does one thing a person asks for, by pressing a button. `.github/**` is in
 # `merge.governed_paths`, so the pull request that edits this file is one an agent
 # cannot merge: the file is a person's, and stays one.
@@ -48,29 +48,31 @@
 # run on whatever results. There is nothing to bump when `package.json` declares no
 # version at all, so the first release names one.
 #
-# ## Why it needs tokens that are not `GITHUB_TOKEN`
+# ## Why there is no PAT, and no auto-merge setting
 #
-# Two identities, each as narrow as its job:
+# Every write here runs on `GITHUB_TOKEN`, and three events never fire because of
+# it -- GitHub starts no workflow run for an event its own token triggered. Each
+# one is bridged explicitly, which is the same pattern the machinery uses for an
+# agent's own merges:
 #
-# - `RELEASE_TOKEN`, a person's PAT: a pull request opened with `GITHUB_TOKEN`
-#   starts no workflow run -- GitHub starts none for an event its own token caused
-#   -- so `atomaton-check` would never run on it and the ruleset could never pass.
-#   The same PAT is what merges, because a `GITHUB_TOKEN` merge starts no `push`
-#   either, and the merge's push is what runs the deploy.
-# - `ATOMATON_UPDATE_TOKEN`, the machinery's: the application step dispatches the
-#   update workflow, and the update pushes `.github/` under that secret, not this
-#   one. This workflow never touches it, and the update never borrows a person's.
+# - the release pull request fires no `pull_request` event, so its required check
+#   would never start: `dispatch_ci.ts` starts it, through the same bridge
+#   (`dispatchCi`) an agent's pull request is checked with;
+# - the merge fires no `push`, so `deploy.on_merge` would never run:
+#   `dispatch_cd.ts` starts the deploy, through `dispatchCd`;
+# - the tag `tag-release.sh` creates fires no `push` either, so the publish would
+#   never run: the deploy workflow's own `dispatch-new-tags` job bridges that one,
+#   and nothing here needs to.
 #
-# ## The merge waits for the whole ruleset, not the visible checks
-#
-# The merge is `gh pr merge --auto`, not a watched merge. The ruleset requires
-# `atomaton-check`, which the plan job dispatches -- so on a pull request opened
-# moments ago, the check that decides mergeability does not exist yet. Watching the
-# checks that are visible races that dispatch and loses: the measured failure was a
-# merge refused by the base branch policy while every check on screen was green.
-# `--auto` hands the wait to GitHub itself, which knows the full requirements list.
-# The fallback below covers a repository where auto-merge is not enabled, and the
-# poll after either path is what confirms a merge actually happened.
+# No PAT is named and no secret is read; `ATOMATON_UPDATE_TOKEN` is the update
+# workflow's own secret, used there, not here. And no "Allow auto-merge" setting
+# is needed, because nothing waits on GitHub to merge: the check is started here,
+# so its appearance is this workflow's own doing, and the merge waits for it
+# directly. The wait that matters is for the REQUIRED check to exist at all -- on
+# a pull request opened moments ago, `atomaton-check` has not registered yet (the
+# plan jobs dispatch it late by design), and a merge fired while the visible
+# checks are green races that dispatch and loses. The measured failure was a merge
+# the base branch policy refused while every check on screen was green.
 #
 # ## The application is the machinery, not a rebuild
 #
@@ -85,9 +87,7 @@
 #
 # ## What this needs, once, in the repository's Settings
 #
-# `RELEASE_TOKEN` and `ATOMATON_UPDATE_TOKEN` as secrets, and "Allow auto-merge"
-# enabled -- the fallback merge covers it being off, at the cost of the race the
-# `--auto` path exists to avoid.
+# `ATOMATON_UPDATE_TOKEN` as a secret -- the same one an adopter sets. Nothing else.
 name: Release
 
 on:
@@ -114,9 +114,7 @@ on:
         default: true
         type: boolean
 
-# Read-only at the workflow level. Every write goes through a PAT, which keeps the
-# identities apart: if something here can write, it is because a person's token
-# allowed it -- except the application step, which only starts a run.
+# Read-only at the workflow level; each job grants exactly what its steps need.
 permissions:
   contents: read
 
@@ -155,31 +153,27 @@ jobs:
           echo "dispatched by $ACTOR"
 
   release:
-    name: Prepare the release pull request
+    name: Prepare the release pull request, and start its check
     needs: refuse-bot
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    # The branch push, the pull request, and the check dispatch: three writes the
+    # job makes itself, all on the workflow's own token.
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
     outputs:
       version: ${{ steps.version.outputs.new }}
       tag: ${{ steps.version.outputs.tag }}
       changed: ${{ steps.write.outputs.changed }}
       pr: ${{ steps.open.outputs.pr }}
     steps:
-      - name: Check the token is present
-        env:
-          TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::RELEASE_TOKEN is unset. It needs a PAT; a pull request opened with GITHUB_TOKEN starts no workflow run, so its checks would never appear. See CONTRIBUTING.md."
-            exit 1
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # The PAT, so the pull request opened later carries an identity that
-          # starts the checks it needs.
-          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Validate the version
         id: version
@@ -344,11 +338,11 @@ jobs:
             git --no-pager diff -- package.json
           fi
 
-      - name: Open the pull request
+      - name: Open the pull request, and start its check
         id: open
         if: steps.write.outputs.changed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           NEW: ${{ steps.version.outputs.new }}
           CURRENT: ${{ steps.version.outputs.current }}
           ACTOR: ${{ github.triggering_actor }}
@@ -382,6 +376,9 @@ jobs:
           # Force, because the branch is derived from the input: re-running for the
           # same version should reproduce it rather than conflict with the previous
           # attempt. Nothing hand-written belongs here.
+          #
+          # The push is made with GITHUB_TOKEN, so it fires no event -- that is
+          # why the check is dispatched below rather than waited for.
           git push -q --force origin "$BRANCH"
 
           {
@@ -391,7 +388,7 @@ jobs:
             echo
             echo "Merging this **is** the release: \`deploy.on_merge\` runs \`tag-release.sh\`, which derives \`v${NEW}\` from this declaration, and the tag's own deployment publishes it."
             echo
-            echo "This workflow merges the pull request itself once the repository's checks pass (\`--auto\`, so the whole ruleset is waited for, not just the checks that exist yet), waits for the publish, and -- with \`deploy: true\`, the default -- dispatches the update machinery to take v${NEW} onto this repository's own \`.github/\`."
+            echo "This workflow merges the pull request itself once the required check has run and passed, waits for the publish, and -- with \`deploy: true\`, the default -- dispatches the update machinery to take v${NEW} onto this repository's own \`.github/\`."
           } > /tmp/body.md
 
           EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number // empty')
@@ -415,6 +412,14 @@ jobs:
           fi
           echo "pr=${PR}" >> "$GITHUB_OUTPUT"
 
+          # A pull request opened with GITHUB_TOKEN fires no event, so the check
+          # the ruleset requires never starts on its own. Through the bridge, like
+          # every other dispatch: this is the same script an agent's pull request
+          # is checked through, and the contract that keeps dispatch calls in one
+          # module (tests/contract/dispatch-sites.test.ts) is not suspended for
+          # the button that releases the machinery itself.
+          bun src/entrypoints/machinery/dispatch_ci.ts --repo "$GITHUB_REPOSITORY" --branch "$BRANCH"
+
   merge-release:
     name: Merge the release pull request, and wait for the release
     needs: release
@@ -425,26 +430,21 @@ jobs:
     timeout-minutes: 180
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       checks: read
-      actions: read
+      # `gh run list`/`watch` read, and the deploy dispatch writes: one permission
+      # covers both, and without the write the bridge below fails.
+      actions: write
     steps:
-      - name: Check the token is present
-        env:
-          TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::RELEASE_TOKEN is unset. It needs a PAT that may merge pull requests. See CONTRIBUTING.md."
-            exit 1
-          fi
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Merge the release pull request, and wait for the release
         env:
-          # Reads use the workflow's own token, so the PAT is only ever the thing
-          # that merges. `gh run watch` also refuses a fine-grained PAT's scopes;
-          # an Actions token has what it needs.
           GH_TOKEN: ${{ github.token }}
-          MERGE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           REPO: ${{ github.repository }}
           PR: ${{ needs.release.outputs.pr }}
           CHANGED: ${{ needs.release.outputs.changed }}
@@ -468,54 +468,66 @@ jobs:
             exit 1
           fi
 
-          # --auto, and not a watched merge: the ruleset requires `atomaton-check`,
-          # which the plan job dispatches, so on a pull request opened moments ago
-          # the deciding check does not exist yet. Watching the visible checks
-          # races that dispatch and loses -- the measured failure was a merge the
-          # base branch policy refused while every check on screen was green.
-          # GitHub itself knows the full requirements list; --auto hands the wait
-          # to it, and the merge runs the moment they are all green.
-          #
-          # The fallback covers a repository without "Allow auto-merge": watch
-          # what is visible and merge. It carries the race back with it, which is
-          # why --auto is the primary path and why the fallback says so out loud.
-          if ! AUTO=$(GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR" --repo "$REPO" --merge --auto 2>&1); then
-            echo "$AUTO"
-            echo "::warning::auto-merge was refused -- enable 'Allow auto-merge' in the repository settings to close this race. Falling back to watching the checks."
-            for _ in $(seq 1 60); do
-              count=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup | length')
-              if [ "$count" -gt 0 ]; then break; fi
-              sleep 10
-            done
-            gh pr checks "$PR" --repo "$REPO" --watch --fail-fast --interval 10
-            GH_TOKEN="$MERGE_TOKEN" gh pr merge "$PR" --repo "$REPO" --merge
+          # Wait for the REQUIRED check to EXIST, not for the visible checks to
+          # finish. The check workflow runs in two phases -- plan jobs first, and
+          # they dispatch the real check -- so on a pull request opened moments
+          # ago, `atomaton-check` is not in the rollup yet, and every check that
+          # IS visible can be green while the deciding one does not exist. The
+          # measured failure was a merge the base branch policy refused in
+          # exactly that state. The check was dispatched by the previous job, so
+          # its arrival is a matter of minutes, not a maybe.
+          SEEN=""
+          for _ in $(seq 1 90); do
+            SEEN=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name == "atomaton-check")] | length')
+            if [ "$SEEN" != "0" ] && [ -n "$SEEN" ]; then break; fi
+            sleep 10
+          done
+          if [ "$SEEN" = "0" ] || [ -z "$SEEN" ]; then
+            echo "::error::the required check never registered on #$PR in fifteen minutes. Read the check workflow's run; once it has run, merge by hand and re-run this job."
+            exit 1
           fi
 
-          # The merge commit is the fact the next stage needs, and under --auto it
-          # can be minutes away: poll rather than assume the command's exit means
-          # the merge happened. "A red change is not merged" still holds -- --auto
-          # never merges past a failing required check, it only waits.
+          # Now that the deciding check exists, watch everything on the pull
+          # request. A red change is not merged: this fails and leaves the pull
+          # request open.
+          gh pr checks "$PR" --repo "$REPO" --watch --fail-fast --interval 10
+
+          # The merge is made with GITHUB_TOKEN, so it fires no `push`, and
+          # `deploy.on_merge` never runs on its own -- the dispatch below is the
+          # bridge for that, the same one the machinery's own merges go through.
+          gh pr merge "$PR" --repo "$REPO" --merge
+
+          # The merge commit is the fact the next stage needs; poll rather than
+          # assume the command's exit means the merge happened.
           SHA=""
-          for _ in $(seq 1 90); do
+          for _ in $(seq 1 60); do
             SHA=$(gh pr view "$PR" --repo "$REPO" --json mergeCommit --jq '.mergeCommit.oid // empty')
             if [ -n "$SHA" ]; then break; fi
             sleep 10
           done
           if [ -z "$SHA" ]; then
-            echo "::error::#${PR} did not merge within fifteen minutes of --auto. Read its checks; once green, merge it by hand and re-run this job."
+            echo "::error::#${PR} merged but GitHub reported no merge commit, so the Deploy run cannot be found."
             exit 1
           fi
 
-          # The push this merge caused is the run to watch. It may not exist for a
-          # few seconds, and reading it is a plain list so a transient failure is a
+          # Through the bridge. The deploy runs against main's tip, which is what
+          # a push would have delivered; between this merge and the dispatch,
+          # only another serialized release could move main, and the concurrency
+          # group rules that out.
+          bun src/entrypoints/machinery/dispatch_cd.ts --repo "$REPO" --ref main
+
+          # The dispatched run is the one to watch. It may not exist for a few
+          # seconds, and reading it is a plain list so a transient failure is a
           # retry rather than the answer.
-          # `--event push` and not merely the commit: once `tag-release.sh` has
-          # created the tag, the tag's own `workflow_dispatch` run names the same
-          # commit and is newer, and watching that instead would skip the run whose
+          #
+          # `--event workflow_dispatch`, and the FIRST match is the right one: the
+          # tag's own run names the same commit and is also a dispatch, but it
+          # only exists after `tag-release.sh` has run inside this one, minutes
+          # from now. Watching the first run found is watching the run whose
           # success says the tag was created at all.
           RUN=""
           for _ in $(seq 1 60); do
-            RUN=$(gh run list --repo "$REPO" --workflow atomaton-deploy.yml --event push --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+            RUN=$(gh run list --repo "$REPO" --workflow atomaton-deploy.yml --event workflow_dispatch --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
             if [ -n "$RUN" ]; then break; fi
             sleep 10
           done
@@ -530,10 +542,11 @@ jobs:
             exit 1
           fi
 
-          # `Deploy` now waits for the tag's publish run, so this should already be
-          # true. It is checked anyway: it is the fact the next stage needs, and a
-          # release that is tagged but not published is exactly the state this
-          # pipeline exists to keep out of the next step.
+          # The deploy run waits for the tag's publish run, so its success should
+          # already mean the release exists. It is checked anyway: it is the fact
+          # the next stage needs, and a release that is tagged but not published
+          # is exactly the state this workflow exists to keep out of the next
+          # step.
           for _ in $(seq 1 60); do
             if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
               echo "Published $TAG."
@@ -557,6 +570,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      # The update dispatch: `gh workflow run` needs it, and without it the step
+      # below fails after the release is already published.
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -578,11 +594,10 @@ jobs:
           # is not suspended for the button that releases the machinery itself.
           #
           # Fire-and-acknowledge, and the machinery owns the rest: a clean
-          # application merges itself (the machinery merges --auto), a conflicted
-          # one opens its pull request and stops for a person, and both are
-          # reported on the pull request and in the notice issue. Waiting here
-          # would hold this run open for the checks the application's pull
-          # request needs, and that progress already lives on the machinery's own
-          # run.
+          # application merges itself, a conflicted one opens its pull request
+          # and stops for a person, and both are reported on the pull request and
+          # in the notice issue. Waiting here would hold this run open for the
+          # checks the application's pull request needs, and that progress
+          # already lives on the machinery's own run.
           bun src/entrypoints/machinery/dispatch_update.ts --repo "$REPO"
           echo "::notice::${TAG} is published; the update machinery is taking it onto this repository's .github/. Progress: the Actions tab, the pull request it opens, and the notice issue."

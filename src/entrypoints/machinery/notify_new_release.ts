@@ -26,8 +26,8 @@
  * `local` is `.github/atomaton-release.json`, which ships in every release and
  * names the release it came from. `latest` is GitHub's own latest release of
  * `UPSTREAM_REPOSITORY`, the template. They are the same repository in this
- * repository, which is why a scheduled run here is a no-op: self-deploy keeps the
- * two equal.
+ * repository, which is why a scheduled run here is a no-op: applying a release keeps
+ * the two equal.
  *
  * ## One issue, updated
  *

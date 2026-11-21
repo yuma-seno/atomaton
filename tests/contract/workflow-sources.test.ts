@@ -9,7 +9,7 @@
  * `dist/.github/workflows/`: the last one won. No error, no warning, exit 0,
  * valid YAML. `.claude/` is untracked and `dist/` is gitignored, so there is no
  * diff in which anybody could see it -- and `dist/` is the release, from which
- * `.github/workflows/` is updated by self-deploy. Issue #952.
+ * `.github/workflows/` is updated by the update machinery. Issue #952.
  *
  * Two ends of the same fact are held here, because either alone is decoration:
  * that the discovery refuses anything outside the tree, and that the discovery

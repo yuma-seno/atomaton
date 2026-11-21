@@ -407,8 +407,8 @@ function copyWorkspace(source: string, destination: string): string[] | undefine
  *
  * Replace, not merge. A file the agent deleted has to be gone next run, or the
  * workspace becomes a place where deletions do not take -- the same silent shape
- * `unzip -o` produced for `.github/` before `self/` (see
- * `tests/contract/self-overlay.test.ts`). `git add --all <prefix>` after removing
+ * `unzip -o` produced for `.github/` back when it was rebuilt rather than
+ * merged. `git add --all <prefix>` after removing
  * the old tree stages the deletions along with the additions.
  *
  * The retry loop is `saveSession`'s, for the same reason: sibling agents on

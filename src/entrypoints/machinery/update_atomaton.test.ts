@@ -108,6 +108,12 @@ function fixtureRepo(entries: Tree, version: string): { dir: string; bare: strin
   }
   mkdirSync(dirname(join(dir, RELEASE_MANIFEST)), { recursive: true });
   writeFileSync(join(dir, RELEASE_MANIFEST), `${manifestJson(version, Object.keys(entries))}\n`);
+  // The configuration the machinery reads in a real adopted tree. It is in
+  // neither release, so the plan must never propose touching it -- a path in
+  // neither release is invisible to the plan, and this is that property under a
+  // file the run itself reads through another door.
+  mkdirSync(dirname(join(dir, ".github/atomaton/config.yaml")), { recursive: true });
+  writeFileSync(join(dir, ".github/atomaton/config.yaml"), "base_branch: main\ndeploy: {}\n");
   gitIn(dir, ["-c", "init.defaultBranch=main", "init"]);
   gitIn(dir, ["add", "-A"]);
   gitIn(dir, ["-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "seed"]);
@@ -163,6 +169,12 @@ function rules(
     { match: ["pr", "list"], stdout: JSON.stringify(options.openPr ? [{ number: options.openPr }] : []) },
     { match: ["pr", "create"], stdout: `https://example.test/owner/repo/pull/9` },
     { match: ["pr", "edit"], stdout: "" },
+    // The rollup poll: the required check exists, so the wait ends on its first
+    // attempt. The answer is the projection `readPullRequest` returns, not a
+    // jq'd count -- the read goes through the one module that reads a pull
+    // request, and the filter is this script's.
+    { match: ["pr", "view"], stdout: JSON.stringify({ statusCheckRollup: [{ name: "atomaton-check" }] }) },
+    { match: ["pr", "checks"], stdout: "" },
     { match: ["pr", "merge"], stdout: "" },
     {
       match: ["issue", "list"],
@@ -258,9 +270,23 @@ describe("a clean update", () => {
     expect(create).toContain(updateBranchFor("v0.2.0"));
     expect(create).toContain(updateTitle("v0.2.0"));
 
+    // The merge is the script's own, made after the checks it waited for: the
+    // rollup was polled for the required check's existence, the checks were
+    // watched, and the merge carries no `--auto` -- the script does not depend
+    // on the repository having auto-merge enabled, because the wait is one it
+    // can make itself.
+    const viewed = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "view");
+    expect(viewed.length).toBeGreaterThan(0);
+    const watched = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "checks");
+    expect(watched).toHaveLength(1);
     const merged = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge");
     expect(merged).toHaveLength(1);
-    expect(merged[0]).toContain("--auto");
+    expect(merged[0]).not.toContain("--auto");
+    // The merge the script made fired no push (the workflow's own token made
+    // it), so the deploy is dispatched through the bridge. This fixture's
+    // deploy section is empty, so the bridge dispatches nothing -- the absence
+    // of a `workflow run` call is the bridge's decision, not a skip.
+    expect(r.ghCalls.filter((call) => call[0] === "workflow")).toEqual([]);
   });
 
   test("a notice standing open is closed, with the pull request named", () => {

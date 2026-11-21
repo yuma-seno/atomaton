@@ -74,7 +74,7 @@ export interface ReleaseFiles {
  * ## Why the manifest comes out of the asset, not the tree at the tag
  *
  * The copy committed at a tag is the repository's own deployed `.github/`, written
- * by the PREVIOUS release and committed by the self-deploy pull request — the tag
+ * by the PREVIOUS release and committed by the pull request that applied it — the tag
  * at `vX` serves a manifest naming `v(X-1)`. Reading that copy answers "what my
  * release shipped that the previous one did not", which is the opposite question,
  * and it filters the very paths this machinery exists to report. The manifest

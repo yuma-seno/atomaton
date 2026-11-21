@@ -9,8 +9,9 @@ This repository builds Atomaton, the delivery template. It is both the producer 
 that template and an adopter of it, which creates rules that do not apply
 anywhere else.
 
-This file is not part of the template. Its source is `self/atomaton/skills/project/`,
-and it is deliberately absent from `src/` so adopters never receive it.
+This file is not part of the template. It lives in
+`.github/atomaton/skills/project/`, and it is deliberately absent from `src/` so
+adopters never receive it.
 
 ## The four trees
 
@@ -125,43 +126,19 @@ the moment it merges. Two breakages reached the running system exactly that way.
 
 ### Applying a release
 
-The ordinary route is **Release Pipeline**, which publishes the release and then
-opens and merges the deploy pull request. To apply a release on its own, dispatch
-**Self Deploy** (`self/workflows/self-deploy.yml`) from the Actions tab. It opens a
-pull request and merges nothing. `.github/**` is in `merge.governed_paths`, so a
-person reviews it.
+The ordinary route is **Release**, which publishes the release and then dispatches
+the update machinery to take it onto this repository's own `.github/` — the same
+three-way plan an adopter gets. To apply a release on its own — an older one, or
+after a run with `deploy: false` — dispatch **Atomaton Update**
+(`.github/workflows/atomaton-update.yml`) from the Actions tab. The machinery
+opens the pull request and merges it when the plan is clean; where the tree and
+the release both changed a file, it stops there for a person. `.github/**` is in
+`merge.governed_paths`, so what it cannot decide is a person's to review.
 
-What it does:
-
-```bash
-rm -rf .github            # so a file the release DELETED is gone, not orphaned
-unzip release.zip         # the deliverable
-cp -r self/. .github/     # this repository's own, at the same paths
-```
-
-`.github/` is therefore exactly those two sources, with nothing kept alive by
-remembering to. Before `self/` existed this was a `cp -r` followed by
-`git checkout -- .github/atomaton/config.yaml`, and a file the template had removed
-stayed in the tree with no diff to notice it by.
-
-It needs `SELF_DEPLOY_TOKEN`, a PAT with the `workflow` scope, because
-`GITHUB_TOKEN` cannot write `.github/workflows/**` — refused on identity, not by
-path. No agent can reach that token: it is named in one file outside the
-deliverable, and `atomaton-runner.yml` does not mention it.
-
-### Changing something in `self/`
-
-An overlay entry is a copy, not a build, so it needs no release. Change
-`self/X` and `.github/X` **in the same pull request**, identically.
-
-`tests/contract/self-overlay.test.ts` requires them byte-identical, in both
-directions. Editing `.github/X` alone is worse than not editing it at all: the next
-self-deploy overwrites it from `self/` and the change disappears without a diff.
-
-A file added to `.github/` that is in no release and not in `self/` is not checked
-for, because the next deploy removes it anyway. `.github/**` is in
-`merge.governed_paths` and stays a person's merge — except for the prose carve-out
-below, which is the one deliberate exception.
+The application is a three-way merge against the manifest, not a rebuild: a file
+the release ships takes the new version, a file this repository edited keeps its
+words, and a path the release does not ship — `release.yml`, the release scripts,
+the customized skills — is never proposed for an update at all.
 
 ## Fixing the machinery prose from inside a run
 
@@ -180,14 +157,15 @@ What to point it at:
 
 | What you found | Where the fix goes | Why |
 | --- | --- | --- |
-| A skill or the prompt template, as this repository runs it | the tool, on its `.github/atomaton/` path | one commit of its own; CI and a reviewer; no issue entanglement. Live from the next run. Durable only where a `self/` twin carries it — the prompt template and the shipped skills have none, and their durable fix is `src/content/` |
+| A skill or the prompt template, as this repository runs it | the tool, on its `.github/atomaton/` path | one commit of its own; CI and a reviewer; no issue entanglement. Live from the next run, and durable: the update machinery never touches a path the release does not ship |
 | The same fix, made to outlive the next deploy for every adopter | a normal pull request against `src/content/skills/` or `src/content/prompt-template.md` | the deployed copies are release output; the durable master is `src/content/` |
 | `config.yaml`, `package.json`, machinery code, workflows | a normal issue-tree pull request | governed or gated, and none of it is prose |
 
 The tool refuses `config.yaml` itself: it decides which credentials a run may
-reach, and that boundary is not an agent's to move. A `self/` twin on the base
-branch is staged into the same commit automatically — which is what makes the two
-skills in `self/atomaton/skills/` durable under the exemption.
+reach, and that boundary is not an agent's to move. A skill living under
+`.github/atomaton/skills/` is durable by construction: the update machinery's plan
+never names a path the release does not ship, so the exemption is not carved away
+by the next update.
 
 What happens when the fix lands, in three parts:
 

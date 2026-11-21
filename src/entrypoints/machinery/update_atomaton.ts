@@ -41,6 +41,8 @@
  */
 import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
+import { dispatchCd } from "../../adapters/actions/dispatch-targets.ts";
+import { readPullRequest } from "../../adapters/github/pull-request.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { machineryPath } from "../../adapters/runner/machinery.ts";
 import { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from "../../domain/machinery/update-plan.ts";
@@ -436,16 +438,55 @@ function main(): void {
   const notice = findOpenNotice(repo);
 
   if (conflicts.length === 0) {
-    // The plan was clean and every merge measured clean: ask for the merge and
-    // let the repository's own checks stand between this and the default branch.
-    const requested = gh("pr", "merge", String(prNumber), "--repo", repo, "--auto", "--merge");
-    const merging = requested.code === 0;
-    if (!merging) {
-      log(
-        `WARN the auto-merge could not be requested on #${prNumber}: ${requested.stderr.trim() || `gh exited ${requested.code}`}` +
-          " — the pull request stands, and merges when the checks pass and a person or a run asks again.",
-      );
+    // The plan was clean and every merge measured clean: put the pull request
+    // through the repository's own checks, and merge when they have passed.
+    //
+    // Not `--auto`. Auto-merge is a repository setting, and depending on it made
+    // every clean update on a repository that had not flipped the setting on stop
+    // at a WARN with its pull request standing. The wait it stood in for is one
+    // this script can make itself, because the check's arrival is known: the pull
+    // request was pushed with the update token, which is a real event, so the
+    // check is coming. The only wait that matters is for it to EXIST -- the check
+    // workflow runs in two phases, plan jobs first and they dispatch the real
+    // check, so a merge fired while the visible checks are green races that
+    // dispatch and loses. The measured failure was a merge the base branch policy
+    // refused in exactly that state, every check on screen green.
+    let seen = "";
+    for (let attempt = 0; attempt < 90; attempt++) {
+      const rollup = readPullRequest<{ statusCheckRollup?: Array<{ name?: string }>}>(repo, prNumber, "statusCheckRollup");
+      seen = rollup.known
+        ? String((rollup.value.statusCheckRollup ?? []).filter((check) => check.name === "atomaton-check").length)
+        : "0";
+      if (seen !== "0") break;
+      Bun.sleepSync(10_000);
     }
+    let merging = false;
+    if (seen === "0" || seen === "") {
+      log(
+        `WARN the required check never registered on #${prNumber} in fifteen minutes — the pull request stands, ` +
+          "and merges when a person or a run asks again.",
+      );
+    } else if (
+      gh("pr", "checks", String(prNumber), "--repo", repo, "--watch", "--fail-fast", "--interval", "10").code !== 0
+    ) {
+      // A red change is not merged, and the pull request stands with the checks
+      // that said so.
+      log(`WARN the checks on #${prNumber} did not pass — the pull request stands with them.`);
+    } else {
+      const requested = gh("pr", "merge", String(prNumber), "--repo", repo, "--merge");
+      merging = requested.code === 0;
+      if (!merging) {
+        log(
+          `WARN the merge could not be made on #${prNumber}: ${requested.stderr.trim() || `gh exited ${requested.code}`}`,
+        );
+      }
+    }
+    // A merge made here is made with this workflow's own token, so it fires no
+    // `push`, and `deploy.on_merge` would never run on its own. `dispatchCd` is
+    // the bridge for exactly that, the same one the machinery's own merges go
+    // through; a repository whose deploy section is empty dispatches nothing, by
+    // the bridge's own decision.
+    if (merging) dispatchCd(base);
     // The notice's promise is now being kept; a notice that stayed open would
     // keep asking for what is already underway.
     if (notice !== null && notice !== 0) {
