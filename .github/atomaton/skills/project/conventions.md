@@ -18,16 +18,17 @@ and it is deliberately absent from `src/` so adopters never receive it.
 | --- | --- | --- |
 | `src/**` | Source of the deliverable | You |
 | `dist/.github/**` | The deliverable adopters receive | The build |
-| `self/**` | This repository's own files, the ones that are not the template's | You |
-| `.github/**` | This repository's running configuration | The self-deploy job, from a release plus `self/` |
+| `.github/**` | This repository's running configuration | The update machinery, from a release; this repository's own files in it stay |
 
 Two different activities live in this table, and which one you are doing decides
 which rules apply:
 
 - **improving the deliverable** — `src/**`. It affects every adopter, and it
-  reaches this repository only after a release and a self-deploy.
-- **improving this repository's own operation** — `self/**`. It affects nobody
-  else, and it applies as soon as it merges.
+  reaches this repository only after the next release is applied.
+- **improving this repository's own operation** — the files directly under
+  `.github/` that no release ships (`release.yml`, the release scripts, the
+  customized skills). They affect nobody else, and they apply as soon as the pull
+  request merges.
 
 The rest of this file does not separate them cleanly. That is a known gap, tracked
 in the documentation restructure; until then, read each rule and ask which of the two it is about.
@@ -52,13 +53,14 @@ merge needs to carry it.
 
 **Never touch `version` in `package.json`.** The version is the release declaration:
 merging an edit to it publishes to adopters, and that decision belongs to a person,
-made on the pull request **Release Pipeline** opens — never inside a
+made on the pull request **Release** opens — never inside a
 work pull request. A version left alone is a merge that publishes nothing, which is
 the normal case. A work pull request that arrives with a version change in it is a
 merge-blocking defect: flag it, and have the edit taken back out before merge.
 
-`.github/**` is a different matter — see below. It is tracked, and every file in it
-comes from either the release or `self/`.
+`.github/**` is a different matter — see below. It is tracked; the files the
+release ships arrive from the release through the update machinery, and this
+repository's own files in it survive every update untouched.
 
 ## main is protected; everything lands by pull request
 

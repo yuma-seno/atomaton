@@ -48,7 +48,7 @@ function log(message: string): void {
 export const UPSTREAM_REPOSITORY = "yuma-seno/atomaton";
 
 /**
- * The release asset, as `self/atomaton/scripts/publish-release.sh` names it.
+ * The release asset, as `.github/atomaton/scripts/publish-release.sh` names it.
  *
  * A fixed name rather than one carrying the version: that is what makes
  * `releases/latest/download/atomaton-delivery.zip` a stable URL, and the version
