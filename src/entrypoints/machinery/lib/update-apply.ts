@@ -71,6 +71,15 @@ export function applyPlan(
     return destination;
   };
 
+  // Every path the plan names is validated before anything runs: an escaping
+  // path is a refusal that costs nothing, and refusing late -- after the merges
+  // have run, at the write loop -- would leave a tree holding half a plan. The
+  // paths come from the release's own manifest and archive, so this is the
+  // boundary a malformed release is caught at.
+  for (const path of [...plan.take, ...plan.add, ...plan.delete, ...plan.merge]) {
+    if (inside(path) === null) return { why: `\`${path}\` resolves outside the tree` };
+  }
+
   // Decide everything: content per path to write, paths to delete. The tree is
   // untouched until every decision has succeeded.
   const writes = new Map<string, string>();
@@ -96,6 +105,8 @@ export function applyPlan(
     }
     // A path upstream adds where the plan says nothing is in the way is a file the
     // tree should not already hold; refuse to clobber one that appeared anyway.
+    // Containment was validated up front for every path in the plan, so the null
+    // branch is unreachable -- kept for the type, not for the runtime.
     const destination = inside(path);
     if (destination === null) return { why: `\`${path}\` resolves outside the tree` };
     if (existsSync(destination)) {
@@ -105,7 +116,6 @@ export function applyPlan(
     added.push(path);
   }
   for (const path of plan.delete) {
-    if (inside(path) === null) return { why: `\`${path}\` resolves outside the tree` };
     deletes.add(path);
     removed.push(path);
   }
@@ -143,13 +153,11 @@ export function applyPlan(
 
   // Then act. Writes first (parents included), deletions after — order only
   // matters where a release moves a directory's contents around, which no two
-  // releases of this tree have done.
+  // releases of this tree have done. Containment was validated for every path
+  // up front, so this loop has no refusals left to make.
   for (const [path, content] of writes) {
     const destination = inside(path);
-    if (destination === null) {
-      // Unreachable through the checks above; the write half must stay honest.
-      return { why: `\`${path}\` resolves outside the tree` };
-    }
+    if (destination === null) throw new Error(`\`${path}\` resolves outside the tree`);
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, content);
   }

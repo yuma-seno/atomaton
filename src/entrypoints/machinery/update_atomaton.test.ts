@@ -251,7 +251,7 @@ describe("a run that is already settled", () => {
 });
 
 describe("a clean update", () => {
-  test("applies the plan, pushes the branch, opens the pull request, asks for the merge", () => {
+  test("applies the plan, pushes the branch, opens the pull request, merges after the checks", () => {
     const { dir, bare } = fixtureRepo(BASE_FILES, "v0.1.0");
     const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: "tok" });
     expect(r.status).toBe(0);
@@ -282,10 +282,10 @@ describe("a clean update", () => {
     const merged = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge");
     expect(merged).toHaveLength(1);
     expect(merged[0]).not.toContain("--auto");
-    // The merge the script made fired no push (the workflow's own token made
-    // it), so the deploy is dispatched through the bridge. This fixture's
-    // deploy section is empty, so the bridge dispatches nothing -- the absence
-    // of a `workflow run` call is the bridge's decision, not a skip.
+    // The merge is made as the update token -- the identity that opened the pull
+    // request -- so its push is real, and `deploy.on_merge` runs on its own. No
+    // dispatch follows a clean update: the repository's ordinary chain does the
+    // deploying, the way a person's merge would.
     expect(r.ghCalls.filter((call) => call[0] === "workflow")).toEqual([]);
   });
 

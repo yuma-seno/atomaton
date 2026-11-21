@@ -13,7 +13,7 @@ This file is not part of the template. It lives in
 `.github/atomaton/skills/project/`, and it is deliberately absent from `src/` so
 adopters never receive it.
 
-## The four trees
+## The three trees
 
 | Tree | What it is | Who writes it |
 | --- | --- | --- |
@@ -173,17 +173,18 @@ What happens when the fix lands, in three parts:
   straight off the default branch — there is nothing to build or restart — so the
   fix is live for every agent that starts after the merge. It never reaches the
   run that wrote it.
-- **The next self-deploy is what can take it back, not what applies it.** It
-  rebuilds `.github/` from the release and `self/`, so an edit whose durable copy
-  — the `self/` twin, or `src/content/` — does not hold the same text is wiped
-  then. The two `self/atomaton/skills/` skills survive every deploy; the prompt
-  template and the shipped skills do not.
+- **An update merges three-way around it, and never reverts it.** The update
+  machinery's plan enumerates the release, never the tree: a path the release does
+  not ship — this repository's own skills among them — is never proposed for an
+  update, so a fix living directly under `.github/` survives every update. A file
+  the release also ships is three-way merged, and where both sides changed, the
+  update stops at its pull request rather than picking a winner.
 - **The tool and the matcher behind it are code, and code ships with the
-  release.** `open_base_edit_pr` lives in the generated runtime, which a
-  self-deploy replaces — until that has happened, a run has no such tool, and a
+  release.** `open_base_edit_pr` lives in the generated runtime, which the next
+  applied release replaces — until that has happened, a run has no such tool, and a
   prose-fix pull request meets the old matcher, which cannot read the `!`
   exemptions, and stops with a governance blocker left for a person. That window
-  closes by itself on the next release and self-deploy.
+  closes by itself when the next release is applied.
 
 Merging here: once the new matcher is live, `merge.policy` is `auto` and the
 prompt template and skills are exempt from `governed_paths`, so a prose-fix pull

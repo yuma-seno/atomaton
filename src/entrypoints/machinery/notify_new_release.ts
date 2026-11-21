@@ -58,6 +58,7 @@
  */
 import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
+import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { RELEASE_MANIFEST } from "../../domain/machinery/machinery-layout.ts";
 import { noLongerShipped } from "../../domain/machinery/release-manifest.ts";
 import type { PlanEntry } from "../../domain/machinery/update-plan.ts";
@@ -416,7 +417,9 @@ function main(): void {
     const closed = gh(
       "issue", "close", String(existing), "--repo", repo,
       "--comment",
-      `${NOTICE_MARKER}\n\`.github/\` is on ${local.manifest.version}, which is the latest release, so this notice is settled and closes itself. A newer one opens a new notice.`,
+      // Tagged `exclude`: this is bookkeeping addressed to nobody who will act
+      // on it -- the notice is settled, and a newer release opens a new notice.
+      `${NOTICE_MARKER}\n${LLM_CONTEXT_TAG.write("exclude")}\n\`.github/\` is on ${local.manifest.version}, which is the latest release, so this notice is settled and closes itself. A newer one opens a new notice.`,
     );
     if (closed.code !== 0) {
       console.error(

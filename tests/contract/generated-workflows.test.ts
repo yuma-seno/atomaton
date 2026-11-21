@@ -338,7 +338,11 @@ describe("generated workflows", () => {
       // across five, and a test that only matched one formatting would pass by
       // missing the file rather than by checking it.
       const flat = source.replace(/\s+/g, " ");
-      if (!/gh\( ?"issue", ?"comment"/.test(flat)) continue;
+      // A close carries a comment too: `issue close --comment` writes a body the
+      // next run reads just as much as a `comment` call does. That site existed
+      // untagged in `notify_new_release.ts` and was invisible to the narrower
+      // match -- which is why `--comment` is matched alongside it.
+      if (!/gh\( ?"issue", ?"(comment|close)"/.test(flat)) continue;
       posters.push(file);
       expect(
         DECIDES_INCLUSION.test(source),

@@ -60,6 +60,35 @@ export function gh(...args: string[]): RunResult {
 }
 
 /**
+ * Run one `gh` command as `token`, rather than as the ambient `GH_TOKEN`.
+ *
+ * For the caller that must act as an identity the workflow does not hold: the
+ * update opens its pull request and merges it under the update token, because
+ * GitHub starts no `pull_request` run for a pull request the workflow's own
+ * token opened and no `push` for a merge it made -- and the check the ruleset
+ * requires and the deploy the merge chains to are exactly those events. The
+ * token is an identity that starts runs; the workflow's token is not.
+ *
+ * The environment is built for one process and dies with it, the same rule
+ * `gitRunWith` states: assigning `GH_TOKEN` into `process.env` would leave every
+ * later `gh` in this script acting as the token, which is a decision the caller
+ * makes per call or not at all.
+ */
+export function ghAs(token: string, ...args: string[]): RunResult {
+  const proc = Bun.spawnSync({
+    cmd: [...ghCommand(), ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, GH_TOKEN: token },
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : "",
+  };
+}
+
+/**
  * Run a READ through `gh`, treating an upstream failure as no answer rather than as
  * an answer of "no".
  *

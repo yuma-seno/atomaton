@@ -81,6 +81,19 @@ deploy:
 
 # When a person, not an agent, performs the merge. Any one of these firing is
 # enough.
+#
+# ## The one merge that is exempt, and why it is not a hole
+#
+# The update machinery's own pull request changes `.github/**` and merges without
+# a person. That is the design, not an oversight: `governed_paths` is a rule about
+# AGENT merges -- a rule a merge gate and `merge_pr` enforce, and the update's
+# `gh pr merge` consults neither. What stands where a person would are the two
+# things this list exists to guarantee, by other means: every path the pull
+# request changes is named in its body (the plan's whole output is that list), and
+# the release it applies was published by a person pressing the button or asked
+# for with `!upgrade`. A conflicted application stops at its pull request, and
+# there a person decides. The machinery applying a declared release is the
+# person's instruction, carried out.
 merge:
   policy: auto              # this repository lets agents merge
   governed_paths:             # changes here are a person's to merge

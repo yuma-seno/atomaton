@@ -232,6 +232,14 @@ needed a mirror in `self/`. Three-way merging makes upstream removals ordinary t
 matches), and needs no mirror, so `self/` is gone with the rebuild that required
 it.
 
+**The update's own merge is the one that is exempt from `governed_paths`, and that
+is the design.** The rule is about agent merges, and `merge_pr` enforces it; the
+update's merge consults neither. What stands where a person would: every changed
+path is named in the update's pull request body (the plan's output is that list),
+and the release it applies was published by a person's button or asked for with
+`!upgrade`. A conflicted application stops at its pull request, where a person
+decides.
+
 ### The token, and why the update is the only one
 
 `GITHUB_TOKEN` cannot write `.github/workflows/**`. Not by path rule and not by

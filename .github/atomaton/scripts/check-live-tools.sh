@@ -48,8 +48,8 @@
 # ## Which tree, and who builds it
 #
 # `dist/` -- the artifact a run is about to be handed, and never `.github/`.
-# `.github/` in this repository is the LAST RELEASE, put there by the self-deploy
-# workflow, so a check that read it would be checking something that already
+# `.github/` in this repository is the LAST RELEASE, applied by the update
+# machinery, so a check that read it would be checking something that already
 # passed. This script BUILDS `dist/` from the checkout it is run in -- see the
 # `bun run synth` below -- so "the tree being checked" is unambiguous: it is the
 # one this process is standing in.

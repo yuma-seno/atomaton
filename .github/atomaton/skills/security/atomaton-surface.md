@@ -79,6 +79,8 @@ says which, because the fix and who merges it differ:
   fix there is ordinary work on the deliverable;
 - the hand-written half of `.github/**` applies on merge, and is a person's merge.
 
-The one rule that catches everybody out: a change to `self/X` belongs in the same
-pull request as the identical change to `.github/X`, or the next self-deploy
-overwrites it with no diff to notice it by.
+The one rule that catches everybody out: the hand-written half of `.github/` is a
+person's merge (`.github/**` is in `merge.governed_paths`), and the machinery's
+update never touches a path the release does not ship — so a hand-written file is
+safe where it stands, and a shipped file it customises rides the ordinary
+three-way merge.

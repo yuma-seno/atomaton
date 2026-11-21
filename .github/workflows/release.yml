@@ -120,8 +120,11 @@ permissions:
 
 # One release at a time, and the second waits rather than cancelling the first: a
 # release is a version of the whole of main, and two interleaved declarations would
-# race for which version the next one is derived from. The same group also keeps an
-# application from racing the release that published it.
+# race for which version the next one is derived from. The application runs in its
+# own concurrency group (`atomaton-update`), so this group does not serialise it --
+# and does not need to: the application targets the release this run just
+# published, which only this run could have made, and a second release cannot
+# start while this one holds the group.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -428,12 +431,15 @@ jobs:
     # (seventy-five), and the queue before each. A budget shorter than that path
     # reports a timeout as a failed release.
     timeout-minutes: 180
+    # `contents: write` is the merge itself: GitHub's merge endpoint is a write to
+    # the base branch, and a job holding only reads gets all the way to a red step
+    # after the release pull request has passed its checks. The merge is made with
+    # the workflow's own token, so it fires no `push` -- the deploy is dispatched
+    # through the bridge below, which is why `actions: write` is here too.
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       checks: read
-      # `gh run list`/`watch` read, and the deploy dispatch writes: one permission
-      # covers both, and without the write the bridge below fails.
       actions: write
     steps:
       - name: Checkout
