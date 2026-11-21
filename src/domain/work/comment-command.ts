@@ -2,8 +2,10 @@
  * comment-command.ts — what counts as a command to Atomaton, in any text.
  *
  * A command is a line that asks for an agent (`/engineer`, `/engineer recover`, or the
- * `atomaton:dispatch` marker the machinery writes) or acts on a run (`/stop`,
- * `/resume`). This is the one definition of that syntax, and three readers share it:
+ * `atomaton:dispatch` marker the machinery writes) or commands the machinery
+ * (`!stop`, `!resume`, `!upgrade`; the slash spellings of the two originals are still
+ * read — see `control-commands.ts`). This is the one definition of that syntax, and
+ * three readers share it:
  *
  *   - `parse_comment_command.ts` reads a person's comment to decide what to start
  *   - `domain/work/thread.ts`, through the thread reader, reads a thread to decide
@@ -26,9 +28,18 @@
  * Pure: text in, text out.
  */
 import { AGENT_NAME_PATTERN } from "./agent-name.ts";
-import { isControlCommand, type ControlCommand } from "./control-commands.ts";
+import { controlLabel, isControlCommand, type ControlCommand } from "./control-commands.ts";
 
 const COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+
+/**
+ * The control form: `!name` with nothing after it. There was a time these shared the
+ * agent's slash, and the slash spelling is still read below for what older comments
+ * and receipts left in live threads -- but the bang is what the machinery writes, and
+ * what a person is asked to type, because a control command does not summon a worker
+ * and should not be dressed as one.
+ */
+const CONTROL_RE = /^!([a-z][a-z0-9-]*)(?:\s+(.*))?$/;
 // Deliberately NOT `DISPATCH_TAG.read` from `adapters/github/tags.ts`, and the
 // difference is load-bearing: this must be anchored to the start of a line so a
 // dispatch marker quoted inside a human's comment cannot trigger a run, whereas
@@ -106,13 +117,17 @@ export interface CommentCommandLine {
  * A malformed line is shown as it was written, because the notice's job is to tell a
  * person what their comment asked for: `/engineer fix it` does not read as `//`, and
  * the line is the thing they must rewrite. Everything else is named by what the
- * machinery would have run, `/stop` or `/reviewer`.
+ * machinery would have run, `!stop` or `/reviewer`.
  *
  * Shared by the two notices that name commands -- the in-progress/commands guard and
- * the stop receipt -- so `/stop` + `/reviewer` reads the same in both.
+ * the stop receipt -- so `!stop` + `/reviewer` reads the same in both.
  */
 export function commandLabel(command: CommentCommandLine): string {
-  return command.command.error !== "" ? command.line : command.command.control ? `/${command.command.control}` : `/${command.command.agent}`;
+  return command.command.error !== ""
+    ? command.line
+    : command.command.control
+      ? controlLabel(command.command.control)
+      : `/${command.command.agent}`;
 }
 
 /**
@@ -146,24 +161,18 @@ export function commandsIn(body: string): CommentCommandLine[] {
 /** One line read as a command, or `undefined` when it is not one. The one scan. */
 function parseCommandLine(rawLine: string): ParsedCommentCommand | undefined {
   const line = rawLine.trim();
+  const bangMatch = CONTROL_RE.exec(line);
+  if (bangMatch && isControlCommand(bangMatch[1]!)) {
+    return readControl(bangMatch[1] as ControlCommand, bangMatch[2]);
+  }
   const commandMatch = COMMAND_RE.exec(line);
   if (commandMatch) {
     const name = commandMatch[1]!;
     const modifier = commandMatch[2]?.trim() ?? "";
 
-    // Before the agent branch, so a control command never reaches it. See
-    // `domain/work/control-commands.ts`.
-    if (isControlCommand(name)) {
-      if (!modifier) return { ...NOTHING, control: name };
-      // `/resume 直して` is the one mistake worth naming, because the thing the
-      // person wanted exists and is one line away: an ordinary agent command
-      // resumes the same session AND carries the instruction, which is why
-      // `/resume` deliberately takes none.
-      return {
-        ...NOTHING,
-        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`,
-      };
-    }
+    // Before the agent branch, so a legacy slash spelling of a control command
+    // never reaches it. See `domain/work/control-commands.ts`.
+    if (isControlCommand(name)) return readControl(name, modifier === "" ? undefined : modifier);
 
     if (!modifier) return { ...NOTHING, agent: name };
     if (modifier === "recover") return { ...NOTHING, agent: name, sessionMode: "recover" };
@@ -175,6 +184,19 @@ function parseCommandLine(rawLine: string): ParsedCommentCommand | undefined {
   const dispatchMatch = DISPATCH_RE.exec(line);
   if (dispatchMatch) return { ...NOTHING, agent: dispatchMatch[1]! };
   return undefined;
+}
+
+/** A control command and whatever the person wrongly put after it. */
+function readControl(name: ControlCommand, modifier: string | undefined): ParsedCommentCommand {
+  if (!modifier) return { ...NOTHING, control: name };
+  // `!resume 直して` is the one mistake worth naming, because the thing the
+  // person wanted exists and is one line away: an ordinary agent command
+  // resumes the same session AND carries the instruction, which is why
+  // `!resume` deliberately takes none.
+  return {
+    ...NOTHING,
+    error: `'${controlLabel(name)}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`,
+  };
 }
 
 /**

@@ -14,6 +14,7 @@ import { ref as requestStopRef } from "../entrypoints/machinery/request_stop.ts"
 import { ref as resolveResumeAgentRef } from "../entrypoints/machinery/resolve_resume_agent.ts";
 import { ref as resumeSubtreeRef } from "../entrypoints/machinery/resume_subtree.ts";
 import { ref as dispatchPrValidationRef } from "../entrypoints/machinery/dispatch_pr_validation.ts";
+import { ref as dispatchUpdateRef } from "../entrypoints/machinery/dispatch_update.ts";
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../adapters/github/tags.ts";
 
 // Invoke agents via /agent-name slash command in issue/PR comments.
@@ -130,16 +131,43 @@ const closedGuardStep = new TypedOutputsStep(
       FROM_COMMAND: parseCommandStep.outputs.agent,
       FROM_CONTROL: parseCommandStep.outputs.control,
     },
-    run: `COMMAND="\${FROM_COMMAND:-\${FROM_CONTROL}}"
+    run: `if [ -n "$FROM_COMMAND" ]; then COMMAND="/$FROM_COMMAND"; else COMMAND="!$FROM_CONTROL"; fi
 ${scriptCommandWithArgs(guardCommandOnClosedRef, {
   number: "\${NUMBER}",
   commenter: "\${COMMENTER}",
-  command: "/\${COMMAND}",
+  command: "\${COMMAND}",
 })}
 `,
   },
   ["blocked"] as const,
 );
+
+/**
+ * `!upgrade`: dispatch the update workflow, which takes a newer release onto this tree.
+ *
+ * The workflow — not a run on this node — because an update is an action on the
+ * deployment, not work on the thread: it pushes its own branch and opens its own
+ * pull request, and the thread that asked gets the answer from that run (the
+ * workflow is started with this thread's number as its `source`). One update at a
+ * time is the workflow's own concurrency group, so two `!upgrade` comments queue
+ * rather than race.
+ */
+const upgradeStep = new TypedOutputsStep({
+  name: "Dispatch the update workflow",
+  if: `${parseCommandStep.rawOutputs.control} == 'upgrade' && ${guardStep.rawOutputs.blocked} != 'true' && ${closedGuardStep.rawOutputs.blocked} != 'true'`,
+  shell: "bash",
+  env: {
+    GH_TOKEN: "${{ github.token }}",
+    REPO: "${{ github.repository }}",
+    NUMBER: githubEvent<IssueCommentCreatedEvent>((e) => e.issue.number),
+  },
+  // Through the bridge, not `gh workflow run` in this step: a comment command
+  // starts a run by name, and the contract (`tests/contract/dispatch-sites.test.ts`)
+  // keeps every such call in one module — the closed-target guard and the ops-log
+  // entry travel with it. `NUMBER` is the thread that asked, so the update
+  // answers where the request was made.
+  run: `${scriptCommandWithArgs(dispatchUpdateRef, { repo: "\${REPO}", source: "\${NUMBER}" })}\n`,
+});
 
 const targetStep = new TypedOutputsStep(
   {
@@ -409,6 +437,7 @@ export const atomaManualComment = new Workflow("atomaton-manual-comment", {
       closedGuardStep,
       targetStep,
       stopStep,
+      upgradeStep,
       resumeStep,
       resumeSubtreeStep,
       dispatchStep,

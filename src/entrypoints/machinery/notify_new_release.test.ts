@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { crc32 } from "node:zlib";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   ASSET_NAME,
   MAX_RELEASES,
@@ -17,31 +17,34 @@ import { removeTemp, runWithFakeGh, scriptPath, type FakeGhRule } from "./testin
 /**
  * The announcement, against the fake `gh`.
  *
- * Two behaviours are the whole of it and both are silent when wrong: a tree that
+ * Three behaviours are the whole of it and all are silent when wrong: a tree that
  * is up to date must write NOTHING (a scheduled run that writes every time is a
- * repository with one issue per day), and a tree that is behind must leave exactly
- * ONE notice behind however many times it runs.
+ * repository with one issue per day); a tree that is behind must leave exactly ONE
+ * notice behind however many times it runs; and the notice must answer what taking
+ * the release would do to THIS tree, not announce a version number.
  *
- * ## Where the upstream manifest comes from, and why the fixture says so twice
+ * ## Three content maps, not one manifest
  *
- * The deletion list is the difference between two manifests, and WHICH copy of the
- * newer one is read is the defect this file was rewritten for. The tree served at a
- * tag carries the previous release's manifest — self-deploy commits it a release
- * late — so a fixture that only ever had one upstream manifest passed whichever copy
- * the code read.
+ * The notice's plan needs file contents on all three sides — the release the tree
+ * came from, the release being taken, and the tree itself. So every fixture is a
+ * checkout whose files actually exist on disk, and TWO release assets, one per
+ * download, with contents the fixture chooses. A read that fails is a case of its
+ * own, because "could not read" and "nothing newer" are the two answers that must
+ * never be confused.
  *
- * So `reads()` writes two, deliberately different, and only one of them belongs to
- * the release:
+ * ## Why the download rules match on the tag AND `-D`
  *
- *   - the ASSET carries it, built from `package.json` at build time, and it cannot
- *     lag: `publish-release.sh` refuses to publish unless the tag equals that version;
- *   - the committed copy at the tag is the previous release's, and a regression that
- *     read it would report NOTHING as deleted where this asset reports a path.
+ * The fake matches a rule by substring across argv, and the notice BODY quotes the
+ * very command being faked — `gh release download <tag> …` sits in the fenced block
+ * a person copies. That quotation is why every download rule also carries `-D`: the
+ * quoted command has no `-D`, so the notice's own write call can never satisfy a
+ * download rule (a failed-download fixture once silently failed the write instead).
+ * Within the two downloads, the tag is its own argv element, so the tag anchor is
+ * what tells them apart; order still matters because a tree already on the latest
+ * would match the target's rule and quietly download the wrong release.
  *
- * Every fixture is a checkout-shaped temp directory — the script reads the local
- * manifest off the disk it is run in — and a `gh` that answers the reads it makes.
- * A read that fails is a case of its own, because "could not read" and "nothing
- * newer" are the two answers that must never be confused.
+ * The `releases/latest` rule returns the BARE tag, because that is what a real
+ * `gh api … --jq .tag_name` prints — the fixture pretends the jq ran, not gh.
  */
 
 /** Temp directories this file made, removed in one place rather than at every call site. */
@@ -56,72 +59,85 @@ function temp(prefix: string): string {
   return dir;
 }
 
-/** A `.github/atomaton-release.json`, as a release writes one, in a fresh temp directory. */
-function checkout(files: string[], version = "v0.1.0"): string {
+/** A tree's files beyond the manifest itself. */
+type Tree = Record<string, string>;
+
+const CHECK = ".github/workflows/atomaton-check.yml";
+const GONE = ".github/workflows/atomaton-gone.yml";
+/** Every fixture tree is behind by this much: a check the release changed, and one it dropped. */
+const BASE_FILES: Tree = { [CHECK]: "check: one\n", [GONE]: "gone: one\n" };
+const TARGET_FILES: Tree = { [CHECK]: "check: two\n" };
+
+/** The manifest as both the tree's copy and the asset's copy write it — byte for byte the same. */
+const manifestJson = (version: string, files: string[]): string =>
+  JSON.stringify({ version, files: [RELEASE_MANIFEST, ...files] });
+
+/** A checkout-shaped temp directory: the manifest, and every file it lists, on disk. */
+function checkout(entries: Tree, version = "v0.1.0"): string {
   const dir = temp("atomaton-new-release-");
-  mkdirSync(join(dir, ".github"), { recursive: true });
-  writeFileSync(
-    join(dir, RELEASE_MANIFEST),
-    `${JSON.stringify({ version, files: [RELEASE_MANIFEST, ...files] }, null, 2)}\n`,
-  );
+  for (const [path, content] of Object.entries(entries)) {
+    mkdirSync(dirname(join(dir, path)), { recursive: true });
+    writeFileSync(join(dir, path), content);
+  }
+  mkdirSync(dirname(join(dir, RELEASE_MANIFEST)), { recursive: true });
+  writeFileSync(join(dir, RELEASE_MANIFEST), `${manifestJson(version, Object.keys(entries))}\n`);
   return dir;
 }
 
 /**
- * A one-entry zip holding `content` at `name`, built byte for byte.
+ * A zip holding the manifest and `entries` beside it, in the checkout's own shape.
  *
  * STORED rather than deflated on purpose: an entry with method 0 needs no inflate
  * table to be written, so this stays a plain byte layout rather than an
- * implementation of DEFLATE in a test. `unzip` reads it like any other archive —
- * which is the point, because the script prints one member out of a real release
- * asset and a fixture that faked that would be testing a decoder against a picture
- * of itself.
+ * implementation of DEFLATE in a test. The reader under test handles both methods
+ * — a deflated entry is its own test in `lib/zip-read.test.ts` — and the point here
+ * is that the notice genuinely downloads an archive and reads members out of it.
  */
-function oneEntryZip(name: string, content: string): Uint8Array {
-  const data = new TextEncoder().encode(content);
-  const nameBytes = new TextEncoder().encode(name);
-  const crc = crc32(data);
+function treeZip(name: string, version: string, entries: Tree): string {
+  const listed = Object.keys(entries);
+  const members = new Map<string, string>([
+    [RELEASE_MANIFEST, `${manifestJson(version, listed)}\n`],
+    ...Object.entries(entries),
+  ]);
+  const bytes: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  for (const [entry, content] of members) {
+    const data = Buffer.from(content, "utf8");
+    const nameBytes = Buffer.from(entry, "utf8");
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(crc32(data), 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBytes.length, 26);
+    bytes.push(local, nameBytes, data);
 
-  const local = Buffer.alloc(30);
-  local.writeUInt32LE(0x04034b50, 0);
-  local.writeUInt16LE(20, 4);
-  local.writeUInt16LE(0, 8); // method 0 = stored
-  local.writeUInt32LE(crc, 14);
-  local.writeUInt32LE(data.length, 18);
-  local.writeUInt32LE(data.length, 22);
-  local.writeUInt16LE(nameBytes.length, 26);
-
-  const central = Buffer.alloc(46);
-  central.writeUInt32LE(0x02014b50, 0);
-  central.writeUInt16LE(20, 4);
-  central.writeUInt16LE(20, 6);
-  central.writeUInt32LE(crc, 16);
-  central.writeUInt32LE(data.length, 20);
-  central.writeUInt32LE(data.length, 24);
-  central.writeUInt16LE(nameBytes.length, 28);
-
-  const localRecord = Buffer.concat([local, Buffer.from(nameBytes), data]);
-  const centralRecord = Buffer.concat([central, Buffer.from(nameBytes)]);
+    const header = Buffer.alloc(46);
+    header.writeUInt32LE(0x02014b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(20, 6);
+    header.writeUInt32LE(crc32(data), 16);
+    header.writeUInt32LE(data.length, 20);
+    header.writeUInt32LE(data.length, 24);
+    header.writeUInt16LE(nameBytes.length, 28);
+    header.writeUInt32LE(offset, 42);
+    central.push(header, nameBytes);
+    offset += local.length + nameBytes.length + data.length;
+  }
+  const directory = Buffer.concat(central);
   const eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(1, 8);
-  eocd.writeUInt16LE(1, 10);
-  eocd.writeUInt32LE(centralRecord.length, 12);
-  eocd.writeUInt32LE(localRecord.length, 16);
+  eocd.writeUInt16LE(members.size, 8);
+  eocd.writeUInt16LE(members.size, 10);
+  eocd.writeUInt32LE(directory.length, 12);
+  eocd.writeUInt32LE(offset, 16);
 
-  return Buffer.concat([localRecord, centralRecord, eocd]);
-}
-
-/** The release asset a `gh release download` leaves behind: a real zip the script can print from. */
-function asset(manifest: { version: string; files: string[] }): string {
-  const path = join(temp("atomaton-asset-"), ASSET_NAME);
-  writeFileSync(path, oneEntryZip(RELEASE_MANIFEST, JSON.stringify(manifest)));
+  const path = join(temp("atomaton-asset-"), name);
+  writeFileSync(path, Buffer.concat([...bytes, directory, eocd]));
   return path;
 }
-
-/** A manifest as the contents API serves the copy committed at a tag. */
-const atTag = (version: string, files: string[]): string =>
-  JSON.stringify({ version, files: [RELEASE_MANIFEST, ...files] });
 
 /** One release, as the releases list returns it. */
 const release = (tag: string, body = `notes for ${tag}`): ReleaseNote => ({
@@ -131,56 +147,43 @@ const release = (tag: string, body = `notes for ${tag}`): ReleaseNote => ({
 });
 
 /**
- * The reads, as rules — with the two upstream manifests told apart.
+ * The reads, as rules — one download per release, told apart by the tag.
  *
- * `shipped` is what the ASSET carries. `committed` is what the tree at the tag
- * serves, and it defaults to the EMPTY list: the previous release's manifest does
- * not carry a path the newest release dropped, which is why reading it reported
- * nothing.
- *
- * ## Why the download rule matches `-D`
- *
- * The fake matches a rule by substring across argv, and the notice BODY quotes the
- * very command being faked — `gh release download <tag> …` sits in the fenced block
- * a person copies. So `["release", "download"]` matches `issue create` too, and a
- * failed-download fixture would silently make the write fail instead. `-D` is the
- * flag only the real call passes, and it makes the rule order-independent.
+ * Rule order matters: the base rule comes first, because a tree already on the
+ * latest would match the target's rule and quietly download the wrong release.
+ * That tree never downloads at all (it is caught up), so this is belt only.
  */
 function reads(
   latest: string,
   options: {
     notes?: ReleaseNote[];
-    shipped?: string[];
-    committed?: string[];
     notesFail?: boolean;
-    assetFail?: boolean;
+    /** What the base release's asset carries beyond its manifest. */
+    base?: Tree;
+    /** What the target release's asset carries beyond its manifest. */
+    target?: Tree;
+    /** Which download to fail. Failing both degrades the plan and the deletion list. */
+    downloadFail?: "base" | "target" | "both";
+    /** The tree's own release, when it is not the default one behind. */
+    baseTag?: string;
   } = {},
 ): FakeGhRule[] {
+  const baseTag = options.baseTag ?? "v0.1.0";
+  const fail = options.downloadFail;
+  const download = (tag: string, entries: Tree): FakeGhRule =>
+    fail === "both" || fail === (tag === baseTag ? "base" : "target")
+      ? { match: [tag, "release", "download", "-D"], code: 1, stdout: "no such asset" }
+      : {
+          match: [tag, "release", "download", "-D"],
+          writes: [{ name: ASSET_NAME, from: treeZip(`${tag}.zip`, tag, entries) }],
+        };
   return [
     {
       match: [`repos/${UPSTREAM_REPOSITORY}/releases/latest`],
-      stdout: JSON.stringify({ tag: latest, url: `https://example.test/${latest}` }),
+      stdout: latest,
     },
-    {
-      match: ["release", "download", "-D", ASSET_NAME],
-      ...(options.assetFail
-        ? { code: 1, stdout: "no such asset" }
-        : {
-            writes: [
-              {
-                name: ASSET_NAME,
-                from: asset({
-                  version: latest,
-                  files: [RELEASE_MANIFEST, ...(options.shipped ?? [".github/workflows/atomaton-check.yml"])],
-                }),
-              },
-            ],
-          }),
-    },
-    {
-      match: [`contents/${RELEASE_MANIFEST}`],
-      stdout: atTag("v0.1.5", options.committed ?? []),
-    },
+    download(baseTag, options.base ?? BASE_FILES),
+    download(latest, options.target ?? TARGET_FILES),
     {
       match: ["releases?per_page"],
       ...(options.notesFail
@@ -192,7 +195,10 @@ function reads(
 
 /** A search answering with the open notice's number, or with none. */
 const search = (number: number): FakeGhRule => ({
-  match: ["issue", "list"],
+  // Anchored on `in:title` as well: an edit or create call carries the notice's
+  // whole body on its argv, and a body that happens to contain the word "list"
+  // would otherwise be answered with a search result.
+  match: ["issue", "list", "in:title"],
   stdout: JSON.stringify(
     number === 0
       ? []
@@ -212,14 +218,14 @@ function flagValue(call: string[], flag: string): string {
   return at === -1 ? "" : (call[at + 1] ?? "");
 }
 
-/** A checkout that is behind, with one path the newer release drops. */
+/** A checkout that is behind, matching the base release's own contents. */
 function behind(): string {
-  return checkout([".github/workflows/atomaton-check.yml", ".github/workflows/atomaton-gone.yml"], "v0.1.0");
+  return checkout(BASE_FILES, "v0.1.0");
 }
 
 describe("when a tree is up to date", () => {
   test("nothing is written at all", () => {
-    const dir = checkout([".github/workflows/atomaton-check.yml"], "v0.2.0");
+    const dir = checkout(BASE_FILES, "v0.2.0");
     const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
       cwd: dir,
       rules: [...reads("v0.2.0"), search(0)],
@@ -235,7 +241,7 @@ describe("when a tree is up to date", () => {
    * announced by editing an issue about a version that is no longer waiting.
    */
   test("a notice left open after the upgrade is closed, and no new one is opened", () => {
-    const dir = checkout([".github/workflows/atomaton-check.yml"], "v0.2.0");
+    const dir = checkout(BASE_FILES, "v0.2.0");
     const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
       cwd: dir,
       rules: [...reads("v0.2.0"), search(7), { match: ["issue", "close"] }],
@@ -298,38 +304,6 @@ describe("when a tree is behind", () => {
     // Every release already here, and older ones, stay out of it.
     expect(body).not.toContain("notes for v0.1.0");
     expect(body).not.toContain("notes for v0.0.9");
-  });
-
-  /**
-   * The fixture the previous version of this file could not have written, and the
-   * defect it exists for.
-   *
-   * The release's own asset does NOT carry `atomaton-gone.yml`; the manifest
-   * committed at the tag DOES. Reading the committed copy — which is what this
-   * script did — finds nothing missing and renders an empty section that reads
-   * exactly like a release that dropped nothing. Only reading the asset reports it.
-   */
-  test("a path only the ASSET knows was dropped is listed", () => {
-    const dir = behind();
-    const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
-      cwd: dir,
-      rules: [
-        ...reads("v0.2.0", {
-          shipped: [".github/workflows/atomaton-check.yml"],
-          committed: [".github/workflows/atomaton-check.yml", ".github/workflows/atomaton-gone.yml"],
-        }),
-        search(0),
-        { match: ["issue", "create"] },
-      ],
-    });
-    expect(r.status).toBe(0);
-    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
-    expect(
-      body,
-      "the committed copy at the tag is a release behind, so its list hides this deletion",
-    ).toContain("`.github/workflows/atomaton-gone.yml`");
-    expect(body, "a file both releases ship is not a deletion").not.toContain("`.github/workflows/atomaton-check.yml`");
-    expect(body, "nothing the adopter wrote can be on it").toContain("nothing you wrote is on it");
   });
 
   test("an open notice is updated rather than a second one opened", () => {
@@ -402,6 +376,73 @@ describe("when a tree is behind", () => {
   });
 });
 
+describe("the plan inside the notice", () => {
+  /**
+   * On the default fixture, the untouched check flows through as a take, the
+   * dropped file as a deletion, and nothing collides — which is the one state
+   * under which the notice may say the update applies itself.
+   */
+  test("a tree nothing collides with is told so, with the plan's counts", () => {
+    const dir = behind();
+    const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      rules: [...reads("v0.2.0"), search(0), { match: ["issue", "create"] }],
+    });
+    expect(r.status).toBe(0);
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body).toContain("the update applies itself");
+    expect(body).toContain("| Files updated (this tree never changed them) | 2 |");
+    expect(body).toContain(`| Files removed (unmodified here) | 1 |`);
+    expect(body).toContain("| Files changed on **both** sides | 0 |");
+    expect(body).not.toContain("both-sides files are where");
+  });
+
+  /** The file both sides changed is the whole reason an update stops at a pull request. */
+  test("a both-sides change is named in the verdict, as the decision to make", () => {
+    const dir = checkout({ ...BASE_FILES, [CHECK]: "check: customised by the adopter\n" }, "v0.1.0");
+    const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      rules: [...reads("v0.2.0"), search(0), { match: ["issue", "create"] }],
+    });
+    expect(r.status).toBe(0);
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body).toContain("needs a decision");
+    expect(body).toContain(`\`${CHECK}\``);
+  });
+
+  /** A path the plan will not touch without a person is listed, not silently kept. */
+  test("a file the adopter edited where upstream added nothing new is left for the notice to name", () => {
+    const dir = checkout({ ...BASE_FILES, [GONE]: "gone: customised\n" }, "v0.1.0");
+    const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      rules: [...reads("v0.2.0"), search(0), { match: ["issue", "create"] }],
+    });
+    expect(r.status).toBe(0);
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body).toContain("leaves these alone until a person says otherwise");
+    expect(body).toContain(`\`${GONE}\``);
+  });
+
+  /**
+   * The base release failing to read is the plan going dark while the announcement
+   * still stands: the notice says what it could not compute and why, and still says
+   * the rest — a missing table must never read as "nothing would change".
+   */
+  test("the base release failing to read degrades the plan but keeps the notice", () => {
+    const dir = behind();
+    const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      rules: [...reads("v0.2.0", { downloadFail: "base" }), search(0), { match: ["issue", "create"] }],
+    });
+    expect(r.status).toBe(0);
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body).toContain("not computed");
+    expect(body).toContain("this tree's own release (v0.1.0) could not be read");
+    // The deletion list — which needs only the target's manifest — still stands.
+    expect(body).toContain(`\`${GONE}\``);
+  });
+});
+
 describe("a read that fails is not an answer", () => {
   test("a latest release that could not be read fails the run and writes nothing", () => {
     const dir = behind();
@@ -440,16 +481,16 @@ describe("a read that fails is not an answer", () => {
   });
 
   /**
-   * The notes and the deleted list degrade; the decision does not. A failed download
-   * leaves the notice without the deletion list, which a person can still act on,
-   * rather than leaving no notice at all.
+   * The notes and the plan degrade; the decision does not. A failed download leaves
+   * the notice without its table and its deletion list, which a person can still
+   * act on, rather than leaving no notice at all.
    */
-  test("unreadable notes and an unreadable asset still leave a notice, saying what is missing", () => {
+  test("unreadable notes and unreadable assets still leave a notice, saying what is missing", () => {
     const dir = behind();
     const r = runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
       cwd: dir,
       rules: [
-        ...reads("v0.2.0", { notesFail: true, assetFail: true }),
+        ...reads("v0.2.0", { notesFail: true, downloadFail: "both" }),
         search(0),
         { match: ["issue", "create"] },
       ],
@@ -458,6 +499,9 @@ describe("a read that fails is not an answer", () => {
     const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
     expect(body).toContain("Not read:");
     expect(body).toContain("Not computed:");
+    // The plan's degraded line is its own sentence — a missing table must never
+    // read as an empty one.
+    expect(body).toContain("not computed");
     expect(body, "the versions are the part that cannot be missing").toContain("v0.2.0");
   });
 });

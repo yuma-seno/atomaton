@@ -61,14 +61,34 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, e.g. 0.2.0 (a leading "v" is accepted). Leave empty to bump the last segment of the declared version.'
+        description: 'Version to release, e.g. 0.2.0 (a leading "v" is accepted). Names the version directly; leave empty to derive it from the bump.'
         required: false
         default: ''
         type: string
+      bump:
+        description: 'Which part of the declared version to bump. Required unless "version" names one.'
+        required: false
+        default: '(choose)'
+        type: choice
+        options:
+          - '(choose)'
+          - patch
+          - minor
+          - major
   workflow_call:
     inputs:
       version:
-        description: 'Version to release. Empty bumps the last segment of the declared version.'
+        description: 'Version to release. Empty derives it from the bump.'
+        required: false
+        default: ''
+        type: string
+      # `type: choice` is a workflow_dispatch input shape only — a workflow_call
+      # that declares one is an invalid workflow file, and GitHub answers every
+      # push with a run that failed to parse it. The caller (release-pipeline.yml)
+      # offers the choice in its own dispatch form and passes the picked word
+      # through as a string; the version step's `case` is what validates it.
+      bump:
+        description: 'Which part of the declared version to bump. Required unless "version" names one.'
         required: false
         default: ''
         type: string
@@ -151,11 +171,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
 
-          # The declared version, read before anything else: it is what an empty
-          # input bumps, and what the downgrade check compares against.
+          # The declared version, read before anything else: it is what the bump
+          # derives the new version from, and what the downgrade check compares against.
           CURRENT=$(jq -r '.version // empty' package.json)
           if [ -z "$CURRENT" ]; then
             echo "::error::package.json declares no version; there is nothing to compare against, and nothing to bump. Name the version explicitly."
@@ -165,20 +186,48 @@ jobs:
           # A leading `v` is how a tag is written and how a person says it out
           # loud; the declaration is bare. Accept both, store one.
           #
-          # An empty input is the default, and it means "the next one": increment
-          # the last segment, no carry. The last segment is required to be a
-          # number so that `0.3.0-rc` (a valid prerelease with no number to bump)
-          # fails loudly rather than deriving nonsense -- a person names that one.
-          if [ -z "$REQUESTED" ]; then
-            LAST="${CURRENT##*.}"
-            if ! [[ "$LAST" =~ ^[0-9]+$ ]]; then
-              echo "::error::cannot infer the next version from '${CURRENT}': its last segment is not a number. Name one explicitly."
-              exit 1
-            fi
-            NEW="${CURRENT%.*}.$(( LAST + 1 ))"
-            echo "::notice::no version given; bumping the last segment: ${CURRENT} -> ${NEW}"
-          else
+          # With no version named, the bump is required -- the input is a choice
+          # whose first option is a sentinel, so a person pressing the button picks
+          # which segment moves; the number has no meaning of its own, but which
+          # part changes is still the person's to say. '(choose)' reaching here
+          # means it was not picked, and a run that guessed would release under a
+          # number nobody chose. The last segment is required to be a number so
+          # that `0.3.0-rc` (a valid prerelease with no number to bump) fails
+          # loudly rather than deriving nonsense -- a person names that one.
+          if [ -n "$REQUESTED" ]; then
             NEW="${REQUESTED#v}"
+          else
+            case "$BUMP" in
+              patch)
+                LAST="${CURRENT##*.}"
+                if ! [[ "$LAST" =~ ^[0-9]+$ ]]; then
+                  echo "::error::cannot bump the last segment of '${CURRENT}': it is not a number. Name the version explicitly."
+                  exit 1
+                fi
+                NEW="${CURRENT%.*}.$(( LAST + 1 ))"
+                ;;
+              minor)
+                MIDDLE="${CURRENT#*.}"; MIDDLE="${MIDDLE%%.*}"
+                if ! [[ "$MIDDLE" =~ ^[0-9]+$ ]]; then
+                  echo "::error::cannot bump the middle segment of '${CURRENT}': it is not a number. Name the version explicitly."
+                  exit 1
+                fi
+                NEW="${CURRENT%%.*}.$(( MIDDLE + 1 )).0"
+                ;;
+              major)
+                FIRST="${CURRENT%%.*}"
+                if ! [[ "$FIRST" =~ ^[0-9]+$ ]]; then
+                  echo "::error::cannot bump the first segment of '${CURRENT}': it is not a number. Name the version explicitly."
+                  exit 1
+                fi
+                NEW="$(( FIRST + 1 )).0.0"
+                ;;
+              *)
+                echo "::error::no version was named and no bump was chosen. Pick 'patch', 'minor' or 'major' in the form, or type the version. Nothing has been derived."
+                exit 1
+                ;;
+            esac
+            echo "::notice::bumping ${BUMP}: ${CURRENT} -> ${NEW}"
           fi
 
           if ! [[ "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then

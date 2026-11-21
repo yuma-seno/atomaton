@@ -18,6 +18,7 @@
  * | `dispatchCd` | `push` to the branch a merge landed on |
  * | `dispatchTagDeploy` | `push` of a tag a deployment created, and the publish that follows |
  * | `dispatchPostMergeAgent` | `pull_request.closed`, when an agent did the merging |
+ * | `dispatchUpdate` | `!upgrade` — a comment command fires no event GitHub would act on |
  * | `dispatchRunner` (`dispatch.ts`) | every hand-off from one agent to the next |
  *
  * A pull request closed without merging dispatches nobody: the close is told to a
@@ -182,6 +183,26 @@ export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent:
 /** Kick off the CI workflow against a branch, so a fresh agent pull request gets a check run. */
 export function dispatchCi(branch: string): boolean {
   return dispatchWorkflow("dispatchCi", getWorkflowName("ci", DEFAULT_CI_WORKFLOW), ["--ref", branch], log);
+}
+
+/**
+ * Take a newer template release onto this repository — the doing half of the
+ * machinery the notice serves (`scripts/update_atomaton.ts`).
+ *
+ * `!upgrade` is a comment command, and a comment fires no push and no issue event
+ * GitHub would act on, so the update has to be started by name — which is why it
+ * is in this table at all. `source` is the thread the command came from, so the
+ * run answers where it was asked; empty means the Actions button, and the run then
+ * reports only where the machinery reports anyway: the pull request, and the
+ * notice when one stands open.
+ */
+export function dispatchUpdate(repo: string, source: number): boolean {
+  return dispatchWorkflow(
+    `dispatchUpdate: taking a newer release onto ${repo}`,
+    "atomaton-update.yml",
+    ["--repo", repo, "-f", `source=${source > 0 ? String(source) : ""}`],
+    log,
+  );
 }
 
 /**

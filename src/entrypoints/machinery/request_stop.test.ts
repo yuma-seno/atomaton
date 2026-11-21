@@ -24,7 +24,7 @@ describe("request_stop.ts", () => {
     const notice = stopRequestedNotice("octocat", true, []);
     expect(notice).toContain("octocat's");
     expect(notice).not.toContain("@octocat");
-    expect(stopRequestedNotice("", true, [])).toContain("The `/stop` comment");
+    expect(stopRequestedNotice("", true, [])).toContain("The `!stop` comment");
   });
 
   // The existing in-progress guard also deletes comments. Someone whose `/stop`

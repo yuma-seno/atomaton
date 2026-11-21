@@ -95,7 +95,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
     });
     expect(body).toContain("ended before it said anything at all");
     expect(body).toContain("saved session");
-    expect(body).toContain("/resume");
+    expect(body).toContain("!resume");
     expect(body).toContain("@octocat");
     // Not the salvage warning: that one promises a sentence from the middle of the
     // work, and there is none.
@@ -151,7 +151,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
     });
     expect(body).toContain("merged already");
     expect(body).toContain("Continue on #441");
-    expect(body).not.toContain("/resume");
+    expect(body).not.toContain("!resume");
   });
 
   test("points at the thread even when it has no number", () => {
@@ -164,7 +164,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
       target: { known: true, kind: "pull-request", state: "done" },
     });
     expect(body).toContain("Continue on the issue this pull request delivered");
-    expect(body).not.toContain("/resume");
+    expect(body).not.toContain("!resume");
   });
 
   /** A close that merged nothing can be undone, so the advice names the undo. */
@@ -178,7 +178,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
       target: { known: true, kind: "pull-request", state: "abandoned" },
     });
     expect(body).toContain("reopen it");
-    expect(body).not.toContain("/resume");
+    expect(body).not.toContain("!resume");
   });
 
   /**
@@ -194,7 +194,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
       output: "Stopping here.",
       target: { known: false, why: "gh failed" },
     });
-    expect(body).toContain("/resume");
+    expect(body).toContain("!resume");
   });
 
   /** The ordinary ending keeps the sentence it always had. */
@@ -230,7 +230,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
 
   /**
    * `atomaton:ended` answers one question -- was this node INTERRUPTED -- because
-   * `/resume` is its only reader and that is what it picks nodes by. A run that
+   * `!resume` is its only reader and that is what it picks nodes by. A run that
    * reported nothing was not interrupted: it ended believing itself done, so resuming
    * it would restart an agent with nothing left to do. The person the mention fetches
    * is what it needs instead.
@@ -358,7 +358,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
     });
     expect(body).toContain("Stopped on request");
     expect(body).toContain("session is saved");
-    expect(body).toContain("`/resume`");
+    expect(body).toContain("`!resume`");
   });
 
   /**
@@ -536,7 +536,7 @@ describe("post_result_comment.ts main", () => {
       expect(posted, "a stopped run has to say that it stopped").toBeDefined();
       const body = posted?.join(" ") ?? "";
       expect(body).toContain("ended before it said anything at all");
-      expect(body).toContain("/resume");
+      expect(body).toContain("!resume");
       expect(body).toContain("@octocat");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1085,7 +1085,7 @@ describe("the no-report notice for a run whose silence is its own", () => {
     // believing itself done. Resuming it would restart an agent with nothing
     // left to do; what it needs is the person the mention fetches.
     expect(body).toContain("<!-- atomaton:ended=done answers=0 run=0 -->");
-    expect(body).not.toContain("/resume");
+    expect(body).not.toContain("!resume");
     // No cut-short warning either: nothing ran out and nothing was stopped.
     expect(body).not.toContain("⚠️");
   });
