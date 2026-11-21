@@ -26240,5 +26240,56 @@
     "tools": {},
     "acts": {},
     "runs": []
+  },
+  {
+    "path": "sessions/pr-572/reviewer.json",
+    "agent": "reviewer",
+    "messages": 28,
+    "calls": 15,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "get_pr": 1,
+      "get_pr_diff": 1,
+      "load_skill": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "get_issue_comments": 1,
+      "read": 6,
+      "list": 2,
+      "fetch": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-21T11:58:24Z",
+        "ended_because": "failed",
+        "iterations": 8,
+        "messages": 28,
+        "seconds": 19,
+        "server_calls": {
+          "files_readonly": {
+            "list": 2,
+            "read": 6
+          },
+          "github": {
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-21T11:58:05Z"
+      }
+    ]
   }
 ]
