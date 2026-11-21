@@ -130,11 +130,11 @@ const closedGuardStep = new TypedOutputsStep(
       FROM_COMMAND: parseCommandStep.outputs.agent,
       FROM_CONTROL: parseCommandStep.outputs.control,
     },
-    run: `COMMAND="\${FROM_COMMAND:-\${FROM_CONTROL}}"
+    run: `if [ -n "$FROM_COMMAND" ]; then COMMAND="/$FROM_COMMAND"; else COMMAND="!$FROM_CONTROL"; fi
 ${scriptCommandWithArgs(guardCommandOnClosedRef, {
   number: "\${NUMBER}",
   commenter: "\${COMMENTER}",
-  command: "/\${COMMAND}",
+  command: "\${COMMAND}",
 })}
 `,
   },

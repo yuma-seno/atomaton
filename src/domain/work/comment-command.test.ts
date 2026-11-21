@@ -44,17 +44,36 @@ describe("parseCommentCommand", () => {
   });
 
   // `/stop` reaching the agent branch would dispatch a run looking for stop.md,
-  // which is a failed run rather than a stopped one.
-  test("a control command is taken out of the agent namespace", () => {
-    expect(parseCommentCommand("/stop")).toEqual({
+  // which is a failed run rather than a stopped one. The slash spelling survives
+  // from before the bang, for what older notices left in live threads.
+  test("a control command is taken out of the agent namespace, in both spellings", () => {
+    for (const stop of ["!stop", "/stop"]) {
+      expect(parseCommentCommand(stop)).toEqual({
+        agent: "",
+        control: "stop",
+        sessionMode: "continue",
+        error: "",
+      });
+    }
+    for (const resume of ["!resume", "/resume"]) {
+      expect(parseCommentCommand(resume)).toEqual({
+        agent: "",
+        control: "resume",
+        sessionMode: "continue",
+        error: "",
+      });
+    }
+  });
+
+  /**
+   * `!upgrade` acts on the deployment rather than on a run, and it is the third
+   * control command. The slash spelling is read too, for uniformity with the
+   * other two -- an agent named `upgrade` cannot exist while it is.
+   */
+  test("the upgrade command parses in the bang form", () => {
+    expect(parseCommentCommand("!upgrade")).toEqual({
       agent: "",
-      control: "stop",
-      sessionMode: "continue",
-      error: "",
-    });
-    expect(parseCommentCommand("/resume")).toEqual({
-      agent: "",
-      control: "resume",
+      control: "upgrade",
       sessionMode: "continue",
       error: "",
     });
@@ -63,10 +82,25 @@ describe("parseCommentCommand", () => {
   // The thing the person wanted exists and is one line away, so the error names it
   // rather than saying the syntax is wrong.
   test("a control command refuses an argument and points at the agent command", () => {
-    const result = parseCommentCommand("/resume 続きをお願いします");
+    const result = parseCommentCommand("!resume 続きをお願いします");
     expect(result.control).toBe("");
     expect(result.agent).toBe("");
+    expect(result.error).toContain("'!resume'");
     expect(result.error).toContain("'/<agent>'");
+  });
+
+  /**
+   * A bang followed by a letter happens in ordinary prose ("!important", an
+   * emphatic "!nice"). Only the names the machinery answers to may become
+   * commands; everything else after a bang is the person's text, not a refusal
+   * waiting to happen.
+   */
+  test("an unknown bang word is prose, not an error", () => {
+    expect(parseCommentCommand("!important").control).toBe("");
+    expect(parseCommentCommand("!important").error).toBe("");
+    const error = parseCommentCommand("!stopp now really");
+    expect(error.error).toBe("");
+    expect(error.agent).toBe("");
   });
 
   test("ignores a non-command comment", () => {

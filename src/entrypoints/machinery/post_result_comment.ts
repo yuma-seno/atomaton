@@ -937,7 +937,7 @@ export function buildFooter(args: {
       );
     } else {
       lines.push(
-        `${saved} Comment \`/resume\` to continue from here, or \`/${args.agent}\` ` +
+        `${saved} Comment \`!resume\` to continue from here, or \`/${args.agent}\` ` +
           `with an instruction on the following lines._`,
       );
     }

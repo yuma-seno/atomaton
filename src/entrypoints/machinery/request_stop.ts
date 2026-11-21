@@ -204,8 +204,8 @@ export function stopRequestedNotice(commenter: string, deleted: boolean, alsoRea
     "Atomaton: stop requested.",
     "",
     deleted
-      ? `${whose} \`/stop\` comment was removed so it does not become part of the agent's context.`
-      : `${whose} \`/stop\` comment could not be removed, so it may end up in the agent's context.`,
+      ? `${whose} \`!stop\` comment was removed so it does not become part of the agent's context.`
+      : `${whose} \`!stop\` comment could not be removed, so it may end up in the agent's context.`,
   ];
   if (extra && extra.commands.length > 0) {
     const named = extra.commands.map((line) => `\`${line}\``).join(", ");
