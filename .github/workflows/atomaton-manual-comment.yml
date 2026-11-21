@@ -71,8 +71,8 @@ jobs:
           FROM_COMMAND: ${{ steps.command.outputs.agent }}
           FROM_CONTROL: ${{ steps.command.outputs.control }}
         run: |
-          COMMAND="${FROM_COMMAND:-${FROM_CONTROL}}"
-          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/guard_command_on_closed.ts" --number "${NUMBER}" --commenter "${COMMENTER}" --command "/${COMMAND}"
+          if [ -n "$FROM_COMMAND" ]; then COMMAND="/$FROM_COMMAND"; else COMMAND="!$FROM_CONTROL"; fi
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/guard_command_on_closed.ts" --number "${NUMBER}" --commenter "${COMMENTER}" --command "${COMMAND}"
         if: (github.event.comment.user.type != 'Bot') && steps.command.outputs.control != 'stop' && (steps.command.outputs.agent != '' || steps.command.outputs.control != '') && steps.guard.outputs.blocked != 'true'
       - name: Resolve target context
         id: target
@@ -100,6 +100,15 @@ jobs:
         run: |
           bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/request_stop.ts" --number "${NUMBER}" --comment-id "${COMMENT_ID}" --commenter "${COMMENTER}"
         if: steps.command.outputs.control == 'stop'
+      - name: Dispatch the update workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/dispatch_update.ts" --repo "${REPO}" --source "${NUMBER}"
+        if: steps.command.outputs.control == 'upgrade' && steps.guard.outputs.blocked != 'true' && steps.closed-guard.outputs.blocked != 'true'
       - name: Resolve the agent to resume
         id: resume
         shell: bash

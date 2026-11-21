@@ -2,9 +2,6 @@
 // @bun
 
 // src/entrypoints/machinery/notify_new_release.ts
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 import { parseArgs } from "util";
 
 // src/adapters/github/gh.ts
@@ -63,19 +60,66 @@ var SCRIPTS_DIR = `${RUNTIME_ROOT}/scripts`;
 var RELEASE_MANIFEST = ".github/atomaton-release.json";
 var MACHINERY_ROOT_VAR = "ATOMATON_MACHINERY_ROOT";
 
-// src/adapters/runner/machinery.ts
-function machineryRoot() {
-  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
-}
-function machineryPath(relative) {
-  const root = machineryRoot();
-  return root ? `${root}/${relative}` : relative;
-}
-
 // src/domain/machinery/release-manifest.ts
 function noLongerShipped(manifest, tree) {
   const shipped = new Set(manifest.files);
   return [...tree].map((path) => path.replace(/\\/g, "/")).filter((path) => !shipped.has(path)).sort();
+}
+
+// src/domain/machinery/update-plan.ts
+function planUpdate(base, target, baseFiles, targetFiles, ours) {
+  const paths = new Set([...baseFiles.keys(), ...targetFiles.keys()]);
+  const entries = [];
+  for (const path of [...paths].sort()) {
+    const baseContent = baseFiles.get(path);
+    const targetContent = targetFiles.get(path);
+    const oursContent = ours.get(path);
+    let upstream;
+    if (baseContent === undefined && targetContent !== undefined)
+      upstream = "added";
+    else if (baseContent !== undefined && targetContent === undefined)
+      upstream = "deleted";
+    else if (baseContent === targetContent)
+      upstream = "unchanged";
+    else
+      upstream = "modified";
+    const inTheWay = oursContent !== undefined && oursContent !== baseContent;
+    let outcome;
+    if (upstream === "added") {
+      outcome = inTheWay ? "keep" : "add";
+    } else if (upstream === "deleted") {
+      outcome = oursContent === undefined ? "skip" : inTheWay ? "keep" : "delete";
+    } else if (upstream === "unchanged") {
+      outcome = "skip";
+    } else {
+      if (oursContent === undefined)
+        outcome = "keep";
+      else if (!inTheWay)
+        outcome = "take";
+      else if (oursContent === targetContent)
+        outcome = "skip";
+      else
+        outcome = "merge";
+    }
+    entries.push({ path, upstream, oursModified: inTheWay, outcome });
+  }
+  const by = (outcome) => entries.filter((e) => e.outcome === outcome).map((e) => e.path);
+  return {
+    base,
+    target,
+    entries,
+    take: by("take"),
+    add: by("add"),
+    delete: by("delete"),
+    merge: by("merge"),
+    kept: entries.filter((e) => e.outcome === "keep")
+  };
+}
+function verdictSentence(base, target, mergeCount, keptCount) {
+  if (mergeCount === 0 && keptCount === 0) {
+    return `Nothing in this tree collides with ${target}: the update applies itself, and no decision is needed on the way from ${base}.`;
+  }
+  return `Taking ${target} onto ${base} needs a decision here: ${mergeCount} file(s) changed on both sides, ${keptCount} more the plan will not touch without a person.`;
 }
 
 // src/entrypoints/machinery/lib/script-ref.ts
@@ -85,12 +129,208 @@ function defineScript(importMetaUrl) {
   return { runtimePath: `${SCRIPTS_DIR}/${basename(fileURLToPath(importMetaUrl))}` };
 }
 
-// src/entrypoints/machinery/notify_new_release.ts
-var ref = defineScript(import.meta.url);
+// src/entrypoints/machinery/lib/notice-issue.ts
+var NOTICE_MARKER = "<!-- atomaton:new-release -->";
+function findOpenNotice(repo) {
+  const result = ghRead("issue", "list", "--repo", repo, "--state", "open", "--search", `"Template release" in:title`, "--json", "number,body,state");
+  if (result.code !== 0) {
+    log(`WARN could not look for an existing notice in ${repo}: ${result.stderr.trim() || `gh exited ${result.code}`}`);
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(result.stdout || "[]");
+  } catch {
+    log(`WARN the issue search in ${repo} did not answer with JSON`);
+    return null;
+  }
+  if (!Array.isArray(parsed)) {
+    log(`WARN the issue search in ${repo} did not answer with a list`);
+    return null;
+  }
+  const found = parsed.find((entry) => {
+    const issue = entry;
+    return typeof issue.body === "string" && issue.body.includes(NOTICE_MARKER) && (issue.state === undefined || issue.state === "OPEN");
+  });
+  const number = Number(found?.number ?? 0);
+  return Number.isInteger(number) && number > 0 ? number : 0;
+}
+function log(message) {
+  console.error(`[notice-issue] ${message}`);
+}
+
+// src/entrypoints/machinery/lib/release-files.ts
+import { existsSync, mkdtempSync, readFileSync as readFileSync2, readdirSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+
+// src/adapters/runner/machinery.ts
+function machineryRoot() {
+  return process.env[MACHINERY_ROOT_VAR]?.trim() || undefined;
+}
+function machineryPath(relative) {
+  const root = machineryRoot();
+  return root ? `${root}/${relative}` : relative;
+}
+
+// src/entrypoints/machinery/lib/zip-read.ts
+import { readFileSync } from "fs";
+import { inflateRawSync } from "zlib";
+var EOCD_SIG = 101010256;
+var CENTRAL_SIG = 33639248;
+var LOCAL_SIG = 67324752;
+var EOCD_MAX_SEARCH = 22 + 65535;
+function zipEntries(path) {
+  let buf;
+  try {
+    buf = readFileSync(path);
+  } catch (error) {
+    return { why: `could not read the archive at ${path}: ${error.message}` };
+  }
+  const floor = Math.max(0, buf.length - EOCD_MAX_SEARCH);
+  let eocd = -1;
+  for (let at = buf.length - 22;at >= floor; at--) {
+    if (buf.readUInt32LE(at) === EOCD_SIG) {
+      eocd = at;
+      break;
+    }
+  }
+  if (eocd === -1) {
+    return { why: `${path} does not end like a zip archive (no end-of-central-directory record)` };
+  }
+  const entryCount = buf.readUInt16LE(eocd + 10);
+  const centralOffset = buf.readUInt32LE(eocd + 16);
+  const raw = [];
+  let at = centralOffset;
+  for (let index = 0;index < entryCount; index++) {
+    if (at + 46 > buf.length || buf.readUInt32LE(at) !== CENTRAL_SIG) {
+      return { why: `${path}'s central directory ends after ${index} of ${entryCount} entries` };
+    }
+    const method = buf.readUInt16LE(at + 10);
+    const compressedSize = buf.readUInt32LE(at + 20);
+    const nameLength = buf.readUInt16LE(at + 28);
+    const extraLength = buf.readUInt16LE(at + 30);
+    const commentLength = buf.readUInt16LE(at + 32);
+    const localOffset = buf.readUInt32LE(at + 42);
+    const name = buf.subarray(at + 46, at + 46 + nameLength).toString("utf8");
+    if (commentLength !== 0) {
+      return { why: `${path}'s entry ${name} carries a central-directory comment, which this reader does not handle` };
+    }
+    if (localOffset + 30 > buf.length || buf.readUInt32LE(localOffset) !== LOCAL_SIG) {
+      return { why: `${path}'s entry ${name} points at a local header that is not one` };
+    }
+    const localNameLength = buf.readUInt16LE(localOffset + 26);
+    const localExtraLength = buf.readUInt16LE(localOffset + 28);
+    const dataAt = localOffset + 30 + localNameLength + localExtraLength;
+    if (dataAt + compressedSize > buf.length) {
+      return { why: `${path}'s entry ${name} claims more bytes than the archive holds` };
+    }
+    raw.push({ name, method, compressed: buf.subarray(dataAt, dataAt + compressedSize) });
+    at += 46 + nameLength + extraLength + commentLength;
+  }
+  const entries = new Map;
+  for (const entry of raw) {
+    if (entry.name.endsWith("/"))
+      continue;
+    let content;
+    try {
+      content = entry.method === 0 ? Buffer.from(entry.compressed).toString("utf8") : inflateRawSync(entry.compressed).toString("utf8");
+    } catch (error) {
+      return { why: `${path}'s entry ${entry.name} could not be expanded: ${error.message}` };
+    }
+    if (!entries.has(entry.name))
+      entries.set(entry.name, content);
+  }
+  return { entries };
+}
+
+// src/entrypoints/machinery/lib/release-files.ts
+function log2(message) {
+  console.error(`[release-files] ${message}`);
+}
 var UPSTREAM_REPOSITORY = "yuma-seno/atomaton";
 var ASSET_NAME = "atomaton-delivery.zip";
+function releaseFiles(tag) {
+  const dir = mkdtempSync(join(tmpdir(), "atomaton-release-"));
+  try {
+    const downloaded = ghRead("release", "download", tag, "-R", UPSTREAM_REPOSITORY, "-p", ASSET_NAME, "-D", dir);
+    if (downloaded.code !== 0) {
+      return { why: `could not download ${tag}'s ${ASSET_NAME}: ${downloaded.stderr.trim() || `gh exited ${downloaded.code}`}` };
+    }
+    const asset = join(dir, ASSET_NAME);
+    if (!existsSync(asset)) {
+      return { why: `${tag}'s download reported success but left no ${ASSET_NAME}` };
+    }
+    const read = zipEntries(asset);
+    if ("why" in read) {
+      return { why: `could not read ${tag}'s ${ASSET_NAME}: ${read.why}` };
+    }
+    const manifestJson = read.entries.get(RELEASE_MANIFEST);
+    if (manifestJson === undefined) {
+      return { why: `${tag}'s ${ASSET_NAME} carries no ${RELEASE_MANIFEST}` };
+    }
+    let manifest;
+    try {
+      const parsed = JSON.parse(manifestJson);
+      if (!Array.isArray(parsed.files)) {
+        return { why: `${RELEASE_MANIFEST} in ${tag}'s ${ASSET_NAME} holds no file list` };
+      }
+      manifest = { version: String(parsed.version ?? tag), files: parsed.files.map(String) };
+    } catch (error) {
+      return { why: `could not parse the ${RELEASE_MANIFEST} inside ${tag}'s ${ASSET_NAME}: ${error.message}` };
+    }
+    const files = new Map;
+    for (const path of manifest.files) {
+      const content = read.entries.get(path);
+      if (content !== undefined)
+        files.set(path, content);
+    }
+    return { files: { manifest, files } };
+  } finally {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch {}
+  }
+}
+function readTreeFiles(paths) {
+  const files = new Map;
+  for (const path of paths) {
+    const onDisk = machineryPath(path);
+    if (!existsSync(onDisk))
+      continue;
+    try {
+      files.set(path, readFileSync2(onDisk, "utf8"));
+    } catch {}
+  }
+  return files;
+}
+function readLocalManifest() {
+  const path = machineryPath(RELEASE_MANIFEST);
+  if (!existsSync(path)) {
+    return { why: `${path} is missing, so this tree cannot say which release it came from` };
+  }
+  try {
+    const parsed = JSON.parse(readFileSync2(path, "utf8"));
+    if (typeof parsed.version !== "string" || !parsed.version || !Array.isArray(parsed.files)) {
+      return { why: `${path} does not hold a version and a file list` };
+    }
+    return { manifest: { version: parsed.version, files: parsed.files.map(String) } };
+  } catch (error) {
+    return { why: `${path} could not be parsed: ${error.message}` };
+  }
+}
+function latestReleaseTag() {
+  const result = ghRead("api", `repos/${UPSTREAM_REPOSITORY}/releases/latest`, "--jq", ".tag_name");
+  if (result.code !== 0) {
+    log2(`WARN could not read ${UPSTREAM_REPOSITORY}'s latest release: ${result.stderr.trim() || `gh exited ${result.code}`}`);
+    return null;
+  }
+  const tag = result.stdout.trim();
+  return tag === "" ? null : tag;
+}
+// src/entrypoints/machinery/notify_new_release.ts
+var ref = defineScript(import.meta.url);
 var UPGRADE_DOC = `https://github.com/${UPSTREAM_REPOSITORY}/blob/main/docs/runtime/tasks/move-to-a-newer-release.md`;
-var NOTICE_MARKER = "<!-- atomaton:new-release -->";
 var MAX_RELEASES = 20;
 var MAX_NOTES_CHARS = 1200;
 function releaseWindow(notes, localVersion, max = MAX_RELEASES) {
@@ -122,21 +362,22 @@ function noticeBody(input) {
     `| The latest release is | \`${input.latestVersion}\` |`,
     "",
     "## Taking it",
-    "",
-    "Nothing has been changed for you: this is a notice, and the upgrade is a decision.",
-    "",
-    "```bash",
-    `gh release download ${input.latestVersion} -R ${UPSTREAM_REPOSITORY} -p ${ASSET_NAME}`,
-    `unzip -o ${ASSET_NAME}   # the archive holds .github/, so run this at the repository root`,
-    `rm ${ASSET_NAME}`,
-    "git diff .github/                # every difference is now a decision",
-    "```",
-    "",
-    `What to keep, and which files an upgrade replaces: [move to a newer release](${UPGRADE_DOC}).`,
-    "",
-    "## Files upstream no longer ships",
     ""
   ];
+  if (input.plan === null) {
+    lines.push(`What this update would touch here: not computed \u2014 ${input.planWhy}.`, "", "Nothing has been changed for you: this is a notice, and the upgrade is a decision.", "", "Comment **`!upgrade`** on this issue, or run the **Atomaton Update** workflow from the Actions tab.", "");
+  } else {
+    lines.push(verdictSentence(input.localVersion, input.latestVersion, input.plan.both.length, input.plan.kept.length), "", "Nothing has been changed for you: this is a notice, and the upgrade is a decision.", "", "Comment **`!upgrade`** on this issue, or run the **Atomaton Update** workflow from the Actions tab.", "The update applies the release to `.github/` on a branch and merges it itself when nothing in this", "tree collides; a file this tree changed AND upstream changed is what stops it at a pull request,", "where the resolution is yours to make \u2014 comment on that pull request and ask an agent to help.", "");
+    const plan = input.plan;
+    lines.push("What it would do on this tree:", "", "| | |", "| --- | --- |", `| Files updated (this tree never changed them) | ${plan.take.length} |`, `| Files added | ${plan.add.length} |`, `| Files removed (unmodified here) | ${plan.deleted.length} |`, `| Files changed on **both** sides | ${plan.both.length} |`, `| Paths the plan will not touch without a person | ${plan.kept.length} |`, "");
+    if (plan.both.length > 0) {
+      lines.push("The both-sides files are where your edits and upstream's meet:", "", ...plan.both.slice(0, 10).map((path) => `- \`${path}\``), ...plan.both.length > 10 ? [`- \u2026and ${plan.both.length - 10} more`] : [], "");
+    }
+    if (plan.kept.length > 0) {
+      lines.push("The plan leaves these alone until a person says otherwise:", "", ...plan.kept.slice(0, 10).map((entry) => `- \`${entry.path}\``), ...plan.kept.length > 10 ? [`- \u2026and ${plan.kept.length - 10} more`] : [], "");
+    }
+  }
+  lines.push("Or by hand \u2014 the documented procedure, which is what the workflow automates:", "", "```bash", `gh release download ${input.latestVersion} -R ${UPSTREAM_REPOSITORY} -p ${ASSET_NAME}`, `unzip -o ${ASSET_NAME}   # the archive holds .github/, so run this at the repository root`, `rm ${ASSET_NAME}`, "git diff .github/                # every difference is now a decision", "```", "", `What to keep, and which files an upgrade replaces: [move to a newer release](${UPGRADE_DOC}).`, "", "## Files upstream no longer ships", "");
   if (input.removed === null) {
     lines.push(`Not computed: ${input.removedWhy}`, "", `Compare by hand \u2014 [the page](${UPGRADE_DOC}) has the command.`);
   } else if (input.removed.length === 0) {
@@ -164,52 +405,19 @@ function noticeBody(input) {
 `).trimEnd()}
 `;
 }
-function log(message) {
+function log3(message) {
   console.error(`[new-release] ${message}`);
-}
-function readLocalManifest() {
-  const path = machineryPath(RELEASE_MANIFEST);
-  if (!existsSync(path)) {
-    return { why: `${path} is missing, so this tree cannot say which release it came from` };
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8"));
-    if (typeof parsed.version !== "string" || !parsed.version || !Array.isArray(parsed.files)) {
-      return { why: `${path} does not hold a version and a file list` };
-    }
-    return { manifest: { version: parsed.version, files: parsed.files.map(String) } };
-  } catch (error) {
-    return { why: `${path} could not be parsed: ${error.message}` };
-  }
-}
-function latestRelease() {
-  const result = ghRead("api", `repos/${UPSTREAM_REPOSITORY}/releases/latest`, "--jq", "{tag: .tag_name, url: .html_url}");
-  if (result.code !== 0) {
-    log(`WARN could not read ${UPSTREAM_REPOSITORY}'s latest release: ${result.stderr.trim() || `gh exited ${result.code}`}`);
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(result.stdout);
-    if (!parsed.tag) {
-      log("WARN the latest release came back with no tag");
-      return null;
-    }
-    return { tag: parsed.tag, url: parsed.url ?? "" };
-  } catch {
-    log("WARN the latest release was not valid JSON");
-    return null;
-  }
 }
 function releaseNotes() {
   const result = ghRead("api", `repos/${UPSTREAM_REPOSITORY}/releases?per_page=100`, "--jq", '[.[] | {tag: .tag_name, body: (.body // ""), url: .html_url}]');
   if (result.code !== 0) {
-    log(`WARN could not read ${UPSTREAM_REPOSITORY}'s releases: ${result.stderr.trim() || `gh exited ${result.code}`}`);
+    log3(`WARN could not read ${UPSTREAM_REPOSITORY}'s releases: ${result.stderr.trim() || `gh exited ${result.code}`}`);
     return null;
   }
   try {
     const parsed = JSON.parse(result.stdout);
     if (!Array.isArray(parsed)) {
-      log("WARN the release list was not an array");
+      log3("WARN the release list was not an array");
       return null;
     }
     return parsed.filter((entry) => {
@@ -217,77 +425,9 @@ function releaseNotes() {
       return typeof note.tag === "string" && note.tag !== "";
     }).map((note) => ({ tag: note.tag, body: String(note.body ?? ""), url: String(note.url ?? "") }));
   } catch {
-    log("WARN the release list was not valid JSON");
+    log3("WARN the release list was not valid JSON");
     return null;
   }
-}
-function upstreamManifest(tag) {
-  const dir = mkdtempSync(join(tmpdir(), "atomaton-release-"));
-  try {
-    const asset = join(dir, ASSET_NAME);
-    const downloaded = ghRead("release", "download", tag, "-R", UPSTREAM_REPOSITORY, "-p", ASSET_NAME, "-D", dir);
-    if (downloaded.code !== 0) {
-      log(`WARN could not download ${tag}'s ${ASSET_NAME}: ${downloaded.stderr.trim() || `gh exited ${downloaded.code}`}`);
-      return null;
-    }
-    if (!existsSync(asset)) {
-      log(`WARN ${tag}'s download reported success but left no ${ASSET_NAME}`);
-      return null;
-    }
-    let printed;
-    try {
-      const proc = Bun.spawnSync({ cmd: ["unzip", "-p", asset, RELEASE_MANIFEST], stdout: "pipe", stderr: "pipe" });
-      printed = {
-        code: proc.exitCode ?? 1,
-        stdout: proc.stdout?.toString("utf8") ?? "",
-        stderr: proc.stderr?.toString("utf8") ?? ""
-      };
-    } catch (error) {
-      log(`WARN could not run unzip on ${tag}'s ${ASSET_NAME}: ${error.message}`);
-      return null;
-    }
-    if (printed.code !== 0) {
-      log(`WARN ${tag}'s ${ASSET_NAME} holds no readable ${RELEASE_MANIFEST}: ${printed.stderr.trim()}`);
-      return null;
-    }
-    const parsed = JSON.parse(printed.stdout);
-    if (!Array.isArray(parsed.files)) {
-      log(`WARN ${RELEASE_MANIFEST} in ${tag}'s ${ASSET_NAME} holds no file list`);
-      return null;
-    }
-    return { version: String(parsed.version ?? tag), files: parsed.files.map(String) };
-  } catch (error) {
-    log(`WARN could not read ${RELEASE_MANIFEST} out of ${tag}'s ${ASSET_NAME}: ${error.message}`);
-    return null;
-  } finally {
-    try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-    } catch {}
-  }
-}
-function existingNotice(repo) {
-  const result = ghRead("issue", "list", "--repo", repo, "--state", "open", "--search", `"Template release" in:title`, "--json", "number,body,state");
-  if (result.code !== 0) {
-    log(`WARN could not look for an existing notice in ${repo}: ${result.stderr.trim() || `gh exited ${result.code}`}`);
-    return null;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(result.stdout || "[]");
-  } catch {
-    log(`WARN the issue search in ${repo} did not answer with JSON`);
-    return null;
-  }
-  if (!Array.isArray(parsed)) {
-    log(`WARN the issue search in ${repo} did not answer with a list`);
-    return null;
-  }
-  const found = parsed.find((entry) => {
-    const issue = entry;
-    return typeof issue.body === "string" && issue.body.includes(NOTICE_MARKER) && (issue.state === undefined || issue.state === "OPEN");
-  });
-  const number = Number(found?.number ?? 0);
-  return Number.isInteger(number) && number > 0 ? number : 0;
 }
 function main() {
   const { values } = parseArgs({
@@ -304,19 +444,20 @@ function main() {
     console.error(`::error::${local.why}. An upgrade cannot be announced for a tree that cannot be compared.`);
     process.exit(1);
   }
-  const latest = latestRelease();
-  if (latest === null) {
+  const latestTag = latestReleaseTag();
+  if (latestTag === null) {
     console.error(`::error::could not read ${UPSTREAM_REPOSITORY}'s latest release, so a newer one cannot be ` + "announced. A failed read is not an answer of 'up to date'.");
     process.exit(1);
   }
-  const existing = existingNotice(repo);
+  const latest = { tag: latestTag };
+  const existing = findOpenNotice(repo);
   if (existing === null) {
     console.error(`::error::could not search ${repo} for an existing notice, so this run wrote nothing.`);
     process.exit(1);
   }
   if (latest.tag === local.manifest.version) {
     if (existing === 0) {
-      log(`${local.manifest.version} is the latest release; nothing to announce`);
+      log3(`${local.manifest.version} is the latest release; nothing to announce`);
       return;
     }
     const closed = gh("issue", "close", String(existing), "--repo", repo, "--comment", `${NOTICE_MARKER}
@@ -325,18 +466,41 @@ function main() {
       console.error(`::error::this tree caught up to ${local.manifest.version}, but the open notice #${existing} could not ` + `be closed: ${closed.stderr.trim() || `gh exited ${closed.code}`}`);
       process.exit(1);
     }
-    log(`caught up to ${local.manifest.version}; closed the settled notice #${existing}`);
+    log3(`caught up to ${local.manifest.version}; closed the settled notice #${existing}`);
     return;
   }
   const notes = releaseNotes();
-  const shipped = upstreamManifest(latest.tag);
+  const targetRelease = releaseFiles(latest.tag);
+  const removed = "why" in targetRelease ? null : noLongerShipped(targetRelease.files.manifest, local.manifest.files);
+  const removedWhy = `${RELEASE_MANIFEST} could not be read out of ${latest.tag}'s release asset.`;
+  const baseRelease = releaseFiles(local.manifest.version);
+  let plan = null;
+  let planWhy = "";
+  if ("why" in baseRelease) {
+    planWhy = `this tree's own release (${local.manifest.version}) could not be read: ${baseRelease.why}`;
+  } else if ("why" in targetRelease) {
+    planWhy = `the target release (${latest.tag}) could not be read: ${targetRelease.why}`;
+  } else {
+    const paths = new Set([...baseRelease.files.files.keys(), ...targetRelease.files.files.keys()]);
+    const tree = readTreeFiles(paths);
+    const computed = planUpdate(local.manifest.version, latest.tag, baseRelease.files.files, targetRelease.files.files, tree);
+    plan = {
+      take: computed.take,
+      add: computed.add,
+      deleted: computed.delete,
+      both: computed.merge,
+      kept: computed.kept
+    };
+  }
   const input = {
     localVersion: local.manifest.version,
     latestVersion: latest.tag,
     window: notes === null ? null : releaseWindow(notes, local.manifest.version),
     windowWhy: `the release list could not be read.`,
-    removed: shipped === null ? null : noLongerShipped(shipped, local.manifest.files),
-    removedWhy: `${RELEASE_MANIFEST} could not be read out of ${latest.tag}'s release asset.`
+    removed,
+    removedWhy,
+    plan,
+    planWhy
   };
   const title = noticeTitle(input);
   const body = noticeBody(input);
@@ -346,7 +510,7 @@ function main() {
     process.exit(1);
   }
   const where = existing === 0 ? written.stdout.trim() : `#${existing}`;
-  log(`announced ${latest.tag} (this tree is on ${local.manifest.version}) at ${where}`);
+  log3(`announced ${latest.tag} (this tree is on ${local.manifest.version}) at ${where}`);
 }
 if (import.meta.main)
   main();

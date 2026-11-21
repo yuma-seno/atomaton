@@ -461,13 +461,17 @@ function lockVerdict(args) {
 }
 
 // src/domain/work/control-commands.ts
-var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+var CONTROL_COMMAND_NAMES = ["stop", "resume", "upgrade"];
 function isControlCommand(name) {
   return CONTROL_COMMAND_NAMES.includes(name);
+}
+function controlLabel(name) {
+  return name ? `!${name}` : "";
 }
 
 // src/domain/work/comment-command.ts
 var COMMAND_RE = new RegExp(`^\\/(${AGENT_NAME_PATTERN})(?:\\s+(.*))?$`);
+var CONTROL_RE = /^!([a-z][a-z0-9-]*)(?:\s+(.*))?$/;
 var DISPATCH_RE = new RegExp(`^<!--\\s*atomaton:dispatch\\s*=\\s*(${AGENT_NAME_PATTERN})\\s*-->`);
 var NOTHING = { agent: "", control: "", sessionMode: "continue", error: "" };
 function parseCommentCommand(body) {
@@ -482,7 +486,7 @@ function parseCommentCommand(body) {
   return NOTHING;
 }
 function commandLabel(command) {
-  return command.command.error !== "" ? command.line : command.command.control ? `/${command.command.control}` : `/${command.command.agent}`;
+  return command.command.error !== "" ? command.line : command.command.control ? controlLabel(command.command.control) : `/${command.command.agent}`;
 }
 function commandsIn(body) {
   const found = [];
@@ -498,18 +502,16 @@ function commandsIn(body) {
 }
 function parseCommandLine(rawLine) {
   const line = rawLine.trim();
+  const bangMatch = CONTROL_RE.exec(line);
+  if (bangMatch && isControlCommand(bangMatch[1])) {
+    return readControl(bangMatch[1], bangMatch[2]);
+  }
   const commandMatch = COMMAND_RE.exec(line);
   if (commandMatch) {
     const name = commandMatch[1];
     const modifier = commandMatch[2]?.trim() ?? "";
-    if (isControlCommand(name)) {
-      if (!modifier)
-        return { ...NOTHING, control: name };
-      return {
-        ...NOTHING,
-        error: `'/${name}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
-      };
-    }
+    if (isControlCommand(name))
+      return readControl(name, modifier === "" ? undefined : modifier);
     if (!modifier)
       return { ...NOTHING, agent: name };
     if (modifier === "recover")
@@ -523,6 +525,14 @@ function parseCommandLine(rawLine) {
   if (dispatchMatch)
     return { ...NOTHING, agent: dispatchMatch[1] };
   return;
+}
+function readControl(name, modifier) {
+  if (!modifier)
+    return { ...NOTHING, control: name };
+  return {
+    ...NOTHING,
+    error: `'${controlLabel(name)}' takes nothing after it. To resume with an instruction, use '/<agent>' and put the instruction on the following lines.`
+  };
 }
 
 // src/domain/work/actor.ts

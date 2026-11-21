@@ -145,7 +145,7 @@ var CHECKS_FROM_DEFAULT_BRANCH = {
 var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
 
 // src/domain/work/control-commands.ts
-var CONTROL_COMMAND_NAMES = ["stop", "resume"];
+var CONTROL_COMMAND_NAMES = ["stop", "resume", "upgrade"];
 function isControlCommand(name) {
   return CONTROL_COMMAND_NAMES.includes(name);
 }
