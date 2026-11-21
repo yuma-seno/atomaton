@@ -26242,9 +26242,9 @@
     "runs": []
   },
   {
-    "path": "sessions/pr-572/reviewer.json",
+    "path": "sessions/pr-572/archive/reviewer-1.json",
     "agent": "reviewer",
-    "messages": 174,
+    "messages": 177,
     "calls": 113,
     "failed": 1,
     "refused": 0,
@@ -26343,6 +26343,126 @@
           }
         },
         "started": "2026-11-21T13:39:57Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/pr-572/reviewer.json",
+    "agent": "reviewer",
+    "messages": 186,
+    "calls": 125,
+    "failed": 2,
+    "refused": 0,
+    "skills": [
+      "research/web-search"
+    ],
+    "reported": true,
+    "tools": {
+      "list": 6,
+      "read": 62,
+      "grep": 44,
+      "glob": 2,
+      "fetch": 4,
+      "load_skill": 1,
+      "search_remote_code": 1,
+      "get_check_runs": 2,
+      "check_merge_readiness": 1,
+      "get_branch": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-21T11:58:24Z",
+        "ended_because": "failed",
+        "iterations": 8,
+        "messages": 28,
+        "seconds": 19,
+        "server_calls": {
+          "files_readonly": {
+            "list": 2,
+            "read": 6
+          },
+          "github": {
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-21T11:58:05Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-21T12:05:46Z",
+        "ended_because": "completed",
+        "iterations": 32,
+        "messages": 129,
+        "seconds": 266,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 11,
+            "list": 6,
+            "read": 42
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "search_remote_code": 1
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-21T12:01:20Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-21T13:41:31Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "messages": 174,
+        "seconds": 94,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 16,
+            "read": 12
+          },
+          "github": {
+            "get_branch": 1,
+            "get_check_runs": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-21T13:39:57Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-21T14:53:13Z",
+        "ended_because": "completed",
+        "iterations": 13,
+        "messages": 186,
+        "seconds": 143,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 17,
+            "read": 13
+          },
+          "github": {
+            "get_branch": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-21T14:50:50Z"
       }
     ]
   }
