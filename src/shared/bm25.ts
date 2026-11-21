@@ -93,8 +93,8 @@ export interface Passage {
  * search that has to be followed by an open is the shape the shell guard counts.
  *
  * One implementation rather than a second copy of the rule beside it. Two copies of a
- * splitting rule is the defect this repository keeps finding in other forms: `self/`
- * against `.github/`, the config interface against its runtime mirror. `splitBody`
+ * splitting rule is the defect this repository keeps finding in other forms: the
+ * config interface against its runtime mirror. `splitBody`
  * is now the shape without the offsets rather than a rule of its own.
  */
 export function splitBodyWithOffsets(text: string, limit = CHUNK_LIMIT): Passage[] {

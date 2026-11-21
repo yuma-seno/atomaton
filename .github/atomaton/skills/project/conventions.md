@@ -82,8 +82,9 @@ values that exist only after manual setup, so the JSON would stop describing the
 whole configuration.
 
 The workflows that run agents are generated from `src/workflows/` and shipped.
-`self/workflows/` holds the three that are not: `release.yml`, `self-deploy.yml`,
-and `release-pipeline.yml`.
+`release.yml` — the release button — is the one that is not: hand-written, living
+directly in `.github/workflows/`, outside the manifest the update machinery merges
+against.
 
 ## Adding a static file to the deliverable
 

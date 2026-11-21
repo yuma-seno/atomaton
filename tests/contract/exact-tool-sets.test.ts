@@ -8,8 +8,8 @@
  * is the only thing that can see an allowlist that has stopped being applied. It
  * cannot see it *here*, on the pull request that breaks it: that job runs with no
  * `ATOMATON_MACHINERY_ROOT`, so the tree it reads is the checkout's `.github/` — and
- * in THIS repository `.github/` is the last release, put there by the self-deploy
- * workflow. A pull request editing `src/entrypoints/tools/defaults.yaml` is checked
+ * in THIS repository `.github/` is the last release, applied by the update
+ * machinery. A pull request editing `src/entrypoints/tools/defaults.yaml` is checked
  * live only after it has been deployed.
  *
  * For an adopter that is the right arrangement — their `.github/` is the thing they

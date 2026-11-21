@@ -18,9 +18,9 @@
  *     model, a tool list or a role prompt in a person's hands. A redirected
  *     `agent-definitions/` leaves that gate permanently, on one approval that
  *     reads as tidying.
- *   - Both upgrade paths — `cp -r self/. .github/` here, `unzip -o` for an
- *     adopter — replace by POSITION. A redirected tree is never upgraded again,
- *     and the new upstream copy lands beside it unread.
+ *   - Both upgrade paths — the update machinery's three-way plan here, `unzip -o`
+ *     for an adopter without the machinery — replace by POSITION. A redirected tree
+ *     is never upgraded again, and the new upstream copy lands beside it unread.
  *
  * And one of these can never be a setting whatever is decided about the rest:
  * the scripts directory holds the programs that open the configuration. A file

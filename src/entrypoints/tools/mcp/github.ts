@@ -62,7 +62,6 @@ import {
   fetchBaseTip,
   pushCommit,
   readBaseFile,
-  readTwin,
   type StagedFile,
 } from "../../../adapters/github/base-edit.ts";
 import { commentOnWithId } from "../../../adapters/github/work-tree.ts";
@@ -1363,27 +1362,13 @@ async function openBaseEditPr(a: z.infer<typeof OPEN_BASE_EDIT_PR_SCHEMA>): Prom
     };
   });
 
-  const twins = rewritten.map((file) => ({ file, twin: readTwin(tip.sha, file.path) }));
-  const staged: StagedFile[] = [];
-  const recorded: { path: string; twin: string | undefined }[] = [];
-  for (const { file, twin } of twins) {
-    staged.push(file);
-    if (twin === undefined) {
-      recorded.push({ path: file.path, twin: undefined });
-      continue;
-    }
-    // The overlay is the source and `.github/` is the copy, so a change that moves one
-    // alone is either reverted at the next deploy or a red `self-overlay.test.ts`. Both
-    // copies go in the same commit, and the reply says which paths had one.
-    staged.push({ path: twin.path, text: file.text, mode: twin.mode });
-    recorded.push({ path: file.path, twin: twin.path });
-  }
+  const staged: StagedFile[] = [...rewritten];
 
   const body = baseEditPrBody({
     observing: nodeNumber() === undefined ? "" : `#${nodeNumber()}`,
     base: tip.base,
     reviewer,
-    files: recorded,
+    files: staged.map((file) => file.path),
     // The caller's own words, with the same mention check every other body an agent
     // writes gets: an `@login` this run cannot confirm as a participant is escaped, so a
     // pull request does not notify a stranger.
@@ -1456,12 +1441,8 @@ async function openBaseEditPr(a: z.infer<typeof OPEN_BASE_EDIT_PR_SCHEMA>): Prom
     base: tip.base,
     branch,
     commit,
-    // Every path the commit holds, and per requested file whether an overlay twin went
-    // with it. `null` is "the base branch has no twin of this path", which a reader needs
-    // per file: a list of amended files with one exception among them says nothing about
-    // which one it is.
+    // Every path the commit holds.
     staged: staged.map((file) => file.path),
-    files: recorded.map((file) => ({ path: file.path, twin: file.twin ?? null })),
     validation_dispatched: validationDispatched,
     ...(validationDispatched
       ? {}
@@ -2557,8 +2538,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
       "base branch's current tree, pushed to `atomaton/amend-<id>`, and the pull request targets the base branch with no " +
       "parent-issue link, so it belongs to no node and nothing waits on it. Each file takes `old`/`new` (the replacement " +
       "must match exactly once in the file as the base branch holds it now, or nothing is pushed) or `content` (the " +
-      "whole new file). A path with a `self/` twin on the base branch is staged in both copies in the same commit. " +
-      "`config.yaml` is refused: it decides which credentials a run may reach. CI is dispatched, and `validation_dispatched` " +
+      "whole new file). `config.yaml` is refused: it decides which credentials a run may reach. CI is dispatched, and `validation_dispatched` " +
       "says whether it started.",
     schema: OPEN_BASE_EDIT_PR_SCHEMA,
     handler: openBaseEditPr,

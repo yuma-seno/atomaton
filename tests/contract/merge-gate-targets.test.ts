@@ -17,12 +17,12 @@
  * `files_added` matches nothing — and this is the other half of that argument
  * applied to the values.
  *
- * ## Both copies
+ * ## The copy in force
  *
- * The gate in force is the one in the machinery tree, `.github/atomaton/config.yaml`.
- * `self/atomaton/config.yaml` is what the next self-deploy would put back. A path
- * corrected in one and not the other is a gate that works until it is redeployed,
- * or one that does not work until then, so both are read here.
+ * The gate in force is the one in the machinery tree, `.github/atomaton/config.yaml`
+ * — the file the live agents run under, and the one an update three-way merges. It
+ * is read here rather than the shipped template, because a gate that works in the
+ * template but not in the deployed copy is the failure that matters.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -31,7 +31,7 @@ import { governedPathsIn } from "../../src/domain/delivery/merge-readiness.ts";
 import { pathMatches, pathPatternTarget } from "../../src/domain/delivery/path-patterns.ts";
 import { hermeticEnv } from "../../src/entrypoints/machinery/testing/harness.ts";
 
-const CONFIGS = [".github/atomaton/config.yaml", "self/atomaton/config.yaml"];
+const CONFIGS = [".github/atomaton/config.yaml"];
 
 /** Every file git knows about, for the patterns that are globs rather than paths. */
 function trackedFiles(): string[] {
@@ -79,13 +79,6 @@ describe.each(CONFIGS)("%s", (config) => {
   });
 });
 
-describe("the two copies", () => {
-  test("name the same files, so a deploy does not change which gates fire", () => {
-    const [live, overlay] = CONFIGS.map((c) => JSON.stringify(gatesOf(c)));
-    expect(overlay).toBe(live);
-  });
-});
-
 /**
  * `merge.governed_paths`, held to the same rule as the gates above and to one the
  * gates do not need: an exclusion has to exclude something.
@@ -110,21 +103,18 @@ describe.each(CONFIGS)("%s governed_paths", (config) => {
   // apply rather than as text in a file: what an agent writes down about how this
   // project works is not a merge a person has to perform, and everything deciding
   // what that agent may reach still is.
-  test("the prompt template and the skills are not governed; the rest of .github and self/ is", () => {
+  test("the prompt template and the skills are not governed; the rest of .github is", () => {
     const patterns = governedOf(config);
     const ungoverned = adoptedPathsUnder(".github/atomaton/skills")
-      .concat(adoptedPathsUnder("self/atomaton/skills"))
       .concat(".github/atomaton/prompt-template.md");
     expect(ungoverned.length).toBeGreaterThan(1);
     expect(governedPathsIn(ungoverned, patterns)).toEqual([]);
     expect(governedPathsIn([".github/atomaton/config.yaml"], patterns)).toEqual([
       ".github/atomaton/config.yaml",
     ]);
-    // `self/**` still governs what is not a skill, and a `self/` skill is durable:
-    // it is its own file, so the exemption is not carved away by the next deploy.
-    expect(governedPathsIn(["self/atomaton/scripts/tag-release.sh"], patterns)).toEqual([
-      "self/atomaton/scripts/tag-release.sh",
-    ]);
+    // And the exemption is durable by construction, not by a copy step: the
+    // machinery's plan enumerates the release, so a path it does not ship — a
+    // skill living directly under `.github/` — is never proposed for an update.
   });
 });
 

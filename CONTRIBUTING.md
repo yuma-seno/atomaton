@@ -13,11 +13,12 @@ The deliverable:
 - `dist/.github/`: generated from `src/` by `bun run synth`. This is what adopters
   receive. **Not tracked in git** — it is a pure function of `src/`, and the
   release deployment publishes it as a release asset rather than committing it.
-- `self/atomaton/scripts/`: this project's own pipeline. `tag-release.sh` is what
+- `.github/atomaton/scripts/`: this project's own pipeline. `tag-release.sh` is what
   `deploy.on_merge` names. These are the reason there are no hand-written workflows
-  left, and they live under `self/` because they are this repository's rather than the
-  template's — the self-deploy copies them to `.github/atomaton/scripts/`, where the
-  workflows name them. Governed, like `.github/`. The secret scan used to live here
+  left beyond `release.yml`, and they live directly under `.github/` because they
+  are this repository's rather than the template's — the update machinery never
+  proposes touching a path the release does not ship, so nothing copies them
+  anywhere. Governed, like `.github/`. The secret scan used to live here
   too and now ships to every adopter as
   `.github/atomaton-runtime/scripts/scan_secrets.ts`; this repository runs the shipped
   one, so a defect in it fails here before it reaches anybody else.
@@ -93,43 +94,33 @@ Merging an ordinary change publishes nothing. The release is declared **separate
 on purpose**: deciding that a set of work is ready to ship is a judgement about the
 whole of `main`, not about the pull request that happened to merge last, and no work
 pull request carries that judgement in it. `version` in `package.json` is the single
-declaration, and `self/atomaton/scripts/tag-release.sh` derives the tag from it — so
+declaration, and `.github/atomaton/scripts/tag-release.sh` derives the tag from it — so
 there is no tag to push and nothing that can disagree.
 
-The ordinary route is **Release Pipeline**. It declares the version, merges that
-pull request once its checks pass, waits for the release to be published, and then
-applies the release to this repository's own `.github/` by opening and merging a
-second pull request:
+The ordinary route is **Release**. One button: it declares the version, merges that
+pull request once the whole ruleset passes (`--auto`, which waits for
+`atomaton-check` even though the plan job dispatches it and so it does not exist on
+a pull request opened moments ago), waits for the release to be published, and then
+dispatches the update machinery to take the release onto this repository's own
+`.github/` — the same three-way plan an adopter gets, which applies itself when it
+is clean and stops at a pull request when it needs a person:
 
 ```bash
-gh workflow run release-pipeline.yml --ref main -f version=0.2.0
+gh workflow run release.yml --ref main -f bump=minor
 ```
 
-Or press **Run workflow** on **Release Pipeline** in the Actions tab. Both pull
-requests it merges are generated from the version declaration, so neither is a
-change someone wrote and neither needs someone to read it. It still waits for
-`atomaton-check`: no review is not no checks, and a red change is left open rather
-than merged.
+Or press **Run workflow** on **Release** in the Actions tab. Both pull requests it
+merges are generated from the version declaration, so neither is a change someone
+wrote and neither needs someone to read it. The application is opt-out
+(`deploy: false` stops after publishing), never opt-in: a release that forgot to
+apply itself would leave this repository behind its own releases.
 
-The `version` input is optional. Leave it empty (the default) to bump the last
-segment of the declared version — `0.2.9` becomes `0.2.10`, and a prerelease
-increments its last segment too, so `0.3.0-rc.1` becomes `0.3.0-rc.2`. Any other
-number is typed, and the same checks run on it. There is nothing to bump on the
-first release, when `package.json` declares no version yet, so that one names a
-version.
-
-The declaration itself is still **Release** on its own, which is what to reach for
-when the pipeline is broken or when a release has to carry a change to the pipeline
-itself:
-
-```bash
-gh workflow run release.yml --ref main -f version=0.2.0
-```
-
-It writes the version into `package.json` and opens a pull request; it merges
-nothing. `package.json` is in `merge.governed_paths`, so a person reviews it — a
-version is a claim about what is being shipped, and deciding that is not an agent's
-to make.
+`version` and `bump` share one job: naming the number. Type a `version` to name it
+directly (a leading `v` is accepted), or leave it empty and pick `bump` — which
+segment moves is the pick, patch, minor or major, because which part changes is
+still the person's to say. A run that guessed would release under a number nobody
+chose, so picking nothing is refused. There is nothing to bump on the first
+release, when `package.json` declares no version yet, so that one names a version.
 
 The mirror of that rule is for every other pull request: **do not edit `version` in
 one.** A work change merged without a version edit publishes nothing, and that is the
@@ -149,17 +140,20 @@ Everything else is left to the person merging. A version equal to the declared o
 is not an error: it means a publish did not finish, and the fix is to re-run the
 deploy rather than open a pull request for no diff.
 
-The workflow is hand-written and lives in `self/workflows/`, like the self-deploy,
-and for the same reasons: it is not in the deliverable, no agent triggers it, and it
-uses `SELF_DEPLOY_TOKEN` because a pull request opened with `GITHUB_TOKEN` starts no
-workflow run — so its checks would never appear and it could never be merged.
+The workflow is hand-written and lives in `.github/workflows/` — not in the
+deliverable, so no adopter receives it, and `.github/**` is in
+`merge.governed_paths`, so an agent cannot merge the pull request that edits it. It
+uses `RELEASE_TOKEN` because a pull request opened with `GITHUB_TOKEN` starts no
+workflow run — so its checks would never appear and it could never be merged — and
+because a `GITHUB_TOKEN` merge starts no `push` either, and the merge's push is
+what runs the deploy.
 
 It happens in two halves, and the second is triggered by the first:
 
-1. **`deploy.on_merge` → `self/atomaton/scripts/tag-release.sh`.** Runs after every merge and is
+1. **`deploy.on_merge` → `.github/atomaton/scripts/tag-release.sh`.** Runs after every merge and is
    idempotent: it reads the declared version, finds a release already exists for
    it, and stops. Only a merge that changes the version creates the tag.
-2. **`deploy.on_tag` → `self/atomaton/scripts/publish-release.sh`.** Runs off that tag. It
+2. **`deploy.on_tag` → `.github/atomaton/scripts/publish-release.sh`.** Runs off that tag. It
    builds, runs the live tool check, packages `dist/` as `atomaton-delivery.zip`
    with `.github/` at the archive root, and creates the release.
 
@@ -179,7 +173,7 @@ gh workflow run atomaton-deploy.yml --ref v1.2.3 -f target=publish
 
 Nothing writes to main, so none of this needs a ruleset bypass.
 
-**`publish-release.sh` also runs `self/atomaton/scripts/check-live-tools.sh`**, between building `dist/`
+**`publish-release.sh` also runs `.github/atomaton/scripts/check-live-tools.sh`**, between building `dist/`
 and creating the release. That script starts every tool server the artifact would
 ship and asks `atoma validate --with-live-tools` what each server actually
 advertises — which is what says whether a `tool_allowlist` pattern still names a
@@ -208,47 +202,58 @@ gh workflow run atomaton-deploy.yml --ref v1.2.3 -f target=publish
 
 ## Applying a release to this repository
 
-A release does not change how this repository's own agents run. `.github/` has to
-be rebuilt from it, which is a second, deliberate step.
+A release does not change how this repository's own agents run — the `.github/`
+the release publishes is the template's, and this repository is an adopter of its
+own machinery. **Release** applies it as part of the button (`deploy: true`, the
+default): after the publish it dispatches the update machinery, which opens the
+pull request and merges it when the plan is clean.
+
+To apply a release on your own — an older one, or after a run with `deploy: false`:
 
 ```bash
-gh workflow run self-deploy.yml --ref main -f version=latest
+gh workflow run atomaton-update.yml --ref main
 ```
 
-Or press **Run workflow** on **Self Deploy** in the Actions tab. **Release Pipeline**
-already does this for the release it just published; dispatch it on its own to apply
-an older release, or when the pipeline itself is broken. It opens a pull request and
-merges nothing: `.github/**` is in `merge.governed_paths`, so a person reviews it.
+What runs is the same machinery an adopter's `!upgrade` runs. The manifest records
+the release this tree came from, the plan is a three-way merge against that release
+and the new one, and a path this repository edited and upstream changed opens a
+pull request with conflict markers and stops for a person. A clean application
+merges itself; a conflicted one waits. Files the release does not ship — this
+repository's own `release.yml`, the customized skills — are not manifest paths and
+are never touched.
 
-What the job does, in three lines:
+The old self-deploy rebuilt `.github/` from the release (`rm -rf .github`, unzip,
+copy `self/` over it). It deleted first so an upstream removal would be ordinary
+rather than orphaned — and that deletion was also why every hand-written file
+needed a mirror in `self/`. Three-way merging makes upstream removals ordinary too
+(a shipped file the release dropped is a `delete` entry while your copy still
+matches), and needs no mirror, so `self/` is gone with the rebuild that required
+it.
 
-```bash
-rm -rf .github            # a file the release DELETED is gone, not orphaned
-unzip atomaton-delivery.zip  # the deliverable
-cp -r self/. .github/     # this repository's own, at the same paths
-```
-
-The `rm -rf` is the point. `unzip -o` overwrites and never removes, so before
-`self/` existed a file the template had dropped stayed in the tree with no diff to
-notice it by — the old procedure told you to go looking for orphans yourself.
-Deleting first makes an upstream removal ordinary.
-
-### The token, and why it is a PAT
+### The tokens, and why one is a PAT
 
 `GITHUB_TOKEN` cannot write `.github/workflows/**`. Not by path rule and not by
-branch: the push is refused on **identity**, measured here. This deploy replaces
-those files, so no arrangement of paths avoids it.
+branch: the push is refused on **identity**, measured here. Two secrets carry the
+two writes:
 
-So the workflow needs `SELF_DEPLOY_TOKEN` — a fine-grained or classic PAT
-with the `workflow` scope, set as an Actions secret in this repository:
+- `RELEASE_TOKEN` — a fine-grained or classic PAT with repo scope, set as an
+  Actions secret. It opens the release pull request, so its checks run, and merges
+  it, so its push starts the deploy. It never writes workflows. Set it:
 
-```bash
-gh secret set SELF_DEPLOY_TOKEN
-```
+  ```bash
+  gh secret set RELEASE_TOKEN
+  ```
 
-**No agent can reach it.** It is named in the three hand-written workflows under
-`self/workflows/` and nowhere else; `atomaton-runner.yml` does not mention it, and `atoma` hands a tool
-server only the credentials that server's own `env` declares. The workflow also
+- `ATOMATON_UPDATE_TOKEN` — the machinery's own secret, the same one an adopter
+  sets. The update workflow pushes `.github/` under it, including the workflow
+  files the release carries.
+
+**No agent can reach either.** `RELEASE_TOKEN` is named in the one hand-written
+workflow, `release.yml`, and nowhere else; `ATOMATON_UPDATE_TOKEN` is named by the
+update workflow and read there as a secret. `atomaton-runner.yml` mentions neither,
+and `atoma` hands a tool
+server only the credentials that server's own `env` declares. The release workflow
+also
 refuses a bot as `triggering_actor`, because the agent runner's token carries
 `actions: write` and could therefore dispatch a workflow in principle —
 an agent has no route to it today (`gh` and `curl` are both refused by the shell
@@ -259,32 +264,21 @@ A PAT is acceptable here and not inside Atomaton because what holds it is a pers
 pressing a button. The line in #353 — a pull request may not decide its own
 execution environment — is not crossed: nothing an agent produces reaches it.
 
-### Changing something in `self/`
+### Changing something in `.github/`
 
-An overlay entry is a copy, not a build, so it needs no release. Change `self/X`
-and `.github/X` in the **same pull request**, identically.
+What is genuinely this repository's own lives directly in `.github/`: `release.yml`,
+`config.yaml`, the customized skills under `.github/atomaton/skills/`. No copy step
+and no mirror: the machinery's plan never proposes touching a path the release does
+not ship, so these survive every update untouched. `.github/**` is in
+`merge.governed_paths`, so the pull request that edits them is one an agent cannot
+merge — a person is already reading it.
 
-`tests/contract/self-overlay.test.ts` requires them byte-identical, in both
-directions, which is what stops a change from being half-applied.
-
-**Workflows are the one exception.** GitHub refuses to let a GitHub App token
-write `.github/workflows/**`, so an agent can change `self/workflows/**` and cannot
-change the deployed copy. A workflow change therefore goes in `self/` alone, and
-the deployed copy catches up the next time **Self Deploy** runs rather
-than the moment the pull request merges. The direction that matters is still held:
-the test compares against the base the pull request branched from, and fails when
-`.github/workflows/**` moved without `self/` moving with it — the edit that the
-next self-deploy would revert.
-
-Editing any other `.github/X` alone is worse than not editing it: the next
-self-deploy overwrites it from `self/` and the change disappears without a diff.
-
-Nothing checks that every file in `.github/` is accounted for, and nothing needs
-to. The deploy runs `rm -rf .github` first, so a file the release stopped shipping
-is not recreated. A file ADDED to `.github/` with no counterpart in `self/` would
-be silently removed by the next deploy — but `.github/**` is in `merge.governed_paths`,
-so any pull request touching it carries the blocker "this pull request changes how
-agents themselves run" and no agent can merge it. A person is already reading it.
+Files the release also ships are ordinary customizations, held by the same rule as
+any adopter's: the next update three-way merges them, and where both sides changed
+a file, the pull request it opens stops for a person rather than picking a winner.
+Nothing checks that every file in `.github/` is accounted for, because the plan
+does not enumerate the tree — it enumerates the release, and the tree's other
+files are invisible to it by construction.
 
 ## Setup (Bun)
 
@@ -426,16 +420,16 @@ a shell any more.
   receive. CI runs it on every pull request, before `test`, to prove the
   deliverable still builds.
 - `dist/.github/*` is generated: never hand-edit it.
-- `.github/*` is *deployed*, not generated on merge. It is a release plus `self/`
-  copied over it, rebuilt by [Self Deploy](#applying-a-release-to-this-repository).
-  So a change under `src/` does not reach the live agents until someone
-  dispatches that, and CI does not reject a diff that touches `.github/`.
-- What is genuinely yours to edit lives in `self/`, not in `.github/`. Edit both,
-  identically, in one pull request — `tests/contract/self-overlay.test.ts` requires
-  it. `self/workflows/**` is the one exception: GitHub refuses to let an agent write
-  `.github/workflows/**`, so it goes in `self/` alone and the next self-deploy
-  applies it. Editing `.github/` alone is worse than not editing it: the next
-  self-deploy reverts it, silently.
+- `.github/*` is *deployed*, not generated on merge. It is a release applied by
+  the update machinery, so a change under `src/` does not reach the live agents
+  until the next release is applied. CI does not reject a diff that touches
+  `.github/`.
+- What is genuinely this repository's own lives directly in `.github/` —
+  `release.yml`, `config.yaml`, the customized skills. The machinery's plan never
+  touches a path the release does not ship, so hand-written files need no mirror
+  and no copy step; `self/` is gone with the rebuild that needed one. Editing a
+  file the release also ships is an ordinary customization: the next update
+  three-way merges around it, and stops for a person where both sides changed.
 
 ## PR checklist
 

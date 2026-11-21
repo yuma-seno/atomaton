@@ -5,7 +5,7 @@
  *
  * `validate_deliverable.ts` checks the `.github/atomaton/` a pull request would
  * merge, and it ran on every pull request. What nothing checked is whether
- * `src/content/config.yaml` — the template — and `self/atomaton/config.yaml` —
+ * `src/content/config.yaml` — the template — and `.github/atomaton/config.yaml` —
  * this repository's copy of its own config — say the same thing about a key that
  * is REQUIRED.
  *
@@ -21,20 +21,21 @@
  * ## Why this file and not one of the three that read a config
  *
  * `config-contract.test.ts` validates the SHIPPED config against `configProblems`,
- * `merge-gate-targets.test.ts` compares the two copies' merge gates, and
- * `self-overlay.test.ts` requires the two copies byte-identical — so a change to one
- * copy alone is already caught. The hole is the fourth case: both copies the same,
- * both missing a required key, and nothing reading either through the validator.
- * `src/content/config.yaml` is not a fourth copy — it is the template, it is not
- * what the agents here run under, and it is the one that had the key.
+ * `merge-gate-targets.test.ts` compares the two copies' merge gates, and the
+ * machinery's own update three-way merges the deployed copy — so a change to the
+ * shipped copy alone is already visible. The hole is the case nobody reads: the
+ * deployed copy the agents here actually run under, against the validator, with the
+ * names that sit beside it. `src/content/config.yaml` is not that — it is the
+ * template, it is not what the agents here run under, and it is the one that had
+ * the key.
  */
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configProblems } from "../../src/domain/delivery/deliverable-integrity.ts";
 
-/** This repository's own config, in both copies a self-deploy keeps in step. */
-const CONFIGS = [".github/atomaton/config.yaml", "self/atomaton/config.yaml"];
+/** This repository's own config, the one the live agents run under. */
+const CONFIGS = [".github/atomaton/config.yaml"];
 
 function agentNames(dir: string): string[] {
   return readdirSync(dir)
@@ -69,22 +70,6 @@ describe.each(CONFIGS)("%s", (configPath) => {
         `request's validation reads. A problem here blocks CI for every pull request, not only ` +
         `the one that touched it`,
     ).toEqual([]);
-  });
-});
-
-describe("the two copies of this repository's own config", () => {
-  /**
-   * `self/atomaton/config.yaml` is what the next self-deploy puts back, and the
-   * deploy writes it over `.github/atomaton/config.yaml`. Fixing only the deployed
-   * copy holds until the next release; fixing only the overlay does not take effect
-   * until then. `self-overlay.test.ts` enforces the bytes, and this says what the
-   * consequence of that is: a key added to one must be added to the other.
-   */
-  test("declare the same required keys, so a deploy does not remove one", () => {
-    const required = CONFIGS.map(
-      (path) => (Bun.YAML.parse(readFileSync(path, "utf8")) as { agents?: unknown }).agents,
-    );
-    expect(required[1]).toEqual(required[0]);
   });
 });
 

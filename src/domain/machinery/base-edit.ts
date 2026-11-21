@@ -20,22 +20,12 @@
  * ## Why the rules are here rather than at the tool
  *
  * Three of them decide what lands on a branch people review, and all three are
- * answerable from their arguments: which paths may be written at all, how the
- * overlay's second copy is found, and whether a replacement is safe to apply to a
- * file this process read a moment ago. A rule stated beside the `git` calls is a
+ * answerable from their arguments: which paths may be written at all, whether a
+ * replacement is safe to apply to a file this process read a moment ago, and how
+ * the pull request names what moved. A rule stated beside the `git` calls is a
  * rule nothing can test without a repository and a remote.
  */
 import { CONFIG_FILE, USER_ROOT } from "./machinery-layout.ts";
-
-/**
- * `.github/`, which is what `self/` is the source of.
- *
- * Not `USER_ROOT`: the twin of `.github/atomaton/skills/x.md` is
- * `self/atomaton/skills/x.md`, so the two are related by the directory the
- * self-deploy replaces wholesale (`rm -rf .github` then `cp -r self/. .github/`),
- * not by the directory an adopter edits.
- */
-const DEPLOYED_ROOT = ".github";
 
 /**
  * Why `path` may not be amended through this tool, or `undefined` when it may.
@@ -89,21 +79,6 @@ export function amendPathProblem(path: string): string | undefined {
     );
   }
   return undefined;
-}
-
-/**
- * The `self/` copy of a deployed file, whether or not it exists.
- *
- * `self/` mirrors `.github/`, and the self-deploy replaces the deployed tree with
- * it, so the two must hold the same bytes: `self/` is the source and `.github/` is
- * the copy. A change made to one of them alone is either reverted at the next
- * deploy or fails `self-overlay.test.ts`, which is why the tool stages both.
- *
- * An adopter has no `self/`, and `git ls-tree` is what decides that: the tool asks
- * the base branch whether this path is there rather than assuming the layout.
- */
-export function overlayTwinPath(path: string): string {
-  return `self/${path.slice(DEPLOYED_ROOT.length + 1)}`;
 }
 
 /** One file the caller asks to change, as it arrives from the tool's arguments. */
@@ -200,8 +175,8 @@ export interface BaseEditPrBody {
   readonly base: string;
   /** The agent to review, or "" to leave the pull request for a person. */
   readonly reviewer: string;
-  /** Every path staged, and whether a `self/` twin was part of the same commit. */
-  readonly files: readonly { path: string; twin: string | undefined }[];
+  /** Every path the commit holds. */
+  readonly files: readonly string[];
   /** The caller's own words, appended below the machinery's part. */
   readonly note?: string;
 }
@@ -237,21 +212,8 @@ export function baseEditPrBody(body: BaseEditPrBody): string {
       "and its work continues — this pull request is separate from it on purpose, so review it as a change to how " +
       "agents behave rather than as part of a feature.",
     "",
-    ...body.files.map((file) =>
-      file.twin === undefined
-        ? `- \`${file.path}\` — staged on its own; no \`${overlayTwinPath(file.path)}\` on \`${body.base}\``
-        : `- \`${file.path}\`, and its overlay twin \`${file.twin}\` with the same content`,
-    ),
+    ...body.files.map((file) => `- \`${file}\``),
   ];
-  const twins = body.files.filter((file) => file.twin === undefined).map((file) => `\`${file.path}\``);
-  if (twins.length > 0) {
-    lines.push(
-      "",
-      `${twins.join(", ")} ${twins.length === 1 ? "has" : "have"} no \`self/\` twin, so only the deployed copy moved. ` +
-        "In a repository whose deploy rebuilds `.github/` from `self/` and the release, such a file is reverted at " +
-        "the next deploy — this is the copy to leave a note about, not a defect in this change.",
-    );
-  }
   const note = (body.note ?? "").trim();
   if (note !== "") lines.push("", "---", "", note);
   return `${lines.join("\n")}\n`;

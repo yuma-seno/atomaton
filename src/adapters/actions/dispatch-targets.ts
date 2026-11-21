@@ -266,8 +266,8 @@ export function dispatchCd(baseRef: string): boolean {
  * The run is returned rather than a boolean because the caller has to WAIT for it.
  * A dispatch that GitHub accepted is not a deployment that happened: `Deploy` on the
  * merge went green before the release it was supposed to publish existed, and the
- * self-deploy that followed it failed looking for a release not yet created. The
- * caller waits for this run and fails its job if it did not succeed, so green means
+ * release application that followed it failed looking for a release not yet created.
+ * The caller waits for this run and fails its job if it did not succeed, so green means
  * published.
  *
  * `repo` is required rather than optional: the only caller runs in a job checked out
