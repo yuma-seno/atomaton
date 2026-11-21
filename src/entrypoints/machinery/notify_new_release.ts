@@ -11,9 +11,15 @@
  * is anything to download. This is the announcement, and it is the whole of it:
  * nothing is written into the tree from here.
  *
- * It does download the release's asset, into a temporary directory it then deletes,
- * to read the manifest inside it. That is the only way to learn what the release
- * dropped — see `upstreamManifest`. What it never does is apply the release.
+ * It downloads the release's asset twice — the release this tree came from, and
+ * the one being announced — into temporary directories it then deletes, because
+ * the interesting answer needs file contents, not version numbers: what taking
+ * the new release would do to THIS tree. `lib/release-files.ts` puts the three
+ * content maps on the table and `domain/machinery/update-plan.ts` classifies every
+ * path; the notice renders that dry run as a table, headed by the same verdict
+ * sentence the update workflow itself will lead with (`verdictSentence`). A tree
+ * that is up to date learns nothing, which is why its notice closes itself below.
+ * What it never does is apply the release — that is the update workflow's job.
  *
  * ## The two versions, and which repository each comes from
  *
@@ -50,15 +56,24 @@
  * Usage:
  *   notify_new_release.ts --repo OWNER/REPO   (or set GITHUB_REPOSITORY)
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { gh, ghRead } from "../../adapters/github/gh.ts";
-import { machineryPath } from "../../adapters/runner/machinery.ts";
 import { RELEASE_MANIFEST } from "../../domain/machinery/machinery-layout.ts";
-import { noLongerShipped, type ReleaseManifest } from "../../domain/machinery/release-manifest.ts";
+import { noLongerShipped } from "../../domain/machinery/release-manifest.ts";
+import type { PlanEntry } from "../../domain/machinery/update-plan.ts";
+import { planUpdate, verdictSentence } from "../../domain/machinery/update-plan.ts";
 import { defineScript } from "./lib/script-ref.ts";
+import { findOpenNotice, NOTICE_MARKER } from "./lib/notice-issue.ts";
+import {
+  ASSET_NAME,
+  UPSTREAM_REPOSITORY,
+  latestReleaseTag,
+  readLocalManifest,
+  readTreeFiles,
+  releaseFiles,
+} from "./lib/release-files.ts";
+
+export { ASSET_NAME, UPSTREAM_REPOSITORY };
 
 export interface NotifyNewReleaseArgs {
   /** `owner/name` of the repository the notice is opened in — the adopted tree's own. */
@@ -67,34 +82,11 @@ export interface NotifyNewReleaseArgs {
 
 export const ref = defineScript<NotifyNewReleaseArgs>(import.meta.url);
 
-/**
- * Where a release comes from.
- *
- * Named in one place because two calls need it and they have to agree. It is the
- * same slug `src/content/README.md` links to and `atoma-cli.ts` downloads from: an
- * adopted tree reaches upstream by name, and the name is what it is.
- */
-export const UPSTREAM_REPOSITORY = "yuma-seno/atomaton";
-
-/**
- * The release asset, as `self/atomaton/scripts/publish-release.sh` names it.
- *
- * A fixed name rather than one carrying the version: that is what makes
- * `releases/latest/download/atomaton-delivery.zip` a stable URL, and the version is
- * carried by the release itself.
- */
-export const ASSET_NAME = "atomaton-delivery.zip";
-
 /** Where the recipe the notice points at lives, as an adopter can reach it. */
 const UPGRADE_DOC = `https://github.com/${UPSTREAM_REPOSITORY}/blob/main/docs/runtime/tasks/move-to-a-newer-release.md`;
 
-/**
- * The marker that makes the notice findable, and that keeps it to one.
- *
- * A comment rather than a label: labels are the project's to name and this is not,
- * and searching for a comment body needs no label to exist first.
- */
-export const NOTICE_MARKER = "<!-- atomaton:new-release -->";
+/** The marker that finds the notice; defined in `lib/notice-issue.ts`, shared with the update. */
+export { NOTICE_MARKER } from "./lib/notice-issue.ts";
 
 /** How many releases a notice lists before it stops and says how many it left out. */
 export const MAX_RELEASES = 20;
@@ -170,6 +162,27 @@ export interface NoticeInput {
   /** Paths the latest release no longer ships, or `null` when that could not be worked out. */
   readonly removed: readonly string[] | null;
   readonly removedWhy: string;
+  /**
+   * What taking the target would do on THIS tree, or `null` when the assets or the
+   * comparison could not be read. Computed the same way the update workflow will:
+   * the release the tree came from, the release being taken, and the tree itself.
+   */
+  readonly plan: PlanSummary | null;
+  readonly planWhy: string;
+}
+
+/** The dry-run shape the notice renders. Counts and lists, no contents. */
+export interface PlanSummary {
+  /** Files upstream changed that this tree never touched. */
+  readonly take: readonly string[];
+  /** Files upstream added that nothing here is in the way of. */
+  readonly add: readonly string[];
+  /** Files upstream removed that this tree still has, unmodified. */
+  readonly deleted: readonly string[];
+  /** Files changed on BOTH sides: the ones a merge has to reconcile. */
+  readonly both: readonly string[];
+  /** Paths the plan will not touch without a person. */
+  readonly kept: readonly PlanEntry[];
 }
 
 /** The issue's title: what changed, and where this tree stands. */
@@ -190,7 +203,68 @@ export function noticeBody(input: NoticeInput): string {
     "",
     "## Taking it",
     "",
-    "Nothing has been changed for you: this is a notice, and the upgrade is a decision.",
+  ];
+
+  // The same sentence the update workflow leads with, so the notice and the run it
+  // offers never disagree. Its inputs are the plan's counts, which is why it walks
+  // in with the plan (or walks out again below): a verdict the notice cannot compute
+  // is a section saying so, not a guess.
+  if (input.plan === null) {
+    lines.push(
+      `What this update would touch here: not computed — ${input.planWhy}.`,
+      "",
+      "Nothing has been changed for you: this is a notice, and the upgrade is a decision.",
+      "",
+      "Comment **`!upgrade`** on this issue, or run the **Atomaton Update** workflow from the Actions tab.",
+      "",
+    );
+  } else {
+    lines.push(
+      verdictSentence(input.localVersion, input.latestVersion, input.plan.both.length, input.plan.kept.length),
+      "",
+      "Nothing has been changed for you: this is a notice, and the upgrade is a decision.",
+      "",
+      "Comment **`!upgrade`** on this issue, or run the **Atomaton Update** workflow from the Actions tab.",
+      "The update applies the release to `.github/` on a branch and merges it itself when nothing in this",
+      "tree collides; a file this tree changed AND upstream changed is what stops it at a pull request,",
+      "where the resolution is yours to make — comment on that pull request and ask an agent to help.",
+      "",
+    );
+    const plan = input.plan;
+    lines.push(
+      "What it would do on this tree:",
+      "",
+      "| | |",
+      "| --- | --- |",
+      `| Files updated (this tree never changed them) | ${plan.take.length} |`,
+      `| Files added | ${plan.add.length} |`,
+      `| Files removed (unmodified here) | ${plan.deleted.length} |`,
+      `| Files changed on **both** sides | ${plan.both.length} |`,
+      `| Paths the plan will not touch without a person | ${plan.kept.length} |`,
+      "",
+    );
+    if (plan.both.length > 0) {
+      lines.push(
+        "The both-sides files are where your edits and upstream's meet:",
+        "",
+        ...plan.both.slice(0, 10).map((path) => `- \`${path}\``),
+        ...(plan.both.length > 10 ? [`- …and ${plan.both.length - 10} more`] : []),
+        "",
+      );
+    }
+    if (plan.kept.length > 0) {
+      lines.push(
+        "The plan leaves these alone until a person says otherwise:",
+        "",
+        ...plan.kept.slice(0, 10).map((entry) => `- \`${entry.path}\``),
+        ...(plan.kept.length > 10 ? [`- …and ${plan.kept.length - 10} more`] : []),
+        "",
+      );
+    }
+  }
+
+  lines.push(
+    "Or by hand — the documented procedure, which is what the workflow automates:",
     "",
     "```bash",
     `gh release download ${input.latestVersion} -R ${UPSTREAM_REPOSITORY} -p ${ASSET_NAME}`,
@@ -203,7 +277,7 @@ export function noticeBody(input: NoticeInput): string {
     "",
     "## Files upstream no longer ships",
     "",
-  ];
+  );
 
   if (input.removed === null) {
     lines.push(`Not computed: ${input.removedWhy}`, "", `Compare by hand — [the page](${UPGRADE_DOC}) has the command.`);
@@ -254,52 +328,6 @@ function log(message: string): void {
   console.error(`[new-release] ${message}`);
 }
 
-/** The release this tree came from, or the reason it cannot be read. */
-function readLocalManifest(): { manifest: ReleaseManifest } | { why: string } {
-  const path = machineryPath(RELEASE_MANIFEST);
-  if (!existsSync(path)) {
-    // A tree that cannot say which release it is on cannot be compared with
-    // anything, and inventing "up to date" for it would be the failure this whole
-    // script exists to prevent. Failing is what `plan_deploy.ts` does with a
-    // declaration it could not read, for the same reason.
-    return { why: `${path} is missing, so this tree cannot say which release it came from` };
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ReleaseManifest>;
-    if (typeof parsed.version !== "string" || !parsed.version || !Array.isArray(parsed.files)) {
-      return { why: `${path} does not hold a version and a file list` };
-    }
-    return { manifest: { version: parsed.version, files: parsed.files.map(String) } };
-  } catch (error) {
-    return { why: `${path} could not be parsed: ${(error as Error).message}` };
-  }
-}
-
-/** The latest release's tag, or null when it could not be read. */
-function latestRelease(): { tag: string; url: string } | null {
-  const result = ghRead(
-    "api",
-    `repos/${UPSTREAM_REPOSITORY}/releases/latest`,
-    "--jq",
-    "{tag: .tag_name, url: .html_url}",
-  );
-  if (result.code !== 0) {
-    log(`WARN could not read ${UPSTREAM_REPOSITORY}'s latest release: ${result.stderr.trim() || `gh exited ${result.code}`}`);
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(result.stdout) as { tag?: string; url?: string };
-    if (!parsed.tag) {
-      log("WARN the latest release came back with no tag");
-      return null;
-    }
-    return { tag: parsed.tag, url: parsed.url ?? "" };
-  } catch {
-    log("WARN the latest release was not valid JSON");
-    return null;
-  }
-}
-
 /** The releases the API lists, newest first, or null when they could not be read. */
 function releaseNotes(): ReleaseNote[] | null {
   const result = ghRead(
@@ -331,140 +359,12 @@ function releaseNotes(): ReleaseNote[] | null {
 }
 
 /**
- * The manifest the released ASSET carries, or null.
- *
- * ## Not the copy committed at the tag
- *
- * That copy is this repository's own deployed `.github/`, written by the previous
- * release and committed by the self-deploy pull request. So the tree at `vX` serves
- * the manifest naming `v(X-1)` — measured here, where `v0.21.74`'s tree holds
- * `"version": "v0.21.73"`. Reading it made the deletion list answer "what my release
- * shipped that the previous one did not", which is the opposite question: the paths
- * the announced release itself dropped are already in the previous list, so
- * `noLongerShipped` filtered them out and the section the release exists for showed
- * a plausible, shorter list. Silent, because a list that is merely incomplete reads
- * exactly like a complete one.
- *
- * ## Why the zip, and why through a file
- *
- * The manifest inside the asset is built from `package.json` at build time
- * (`src/build-dist.ts`) and `publish-release.sh` refuses to publish unless the tag
- * equals that version, so it is the one copy that cannot lag. `gh` decodes stdout as
- * UTF-8 and trims it — `ghBytes` exists for precisely this — so the asset is written
- * into a directory and one member is printed out of it, rather than piped.
- */
-function upstreamManifest(tag: string): ReleaseManifest | null {
-  const dir = mkdtempSync(join(tmpdir(), "atomaton-release-"));
-  try {
-    const asset = join(dir, ASSET_NAME);
-    const downloaded = ghRead(
-      "release", "download", tag, "-R", UPSTREAM_REPOSITORY, "-p", ASSET_NAME, "-D", dir,
-    );
-    if (downloaded.code !== 0) {
-      log(
-        `WARN could not download ${tag}'s ${ASSET_NAME}: ${downloaded.stderr.trim() || `gh exited ${downloaded.code}`}`,
-      );
-      return null;
-    }
-    if (!existsSync(asset)) {
-      log(`WARN ${tag}'s download reported success but left no ${ASSET_NAME}`);
-      return null;
-    }
-
-    // `unzip -p` reads one member to stdout, so nothing is extracted onto the disk
-    // that this run would then have to trust. It is present on the runner image this
-    // workflow uses; a missing binary is a null like any other read failure.
-    let printed: { code: number; stdout: string; stderr: string };
-    try {
-      const proc = Bun.spawnSync({ cmd: ["unzip", "-p", asset, RELEASE_MANIFEST], stdout: "pipe", stderr: "pipe" });
-      printed = {
-        code: proc.exitCode ?? 1,
-        stdout: proc.stdout?.toString("utf8") ?? "",
-        stderr: proc.stderr?.toString("utf8") ?? "",
-      };
-    } catch (error) {
-      log(`WARN could not run unzip on ${tag}'s ${ASSET_NAME}: ${(error as Error).message}`);
-      return null;
-    }
-    if (printed.code !== 0) {
-      log(`WARN ${tag}'s ${ASSET_NAME} holds no readable ${RELEASE_MANIFEST}: ${printed.stderr.trim()}`);
-      return null;
-    }
-
-    const parsed = JSON.parse(printed.stdout) as Partial<ReleaseManifest>;
-    if (!Array.isArray(parsed.files)) {
-      log(`WARN ${RELEASE_MANIFEST} in ${tag}'s ${ASSET_NAME} holds no file list`);
-      return null;
-    }
-    return { version: String(parsed.version ?? tag), files: parsed.files.map(String) };
-  } catch (error) {
-    log(`WARN could not read ${RELEASE_MANIFEST} out of ${tag}'s ${ASSET_NAME}: ${(error as Error).message}`);
-    return null;
-  } finally {
-    try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-    } catch {
-      // The OS owns a temp directory it will not let go of.
-    }
-  }
-}
-
-/**
  * The open notice's number, `0` for none, or null when the list could not be read.
  *
- * ## Why the marker is checked here rather than searched for
- *
- * The query is the title's own words, and the marker is then checked in the body in
- * TypeScript. Title words are certainly indexed; a hidden HTML comment is not
- * something this can be sure of from here, and a query the index does not match
- * would leave this run opening a fresh notice every day — the one failure that
- * compounds. Checking the body makes the other direction safe too: an issue whose
- * title happens to match, and which no run of this wrote, is not edited.
- *
- * ## Why the state is filtered here too
- *
- * `--state open` is passed, and the answer is held to it again below. Whether `gh`
- * applies a state filter when `--search` is alongside it is not something this
- * repository can measure — the fake `gh` matches argv and has no search API — and
- * getting it wrong is expensive in one direction: a CLOSED notice read as open would
- * be edited every day instead of a new one being opened after the owner closed it.
- * So the request asks for `state` and the answer is filtered on it, which is correct
- * whichever way the flag behaves.
+ * The search itself lives in `lib/notice-issue.ts`, where the update script shares
+ * it: that script closes the notice when it makes the notice's promise true.
  */
-function existingNotice(repo: string): number | null {
-  const result = ghRead(
-    "issue", "list", "--repo", repo, "--state", "open",
-    "--search", `"Template release" in:title`,
-    "--json", "number,body,state",
-  );
-  if (result.code !== 0) {
-    log(`WARN could not look for an existing notice in ${repo}: ${result.stderr.trim() || `gh exited ${result.code}`}`);
-    return null;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(result.stdout || "[]");
-  } catch {
-    log(`WARN the issue search in ${repo} did not answer with JSON`);
-    return null;
-  }
-  if (!Array.isArray(parsed)) {
-    log(`WARN the issue search in ${repo} did not answer with a list`);
-    return null;
-  }
-  const found = parsed.find((entry) => {
-    const issue = entry as { number?: unknown; body?: unknown; state?: unknown };
-    // `state` absent is left to the server's own filter; present and not open is
-    // not a notice this run may touch.
-    return (
-      typeof issue.body === "string" &&
-      issue.body.includes(NOTICE_MARKER) &&
-      (issue.state === undefined || issue.state === "OPEN")
-    );
-  }) as { number?: unknown } | undefined;
-  const number = Number(found?.number ?? 0);
-  return Number.isInteger(number) && number > 0 ? number : 0;
-}
+
 
 function main(): void {
   const { values } = parseArgs({
@@ -484,21 +384,22 @@ function main(): void {
     process.exit(1);
   }
 
-  const latest = latestRelease();
-  if (latest === null) {
+  const latestTag = latestReleaseTag();
+  if (latestTag === null) {
     console.error(
       `::error::could not read ${UPSTREAM_REPOSITORY}'s latest release, so a newer one cannot be ` +
         "announced. A failed read is not an answer of 'up to date'.",
     );
     process.exit(1);
   }
+  const latest = { tag: latestTag };
 
   // Searched before the comparison, because both outcomes have something to do with
   // an open notice: one updates it and the other is the reason it should not still
   // be open. A search that fails stops the run either way — told apart from "there
   // is none", because opening a notice on every run the search blips is how a
   // repository gets one issue per day.
-  const existing = existingNotice(repo);
+  const existing = findOpenNotice(repo);
   if (existing === null) {
     console.error(`::error::could not search ${repo} for an existing notice, so this run wrote nothing.`);
     process.exit(1);
@@ -529,15 +430,55 @@ function main(): void {
   }
 
   const notes = releaseNotes();
-  const shipped = upstreamManifest(latest.tag);
+  const targetRelease = releaseFiles(latest.tag);
+
+  // What the target release no longer ships: the manifest inside its asset against
+  // the tree's own. Degraded to "not computed" with the reason, never an empty list.
+  // (`existing` was taken before this: valueless work remains valueless work.)
+  const removed =
+    "why" in targetRelease ? null : noLongerShipped(targetRelease.files.manifest, local.manifest.files);
+  const removedWhy = `${RELEASE_MANIFEST} could not be read out of ${latest.tag}'s release asset.`;
+
+  // The plan is the notice's "what would this actually do here" table. It needs the
+  // release the tree came from as well as the target, which is two asset downloads
+  // where this used to be one — the price of answering concretely rather than
+  // announcing a version number. Degraded, not failed: a plan that cannot be read
+  // leaves the notice without its table, never leaves the tree with a wrong one.
+  const baseRelease = releaseFiles(local.manifest.version);
+  let plan: PlanSummary | null = null;
+  let planWhy = "";
+  if ("why" in baseRelease) {
+    planWhy = `this tree's own release (${local.manifest.version}) could not be read: ${baseRelease.why}`;
+  } else if ("why" in targetRelease) {
+    planWhy = `the target release (${latest.tag}) could not be read: ${targetRelease.why}`;
+  } else {
+    const paths = new Set([...baseRelease.files.files.keys(), ...targetRelease.files.files.keys()]);
+    const tree = readTreeFiles(paths);
+    const computed = planUpdate(
+      local.manifest.version,
+      latest.tag,
+      baseRelease.files.files,
+      targetRelease.files.files,
+      tree,
+    );
+    plan = {
+      take: computed.take,
+      add: computed.add,
+      deleted: computed.delete,
+      both: computed.merge,
+      kept: computed.kept,
+    };
+  }
 
   const input: NoticeInput = {
     localVersion: local.manifest.version,
     latestVersion: latest.tag,
     window: notes === null ? null : releaseWindow(notes, local.manifest.version),
     windowWhy: `the release list could not be read.`,
-    removed: shipped === null ? null : noLongerShipped(shipped, local.manifest.files),
-    removedWhy: `${RELEASE_MANIFEST} could not be read out of ${latest.tag}'s release asset.`,
+    removed,
+    removedWhy,
+    plan,
+    planWhy,
   };
 
   const title = noticeTitle(input);
