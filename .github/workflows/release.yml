@@ -56,8 +56,12 @@
 # agent's own merges:
 #
 # - the release pull request fires no `pull_request` event, so its required check
-#   would never start: `dispatch_ci.ts` starts it, through the same bridge
-#   (`dispatchCi`) an agent's pull request is checked with;
+#   would never start: `dispatch_pr_validation.ts` starts it, through the same
+#   bridge (`dispatchPrValidation`) an agent's pull request is validated with.
+#   Not `dispatchCi`: a check derived from a `workflow_dispatch` run does not
+#   count toward a required status check -- only the mirror
+#   `validate_pull_request.ts` writes through the Checks API does -- so the CI
+#   jobs ran and the merge job waited for a context nothing would register;
 # - the merge fires no `push`, so `deploy.on_merge` would never run:
 #   `dispatch_cd.ts` starts the deploy, through `dispatchCd`;
 # - the tag `tag-release.sh` creates fires no `push` either, so the publish would
@@ -70,9 +74,10 @@
 # so its appearance is this workflow's own doing, and the merge waits for it
 # directly. The wait that matters is for the REQUIRED check to exist at all -- on
 # a pull request opened moments ago, `atomaton-check` has not registered yet (the
-# plan jobs dispatch it late by design), and a merge fired while the visible
-# checks are green races that dispatch and loses. The measured failure was a merge
-# the base branch policy refused while every check on screen was green.
+# validator writes it once CI has concluded, which is minutes), and a merge fired
+# while the visible checks are green races that wait and loses. The measured
+# failure was a merge the base branch policy refused while every check on screen
+# was green.
 #
 # ## The application is the machinery, not a rebuild
 #
@@ -423,13 +428,23 @@ jobs:
           fi
           echo "pr=${PR}" >> "$GITHUB_OUTPUT"
 
-          # A pull request opened with GITHUB_TOKEN fires no event, so the check
-          # the ruleset requires never starts on its own. Through the bridge, like
-          # every other dispatch: this is the same script an agent's pull request
-          # is checked through, and the contract that keeps dispatch calls in one
-          # module (tests/contract/dispatch-sites.test.ts) is not suspended for
-          # the button that releases the machinery itself.
-          bun src/entrypoints/machinery/dispatch_ci.ts --repo "$GITHUB_REPOSITORY" --branch "$BRANCH"
+          # A pull request opened with GITHUB_TOKEN fires no event, so nothing
+          # starts the check the ruleset requires. Through the bridge, like every
+          # other dispatch -- but the VALIDATOR's bridge, not the CI one: the CI
+          # workflow runs jobs and registers no context the ruleset accepts, while
+          # atomaton-validate-pr.yml holds `checks: write` and writes the required
+          # check run itself. This is the same script an agent's pull request is
+          # validated through.
+          #
+          # No `--ask`: the release body names no `/<agent>`, so validation
+          # dispatches nobody and claims no comment. An empty ask is the shape for
+          # that; only the agent dispatch, which this PR skips, requires one.
+          # `asked-by-person true` for the one CI-waiting comment: a person pressed
+          # the button, and the wait is minutes long. The value is required --
+          # `parseArgs` takes this option as a string and a bare `--asked-by-person`
+          # aborts the step before anything is dispatched.
+          bun src/entrypoints/machinery/dispatch_pr_validation.ts \
+            --repo "$GITHUB_REPOSITORY" --number "$PR" --branch "$BRANCH" --asked-by-person true
 
   merge-release:
     name: Merge the release pull request, and wait for the release
@@ -483,13 +498,13 @@ jobs:
           fi
 
           # Wait for the REQUIRED check to EXIST, not for the visible checks to
-          # finish. The check workflow runs in two phases -- plan jobs first, and
-          # they dispatch the real check -- so on a pull request opened moments
-          # ago, `atomaton-check` is not in the rollup yet, and every check that
-          # IS visible can be green while the deciding one does not exist. The
-          # measured failure was a merge the base branch policy refused in
-          # exactly that state. The check was dispatched by the previous job, so
-          # its arrival is a matter of minutes, not a maybe.
+          # finish. It is written by the validator once CI has concluded, so on a
+          # pull request opened moments ago `atomaton-check` is not in the rollup
+          # yet, and every check that IS visible can be green while the deciding
+          # one does not exist. The measured failure was a merge the base branch
+          # policy refused in exactly that state. The previous job hands the pull
+          # request to the validator, so the check's arrival is minutes, not a
+          # maybe.
           SEEN=""
           for _ in $(seq 1 90); do
             SEEN=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '[.statusCheckRollup[] | select(.name == "atomaton-check")] | length')

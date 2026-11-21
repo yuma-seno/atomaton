@@ -22,14 +22,22 @@ import { readFileSync } from "node:fs";
  *   predecessors, because the tag it announces is `release`'s output and GitHub
  *   exposes outputs only to a job that names their job directly;
  * - the merge waits for the required check to EXIST before watching anything.
- *   The check workflow runs in two phases -- plan jobs first, and they dispatch
- *   the real check -- so on a fresh pull request the deciding check does not
- *   exist yet, and a merge fired when the visible checks are green races that
- *   dispatch and loses (measured: the base branch policy refused the merge);
- * - the workflow runs on `GITHUB_TOKEN` alone, and the three events that token
- *   suppresses are each dispatched through a bridge (`dispatch_ci.ts`,
+ *   The validator writes it as its last act, after CI has concluded, so on a
+ *   fresh pull request the deciding check does not exist yet, and a merge fired
+ *   when the visible checks are green races that write and loses (measured: the
+ *   base branch policy refused the merge);
+ * - the workflow runs on `GITHUB_TOKEN` alone, and the events that token
+ *   suppresses are each dispatched through a bridge (`dispatch_pr_validation.ts`,
  *   `dispatch_cd.ts`, `dispatch_update.ts`). A secret here would be one a person
  *   has to set, and the machinery's own push already travels under its own;
+ * - the release pull request's required check is started through the VALIDATOR,
+ *   not the CI workflow. GitHub starts no workflow run for an event its own token
+ *   triggered, and the context the ruleset requires is the check run
+ *   `validate_pull_request.ts` writes through the Checks API: a check derived
+ *   from a `workflow_dispatch` run is reported on the commit but does not count
+ *   toward a required status check. Dispatching CI directly ran the jobs, left
+ *   the context unregistered, and the merge job spent fifteen minutes waiting for
+ *   it before refusing (measured on #573);
  * - the application dispatches through the bridge (`dispatch_update.ts`), the same
  *   script the `!upgrade` comment command runs. The contract that keeps dispatch
  *   calls in one module is not suspended for the button that releases the
@@ -117,7 +125,7 @@ describe("Release", () => {
     }
   });
 
-  test("the secret it reads is the machinery's own, and the two bridges cover the rest", () => {
+  test("the secret it reads is the machinery's own, and the bridges cover the rest", () => {
     // One secret, and it is not this workflow's: `ATOMATON_UPDATE_TOKEN` is the
     // identity the update script needs to push, open its pull request and merge
     // -- the writes whose events the workflow's own token cannot start. The
@@ -144,8 +152,20 @@ describe("Release", () => {
     }
     const prepared = script(jobs.release);
     const merged = script(jobs["merge-release"]);
-    // The pull request fires no event: the check is started through the bridge.
-    expect(prepared, "the check a ruleset requires is dispatched, not waited for").toContain("dispatch_ci.ts");
+    // The pull request fires no event, and the required context is the validator's
+    // to write: it starts CI and republishes the result as a Checks-API check run.
+    // The CI bridge starts the same jobs and registers nothing the ruleset counts,
+    // which is what the merge job then waits fifteen minutes for.
+    expect(prepared, "the required check is started by the validator, which writes it").toContain(
+      "dispatch_pr_validation.ts",
+    );
+    expect(prepared, "dispatching CI directly registers no required context").not.toContain(
+      "dispatch_ci.ts",
+    );
+    // And the value the person flag carries is not decoration: `parseArgs` reads
+    // `asked-by-person` as a string, so a bare `--asked-by-person` aborts the step
+    // before anything is dispatched.
+    expect(prepared, "the person flag carries its value").toContain("--asked-by-person true");
     // The merge fires no push: the deploy is dispatched through the bridge.
     expect(merged, "the deploy a merge would have started is dispatched").toContain("dispatch_cd.ts");
     // And each dispatching job holds the permission the dispatch needs, or it
