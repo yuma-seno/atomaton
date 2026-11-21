@@ -47,10 +47,20 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release, e.g. 0.2.0. Leave empty to bump the last segment of the declared version.'
+        description: 'Version to release, e.g. 0.2.0. Names it directly; leave empty to derive it from the bump.'
         required: false
         default: ''
         type: string
+      bump:
+        description: 'Which part of the declared version to bump. Required unless "version" names one.'
+        required: false
+        default: '(choose)'
+        type: choice
+        options:
+          - '(choose)'
+          - patch
+          - minor
+          - major
       deploy:
         description: 'Apply the published release to this repository''s .github/ as well.'
         required: false
@@ -94,6 +104,7 @@ jobs:
     secrets: inherit
     with:
       version: ${{ inputs.version }}
+      bump: ${{ inputs.bump }}
 
   merge-release:
     name: Merge the release pull request
