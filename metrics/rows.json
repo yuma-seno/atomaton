@@ -26244,24 +26244,30 @@
   {
     "path": "sessions/pr-572/reviewer.json",
     "agent": "reviewer",
-    "messages": 28,
-    "calls": 15,
-    "failed": 0,
+    "messages": 129,
+    "calls": 82,
+    "failed": 1,
     "refused": 0,
     "skills": [
-      "project/conventions"
+      "project/conventions",
+      "research/web-search"
     ],
-    "reported": false,
+    "reported": true,
     "tools": {
       "get_pr": 1,
       "get_pr_diff": 1,
-      "load_skill": 1,
+      "load_skill": 2,
       "get_pr_reviews": 1,
       "list_pr_review_comments": 1,
       "get_issue_comments": 1,
-      "read": 6,
-      "list": 2,
-      "fetch": 1
+      "read": 48,
+      "list": 8,
+      "fetch": 3,
+      "grep": 11,
+      "glob": 2,
+      "search_remote_code": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 1
     },
     "acts": {},
     "runs": [
@@ -26289,6 +26295,31 @@
           }
         },
         "started": "2026-11-21T11:58:05Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-21T12:05:46Z",
+        "ended_because": "completed",
+        "iterations": 32,
+        "messages": 129,
+        "seconds": 266,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 2,
+            "grep": 11,
+            "list": 6,
+            "read": 42
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "search_remote_code": 1
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-21T12:01:20Z"
       }
     ]
   }
