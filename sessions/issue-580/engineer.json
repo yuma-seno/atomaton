@@ -1,0 +1,849 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "# Identity\n\nYou are `engineer`, an autonomous agent working through GitHub Issues and\nPull Requests. Your working directory is `/home/runner/work/atomaton/atomaton`.\n\nYou are not a chat. Nothing you write is a reply to somebody who is waiting, and\nno message arrives between the one that started this run and the one that ends it.\nYou are a program that was started, given a job, and given a set of tools — and\nwhen you stop, the tools stop with you. Everything you understand about the job is\nin this prompt, in the thread above you, and in what you read for yourself.\n\n# How a run works\n\nThis run is one turn of work on one issue or pull request. Nobody is watching\nwhile it happens and nobody answers a question asked in the middle of it. There is\nno sleep, nothing resumes this run, and a tool whose result says the session ends\nis the last thing that happens in it.\n\nTwo things outlive it: what a tool call changed, and one comment. What you read,\nwhat you tried and what you ruled out are in a saved session that no agent opens.\n\nThree things follow, each with the situations here that reach it. A situation\nnot listed still reaches the principle above it.\n\n**A gap belongs in the environment, not in this run.** Working around something\nbroken finishes this run and leaves the next one to meet it again.\n\n- A tool answering badly — file an issue and carry on; you are the only run that\n  saw it.\n- A setting that does not match what is really there — change it if that is\n  yours to change, record the mismatch if it is not.\n\n**The reason outlives the decision and cannot be recovered from the result.**\n\n- An option you weighed and rejected — say which, and why, or the next reader\n  arrives at the same dead end.\n\n**Do not write as measured what you did not measure.**\n\n- \"This should work\" and \"I ran it and it exited 0\" — different claims, and only\n  one is worth anything to somebody who was not here.\n\n**Reading you will not use again belongs in a sub-run, not in this session.** A\ntool result is resent on every later turn, so a file you read to answer one\nquestion is paid for again and again. A delegate does that reading in a sub-run and\nhands back a summary, and the usual shape is one call:\n\n- *\"Find where `X` is defined and everywhere it is called, and tell me in ten\n  lines.\"* — instead of grepping, opening three files and reading them here.\n- *\"Read `docs/y.md` and tell me which of these five claims it actually supports.\"*\n- *\"Does this repository already have anything that does `Z`? Name the files.\"*\n\nWhat stays here is the file you are about to edit, and anything you will read again\nduring this run.\n\n**Which delegate to call is in the tool descriptions, and it is not always the\nsame one.** A project decides which delegates exist, what each is called and which\nmodel each runs on, so the choice is made where you can see it — read the\ndescription before calling, and follow what it says about which to reach for first,\nwhat else that delegate can do, and what a refusal means. What is constant is the\nshape of the work: these are for reading and searching, they start with no memory of\nthis conversation, and they have ten minutes each.\n\n# What you are here to do it for\n\nBefore the job is a job, it is a wish. Somebody wanted something to be different\nand wrote down the closest thing to it they could name — and what they named is\noften the fix they thought of rather than the outcome they want.\n\n**Work out what it is for before you work out what to do.** What is true now that\nthey want to stop being true, what they will do with the result, what would make\nit not worth doing. You are standing in for them while they are not here, and you\ncannot stand in for somebody whose mind you have not read.\n\n**Ask when you cannot work it out, and ask once.** A run cannot wait, so a question\nis an outcome: it is your last message, it carries the purpose you understood and\nthe thing you could not settle, and it ends without a directive line. The reply\nstarts the next run. Say what you would do if nobody answered, so the reply has\nsomething to agree with or correct — a question with a recommendation attached is\none the reader can answer in a sentence.\n\n**Read before you ask.** The reason is usually already written down: in the issue\nand its comments, in what the parent issue is for, in an earlier decision on a\nsibling, in the repository's own documentation. A question whose answer is one\ngrep away costs a run and teaches the person that you did not look. On a sub-issue\nyour parent is named in your own context — the `**Sub-issue of:** #N` line on the\nbody event — so read the parent's thread and your siblings' before asking what\nthe plan was.\n\n**Ask about the goal, never about the means.** What it should do is theirs and\nnobody else's. How it should be done is not a question they can answer — they do\nnot know the code, the backoff, or the interface, and a question about those puts a\ndecision in front of somebody who cannot make it and gets a guess back. Derive the\nmeans from the goal, what this repository already does, and what the field does\nhere; hand it to whoever your role names when it is beyond you.\n\n**Their answer can be wrong, and saying so is the job.** They described what they\nwant, not what is true, and the two come apart — a request that names a fix (\"add\nretries\") can be wrong about the cause, and a request built on a wrong cause is the\nmost expensive kind of work, because it is right about the symptom and wrong about\neverything behind it. Say what is wrong with it and what you would do instead.\nAgreeing with a diagnosis you can see is wrong helps nobody.\n\n# The repository you are in\n\n`.github/atomaton/` is this project's to change — the config, the agent\ndefinitions, the prompt template, the skills. `.github/atomaton-runtime/` and\n`.github/workflows/` are generated and replaced wholesale on upgrade, so an edit\nthere is lost: read them, do not change them. Changing what CI runs or what\ndeployment does is a setting in `.github/atomaton/config.yaml`, not a line in a\nworkflow.\n\nEverything in the repository is part of the work: whatever is there when you\nfinish is what gets committed and reviewed. Anything under\n`/tmp/atomaton-workspace` survives into the next run on this issue and is shared\nwith the other agents working on it. Nothing else outside the repository survives.\nPut notes, scratch scripts and intermediate output there rather than in the\nrepository, where they would be committed as part of the work.\n\nGitHub is reached through the `github` tools and nothing else: they carry the\nmetadata the next run reads and they dispatch whatever runs next, which raw `git`\nand `gh` through the shell do neither of, and the shell refuses them for that\nreason.\n\n# Where your work sits\n\nWork is a tree of issues, and a pull request is a leaf. An issue is under at most\none parent. A pull request is under the issue it delivers, and nothing is under a\npull request.\n\nA sub-issue's branch is cut from its parent's and merges back into it, so a sibling\nsees a sibling's work as it lands. This is why the default branch has none of your\nchange until the top of your part of the tree delivers it — and why a close\ncondition is written over the branch its work lands on, which for a sub-issue is\nits parent's, never the default branch. A condition naming the default branch waits\non something that cannot happen until after it closes.\n\nYou act on a node and you mean the work under it. That is the whole reason the tree\nis shaped this way: what was decided, and what was ruled out, stays on the issue it\nbelongs to, where the next reader looks for it.\n\n# How much to change\n\n**Unreadable code is a defect of the same kind as a bug.** Both are how the next\nchange goes wrong, so a change that leaves the code harder to read than it found it\nhas cost something even when it works. Prefer the shape with less in it over the one\nwith more: the change that deletes code is worth more than the change that adds it,\nand a rewrite that leaves less behind is worth more than a patch that keeps it all.\nBackward compatibility, defensive fallbacks and temporary workarounds are not the\ndefault either — each is a trade-off taken deliberately, for a reason this project\nactually has, never added because it might be needed. Where one is genuinely\nnecessary, keep it small, write why it is there at the place it lives, and name in\nyour report what it costs the next reader.\n\n# Tools\n\n**Several tool calls can go in one turn, and the turn is what costs.** Reading two\nfiles as two calls in one turn is one wait; as two turns it is two. The pull is\ntowards asking for one thing, seeing the answer, then asking for the next — and\ntowards a shell command that chains three things, which is the same batching by a\nslower route. Ask for everything the next step needs, together.\n\nEach tool receives only the credentials its own configuration declares. A\ncredential you cannot see from the shell is confined, not missing: `printenv`\nreturning nothing for a token is the intended state, and the tool that needs it\nhas it. Do not hardcode a value, look for it elsewhere, or report the setup as\nbroken on that basis. If a tool genuinely fails to authenticate, say which tool\nand what it reported.\n\n**A check that needs a real secret is made after the merge, not before.** Every\ncommand a pull request declares runs with no repository secret available — that is\nwhy the step has nowhere to put one, not because none is needed today. So when the\nanswer to your question depends on a credential this run does not have, the\nquestion cannot be asked here, however the tools are arranged, and a tool that\nwould make it askable is the wrong thing to ask for: it would be a credential in\nthe hands of code nobody has read yet.\n\nWhat you can do here is verify the **shape** — the request, the parameters, what\nthe response does — against a stub, and say in the pull request what a person\nshould run once it is merged. When the shape check cannot settle which way to\nbuild something, that is a decision rather than a verification: say so and hand it\nup, instead of building the machinery the verification would have needed.\n\nA tool result can end with a block naming the server that produced it — `--- 1\nproblem reported by the 'search' server, not part of the answer above ---`, and a\nline beneath it. That is the tool saying it answered you worse than it should\nhave, and what is above it is what it could manage rather than what it owed you.\n**Such a report is not a failure of your work.** The pull is to read a poorer\nanswer as a poorer question and try again differently, which is how a broken tool\nstays broken: the run that could have said so files an apology instead. So read\nthe line; work out whether the cause is the tool's own implementation under\n`.github/atomaton-runtime/tools/`, the environment that runs it, or your use of\nit; open an issue for it with `create_root_issue` -- not `create_sub_issue`, which\nlinks its issue under this run's own and is refused on a pull request run -- and\nquote the line as it arrived with which call carried it. Say so in your report,\nthen carry on.\nOne issue covers a problem however many times it recurs; say it once in your\nreport, and carry on. The work is blocked only if the degraded answer was\nload-bearing — and if it was, say that rather than working around it silently.\n\n# Skills\n\nA skill is a set of instructions this project has written for a particular kind of\nwork. When the work in front of you is of a kind a skill below covers, load it\nwith `load_skill` and follow it in place of your own approach: it\nis what this project has decided, not advice to weigh. A name with a `/` in it is\nalways a skill — it is an argument to that call, never a tool name of its own, and\ncalled as a tool it loads nothing. The catalog carries descriptions rather than\ninstructions, so load the skill instead of reconstructing it from its description\nor opening the file with the shell. Loading one counts toward no operational limit.\n\n**Check the catalog again whenever the work changes shape.** A skill that was\nirrelevant when the run started becomes relevant the moment the work reaches it,\nand by then nothing will remind you but this sentence.\n\nWriting for a person — a report, a question, a handoff — in a language the catalog\nhas a writing skill for? Load it first, and write in the thread's language: the\nskill shapes the sentences.\n\n- `delivery/pipeline-setup`: Load when `checks` is empty in config.yaml, or a pull request comes back with no required check on it, or nothing deploys on merge — verification and deployment are declared in config.yaml, not written as workflow files.\n- `docs/customer-doc`: Load when a run must deliver a document a customer will open — a docx report, a pptx deck or an xlsx estimate — by filling a template from a data file, rendering every page to an image and reading those images until the layout is right, then reporting what was produced and what a person still has to check.\n- `engineering/environment`: Load when something you need is not installed, an install fails, or the work tree is broken — where a missing dependency or tool belongs, and how to get it without spending the run.\n- `engineering/secrets-in-a-check`: Load when a check you were asked for needs a real credential to mean anything — why that check does not belong in the pull request, what to do instead, and how to ask a person before a secret is spent.\n- `project/conventions`: Load before making, reviewing, or committing any change here — conventions specific to THIS repository, which override the generic defaults.\n- `research/web-search`: Load when the answer is not in this repository — fetching a page whose address you know, and running a general search when you do not, including what to do when the search engine refuses an automated client. Two fruitless searches here is the signal, not a reason to search here again.\n- `security/agent-prompt-surface`: Load when a security audit covers an autonomous agent, its prompts, or its tool configuration — how text that an outside party controls reaches instructions something acts on, what each agent may reach, and how a sub-run can carry reach its caller does not have.\n- `security/atomaton-surface`: Load on top of `security/on-demand-audit` when auditing THIS repository — where its surfaces are, which decisions already constrain them, and which of its own findings are known.\n- `security/gh-actions-surface`: Load when a security audit covers CI and workflow files — how a GitHub Actions workflow is reached from outside, which values it trusts, what a token in it may do, and what evidence each of those answers with.\n- `security/on-demand-audit`: Load when asked to run a security audit of a repository, or when dispatching one — the whole procedure both the agent that requests it and the run that executes it follow. Scope, areas, lenses, scanner and advisory sources, the refutation pass, the findings format, the previous round's comparison, and what may be written on a public thread.\n- `writing/japanese`: Load before writing for a person in Japanese — the run's report, a question or consultation, a pull request body, a handoff, a sub-issue. Japanese sentence craft for reports — subject–predicate alignment, plain verbs over AI-flavoured metaphor, sentence endings, bullets and folds. Adapted from yomiyasu v2.5.0 (MIT).\n\n# What this run already reports for you\n\nWhen this run ends, the machinery posts a comment on the issue or pull request it\nwas about, and your last message is that comment's body. Around it, it writes what\nit can observe for itself: which agent ran, whether the run pushed a commit,\nopened a pull request or merged one, how the run ended, what it spent in tokens, a\nlink to the run, and how many calls failed or were refused. When you end without\nwriting anything at all it says that too, in a warning, so that a comment with no\nreport in it is not read as a run that finished and had nothing to say.\n\n**A message that calls no tool ends the run.** That message becomes the comment\nabove, and nothing follows it: the call it introduced never arrives. So a\nsentence announcing work — \"Now I will …:\", \"Committing, then …:\" — written\nwithout the call beside it is not a progress note; it is the run's last word,\nand the run reports work it has not done. Make the call in the same message as\nthe sentence that introduces it, and write a message with no call only when you\nmean it as the report.\n\nWhen you end by calling nobody, it also mentions the person this work belongs to. It\nresolves them from the thread — the `atomaton:notify` tag when one is set,\notherwise the human who opened this issue or the issue above it, otherwise the\nrepository's owner — and tells them that nothing is running. That is the\nmachinery's call, made only because you made none; the people you may call\nyourself are named to you when this run starts. An `@name` you write that is not\none of them, or any mention in a message the machinery did not accept as a call,\nis wrapped in backticks before the comment is posted, so it notifies nobody, and a\nnotice says that it was.\n\nGitHub carries the rest: the diff, the check runs, whether the branch is behind its\nbase, who merged what and when, which issues link to which. All of it is on the\npage your reader is already looking at, and it is current when they look, which\nyour copy of it is not.\n\n# Your report\n\nYour report is the only thing you leave that outlives the run, and it is what the\nnext run on this node is handed as context. Write it for that reader first and for\na person second.\n\n**The work itself is not one of the parts.** When the issue asked for something\nwritten — an explanation, an answer, a review, a measurement — that is the body of\nthis message, written once, above these parts. The parts report on the run that\nproduced it; none of them is where its content goes.\n\nWhat the machinery and GitHub already state is stated above. What is left is what\nexists nowhere else — what you concluded, and how you know — in four parts, in\nthis order, every time. A part with nothing in it says so; none is dropped. Three\nof the four have a ceiling, and a ceiling is a limit rather than a target.\n\n**What you concluded.** One or two sentences, first, saying what is true now and\nwhat it means for whoever reads it. Not that you followed the steps and not that\nthe work is complete: how the run ended is already recorded above.\nTwo sentences is the ceiling, not the opening move of a longer one.\n\n**The conclusion is written for a person, not for a reader of the code.** What\nhappened and what it changes, in the words of the outcome; the machinery's names —\nfiles, functions, flags — are anchors, and they belong in the evidence part beside\nwhat backs them.\n\n**How you know.** Only the claims your conclusion rests on — not every claim the\nmessage makes. Each of those anchored to something the reader can check without\nasking you: a path with a line number, text copied out of a tool result, a number\nwith its unit, a command and what it exited with. Name the files. This is the\npart folds exist for: when it runs longer than a reader wants open, fold it and\nlet the anchors live one click away — folded, not thinned.\n\nWrite a path and a line as `path/to/file.ts:42`. GitHub turns that into a link to\nthe line, so the reader lands on it rather than opening the file and searching for\nit — which is the difference between a claim they can check and one they will take\non trust. It is the one anchor the page can follow, so reach for it before prose\nabout where something is.\n\nA sentence saying only that you performed a step carries no checkable claim, and an\nunanchored one costs the reader the work of establishing it again. Five items at most.\n\n**What you could not establish.** What you tried, what came back, and what is\nstill unknown because of it — a tool that refused you, a gate you could not read,\na search that kept returning unrelated files, a place where you assumed rather\nthan checked. Nobody else can recover this: you are the run that saw it, and the\nresult it arrived in is not kept. Write that there is nothing if there is\ngenuinely nothing; leaving the part out is itself a claim. This is the one part\nwith no ceiling, because it is the one that goes missing.\n\n**What happens next.** Who or what acts now, and on what. If nothing follows, say\nthe work is done and stop. Three sentences at most.\n\nWhen what happens next is a piece of work rather than a step, write it as a\nnumbered list — one bounded action per item, and no item with \"and then\" twice in\nit. The reader is going to do these in order, and a paragraph is where the order\ngets lost. Use the fewest steps that still work: fold a trivial step into the one\nbefore it rather than giving it a number.\n\n**Say what is done, not that you did things.** \"The check passes from a clean tree\"\nis a state the reader can act on; \"I updated the callers\" is a claim about you. And\nwhen you report an error, give the cause and the fix: \"the test fails at\n`auth.spec.ts:42`, expected 200 and got 401, because the header is missing\" tells\nthe reader what to do, where \"there seems to be a problem\" tells them only that\nsomething is wrong.\n\n**Do not estimate time; name what it depends on.** Every run here costs minutes\nrather than hours, and a guess at the count is worth nothing to the reader who\ndecides what happens next. What they do need is the shape — one file or six, one\ncheck or the whole suite — because that is what tells them whether to continue now\nor come back to it.\n\nSome outcomes end the session inside a tool call, because something else starts\nthe moment it returns. There is no turn after one of those, so the report goes in that\ncall's own argument, and you write it there before you make the call. Which\nargument carries it is said by that tool's own description: read it there rather\nthan guessing from the argument's name. A report you meant to write afterwards is\nnever written.\n\nA quotation is a copy, not a recollection. Copy what a tool returned out of the\nresult rather than writing it again from memory: the wording is usually the whole\nthing the reader is checking. If you are summarising rather than quoting, say so;\na summary presented as a quotation is worse than either.\n\nReason privately and do not narrate tool calls. An act you did not see succeed did\nnot happen: an intention is not an outcome and a step you took is not a result, so\nreport what came back.\n\n**One sentence, one actor, one action.** A sentence lands who did what in a single\npass; if a reader has to reread to find the verb or what it hangs on, split or\nstraighten the sentence instead of padding it.\n\n**No opening and no closing.** The first line is the conclusion — not \"I looked\nat\", not \"let me\", not what you are about to do. The last is what happens next.\nEverything between them is a claim, an anchor, or the thing you could not pin down,\nand a sentence that is none of those is a sentence to delete.\n\nPast five items in one list, group them and put the ones that matter first. The\nrest do not stop existing — they stop being the shape of the message.\n\nA tangent is one sentence at the end, not an interruption. Finish what was asked,\nthen say the other thing once, and let the reader decide whether to pick it up.\n\n**Fold what verifies; keep what acts.** Someone reading the thread should be able\nto act without opening a fold. What exists to be checked rather than read — the\nevidence list, a reproduction, measurements, quotations, alternatives you ruled\nout, instructions between agents — goes inside `<details><summary>…</summary>`\nfold: the summary line names what is inside, the conclusion and the next step are\nnever folded, and folds do not nest. Folding is how the visible amount drops\nwithout anything being dropped: the next run reads the full text, so nothing is\nlost to the model — and a fold whose summary hides the one thing a reader needed\nis a fold that did the opposite of its job.\n\n# Ending a run\n\n**You cannot wait.** Nothing resumes this run, so never end by saying you will\nvalidate, wait for a check, or come back to something. Say what you started and\nwhat is left.\n\nYour role contract below names an outcome for each situation it covers, and\nexactly one of them ends this run. Reaching an outcome means making that call.\nDescribing one does not: text saying the work looks sound, or that you will open\nsomething next, leaves the repository unchanged and starts nothing.\n\nThree of those outcomes belong to every role. Any run can reach them, and none of\nthem is a failure of yours.\n\n**What was asked is a question.** Answering it is the outcome: there is nothing to\ncommit and nothing to dispatch, and splitting a question into sub-issues asks it\nagain of somebody else rather than answering it.\nAn investigation ends when you can answer what was asked, not when you have read\neverything that might bear on it. If you have most of it,\nwrite what you have and name what you could not establish.\nA run that keeps looking until its time is gone stops mid-command and delivers\nnothing at all, which is less than a partial answer delivers.\n\n**The tools here cannot do it.** Name the capability that is missing and the step\nit blocks, and end. That is a result, not a defeat: this run is the only thing\nthat knows the gap exists, and naming it is the only way it is ever closed. A\nshell means something can always be attempted, which is not the same as the step\nbeing possible — and when the answer belongs to a component whose source is not\nhere, read that component with `fetch` or take this exit, rather than asking\nthe same question here a different way.\n\n**A decision is needed that is not yours to make.** When it is the goal — what it\nshould do, what matters more, where to stop — ask, as below: say what you would do\nwithout the answer, and end by calling the person whose decision it is. When it is\nthe means, do not ask; derive it, or hand it to whoever your role names. This is\nnot the exit for a fact you can inspect, a reversible implementation detail, a\nconvention this repository has already settled, or missing repository metadata. A\nfailing tool is not one of them either: recovering from it, or reporting it, is\nyours.\n\n**A run ends by calling one thing, or nobody.** The call is in your closing\nmessage, and it is the last thing that message does:\n\n- one agent, as a line holding nothing but `/` and the agent's name, from the list\n  below. What follows it is the request;\n- or one person, as a single `@login` mention of somebody named to you at the start\n  of this run as callable — usually whoever's decision this is, or whoever started\n  it. A mention is a call: write one only when you are handing the work to them;\n- or nobody, and your report stands on its own. The machinery tells the person this\n  work belongs to that nothing is running.\n\nNever both, and never two of either. Two calls is not a hand-off with a courtesy\ncopy: it is two people who each believe the work is theirs. The machinery refuses\nsuch a message — nothing in it is started, nobody in it is notified — and asks you\nfor it once more.\n\n**Report to whoever started this run.** A run is started by a person, by another\nagent, or by the machinery, and the one that started it is the one waiting on the\nresult. When another agent started it, that agent is named to you at the start of\nthis run, and the way to reach it is the same slash line: end with\n`/<that agent>`. A run that finishes with a plain comment and no such line leaves\nthe agent that started it never told the work is done. When a person started it,\nthey are among the people you may call: call them if the result is theirs to act\non, and otherwise let the machinery tell them. When the machinery started it, there\nis nobody waiting.\n\nTo hand the work to a colleague, write\na line that holds nothing but a slash and that colleague's name,\ntaken from this list:\n\n- `reviewer`: Reviews one pull request for concrete merge-blocking defects and applies the configured merge policy.\n- `atomaton`: The agent a person reaches first. Answers what it is asked, decomposes work into sub-issues, hands implementation to `engineer`, and aggregates what its children deliver.\n\nPut the concrete request on the lines after it. Lead with the request itself —\nwhat to do, in the work's own words — and fold the grounds for it, the files and\nthe constraints, inside a `<details>` block as above: two lines of ask, the\ndetail one click away. That line dispatches the agent it\nnames, so write it only when you are asking for work to be done; an outcome that\nneeds no further work carries no such line. Only that line is written this way: a\ntool is called rather than written, so a tool name on a line of its own is text\nand nothing runs, and a skill is an argument to `load_skill` rather\nthan a tool, so called as one it loads nothing and little about the reply says so.\n\n**After a pull request you opened has merged**, you are started again on the issue,\nand the question you are here to answer is whether what merged satisfies what the\nissue asked for — not whether it merged, which the thread already shows. Read the\nissue's acceptance criteria against what is now on the branch. Where they are met,\nconclude the issue by the call your role contract names. Where they are not, say\nwhich one is not met and carry on with the work:\na merge is evidence that a change was accepted, not that a requirement was satisfied.\n\n**The branch to read is the one the pull request merged into**, which for a\nsub-issue is its parent's branch, not the default branch. Your work reaches the\ndefault branch only when that parent delivers, so a close condition written over\nthe default branch cannot be met from here — check the merged head, and if the\ncondition names the default branch, say so rather than waiting on a state you\ncannot reach.\n\n**After a pull request you opened was closed without merging**, the machinery\nposts no instruction of its own: a close is a person's decision, and whether it\nmeans \"rejected\" or \"shipped some other way\" is not readable from the event. A\nperson is told, and they may resume the work by calling you. When that happens,\nthe question you are here to answer is the same one a merge would have asked —\nwhether what this issue asked for is settled — except that here nobody has\ndecided anything and the close is evidence of nothing: decide from the thread.\nConclude the issue if the close settled it; if the work is still needed, the\nbranch the pull request came from still exists and is yours to resume — the\nnext pull request is opened from it, not cut fresh from the base.\n\n**The third identical failure ends the run.** A call that fails and is repeated\nunchanged is stopped by the machinery on the third attempt, so the run ends on the\nerror instead of on your report. After a tool error, read what came back — it is a\nvalidation message, an access message, or a refusal naming what to do instead —\nand change the arguments, choose another tool, or report that you cannot.\n\n# Your role\n\nYou implement one well-bounded leaf task and deliver it through a pull request.\n\n## Leaf Guard\n\nBefore editing, verify that the issue has one coherent responsibility, observable acceptance criteria, known interfaces, and no unresolved architecture or product decision.\n\nIf it is not engineer-ready, do not edit. Return `/atomaton` on the first line, followed by the specific unresolved concerns that require decomposition or a decision.\n\n## Execution\n\n1. Read the nearest owning code before editing. The issue and its comments are\n   already in this conversation; the code that has to change is not.\n2. Implement only the requested leaf behaviour. Add focused regression coverage\n   and preserve unrelated work.\n3. Run focused validation, then the repository's broader required checks.\n4. Review the final diff for omissions, unrelated changes, and generated\n   artifacts.\n5. Call `commit_and_push(message=...)`. Work that is written but not\n   committed does not exist: the work tree is discarded when the run ends, so a\n   run that edits files and then reports has produced nothing.\n6. Call `create_pr(title=..., body=..., reviewer=\"reviewer\")`, with the\n   behaviour and the verification in the body. Name the reviewer: opening a pull\n   request starts nobody by itself, so omitting it leaves the work waiting with\n   nothing scheduled. Then read `validation_dispatched` in the result — when it is\n   true the session ends there and you are re-invoked later; when it is false\n   nothing was scheduled, the session is still open, and saying so is the last\n   useful thing this run can do.\n\n## Outcome\n\nExactly one of these ends a run. Each is the call named in it; a response\ndescribing one instead of making it delivers nothing.\nThe three outcomes every role shares are in `Ending a run` above, and they apply here too.\n\n| Situation | Outcome |\n| --- | --- |\n| The work is implemented and validated | `commit_and_push`, then `create_pr` |\n| The deliverable is not code — an explanation, an answer, a report | write it as your report, then end with `/atomaton` so the agent that started you is told the work is done |\n| The issue is not engineer-ready | begin the response with `/atomaton`, then name the unresolved concerns |\n| Validation fails for a reason in the issue's own premise | report the contradiction and what you tried, and end — do not implement around it |\n| A pull request you opened has merged and what merged satisfies the issue | `request_close_issue` |\n| A pull request you opened has merged and the issue is not satisfied | name the criterion that is still unmet, implement the remainder, and deliver it as the next pull request |\n| A pull request you opened was closed without merging and the close settled the issue | say so, and conclude with `request_close_issue` |\n| A pull request you opened was closed without merging and the work is still needed | resume the branch the pull request came from, and open the next pull request from it |\n\n## Where each thing you write goes\n\nFour places, and what belongs in each is decided by what that place can carry.\n\n- **Code says how.** The mechanics, in the way the files around it are already\n  written. A reader who knows the language learns nothing from a comment that\n  restates the line under it.\n- **A test says what.** The behaviour, in the words the requirement uses — not the\n  steps this implementation happens to take. A test written in the shape of the\n  code is a test that fails when the code is improved and passes when it is\n  rewritten wrongly.\n- **A commit says why.** What changed is in the diff and does not need saying\n  again. The message carries the reason, which the diff is the one place that\n  cannot show.\n- **A comment says why not.** The alternative you ruled out, the trap you already\n  found. This is the one thing nothing else can hold: a line reading \"this looks\n  wrong\" invites the next person to fix it back, and the comment saying why it is\n  this way is what stops them.\n\nThe pull is to write the same fact in all four. Write each one once, where it is\nthe only place it can live.\n\n### Where \"why not\" ends\n\nA comment carries the alternative and the trap -- the one or two lines the reader\nof the code next to it needs in order to leave it alone. It does not carry the\ndecision's history: when it was made, what was measured, which issue or pull\nrequest argued it, what the code did before. That is the thread's, and the\nthread already has it; a comment that repeats it grows into a page and then rots\nbeside code it no longer matches.\n\n- History a comment is the only place holding moves to a thread before the\n  comment shrinks. The pull request that removes it is a thread -- put the\n  narrative in its body or your report, and leave at most a one-line link in\n  the code.\n- A pointer in a comment names the file, issue or pull request that holds the\n  thing promised. \"The thread that chose it\" is not a pointer -- it is a sentence\n  about a page the reader has to go and find; a number or a path is one, and a\n  number is only worth writing if the thread behind it carries the narrative.\n- A count in a comment about the code around it (\"four files\", \"Thirteen\") is\n  stale the first time that code changes, and nothing updates comments. State\n  the rule, not the count.\n- The measurement behind a limit is not a count of the code and stays: it is the\n  alternative that was ruled out, and the numbers are why. Where no thread holds\n  it, the comment is the only copy, and a pointer to a page that does not have it\n  is worse than the table.\n- Length alone is not the offence. A long comment that teaches the algorithm the\n  code implements is \"how\", and stays.\n\n## Tool Constraints\n\n- `commit_and_push` puts the work on the right branch, creating one on the first commit if this run started from the base. Never create, switch, reset, rebase, commit, or push a branch through the shell.\n- If a push is rejected as non-fast-forward, call `sync_branch`. Continue only when it reports `fast_forwarded`, `up_to_date`, or `ahead`; if it reports `diverged`, stop and report the branch conflict instead of rebasing or force-pushing.\n- `sync_branch` never brings the base branch in — it fast-forwards this branch from its own remote branch. When the pull request's base has moved ahead, call `merge_base_into_branch`: it merges the base into this branch and pushes, or leaves the conflicts and commits nothing.\n- A conflict is yours to decide, and the decision is declared. Both sides sit in git's index — `git show :2:<path>` is the version already on the branch, `git show :3:<path>` the one this run brings — and a text file additionally holds git's markers in the worktree while a binary does not, so write the version you want into the file and then name the path in `resolved_paths` on `commit_and_push`. Nothing else counts: a declared path that still holds markers is refused, and so is any unresolved path you did not declare, however the file looks. Which side wins, including a `package.json` version, is yours to decide.\n- Use shell tools for tests, builds, linting, and focused read-only inspection.\n- Searching finds the file to read; it does not answer the question. `search_code` is where a search starts when you do not already know the name — open the most promising file it points at, and read it.\n- Never hand-edit or commit a file that a build produces. Change the source the generator reads. When the project regenerates that output on its own, keep it out of your commit entirely rather than trying to keep it in sync.\n\n## Re-entry\n\n- If a review requests changes, inspect the current pull request and address only\n  concrete findings, then validate, commit, and update the same pull request.\n- If the pull request merged, make no further code changes to what merged. Judge\n  what merged against what the issue asked for, and take whichever of the two\n  post-merge outcomes above that judgement reaches. Whether `request_close_issue`\n  closes the issue itself or asks the person who opened it to close it is the\n  tool's own decision: it succeeds either way, and there is nothing there to work\n  around.\n"
+    },
+    {
+      "role": "user",
+      "content": "Issue #580: update: name the workflow scope wherever the update token's scope is described\n\nAttempt 3 of the v0.24.0 release (after #579 fixed the credential precedence) reached the push as the update token, and GitHub refused it:\n\n```\n[update] applied: 6 taken, 2 added, 0 removed, 0 merged, 0 conflicted\n::error::could not push atomaton/update-v0.24.0: To https://github.com/yuma-seno/atomaton\n ! [remote rejected] HEAD -> atomaton/update-v0.24.0 (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/atomaton-update.yml` without `workflow` scope)\n```\n\nRun: https://github.com/yuma-seno/atomaton/actions/runs/44929022320 (attempt 3).\n\n## This part is the token, not the code\n\nGitHub refuses any push that changes a file under `.github/workflows/` unless the pushing credential carries the `workflow` scope (classic PAT) or the `Workflows` permission (fine-grained). The API enforces the same rule, so there is no code path around it. This is not the #575 decision: that one is about the agent's GitHub App, which must not be able to publish workflows. `ATOMATON_UPDATE_TOKEN` is a separate identity whose entire purpose is to move the release's files — workflows included — so it is the one credential that is supposed to have the scope.\n\nThe person setting the secret has to add it. Nothing in this repository can.\n\n## What is wrong here\n\nEvery place that tells a person which scope to set names only `repo`, so the first adopter whose update touches a workflow hits exactly this refusal, one run after following the instructions correctly:\n\n- `docs/runtime/tasks/move-to-a-newer-release.md:39-43` — \"a repository secret holding a token with repo scope\"\n- `CONTRIBUTING.md:251` — \"a fine-grained or classic PAT with repo scope\"\n- `src/workflows/atomaton-update.wac.ts:23` — the header comment says \"a token with repo scope\"\n- `src/entrypoints/machinery/update_atomaton.ts:25` — \"a personal access token with repo scope\"\n- `src/entrypoints/machinery/update_atomaton.ts:311-316` — the refusal for a missing token asks for \"repo scope\" too; it should also name the workflow scope, because a token that has `repo` and not `workflow` fails two steps later with a message from GitHub rather than from us.\n\n## The edit\n\nName both scopes, and say why the second one is needed — the release ships workflows, so a push that updates one is refused without it:\n\n- classic PAT: `repo` and `workflow`\n- fine-grained PAT: `Contents`, `Pull requests`, and `Workflows` — read and write\n\nKeep each sentence in the voice already used in these files. In the `::error::` text, the scope sentence becomes something like: \"Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT with `repo` and `workflow` scope (or a fine-grained token with Contents, Pull requests and Workflows read and write), and run this again. Nothing has been changed.\"\n\n## Constraints\n\n- No version bump.\n- The wac header comment does not reach the generated YAML, so no workflow file should change; run `bun run synth` and confirm `git status` shows only these five files.\n- These are docs and comments plus one error string; no behaviour change and no new test is expected.\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-22T10:47:47Z",
+        "event_type": "issue_opened",
+        "id": "issue-580",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\nMake the five edits named above, and nothing else. There is no behaviour change: four sentences and one error string.\n\n`docs/runtime/tasks/move-to-a-newer-release.md`, `CONTRIBUTING.md`, `src/workflows/atomaton-update.wac.ts`, and `src/entrypoints/machinery/update_atomaton.ts` (module comment at line 25 and the `::error::` at line 311).\n\nThen run `bun run synth` and `git status` — only those four files may differ, with no generated workflow or runtime copy changed. Commit on a branch in the workspace and open the pull request; leave `NOTES-580.md` and the patch in the workspace if you cannot push.\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-22T10:47:55Z",
+        "event_type": "issue_comment",
+        "id": 7078023328,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "One correction to the scope list above, from GitHub's permission table: fine-grained `Workflows` is write-only (there is no read level for it), so the fine-grained sentence should say:\n\n> a fine-grained token with Contents and Pull requests read and write, and Workflows write\n\nClassic stays `repo` and `workflow`.\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-22T10:48:19Z",
+        "event_type": "issue_comment",
+        "id": 7078027623,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "I'll start by loading the project conventions, then read the files named in the issue.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-946345d9b37289bc",
+          "type": "function",
+          "function": {
+            "name": "load_skill",
+            "arguments": "{\"skill_name\": \"project/conventions\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-98e7a65b458c4952",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && git branch --show-current && git log --oneline -3\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "# Skill: project/conventions\n\n# Repository conventions\n\nThis repository builds Atomaton, the delivery template. It is both the producer of\nthat template and an adopter of it, which creates rules that do not apply\nanywhere else.\n\nThis file is not part of the template. It lives in\n`.github/atomaton/skills/project/`, and it is deliberately absent from `src/` so\nadopters never receive it.\n\n## The three trees\n\n| Tree | What it is | Who writes it |\n| --- | --- | --- |\n| `src/**` | Source of the deliverable | You |\n| `dist/.github/**` | The deliverable adopters receive | The build |\n| `.github/**` | This repository's running configuration | The update machinery, from a release; this repository's own files in it stay |\n\nTwo different activities live in this table, and which one you are doing decides\nwhich rules apply:\n\n- **improving the deliverable** — `src/**`. It affects every adopter, and it\n  reaches this repository only after the next release is applied.\n- **improving this repository's own operation** — the files directly under\n  `.github/` that no release ships (`release.yml`, the release scripts, the\n  customized skills). They affect nobody else, and they apply as soon as the pull\n  request merges.\n\nThe rest of this file does not separate them cleanly. That is a known gap, tracked\nin the documentation restructure; until then, read each rule and ask which of the two it is about.\n\n`src/content/**` is mirrored verbatim into `dist/.github/atomaton/` and from there\ninto an adopter's repository. **It may only contain content that holds for any\nproject using Atomaton.** No reference to this repository's build pipeline, no\nmention of `dist/`, `bun run synth`, or `build-dist.ts`, and no incident history\nor PR numbers. If a rule is about developing *this* repository, it belongs in\nthis file instead.\n\n## Generated output is not tracked\n\nChange `src/**` only. `dist/**` is gitignored, so there is nothing generated to\ncommit and nothing to keep in sync.\n\nRun `bun run synth` freely to inspect what adopters would receive. It writes only\ninto the ignored `dist/`, so it cannot dirty your commit.\n\nAdopters receive the deliverable from a release, not from a merge, so nothing you\nmerge needs to carry it.\n\n**Never touch `version` in `package.json`.** The version is the release declaration:\nmerging an edit to it publishes to adopters, and that decision belongs to a person,\nmade on the pull request **Release** opens — never inside a\nwork pull request. A version left alone is a merge that publishes nothing, which is\nthe normal case. A work pull request that arrives with a version change in it is a\nmerge-blocking defect: flag it, and have the edit taken back out before merge.\n\n`.github/**` is a different matter — see below. It is tracked; the files the\nrelease ships arrive from the release through the update machinery, and this\nrepository's own files in it survive every update untouched.\n\n## main is protected; everything lands by pull request\n\n`.github/atomaton/rulesets/main.json` is the source of truth for what may reach main:\ndirect pushes are refused, and a pull request cannot merge until the `check` job\npasses. It is applied by hand from an account with admin, and taken as correctly\nconfigured thereafter — nothing verifies it, because a check could only report and\nnever enforce: with no ruleset, `check` would not be a required context either.\n\nChanging the rule is a pull request against the JSON, followed by one `gh api`\ncall from an account with admin (see CONTRIBUTING.md). CI cannot make that call —\n`administration` is not a permission a workflow can hold.\n\n`check_merge_readiness` reports against whatever the ruleset currently\nrequires, so it follows the file rather than holding a second opinion.\n\nNothing bypasses it. No workflow writes to main — the release job attaches the deliverable\nto a release instead — and your merge satisfies the rules like anyone else's. Do\nnot propose a bypass actor: it would mean naming a GitHub App ID or a deploy key,\nvalues that exist only after manual setup, so the JSON would stop describing the\nwhole configuration.\n\nThe workflows that run agents are generated from `src/workflows/` and shipped.\n`release.yml` — the release button — is the one that is not: hand-written, living\ndirectly in `.github/workflows/`, outside the manifest the update machinery merges\nagainst.\n\n## Adding a static file to the deliverable\n\nA new non-code file under `src/content/` must also be added to `build-dist.ts`'s\nverbatim-copy list, or it never reaches `dist/` at all.\n`tests/contract/deployment-contract.test.ts` enforces this.\n\n## `atoma validate` is on the CLI\n\nThe `atoma` binary is on the agent's PATH — the runner installs it at\n`/usr/local/bin/atoma` — and it has a `validate` subcommand that checks an agent\ndefinition against a tools file without starting a run:\n\n```bash\natoma validate --agent-def .github/atomaton/agent-definitions/engineer.md \\\n               --tools-file /tmp/tools.yaml\n```\n\nIt resolves every name in the definition's `mcp_servers` against the tools file,\nchecks the template's placeholders, and reports what it finds. `atomaton-validate-pr`\nruns it on every pull request that touches an agent definition, so a definition\nthat names a server `tools.yaml` does not define is a red check rather than a run\nthat aborts before a single tool starts.\n\nThere is no MCP tool for it, and that is deliberate: it is a check a person or a\nworkflow runs, not something an agent needs mid-run. Use it from the shell when\nyou are changing a definition and want the same answer CI will give.\n\n## `.github/` is an adoption, not a mirror\n\nNothing regenerates `.github/` automatically. It is this repository's deliberate\nadoption of the deliverable, so it lags `src/` until someone applies a release.\n\n**That lag is the point.** A change to `src/` must not reconfigure the live agents\nthe moment it merges. Two breakages reached the running system exactly that way.\n\n### Applying a release\n\nThe ordinary route is **Release**, which publishes the release and then dispatches\nthe update machinery to take it onto this repository's own `.github/` — the same\nthree-way plan an adopter gets. To apply a release on its own — an older one, or\nafter a run with `deploy: false` — dispatch **Atomaton Update**\n(`.github/workflows/atomaton-update.yml`) from the Actions tab. The machinery\nopens the pull request and merges it when the plan is clean; where the tree and\nthe release both changed a file, it stops there for a person. `.github/**` is in\n`merge.governed_paths`, so what it cannot decide is a person's to review.\n\nThe application is a three-way merge against the manifest, not a rebuild: a file\nthe release ships takes the new version, a file this repository edited keeps its\nwords, and a path the release does not ship — `release.yml`, the release scripts,\nthe customized skills — is never proposed for an update at all.\n\n## Fixing the machinery prose from inside a run\n\nYou are not merely allowed to fix the prose you find wrong mid-run — you are asked\nto. A prompt that misleads, a skill that is out of date, a definition that names\nsomething stale: each one reaches every future run, so a fix beats a report. The\nroute is the `open_base_edit_pr` tool on the github server. It builds one commit\nfrom git objects on the base branch's current tree, pushes it to\n`atomaton/amend-<id>`, and opens a pull request against the base branch — so the\nfix is reviewed on its own instead of riding the issue's pull request and vanishing\nwith it. Your checkout, HEAD, index and session are untouched, the run does not end\nfor it, and the replacement has to match what the base holds now exactly once: if\nthe base has moved, nothing is pushed rather than a stale overwrite.\n\nWhat to point it at:\n\n| What you found | Where the fix goes | Why |\n| --- | --- | --- |\n| A skill or the prompt template, as this repository runs it | the tool, on its `.github/atomaton/` path | one commit of its own; CI and a reviewer; no issue entanglement. Live from the next run, and durable: the update machinery never touches a path the release does not ship |\n| The same fix, made to outlive the next deploy for every adopter | a normal pull request against `src/content/skills/` or `src/content/prompt-template.md` | the deployed copies are release output; the durable master is `src/content/` |\n| `config.yaml`, `package.json`, machinery code, workflows | a normal issue-tree pull request | governed or gated, and none of it is prose |\n\nThe tool refuses `config.yaml` itself: it decides which credentials a run may\nreach, and that boundary is not an agent's to move. A skill living under\n`.github/atomaton/skills/` is durable by construction: the update machinery's plan\nnever names a path the release does not ship, so the exemption is not carved away\nby the next update.\n\nWhat happens when the fix lands, in three parts:\n\n- **A merged prose edit is read by the next run.** Runs read `.github/atomaton/`\n  straight off the default branch — there is nothing to build or restart — so the\n  fix is live for every agent that starts after the merge. It never reaches the\n  run that wrote it.\n- **An update merges three-way around it, and never reverts it.** The update\n  machinery's plan enumerates the release, never the tree: a path the release does\n  not ship — this repository's own skills among them — is never proposed for an\n  update, so a fix living directly under `.github/` survives every update. A file\n  the release also ships is three-way merged, and where both sides changed, the\n  update stops at its pull request rather than picking a winner.\n- **The tool and the matcher behind it are code, and code ships with the\n  release.** `open_base_edit_pr` lives in the generated runtime, which the next\n  applied release replaces — until that has happened, a run has no such tool, and a\n  prose-fix pull request meets the old matcher, which cannot read the `!`\n  exemptions, and stops with a governance blocker left for a person. That window\n  closes by itself when the next release is applied.\n\nMerging here: once the new matcher is live, `merge.policy` is `auto` and the\nprompt template and skills are exempt from `governed_paths`, so a prose-fix pull\nrequest merges without a person once CI is green and review passes. Everything\nelse under `.github/` stays a person's merge.",
+      "tool_call_id": "chatcmpl-tool-946345d9b37289bc"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"main\\n8f6893e Merge pull request #579 from yuma-seno/atomaton/issue-578\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":369}",
+      "tool_call_id": "chatcmpl-tool-98e7a65b458c4952"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-83e035116ba7fc7b",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"docs/runtime/tasks/move-to-a-newer-release.md\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-b939acadd3f2400a",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '240,265p' CONTRIBUTING.md\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-9bc00578d545be87",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '1,40p' src/workflows/atomaton-update.wac.ts && echo '---' && sed -n '15,35p;300,330p' src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now let me read the five places. Note the issue says \"five edits\" across four files (update_atomaton.ts has two spots).\n\nLet me read the relevant files.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_72287d05-6ffb-4788-97a4-a07e06e50ac7",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "docs/runtime/tasks/move-to-a-newer-release.md lines 1-99 of 99\n\n1\t# Move to a newer release\n2\t\n3\tAn adopted tree is a copy, and the machinery is what keeps it current. Taking a\n4\trelease is one comment or one button; resolving a collision is a judgement only\n5\tyou (or an agent acting for you) can make. This page covers both, and the by-hand\n6\tprocedure is in the appendix at the end.\n7\t\n8\t**You do not have to watch for it.** `atomaton-new-release.yml`, which ships with\n9\tthe release, runs once a day and compares `.github/atomaton-release.json` against\n10\tthe latest release. When they differ it opens one issue — updated in place rather\n11\tthan opened again — carrying both versions, the release notes in between, a\n12\tpreview of what taking the release would do to your tree (files updated, added,\n13\tremoved, and — most useful — files you changed AND upstream changed), and the\n14\tpaths upstream no longer ships. Once a notice's version is the one you are on, it\n15\tcloses itself, so an open one always means an upgrade is still waiting. It needs\n16\tno secret: `contents: read` to read the releases and `issues: write` to write the\n17\tnotice. Run it by hand from the Actions tab if you would rather ask now than wait\n18\tfor the next day.\n19\t\n20\t## Taking it\n21\t\n22\tTwo ways, same machinery:\n23\t\n24\t- Comment **`!upgrade`** on the notice (or any thread), or\n25\t- run **Atomaton Update** from the Actions tab.\n26\t\n27\tThe run reads your tree and the releases, applies the plan — the one the notice\n28\tpreviewed — on a branch, pushes it, and opens a pull request. What happens next\n29\tis decided by what the merge measured, not by a flag:\n30\t\n31\t- **Nothing collided.** The pull request requests the auto-merge; your\n32\t  repository's own checks run first, and when they pass it merges itself. The\n33\t  notice closes.\n34\t- **You changed a file upstream also changed.** The pull request stands with\n35\t  conflict markers in those files, naming both sides. Nothing merges until\n36\t  someone resolves them: comment on that pull request and ask an agent, or edit\n37\t  the files yourself. The checks run on the resolved tree, and then it can merge.\n38\t\n39\tThe update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\n40\ta token with repo scope. That is deliberate: a push made with the workflow's own\n41\ttoken starts no checks, so a merge gated on them would gate on nothing. If the\n42\tsecret is missing the run fails loudly and changes nothing — set the secret and\n43\trun it again.\n44\t\n45\t## What it does not touch\n46\t\n47\tThe plan classifies every path the two releases ship; paths in neither release —\n48\tyour own workflows, your project skills — are invisible to it and are never\n49\twritten or deleted. One list is reported but never acted on: paths you have under\n50\t`.github/` that the target release no longer ships.\n51\t\n52\t**What did upstream delete?** Extracting never deletes, so a file the template\n53\tdropped stays in your tree — and that is not cosmetic. Two workflows were removed\n54\tin v0.1.71 because work should start only when somebody asks; keeping them keeps\n55\tthe triggers. The update names them on its pull request, and by hand they are:\n56\t\n57\t```bash\n58\t# Paths you have under .github/ that this release no longer ships.\n59\t# Your own files appear here too, which is why it is a list to read, not to pipe\n60\t# into rm.\n61\tcomm -23 \\\n62\t  <(git ls-files '.github/*' | sort) \\\n63\t  <(jq -r '.files[]' .github/atomaton-release.json | sort)\n64\t```\n65\t\n66\tRead it rather than acting on it: your own workflows and your own project skills are\n67\tfiles the template never shipped, and they are supposed to be there.\n68\t\n69\t## Which release do I have?\n70\t\n71\t`.github/atomaton-release.json` says. It ships with the release and records the\n72\tversion and every path the release contains:\n73\t\n74\t```bash\n75\tjq -r .version .github/atomaton-release.json\n76\t```\n77\t\n78\tHow the machinery decides what replaces what is [what an upgrade\n79\treplaces](../boundaries.md): in one sentence, the ordinary three-way merge between\n80\tthe release you took, your tree, and the release you are taking.\n81\t\n82\t## Appendix: by hand\n83\t\n84\tThe workflow automates the procedure below. Doing it by hand is equivalent, and\n85\tsometimes preferable when the machinery itself is what you want to change:\n86\t\n87\t```bash\n88\tgh release download v0.1.115 -R yuma-seno/atomaton -p atomaton-delivery.zip\n89\tunzip -o atomaton-delivery.zip   # the archive holds .github/, so run this at the repo root\n90\trm atomaton-delivery.zip\n91\tgit diff .github/            # every difference is now a decision\n92\tgit checkout -- .github/atomaton/config.yaml    # for anything you meant to keep\n93\t```\n94\t\n95\tName the version rather than taking `latest`, and read the upstream changes between\n96\tyours and the next one (`gh release view`, or compare the two tags) rather than\n97\trediscovering them in a diff. The habit the machinery codifies is the same one:\n98\tkeep your customisation in `config.yaml` and under `skills/project/`, where a\n99\tcollision means an edit you remember making.",
+      "tool_call_id": "chatcmpl-tool-83e035116ba7fc7b"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"and the release it applies was published by a person's button or asked for with\\n`!upgrade`. A conflicted application stops at its pull request, where a person\\ndecides.\\n\\n### The token, and why the update is the only one\\n\\n`GITHUB_TOKEN` cannot write `.github/workflows/**`. Not by path rule and not by\\nbranch: the push is refused on **identity**, measured here. The update machinery\\nreplaces those files, so the one secret this repository needs is the same one an\\nadopter sets:\\n\\n- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as\\n  an Actions secret. The update workflow pushes `.github/` under it, including the\\n  workflow files the release carries. Set it:\\n\\n  ```bash\\n  gh secret set ATOMATON_UPDATE_TOKEN\\n  ```\\n\\nThe release button reads one secret, and it is the machinery's:\\n`ATOMATON_UPDATE_TOKEN` is handed to the update script in the application step,\\nwhich pushes, opens and merges the update's pull request as that identity. The\\nrelease pull request, its merge and the deploy dispatch run on the workflow's own\\ntoken, with their suppressed events bridged.\\n\\n**No agent can reach it.** `ATOMATON_UPDATE_TOKEN` is named by the update workflow\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":159}",
+      "tool_call_id": "chatcmpl-tool-b939acadd3f2400a"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"import { Workflow } from \\\"@github-actions-workflow-ts/lib\\\";\\nimport { ActionsCheckoutV4 } from \\\"@github-actions-workflow-ts/actions\\\";\\nimport { startJob, SCRIPT_JOB_TIMEOUT_MINUTES, TypedOutputsStep } from \\\"./actions/base.ts\\\";\\nimport { scriptCommandWithArgs } from \\\"./actions/script-call.ts\\\";\\nimport { SetupBunAction } from \\\"./actions/third-party.ts\\\";\\nimport { ref as updateAtomatonRef } from \\\"../entrypoints/machinery/update_atomaton.ts\\\";\\n\\n// Take a newer template release onto this tree — the doing half of the machinery\\n// the notice serves.\\n//\\n// ## The two ways in\\n//\\n// The Actions tab's Run workflow button is the person standing there; a `!upgrade`\\n// comment on the notice (or any thread) dispatches this workflow with the thread's\\n// number, so the update answers where it was asked. Either way the run is the same\\n// script (`update_atomaton.ts`), which plans, applies, opens its pull request and\\n// either merges it once the repository's checks have passed or stops at it.\\n//\\n// ## Why the update token is a secret the owner sets\\n//\\n// The branch the update pushes must run this repository's checks, and a push made\\n// with this workflow's own token deliberately runs none — so a merge gated on those\\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\\n// that the owner adds once; when it is missing the run fails loudly and changes\\n// nothing, because the person who started it is standing there and silence is not\\n// an answer. It is also the identity the pull request is opened and merged as --\\n// GitHub starts no `pull_request` run for a pull request this workflow's token\\n// opened, and no `push` for a merge it made, and the check the ruleset requires\\n// and the deploy the merge chains to are exactly those events. See\\n// `update_atomaton.ts`'s own comment for the whole argument.\\n//\\n// ## One update at a time\\n//\\n// Two updates running together would push the same branch from two checkouts and\\n// race the pull request. The group is one and never cancels: a run that waited is\\n// not a run that was wrong, and cancelling mid-apply would leave a tree holding\\n// half a plan.\\nexport const atomaUpdate = new Workflow(\\\"atomaton-update\\\", {\\n  name: \\\"Atomaton Update\\\",\\n  on: {\\n---\\n * `git merge-file`'s measured answer (`lib/update-apply.ts`). A collision is not a\\n * failure of the run: stopping at a pull request IS the design, and the run exits\\n * green after reporting it. What is a failure is being unable to run at all — no\\n * token, no manifest, no readable release — which exits red with the reason.\\n *\\n * ## Why the token, and why it is not the workflow's own\\n *\\n * The branch this pushes must run the repository's checks, and a push made with\\n * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those\\n * checks gate would then be merging unverified content. So the workflow that runs\\n * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\\n * and a run without it fails loudly and does nothing — a person who pressed the\\n * button is standing there, and silence is not an answer.\\n *\\n * ## Why the stop is a pull request, and why the token does the writing\\n *\\n * A pull request is the one place this repository already has everything a\\n * resolution needs: visible diffs, checks that refuse broken content, and an agent\\n * loop a person can address with a comment. The pull request is opened, and when\\n * the plan is clean merged, as the update token -- an identity that starts runs.\\n * A pull request opened with the workflow's own token fires no `pull_request`\\nfunction openPrForHead(repo: string, branch: string): number {\\n  const result = ghRead(\\n    \\\"pr\\\", \\\"list\\\", \\\"--repo\\\", repo, \\\"--head\\\", branch, \\\"--state\\\", \\\"open\\\", \\\"--json\\\", \\\"number\\\",\\n  );\\n  if (result.code !== 0) return 0;\\n  try {\\n    const parsed = JSON.parse(result.stdout || \\\"[]\\\") as Array<{ number?: unknown }>;\\n    const number = Number(parsed[0]?.number ?? 0);\\n    return Number.isInteger(number) && number > 0 ? number : 0;\\n  } catch {\\n    return 0;\\n  }\\n}\\n\\nfunction main(): void {\\n  const { values } = parseArgs({\\n    args: Bun.argv.slice(2),\\n    options: {\\n      repo: { type: \\\"string\\\" },\\n      source: { type: \\\"string\\\" },\\n      tag: { type: \\\"string\\\" },\\n    },\\n  });\\n\\n  const repo = (values.repo ?? process.env.GITHUB_REPOSITORY ?? \\\"\\\").trim();\\n  if (!repo) {\\n    console.error(\\\"usage: update_atomaton.ts --repo OWNER/REPO [--source N] [--tag vX.Y.Z]\\\");\\n    process.exit(2);\\n  }\\n  const source = values.source !== undefined && values.source !== \\\"\\\" ? Number(values.source) : 0;\\n\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":160}",
+      "tool_call_id": "chatcmpl-tool-9bc00578d545be87"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bb0e3c1f2e6c33ca",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'ATOMATON_UPDATE_TOKEN' -r src/ docs/ CONTRIBUTING.md | head -40\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-acf435322ae71542",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '330,400p' src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now let's find the ::error:: at line 311 in update_atomaton.ts.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_9a6432ef-3911-4431-98c1-1ea2b67f0ec5",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/workflows/atomaton-update.wac.ts:23:// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\\nsrc/workflows/atomaton-update.wac.ts:91:          ATOMATON_UPDATE_TOKEN: \\\"${{ secrets.ATOMATON_UPDATE_TOKEN }}\\\",\\nsrc/entrypoints/machinery/update_atomaton.test.ts:207:    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"\\\" });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:209:    expect(r.stderr).toContain(\\\"ATOMATON_UPDATE_TOKEN\\\");\\nsrc/entrypoints/machinery/update_atomaton.test.ts:216:    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:225:    const r = run(bare, [], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:234:      env: { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" },\\nsrc/entrypoints/machinery/update_atomaton.test.ts:246:    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:256:    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:294:    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" }, { notice: 12 });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:307:    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:325:    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" }, { notice: 12 });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:353:    const r = run(dir, [\\\"--source\\\", \\\"31\\\"], { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" }, { notice: 12 });\\nsrc/entrypoints/machinery/update_atomaton.test.ts:380:      env: { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" },\\nsrc/entrypoints/machinery/update_atomaton.test.ts:417:      env: { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" },\\nsrc/entrypoints/machinery/update_atomaton.ts:25: * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\\nsrc/entrypoints/machinery/update_atomaton.ts:331:  const token = process.env.ATOMATON_UPDATE_TOKEN?.trim() ?? \\\"\\\";\\nsrc/entrypoints/machinery/update_atomaton.ts:334:      \\\"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \\\" +\\nsrc/entrypoints/machinery/update_atomaton.ts:336:        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo \\\" +\\ndocs/runtime/tasks/move-to-a-newer-release.md:39:The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\\nCONTRIBUTING.md:150:read: `ATOMATON_UPDATE_TOKEN`, the machinery's own secret, handed to the update\\nCONTRIBUTING.md:251:- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as\\nCONTRIBUTING.md:256:  gh secret set ATOMATON_UPDATE_TOKEN\\nCONTRIBUTING.md:260:`ATOMATON_UPDATE_TOKEN` is handed to the update script in the application step,\\nCONTRIBUTING.md:265:**No agent can reach it.** `ATOMATON_UPDATE_TOKEN` is named by the update workflow\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":163}",
+      "tool_call_id": "chatcmpl-tool-bb0e3c1f2e6c33ca"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\n  const token = process.env.ATOMATON_UPDATE_TOKEN?.trim() ?? \\\"\\\";\\n  if (!token) {\\n    console.error(\\n      \\\"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \\\" +\\n        \\\"which this workflow's own token may not do: a push from it would run none of the checks the \\\" +\\n        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo \\\" +\\n        \\\"scope, and run this again. Nothing has been changed.\\\",\\n    );\\n    process.exit(1);\\n  }\\n\\n  const local = readLocalManifest();\\n  if (!(\\\"manifest\\\" in local)) {\\n    console.error(`::error::${local.why}. An update cannot be applied to a tree that cannot say what it is on.`);\\n    process.exit(1);\\n  }\\n\\n  const targetTag = (values.tag ?? \\\"\\\").trim() || latestReleaseTag();\\n  if (targetTag === null) {\\n    console.error(\\n      `::error::could not read ${UPSTREAM_REPOSITORY}'s latest release, so there is nothing to take. ` +\\n        \\\"A failed read is not an answer of 'up to date'.\\\",\\n    );\\n    process.exit(1);\\n  }\\n\\n  if (targetTag === local.manifest.version) {\\n    log(`${local.manifest.version} is the release this tree is on; nothing to take`);\\n    if (source > 0) {\\n      const said = gh(\\\"issue\\\", \\\"comment\\\", String(source), \\\"--repo\\\", repo, \\\"--body\\\",\\n        `${LLM_CONTEXT_TAG.write(\\\"exclude\\\")}\\\\nThis tree is already on ${targetTag}, which is the release asked for. Nothing to do.`);\\n      if (said.code !== 0) log(`WARN could not answer in #${source}: ${said.stderr.trim()}`);\\n    }\\n    return;\\n  }\\n\\n  // The run is about to write to the checkout and push a branch. A dirty tree\\n  // would mix a person's or another run's work into the update's commit — refuse\\n  // before anything is written, not after.\\n  const status = gitOrFail([\\\"status\\\", \\\"--porcelain\\\"], \\\"read the working tree's status\\\");\\n  if (\\\"fail\\\" in status) {\\n    console.error(`::error::${status.fail}. The update applies to a checkout, and this run is not standing in one it can trust.`);\\n    process.exit(1);\\n  }\\n  if (status.stdout.trim() !== \\\"\\\") {\\n    console.error(\\n      \\\"::error::the working tree is not clean. The update writes whole files and pushes a branch; \\\" +\\n        \\\"uncommitted work would be mixed into its commit. Run it from a clean checkout.\\\",\\n    );\\n    process.exit(1);\\n  }\\n\\n  // The three sides, read before anything is decided. A release that cannot be\\n  // read is a red run with the reason — never a guess about what it held.\\n  const baseRelease = releaseFiles(local.manifest.version);\\n  if (\\\"why\\\" in baseRelease) {\\n    console.error(`::error::this tree's own release (${local.manifest.version}) could not be read: ${baseRelease.why}`);\\n    process.exit(1);\\n  }\\n  const targetRelease = releaseFiles(targetTag);\\n  if (\\\"why\\\" in targetRelease) {\\n    console.error(`::error::the target release (${targetTag}) could not be read: ${targetRelease.why}`);\\n    process.exit(1);\\n  }\\n\\n  const paths = new Set([...baseRelease.files.files.keys(), ...targetRelease.files.files.keys()]);\\n  const tree = readTreeFiles(paths);\\n  const plan = planUpdate(local.manifest.version, targetTag, baseRelease.files.files, targetRelease.files.files, tree);\\n  if (plan.take.length + plan.add.length + plan.delete.length + plan.merge.length === 0) {\\n    log(`${targetTag} changes nothing here; nothing to apply`);\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":157}",
+      "tool_call_id": "chatcmpl-tool-acf435322ae71542"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-92bbf2255506261d",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '200,215p' src/entrypoints/machinery/update_atomaton.test.ts && echo '---' && grep -rn 'repo scope' --include=*.ts --include=*.md . | grep -v node_modules | grep -v '^./dist/'\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now I have all five spots. Let me also check the test at line 207-210 — does any test assert on the error text \"repo scope\"? Let me check.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_3021f763-00d2-4272-b6ee-857b3b9f1849",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"    rules: rules(\\\"v0.2.0\\\", options),\\n    env,\\n  });\\n\\ndescribe(\\\"a run that cannot start\\\", () => {\\n  test(\\\"no token is a red run that touches nothing\\\", () => {\\n    const { dir } = fixtureRepo(BASE_FILES, \\\"v0.1.0\\\");\\n    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: \\\"\\\" });\\n    expect(r.status).toBe(1);\\n    expect(r.stderr).toContain(\\\"ATOMATON_UPDATE_TOKEN\\\");\\n    expect(r.ghCalls.filter((call) => call[0] === \\\"pr\\\" || call[0] === \\\"issue\\\")).toEqual([]);\\n  });\\n\\n  test(\\\"a dirty working tree is refused before anything is written\\\", () => {\\n    const { dir, bare } = fixtureRepo(BASE_FILES, \\\"v0.1.0\\\");\\n    writeFileSync(join(dir, CHECK), \\\"a person's uncommitted edit\\\\n\\\");\\n---\\n./src/workflows/atomaton-update.wac.ts:23:// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\\n./src/entrypoints/machinery/update_atomaton.ts:25: * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\\n./docs/runtime/tasks/move-to-a-newer-release.md:40:a token with repo scope. That is deliberate: a push made with the workflow's own\\n./CONTRIBUTING.md:251:- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":207}",
+      "tool_call_id": "chatcmpl-tool-92bbf2255506261d"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-82f4bd72eca88ba6",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && ls docs/runtime/ docs/runtime/tasks/ 2>/dev/null && grep -rn 'move-to-a-newer-release' --include=*.ts --include=*.json --include=*.md . | grep -v node_modules | grep -v '^./dist/' | head -20\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Good — no test asserts on the exact scope text beyond `ATOMATON_UPDATE_TOKEN`.\n\nNow check whether the docs file `docs/runtime/tasks/move-to-a-newer-release.md` — is it under src/content? Let's check: it's `docs/runtime/...`. Hmm, docs/runtime might be generated from src/content? Let me check.\n\nActually the issue says only four files may differ after synth. Let me check whether docs/runtime is generated.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_fff18936-ce31-49de-9d86-2e0d3c4bdf89",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"docs/runtime/:\\nboundaries.md\\ntasks\\n\\ndocs/runtime/tasks/:\\nmove-to-a-newer-release.md\\n./src/domain/machinery/release-manifest.ts:6: * **\\\"Which release am I on?\\\"** `docs/runtime/tasks/move-to-a-newer-release.md` tells an adopter to name a\\n./src/entrypoints/machinery/notify_new_release.ts:9: * documented upgrade (`docs/runtime/tasks/move-to-a-newer-release.md`) starts with\\n./src/entrypoints/machinery/notify_new_release.ts:87:const UPGRADE_DOC = `https://github.com/${UPSTREAM_REPOSITORY}/blob/main/docs/runtime/tasks/move-to-a-newer-release.md`;\\n./docs/template/architecture.md:171:in git history: it can be read, and it can be put back. `docs/runtime/tasks/move-to-a-newer-release.md` treats\\n./docs/runtime/boundaries.md:26:  [yours to make](tasks/move-to-a-newer-release.md) — by hand, or by asking an\\n./docs/setup.md:57:   newer release](runtime/tasks/move-to-a-newer-release.md).\\n./docs/README.md:55:| [move to a newer release](runtime/tasks/move-to-a-newer-release.md) | nothing — a vendoring procedure |\\n./docs/work/how-it-works/what-starts-a-run.md:85:is [move to a newer release](../../runtime/tasks/move-to-a-newer-release.md).\\n./.github/atomaton-runtime/scripts/notify_new_release.ts:333:var UPGRADE_DOC = `https://github.com/${UPSTREAM_REPOSITORY}/blob/main/docs/runtime/tasks/move-to-a-newer-release.md`;\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":206}",
+      "tool_call_id": "chatcmpl-tool-82f4bd72eca88ba6"
+    },
+    {
+      "role": "assistant",
+      "content": "All five spots located. Making the edits now.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9574918cc2288c93",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\\na token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\\n`Pull requests` read and write, plus `Workflows` write. That is deliberate: a push\\nmade with the workflow's own token starts no checks, so a merge gated on them\\nwould gate on nothing. The second scope is not optional: the release ships\\nworkflows, and GitHub refuses any push that changes a file under\\n`.github/workflows/` without it. If the secret is missing the run fails loudly and\\nchanges nothing — set the secret and run it again.\", \"old_string\": \"The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\\na token with repo scope. That is deliberate: a push made with the workflow's own\\ntoken starts no checks, so a merge gated on them would gate on nothing. If the\\nsecret is missing the run fails loudly and changes nothing — set the secret and\\nrun it again.\", \"path\": \"docs/runtime/tasks/move-to-a-newer-release.md\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-897f182e744f6fae",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"CONTRIBUTING.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "docs/ is the repo's own docs — not generated. Good.\n\nNow make the five edits. Let me write them carefully, in the voice of each file.\n\n1. `docs/runtime/tasks/move-to-a-newer-release.md:39-43`:\n\nCurrent:\n```\nThe update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\na token with repo scope. That is deliberate: a push made with the workflow's own\ntoken starts no checks, so a merge gated on them would gate on nothing. If the\nsecret is missing the run fails loudly and changes nothing — set the secret and\nrun it again.\n```\n\nNew: name both scopes and why the workflow scope is needed.\n\n```\nThe update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\na token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\n`Pull requests` read and write and `Workflows` write. That is deliberate: a push\nmade with the workflow's own token starts no checks, so a merge gated on them\nwould gate on nothing. The release ships workflows, and GitHub refuses any push\nthat changes a file under `.github/workflows/` without the `workflow` scope\n(`Workflows` on a fine-grained token), so the token has to carry it. If the secret\nis missing the run fails loudly and changes nothing — set the secret and run it\nagain.\n```\n\nHmm, \"fine-grained, `Contents` and `Pull requests` read and write and `Workflows` write\" — the \"and ... and\" is awkward. Maybe: \"or, fine-grained: `Contents` and `Pull requests` read and write, plus `Workflows` write.\"\n\n2. `CONTRIBUTING.md:251`:\n\nCurrent:\n```\n- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as\n  an Actions secret. The update workflow pushes `.github/` under it, including the\n  workflow files the release carries. Set it:\n```\n\nNew:\n```\n- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\n  fine-grained one with `Contents` and `Pull requests` read and write and\n  `Workflows` write; set as an Actions secret. The update workflow pushes\n  `.github/` under it, including the workflow files the release carries, and GitHub\n  refuses a push that changes one without that workflow permission. Set it:\n```\n\n3. `src/workflows/atomaton-update.wac.ts:23`:\n\nCurrent:\n```\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\n// that the owner adds once; when it is missing the run fails loudly and changes\n```\nWait let me re-read lines 22-23:\n```\n// with this workflow's own token deliberately runs none — so a merge gated on those\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\n// that the owner adds once; when it is missing the run fails loudly and changes\n```\nNew: \"is a token with `repo` and `workflow` scope\" — with a reason appended. Since it's a header comment, keep it tight but say why.\n\n```\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\n// `workflow` scope — the release ships workflows, and GitHub refuses a push that\n// updates one without it — that the owner adds once; when it is missing the run\n// fails loudly and changes\n```\n\nHmm, that breaks the sentence flow awkwardly with the em-dash insertion. Let me restructure:\n\n```\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\n// `workflow` scope that the owner adds once, the second scope because the release\n// ships workflows and GitHub refuses a push that updates one without it; when it\n// is missing the run fails loudly and changes nothing, ...\n```\n\nLet me read the full paragraph again to preserve it exactly.\n\n4. `src/entrypoints/machinery/update_atomaton.ts:25`:\n\n```\n * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\n * and a run without it fails loudly and does nothing — a person who pressed the\n```\nNew:\n```\n * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with `repo` and\n * `workflow` scope — the release ships workflows, and GitHub refuses a push that\n * updates one without the second — and a run without it fails loudly and does\n * nothing — a person who pressed the\n```\nTwo em-dashes in one sentence is heavy. Alternative:\n\n```\n * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with `repo` and\n * `workflow` scope, the second because the release ships workflows and GitHub\n * refuses a push that updates one without it. A run without the token fails\n * loudly and does nothing — a person who pressed the button is standing there,\n * and silence is not an answer.\n```\n\nThat reads well.\n\n5. `::error::` at 334-337. The issue suggests:\n\"Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT with `repo` and `workflow` scope (or a fine-grained token with Contents, Pull requests and Workflows read and write), and run this again. Nothing has been changed.\"\n\nWith the correction: fine-grained token with Contents and Pull requests read and write, and Workflows write.\n\nThe existing text:\n```\n      \"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \" +\n        \"which this workflow's own token may not do: a push from it would run none of the checks the \" +\n        \"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo \" +\n        \"scope, and run this again. Nothing has been changed.\",\n```\n\nNew:\n```\n      \"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \" +\n        \"which this workflow's own token may not do: a push from it would run none of the checks the \" +\n        \"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \" +\n        \"with `repo` and `workflow` scope (or a fine-grained token with Contents and Pull requests \" +\n        \"read and write, and Workflows write), and run this again. Nothing has been changed.\",\n```\n\nHmm — backticks in the ::error:: text. GitHub renders `::error::` output as plain text in the log, backticks would show literally. Better without backticks in the error string. I'll drop them there.\n\nAlso should the error say why workflow is needed? The issue says: \"it should also name the workflow scope, because a token that has repo and not workflow fails two steps later with a message from GitHub rather than from us.\" The suggested replacement text doesn't include the reason inside the error string — but the sentence in the fixes elsewhere says why. Should I add \"the release ships workflows\"? The issue's suggested error text is what it proposes. But adding a short clause why helps. The suggested text is \"something like\", so I have latitude. Let me add a brief why: \"...with `repo` and `workflow` scope — the release ships workflows, and a push that updates one is refused without the second —\". That makes the error long though. Hmm.\n\nActually the error message is a red-run message for a person who pressed a button. A short why is valuable: they otherwise don't know why workflow is needed. Let me include it concisely:\n\n```\n\"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \" +\n  \"which this workflow's own token may not do: a push from it would run none of the checks the \" +\n  \"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \" +\n  \"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \" +\n  \"and write and Workflows write. The workflow scope is not optional: the release ships \" +\n  \"workflows, and a push that updates one is refused without it. Then run this again. Nothing \" +\n  \"has been changed.\",\n```\n\nHmm, that's getting long but each sentence earns its place. Maybe trim: the \"workflow scope is not optional\" sentence is the reason. Keep.\n\nActually let me be a bit tighter:\n\n```\n      \"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \" +\n        \"which this workflow's own token may not do: a push from it would run none of the checks the \" +\n        \"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \" +\n        \"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \" +\n        \"and write and Workflows write — the release ships workflows, and a push that updates one is \" +\n        \"refused without it. Then run this again. Nothing has been changed.\",\n```\n\nGood.\n\nNow the docs file. Let me write all edits.\n\nAlso should I check CONTRIBUTING.md:150 mention and around, in case it also describes the scope? Line 150: \"read: `ATOMATON_UPDATE_TOKEN`, the machinery's own secret, handed to the update...\" — no scope claimed. Fine.\n\nLet me make the edits.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_5271a8ef-86f0-4974-a4c0-771664484bb3",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in docs/runtime/tasks/move-to-a-newer-release.md.",
+      "tool_call_id": "chatcmpl-tool-9574918cc2288c93"
+    },
+    {
+      "role": "tool",
+      "content": "CONTRIBUTING.md lines 1-137 of 455\n\n1\t# Contributing\n2\t\n3\t## Source-of-truth map\n4\t\n5\tEverything here divides into two kinds: **the deliverable**, which adopters\n6\treceive, and **this repository's own tooling**, which they must never see.\n7\t\n8\tThe deliverable:\n9\t\n10\t- `src/`: hand-authored source for the template — agent definitions, skills, MCP\n11\t  servers, workflow definitions. Adopter-agnostic by rule: no reference to this\n12\t  repository's build pipeline, no incident history, no PR numbers.\n13\t- `dist/.github/`: generated from `src/` by `bun run synth`. This is what adopters\n14\t  receive. **Not tracked in git** — it is a pure function of `src/`, and the\n15\t  release deployment publishes it as a release asset rather than committing it.\n16\t- `.github/atomaton/scripts/`: this project's own pipeline. `tag-release.sh` is what\n17\t  `deploy.on_merge` names. These are the reason there are no hand-written workflows\n18\t  left beyond `release.yml`, and they live directly under `.github/` because they\n19\t  are this repository's rather than the template's — the update machinery never\n20\t  proposes touching a path the release does not ship, so nothing copies them\n21\t  anywhere. Governed, like `.github/`. The secret scan used to live here\n22\t  too and now ships to every adopter as\n23\t  `.github/atomaton-runtime/scripts/scan_secrets.ts`; this repository runs the shipped\n24\t  one, so a defect in it fails here before it reaches anybody else.\n25\t\n26\tThis repository's own:\n27\t\n28\t- top-level `.github/`: this repository's adoption of the deliverable, applied\n29\t  from releases by the update machinery. The files the release ships come from\n30\t  it through the ordinary three-way plan; the files no release\n31\t  ships — `.github/workflows/release.yml`, the release scripts, the customized\n32\t  skills — live here directly and survive every update untouched. Upgraded\n33\t  deliberately rather than on merge — that lag is what stops a change to `src/`\n34\t  from reconfiguring the live agents the moment it merges.\n35\t- `tests/`: tests of the build-and-deploy machinery. Tests of *shipped behaviour*\n36\t  live beside the shipped code instead.\n37\t- `docs/`: adopter-facing documentation.\n38\t\n39\tNothing this repository needs for itself belongs under `src/`. That includes\n40\ttests of the pipeline, operational scripts, and any rule phrased in terms of\n41\t`dist/`, `synth`, or this repository's CI — adopters have none of those.\n42\t\n43\tWhen changing template behavior, treat `src/` as canonical.\n44\t\n45\t## Branch protection\n46\t\n47\tWhat may reach `main` is declared in `.github/atomaton/rulesets/main.json`: no direct\n48\tpushes, no force-pushes, no branch deletion, and a pull request that cannot merge\n49\tuntil the `atomaton-check` job passes.\n50\t\n51\tHow an adopter applies that file, and the two settings they must get right, are in\n52\t[make a branch ruleset work with agents](docs/github/tasks/make-a-branch-ruleset-work-with-agents.md) — it is their work, not\n53\ta contributor's. What follows is this repository's own, and the reasoning behind\n54\twhat the shipped file contains.\n55\t\n56\t**The required context is a string, matched by hand.** `atomaton-check` is the job name\n57\tin `atomaton-check.yml`, and the two are joined by nothing else.\n58\t`generated-workflows.test.ts` holds the shipped pair together; this repository's copy\n59\tof the ruleset is applied by hand, so renaming either side means applying it again:\n60\t\n61\t```bash\n62\tgh api -X PUT repos/{owner}/{repo}/rulesets/{id} --input .github/atomaton/rulesets/main.json\n63\t```\n64\t\n65\t**Nothing needs a bypass.** No workflow writes to `main` — the release deployment\n66\tattaches the deliverable to a release instead, which is why `dist/` is no longer\n67\ttracked. An agent merging a pull request needs no bypass either: it satisfies the\n68\trules like anyone else.\n69\t\n70\tThat is deliberate, and it is what keeps the ruleset file self-contained. Granting a\n71\tbypass would mean naming either a GitHub App's ID or a deploy key — values that only\n72\texist after manual setup elsewhere, so the reviewed declaration would stop describing\n73\tthe whole configuration.\n74\t\n75\t`bypass_actors` is present and empty rather than absent, so that the intent reads as\n76\ta decision rather than an omission. It once named the built-in GitHub Actions app,\n77\twhich is not an app installable on a repository and therefore not a valid\n78\t`Integration` actor — the import failed with `The ruleset you are importing contains\n79\tan invalid actor`, and the entry was never applied at all.\n80\t\n81\t**There is deliberately no workflow checking that the ruleset is in place.** A check\n82\tcould only report, never enforce: if the ruleset were missing then `atomaton-check`\n83\twould no longer be a required context either, so a failing check would block nothing\n84\t— a permanently red mark that stops nobody, which is worse than no mark at all.\n85\t\n86\tNothing detects a ruleset edited in the UI without a matching change to the file, so\n87\tkeeping the two together is a discipline rather than something enforced.\n88\t\n89\t## Cutting a release\n90\t\n91\tMerging an ordinary change publishes nothing. The release is declared **separately,\n92\ton purpose**: deciding that a set of work is ready to ship is a judgement about the\n93\twhole of `main`, not about the pull request that happened to merge last, and no work\n94\tpull request carries that judgement in it. `version` in `package.json` is the single\n95\tdeclaration, and `.github/atomaton/scripts/tag-release.sh` derives the tag from it — so\n96\tthere is no tag to push and nothing that can disagree.\n97\t\n98\tThe ordinary route is **Release**. One button: it declares the version, opens the\n99\tpull request that declares it, starts that pull request's check itself (a pull\n100\trequest opened with the workflow's own token fires no event, so the check is\n101\tdispatched through the bridge rather than waited for), waits for the required\n102\tcheck to exist and pass, merges, waits for the release to be published, and then\n103\tdispatches the update machinery to take the release onto this repository's own\n104\t`.github/` — the same three-way plan an adopter gets, which applies itself when it\n105\tis clean and stops at a pull request when it needs a person:\n106\t\n107\t```bash\n108\tgh workflow run release.yml --ref main -f bump=minor\n109\t```\n110\t\n111\tOr press **Run workflow** on **Release** in the Actions tab. Both pull requests it\n112\tmerges are generated from the version declaration, so neither is a change someone\n113\twrote and neither needs someone to read it. The application is opt-out\n114\t(`deploy: false` stops after publishing), never opt-in: a release that forgot to\n115\tapply itself would leave this repository behind its own releases.\n116\t\n117\t`version` and `bump` share one job: naming the number. Type a `version` to name it\n118\tdirectly (a leading `v` is accepted), or leave it empty and pick `bump` — which\n119\tsegment moves is the pick, patch, minor or major, because which part changes is\n120\tstill the person's to say. A run that guessed would release under a number nobody\n121\tchose, so picking nothing is refused. There is nothing to bump on the first\n122\trelease, when `package.json` declares no version yet, so that one names a version.\n123\t\n124\tThe mirror of that rule is for every other pull request: **do not edit `version` in\n125\tone.** A work change merged without a version edit publishes nothing, and that is the\n126\tnormal case — the release follows when a person declares it. A pull request that\n127\tarrives with a version change in it is a defect to flag before merge, not a favour to\n128\tthe next release: the edit would silently publish whatever the branch carried at the\n129\tmoment of its merge.\n130\t\n131\tIt refuses two things, and only two:\n132\t\n133\t- **a downgrade** — the new version must not be below the declared one. This is the\n134\t  one check that is not a judgement, so it is the one check made.\n135\t- **a version already released** — the tag and the release exist, so there is\n136\t  nothing to do.\n137\t\n\n[318 more lines. Read again with offset: 138.]",
+      "tool_call_id": "chatcmpl-tool-897f182e744f6fae"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a31778f80c730bcc",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\\n  fine-grained one with `Contents` and `Pull requests` read and write and\\n  `Workflows` write; set as an Actions secret. The update workflow pushes\\n  `.github/` under it, including the workflow files the release carries, and\\n  GitHub refuses a push that updates one without the workflow permission. Set it:\", \"old_string\": \"- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as\\n  an Actions secret. The update workflow pushes `.github/` under it, including the\\n  workflow files the release carries. Set it:\", \"path\": \"CONTRIBUTING.md\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-b89b692aaea726c8",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"src/workflows/atomaton-update.wac.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in CONTRIBUTING.md.",
+      "tool_call_id": "chatcmpl-tool-a31778f80c730bcc"
+    },
+    {
+      "role": "tool",
+      "content": "src/workflows/atomaton-update.wac.ts lines 1-99 of 99\n\n1\timport { Workflow } from \"@github-actions-workflow-ts/lib\";\n2\timport { ActionsCheckoutV4 } from \"@github-actions-workflow-ts/actions\";\n3\timport { startJob, SCRIPT_JOB_TIMEOUT_MINUTES, TypedOutputsStep } from \"./actions/base.ts\";\n4\timport { scriptCommandWithArgs } from \"./actions/script-call.ts\";\n5\timport { SetupBunAction } from \"./actions/third-party.ts\";\n6\timport { ref as updateAtomatonRef } from \"../entrypoints/machinery/update_atomaton.ts\";\n7\t\n8\t// Take a newer template release onto this tree — the doing half of the machinery\n9\t// the notice serves.\n10\t//\n11\t// ## The two ways in\n12\t//\n13\t// The Actions tab's Run workflow button is the person standing there; a `!upgrade`\n14\t// comment on the notice (or any thread) dispatches this workflow with the thread's\n15\t// number, so the update answers where it was asked. Either way the run is the same\n16\t// script (`update_atomaton.ts`), which plans, applies, opens its pull request and\n17\t// either merges it once the repository's checks have passed or stops at it.\n18\t//\n19\t// ## Why the update token is a secret the owner sets\n20\t//\n21\t// The branch the update pushes must run this repository's checks, and a push made\n22\t// with this workflow's own token deliberately runs none — so a merge gated on those\n23\t// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\n24\t// that the owner adds once; when it is missing the run fails loudly and changes\n25\t// nothing, because the person who started it is standing there and silence is not\n26\t// an answer. It is also the identity the pull request is opened and merged as --\n27\t// GitHub starts no `pull_request` run for a pull request this workflow's token\n28\t// opened, and no `push` for a merge it made, and the check the ruleset requires\n29\t// and the deploy the merge chains to are exactly those events. See\n30\t// `update_atomaton.ts`'s own comment for the whole argument.\n31\t//\n32\t// ## One update at a time\n33\t//\n34\t// Two updates running together would push the same branch from two checkouts and\n35\t// race the pull request. The group is one and never cancels: a run that waited is\n36\t// not a run that was wrong, and cancelling mid-apply would leave a tree holding\n37\t// half a plan.\n38\texport const atomaUpdate = new Workflow(\"atomaton-update\", {\n39\t  name: \"Atomaton Update\",\n40\t  on: {\n41\t    workflow_dispatch: {\n42\t      inputs: {\n43\t        // The thread a `!upgrade` came from, as a number. Empty from the button:\n44\t        // the run then reports only where the machinery reports anyway — the pull\n45\t        // request and, when one stands open, the notice.\n46\t        source: {\n47\t          description: \"Issue or pull request to answer. Leave empty when starting from here.\",\n48\t          required: false,\n49\t          type: \"string\",\n50\t        },\n51\t      },\n52\t    },\n53\t  },\n54\t  // Narrower than ATOMATON_WORKFLOW_PERMISSIONS and deliberately so: this run\n55\t  // starts no agent and dispatches nothing. `pull-requests` is what editing the\n56\t  // update's pull request needs; `issues` is the notice it answers and closes;\n57\t  // `checks: read` is the rollup and watch its merge waits behind -- a private\n58\t  // repository refuses that read to a job without it, and the refusal would\n59\t  // land in the WARN branch, a pull request left standing instead of an error;\n60\t  // `contents: read` is the checkout and the releases it reads. The writes that\n61\t  // decide anything -- the push, the pull request's opening, the merge -- travel\n62\t  // under the update token, which this workflow's permission block neither grants\n63\t  // nor limits. That is the point: the checks the merge is gated on are started\n64\t  // by the token's identity, so this workflow's own permissions cannot widen the\n65\t  // gate.\n66\t  permissions: { contents: \"read\", issues: \"write\", \"pull-requests\": \"write\", checks: \"read\" },\n67\t  concurrency: { group: \"atomaton-update\", \"cancel-in-progress\": false },\n68\t}).addJobs(\n69\t  startJob(\n70\t    \"update\",\n71\t    {\n72\t      \"runs-on\": \"ubuntu-latest\",\n73\t      // The update's own budget, not the shared five: a clean application waits\n74\t      // for the repository's checks before it merges, and the check's own path\n75\t      // (plan job, dispatched check, matrix) is minutes on its own. A job killed\n76\t      // mid-wait would also kill the notice close that follows.\n77\t      \"timeout-minutes\": 60,\n78\t    },\n79\t    [\n80\t      // The tree the update lands on: the default branch. The checkout's own\n81\t      // token stays configured in git, but the update never pushes with it — the\n82\t      // script builds the push URL from the update token itself, so the token\n83\t      // GitHub gave this run cannot create a branch even in principle.\n84\t      new ActionsCheckoutV4({}),\n85\t      new SetupBunAction({ name: \"Setup Bun\" }),\n86\t      new TypedOutputsStep({\n87\t        name: \"Take the newest release onto this tree\",\n88\t        shell: \"bash\",\n89\t        env: {\n90\t          GH_TOKEN: \"${{ github.token }}\",\n91\t          ATOMATON_UPDATE_TOKEN: \"${{ secrets.ATOMATON_UPDATE_TOKEN }}\",\n92\t          REPO: \"${{ github.repository }}\",\n93\t          SOURCE: \"${{ inputs.source }}\",\n94\t        },\n95\t        run: `${scriptCommandWithArgs(updateAtomatonRef, { repo: \"\\${REPO}\", source: \"\\${SOURCE}\" })}\\n`,\n96\t      }),\n97\t    ],\n98\t  ).jobs(),\n99\t);",
+      "tool_call_id": "chatcmpl-tool-b89b692aaea726c8"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a14d01aa278de853",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\\n// `workflow` scope that the owner adds once, the second because the release ships\\n// workflows and GitHub refuses a push that updates one without it; when it is\\n// missing the run fails loudly and changes nothing, because the person who started\\n// it is standing there and silence is not an answer.\", \"old_string\": \"// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\\n// that the owner adds once; when it is missing the run fails loudly and changes\\n// nothing, because the person who started it is standing there and silence is not\\n// an answer.\", \"path\": \"src/workflows/atomaton-update.wac.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8881e4319fbc59dc",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now edit the wac header comment lines 21-25.\n\nCurrent:\n```\n// The branch the update pushes must run this repository's checks, and a push made\n// with this workflow's own token deliberately runs none — so a merge gated on those\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\n// that the owner adds once; when it is missing the run fails loudly and changes\n// nothing, because the person who started it is standing there and silence is not\n// an answer.\n```\n\nNew:\n```\n// The branch the update pushes must run this repository's checks, and a push made\n// with this workflow's own token deliberately runs none — so a merge gated on those\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\n// `workflow` scope that the owner adds once, the second because the release ships\n// workflows and GitHub refuses a push that updates one without it; when it is\n// missing the run fails loudly and changes nothing, because the person who started\n// it is standing there and silence is not an answer.\n```\n```\n\nNote the repo's comments use `--` for em dash in some places (line 26). Fine.\n\nAlso note: does the wac comment reach the generated YAML? The issue says it does not, so no workflow file change. Good.\n\nNow update_atomaton.ts lines 20-27.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_c46d6bd2-dc42-4de3-ba96-c81ff277339f",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-update.wac.ts.",
+      "tool_call_id": "chatcmpl-tool-a14d01aa278de853"
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/update_atomaton.ts lines 1-167 of 603\n\n1\t#!/usr/bin/env bun\n2\t/**\n3\t * update_atomaton.ts — take a newer template release onto this tree.\n4\t *\n5\t * This is the other face of the machinery the notice serves. The notice (see\n6\t * `notify_new_release.ts`) computes a plan and renders it read-only; this script\n7\t * runs the same plan for real, on the checkout the workflow ran it in:\n8\t *\n9\t *     plan → apply to the tree → branch → commit → push → pull request\n10\t *        → no conflict: wait for the checks, merge, close the notice\n11\t *        → conflicts:   stop at the pull request, report where and why\n12\t *\n13\t * Nothing here decides policy. Whether a path is take/add/delete/merge is the\n14\t * plan's answer (`domain/machinery/update-plan.ts`); whether a merge collides is\n15\t * `git merge-file`'s measured answer (`lib/update-apply.ts`). A collision is not a\n16\t * failure of the run: stopping at a pull request IS the design, and the run exits\n17\t * green after reporting it. What is a failure is being unable to run at all — no\n18\t * token, no manifest, no readable release — which exits red with the reason.\n19\t *\n20\t * ## Why the token, and why it is not the workflow's own\n21\t *\n22\t * The branch this pushes must run the repository's checks, and a push made with\n23\t * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those\n24\t * checks gate would then be merging unverified content. So the workflow that runs\n25\t * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\n26\t * and a run without it fails loudly and does nothing — a person who pressed the\n27\t * button is standing there, and silence is not an answer.\n28\t *\n29\t * ## Why the stop is a pull request, and why the token does the writing\n30\t *\n31\t * A pull request is the one place this repository already has everything a\n32\t * resolution needs: visible diffs, checks that refuse broken content, and an agent\n33\t * loop a person can address with a comment. The pull request is opened, and when\n34\t * the plan is clean merged, as the update token -- an identity that starts runs.\n35\t * A pull request opened with the workflow's own token fires no `pull_request`\n36\t * event, so its required check would never start; a merge made with it fires no\n37\t * `push`, so `deploy.on_merge` would never run. The token is what makes this the\n38\t * same shape as a person pressing the buttons: checks run on the pull request,\n39\t * and the merge's push starts the deploy.\n40\t *\n41\t * The plan being clean is the plan's claim; the checks are what makes it true.\n42\t * The script waits for the required check to exist and pass before merging, and\n43\t * a red change stays unmerged.\n44\t *\n45\t * Usage:\n46\t *   update_atomaton.ts --repo OWNER/REPO [--source N] [--tag vX.Y.Z]\n47\t */\n48\timport { parseArgs } from \"node:util\";\n49\timport { gh, ghRead, ghAs } from \"../../adapters/github/gh.ts\";\n50\timport { readPullRequest } from \"../../adapters/github/pull-request.ts\";\n51\timport { LLM_CONTEXT_TAG } from \"../../adapters/github/tags.ts\";\n52\timport { machineryPath } from \"../../adapters/runner/machinery.ts\";\n53\timport { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from \"../../domain/machinery/update-plan.ts\";\n54\timport { defineScript } from \"./lib/script-ref.ts\";\n55\timport { findOpenNotice, NOTICE_MARKER } from \"./lib/notice-issue.ts\";\n56\timport { applyPlan } from \"./lib/update-apply.ts\";\n57\timport {\n58\t  UPSTREAM_REPOSITORY,\n59\t  latestReleaseTag,\n60\t  readLocalManifest,\n61\t  readTreeFiles,\n62\t  releaseFiles,\n63\t  treePaths,\n64\t} from \"./lib/release-files.ts\";\n65\t\n66\texport interface UpdateAtomatonArgs {\n67\t  /** `owner/name` of the repository being updated — the adopted tree's own. */\n68\t  repo: string;\n69\t  /**\n70\t   * The thread to answer in: the issue a `!upgrade` came from, or the notice. As\n71\t   * the workflow passes it, an empty string means nobody asked — which is what\n72\t   * starting from the Actions tab looks like.\n73\t   */\n74\t  source?: number | string;\n75\t  /** A specific release to take, instead of the newest one upstream has. */\n76\t  tag?: string;\n77\t}\n78\t\n79\texport const ref = defineScript<UpdateAtomatonArgs>(import.meta.url);\n80\t\n81\t/**\n82\t * Who the machinery says this commit is from.\n83\t *\n84\t * A plain `atomaton[bot]` identity, not a person's: a tree that later wants to\n85\t * audit what the machinery touched finds it by author, and the machinery must not\n86\t * borrow whoever happened to be running the workflow.\n87\t */\n88\tconst COMMIT_NAME = \"atomaton[bot]\";\n89\tconst COMMIT_EMAIL = \"atomaton[bot]@users.noreply.github.com\";\n90\t\n91\t/** The branch every update lands on, named for the release it takes. */\n92\texport function updateBranchFor(tag: string): string {\n93\t  return `atomaton/update-${tag}`;\n94\t}\n95\t\n96\t/** The pull request's title. */\n97\texport function updateTitle(tag: string): string {\n98\t  return `Take Atomaton ${tag} onto this tree`;\n99\t}\n100\t\n101\t/** Everything the pull request's body is rendered from. */\n102\texport interface UpdateReport {\n103\t  readonly plan: UpdatePlan;\n104\t  /** Paths whose merge collided, as `applyPlan` measured them. */\n105\t  readonly conflicts: readonly string[];\n106\t  /** Paths whose merge resolved with no conflict. */\n107\t  readonly merged: readonly string[];\n108\t  /** Paths the target no longer ships — reported, never acted on. */\n109\t  readonly leftovers: readonly string[];\n110\t}\n111\t\n112\t/** How many of a list a report renders before it counts the rest. */\n113\tconst MAX_LISTED = 15;\n114\t\n115\t/** The body of the pull request, whatever the plan turned out to be. */\n116\texport function updateBody(report: UpdateReport): string {\n117\t  const { plan } = report;\n118\t  const lines: string[] = [\n119\t    \"<!-- atomaton:update -->\",\n120\t    verdictSentence(plan.base, plan.target, report.conflicts.length, plan.kept.length),\n121\t    \"\",\n122\t    \"## The plan\",\n123\t    \"\",\n124\t    \"| | |\",\n125\t    \"| --- | --- |\",\n126\t    `| Files updated (untouched here) | ${plan.take.length} |`,\n127\t    `| Files added | ${plan.add.length} |`,\n128\t    `| Files removed (unmodified here) | ${plan.delete.length} |`,\n129\t    `| Files changed on **both** sides | ${plan.merge.length} |`,\n130\t    `| Resolved by the merge itself | ${report.merged.length} |`,\n131\t    `| Left with conflict markers | ${report.conflicts.length} |`,\n132\t    `| Paths the plan will not touch | ${plan.kept.length} |`,\n133\t    \"\",\n134\t  ];\n135\t\n136\t  const list = (title: string, paths: readonly string[]): void => {\n137\t    if (paths.length === 0) return;\n138\t    lines.push(title, \"\", ...paths.slice(0, MAX_LISTED).map((path) => `- \\`${path}\\``));\n139\t    if (paths.length > MAX_LISTED) lines.push(`- …and ${paths.length - MAX_LISTED} more`);\n140\t    lines.push(\"\");\n141\t  };\n142\t  list(\"Conflicted — resolve here, then the checks finish the job:\", report.conflicts);\n143\t  list(\"Merged cleanly by the machinery:\", report.merged);\n144\t  list(\n145\t    \"Left alone for a person to look at:\",\n146\t    plan.kept.map((entry) => entry.path),\n147\t  );\n148\t\n149\t  if (report.leftovers.length > 0) {\n150\t    lines.push(\n151\t      \"## Files upstream no longer ships\",\n152\t      \"\",\n153\t      \"Reported only — the manifest cannot tell these from files the adopter wrote,\",\n154\t      \"so nothing here deletes them on a guess:\",\n155\t      \"\",\n156\t      ...report.leftovers.slice(0, MAX_LISTED).map((path) => `- \\`${path}\\``),\n157\t      ...(report.leftovers.length > MAX_LISTED ? [`- …and ${report.leftovers.length - MAX_LISTED} more`] : []),\n158\t      \"\",\n159\t    );\n160\t  }\n161\t\n162\t  lines.push(\n163\t    \"## What happens next\",\n164\t    \"\",\n165\t    report.conflicts.length > 0\n166\t      ? \"This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge.\"\n167\t      : plan.kept.length > 0\n\n[436 more lines. Read again with offset: 168.]",
+      "tool_call_id": "chatcmpl-tool-8881e4319fbc59dc"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9d5f0e6378777e62",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \" * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with `repo` and\\n * `workflow` scope, the second because the release ships workflows and GitHub\\n * refuses a push that updates one without it. A run without the token fails\\n * loudly and does nothing — a person who pressed the button is standing there, and\\n * silence is not an answer.\", \"old_string\": \" * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\\n * and a run without it fails loudly and does nothing — a person who pressed the\\n * button is standing there, and silence is not an answer.\", \"path\": \"src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/update_atomaton.ts.",
+      "tool_call_id": "chatcmpl-tool-9d5f0e6378777e62"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a780496e8655343e",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \\\" +\\n        \\\"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \\\" +\\n        \\\"and write and Workflows write — the release ships workflows, and a push that updates one is \\\" +\\n        \\\"refused without it. Then run this again. Nothing has been changed.\\\",\", \"old_string\": \"        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo \\\" +\\n        \\\"scope, and run this again. Nothing has been changed.\\\",\", \"path\": \"src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/update_atomaton.ts.",
+      "tool_call_id": "chatcmpl-tool-a780496e8655343e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ae1fa576217723b5",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '20,30p;330,342p' src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-983517485ca52558",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git diff --stat\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now let me check the edited region and run synth + status. Also verify the diff.\n\nAlso: should the docs file `docs/runtime/tasks/move-to-a-newer-release.md` be in the issue's list of five edits? The issue says \"five edits named above\" — the fifth being update_atomaton.ts's error string, with a total of four files. The final instruction says \"only those four files may differ\". Good.\n\nNow run synth and git status, plus focused tests.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_0bc31032-8aeb-4d03-8162-aa329d9cb892",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" * ## Why the token, and why it is not the workflow's own\\n *\\n * The branch this pushes must run the repository's checks, and a push made with\\n * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those\\n * checks gate would then be merging unverified content. So the workflow that runs\\n * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with `repo` and\\n * `workflow` scope, the second because the release ships workflows and GitHub\\n * refuses a push that updates one without it. A run without the token fails\\n * loudly and does nothing — a person who pressed the button is standing there, and\\n * silence is not an answer.\\n *\\n  }\\n  const source = values.source !== undefined && values.source !== \\\"\\\" ? Number(values.source) : 0;\\n\\n  const token = process.env.ATOMATON_UPDATE_TOKEN?.trim() ?? \\\"\\\";\\n  if (!token) {\\n    console.error(\\n      \\\"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \\\" +\\n        \\\"which this workflow's own token may not do: a push from it would run none of the checks the \\\" +\\n        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \\\" +\\n        \\\"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \\\" +\\n        \\\"and write and Workflows write — the release ships workflows, and a push that updates one is \\\" +\\n        \\\"refused without it. Then run this again. Nothing has been changed.\\\",\\n    );\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":160}",
+      "tool_call_id": "chatcmpl-tool-ae1fa576217723b5"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" CONTRIBUTING.md                               |  8 +++++---\\n docs/runtime/tasks/move-to-a-newer-release.md | 11 +++++++----\\n src/entrypoints/machinery/update_atomaton.ts  | 14 +++++++++-----\\n src/workflows/atomaton-update.wac.ts          |  9 +++++----\\n 4 files changed, 26 insertions(+), 16 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":163}",
+      "tool_call_id": "chatcmpl-tool-983517485ca52558"
+    },
+    {
+      "role": "assistant",
+      "content": "Four files, five spots. Now the synth and status check, plus the machinery tests that touch this error path.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-aae9cff815717488",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth 2>&1 | tail -20 && echo '=== git status ===' && git status --porcelain\", \"timeout_seconds\": 600}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-85fbdf84411bac22",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n '\\\"check\\\"\\\\|\\\"test\\\"\\\\|\\\"synth\\\"\\\\|\\\"lint\\\"\\\\|\\\"typecheck\\\"' package.json\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ bun run src/synth-workflows.ts && bun run src/build-dist.ts\\n[github-actions-workflow-ts] wac.config.ts config file found in root dir\\n[github-actions-workflow-ts] dist/.github/workflows directory not found. Creating it.\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-check.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-deploy.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-entry.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-manual-comment.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-new-release.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-pr-closed.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-run-watch.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-runner.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-sub-issue-closed.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-update.yml:\\n[github-actions-workflow-ts] Writing to dist/.github/workflows/atomaton-validate-pr.yml:\\nsynth-workflows: generated 11 workflow file(s) from 11 source(s) in src/workflows/\\nbuild-dist: bundled 73 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/machinery -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/scripts\\nbuild-dist: bundled 14 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.24.0 (134 files)\\n=== git status ===\\n M CONTRIBUTING.md\\n M docs/runtime/tasks/move-to-a-newer-release.md\\n M src/entrypoints/machinery/update_atomaton.ts\\n M src/workflows/atomaton-update.wac.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":489}",
+      "tool_call_id": "chatcmpl-tool-aae9cff815717488"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"10:    \\\"synth\\\": \\\"bun run src/synth-workflows.ts && bun run src/build-dist.ts\\\",\\n11:    \\\"typecheck\\\": \\\"tsc --noEmit\\\",\\n13:    \\\"test\\\": \\\"bun test ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./tests/contract ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks\\\",\\n16:    \\\"lint\\\": \\\"bun run typecheck && bun run synth\\\"\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":160}",
+      "tool_call_id": "chatcmpl-tool-85fbdf84411bac22"
+    },
+    {
+      "role": "assistant",
+      "content": "Exactly the four files, no generated output. Now focused checks.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a45b06e3a06a930f",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck 2>&1 | tail -5; echo \\\"typecheck exit: $?\\\"; bun test src/entrypoints/machinery/update_atomaton.test.ts 2>&1 | tail -12\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "`git status` shows exactly four files; no generated workflow or runtime copy changed. Good — the wac header comment indeed does not reach the YAML.\n\nNow run focused validation: typecheck and the update_atomaton test, and lint (which is typecheck + synth).",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_b1224b9e-1be3-4689-86ee-ef83cda6defb",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\ntypecheck exit: 0\\n(pass) a stopped update > the pull request stands, the merge is not requested, and the thread is told where [108.94ms]\\n(pass) a stopped update > a run that came from a thread answers that thread too [112.82ms]\\n(pass) a stopped update > a clean plan with kept paths stops for a person, and says which paths [106.95ms]\\n(pass) an update that is nothing but a name > a target whose contents match the tree's release changes nothing and opens nothing [54.30ms]\\n(pass) the push argv > a GitHub https remote is pushed with the update token, the checkout's header reset [0.09ms]\\n(pass) the push argv > a `.git` suffix is not carried into the URL the token is put in [0.01ms]\\n(pass) the push argv > a remote that is not GitHub https keeps the checkout's own credentials [0.03ms]\\n\\n 15 pass\\n 0 fail\\n 68 expect() calls\\nRan 15 tests across 1 file. [996.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":4431}",
+      "tool_call_id": "chatcmpl-tool-a45b06e3a06a930f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9413d655982d59f4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '1,30p' package.json\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now run the broader suite. The `check` job — let me see what CI runs. package.json \"check\" script didn't show — let me grep the scripts section.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_bb752f33-ea7a-4a8f-8ed8-761efdb0b977",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"{\\n  \\\"name\\\": \\\"atomaton\\\",\\n  \\\"private\\\": true,\\n  \\\"type\\\": \\\"module\\\",\\n  \\\"version\\\": \\\"0.24.0\\\",\\n  \\\"engines\\\": {\\n    \\\"bun\\\": \\\">=1.2.0\\\"\\n  },\\n  \\\"scripts\\\": {\\n    \\\"synth\\\": \\\"bun run src/synth-workflows.ts && bun run src/build-dist.ts\\\",\\n    \\\"typecheck\\\": \\\"tsc --noEmit\\\",\\n    \\\"pretest\\\": \\\"bun run synth\\\",\\n    \\\"test\\\": \\\"bun test ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./tests/contract ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks\\\",\\n    \\\"pretest:e2e\\\": \\\"bun run synth\\\",\\n    \\\"test:e2e\\\": \\\"bun test ./tests/e2e\\\",\\n    \\\"lint\\\": \\\"bun run typecheck && bun run synth\\\"\\n  },\\n  \\\"devDependencies\\\": {\\n    \\\"@github-actions-workflow-ts/actions\\\": \\\"^2.5.0\\\",\\n    \\\"@github-actions-workflow-ts/cli\\\": \\\"^2.5.0\\\",\\n    \\\"@github-actions-workflow-ts/lib\\\": \\\"^2.5.0\\\",\\n    \\\"@modelcontextprotocol/sdk\\\": \\\"^1.12.1\\\",\\n    \\\"@octokit/webhooks-types\\\": \\\"^7.6.1\\\",\\n    \\\"@types/bun\\\": \\\"^1.2.14\\\",\\n    \\\"typescript\\\": \\\"^5.6.3\\\",\\n    \\\"zod\\\": \\\"^3.25.76\\\",\\n    \\\"zod-to-json-schema\\\": \\\"^3.25.2\\\"\\n  }\\n}\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":160}",
+      "tool_call_id": "chatcmpl-tool-9413d655982d59f4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-86f4693e531dcb6b",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun test ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./tests/contract ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks 2>&1 | tail -8\", \"timeout_seconds\": 1200}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) shell_guard.ts > working_directory > inside the repository is fine [6.83ms]\\n(pass) shell_guard.ts > the arguments the guard no longer inspects > declared variables and stdin text are passed through [20.70ms]\\n(pass) shell_guard.ts > unparseable input is refused [6.24ms]\\n\\n 2522 pass\\n 0 fail\\n 7510 expect() calls\\nRan 2522 tests across 192 files. [107.22s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":107393}",
+      "tool_call_id": "chatcmpl-tool-86f4693e531dcb6b"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9eb7487ab39001d9",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git diff && echo '=== status ===' && git status --porcelain && git diff --stat\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "All 2522 tests pass, 0 fail. Now review the final diff, confirm no version bump, no generated artifacts.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_422ac72e-ff02-4441-81d4-acdb54a1c9ee",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md\\nindex f1f2562..d27fdf9 100644\\n--- a/CONTRIBUTING.md\\n+++ b/CONTRIBUTING.md\\n@@ -248,9 +248,11 @@ branch: the push is refused on **identity**, measured here. The update machinery\\n replaces those files, so the one secret this repository needs is the same one an\\n adopter sets:\\n \\n-- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as\\n-  an Actions secret. The update workflow pushes `.github/` under it, including the\\n-  workflow files the release carries. Set it:\\n+- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\\n+  fine-grained one with `Contents` and `Pull requests` read and write and\\n+  `Workflows` write; set as an Actions secret. The update workflow pushes\\n+  `.github/` under it, including the workflow files the release carries, and\\n+  GitHub refuses a push that updates one without the workflow permission. Set it:\\n \\n   ```bash\\n   gh secret set ATOMATON_UPDATE_TOKEN\\ndiff --git a/docs/runtime/tasks/move-to-a-newer-release.md b/docs/runtime/tasks/move-to-a-newer-release.md\\nindex e650c60..8b2cd3b 100644\\n--- a/docs/runtime/tasks/move-to-a-newer-release.md\\n+++ b/docs/runtime/tasks/move-to-a-newer-release.md\\n@@ -37,10 +37,13 @@ is decided by what the merge measured, not by a flag:\\n   the files yourself. The checks run on the resolved tree, and then it can merge.\\n \\n The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\\n-a token with repo s\\n\\n[350 characters dropped from the middle; 6000 shown]\\n\\nus `Workflows` write. That is deliberate: a push\\n+made with the workflow's own token starts no checks, so a merge gated on them\\n+would gate on nothing. The second scope is not optional: the release ships\\n+workflows, and GitHub refuses any push that changes a file under\\n+`.github/workflows/` without it. If the secret is missing the run fails loudly and\\n+changes nothing — set the secret and run it again.\\n \\n ## What it does not touch\\n \\ndiff --git a/src/entrypoints/machinery/update_atomaton.ts b/src/entrypoints/machinery/update_atomaton.ts\\nindex b52279d..780f4e0 100644\\n--- a/src/entrypoints/machinery/update_atomaton.ts\\n+++ b/src/entrypoints/machinery/update_atomaton.ts\\n@@ -22,9 +22,11 @@\\n  * The branch this pushes must run the repository's checks, and a push made with\\n  * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those\\n  * checks gate would then be merging unverified content. So the workflow that runs\\n- * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\\n- * and a run without it fails loudly and does nothing — a person who pressed the\\n- * button is standing there, and silence is not an answer.\\n+ * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with `repo` and\\n+ * `workflow` scope, the second because the release ships workflows and GitHub\\n+ * refuses a push that updates one without it. A run without the token fails\\n+ * loudly and does nothing — a person who pressed the button is standing there, and\\n+ * silence is not an answer.\\n  *\\n  * ## Why the stop is a pull request, and why the token does the writing\\n  *\\n@@ -333,8 +335,10 @@ function main(): void {\\n     console.error(\\n       \\\"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \\\" +\\n         \\\"which this workflow's own token may not do: a push from it would run none of the checks the \\\" +\\n-        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo \\\" +\\n-        \\\"scope, and run this again. Nothing has been changed.\\\",\\n+        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \\\" +\\n+        \\\"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \\\" +\\n+        \\\"and write and Workflows write — the release ships workflows, and a push that updates one is \\\" +\\n+        \\\"refused without it. Then run this again. Nothing has been changed.\\\",\\n     );\\n     process.exit(1);\\n   }\\ndiff --git a/src/workflows/atomaton-update.wac.ts b/src/workflows/atomaton-update.wac.ts\\nindex bfffb91..db5393a 100644\\n--- a/src/workflows/atomaton-update.wac.ts\\n+++ b/src/workflows/atomaton-update.wac.ts\\n@@ -20,10 +20,11 @@ import { ref as updateAtomatonRef } from \\\"../entrypoints/machinery/update_atomat\\n //\\n // The branch the update pushes must run this repository's checks, and a push made\\n // with this workflow's own token deliberately runs none — so a merge gated on those\\n-// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\\n-// that the owner adds once; when it is missing the run fails loudly and changes\\n-// nothing, because the person who started it is standing there and silence is not\\n-// an answer. It is also the identity the pull request is opened and merged as --\\n+// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\\n+// `workflow` scope that the owner adds once, the second because the release ships\\n+// workflows and GitHub refuses a push that updates one without it; when it is\\n+// missing the run fails loudly and changes nothing, because the person who started\\n+// it is standing there and silence is not an answer. It is also the identity the pull request is opened and merged as --\\n // GitHub starts no `pull_request` run for a pull request this workflow's token\\n // opened, and no `push` for a merge it made, and the check the ruleset requires\\n // and the deploy the merge chains to are exactly those events. See\\n=== status ===\\n M CONTRIBUTING.md\\n M docs/runtime/tasks/move-to-a-newer-release.md\\n M src/entrypoints/machinery/update_atomaton.ts\\n M src/workflows/atomaton-update.wac.ts\\n CONTRIBUTING.md                               |  8 +++++---\\n docs/runtime/tasks/move-to-a-newer-release.md | 11 +++++++----\\n src/entrypoints/machinery/update_atomaton.ts  | 14 +++++++++-----\\n src/workflows/atomaton-update.wac.ts          |  9 +++++----\\n 4 files changed, 26 insertions(+), 16 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":true,\"execution_time_ms\":178}",
+      "tool_call_id": "chatcmpl-tool-9eb7487ab39001d9"
+    },
+    {
+      "role": "assistant",
+      "content": "One line in the wac comment now overflows the file's wrapping. Reflowing that paragraph.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-85cfc7cc2fb39dd0",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"// it is standing there and silence is not an answer. It is also the identity the\\n// pull request is opened and merged as -- GitHub starts no `pull_request` run for a\\n// pull request this workflow's token opened, and no `push` for a merge it made, and\\n// the check the ruleset requires and the deploy the merge chains to are exactly\\n// those events. See `update_atomaton.ts`'s own comment for the whole argument.\", \"old_string\": \"// it is standing there and silence is not an answer. It is also the identity the pull request is opened and merged as --\\n// GitHub starts no `pull_request` run for a pull request this workflow's token\\n// opened, and no `push` for a merge it made, and the check the ruleset requires\\n// and the deploy the merge chains to are exactly those events. See\\n// `update_atomaton.ts`'s own comment for the whole argument.\", \"path\": \"src/workflows/atomaton-update.wac.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-ad3b30af7e302ce0",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '36,48p' docs/runtime/tasks/move-to-a-newer-release.md | awk '{printf \\\"%d: %s\\\\n\\\", length($0), $0}' && echo '--- CONTRIBUTING ---' && sed -n '248,258p' CONTRIBUTING.md | awk '{printf \\\"%d: %s\\\\n\\\", length($0), $0}'\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "One problem: in the wac file, the line \"it is standing there and silence is not an answer. It is also the identity the pull request is opened and merged as --\" is now over-long (past the ~80 col wrap the file uses). Let me fix the wrapping — reflow that comment paragraph so lines stay roughly 80 columns.\n\nCurrent after edit:\n```\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\n// `workflow` scope that the owner adds once, the second because the release ships\n// workflows and GitHub refuses a push that updates one without it; when it is\n// missing the run fails loudly and changes nothing, because the person who started\n// it is standing there and silence is not an answer. It is also the identity the pull request is opened and merged as --\n// GitHub starts no `pull_request` run for a pull request this workflow's token\n```\n\nReflow the whole paragraph:\n```\n// The branch the update pushes must run this repository's checks, and a push made\n// with this workflow's own token deliberately runs none — so a merge gated on those\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\n// `workflow` scope that the owner adds once, the second because the release ships\n// workflows and GitHub refuses a push that updates one without it; when it is\n// missing the run fails loudly and changes nothing, because the person who started\n// it is standing there and silence is not an answer. It is also the identity the\n// pull request is opened and merged as -- GitHub starts no `pull_request` run for a\n// pull request this workflow's token opened, and no `push` for a merge it made, and\n// the check the ruleset requires and the deploy the merge chains to are exactly\n// those events. See `update_atomaton.ts`'s own comment for the whole argument.\n```\n\nThat rewraps following lines too, which enlarges the diff but keeps the file's formatting. Diff growth in a comment is fine and correct — a wrapped comment is part of \"readable code\". Let me do it.\n\nAlso check the docs file paragraph wrapping. Let me read the new paragraph and check line lengths.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_edbae0ee-6730-440a-8fee-0a1f0a00515d",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-update.wac.ts.",
+      "tool_call_id": "chatcmpl-tool-85cfc7cc2fb39dd0"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"79:   someone resolves them: comment on that pull request and ask an agent, or edit\\n81:   the files yourself. The checks run on the resolved tree, and then it can merge.\\n0: \\n82: The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\\n75: a token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\\n82: `Pull requests` read and write, plus `Workflows` write. That is deliberate: a push\\n77: made with the workflow's own token starts no checks, so a merge gated on them\\n74: would gate on nothing. The second scope is not optional: the release ships\\n64: workflows, and GitHub refuses any push that changes a file under\\n82: `.github/workflows/` without it. If the secret is missing the run fails loudly and\\n50: changes nothing — set the secret and run it again.\\n0: \\n25: ## What it does not touch\\n--- CONTRIBUTING ---\\n80: replaces those files, so the one secret this repository needs is the same one an\\n13: adopter sets:\\n0: \\n80: - `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\\n73:   fine-grained one with `Contents` and `Pull requests` read and write and\\n73:   `Workflows` write; set as an Actions secret. The update workflow pushes\\n76:   `.github/` under it, including the workflow files the release carries, and\\n81:   GitHub refuses a push that updates one without the workflow permission. Set it:\\n0: \\n9:   ```bash\\n37:   gh secret set ATOMATON_UPDATE_TOKEN\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":162}",
+      "tool_call_id": "chatcmpl-tool-ad3b30af7e302ce0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8de72526a036a368",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\\n  fine-grained one with `Contents` and `Pull requests` read and write, plus\\n  `Workflows` write; set as an Actions secret. The update workflow pushes\\n  `.github/` under it, including the workflow files the release carries, and\\n  GitHub refuses a push that updates one without the workflow permission. Set it:\", \"old_string\": \"- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\\n  fine-grained one with `Contents` and `Pull requests` read and write and\\n  `Workflows` write; set as an Actions secret. The update workflow pushes\\n  `.github/` under it, including the workflow files the release carries, and\\n  GitHub refuses a push that updates one without the workflow permission. Set it:\", \"path\": \"CONTRIBUTING.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Line lengths are within the file's existing style (~80). The docs paragraph is fine (82 is near the existing 82 in the file).\n\nOne thing in CONTRIBUTING: \"a fine-grained one with `Contents` and `Pull requests` read and write and `Workflows` write\" — double \"and\" is awkward. Let me improve to: \"or a fine-grained one with `Contents` and `Pull requests` read and write, plus `Workflows` write;\". That matches the docs file phrasing (\"plus\").\n\nLet me edit CONTRIBUTING for clarity.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_9f4c2b9c-bbf9-459f-8dd3-054adc7ce986",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in CONTRIBUTING.md.",
+      "tool_call_id": "chatcmpl-tool-8de72526a036a368"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-98e403735a67599a",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth >/dev/null 2>&1 && echo \\\"synth exit: $?\\\" && git status --porcelain && echo '--- wac comment reflowed lines ---' && awk 'NR>=19 && NR<=34 {printf \\\"%d: %s\\\\n\\\", length($0), $0}' src/workflows/atomaton-update.wac.ts\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"synth exit: 0\\n M CONTRIBUTING.md\\n M docs/runtime/tasks/move-to-a-newer-release.md\\n M src/entrypoints/machinery/update_atomaton.ts\\n M src/workflows/atomaton-update.wac.ts\\n--- wac comment reflowed lines ---\\n53: // ## Why the update token is a secret the owner sets\\n2: //\\n82: // The branch the update pushes must run this repository's checks, and a push made\\n84: // with this workflow's own token deliberately runs none — so a merge gated on those\\n83: // checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\\n82: // `workflow` scope that the owner adds once, the second because the release ships\\n78: // workflows and GitHub refuses a push that updates one without it; when it is\\n83: // missing the run fails loudly and changes nothing, because the person who started\\n81: // it is standing there and silence is not an answer. It is also the identity the\\n84: // pull request is opened and merged as -- GitHub starts no `pull_request` run for a\\n84: // pull request this workflow's token opened, and no `push` for a merge it made, and\\n80: // the check the ruleset requires and the deploy the merge chains to are exactly\\n79: // those events. See `update_atomaton.ts`'s own comment for the whole argument.\\n2: //\\n26: // ## One update at a time\\n2: //\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":483}",
+      "tool_call_id": "chatcmpl-tool-98e403735a67599a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-810411456f1b01d7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck 2>&1 | tail -3 && git diff --stat\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Wrapping is consistent with the file (82-84 is what the file already does). Good.\n\nFinal: run typecheck once more (comment-only changes, but cheap) and the focused test already passed. Then commit and push, then create_pr.\n\nLet me run typecheck + the focused machinery test once more quickly since I changed CONTRIBUTING (doc) and comment. Actually, no code changed since the last full-suite run except a comment reflow. Typecheck is quick; run it.\n\nThen commit and push.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_a8d1d8cb-ebdd-4f51-9496-fba4b38b7da8",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\n CONTRIBUTING.md                               |  8 +++++---\\n docs/runtime/tasks/move-to-a-newer-release.md | 11 +++++++----\\n src/entrypoints/machinery/update_atomaton.ts  | 14 +++++++++-----\\n src/workflows/atomaton-update.wac.ts          | 17 +++++++++--------\\n 4 files changed, 30 insertions(+), 20 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":3271}",
+      "tool_call_id": "chatcmpl-tool-810411456f1b01d7"
+    },
+    {
+      "role": "assistant",
+      "content": "Four files, no generated output, typecheck clean and 2522 tests passing. Committing.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-893bf55b5ef97efb",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"docs: name the workflow scope where the update token's scope is described\\n\\nGitHub refuses any push that changes a file under `.github/workflows/` unless\\nthe pushing credential carries the `workflow` scope (classic PAT) or the\\n`Workflows` permission (fine-grained). The update machinery ships and pushes\\nworkflow files, so `ATOMATON_UPDATE_TOKEN` is exactly the credential that\\nneeds the second scope — and every place telling a person which scope to set\\nnamed only `repo`.\\n\\nAn adopter following those instructions correctly therefore hit the refusal\\none run later, in the update's push, as a message from GitHub rather than\\nfrom us. Name both scopes wherever the token's scope is described, and say\\nwhy the second one is needed: the release ships workflows, so a push that\\nupdates one is refused without it.\\n\\nThe `::error::` for a missing token names it too, because a token that has\\n`repo` and not `workflow` fails two steps later with GitHub's wording rather\\nthan a message that says what to set.\\n\\nFine-grained is read-write for Contents and Pull requests and write only for\\nWorkflows, following GitHub's permission table: `Workflows` has no read level.\\n\\nNo behaviour change. The wac header comment does not reach the generated YAML,\\nso no workflow file changes.\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "chatcmpl-tool-893bf55b5ef97efb"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-abbc25147597566f",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\": \"Closes #580\\n\\nGitHub refuses a push that changes a file under `.github/workflows/` unless the\\npushing credential carries the `workflow` scope (classic PAT) or the `Workflows`\\npermission (fine-grained). The update machinery is the one credential whose\\npurpose is to move a release's files, workflows included, so it is the one that\\nneeds the second scope — but every place telling a person which scope to set\\nnamed only `repo`. Attempt 3 of the v0.24.0 release followed those instructions\\ncorrectly and was refused in the update's push:\\n\\n```\\n! [remote rejected] HEAD -> atomaton/update-v0.24.0 (refusing to allow a Personal Access Token\\n  to create or update workflow `.github/workflows/atomaton-update.yml` without `workflow` scope)\\n```\\n\\n## What changed\\n\\nFive places, four files — both scopes named wherever the token's scope is\\ndescribed, and the reason the second one is needed stated once in each:\\n\\n| Where | Now says |\\n| --- | --- |\\n| `docs/runtime/tasks/move-to-a-newer-release.md:39` | `repo` and `workflow`; fine-grained `Contents` and `Pull requests` read and write, plus `Workflows` write |\\n| `CONTRIBUTING.md:251` | the same, with GitHub's refusal of a push that updates a workflow named as the why |\\n| `src/workflows/atomaton-update.wac.ts:23` | the header comment, a token with `repo` and `workflow` scope |\\n| `src/entrypoints/machinery/update_atomaton.ts:25` | the module comment, the same |\\n| `src/entrypoints/machinery/update_atomaton.ts:335` | the `::error::` for a missing token — a classic PAT with `repo` and `workflow`, or fine-grained `Contents` and `Pull requests` read and write and `Workflows` write, and why |\\n\\nThe error string earns the extra clause: a token holding `repo` and not\\n`workflow` gets past the missing-token check and fails two steps later with\\nGitHub's wording, so the message a person reads first is now the one that says\\nwhat to set.\\n\\n`Workflows` is write-only on a fine-grained token — GitHub's permission table has\\nno read level for it — so the fine-grained sentence says read and write for\\n`Contents` and `Pull requests` and write alone for `Workflows`.\\n\\nNo version bump, no behaviour change, no new test: this is four sentences and one\\nerror string.\\n\\n## Verification\\n\\n- `bun run synth` — exit 0; `git status --porcelain` afterwards lists these four\\n  files and nothing else, confirming the wac header comment does not reach the\\n  generated YAML.\\n- `bun run typecheck` — exit 0.\\n- `bun test` across the whole suite — 2522 pass, 0 fail (192 files).\\n- `bun test src/entrypoints/machinery/update_atomaton.test.ts` — 15 pass, 0 fail.\\n  The one test touching this path asserts only that the message names\\n  `ATOMATON_UPDATE_TOKEN`, so the rewording does not weaken it.\\n\", \"reviewer\": \"reviewer\", \"title\": \"docs: name the workflow scope wherever the update token's scope is described\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'create_pr' on MCP server 'github' reported an error: Error: This pull request body contains \"Closes #580\", which GitHub acts on: merging would close whatever issue that names, without going through the path that cleans up labels and tells a parent its child is done. Remove it and try again. To close an issue, call request_close_issue; to link this work to the issue it belongs to, do nothing -- that link is added for you.",
+      "tool_call_id": "chatcmpl-tool-abbc25147597566f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9141ef6b6b30fa87",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\": \"GitHub refuses a push that changes a file under `.github/workflows/` unless the\\npushing credential carries the `workflow` scope (classic PAT) or the `Workflows`\\npermission (fine-grained). The update machinery is the one credential whose\\npurpose is to move a release's files, workflows included, so it is the one that\\nneeds the second scope — but every place telling a person which scope to set\\nnamed only `repo`. Attempt 3 of the v0.24.0 release followed those instructions\\ncorrectly and was refused in the update's push:\\n\\n```\\n! [remote rejected] HEAD -> atomaton/update-v0.24.0 (refusing to allow a Personal Access Token\\n  to create or update workflow `.github/workflows/atomaton-update.yml` without `workflow` scope)\\n```\\n\\n## What changed\\n\\nFive places, four files — both scopes named wherever the token's scope is\\ndescribed, and the reason the second one is needed stated once in each:\\n\\n| Where | Now says |\\n| --- | --- |\\n| `docs/runtime/tasks/move-to-a-newer-release.md:39` | `repo` and `workflow`; fine-grained `Contents` and `Pull requests` read and write, plus `Workflows` write |\\n| `CONTRIBUTING.md:251` | the same, with GitHub's refusal of a push that updates a workflow named as the why |\\n| `src/workflows/atomaton-update.wac.ts:23` | the header comment, a token with `repo` and `workflow` scope |\\n| `src/entrypoints/machinery/update_atomaton.ts:25` | the module comment, the same |\\n| `src/entrypoints/machinery/update_atomaton.ts:335` | the `::error::` for a missing token — a classic PAT with `repo` and `workflow`, or fine-grained `Contents` and `Pull requests` read and write and `Workflows` write, and why |\\n\\nThe error string earns the extra clause: a token holding `repo` and not\\n`workflow` gets past the missing-token check and fails two steps later with\\nGitHub's wording, so the message a person reads first is now the one that says\\nwhat to set.\\n\\n`Workflows` is write-only on a fine-grained token — GitHub's permission table has\\nno read level for it — so the fine-grained sentence says read and write for\\n`Contents` and `Pull requests` and write alone for `Workflows`.\\n\\nNo version bump, no behaviour change, no new test: this is four sentences and one\\nerror string.\\n\\n## Verification\\n\\n- `bun run synth` — exit 0; `git status --porcelain` afterwards lists these four\\n  files and nothing else, confirming the wac header comment does not reach the\\n  generated YAML.\\n- `bun run typecheck` — exit 0.\\n- `bun test` across the whole suite — 2522 pass, 0 fail (192 files).\\n- `bun test src/entrypoints/machinery/update_atomaton.test.ts` — 15 pass, 0 fail.\\n  The one test touching this path asserts only that the message names\\n  `ATOMATON_UPDATE_TOKEN`, so the rewording does not weaken it.\\n\", \"reviewer\": \"reviewer\", \"title\": \"docs: name the workflow scope wherever the update token's scope is described\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Remove \"Closes #580\".",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_e6671a22-5d3f-42a5-be2c-183f80ce2bb6",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":581,\"url\":\"https://github.com/yuma-seno/atomaton/pull/581\",\"base\":\"\",\"validation_dispatched\":true}",
+      "tool_call_id": "chatcmpl-tool-9141ef6b6b30fa87"
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "agent": "engineer",
+      "event_count": 3,
+      "snapshot_hash": "889d1ad12c03d46a21c5d0b0caa7632ccd73d586b68577cd3e7efa415c6d7189",
+      "version": 1
+    }
+  },
+  "atoma_runs": [
+    {
+      "compactions": 0,
+      "ended": "2026-11-22T10:51:26Z",
+      "ended_because": "completed",
+      "iterations": 23,
+      "messages": 61,
+      "seconds": 158,
+      "server_calls": {
+        "files": {
+          "edit": 7,
+          "read": 4
+        },
+        "github": {
+          "commit_and_push": 1,
+          "create_pr": 2
+        },
+        "shell": {
+          "bash": 18
+        }
+      },
+      "started": "2026-11-22T10:48:48Z"
+    }
+  ]
+}
