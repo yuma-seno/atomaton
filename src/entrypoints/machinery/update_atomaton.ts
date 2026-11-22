@@ -22,9 +22,11 @@
  * The branch this pushes must run the repository's checks, and a push made with
  * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those
  * checks gate would then be merging unverified content. So the workflow that runs
- * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,
- * and a run without it fails loudly and does nothing — a person who pressed the
- * button is standing there, and silence is not an answer.
+ * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with `repo` and
+ * `workflow` scope, the second because the release ships workflows and GitHub
+ * refuses a push that updates one without it. A run without the token fails
+ * loudly and does nothing — a person who pressed the button is standing there, and
+ * silence is not an answer.
  *
  * ## Why the stop is a pull request, and why the token does the writing
  *
@@ -333,8 +335,10 @@ function main(): void {
     console.error(
       "::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, " +
         "which this workflow's own token may not do: a push from it would run none of the checks the " +
-        "merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo " +
-        "scope, and run this again. Nothing has been changed.",
+        "merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT " +
+        "with repo and workflow scope, or a fine-grained token with Contents and Pull requests read " +
+        "and write and Workflows write — the release ships workflows, and a push that updates one is " +
+        "refused without it. Then run this again. Nothing has been changed.",
     );
     process.exit(1);
   }

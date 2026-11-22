@@ -248,9 +248,11 @@ branch: the push is refused on **identity**, measured here. The update machinery
 replaces those files, so the one secret this repository needs is the same one an
 adopter sets:
 
-- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as
-  an Actions secret. The update workflow pushes `.github/` under it, including the
-  workflow files the release carries. Set it:
+- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a
+  fine-grained one with `Contents` and `Pull requests` read and write, plus
+  `Workflows` write; set as an Actions secret. The update workflow pushes
+  `.github/` under it, including the workflow files the release carries, and
+  GitHub refuses a push that updates one without the workflow permission. Set it:
 
   ```bash
   gh secret set ATOMATON_UPDATE_TOKEN
