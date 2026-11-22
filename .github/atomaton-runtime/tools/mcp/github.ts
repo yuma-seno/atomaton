@@ -20791,7 +20791,6 @@ function hardenCredentialHolder(log) {
 }
 
 // src/domain/machinery/base-edit.ts
-var DEPLOYED_ROOT = ".github";
 function amendPathProblem(path) {
   if (path.trim() === "")
     return "A path is required.";
@@ -20817,9 +20816,6 @@ function amendPathProblem(path) {
     return `\`${path}\` is outside \`${USER_ROOT}/\`. This tool amends this project's own machinery \u2014 prompts, skills, ` + "agent definitions and the scripts beside them \u2014 and nothing else: the rest of the tree is delivered through " + "the issue the run is working on.";
   }
   return;
-}
-function overlayTwinPath(path) {
-  return `self/${path.slice(DEPLOYED_ROOT.length + 1)}`;
 }
 function editedText(current, edit, base) {
   const replaces = edit.old !== undefined || edit.new !== undefined;
@@ -20856,12 +20852,8 @@ function baseEditPrBody(body) {
     ...body.reviewer === "" ? [] : [`/${body.reviewer}`, ""],
     `Atomaton: ${where} amended this project's own machinery on \`${body.base}\`. That run's checkout is untouched, ` + "and its work continues \u2014 this pull request is separate from it on purpose, so review it as a change to how " + "agents behave rather than as part of a feature.",
     "",
-    ...body.files.map((file) => file.twin === undefined ? `- \`${file.path}\` \u2014 staged on its own; no \`${overlayTwinPath(file.path)}\` on \`${body.base}\`` : `- \`${file.path}\`, and its overlay twin \`${file.twin}\` with the same content`)
+    ...body.files.map((file) => `- \`${file}\``)
   ];
-  const twins = body.files.filter((file) => file.twin === undefined).map((file) => `\`${file.path}\``);
-  if (twins.length > 0) {
-    lines.push("", `${twins.join(", ")} ${twins.length === 1 ? "has" : "have"} no \`self/\` twin, so only the deployed copy moved. ` + "In a repository whose deploy rebuilds `.github/` from `self/` and the release, such a file is reverted at " + "the next deploy \u2014 this is the copy to leave a note about, not a defect in this change.");
-  }
   const note = (body.note ?? "").trim();
   if (note !== "")
     lines.push("", "---", "", note);
@@ -20968,11 +20960,6 @@ function pushCommit(commit, branch) {
     return;
   const refused = /non-fast-forward|fetch first|rejected/i.test(`${pushed.stderr} ${pushed.stdout}`);
   throw new Error(refused ? `\`${branch}\` moved on origin while this call was building its commit, so the push was refused rather than ` + "replacing somebody else's. Nothing was pushed; retry, which names a new branch." : `could not push \`${branch}\`: ${pushed.stderr || pushed.stdout}`);
-}
-function readTwin(baseSha, path) {
-  const twinPath = overlayTwinPath(path);
-  const read = readBaseFile(baseSha, twinPath);
-  return read.present ? { path: twinPath, text: read.text, mode: read.mode } : undefined;
 }
 
 // src/entrypoints/tools/mcp/github.ts
@@ -21484,23 +21471,12 @@ async function openBaseEditPr(a) {
       text: editedText(current.present ? current.text : "", file, tip.base)
     };
   });
-  const twins = rewritten.map((file) => ({ file, twin: readTwin(tip.sha, file.path) }));
-  const staged = [];
-  const recorded = [];
-  for (const { file, twin } of twins) {
-    staged.push(file);
-    if (twin === undefined) {
-      recorded.push({ path: file.path, twin: undefined });
-      continue;
-    }
-    staged.push({ path: twin.path, text: file.text, mode: twin.mode });
-    recorded.push({ path: file.path, twin: twin.path });
-  }
+  const staged = [...rewritten];
   const body = baseEditPrBody({
     observing: nodeNumber() === undefined ? "" : `#${nodeNumber()}`,
     base: tip.base,
     reviewer,
-    files: recorded,
+    files: staged.map((file) => file.path),
     note: withCheckedMentions(a.body ?? "")
   });
   refuseClosingKeywords(body, "pull request body");
@@ -21541,7 +21517,6 @@ Atomaton: opened this pull request from \`${branch}\`. Running CI; the result ro
     branch,
     commit,
     staged: staged.map((file) => file.path),
-    files: recorded.map((file) => ({ path: file.path, twin: file.twin ?? null })),
     validation_dispatched: validationDispatched,
     ...validationDispatched ? {} : {
       note: "The pull request and its commit exist, but CI could not be started, so no required check will appear " + "and no agent is scheduled. Run /reviewer on the pull request, or report this so a person can start it."
@@ -22117,7 +22092,7 @@ var { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "open_base_edit_pr",
-    description: "Amend this project's own machinery on the BASE BRANCH and open a separate pull request for it, without touching " + "this run's checkout, HEAD or index \u2014 and without ending this run. Use it when what you found wrong is a prompt, a " + "skill, an agent definition or a script under `.github/atomaton/`: through commit_and_push that fix would be " + "reviewed as part of the issue's feature and would vanish with it. The commit is built from git objects on the " + "base branch's current tree, pushed to `atomaton/amend-<id>`, and the pull request targets the base branch with no " + "parent-issue link, so it belongs to no node and nothing waits on it. Each file takes `old`/`new` (the replacement " + "must match exactly once in the file as the base branch holds it now, or nothing is pushed) or `content` (the " + "whole new file). A path with a `self/` twin on the base branch is staged in both copies in the same commit. " + "`config.yaml` is refused: it decides which credentials a run may reach. CI is dispatched, and `validation_dispatched` " + "says whether it started.",
+    description: "Amend this project's own machinery on the BASE BRANCH and open a separate pull request for it, without touching " + "this run's checkout, HEAD or index \u2014 and without ending this run. Use it when what you found wrong is a prompt, a " + "skill, an agent definition or a script under `.github/atomaton/`: through commit_and_push that fix would be " + "reviewed as part of the issue's feature and would vanish with it. The commit is built from git objects on the " + "base branch's current tree, pushed to `atomaton/amend-<id>`, and the pull request targets the base branch with no " + "parent-issue link, so it belongs to no node and nothing waits on it. Each file takes `old`/`new` (the replacement " + "must match exactly once in the file as the base branch holds it now, or nothing is pushed) or `content` (the " + "whole new file). `config.yaml` is refused: it decides which credentials a run may reach. CI is dispatched, and `validation_dispatched` " + "says whether it started.",
     schema: OPEN_BASE_EDIT_PR_SCHEMA,
     handler: openBaseEditPr
   }),

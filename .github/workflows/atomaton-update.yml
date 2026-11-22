@@ -22,13 +22,14 @@ permissions:
   contents: read
   issues: write
   pull-requests: write
+  checks: read
 concurrency:
   group: atomaton-update
   cancel-in-progress: false
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Setup Bun
