@@ -245,20 +245,43 @@ function gitOrFail(args: string[], what: string): { stdout: string } | { fail: s
 }
 
 /**
+ * The argv that pushes `branch`, with the update token as the only credential
+ * when the remote is a GitHub https one.
+ *
+ * Why the two `-c` resets: `actions/checkout` leaves `persist-credentials` on by
+ * default, which writes `http.https://github.com/.extraheader` into the
+ * repository's config. Git sends a configured `Authorization` header *instead of*
+ * the userinfo in the URL, so the push would authenticate as the run's own token
+ * — and `apply-to-self` runs with `contents: read`, so that push is a 403. An
+ * empty `http.extraheader` value resets the header list to empty, and both the
+ * unscoped and the URL-scoped forms are cleared because either one can be set.
+ *
+ * A remote that is not GitHub https (a test's file remote, an SSH remote the
+ * checkout already carries) keeps the checkout's own credentials: no `-c`, no
+ * rewrite, the URL exactly as the origin carries it.
+ */
+export function pushArgs(url: string, token: string, branch: string): string[] {
+  const github = /^https:\/\/github\.com\/(.+?)(?:\.git)?$/.exec(url);
+  if (!github) return ["push", "--force", url, `HEAD:refs/heads/${branch}`];
+  return [
+    "-c", "http.extraheader=",
+    "-c", "http.https://github.com/.extraheader=",
+    "push", "--force", `https://x-access-token:${token}@github.com/${github[1]}`, `HEAD:refs/heads/${branch}`,
+  ];
+}
+
+/**
  * Push `branch`, with the update token if the remote is this script's to
  * credential.
  *
- * A `https://github.com/` remote gets the token inline — the only credential this
- * run may add. Anything else (a test's file remote, an SSH remote the checkout
+ * A `https://github.com/` remote gets the token as its only credential (see
+ * `pushArgs`). Anything else (a test's file remote, an SSH remote the checkout
  * already carries) is pushed as-is, on the checkout's own credentials.
  */
 function pushBranch(branch: string, token: string): { ok: true } | { fail: string } {
   const origin = gitOrFail(["remote", "get-url", "origin"], "read the origin remote");
   if ("fail" in origin) return origin;
-  const url = origin.stdout.trim();
-  const github = /^https:\/\/github\.com\/(.+?)(?:\.git)?$/.exec(url);
-  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;
-  const pushed = gitOrFail(["push", "--force", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);
+  const pushed = gitOrFail(pushArgs(origin.stdout.trim(), token, branch), `push ${branch}`);
   return "fail" in pushed ? pushed : { ok: true };
 }
 
