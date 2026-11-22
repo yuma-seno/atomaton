@@ -325,7 +325,7 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/lib/notice-issue.ts
 var NOTICE_MARKER = "<!-- atomaton:new-release -->";
 function findOpenNotice(repo) {
-  const result = ghRead("issue", "list", "--repo", repo, "--state", "open", "--search", `"Template release" in:title`, "--json", "number,body,state");
+  const result = ghRead("issue", "list", "--repo", repo, "--state", "open", "--search", `"Atomaton release" in:title`, "--json", "number,body,state");
   if (result.code !== 0) {
     log(`WARN could not look for an existing notice in ${repo}: ${result.stderr.trim() || `gh exited ${result.code}`}`);
     return null;
@@ -542,7 +542,7 @@ function notesOf(body) {
 \u2026the rest is on the release page.`;
 }
 function noticeTitle(input) {
-  return `Template release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`;
+  return `Atomaton release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`;
 }
 function noticeBody(input) {
   const lines = [
