@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #578: update: the push is authenticated as the checkout's token, so apply-to-self 403s\n**Labels:** atomaton/waiting-for-person\n\nThe apply-to-self step of the v0.24.0 release applied the plan and then failed to push:\n\n```\n[update] applied: 6 taken, 2 added, 0 removed, 0 merged, 0 conflicted\n::error::could not push atomaton/update-v0.24.0: remote: Permission to yuma-seno/atomaton.git denied to github-actions[bot].\nfatal: unable to access 'https://github.com/yuma-seno/atomaton/': The requested URL returned error: 403.\n```\n\nRun: https://github.com/yuma-seno/atomaton/actions/runs/44929022320 (attempt 2, `apply-to-self`).\n\n## Root cause\n\n`ATOMATON_UPDATE_TOKEN` is set and reaches the script; the plan is applied. The push is the part that fails, and it fails because it does not authenticate as the update token at all.\n\n`actions/checkout` (with its default `persist-credentials: true`) writes this into `.git/config`:\n\n```\n[http \"https://github.com/\"]\n\textraheader = AUTHORIZATION: basic <base64 of x-access-token:GITHUB_TOKEN>\n```\n\n`pushBranch` builds a URL with the update token in it (`src/entrypoints/machinery/update_atomaton.ts:255-263`):\n\n```ts\nconst pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\n```\n\nbut git sends the configured `Authorization` header **instead of** the URL credentials, so the request is made as `github-actions[bot]`. The `apply-to-self` job declares `contents: read` (it is not meant to write with its own token), so GitHub refuses the push with exactly the message above.\n\nThis was measured, not inferred. A local HTTP server answering `401` with `WWW-Authenticate: Basic` logged the `Authorization` header git actually sent:\n\n- with the checkout-style `http.<url>.extraheader` set: first request carries `Authorization: Bearer CHECKOUT-TOKEN` (the header), and the inline `x-access-token:...` credentials are never used\n- with `git -c http.<url>.extraheader= push <url-with-token>`: the first request carries no header, the retry after the `401` carries `Basic <base64(x-access-token:SUPPLIED-TOKEN)>` — the update token, as intended\n\nThe reset also works when the header is in the repository's `.git/config` (the checkout's case), not only when both values are passed with `-c`.\n\n## Fix\n\nIn `pushBranch` in `src/entrypoints/machinery/update_atomaton.ts`, when the remote is a GitHub https URL, make the token the only credential on that one push:\n\n```ts\ngitOrFail(\n  [\"-c\", \"http.extraheader=\", \"-c\", \"http.https://github.com/.extraheader=\", \"push\", \"--force\", pushUrl, `HEAD:refs/heads/${branch}`],\n  `push ${branch}`,\n);\n```\n\nNotes:\n\n- An empty value resets the header list to empty (git's documented behaviour for `http.extraheader`), so both the unscoped and the URL-scoped forms are cleared.\n- Only the GitHub-https branch needs it. The other path (a file remote in tests, an SSH remote the checkout already carries) must keep using the checkout's own credentials exactly as it does now — the existing bare-repo tests push through that path and must keep passing unchanged.\n- The same reset should not be applied to the `gh` calls: `ghAs`/`gh` authenticate from the environment and are not affected by git config.\n\n## Test\n\nA test that would have caught this. Prefer a small pure helper over stubbing git, e.g. `pushArgs(url, token)` returning the argv, unit-tested for:\n\n- a github https remote: contains both `-c` resets and the token URL\n- anything else: no `-c` flags and the URL unchanged\n\nIf keeping it inside `pushBranch` is cleaner, a recording `git` shim earlier on `PATH` works too — the point is that the argv is asserted, because the fake harness's real bare-repo remote takes the other branch and cannot observe this.\n\n## Verifying on GitHub\n\nAfter this merges, `gh run rerun 44929022320 --failed` is enough. The job checks out `main` at run time, so it runs the fixed script; the release workflow YAML from the original run is unchanged and needs no edit. A successful push opens `atomaton/update-v0.24.0`, the required check runs, the update merges itself, and the notice #577 closes.\n\n## Constraints\n\n- Do not bump the version; the release workflow owns `package.json`'s version.\n- No workflow changes are needed for this fix.\n- Keep the change to `src/` (the deployed `.github/atomaton-runtime/scripts/` copy is generated from it). Run `bun run synth` if any generated artifact is tracked.\n",
+      "content": "Issue #578: update: the push is authenticated as the checkout's token, so apply-to-self 403s\n**Labels:** atomaton/in-progress\n\nThe apply-to-self step of the v0.24.0 release applied the plan and then failed to push:\n\n```\n[update] applied: 6 taken, 2 added, 0 removed, 0 merged, 0 conflicted\n::error::could not push atomaton/update-v0.24.0: remote: Permission to yuma-seno/atomaton.git denied to github-actions[bot].\nfatal: unable to access 'https://github.com/yuma-seno/atomaton/': The requested URL returned error: 403.\n```\n\nRun: https://github.com/yuma-seno/atomaton/actions/runs/44929022320 (attempt 2, `apply-to-self`).\n\n## Root cause\n\n`ATOMATON_UPDATE_TOKEN` is set and reaches the script; the plan is applied. The push is the part that fails, and it fails because it does not authenticate as the update token at all.\n\n`actions/checkout` (with its default `persist-credentials: true`) writes this into `.git/config`:\n\n```\n[http \"https://github.com/\"]\n\textraheader = AUTHORIZATION: basic <base64 of x-access-token:GITHUB_TOKEN>\n```\n\n`pushBranch` builds a URL with the update token in it (`src/entrypoints/machinery/update_atomaton.ts:255-263`):\n\n```ts\nconst pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\n```\n\nbut git sends the configured `Authorization` header **instead of** the URL credentials, so the request is made as `github-actions[bot]`. The `apply-to-self` job declares `contents: read` (it is not meant to write with its own token), so GitHub refuses the push with exactly the message above.\n\nThis was measured, not inferred. A local HTTP server answering `401` with `WWW-Authenticate: Basic` logged the `Authorization` header git actually sent:\n\n- with the checkout-style `http.<url>.extraheader` set: first request carries `Authorization: Bearer CHECKOUT-TOKEN` (the header), and the inline `x-access-token:...` credentials are never used\n- with `git -c http.<url>.extraheader= push <url-with-token>`: the first request carries no header, the retry after the `401` carries `Basic <base64(x-access-token:SUPPLIED-TOKEN)>` — the update token, as intended\n\nThe reset also works when the header is in the repository's `.git/config` (the checkout's case), not only when both values are passed with `-c`.\n\n## Fix\n\nIn `pushBranch` in `src/entrypoints/machinery/update_atomaton.ts`, when the remote is a GitHub https URL, make the token the only credential on that one push:\n\n```ts\ngitOrFail(\n  [\"-c\", \"http.extraheader=\", \"-c\", \"http.https://github.com/.extraheader=\", \"push\", \"--force\", pushUrl, `HEAD:refs/heads/${branch}`],\n  `push ${branch}`,\n);\n```\n\nNotes:\n\n- An empty value resets the header list to empty (git's documented behaviour for `http.extraheader`), so both the unscoped and the URL-scoped forms are cleared.\n- Only the GitHub-https branch needs it. The other path (a file remote in tests, an SSH remote the checkout already carries) must keep using the checkout's own credentials exactly as it does now — the existing bare-repo tests push through that path and must keep passing unchanged.\n- The same reset should not be applied to the `gh` calls: `ghAs`/`gh` authenticate from the environment and are not affected by git config.\n\n## Test\n\nA test that would have caught this. Prefer a small pure helper over stubbing git, e.g. `pushArgs(url, token)` returning the argv, unit-tested for:\n\n- a github https remote: contains both `-c` resets and the token URL\n- anything else: no `-c` flags and the URL unchanged\n\nIf keeping it inside `pushBranch` is cleaner, a recording `git` shim earlier on `PATH` works too — the point is that the argv is asserted, because the fake harness's real bare-repo remote takes the other branch and cannot observe this.\n\n## Verifying on GitHub\n\nAfter this merges, `gh run rerun 44929022320 --failed` is enough. The job checks out `main` at run time, so it runs the fixed script; the release workflow YAML from the original run is unchanged and needs no edit. A successful push opens `atomaton/update-v0.24.0`, the required check runs, the update merges itself, and the notice #577 closes.\n\n## Constraints\n\n- Do not bump the version; the release workflow owns `package.json`'s version.\n- No workflow changes are needed for this fix.\n- Keep the change to `src/` (the deployed `.github/atomaton-runtime/scripts/` copy is generated from it). Run `bun run synth` if any generated artifact is tracked.\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-22T10:09:39Z",
@@ -1023,13 +1023,267 @@
       "role": "tool",
       "content": "{\"number\":579,\"url\":\"https://github.com/yuma-seno/atomaton/pull/579\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "chatcmpl-tool-bfc3e4551dc7c0e6"
+    },
+    {
+      "role": "user",
+      "content": "PR #579: Authenticate the update push as the update token, not the checkout's\n**Labels:** atomaton/in-progress\n**Linked Issue:** #578\n\n/reviewer\n\nPart of #578\nFixes the `apply-to-self` 403: the update machinery applied its plan and then could not push, because the push authenticated as `github-actions[bot]`.\n\n## What was wrong\n\n`pushBranch` built a URL carrying `ATOMATON_UPDATE_TOKEN`, but `actions/checkout` leaves `persist-credentials` on and writes `http.https://github.com/.extraheader` into the repository's config. Git sends a configured `Authorization` header *instead of* the userinfo in the URL, so the token in the URL was never used. `apply-to-self` declares `contents: read`, so that identity cannot push — `remote: Permission to yuma-seno/atomaton.git denied to github-actions[bot]`, 403.\n\n## The change\n\nThe push argv now comes from an exported `pushArgs(url, token, branch)` (`src/entrypoints/machinery/update_atomaton.ts:262`), and `pushBranch` is a caller of it. For a GitHub https remote it clears `http.extraheader` and `http.https://github.com/.extraheader` with `-c` (an empty value resets the header list to empty) and puts the token in the URL, so the token is the only credential on that one push.\n\nA remote that is not GitHub https — a test's file remote, an SSH remote the checkout already carries — gets exactly the argv it got before: no `-c`, URL unchanged, the checkout's own credentials. The `gh` calls are untouched; they authenticate from the environment and git config does not reach them.\n\nOnly `src/` changed. `bun run synth` was run and leaves no tracked file modified (`dist/` is gitignored, and the deployed `.github/atomaton-runtime/` arrives through the update machinery), and the `apply-to-self` step runs `bun src/entrypoints/machinery/update_atomaton.ts` from the checkout, so the next run picks this up from `main` with no workflow edit.\n\n## Verification\n\n- `bun test ./src/entrypoints/machinery/update_atomaton.test.ts` — 15 pass, 0 fail, including three new argv tests: a GitHub https remote carries both `-c` resets and the token URL; a `.git` suffix does not reach the token URL; a file remote and an SSH remote yield the old argv with no `-c`.\n- The new test catches the regression: with `pushArgs` made to return the pre-fix argv, `the push argv > a GitHub https remote is pushed with the update token, the checkout's header reset` fails (14 pass, 1 fail).\n- `bun test ./src/entrypoints/machinery` — 594 pass, 0 fail across 60 files.\n- `bun run typecheck` — exit 0.\n- `bun test ./tests/contract/deployment-contract.test.ts ./src/domain/machinery/code-corpus.test.ts` — 18 pass, 0 fail.\n\nVersion untouched; no file under `.github/workflows/` changed.\n\n<details><summary>What the new test asserts, and why it is argv</summary>\n\nThe existing fixture pushes to a real bare repository over a file path, which takes the non-GitHub branch of `pushArgs` and cannot observe a credential at all. Which credentials a push carries is decided entirely in the argv, so the argv is what is asserted, as a pure helper rather than a stubbed `git`.\n</details>\n\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/45011274682)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T10:15:04Z",
+        "event_type": "pr_opened",
+        "id": "pr-579",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: `reviewer` did not finish.\n\n**The session was saved.** What this run worked out is still there.\n\n- Continue: comment `/reviewer` and put what to do next on the following lines.\n- Start clean: comment `/reviewer recover`, which archives this session and rebuilds\n  it from the issue.\n\nFrom the log, which is often about the infrastructure rather than the work:\n```\n^[[2m2026-11-22T10:20:11.608244Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-22T10:20:13.214513Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-22T10:20:14.417271Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-22T10:20:14.473464Z^[[0m ^[[31mERROR^[[0m ^[[2matoma::application::runner^[[0m^[[2m:^[[0m Run failed: Aborting: the last 5 calls repeat a cycle of earlier ones, ending at 'read'. Each differs from the one before it, so this is a loop rather than a retry.\nError: Aborting: the last 5 calls repeat a cycle of earlier ones, ending at 'read'. Each differs from the one before it, so this is a loop rather than a retry.\n```\n\n@yuma-seno — **reviewer** stopped mid-run, and no agent will run next. Resume it, or say what to do instead.\n\n---\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45011744499) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\n_Counted from the session: 1 refused or errored tool call._",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T10:20:15Z",
+        "event_type": "pr_comment",
+        "id": 7077726456,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/reviewer\n\nReview PR #579 only, and do not explore beyond it. Read `gh pr diff 579` and the two changed files (`src/entrypoints/machinery/update_atomaton.ts`, `src/entrypoints/machinery/update_atomaton.test.ts`), and judge three things against #578:\n\n1. Does the `-c http.extraheader=` / `-c http.https://github.com/.extraheader=` reset actually leave `ATOMATON_UPDATE_TOKEN` as the only credential the push carries?\n2. Is the non-GitHub path (file remote, SSH remote) unchanged, with no `-c` flags and the URL untouched?\n3. Would the new test have failed before the fix?\n\nThe CI check `atomaton-check` is already green on this pull request. Post a verdict: approve, or name concrete blockers with the file and line.\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-22T10:44:12Z",
+        "event_type": "pr_comment",
+        "id": 7077983687,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T10:45:56Z",
+        "event_type": "issue_comment",
+        "id": 7078002161,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/entrypoints/machinery/update_atomaton.test.ts b/src/entrypoints/machinery/update_atomaton.test.ts\nindex 4253947a..1db99aa7 100644\n--- a/src/entrypoints/machinery/update_atomaton.test.ts\n+++ b/src/entrypoints/machinery/update_atomaton.test.ts\n@@ -5,7 +5,7 @@ import { dirname, join } from \"node:path\";\n import { tmpdir } from \"node:os\";\n import { spawnSync } from \"node:child_process\";\n import { NOTICE_MARKER } from \"./notify_new_release.ts\";\n-import { updateBranchFor, updateTitle } from \"./update_atomaton.ts\";\n+import { updateBranchFor, updateTitle, pushArgs } from \"./update_atomaton.ts\";\n import { RELEASE_MANIFEST } from \"../../domain/machinery/machinery-layout.ts\";\n import { ASSET_NAME } from \"./notify_new_release.ts\";\n import { removeTemp, runWithFakeGh, scriptPath, hermeticEnv, type FakeGhRule } from \"./testing/harness.ts\";\n@@ -427,3 +427,48 @@ describe(\"an update that is nothing but a name\", () => {\n     expect(pushedTip(bare, updateBranchFor(\"v0.2.0\"))).toBeNull();\n   });\n });\n+\n+/**\n+ * The push argv, asserted as argv.\n+ *\n+ * The fixture above pushes to a bare repository over a file path, which takes the\n+ * other branch of `pushArgs` and cannot see a credential at all. Which credentials\n+ * a push carries is decided entirely in the argv, so that is what these read:\n+ * a checkout's `http.https://github.com/.extraheader` is reset, or it authenticates\n+ * the push as the run's own token and a `contents: read` job gets a 403.\n+ */\n+describe(\"the push argv\", () => {\n+  const BRANCH = \"atomaton/update-v0.24.0\";\n+\n+  test(\"a GitHub https remote is pushed with the update token, the checkout's header reset\", () => {\n+    expect(pushArgs(\"https://github.com/owner/repo\", \"ATOMATON_TOKEN\", BRANCH)).toEqual([\n+      \"-c\",\n+      \"http.extraheader=\",\n+      \"-c\",\n+      \"http.https://github.com/.extraheader=\",\n+      \"push\",\n+      \"--force\",\n+      \"https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo\",\n+      `HEAD:refs/heads/${BRANCH}`,\n+    ]);\n+  });\n+\n+  test(\"a `.git` suffix is not carried into the URL the token is put in\", () => {\n+    expect(pushArgs(\"https://github.com/owner/repo.git\", \"ATOMATON_TOKEN\", BRANCH)).toContain(\n+      \"https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo\",\n+    );\n+  });\n+\n+  test(\"a remote that is not GitHub https keeps the checkout's own credentials\", () => {\n+    // A test's file remote, and an SSH remote the checkout already carries: the\n+    // update token is not this run's to add there, and no header is reset.\n+    for (const url of [\"/tmp/atomaton-fixture/remote.git\", \"git@github.com:owner/repo.git\"]) {\n+      expect(pushArgs(url, \"ATOMATON_TOKEN\", BRANCH)).toEqual([\n+        \"push\",\n+        \"--force\",\n+        url,\n+        `HEAD:refs/heads/${BRANCH}`,\n+      ]);\n+    }\n+  });\n+});\ndiff --git a/src/entrypoints/machinery/update_atomaton.ts b/src/entrypoints/machinery/update_atomaton.ts\nindex 02a1a9b3..b52279dd 100644\n--- a/src/entrypoints/machinery/update_atomaton.ts\n+++ b/src/entrypoints/machinery/update_atomaton.ts\n@@ -244,21 +244,44 @@ function gitOrFail(args: string[], what: string): { stdout: string } | { fail: s\n   return { stdout: result.stdout };\n }\n \n+/**\n+ * The argv that pushes `branch`, with the update token as the only credential\n+ * when the remote is a GitHub https one.\n+ *\n+ * Why the two `-c` resets: `actions/checkout` leaves `persist-credentials` on by\n+ * default, which writes `http.https://github.com/.extraheader` into the\n+ * repository's config. Git sends a configured `Authorization` header *instead of*\n+ * the userinfo in the URL, so the push would authenticate as the run's own token\n+ * — and `apply-to-self` runs with `contents: read`, so that push is a 403. An\n+ * empty `http.extraheader` value resets the header list to empty, and both the\n+ * unscoped and the URL-scoped forms are cleared because either one can be set.\n+ *\n+ * A remote that is not GitHub https (a test's file remote, an SSH remote the\n+ * checkout already carries) keeps the checkout's own credentials: no `-c`, no\n+ * rewrite, the URL exactly as the origin carries it.\n+ */\n+export function pushArgs(url: string, token: string, branch: string): string[] {\n+  const github = /^https:\\/\\/github\\.com\\/(.+?)(?:\\.git)?$/.exec(url);\n+  if (!github) return [\"push\", \"--force\", url, `HEAD:refs/heads/${branch}`];\n+  return [\n+    \"-c\", \"http.extraheader=\",\n+    \"-c\", \"http.https://github.com/.extraheader=\",\n+    \"push\", \"--force\", `https://x-access-token:${token}@github.com/${github[1]}`, `HEAD:refs/heads/${branch}`,\n+  ];\n+}\n+\n /**\n  * Push `branch`, with the update token if the remote is this script's to\n  * credential.\n  *\n- * A `https://github.com/` remote gets the token inline — the only credential this\n- * run may add. Anything else (a test's file remote, an SSH remote the checkout\n+ * A `https://github.com/` remote gets the token as its only credential (see\n+ * `pushArgs`). Anything else (a test's file remote, an SSH remote the checkout\n  * already carries) is pushed as-is, on the checkout's own credentials.\n  */\n function pushBranch(branch: string, token: string): { ok: true } | { fail: string } {\n   const origin = gitOrFail([\"remote\", \"get-url\", \"origin\"], \"read the origin remote\");\n   if (\"fail\" in origin) return origin;\n-  const url = origin.stdout.trim();\n-  const github = /^https:\\/\\/github\\.com\\/(.+?)(?:\\.git)?$/.exec(url);\n-  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\n-  const pushed = gitOrFail([\"push\", \"--force\", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);\n+  const pushed = gitOrFail(pushArgs(origin.stdout.trim(), token, branch), `push ${branch}`);\n   return \"fail\" in pushed ? pushed : { ok: true };\n }\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-22T10:46:02Z",
+        "event_type": "pr_diff",
+        "id": "pr-579-diff",
+        "layer": "github-context",
+        "sha": "862f4e72",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Merged as the verdict: no blockers on #579, and `check_merge_readiness` reported `ready: true` before the merge call returned `merged: true`.\n\nAll three points you asked about hold. A `https://github.com/<owner>/<repo>` remote now gets `-c http.extraheader=` and `-c http.https://github.com/.extraheader=` ahead of `push`, which resets the header list `actions/checkout` wrote into `.git/config` (empty value = reset, `-c` = highest precedence), so the only credential left is the `x-access-token:<ATOMATON_UPDATE_TOKEN>` userinfo in the push URL. The non-GitHub branch returns the URL exactly as read from origin with no `-c` — the old argv unchanged. The new test asserts the whole array with `toEqual`, so the pre-fix argv fails it.\n\n<details><summary>Evidence for the three answers</summary>\n\n- Token-only push argv, both `-c` resets before `push`: `src/entrypoints/machinery/update_atomaton.ts:263`; `pushBranch` is now only a caller: `src/entrypoints/machinery/update_atomaton.ts:284`.\n- Non-GitHub fallback with no `-c` and the URL untouched: `src/entrypoints/machinery/update_atomaton.ts:265`, asserted for both a file path and an SSH URL at `src/entrypoints/machinery/update_atomaton.test.ts:462`.\n- The regression-catching assertion: `src/entrypoints/machinery/update_atomaton.test.ts:440` (`toEqual`, including the two `-c` pairs).\n- Only `src/` changed: `bun run synth` writes gitignored `dist/` (`.gitignore:15`), and the tracked `.github/atomaton-runtime/scripts/update_atomaton.ts` is replaced wholesale by the update machinery, so hand-editing it would be the defect.\n- `atomaton-check` on the head commit: `completed` / `success`.\n</details>\n\n**What I could not establish.** This run has no shell, so I did not run `bun test` or a real `git push` myself; that git ignores the URL credentials while a config header is set, and uses them once it is reset, rests on the HTTP-server probe recorded in #578 and on the argv this diff builds. Also non-blocking: the `.git`-suffix test uses `toContain` (`src/entrypoints/machinery/update_atomaton.test.ts:461`), so it would pass even if `.git` were kept in the token URL — harmless, since that URL is valid, but not pinned.\n\n**What happens next.** The merge re-invoked `engineer` on #578, so the remaining step — `gh run rerun 44929022320 --failed` and confirming the push lands — runs from there. Nothing else in the diff is outstanding.\n\n\n---\n_Tokens: 771671 total (764726 prompt + 6945 completion, 702208 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45013902233) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T10:46:02Z",
+        "event_type": "pr_comment",
+        "id": 7078003189,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a615d6f8193a87c2",
+          "type": "function",
+          "function": {
+            "name": "get_pr",
+            "arguments": "{\"pull_number\": 579}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-85ea17222a648e58",
+          "type": "function",
+          "function": {
+            "name": "search_remote_code",
+            "arguments": "{\"query\": \"http.https://github.com/.extraheader= pushArgs\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The PR merged. I'm re-invoked on issue #578 to judge whether what merged satisfies the issue.\n\nIssue #578 asked:\n- Fix push credential issue: GitHub https remote pushed with ATOMATON_UPDATE_TOKEN as only credential.\n- Keep non-GitHub path exactly as it is now.\n- Add argv-level test that would have caught this.\n- Run `bun test ./src/entrypoints/machinery` plus typecheck.\n- Do not bump version, do not change `.github/workflows/`.\n- Commit on branch, leave NOTES-578.md and patch if cannot push (not applicable — pushed fine).\n\nThe merged diff: exactly what I delivered. So criteria met.\n\nBut wait — there's an important subtlety. The issue also says \"After this merges, `gh run rerun 44929022320 --failed` is enough.\" The verification of the fix on GitHub — can I do that? `gh run rerun` is a shell command routed to github tools; I have no tool for rerunning a workflow. And the deeper question: does the merged fix actually reach the failing job? The apply-to-self step runs `bun src/entrypoints/machinery/update_atomaton.ts` from a checkout of main — so yes, the merged src change is what the rerun executes. I verified that earlier by reading `.github/workflows/release.yml:631-650`.\n\nShould I check the merged head to confirm what landed on main? \"The branch to read is the one the pull request merged into\" — PR #579 targeted main (base resolved to configured base since #578 is a root issue, not a sub-issue). Let me verify the merge landed and check the file on main at the relevant lines. Let me use get_pr to confirm merged, and check that main's `src/entrypoints/machinery/update_atomaton.ts` contains `pushArgs` (via search_remote_code or read the local checkout... local checkout may be stale — I'm on a branch from before; actually the run's checkout is at the PR branch head presumably).\n\nLet me verify with get_pr(579) and a remote code search for pushArgs. Then, remaining acceptance criterion: the \"Verifying on GitHub\" step is a person's follow-up (rerun the failed workflow). That's not something I can do — no tool to rerun a workflow run. So the outcome: request_close_issue with a summary stating criteria met, and what happens next: a person reruns run 44929022320's failed job.\n\nHmm, but is the issue truly complete if the GitHub verification hasn't happened? The issue's acceptance criteria were the code fix + test + checks, and the rerun is explicitly listed as a post-merge human verification step (\"Verifying on GitHub — After this merges, `gh run rerun ...` is enough\"). The issue's own constraints list doesn't require me to perform it. Since there's no tool for rerun, and the fix is the deliverable of the issue, concluding with request_close_issue and naming the rerun as the person's next step is right.\n\nWait — one thing to double check: is there anything about NOTES-578.md / patch left in workspace? Not needed since push worked.\n\nLet me verify the merge and the main branch content quickly, then call request_close_issue.\n\nAlso should I double check that the merged commit is what I pushed (no changes by reviewer)? The reviewer's verdict says no blockers, merged. The diff shown above in the merge notification is the merged diff. Good enough, but let me confirm the main branch file contains the reset via search_remote_code for \"http.https://github.com/.extraheader=\".\n\nLet me do two calls in parallel: get_pr(579) and search_remote_code(\"http.https://github.com/.extraheader=\").\n\nNote: search_remote_code searches the default branch presumably. Let's try.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_4c79b7a2-7d33-4a0a-ad7f-50eb29354542",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"baseRefName\":\"main\",\"createdAt\":\"2026-11-22T10:15:04Z\",\"headRefName\":\"atomaton/issue-578\",\"number\":579,\"state\":\"MERGED\",\"title\":\"Authenticate the update push as the update token, not the checkout's\",\"body\":\"/reviewer\\n\\nPart of #578\\nFixes the `apply-to-self` 403: the update machinery applied its plan and then could not push, because the push authenticated as `github-actions[bot]`.\\n\\n## What was wrong\\n\\n`pushBranch` built a URL carrying `ATOMATON_UPDATE_TOKEN`, but `actions/checkout` leaves `persist-credentials` on and writes `http.https://github.com/.extraheader` into the repository's config. Git sends a configured `Authorization` header *instead of* the userinfo in the URL, so the token in the URL was never used. `apply-to-self` declares `contents: read`, so that identity cannot push — `remote: Permission to yuma-seno/atomaton.git denied to github-actions[bot]`, 403.\\n\\n## The change\\n\\nThe push argv now comes from an exported `pushArgs(url, token, branch)` (`src/entrypoints/machinery/update_atomaton.ts:262`), and `pushBranch` is a caller of it. For a GitHub https remote it clears `http.extraheader` and `http.https://github.com/.extraheader` with `-c` (an empty value resets the header list to empty) and puts the token in the URL, so the token is the only credential on that one push.\\n\\nA remote that is not GitHub https — a test's file remote, an SSH remote the checkout already carries — gets exactly the argv it got before: no `-c`, URL unchanged, the checkout's own credentials. The `gh` calls are untouched; they authenticate from the environment and git config does not reach them.\\n\\nOnly `src/` changed. `bun run synth` was run and leaves no tracked file modified (`dist/` is gitignored, and the deployed `.github/atomaton-runtime/` arrives through the update machinery), and the `apply-to-self` step runs `bun src/entrypoints/machinery/update_atomaton.ts` from the checkout, so the next run picks this up from `main` with no workflow edit.\\n\\n## Verification\\n\\n- `bun test ./src/entrypoints/machinery/update_atomaton.test.ts` — 15 pass, 0 fail, including three new argv tests: a GitHub https remote carries both `-c` resets and the token URL; a `.git` suffix does not reach the token URL; a file remote and an SSH remote yield the old argv with no `-c`.\\n- The new test catches the regression: with `pushArgs` made to return the pre-fix argv, `the push argv > a GitHub https remote is pushed with the update token, the checkout's header reset` fails (14 pass, 1 fail).\\n- `bun test ./src/entrypoints/machinery` — 594 pass, 0 fail across 60 files.\\n- `bun run typecheck` — exit 0.\\n- `bun test ./tests/contract/deployment-contract.test.ts ./src/domain/machinery/code-corpus.test.ts` — 18 pass, 0 fail.\\n\\nVersion untouched; no file under `.github/workflows/` changed.\\n\\n<details><summary>What the new test asserts, and why it is argv</summary>\\n\\nThe existing fixture pushes to a real bare repository over a file path, which takes the non-GitHub branch of `pushArgs` and cannot observe a credential at all. Which credentials a push carries is decided entirely in the argv, so the argv is what is asserted, as a pure helper rather than a stubbed `git`.\\n</details>\\n\\n\\n---\\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/45011274682)_\\n\"}",
+      "tool_call_id": "chatcmpl-tool-a615d6f8193a87c2"
+    },
+    {
+      "role": "tool",
+      "content": "",
+      "tool_call_id": "chatcmpl-tool-85ea17222a648e58"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bc1c3e694571ab4b",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -n 3 && echo '--- origin/main:' && git log --oneline -n 3 origin/main 2>&1 && echo '--- contains HEAD on origin/main:' && git branch -r --contains HEAD 2>&1 | head -n 3 && echo '--- reset lines in HEAD:' && grep -n \\\"extraheader=\\\" src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "search_remote_code returned nothing (maybe index lag or query issue). Let me verify main's content directly with a read of the local file if the checkout is now on main, or use bash `git show origin/main:src/entrypoints/machinery/update_atomaton.ts | grep -n`. But origin/main locally may be stale (fetched at run start). Let me check git log/refs: does the local repo have the merge commit? Try `git fetch`? Not allowed (git mutations via shell refused? fetch is a network mutation — the tool says read-only inspection runs). I can try `git log --oneline -n 1 origin/main` and `git show origin/main:...`. If stale, use get_branch(\"main\") to get sha and compare with the merge commit sha from get_pr... get_pr didn't return merge commit sha.\n\nSimplest: read local worktree file — the run's checkout is my branch `atomaton/issue-578`, which is what merged. That confirms what the PR carried. For \"what merged\", the PR state MERGED with base main and the reviewer's diff display is the merged diff.\n\nLet me check whether local origin/main includes my commit: `git branch -r --contains <my head sha>` or `git log origin/main --oneline -n 3`.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_0d4bc0fb-218e-4c63-a1ca-e251baee769f",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool blocked by hook '/home/runner/work/_temp/atomaton-machinery/.github/atomaton-runtime/tools/hooks/shell_guard.ts': Command blocked by shell guard: Raw 'git branch' is disabled. Use the github tools for Git mutations and branch synchronization. (attempted: cd /home/runner/work/atomaton/atomaton && git log --oneline -n 3 && echo '--- origin/main:' && git log --oneline -n 3 or)",
+      "tool_call_id": "chatcmpl-tool-bc1c3e694571ab4b"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a6f432e2ac26053d",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -n 3 && echo '--- origin/main:' && git log --oneline -n 3 origin/main && echo '--- reset lines:' && grep -n \\\"extraheader=\\\" src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8403db2f970f6aca",
+          "type": "function",
+          "function": {
+            "name": "get_branch",
+            "arguments": "{\"branch\": \"main\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"8f6893e Merge pull request #579 from yuma-seno/atomaton/issue-578\\n--- origin/main:\\n8f6893e Merge pull request #579 from yuma-seno/atomaton/issue-578\\n--- reset lines:\\n267:    \\\"-c\\\", \\\"http.extraheader=\\\",\\n268:    \\\"-c\\\", \\\"http.https://github.com/.extraheader=\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1033}",
+      "tool_call_id": "chatcmpl-tool-a6f432e2ac26053d"
+    },
+    {
+      "role": "tool",
+      "content": "{\"branch\":\"main\",\"exists\":true,\"sha\":\"8f6893eaf9ecdc8bed423539e1f2f3e9f18167b3\",\"protected\":true}",
+      "tool_call_id": "chatcmpl-tool-8403db2f970f6aca"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-99837ff843db0553",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"export function pushArgs\\\\|function pushBranch\\\\|gitOrFail(pushArgs\\\" src/entrypoints/machinery/update_atomaton.ts && grep -n \\\"describe(\\\\\\\"the push argv\\\\\\\"\\\\|a remote that is not GitHub\\\\|a GitHub https remote is pushed\\\" src/entrypoints/machinery/update_atomaton.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The merge commit `8f6893e` is main's head, and the local checkout is that commit (the run was re-invoked at the merge). The file on main contains the two `-c` resets at lines 267-268.\n\nNow judge against the issue's acceptance criteria:\n\n1. GitHub https remote pushes with the update token as the only credential — met: pushArgs clears both header forms and puts the token in the URL; pushBranch is the caller.\n2. Non-GitHub path unchanged — met: returns `[\"push\",\"--force\",url,...]` with no `-c`, unchanged URL; the existing bare-repo fixture tests still pass.\n3. Argv test that would have caught it — met; I measured it failing against the pre-fix argv.\n4. `bun test ./src/entrypoints/machinery` + typecheck — run and green before merge, and `atomaton-check` green on the head.\n5. No version bump, nothing under `.github/workflows/` — met; the PR's diff is two files under src/.\n\nOne remaining item from the issue (\"Verifying on GitHub: `gh run rerun 44929022320 --failed`\") — a person's step; I have no tool to rerun a workflow run. I should name that as the remaining step. Is that an unmet acceptance criterion that means I should \"carry on with the work\"? No — the issue's deliverable is the fix; the rerun is how a person confirms it on the one failed run, and it needs no code. The issue text itself says \"After this merges, `gh run rerun 44929022320 --failed` is enough\", i.e. it is the verification route, not part of the change. So: conclude with request_close_issue, naming the rerun as what remains for @yuma-seno.\n\nShould I end with request_close_issue (it posts the summary and may ask the author to close)? Per my role: \"A pull request you opened has merged and what merged satisfies the issue | `request_close_issue`\". Yes.\n\nAlso worth noting one non-blocking nit the reviewer raised: `.git`-suffix test uses `toContain` so it would pass even if `.git` were kept. Not a defect requiring work — the resulting URL is valid either way. I'll mention it as a note, one sentence, since it's a tangent. Actually it's already recorded in the reviewer's report on the PR thread; repeating it once in my report is fine and cheap. But careful: the summary in request_close_issue is the one place the conclusion is written and the parent's aggregation reads it. #578 is a root issue presumably; keep the summary focused: criteria met + evidence + next step.\n\nLet me write the summary with the required four-part shape (What you concluded / How you know / What you could not establish / What happens next), since request_close_issue's summary becomes the comment.\n\nAlso: the machinery sentence — \"After a pull request you opened has merged, you are started again... conclude the issue by the call your role contract names.\" So end by calling request_close_issue; no agent mention needed.\n\nLet me include the anchors: path:line on main.\n\nLine numbers on main: pushArgs at 262? Earlier grep on main says lines 267-268 for the `-c` entries. Let me give `src/entrypoints/machinery/update_atomaton.ts:257` for `export function pushArgs` — I should verify the exact line numbers rather than guess. Let me grep -n for \"export function pushArgs\" and the test lines.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_a1956e6c-e4a8-4da9-afdc-1a218e4014b1",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"263:export function pushArgs(url: string, token: string, branch: string): string[] {\\n281:function pushBranch(branch: string, token: string): { ok: true } | { fail: string } {\\n284:  const pushed = gitOrFail(pushArgs(origin.stdout.trim(), token, branch), `push ${branch}`);\\n440:describe(\\\"the push argv\\\", () => {\\n443:  test(\\\"a GitHub https remote is pushed with the update token, the checkout's header reset\\\", () => {\\n462:  test(\\\"a remote that is not GitHub https keeps the checkout's own credentials\\\", () => {\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":137}",
+      "tool_call_id": "chatcmpl-tool-99837ff843db0553"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8b1acbafb3be314f",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"summary\": \"The fix is on `main` (merge `8f6893e`, PR #579) and it meets every criterion the issue set: a GitHub https remote is now pushed with `ATOMATON_UPDATE_TOKEN` as the only credential, the non-GitHub path is byte-for-byte what it was, and the new argv test fails against the pre-fix argv. The one thing left is the post-merge confirmation on the failed run, which no tool in this run can do.\\n\\n<details><summary>Criteria against what merged</summary>\\n\\n| The issue asked for | What is on `main` |\\n| --- | --- |\\n| A GitHub https remote pushed with the update token as its only credential | `pushArgs` clears both header forms ahead of `push` and carries the token in the URL — `src/entrypoints/machinery/update_atomaton.ts:263`, with the two resets at `:267`–`:268`; `pushBranch` is now only a caller, `:284` |\\n| The non-GitHub path exactly as it was | the fallback returns `[\\\"push\\\", \\\"--force\\\", url, ...]` with no `-c` and the URL as origin carries it — `src/entrypoints/machinery/update_atomaton.ts:265`; the existing fixture, which pushes to a real bare repository over a file path, still passes |\\n| An argv-level test that would have caught it | `src/entrypoints/machinery/update_atomaton.test.ts:440`, asserting the whole argv with `toEqual` at `:443`; measured against the old argv it fails — 14 pass, 1 fail |\\n| `bun test ./src/entrypoints/machinery` plus the typecheck | 594 pass / 0 fail across 60 files, and `bun run typecheck` exit 0, both run before the merge; `atomaton-check` reported success on the head commit |\\n| No version bump, nothing under `.github/workflows/` | the pull request touched two files, both under `src/entrypoints/machinery/` |\\n</details>\\n\\n**What I could not establish.** The rerun itself. `gh run rerun 44929022320 --failed` is the confirmation the issue names, and this run has no tool that reruns a workflow run, so whether the 403 is actually gone is unmeasured here — the fix rests on the HTTP-server probe recorded in the issue plus the argv this diff builds, not on a push this run made. Also unmeasured: the header-precedence claim (`-c` outranking `.git/config`, and an empty value resetting the list) is git's documented behaviour, verified by that probe rather than by me.\\n\\n**What happens next.** A person reruns the failed job — `gh run rerun 44929022320 --failed`. The job checks out `main` and its `apply-to-self` step runs `bun src/entrypoints/machinery/update_atomaton.ts` (`.github/workflows/release.yml:650`), so the rerun executes this fix with no workflow edit; a successful push opens `atomaton/update-v0.24.0`, the required check runs, the update merges itself, and the notice #577 closes. Nothing else in this issue is outstanding.\\n\\nOne non-blocking nit, already recorded on the pull request: the `.git`-suffix test (`src/entrypoints/machinery/update_atomaton.test.ts:457`) uses `toContain`, so it would pass even if the suffix were kept in the token URL — harmless, since that URL is valid either way, but not pinned.\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now write the closing summary and call request_close_issue.\n\nCriteria table:\n- GitHub https push carries only the update token: met.\n- Non-GitHub path unchanged: met.\n- Argv test that would have caught it: met (measured: fails against pre-fix argv).\n- machinery suite + typecheck: met (594 pass, typecheck exit 0, before merge; check green on head).\n- No version bump / no workflow change: met — PR touched two files under src/.\n\nCould not establish: I cannot rerun the failed workflow run (no tool for `gh run rerun`), so the end-to-end confirmation—that the 403 is gone and `atomaton/update-v0.24.0` gets a successful push—is not measured here. Also the header-precedence behaviour rests on the probe in #578 rather than a push this run made.\n\nNext: @yuma-seno reruns the failed job (gh run rerun 44929022320 --failed); the job checks out main so it runs the fixed script from src/entrypoints/machinery/update_atomaton.ts. Nothing else outstanding.\n\nCareful about the mention rules: request_close_issue ends the session; does a mention inside the summary count as a second call? The instruction: \"A closing message calls at most one thing\". The summary is the comment body posted by request_close_issue. Mentioning @yuma-seno inside it — the tool call itself is in my closing message, plus a mention = two calls? Safer: do not mention; just say \"a person runs ...\" and let the machinery notify. Actually the tool's description says the summary is posted as the comment this call ends on. If I include an @mention in a tool argument, that's not a mention in my message text. Hmm — risk of the machinery refusing. I'll avoid the @mention and write \"whoever pressed Release\" / \"the person who owns the run\". Since the machinery notifies the owner anyway.\n\nWait, but the summary ends up in issue #578's thread — the closing comment. Fine.\n\nOne more: \"Whether it closes now or asks the author to is this tool's decision\". OK.\n\nLet me write it.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_41d5bd43-afb7-44bf-977c-9fda6b7c3525",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #578 is concluded: your conclusion is on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "chatcmpl-tool-8b1acbafb3be314f"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 3,
-      "snapshot_hash": "4d7d6e4d5e6f1bef0b66189606cf536c76b1b68a8103ca9fe0bf391b88a2acf1",
+      "event_count": 9,
+      "snapshot_hash": "812c9dced66cff24bb3c0af75fc8d9ded3b35bf588f2158ac5edb16afddf32b7",
       "version": 1
     }
   },
@@ -1071,6 +1325,28 @@
         }
       },
       "started": "2026-11-22T10:13:12Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-22T10:46:59Z",
+      "ended_because": "completed",
+      "iterations": 5,
+      "messages": 93,
+      "seconds": 20,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "github": {
+          "get_branch": 1,
+          "get_pr": 1,
+          "search_remote_code": 1
+        },
+        "shell": {
+          "bash": 3
+        }
+      },
+      "started": "2026-11-22T10:46:39Z"
     }
   ]
 }
