@@ -20,14 +20,15 @@ import { ref as updateAtomatonRef } from "../entrypoints/machinery/update_atomat
 //
 // The branch the update pushes must run this repository's checks, and a push made
 // with this workflow's own token deliberately runs none — so a merge gated on those
-// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope
-// that the owner adds once; when it is missing the run fails loudly and changes
-// nothing, because the person who started it is standing there and silence is not
-// an answer. It is also the identity the pull request is opened and merged as --
-// GitHub starts no `pull_request` run for a pull request this workflow's token
-// opened, and no `push` for a merge it made, and the check the ruleset requires
-// and the deploy the merge chains to are exactly those events. See
-// `update_atomaton.ts`'s own comment for the whole argument.
+// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and
+// `workflow` scope that the owner adds once, the second because the release ships
+// workflows and GitHub refuses a push that updates one without it; when it is
+// missing the run fails loudly and changes nothing, because the person who started
+// it is standing there and silence is not an answer. It is also the identity the
+// pull request is opened and merged as -- GitHub starts no `pull_request` run for a
+// pull request this workflow's token opened, and no `push` for a merge it made, and
+// the check the ruleset requires and the deploy the merge chains to are exactly
+// those events. See `update_atomaton.ts`'s own comment for the whole argument.
 //
 // ## One update at a time
 //
