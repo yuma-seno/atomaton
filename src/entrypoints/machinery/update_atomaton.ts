@@ -167,7 +167,7 @@ export function updateBody(report: UpdateReport): string {
     report.conflicts.length > 0
       ? "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge."
       : plan.kept.length > 0
-        ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right."
+        ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right, or ask an agent there to help."
         : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.",
     "",
   );
@@ -208,7 +208,8 @@ export function keptComment(report: UpdateReport, prNumber: number): string {
     ...report.plan.kept.map((entry) => `- \`${entry.path}\` (${entry.upstream})`),
     "",
     `The plan is applied on #${prNumber}, which does not merge itself. Read the kept paths there — ` +
-      "each is this repository's words or files against a release that moved elsewhere — and merge by hand when they read right.",
+      "each is this repository's words or files against a release that moved elsewhere — and merge by hand when they read right, " +
+      "or comment on that pull request and ask an agent to help.",
   ].join("\n");
 }
 

@@ -42,7 +42,7 @@ export const NOTICE_MARKER = "<!-- atomaton:new-release -->";
 export function findOpenNotice(repo: string): number | null {
   const result = ghRead(
     "issue", "list", "--repo", repo, "--state", "open",
-    "--search", `"Template release" in:title`,
+    "--search", `"Atomaton release" in:title`,
     "--json", "number,body,state",
   );
   if (result.code !== 0) {

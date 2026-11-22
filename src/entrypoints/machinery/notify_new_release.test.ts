@@ -195,14 +195,16 @@ function reads(
 
 /** A search answering with the open notice's number, or with none. */
 const search = (number: number): FakeGhRule => ({
-  // Anchored on `in:title` as well: an edit or create call carries the notice's
-  // whole body on its argv, and a body that happens to contain the word "list"
-  // would otherwise be answered with a search result.
-  match: ["issue", "list", "in:title"],
+  // Anchored on the search string as well: an edit or create call carries the
+  // notice's whole body on its argv, and a body that happens to contain the word
+  // "list" would otherwise be answered with a search result. Pinned to the exact
+  // query so a title renamed without its search is a failing test, not a run that
+  // opens a second notice beside the one it cannot find.
+  match: ["issue", "list", `"Atomaton release" in:title`],
   stdout: JSON.stringify(
     number === 0
       ? []
-      : [{ number, state: "OPEN", body: `${NOTICE_MARKER}\nTemplate release v0.2.0 is available.` }],
+      : [{ number, state: "OPEN", body: `${NOTICE_MARKER}\nAtomaton release v0.2.0 is available.` }],
   ),
 });
 
@@ -364,7 +366,7 @@ describe("when a tree is behind", () => {
           match: ["issue", "list"],
           // The search answered with the settled notice anyway.
           stdout: JSON.stringify([
-            { number: 4, state: "CLOSED", body: `${NOTICE_MARKER}\nTemplate release v0.1.5 is available.` },
+            { number: 4, state: "CLOSED", body: `${NOTICE_MARKER}\nAtomaton release v0.1.5 is available.` },
           ]),
         },
         { match: ["issue", "create"], stdout: "https://example.test/issues/12" },
