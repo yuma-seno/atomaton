@@ -372,7 +372,7 @@ function defineScript(importMetaUrl) {
 // src/entrypoints/machinery/lib/notice-issue.ts
 var NOTICE_MARKER = "<!-- atomaton:new-release -->";
 function findOpenNotice(repo) {
-  const result = ghRead("issue", "list", "--repo", repo, "--state", "open", "--search", `"Template release" in:title`, "--json", "number,body,state");
+  const result = ghRead("issue", "list", "--repo", repo, "--state", "open", "--search", `"Atomaton release" in:title`, "--json", "number,body,state");
   if (result.code !== 0) {
     log(`WARN could not look for an existing notice in ${repo}: ${result.stderr.trim() || `gh exited ${result.code}`}`);
     return null;
@@ -762,7 +762,7 @@ function updateBody(report) {
   if (report.leftovers.length > 0) {
     lines.push("## Files upstream no longer ships", "", "Reported only \u2014 the manifest cannot tell these from files the adopter wrote,", "so nothing here deletes them on a guess:", "", ...report.leftovers.slice(0, MAX_LISTED).map((path) => `- \`${path}\``), ...report.leftovers.length > MAX_LISTED ? [`- \u2026and ${report.leftovers.length - MAX_LISTED} more`] : [], "");
   }
-  lines.push("## What happens next", "", report.conflicts.length > 0 ? "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them \u2014 the checks will run on the resolved tree, and only then can this merge." : plan.kept.length > 0 ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them \u2014 each is a place this repository's words and the release disagree \u2014 and merge by hand when they read right." : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.", "");
+  lines.push("## What happens next", "", report.conflicts.length > 0 ? "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them \u2014 the checks will run on the resolved tree, and only then can this merge." : plan.kept.length > 0 ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them \u2014 each is a place this repository's words and the release disagree \u2014 and merge by hand when they read right, or ask an agent there to help." : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.", "");
   return `${lines.join(`
 `).trimEnd()}
 `;
@@ -785,7 +785,7 @@ function keptComment(report, prNumber) {
     "",
     ...report.plan.kept.map((entry) => `- \`${entry.path}\` (${entry.upstream})`),
     "",
-    `The plan is applied on #${prNumber}, which does not merge itself. Read the kept paths there \u2014 ` + "each is this repository's words or files against a release that moved elsewhere \u2014 and merge by hand when they read right."
+    `The plan is applied on #${prNumber}, which does not merge itself. Read the kept paths there \u2014 ` + "each is this repository's words or files against a release that moved elsewhere \u2014 and merge by hand when they read right, " + "or comment on that pull request and ask an agent to help."
   ].join(`
 `);
 }
@@ -815,14 +815,26 @@ function gitOrFail(args, what) {
   }
   return { stdout: result.stdout };
 }
+function pushArgs(url, token, branch) {
+  const github = /^https:\/\/github\.com\/(.+?)(?:\.git)?$/.exec(url);
+  if (!github)
+    return ["push", "--force", url, `HEAD:refs/heads/${branch}`];
+  return [
+    "-c",
+    "http.extraheader=",
+    "-c",
+    "http.https://github.com/.extraheader=",
+    "push",
+    "--force",
+    `https://x-access-token:${token}@github.com/${github[1]}`,
+    `HEAD:refs/heads/${branch}`
+  ];
+}
 function pushBranch(branch, token) {
   const origin = gitOrFail(["remote", "get-url", "origin"], "read the origin remote");
   if ("fail" in origin)
     return origin;
-  const url = origin.stdout.trim();
-  const github = /^https:\/\/github\.com\/(.+?)(?:\.git)?$/.exec(url);
-  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;
-  const pushed = gitOrFail(["push", "--force", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);
+  const pushed = gitOrFail(pushArgs(origin.stdout.trim(), token, branch), `push ${branch}`);
   return "fail" in pushed ? pushed : { ok: true };
 }
 function defaultBranch(repo) {
@@ -863,7 +875,7 @@ function main() {
   const source = values.source !== undefined && values.source !== "" ? Number(values.source) : 0;
   const token = process.env.ATOMATON_UPDATE_TOKEN?.trim() ?? "";
   if (!token) {
-    console.error("::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, " + "which this workflow's own token may not do: a push from it would run none of the checks the " + "merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo " + "scope, and run this again. Nothing has been changed.");
+    console.error("::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, " + "which this workflow's own token may not do: a push from it would run none of the checks the " + "merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT " + "with repo and workflow scope, or a fine-grained token with Contents and Pull requests read " + "and write and Workflows write \u2014 the release ships workflows, and a push that updates one is " + "refused without it. Then run this again. Nothing has been changed.");
     process.exit(1);
   }
   const local = readLocalManifest();
@@ -1060,6 +1072,7 @@ if (import.meta.main)
 export {
   doneComment,
   keptComment,
+  pushArgs,
   ref,
   stopComment,
   updateBody,
