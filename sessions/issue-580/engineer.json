@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #580: update: name the workflow scope wherever the update token's scope is described\n\nAttempt 3 of the v0.24.0 release (after #579 fixed the credential precedence) reached the push as the update token, and GitHub refused it:\n\n```\n[update] applied: 6 taken, 2 added, 0 removed, 0 merged, 0 conflicted\n::error::could not push atomaton/update-v0.24.0: To https://github.com/yuma-seno/atomaton\n ! [remote rejected] HEAD -> atomaton/update-v0.24.0 (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/atomaton-update.yml` without `workflow` scope)\n```\n\nRun: https://github.com/yuma-seno/atomaton/actions/runs/44929022320 (attempt 3).\n\n## This part is the token, not the code\n\nGitHub refuses any push that changes a file under `.github/workflows/` unless the pushing credential carries the `workflow` scope (classic PAT) or the `Workflows` permission (fine-grained). The API enforces the same rule, so there is no code path around it. This is not the #575 decision: that one is about the agent's GitHub App, which must not be able to publish workflows. `ATOMATON_UPDATE_TOKEN` is a separate identity whose entire purpose is to move the release's files — workflows included — so it is the one credential that is supposed to have the scope.\n\nThe person setting the secret has to add it. Nothing in this repository can.\n\n## What is wrong here\n\nEvery place that tells a person which scope to set names only `repo`, so the first adopter whose update touches a workflow hits exactly this refusal, one run after following the instructions correctly:\n\n- `docs/runtime/tasks/move-to-a-newer-release.md:39-43` — \"a repository secret holding a token with repo scope\"\n- `CONTRIBUTING.md:251` — \"a fine-grained or classic PAT with repo scope\"\n- `src/workflows/atomaton-update.wac.ts:23` — the header comment says \"a token with repo scope\"\n- `src/entrypoints/machinery/update_atomaton.ts:25` — \"a personal access token with repo scope\"\n- `src/entrypoints/machinery/update_atomaton.ts:311-316` — the refusal for a missing token asks for \"repo scope\" too; it should also name the workflow scope, because a token that has `repo` and not `workflow` fails two steps later with a message from GitHub rather than from us.\n\n## The edit\n\nName both scopes, and say why the second one is needed — the release ships workflows, so a push that updates one is refused without it:\n\n- classic PAT: `repo` and `workflow`\n- fine-grained PAT: `Contents`, `Pull requests`, and `Workflows` — read and write\n\nKeep each sentence in the voice already used in these files. In the `::error::` text, the scope sentence becomes something like: \"Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT with `repo` and `workflow` scope (or a fine-grained token with Contents, Pull requests and Workflows read and write), and run this again. Nothing has been changed.\"\n\n## Constraints\n\n- No version bump.\n- The wac header comment does not reach the generated YAML, so no workflow file should change; run `bun run synth` and confirm `git status` shows only these five files.\n- These are docs and comments plus one error string; no behaviour change and no new test is expected.\n",
+      "content": "Issue #580: update: name the workflow scope wherever the update token's scope is described\n**Labels:** atomaton/in-progress\n\nAttempt 3 of the v0.24.0 release (after #579 fixed the credential precedence) reached the push as the update token, and GitHub refused it:\n\n```\n[update] applied: 6 taken, 2 added, 0 removed, 0 merged, 0 conflicted\n::error::could not push atomaton/update-v0.24.0: To https://github.com/yuma-seno/atomaton\n ! [remote rejected] HEAD -> atomaton/update-v0.24.0 (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/atomaton-update.yml` without `workflow` scope)\n```\n\nRun: https://github.com/yuma-seno/atomaton/actions/runs/44929022320 (attempt 3).\n\n## This part is the token, not the code\n\nGitHub refuses any push that changes a file under `.github/workflows/` unless the pushing credential carries the `workflow` scope (classic PAT) or the `Workflows` permission (fine-grained). The API enforces the same rule, so there is no code path around it. This is not the #575 decision: that one is about the agent's GitHub App, which must not be able to publish workflows. `ATOMATON_UPDATE_TOKEN` is a separate identity whose entire purpose is to move the release's files — workflows included — so it is the one credential that is supposed to have the scope.\n\nThe person setting the secret has to add it. Nothing in this repository can.\n\n## What is wrong here\n\nEvery place that tells a person which scope to set names only `repo`, so the first adopter whose update touches a workflow hits exactly this refusal, one run after following the instructions correctly:\n\n- `docs/runtime/tasks/move-to-a-newer-release.md:39-43` — \"a repository secret holding a token with repo scope\"\n- `CONTRIBUTING.md:251` — \"a fine-grained or classic PAT with repo scope\"\n- `src/workflows/atomaton-update.wac.ts:23` — the header comment says \"a token with repo scope\"\n- `src/entrypoints/machinery/update_atomaton.ts:25` — \"a personal access token with repo scope\"\n- `src/entrypoints/machinery/update_atomaton.ts:311-316` — the refusal for a missing token asks for \"repo scope\" too; it should also name the workflow scope, because a token that has `repo` and not `workflow` fails two steps later with a message from GitHub rather than from us.\n\n## The edit\n\nName both scopes, and say why the second one is needed — the release ships workflows, so a push that updates one is refused without it:\n\n- classic PAT: `repo` and `workflow`\n- fine-grained PAT: `Contents`, `Pull requests`, and `Workflows` — read and write\n\nKeep each sentence in the voice already used in these files. In the `::error::` text, the scope sentence becomes something like: \"Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT with `repo` and `workflow` scope (or a fine-grained token with Contents, Pull requests and Workflows read and write), and run this again. Nothing has been changed.\"\n\n## Constraints\n\n- No version bump.\n- The wac header comment does not reach the generated YAML, so no workflow file should change; run `bun run synth` and confirm `git status` shows only these five files.\n- These are docs and comments plus one error string; no behaviour change and no new test is expected.\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-22T10:47:47Z",
@@ -812,13 +812,305 @@
       "role": "tool",
       "content": "{\"number\":581,\"url\":\"https://github.com/yuma-seno/atomaton/pull/581\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "chatcmpl-tool-9141ef6b6b30fa87"
+    },
+    {
+      "role": "user",
+      "content": "PR #581: docs: name the workflow scope wherever the update token's scope is described\n**Labels:** atomaton/in-progress\n**Linked Issue:** #580\n\n/reviewer\n\nPart of #580\nGitHub refuses a push that changes a file under `.github/workflows/` unless the\npushing credential carries the `workflow` scope (classic PAT) or the `Workflows`\npermission (fine-grained). The update machinery is the one credential whose\npurpose is to move a release's files, workflows included, so it is the one that\nneeds the second scope — but every place telling a person which scope to set\nnamed only `repo`. Attempt 3 of the v0.24.0 release followed those instructions\ncorrectly and was refused in the update's push:\n\n```\n! [remote rejected] HEAD -> atomaton/update-v0.24.0 (refusing to allow a Personal Access Token\n  to create or update workflow `.github/workflows/atomaton-update.yml` without `workflow` scope)\n```\n\n## What changed\n\nFive places, four files — both scopes named wherever the token's scope is\ndescribed, and the reason the second one is needed stated once in each:\n\n| Where | Now says |\n| --- | --- |\n| `docs/runtime/tasks/move-to-a-newer-release.md:39` | `repo` and `workflow`; fine-grained `Contents` and `Pull requests` read and write, plus `Workflows` write |\n| `CONTRIBUTING.md:251` | the same, with GitHub's refusal of a push that updates a workflow named as the why |\n| `src/workflows/atomaton-update.wac.ts:23` | the header comment, a token with `repo` and `workflow` scope |\n| `src/entrypoints/machinery/update_atomaton.ts:25` | the module comment, the same |\n| `src/entrypoints/machinery/update_atomaton.ts:335` | the `::error::` for a missing token — a classic PAT with `repo` and `workflow`, or fine-grained `Contents` and `Pull requests` read and write and `Workflows` write, and why |\n\nThe error string earns the extra clause: a token holding `repo` and not\n`workflow` gets past the missing-token check and fails two steps later with\nGitHub's wording, so the message a person reads first is now the one that says\nwhat to set.\n\n`Workflows` is write-only on a fine-grained token — GitHub's permission table has\nno read level for it — so the fine-grained sentence says read and write for\n`Contents` and `Pull requests` and write alone for `Workflows`.\n\nNo version bump, no behaviour change, no new test: this is four sentences and one\nerror string.\n\n## Verification\n\n- `bun run synth` — exit 0; `git status --porcelain` afterwards lists these four\n  files and nothing else, confirming the wac header comment does not reach the\n  generated YAML.\n- `bun run typecheck` — exit 0.\n- `bun test` across the whole suite — 2522 pass, 0 fail (192 files).\n- `bun test src/entrypoints/machinery/update_atomaton.test.ts` — 15 pass, 0 fail.\n  The one test touching this path asserts only that the message names\n  `ATOMATON_UPDATE_TOKEN`, so the rewording does not weaken it.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/45014171432)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T10:51:23Z",
+        "event_type": "pr_opened",
+        "id": "pr-581",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T10:56:14Z",
+        "event_type": "issue_comment",
+        "id": 7078112809,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/CONTRIBUTING.md b/CONTRIBUTING.md\nindex f1f25626..27b6fb46 100644\n--- a/CONTRIBUTING.md\n+++ b/CONTRIBUTING.md\n@@ -248,9 +248,11 @@ branch: the push is refused on **identity**, measured here. The update machinery\n replaces those files, so the one secret this repository needs is the same one an\n adopter sets:\n \n-- `ATOMATON_UPDATE_TOKEN` — a fine-grained or classic PAT with repo scope, set as\n-  an Actions secret. The update workflow pushes `.github/` under it, including the\n-  workflow files the release carries. Set it:\n+- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\n+  fine-grained one with `Contents` and `Pull requests` read and write, plus\n+  `Workflows` write; set as an Actions secret. The update workflow pushes\n+  `.github/` under it, including the workflow files the release carries, and\n+  GitHub refuses a push that updates one without the workflow permission. Set it:\n \n   ```bash\n   gh secret set ATOMATON_UPDATE_TOKEN\ndiff --git a/docs/runtime/tasks/move-to-a-newer-release.md b/docs/runtime/tasks/move-to-a-newer-release.md\nindex e650c603..8b2cd3be 100644\n--- a/docs/runtime/tasks/move-to-a-newer-release.md\n+++ b/docs/runtime/tasks/move-to-a-newer-release.md\n@@ -37,10 +37,13 @@ is decided by what the merge measured, not by a flag:\n   the files yourself. The checks run on the resolved tree, and then it can merge.\n \n The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\n-a token with repo scope. That is deliberate: a push made with the workflow's own\n-token starts no checks, so a merge gated on them would gate on nothing. If the\n-secret is missing the run fails loudly and changes nothing — set the secret and\n-run it again.\n+a token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\n+`Pull requests` read and write, plus `Workflows` write. That is deliberate: a push\n+made with the workflow's own token starts no checks, so a merge gated on them\n+would gate on nothing. The second scope is not optional: the release ships\n+workflows, and GitHub refuses any push that changes a file under\n+`.github/workflows/` without it. If the secret is missing the run fails loudly and\n+changes nothing — set the secret and run it again.\n \n ## What it does not touch\n \ndiff --git a/src/entrypoints/machinery/update_atomaton.ts b/src/entrypoints/machinery/update_atomaton.ts\nindex b52279dd..780f4e0b 100644\n--- a/src/entrypoints/machinery/update_atomaton.ts\n+++ b/src/entrypoints/machinery/update_atomaton.ts\n@@ -22,9 +22,11 @@\n  * The branch this pushes must run the repository's checks, and a push made with\n  * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those\n  * checks gate would then be merging unverified content. So the workflow that runs\n- * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\n- * and a run without it fails loudly and does nothing — a person who pressed the\n- * button is standing there, and silence is not an answer.\n+ * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with `repo` and\n+ * `workflow` scope, the second because the release ships workflows and GitHub\n+ * refuses a push that updates one without it. A run without the token fails\n+ * loudly and does nothing — a person who pressed the button is standing there, and\n+ * silence is not an answer.\n  *\n  * ## Why the stop is a pull request, and why the token does the writing\n  *\n@@ -333,8 +335,10 @@ function main(): void {\n     console.error(\n       \"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \" +\n         \"which this workflow's own token may not do: a push from it would run none of the checks the \" +\n-        \"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo \" +\n-        \"scope, and run this again. Nothing has been changed.\",\n+        \"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \" +\n+        \"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \" +\n+        \"and write and Workflows write — the release ships workflows, and a push that updates one is \" +\n+        \"refused without it. Then run this again. Nothing has been changed.\",\n     );\n     process.exit(1);\n   }\ndiff --git a/src/workflows/atomaton-update.wac.ts b/src/workflows/atomaton-update.wac.ts\nindex bfffb91c..09ab8692 100644\n--- a/src/workflows/atomaton-update.wac.ts\n+++ b/src/workflows/atomaton-update.wac.ts\n@@ -20,14 +20,15 @@ import { ref as updateAtomatonRef } from \"../entrypoints/machinery/update_atomat\n //\n // The branch the update pushes must run this repository's checks, and a push made\n // with this workflow's own token deliberately runs none — so a merge gated on those\n-// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with repo scope\n-// that the owner adds once; when it is missing the run fails loudly and changes\n-// nothing, because the person who started it is standing there and silence is not\n-// an answer. It is also the identity the pull request is opened and merged as --\n-// GitHub starts no `pull_request` run for a pull request this workflow's token\n-// opened, and no `push` for a merge it made, and the check the ruleset requires\n-// and the deploy the merge chains to are exactly those events. See\n-// `update_atomaton.ts`'s own comment for the whole argument.\n+// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\n+// `workflow` scope that the owner adds once, the second because the release ships\n+// workflows and GitHub refuses a push that updates one without it; when it is\n+// missing the run fails loudly and changes nothing, because the person who started\n+// it is standing there and silence is not an answer. It is also the identity the\n+// pull request is opened and merged as -- GitHub starts no `pull_request` run for a\n+// pull request this workflow's token opened, and no `push` for a merge it made, and\n+// the check the ruleset requires and the deploy the merge chains to are exactly\n+// those events. See `update_atomaton.ts`'s own comment for the whole argument.\n //\n // ## One update at a time\n //\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-22T10:56:21Z",
+        "event_type": "pr_diff",
+        "id": "pr-581-diff",
+        "layer": "github-context",
+        "sha": "3967f14a",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "No merge-blocking defect: the five places describing `ATOMATON_UPDATE_TOKEN`'s scope now agree with each other and with what the credential actually does, so I merged #581 (`merged: true`). This node is settled; the stale wording in the deployed runtime copy is refreshed the next time a release applies itself.\n\n<details><summary>Evidence for the verdict, as reviewed before merging</summary>\n\n- The edit is where the issue said it is, and consistent across all four files: `src/entrypoints/machinery/update_atomaton.ts:25-29` and `:336-341`, `src/workflows/atomaton-update.wac.ts:23-27`, `docs/runtime/tasks/move-to-a-newer-release.md:39-45`, `CONTRIBUTING.md:251-255` — classic `repo` + `workflow`; fine-grained `Contents` and `Pull requests` read and write with `Workflows` write, matching the correction in the issue thread.\n- The permission list covers what the token actually does. The token carries the push and `pr create`, `pr edit`, `pr merge` (`src/entrypoints/machinery/update_atomaton.ts:482`, `:466`, `:549`); that script's issue comments go through `gh(...)`, i.e. the workflow's `GH_TOKEN`, not the update token (`:364`, `:406`), so no `Issues` permission is missing from the fine-grained list.\n- The one remaining \"repo scope\" sentence is `.github/atomaton-runtime/scripts/update_atomaton.ts:806`, the *deployed* copy of the script. That tree is applied from releases and lags `src/` deliberately (`CONTRIBUTING.md:28-34`), so its staleness until the next release is expected and not a miss in this change.\n- No generated file belongs in this diff, which is why `synth` would not move it: `synth-workflows` writes `dist/.github/workflows/*.yml` (`src/synth-workflows.ts:3-4`, `:142`) and `build-dist` writes `dist/.github` (`src/build-dist.ts:62`), while `dist/.github/` is untracked (`CONTRIBUTING.md:13-15`). The generated workflow's header is a fixed template carrying none of the source comment (`.github/workflows/atomaton-update.yml:1-11`).\n- No test depends on the reworded string: `src/entrypoints/machinery/update_atomaton.test.ts:207-209` asserts only that stderr contains `ATOMATON_UPDATE_TOKEN`. Head-commit checks before merge: `atomaton-check` completed/success, with `pull-request-checks (verify)`, `atomaton-tools` and both plan jobs also success. No earlier review round exists — `get_pr_reviews` and `list_pr_review_comments` each returned 0, and the thread held only the claim comment.\n\n</details>\n\n**What I could not establish.** This run has no shell, so I did not re-run `bun run synth` or `bun test`; the \"no generated file changed\" conclusion rests on the diff and on where `synth`/`build-dist` write, not on a fresh build. I also did not independently re-check GitHub's fine-grained permission table for `Workflows` — I took the write-only correction recorded in the issue thread, which the diff follows.\n\n**What happens next.** Nothing on this node. The merge reported the parent #580 as reinvoked to `engineer`, and the deployed `.github/atomaton-runtime/scripts/update_atomaton.ts:806` keeps the old wording until a release applies this change onto `.github/`.\n\n\n---\n_Tokens: 502348 total (491977 prompt + 10371 completion, 433536 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45014696722) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T10:56:21Z",
+        "event_type": "pr_comment",
+        "id": 7078114116,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "The pull request merged. Let me check the merged state against the issue's five criteria before concluding.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-80708be6dacb6c49",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -2 && echo '=== merged head files ===' && git show --stat --oneline HEAD | head -10 && echo '=== remaining \\\"repo scope\\\" in the tree ===' && grep -rn 'repo scope' --include=*.ts --include=*.md . | grep -v node_modules | grep -v '^./dist/'\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8790c02337cafe8f",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && echo '=== version unchanged? ===' && grep -n '\\\"version\\\"' package.json && echo '=== workflow scope now named ===' && grep -rn 'workflow` scope\\\\|with repo and workflow\\\\|`Workflows` write\\\\|Workflows write' --include=*.ts --include=*.md . | grep -v node_modules | grep -v '^./dist/'\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The pull request #581 merged. Now I must judge whether what merged satisfies what #580 asked for.\n\nThe issue asked for five edits in four files:\n1. `docs/runtime/tasks/move-to-a-newer-release.md:39-43` — done\n2. `CONTRIBUTING.md:251` — done\n3. `src/workflows/atomaton-update.wac.ts:23` — done\n4. `src/entrypoints/machinery/update_atomaton.ts:25` — done\n5. `src/entrypoints/machinery/update_atomaton.ts:311-316` (`::error::`) — done\n\nFine-grained correction: Contents and Pull requests read and write, Workflows write — done in all three places that name fine-grained (docs, CONTRIBUTING, error string). The two comments (wac header, module comment) mention only classic `repo` and `workflow` — is that a gap? The issue's edit section says \"Name both scopes\" with classic and fine-grained lines. Hmm. The wac header and module comment now say \"a token with `repo` and `workflow` scope, the second because...\". They don't name the fine-grained permission set. Is that acceptable?\n\nLet me read the issue text again:\n\n\"- classic PAT: `repo` and `workflow`\n- fine-grained PAT: `Contents`, `Pull requests`, and `Workflows` — read and write\"\n\nwith the correction: fine-grained `Contents` and `Pull requests` read and write, and `Workflows` write.\n\nThe issue says \"Name both scopes\" — \"both scopes\" means repo and workflow for a classic PAT. The fine-grained list is an alternative way of naming the same thing. The five places listed: two of them are terse header/module comments where the existing voice is a phrase (\"a token with repo scope\"). Naming the full fine-grained permission set in a comment would be heavy. Does the issue require it at all five places? It says: \"Name both scopes, and say why the second one is needed\" — the intro sentence to the edit list. Then bullets give classic and fine-grained forms.\n\nHmm. Should the comments have named the fine-grained form too? The reviewer found no merge-blocking defect and merged. My job now: judge against acceptance criteria. The issue's core requirement: \"Every place that tells a person which scope to set names only `repo`\" — fixed. The `::error::` (the one a person actually hits) names both forms. The docs and CONTRIBUTING (the ones an adopter follows to set the secret) name both forms. The two source comments name the classic scopes with the reason; they don't enumerate fine-grained.\n\nIs that an unmet criterion? I'd say the criterion is \"name the workflow scope wherever the update token's scope is described\" — the title. The comments do name the workflow scope now. The fine-grained enumeration is a detail that the two comments, being terse technical prose about why a token exists (fine-grained isn't an option the comment discusses; it says \"personal access token with repo and workflow scope\" — actually the module comment does say \"a personal access token\", which suggests classic). The corpus: CONTRIBUTING says \"a classic PAT ... or a fine-grained one ...\". The comments say only the classic scopes because they say \"personal access token\" generically.\n\nI think this satisfies the issue. But let me verify the merged state on the actual branch — the merged head — to be sure the content is what I expect and no generated files changed in the merged commit. Also note the reviewer said the merged head checks passed and merged true.\n\nI should verify: after merge, is `.github/workflows/atomaton-update.yml` unchanged? The reviewer said generated workflow header is fixed template and the diff shown has only four files. The diff provided in the prompt confirms only those four files changed.\n\nAlso constrains: \"No version bump\" — the diff has no package.json change. Good.\n\nSo: criteria met. But wait — one thing to check: the issue says the \"wac header comment does not reach the generated YAML, so no workflow file should change\". Confirmed by the diff.\n\nNow the outcome: call `request_close_issue` with a summary. Per role contract: \"A pull request you opened has merged and what merged satisfies the issue → request_close_issue\".\n\nShould I do any verification first? The diff is given in full in the prompt, and it's the merged state. I could double-check the working tree / branch to be sure, but the merge landed on the parent's branch. Let me do a quick read-only check to confirm the merged content and that no generated file changed in the merge commit — cheap and gives a checkable anchor. Actually the diff in the prompt is authoritative enough. But a light check is worthwhile: verify `.github/workflows/atomaton-update.yml` has no scope text (it's generated from a template, so it wouldn't), and confirm the deployed runtime copy is stale (expected).\n\nHmm, is the stale deployed copy an unmet criterion? The issue named five places; `.github/atomaton-runtime/scripts/update_atomaton.ts` is generated from `src/` by build-dist — it's the deployed tree, which is gitignored? Wait no: `.github/atomaton-runtime/` is tracked in this repo (the reviewer cited `.github/atomaton-runtime/scripts/update_atomaton.ts:806`). It is generated and replaced wholesale on upgrade. The issue explicitly said not to edit generated output: \"Never hand-edit or commit a file that a build produces.\" And it said only four files may differ after synth — confirming `dist/` is untracked. So `.github/atomaton-runtime/` being stale is expected until the next release applies. The issue's title says \"wherever the update token's scope is described\" — a tracked `.github/atomaton-runtime/scripts/update_atomaton.ts:806` still says \"repo scope\". Is that an unmet criterion?\n\nThe issue named exactly five edit sites and said \"Make the five edits named above, and nothing else.\" So no — the deployed copy is out of scope, and editing it would violate \"nothing else\" plus the never-hand-edit-generated-output rule. But I should name it in my report as a known residual: the running copy in this repo's own `.github/atomaton-runtime/` still says repo scope until the next release applies the change. Actually, wait — does the update machinery then replace it? Yes, `.github/atomaton-runtime/scripts/` is shipped by the release and will be updated on the next release application. That means this repo's own red-run message stays stale until then. Worth naming as a factual residual, not a defect of this change.\n\nLet me quickly verify that with a grep so my claim is anchored, and check the merged files' line numbers for the report.\n\nLet me run a couple of read-only commands.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_f5e8fc5f-6bac-41cf-af3f-023357900d0c",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"failed\",\"exit_code\":1,\"stdout\":\"ae239c0 Merge pull request #581 from yuma-seno/atomaton/issue-580\\n=== merged head files ===\\nae239c0 Merge pull request #581 from yuma-seno/atomaton/issue-580\\n .gitattributes                                     |    31 +\\n .github/atomaton-release.json                      |   137 +\\n .../scripts/aggregate_sub_issues.ts                |  1466 ++\\n .github/atomaton-runtime/scripts/check_ending.ts   |   345 +\\n .../atomaton-runtime/scripts/check_live_tools.ts   |   384 +\\n .../scripts/check_sub_issue_closure.ts             |   141 +\\n .github/atomaton-runtime/scripts/claim_turn.ts     |   598 +\\n .github/atomaton-runtime/scripts/decide_reask.ts   |   279 +\\n .../atomaton-runtime/scripts/decide_turn_ending.ts |   118 +\\n=== remaining \\\"repo scope\\\" in the tree ===\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":744}",
+      "tool_call_id": "chatcmpl-tool-80708be6dacb6c49"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"=== version unchanged? ===\\n5:  \\\"version\\\": \\\"0.24.0\\\",\\n=== workflow scope now named ===\\n./src/workflows/atomaton-update.wac.ts:24:// `workflow` scope that the owner adds once, the second because the release ships\\n./src/entrypoints/machinery/update_atomaton.ts:26: * `workflow` scope, the second because the release ships workflows and GitHub\\n./src/entrypoints/machinery/update_atomaton.ts:339:        \\\"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \\\" +\\n./src/entrypoints/machinery/update_atomaton.ts:340:        \\\"and write and Workflows write — the release ships workflows, and a push that updates one is \\\" +\\n./docs/runtime/tasks/move-to-a-newer-release.md:40:a token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\\n./docs/runtime/tasks/move-to-a-newer-release.md:41:`Pull requests` read and write, plus `Workflows` write. That is deliberate: a push\\n./CONTRIBUTING.md:251:- `ATOMATON_UPDATE_TOKEN` — a classic PAT with `repo` and `workflow` scope, or a\\n./CONTRIBUTING.md:253:  `Workflows` write; set as an Actions secret. The update workflow pushes\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":184}",
+      "tool_call_id": "chatcmpl-tool-8790c02337cafe8f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8900891f137382d1",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'repo scope\\\\|ATOMATON_UPDATE_TOKEN is not set' .github/atomaton-runtime/scripts/update_atomaton.ts | head; echo \\\"exit: $?\\\"; git status --porcelain\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-a6c72fcc35261006",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git show --stat HEAD | grep -E 'CONTRIBUTING|move-to-a-newer|update_atomaton|atomaton-update' \"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Interesting: `grep -rn 'repo scope'` across tracked .ts/.md outside dist returned nothing — even `.github/atomaton-runtime/scripts/update_atomaton.ts`? The reviewer said line 806 there has the old wording. Let me check: maybe my grep excluded it because it's `.ts` and not under dist — it should have matched. Exit code 1 means no match anywhere. So the runtime copy... let me check specifically.\n\nHmm, wait — the first command's exit code was 1 (grep found nothing in the last pipeline), so stdout was still printed. So indeed no \"repo scope\" remaining outside dist. That contradicts the reviewer's claim about `.github/atomaton-runtime/scripts/update_atomaton.ts:806`. Let me check that file directly.\n\nPossibly the merge applied the runtime copy too? No — the diff had four files. Maybe the .github/atomaton-runtime copy is in dist-like state... let me grep there.\n\nActually maybe the runtime copy was updated by something? Let me check.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_a8b630ba-8bd5-4b13-b34a-0132db133877",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"806:    console.error(\\\"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \\\" + \\\"which this workflow's own token may not do: a push from it would run none of the checks the \\\" + \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a token with repo \\\" + \\\"scope, and run this again. Nothing has been changed.\\\");\\nexit: 0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":266}",
+      "tool_call_id": "chatcmpl-tool-8900891f137382d1"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" .../atomaton-runtime/scripts/update_atomaton.ts    |   973 +\\n .github/workflows/atomaton-update.yml              |    46 +\\n CONTRIBUTING.md                                    |   457 +\\n docs/runtime/tasks/move-to-a-newer-release.md      |   102 +\\n src/entrypoints/machinery/update_atomaton.test.ts  |   474 +\\n src/entrypoints/machinery/update_atomaton.ts       |   607 +\\n src/workflows/atomaton-update.wac.ts               |   100 +\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":238}",
+      "tool_call_id": "chatcmpl-tool-a6c72fcc35261006"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a7557ebaee052252",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn 'repo scope' --include='*.ts' --include='*.md' . 2>/dev/null | grep -v node_modules | grep -v '^\\\\./dist/' ; echo \\\"--- direct ---\\\"; grep -c 'repo scope' .github/atomaton-runtime/scripts/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The `git show --stat HEAD` shows all files as added (+) — that's because this merge is against an orphan-ish parent? Odd. It looks like the merge commit's diff against its first parent shows enormous additions (the whole tree). Probably the checkout here has a shallow history or the merge brought the whole tree. Wait — `.gitattributes 31 +`, `.github/atomaton-release.json 137 +` all shown as additions. That suggests the merge's first parent was... hmm, maybe this merge is against the sub-issue branch cut from parent, and the parent branch (`main`?) — no.\n\nActually maybe the merge commit's first parent is the issue branch whose base was empty? Regardless, the earlier grep on the working tree is what matters: my grep for 'repo scope' outside dist returned nothing — but the `.github/atomaton-runtime/scripts/update_atomaton.ts:806` DOES contain \"repo scope\"! Why didn't my grep match it?\n\nBecause my grep excluded... I used `--include=*.ts --include=*.md . | grep -v node_modules | grep -v '^./dist/'`. `.github/atomaton-runtime/scripts/update_atomaton.ts` starts with `./.github/...` — not filtered. So it should have matched. Unless the `-v node_modules` ... no.\n\nHmm, wait, the first command's grep output was empty and exit_code 1 — but exit code 1 there is from the final `grep -v`. Let me re-check: `grep -rn 'repo scope' ... | grep -v node_modules | grep -v '^./dist/'` — if the first grep found a match, the pipeline would print it. It printed nothing. But the direct grep just now found line 806 with \"repo scope\".\n\nAh — possibly `--include=*.ts` combined with `-r .` and a hidden directory `.github` — recursive grep from `.` includes hidden dirs, yes. Hmm, but maybe grep's output paths start with `./.github/...` and my patterns are fine.\n\nWait — maybe the file is untracked/ignored and grep respects .gitignore? No, plain grep doesn't.\n\nLet me just re-run to see. Perhaps my `grep -rn` ran in the first tool call before... no, same tree.\n\nActually! The first call's `git show --stat` output was huge and the whole stdout may have been truncated? No, stdout shown seems complete-ish. Hmm, but \"output_truncated\": false.\n\nLet me re-run the grep carefully.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_2852c1af-71d4-4fbd-bf75-86c1696febb9",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"failed\",\"exit_code\":1,\"stdout\":\"--- direct ---\\n0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":195}",
+      "tool_call_id": "chatcmpl-tool-a7557ebaee052252"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-88cc29afd16586a3",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn 'ATOMATON_UPDATE_TOKEN' src/content .github/atomaton docs README.md 2>/dev/null | grep -v node_modules\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-bf1fe2255a461a88",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '39,45p' docs/runtime/tasks/move-to-a-newer-release.md && echo '--- wac ---' && sed -n '23,27p' src/workflows/atomaton-update.wac.ts && echo '--- error ---' && sed -n '336,342p' src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now `grep -c 'repo scope' .github/atomaton-runtime/scripts/update_atomaton.ts` returns 0?! But the previous command matched line 806 with `'repo scope\\|ATOMATON_UPDATE_TOKEN is not set'`. Ah — line 806 contains \"a token with repo \\\" + \\\"scope\" — the literal text in the generated file is `\"with repo \" + \"scope\"`, so the words \"repo scope\" aren't adjacent! That's why. The reviewer's claim cited the line correctly; my grep pattern was wrong.\n\nSo the deployed copy's message is the old one, broken across the string concatenation as `repo \" + \"scope`. It remains stale until the next release applies the update. Confirmed by direct read.\n\nSo the residual is real: `.github/atomaton-runtime/scripts/update_atomaton.ts:806` still asks for repo scope — that's the bundled copy the running workflow uses; it's regenerated/replaced when a release is applied (per the repo's own machinery). The issue said only these four files may differ and no generated artifact should change, so this is expected, not a miss.\n\nWait — is it? Hmm. `.github/atomaton-runtime/` is tracked in this repo. It's generated from `src/entrypoints/machinery/...` by build-dist into `dist/.github/atomaton-runtime/`, and then the *release* applies that onto `.github/`. So on the next release application the message updates. The issue explicitly said: \"The wac header comment does not reach the generated YAML, so no workflow file should change; run `bun run synth` and confirm `git status` shows only these five files.\" — and \"only those four files may differ\". So the observed state matches exactly what the issue asked for.\n\nSo: all five criteria met. Now conclude with `request_close_issue`.\n\nLet me verify the exact criteria list:\n1. `docs/runtime/tasks/move-to-a-newer-release.md:39-43` names both scopes + why → merged, lines 39-45.\n2. `CONTRIBUTING.md:251` → merged, 251-255.\n3. `src/workflows/atomaton-update.wac.ts:23` → merged, 23-27.\n4. `src/entrypoints/machinery/update_atomaton.ts:25` → merged, 25-30.\n5. `src/entrypoints/machinery/update_atomaton.ts:311-316` error → merged, 336-341.\n- Correction applied: fine-grained = Contents and Pull requests read and write, Workflows write. Docs line 40-41, CONTRIBUTING 251-253, error 339-340.\n- No version bump: package.json \"version\": \"0.24.0\" (unchanged; the v0.24.0 release declared it).\n- No generated workflow change: the merged diff touched four files only; `.github/workflows/atomaton-update.yml` was not among the four (the huge stat listing above is an artifact of comparing the merge to an unusual first parent — hmm, careful: that stat showed `.github/workflows/atomaton-update.yml | 46 +` as added. That's the diff against the first parent... suspicious. But the PR diff in the prompt from the machinery showed exactly four files. And the merge brought the branch into the parent branch; the `git show --stat HEAD` listing whole-tree additions suggests the first parent is empty (shallow clone?), i.e. `git show` compares against parent 1 which... \n\nLet me check: `git log --oneline -2` showed only one commit (ae239c0) — so the clone is shallow (depth 1), and `git show --stat` on a shallow root commit shows the whole tree as added. That explains it. So I cannot read the merge diff from git here; the PR diff in the prompt is my evidence.\n\nSo the anchor for \"only four files changed\" is the PR diff shown to me (machinery-provided) plus my own earlier `git status`/`git diff --stat` during the run (4 files, 30 insertions, 20 deletions).\n\nGood. Everything is met. Now: does the issue's goal get satisfied? The purpose: an adopter following the instructions sets a token that can actually push workflows. Yes.\n\nOne more consideration: the title says \"name the workflow scope wherever the update token's scope is described\". Is there anywhere else in tracked source that describes the scope and still says something incomplete? `CONTRIBUTING.md:150` mentions the secret without scope. `.github/atomaton-runtime/scripts/update_atomaton.ts` (generated, replaced on release). `dist/` (generated, untracked). Also maybe `src/content/` skills or docs mention it? Let me check for ATOMATON_UPDATE_TOKEN mentions in src/content and .github/atomaton (skills/docs) — a quick grep to be thorough, since \"wherever\" is the criterion.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_bfa4230b-7893-45fb-b43b-b618332f74c3",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\".github/atomaton/skills/security/atomaton-surface.md:23:| `.github/workflows/release.yml` | the one hand-written workflow, the release button | the only workflow no generator produces, and the one place outside the machinery that reaches `ATOMATON_UPDATE_TOKEN`: the update it runs pushes, opens and merges as that identity, so the file is the strongest single thing an audit should read |\\ndocs/runtime/tasks/move-to-a-newer-release.md:39:The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":149}",
+      "tool_call_id": "chatcmpl-tool-88cc29afd16586a3"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\\na token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\\n`Pull requests` read and write, plus `Workflows` write. That is deliberate: a push\\nmade with the workflow's own token starts no checks, so a merge gated on them\\nwould gate on nothing. The second scope is not optional: the release ships\\nworkflows, and GitHub refuses any push that changes a file under\\n`.github/workflows/` without it. If the secret is missing the run fails loudly and\\n--- wac ---\\n// checks would gate on nothing. `ATOMATON_UPDATE_TOKEN` is a token with `repo` and\\n// `workflow` scope that the owner adds once, the second because the release ships\\n// workflows and GitHub refuses a push that updates one without it; when it is\\n// missing the run fails loudly and changes nothing, because the person who started\\n// it is standing there and silence is not an answer. It is also the identity the\\n--- error ---\\n      \\\"::error::ATOMATON_UPDATE_TOKEN is not set. The update pushes a branch and asks for a merge, \\\" +\\n        \\\"which this workflow's own token may not do: a push from it would run none of the checks the \\\" +\\n        \\\"merge is meant to gate. Set the repository secret ATOMATON_UPDATE_TOKEN to a classic PAT \\\" +\\n        \\\"with repo and workflow scope, or a fine-grained token with Contents and Pull requests read \\\" +\\n        \\\"and write and Workflows write — the release ships workflows, and a push that updates one is \\\" +\\n        \\\"refused without it. Then run this again. Nothing has been changed.\\\",\\n    );\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":154}",
+      "tool_call_id": "chatcmpl-tool-bf1fe2255a461a88"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b31b4ac4a452d953",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'update_atomaton' .github/workflows/atomaton-update.yml && grep -c 'repo \\\" + \\\"scope' .github/atomaton-runtime/scripts/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "All five places are merged with the corrected fine-grained wording. Only one other mention of the secret exists (an audit skill describing *reach*, not scope) — correctly untouched.\n\nResidual, expected: `.github/atomaton-runtime/scripts/update_atomaton.ts:806` (this repo's deployed runtime copy, generated from `src/` and replaced on release application) still asks for repo scope only. Editing it by hand is forbidden (generated output) and the issue said only four files. That is a real residual worth naming: until the next release applies, a red run of Atomaton Update in *this* repo prints the old sentence. It's the same class as the deployed doc copy.\n\nLet me verify the deployed runtime copy is what the workflow uses — `.github/workflows/atomaton-update.yml` runs which script? Quick grep to anchor the claim.\n\nActually, let me check whether the deployed workflow references `.github/atomaton-runtime/scripts/update_atomaton.ts`. Good anchor for the residual claim.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_1bd9e623-5bb9-42ff-bde5-23acc0aa00b0",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"46:          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/update_atomaton.ts\\\" --repo \\\"${REPO}\\\" --source \\\"${SOURCE}\\\"\\n1\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":154}",
+      "tool_call_id": "chatcmpl-tool-b31b4ac4a452d953"
+    },
+    {
+      "role": "assistant",
+      "content": "All five sites are on the merged head with the corrected fine-grained wording, and no generated file came with it. Concluding the issue.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a579223409f10a18",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"summary\": \"Every place that describes the update token's scope now names the workflow scope alongside `repo`, so an adopter who follows the instructions sets a credential that can actually push the release's workflows — the v0.24.0 attempt-3 refusal no longer has a documented way into.\\n\\n**What #580 asked for, and where it landed.** All five sites are on the merged head, each with the reason the second scope is needed:\\n\\n- `docs/runtime/tasks/move-to-a-newer-release.md:39-45` — `repo` and `workflow`; fine-grained `Contents` and `Pull requests` read and write, plus `Workflows` write, with \\\"the release ships workflows, and GitHub refuses any push that changes a file under `.github/workflows/` without it\\\".\\n- `CONTRIBUTING.md:251-255` — a classic PAT with `repo` and `workflow`, or fine-grained `Contents` and `Pull requests` read and write plus `Workflows` write.\\n- `src/workflows/atomaton-update.wac.ts:23-27` — the header comment.\\n- `src/entrypoints/machinery/update_atomaton.ts:25-30` — the module comment.\\n- `src/entrypoints/machinery/update_atomaton.ts:336-341` — the `::error::`, which now names both token kinds instead of leaving a `repo`-only token to fail two steps later with GitHub's wording.\\n\\nThe fine-grained form follows the correction in the thread: `Contents` and `Pull requests` read and write, `Workflows` write alone, since GitHub's table has no read level for it. No version bump (`package.json` still declares 0.24.0) and no behaviour change.\\n\\n**How I know.** `bun run synth` exited 0 and `git status --porcelain` then listed only the four edited files, which is the issue's own check that the wac header comment does not reach the generated YAML; the full suite passed at 2522 tests with 0 failures, and the one test on this path asserts only that the message names `ATOMATON_UPDATE_TOKEN` (`src/entrypoints/machinery/update_atomaton.test.ts:207-209`), so the rewording weakened nothing. Re-grepping the merged tree finds no remaining `repo scope` in tracked source or docs outside generated output. One other mention of the secret, `.github/atomaton/skills/security/atomaton-surface.md:23`, describes what reaches the token rather than which scope it needs, and is correctly untouched.\\n\\n**What is still stale, and why that is expected.** `.github/atomaton-runtime/scripts/update_atomaton.ts:806` — the copy this repository's own Atomaton Update workflow actually runs (`.github/workflows/atomaton-update.yml:46`) — still prints the old `repo`-only sentence, as does the deployed documentation copy. Both are generated from `src/` and replaced when a release applies itself, and #580 asked for exactly these four files and no generated artifact, so hand-editing them was not taken. I did not observe the next release application, so I cannot say when that copy updates.\\n\\n**What happens next.** Nothing on this node: the scope descriptions and the running system now agree at the source, and the deployed copies catch up on their own at the next release. #580 is concluded.\\n\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Confirmed: this repo's live Atomaton Update workflow runs the deployed runtime copy, which still carries the old sentence — regenerated when a release applies `src/` onto `.github/`.\n\nEverything the issue asked for is merged. Conclude with `request_close_issue`.\n\nWrite the summary. Keep it as the report: conclusion first, evidence anchors, what I could not establish, what happens next.\n\nCareful: `request_close_issue`'s summary is the comment. No /agent line needed since it ends the session. The role says the post-merge outcome is `request_close_issue`.\n\nLet me write it.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_03e59810-9b9a-40c1-ad36-dc28308994dc",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #580 is concluded: your conclusion is on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "chatcmpl-tool-a579223409f10a18"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 3,
-      "snapshot_hash": "889d1ad12c03d46a21c5d0b0caa7632ccd73d586b68577cd3e7efa415c6d7189",
+      "event_count": 7,
+      "snapshot_hash": "9c35c4af7315c68769e1f34be5715d0e152b276f787f65bbe8b7bbf0b4d2c259",
       "version": 1
     }
   },
@@ -844,6 +1136,23 @@
         }
       },
       "started": "2026-11-22T10:48:48Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-22T10:57:18Z",
+      "ended_because": "completed",
+      "iterations": 6,
+      "messages": 81,
+      "seconds": 22,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "shell": {
+          "bash": 8
+        }
+      },
+      "started": "2026-11-22T10:56:56Z"
     }
   ]
 }
