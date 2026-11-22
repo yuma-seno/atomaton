@@ -35,6 +35,11 @@ is decided by what the merge measured, not by a flag:
   conflict markers in those files, naming both sides. Nothing merges until
   someone resolves them: comment on that pull request and ask an agent, or edit
   the files yourself. The checks run on the resolved tree, and then it can merge.
+- **Upstream adds, removes or rewrites a path your tree stands differently on.**
+  Not a collision, and no markers: the plan leaves that path as your tree has it
+  and lists it, so the pull request stands and does not merge itself. Read it, and
+  merge by hand when it reads right — or comment on that pull request and ask an
+  agent to help.
 
 The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding
 a token with `repo` and `workflow` scope — or, fine-grained, `Contents` and

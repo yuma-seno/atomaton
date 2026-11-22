@@ -177,10 +177,10 @@ function rules(
     { match: ["pr", "checks"], stdout: "" },
     { match: ["pr", "merge"], stdout: "" },
     {
-      match: ["issue", "list"],
+      match: ["issue", "list", `"Atomaton release" in:title`],
       stdout: JSON.stringify(
         options.notice
-          ? [{ number: options.notice, state: "OPEN", body: `${NOTICE_MARKER}\nTemplate release v0.1.0 is available.` }]
+          ? [{ number: options.notice, state: "OPEN", body: `${NOTICE_MARKER}\nAtomaton release v0.1.0 is available.` }]
           : [],
       ),
     },

@@ -188,7 +188,7 @@ export interface PlanSummary {
 
 /** The issue's title: what changed, and where this tree stands. */
 export function noticeTitle(input: NoticeInput): string {
-  return `Template release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`;
+  return `Atomaton release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`;
 }
 
 /** The issue's body: what is there, how to take it, what it drops, and what changed. */
