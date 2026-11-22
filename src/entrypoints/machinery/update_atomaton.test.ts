@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { NOTICE_MARKER } from "./notify_new_release.ts";
-import { updateBranchFor, updateTitle } from "./update_atomaton.ts";
+import { updateBranchFor, updateTitle, pushArgs } from "./update_atomaton.ts";
 import { RELEASE_MANIFEST } from "../../domain/machinery/machinery-layout.ts";
 import { ASSET_NAME } from "./notify_new_release.ts";
 import { removeTemp, runWithFakeGh, scriptPath, hermeticEnv, type FakeGhRule } from "./testing/harness.ts";
@@ -425,5 +425,50 @@ describe("an update that is nothing but a name", () => {
     expect(r.status).toBe(0);
     expect(r.ghCalls.filter((call) => call[0] === "pr" || call[0] === "issue")).toEqual([]);
     expect(pushedTip(bare, updateBranchFor("v0.2.0"))).toBeNull();
+  });
+});
+
+/**
+ * The push argv, asserted as argv.
+ *
+ * The fixture above pushes to a bare repository over a file path, which takes the
+ * other branch of `pushArgs` and cannot see a credential at all. Which credentials
+ * a push carries is decided entirely in the argv, so that is what these read:
+ * a checkout's `http.https://github.com/.extraheader` is reset, or it authenticates
+ * the push as the run's own token and a `contents: read` job gets a 403.
+ */
+describe("the push argv", () => {
+  const BRANCH = "atomaton/update-v0.24.0";
+
+  test("a GitHub https remote is pushed with the update token, the checkout's header reset", () => {
+    expect(pushArgs("https://github.com/owner/repo", "ATOMATON_TOKEN", BRANCH)).toEqual([
+      "-c",
+      "http.extraheader=",
+      "-c",
+      "http.https://github.com/.extraheader=",
+      "push",
+      "--force",
+      "https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo",
+      `HEAD:refs/heads/${BRANCH}`,
+    ]);
+  });
+
+  test("a `.git` suffix is not carried into the URL the token is put in", () => {
+    expect(pushArgs("https://github.com/owner/repo.git", "ATOMATON_TOKEN", BRANCH)).toContain(
+      "https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo",
+    );
+  });
+
+  test("a remote that is not GitHub https keeps the checkout's own credentials", () => {
+    // A test's file remote, and an SSH remote the checkout already carries: the
+    // update token is not this run's to add there, and no header is reset.
+    for (const url of ["/tmp/atomaton-fixture/remote.git", "git@github.com:owner/repo.git"]) {
+      expect(pushArgs(url, "ATOMATON_TOKEN", BRANCH)).toEqual([
+        "push",
+        "--force",
+        url,
+        `HEAD:refs/heads/${BRANCH}`,
+      ]);
+    }
   });
 });
