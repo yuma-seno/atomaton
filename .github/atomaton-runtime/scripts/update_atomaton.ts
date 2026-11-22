@@ -24,6 +24,19 @@ function ghCommand() {
 function gh(...args) {
   return run([...ghCommand(), ...args]);
 }
+function ghAs(token, ...args) {
+  const proc = Bun.spawnSync({
+    cmd: [...ghCommand(), ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, GH_TOKEN: token }
+  });
+  return {
+    code: proc.exitCode ?? 1,
+    stdout: proc.stdout ? proc.stdout.toString("utf8").trim() : "",
+    stderr: proc.stderr ? proc.stderr.toString("utf8").trim() : ""
+  };
+}
 function ghRead(...args) {
   let result = gh(...args);
   for (const delay of [2000, 6000]) {
@@ -40,6 +53,28 @@ function looksTransient(result) {
   if (/HTTP (429|5[0-9][0-9])(?![0-9])/.test(text))
     return true;
   return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
+}
+
+// src/adapters/github/pull-request.ts
+function viewArgs(repo, number, fields) {
+  const json = typeof fields === "string" ? fields : fields.join(",");
+  return ["pr", "view", String(number), "--repo", repo, "--json", json];
+}
+function whyNot(what, result) {
+  return `${what}: ${result.stderr || result.stdout || `gh exited ${result.code}`}`;
+}
+function readPullRequest(repo, number, fields) {
+  const what = `gh pr view ${number} --repo ${repo}`;
+  const result = ghRead(...viewArgs(repo, number, fields));
+  if (result.code !== 0)
+    return { known: false, why: whyNot(what, result) };
+  if (!result.stdout.trim())
+    return { known: false, why: `${what}: gh printed nothing` };
+  try {
+    return { known: true, value: JSON.parse(result.stdout) };
+  } catch {
+    return { known: false, why: `${what}: the answer was not JSON` };
+  }
 }
 
 // src/domain/work/agent-name.ts
@@ -365,7 +400,7 @@ function log(message) {
 }
 
 // src/entrypoints/machinery/lib/update-apply.ts
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { basename as basename2, dirname, join, resolve, sep } from "path";
 function applyPlan(treeRoot, plan, base, target, ours) {
@@ -376,6 +411,10 @@ function applyPlan(treeRoot, plan, base, target, ours) {
       return null;
     return destination;
   };
+  for (const path of [...plan.take, ...plan.add, ...plan.delete, ...plan.merge]) {
+    if (inside(path) === null)
+      return { why: `\`${path}\` resolves outside the tree` };
+  }
   const writes = new Map;
   const deletes = new Set;
   const taken = [];
@@ -406,8 +445,6 @@ function applyPlan(treeRoot, plan, base, target, ours) {
     added.push(path);
   }
   for (const path of plan.delete) {
-    if (inside(path) === null)
-      return { why: `\`${path}\` resolves outside the tree` };
     deletes.add(path);
     removed.push(path);
   }
@@ -440,11 +477,23 @@ function applyPlan(treeRoot, plan, base, target, ours) {
       rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     } catch {}
   }
+  for (const path of writes.keys()) {
+    let parent = dirname(path);
+    while (parent !== "." && parent !== "/") {
+      const stats = statSync(resolve(join(root, parent)), { throwIfNoEntry: false });
+      if (stats?.isFile()) {
+        if (!deletes.has(parent)) {
+          return { why: `\`${path}\` needs \`${parent}\` to be a directory, but the tree holds a file there that the plan does not delete` };
+        }
+      }
+      const next = dirname(parent);
+      parent = next;
+    }
+  }
   for (const [path, content] of writes) {
     const destination = inside(path);
-    if (destination === null) {
-      return { why: `\`${path}\` resolves outside the tree` };
-    }
+    if (destination === null)
+      throw new Error(`\`${path}\` resolves outside the tree`);
     mkdirSync(dirname(destination), { recursive: true });
     writeFileSync(destination, content);
   }
@@ -713,7 +762,7 @@ function updateBody(report) {
   if (report.leftovers.length > 0) {
     lines.push("## Files upstream no longer ships", "", "Reported only \u2014 the manifest cannot tell these from files the adopter wrote,", "so nothing here deletes them on a guess:", "", ...report.leftovers.slice(0, MAX_LISTED).map((path) => `- \`${path}\``), ...report.leftovers.length > MAX_LISTED ? [`- \u2026and ${report.leftovers.length - MAX_LISTED} more`] : [], "");
   }
-  lines.push("## What happens next", "", report.conflicts.length === 0 ? "The auto-merge is requested on this pull request; the repository's checks run first. If they pass, this merges itself and the notice closes." : "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them \u2014 the checks will run on the resolved tree, and only then can this merge.", "");
+  lines.push("## What happens next", "", report.conflicts.length > 0 ? "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them \u2014 the checks will run on the resolved tree, and only then can this merge." : plan.kept.length > 0 ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them \u2014 each is a place this repository's words and the release disagree \u2014 and merge by hand when they read right." : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.", "");
   return `${lines.join(`
 `).trimEnd()}
 `;
@@ -729,11 +778,22 @@ function stopComment(report, prNumber) {
   ].join(`
 `);
 }
+function keptComment(report, prNumber) {
+  return [
+    LLM_CONTEXT_TAG.write("exclude"),
+    `Taking ${report.plan.target} stopped for a look: ${report.plan.kept.length} path(s) the plan will not touch without a person.`,
+    "",
+    ...report.plan.kept.map((entry) => `- \`${entry.path}\` (${entry.upstream})`),
+    "",
+    `The plan is applied on #${prNumber}, which does not merge itself. Read the kept paths there \u2014 ` + "each is this repository's words or files against a release that moved elsewhere \u2014 and merge by hand when they read right."
+  ].join(`
+`);
+}
 function doneComment(plan, prNumber, merging) {
   return [
     LLM_CONTEXT_TAG.write("exclude"),
     `Taking ${plan.target} onto ${plan.base} is applied on #${prNumber}.`,
-    merging ? "The auto-merge is requested there; the repository's checks run first, and the merge follows them." : "The repository's checks run on it; once they pass, it can merge."
+    merging ? "The repository's checks passed there, and the merge is made; the merge's push starts the deploy." : "The repository's checks run on it; once they pass, it can merge."
   ].join(`
 `);
 }
@@ -914,7 +974,7 @@ ${targetTag} differs from ${local.manifest.version} by name only: applying it wo
     prNumber = existing;
     log3(`updated pull request #${existing}`);
   } else {
-    const created = gh("pr", "create", "--repo", repo, "--base", base, "--head", branch, "--title", updateTitle(targetTag), "--body", updateBody(report));
+    const created = ghAs(token, "pr", "create", "--repo", repo, "--base", base, "--head", branch, "--title", updateTitle(targetTag), "--body", updateBody(report));
     if (created.code !== 0) {
       console.error(`::error::could not open the pull request: ${created.stderr.trim() || `gh exited ${created.code}`}`);
       process.exit(1);
@@ -928,43 +988,78 @@ ${targetTag} differs from ${local.manifest.version} by name only: applying it wo
     log3(`opened pull request #${prNumber}`);
   }
   const notice = findOpenNotice(repo);
-  if (conflicts.length === 0) {
-    const requested = gh("pr", "merge", String(prNumber), "--repo", repo, "--auto", "--merge");
-    const merging = requested.code === 0;
-    if (!merging) {
-      log3(`WARN the auto-merge could not be requested on #${prNumber}: ${requested.stderr.trim() || `gh exited ${requested.code}`}` + " \u2014 the pull request stands, and merges when the checks pass and a person or a run asks again.");
+  const selfMerging = conflicts.length === 0 && plan.kept.length === 0;
+  let merging = false;
+  if (selfMerging) {
+    let seen = "";
+    for (let attempt = 0;attempt < 90; attempt++) {
+      const rollup = readPullRequest(repo, prNumber, "statusCheckRollup");
+      seen = rollup.known ? String((rollup.value.statusCheckRollup ?? []).filter((check) => check.name === "atomaton-check").length) : "0";
+      if (seen !== "0")
+        break;
+      Bun.sleepSync(1e4);
     }
+    if (seen === "0" || seen === "") {
+      log3(`WARN the required check never registered on #${prNumber} in fifteen minutes \u2014 the pull request stands, ` + "and merges when a person or a run asks again.");
+    } else if (gh("pr", "checks", String(prNumber), "--repo", repo, "--watch", "--fail-fast", "--interval", "10").code !== 0) {
+      log3(`WARN the checks on #${prNumber} did not pass \u2014 the pull request stands with them.`);
+    } else {
+      const requested = ghAs(token, "pr", "merge", String(prNumber), "--repo", repo, "--merge");
+      merging = requested.code === 0;
+      if (!merging) {
+        log3(`WARN the merge could not be made on #${prNumber}: ${requested.stderr.trim() || `gh exited ${requested.code}`}`);
+      }
+    }
+  }
+  if (!selfMerging && plan.kept.length > 0) {
+    const said = keptComment(report, prNumber);
     if (notice !== null && notice !== 0) {
-      const closed = gh("issue", "close", String(notice), "--repo", repo, "--comment", `${NOTICE_MARKER}
-${LLM_CONTEXT_TAG.write("exclude")}
-${doneComment(plan, prNumber, merging)}`);
-      if (closed.code !== 0)
-        log3(`WARN could not close the notice #${notice}: ${closed.stderr.trim()}`);
+      const told = gh("issue", "comment", String(notice), "--repo", repo, "--body", said);
+      if (told.code !== 0)
+        log3(`WARN could not report to the notice #${notice}: ${told.stderr.trim()}`);
     }
     if (source > 0 && source !== notice) {
-      const said = gh("issue", "comment", String(source), "--repo", repo, "--body", doneComment(plan, prNumber, merging));
-      if (said.code !== 0)
-        log3(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
+      const told = gh("issue", "comment", String(source), "--repo", repo, "--body", said);
+      if (told.code !== 0)
+        log3(`WARN could not answer in #${source}: ${told.stderr.trim()}`);
     }
-    log3(`update to ${targetTag} is on #${prNumber}${merging ? " with the auto-merge requested" : ""}`);
+    log3(`update to ${targetTag} is applied on #${prNumber}, held for a person: ${plan.kept.length} kept path(s)`);
     return;
   }
-  if (notice !== null && notice !== 0) {
-    const said = gh("issue", "comment", String(notice), "--repo", repo, "--body", stopComment(report, prNumber));
-    if (said.code !== 0)
-      log3(`WARN could not report to the notice #${notice}: ${said.stderr.trim()}`);
+  if (conflicts.length > 0) {
+    const said = stopComment(report, prNumber);
+    if (notice !== null && notice !== 0) {
+      const told = gh("issue", "comment", String(notice), "--repo", repo, "--body", said);
+      if (told.code !== 0)
+        log3(`WARN could not report to the notice #${notice}: ${told.stderr.trim()}`);
+    }
+    if (source > 0 && source !== notice) {
+      const told = gh("issue", "comment", String(source), "--repo", repo, "--body", said);
+      if (told.code !== 0)
+        log3(`WARN could not answer in #${source}: ${told.stderr.trim()}`);
+    }
+    log3(`stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s)`);
+    return;
+  }
+  if (merging && notice !== null && notice !== 0) {
+    const closed = gh("issue", "close", String(notice), "--repo", repo, "--comment", `${NOTICE_MARKER}
+${LLM_CONTEXT_TAG.write("exclude")}
+${doneComment(plan, prNumber, merging)}`);
+    if (closed.code !== 0)
+      log3(`WARN could not close the notice #${notice}: ${closed.stderr.trim()}`);
   }
   if (source > 0 && source !== notice) {
-    const said = gh("issue", "comment", String(source), "--repo", repo, "--body", stopComment(report, prNumber));
+    const said = gh("issue", "comment", String(source), "--repo", repo, "--body", doneComment(plan, prNumber, merging));
     if (said.code !== 0)
       log3(`WARN could not answer in #${source}: ${said.stderr.trim()}`);
   }
-  log3(`stopped at pull request #${prNumber}: ${conflicts.length} conflicted file(s)`);
+  log3(`update to ${targetTag} is on #${prNumber}${merging ? ", merged after the repository's checks passed" : ""}`);
 }
 if (import.meta.main)
   main();
 export {
   doneComment,
+  keptComment,
   ref,
   stopComment,
   updateBody,
