@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #578: update: the push is authenticated as the checkout's token, so apply-to-self 403s\n\nThe apply-to-self step of the v0.24.0 release applied the plan and then failed to push:\n\n```\n[update] applied: 6 taken, 2 added, 0 removed, 0 merged, 0 conflicted\n::error::could not push atomaton/update-v0.24.0: remote: Permission to yuma-seno/atomaton.git denied to github-actions[bot].\nfatal: unable to access 'https://github.com/yuma-seno/atomaton/': The requested URL returned error: 403.\n```\n\nRun: https://github.com/yuma-seno/atomaton/actions/runs/44929022320 (attempt 2, `apply-to-self`).\n\n## Root cause\n\n`ATOMATON_UPDATE_TOKEN` is set and reaches the script; the plan is applied. The push is the part that fails, and it fails because it does not authenticate as the update token at all.\n\n`actions/checkout` (with its default `persist-credentials: true`) writes this into `.git/config`:\n\n```\n[http \"https://github.com/\"]\n\textraheader = AUTHORIZATION: basic <base64 of x-access-token:GITHUB_TOKEN>\n```\n\n`pushBranch` builds a URL with the update token in it (`src/entrypoints/machinery/update_atomaton.ts:255-263`):\n\n```ts\nconst pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\n```\n\nbut git sends the configured `Authorization` header **instead of** the URL credentials, so the request is made as `github-actions[bot]`. The `apply-to-self` job declares `contents: read` (it is not meant to write with its own token), so GitHub refuses the push with exactly the message above.\n\nThis was measured, not inferred. A local HTTP server answering `401` with `WWW-Authenticate: Basic` logged the `Authorization` header git actually sent:\n\n- with the checkout-style `http.<url>.extraheader` set: first request carries `Authorization: Bearer CHECKOUT-TOKEN` (the header), and the inline `x-access-token:...` credentials are never used\n- with `git -c http.<url>.extraheader= push <url-with-token>`: the first request carries no header, the retry after the `401` carries `Basic <base64(x-access-token:SUPPLIED-TOKEN)>` — the update token, as intended\n\nThe reset also works when the header is in the repository's `.git/config` (the checkout's case), not only when both values are passed with `-c`.\n\n## Fix\n\nIn `pushBranch` in `src/entrypoints/machinery/update_atomaton.ts`, when the remote is a GitHub https URL, make the token the only credential on that one push:\n\n```ts\ngitOrFail(\n  [\"-c\", \"http.extraheader=\", \"-c\", \"http.https://github.com/.extraheader=\", \"push\", \"--force\", pushUrl, `HEAD:refs/heads/${branch}`],\n  `push ${branch}`,\n);\n```\n\nNotes:\n\n- An empty value resets the header list to empty (git's documented behaviour for `http.extraheader`), so both the unscoped and the URL-scoped forms are cleared.\n- Only the GitHub-https branch needs it. The other path (a file remote in tests, an SSH remote the checkout already carries) must keep using the checkout's own credentials exactly as it does now — the existing bare-repo tests push through that path and must keep passing unchanged.\n- The same reset should not be applied to the `gh` calls: `ghAs`/`gh` authenticate from the environment and are not affected by git config.\n\n## Test\n\nA test that would have caught this. Prefer a small pure helper over stubbing git, e.g. `pushArgs(url, token)` returning the argv, unit-tested for:\n\n- a github https remote: contains both `-c` resets and the token URL\n- anything else: no `-c` flags and the URL unchanged\n\nIf keeping it inside `pushBranch` is cleaner, a recording `git` shim earlier on `PATH` works too — the point is that the argv is asserted, because the fake harness's real bare-repo remote takes the other branch and cannot observe this.\n\n## Verifying on GitHub\n\nAfter this merges, `gh run rerun 44929022320 --failed` is enough. The job checks out `main` at run time, so it runs the fixed script; the release workflow YAML from the original run is unchanged and needs no edit. A successful push opens `atomaton/update-v0.24.0`, the required check runs, the update merges itself, and the notice #577 closes.\n\n## Constraints\n\n- Do not bump the version; the release workflow owns `package.json`'s version.\n- No workflow changes are needed for this fix.\n- Keep the change to `src/` (the deployed `.github/atomaton-runtime/scripts/` copy is generated from it). Run `bun run synth` if any generated artifact is tracked.\n",
+      "content": "Issue #578: update: the push is authenticated as the checkout's token, so apply-to-self 403s\n**Labels:** atomaton/waiting-for-person\n\nThe apply-to-self step of the v0.24.0 release applied the plan and then failed to push:\n\n```\n[update] applied: 6 taken, 2 added, 0 removed, 0 merged, 0 conflicted\n::error::could not push atomaton/update-v0.24.0: remote: Permission to yuma-seno/atomaton.git denied to github-actions[bot].\nfatal: unable to access 'https://github.com/yuma-seno/atomaton/': The requested URL returned error: 403.\n```\n\nRun: https://github.com/yuma-seno/atomaton/actions/runs/44929022320 (attempt 2, `apply-to-self`).\n\n## Root cause\n\n`ATOMATON_UPDATE_TOKEN` is set and reaches the script; the plan is applied. The push is the part that fails, and it fails because it does not authenticate as the update token at all.\n\n`actions/checkout` (with its default `persist-credentials: true`) writes this into `.git/config`:\n\n```\n[http \"https://github.com/\"]\n\textraheader = AUTHORIZATION: basic <base64 of x-access-token:GITHUB_TOKEN>\n```\n\n`pushBranch` builds a URL with the update token in it (`src/entrypoints/machinery/update_atomaton.ts:255-263`):\n\n```ts\nconst pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\n```\n\nbut git sends the configured `Authorization` header **instead of** the URL credentials, so the request is made as `github-actions[bot]`. The `apply-to-self` job declares `contents: read` (it is not meant to write with its own token), so GitHub refuses the push with exactly the message above.\n\nThis was measured, not inferred. A local HTTP server answering `401` with `WWW-Authenticate: Basic` logged the `Authorization` header git actually sent:\n\n- with the checkout-style `http.<url>.extraheader` set: first request carries `Authorization: Bearer CHECKOUT-TOKEN` (the header), and the inline `x-access-token:...` credentials are never used\n- with `git -c http.<url>.extraheader= push <url-with-token>`: the first request carries no header, the retry after the `401` carries `Basic <base64(x-access-token:SUPPLIED-TOKEN)>` — the update token, as intended\n\nThe reset also works when the header is in the repository's `.git/config` (the checkout's case), not only when both values are passed with `-c`.\n\n## Fix\n\nIn `pushBranch` in `src/entrypoints/machinery/update_atomaton.ts`, when the remote is a GitHub https URL, make the token the only credential on that one push:\n\n```ts\ngitOrFail(\n  [\"-c\", \"http.extraheader=\", \"-c\", \"http.https://github.com/.extraheader=\", \"push\", \"--force\", pushUrl, `HEAD:refs/heads/${branch}`],\n  `push ${branch}`,\n);\n```\n\nNotes:\n\n- An empty value resets the header list to empty (git's documented behaviour for `http.extraheader`), so both the unscoped and the URL-scoped forms are cleared.\n- Only the GitHub-https branch needs it. The other path (a file remote in tests, an SSH remote the checkout already carries) must keep using the checkout's own credentials exactly as it does now — the existing bare-repo tests push through that path and must keep passing unchanged.\n- The same reset should not be applied to the `gh` calls: `ghAs`/`gh` authenticate from the environment and are not affected by git config.\n\n## Test\n\nA test that would have caught this. Prefer a small pure helper over stubbing git, e.g. `pushArgs(url, token)` returning the argv, unit-tested for:\n\n- a github https remote: contains both `-c` resets and the token URL\n- anything else: no `-c` flags and the URL unchanged\n\nIf keeping it inside `pushBranch` is cleaner, a recording `git` shim earlier on `PATH` works too — the point is that the argv is asserted, because the fake harness's real bare-repo remote takes the other branch and cannot observe this.\n\n## Verifying on GitHub\n\nAfter this merges, `gh run rerun 44929022320 --failed` is enough. The job checks out `main` at run time, so it runs the fixed script; the release workflow YAML from the original run is unchanged and needs no edit. A successful push opens `atomaton/update-v0.24.0`, the required check runs, the update merges itself, and the notice #577 closes.\n\n## Constraints\n\n- Do not bump the version; the release workflow owns `package.json`'s version.\n- No workflow changes are needed for this fix.\n- Keep the change to `src/` (the deployed `.github/atomaton-runtime/scripts/` copy is generated from it). Run `bun run synth` if any generated artifact is tracked.\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-22T10:09:39Z",
@@ -242,13 +242,794 @@
       "role": "tool",
       "content": "src/entrypoints/machinery/update_atomaton.ts lines 1-167 of 580\n\n1\t#!/usr/bin/env bun\n2\t/**\n3\t * update_atomaton.ts — take a newer template release onto this tree.\n4\t *\n5\t * This is the other face of the machinery the notice serves. The notice (see\n6\t * `notify_new_release.ts`) computes a plan and renders it read-only; this script\n7\t * runs the same plan for real, on the checkout the workflow ran it in:\n8\t *\n9\t *     plan → apply to the tree → branch → commit → push → pull request\n10\t *        → no conflict: wait for the checks, merge, close the notice\n11\t *        → conflicts:   stop at the pull request, report where and why\n12\t *\n13\t * Nothing here decides policy. Whether a path is take/add/delete/merge is the\n14\t * plan's answer (`domain/machinery/update-plan.ts`); whether a merge collides is\n15\t * `git merge-file`'s measured answer (`lib/update-apply.ts`). A collision is not a\n16\t * failure of the run: stopping at a pull request IS the design, and the run exits\n17\t * green after reporting it. What is a failure is being unable to run at all — no\n18\t * token, no manifest, no readable release — which exits red with the reason.\n19\t *\n20\t * ## Why the token, and why it is not the workflow's own\n21\t *\n22\t * The branch this pushes must run the repository's checks, and a push made with\n23\t * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those\n24\t * checks gate would then be merging unverified content. So the workflow that runs\n25\t * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\n26\t * and a run without it fails loudly and does nothing — a person who pressed the\n27\t * button is standing there, and silence is not an answer.\n28\t *\n29\t * ## Why the stop is a pull request, and why the token does the writing\n30\t *\n31\t * A pull request is the one place this repository already has everything a\n32\t * resolution needs: visible diffs, checks that refuse broken content, and an agent\n33\t * loop a person can address with a comment. The pull request is opened, and when\n34\t * the plan is clean merged, as the update token -- an identity that starts runs.\n35\t * A pull request opened with the workflow's own token fires no `pull_request`\n36\t * event, so its required check would never start; a merge made with it fires no\n37\t * `push`, so `deploy.on_merge` would never run. The token is what makes this the\n38\t * same shape as a person pressing the buttons: checks run on the pull request,\n39\t * and the merge's push starts the deploy.\n40\t *\n41\t * The plan being clean is the plan's claim; the checks are what makes it true.\n42\t * The script waits for the required check to exist and pass before merging, and\n43\t * a red change stays unmerged.\n44\t *\n45\t * Usage:\n46\t *   update_atomaton.ts --repo OWNER/REPO [--source N] [--tag vX.Y.Z]\n47\t */\n48\timport { parseArgs } from \"node:util\";\n49\timport { gh, ghRead, ghAs } from \"../../adapters/github/gh.ts\";\n50\timport { readPullRequest } from \"../../adapters/github/pull-request.ts\";\n51\timport { LLM_CONTEXT_TAG } from \"../../adapters/github/tags.ts\";\n52\timport { machineryPath } from \"../../adapters/runner/machinery.ts\";\n53\timport { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from \"../../domain/machinery/update-plan.ts\";\n54\timport { defineScript } from \"./lib/script-ref.ts\";\n55\timport { findOpenNotice, NOTICE_MARKER } from \"./lib/notice-issue.ts\";\n56\timport { applyPlan } from \"./lib/update-apply.ts\";\n57\timport {\n58\t  UPSTREAM_REPOSITORY,\n59\t  latestReleaseTag,\n60\t  readLocalManifest,\n61\t  readTreeFiles,\n62\t  releaseFiles,\n63\t  treePaths,\n64\t} from \"./lib/release-files.ts\";\n65\t\n66\texport interface UpdateAtomatonArgs {\n67\t  /** `owner/name` of the repository being updated — the adopted tree's own. */\n68\t  repo: string;\n69\t  /**\n70\t   * The thread to answer in: the issue a `!upgrade` came from, or the notice. As\n71\t   * the workflow passes it, an empty string means nobody asked — which is what\n72\t   * starting from the Actions tab looks like.\n73\t   */\n74\t  source?: number | string;\n75\t  /** A specific release to take, instead of the newest one upstream has. */\n76\t  tag?: string;\n77\t}\n78\t\n79\texport const ref = defineScript<UpdateAtomatonArgs>(import.meta.url);\n80\t\n81\t/**\n82\t * Who the machinery says this commit is from.\n83\t *\n84\t * A plain `atomaton[bot]` identity, not a person's: a tree that later wants to\n85\t * audit what the machinery touched finds it by author, and the machinery must not\n86\t * borrow whoever happened to be running the workflow.\n87\t */\n88\tconst COMMIT_NAME = \"atomaton[bot]\";\n89\tconst COMMIT_EMAIL = \"atomaton[bot]@users.noreply.github.com\";\n90\t\n91\t/** The branch every update lands on, named for the release it takes. */\n92\texport function updateBranchFor(tag: string): string {\n93\t  return `atomaton/update-${tag}`;\n94\t}\n95\t\n96\t/** The pull request's title. */\n97\texport function updateTitle(tag: string): string {\n98\t  return `Take Atomaton ${tag} onto this tree`;\n99\t}\n100\t\n101\t/** Everything the pull request's body is rendered from. */\n102\texport interface UpdateReport {\n103\t  readonly plan: UpdatePlan;\n104\t  /** Paths whose merge collided, as `applyPlan` measured them. */\n105\t  readonly conflicts: readonly string[];\n106\t  /** Paths whose merge resolved with no conflict. */\n107\t  readonly merged: readonly string[];\n108\t  /** Paths the target no longer ships — reported, never acted on. */\n109\t  readonly leftovers: readonly string[];\n110\t}\n111\t\n112\t/** How many of a list a report renders before it counts the rest. */\n113\tconst MAX_LISTED = 15;\n114\t\n115\t/** The body of the pull request, whatever the plan turned out to be. */\n116\texport function updateBody(report: UpdateReport): string {\n117\t  const { plan } = report;\n118\t  const lines: string[] = [\n119\t    \"<!-- atomaton:update -->\",\n120\t    verdictSentence(plan.base, plan.target, report.conflicts.length, plan.kept.length),\n121\t    \"\",\n122\t    \"## The plan\",\n123\t    \"\",\n124\t    \"| | |\",\n125\t    \"| --- | --- |\",\n126\t    `| Files updated (untouched here) | ${plan.take.length} |`,\n127\t    `| Files added | ${plan.add.length} |`,\n128\t    `| Files removed (unmodified here) | ${plan.delete.length} |`,\n129\t    `| Files changed on **both** sides | ${plan.merge.length} |`,\n130\t    `| Resolved by the merge itself | ${report.merged.length} |`,\n131\t    `| Left with conflict markers | ${report.conflicts.length} |`,\n132\t    `| Paths the plan will not touch | ${plan.kept.length} |`,\n133\t    \"\",\n134\t  ];\n135\t\n136\t  const list = (title: string, paths: readonly string[]): void => {\n137\t    if (paths.length === 0) return;\n138\t    lines.push(title, \"\", ...paths.slice(0, MAX_LISTED).map((path) => `- \\`${path}\\``));\n139\t    if (paths.length > MAX_LISTED) lines.push(`- …and ${paths.length - MAX_LISTED} more`);\n140\t    lines.push(\"\");\n141\t  };\n142\t  list(\"Conflicted — resolve here, then the checks finish the job:\", report.conflicts);\n143\t  list(\"Merged cleanly by the machinery:\", report.merged);\n144\t  list(\n145\t    \"Left alone for a person to look at:\",\n146\t    plan.kept.map((entry) => entry.path),\n147\t  );\n148\t\n149\t  if (report.leftovers.length > 0) {\n150\t    lines.push(\n151\t      \"## Files upstream no longer ships\",\n152\t      \"\",\n153\t      \"Reported only — the manifest cannot tell these from files the adopter wrote,\",\n154\t      \"so nothing here deletes them on a guess:\",\n155\t      \"\",\n156\t      ...report.leftovers.slice(0, MAX_LISTED).map((path) => `- \\`${path}\\``),\n157\t      ...(report.leftovers.length > MAX_LISTED ? [`- …and ${report.leftovers.length - MAX_LISTED} more`] : []),\n158\t      \"\",\n159\t    );\n160\t  }\n161\t\n162\t  lines.push(\n163\t    \"## What happens next\",\n164\t    \"\",\n165\t    report.conflicts.length > 0\n166\t      ? \"This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge.\"\n167\t      : plan.kept.length > 0\n\n[413 more lines. Read again with offset: 168.]",
       "tool_call_id": "chatcmpl-tool-aec658033563946f"
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\nContinue. The diagnosis is settled — do not re-read the issue or the files. Make these edits, then run the tests.\n\n1. In `src/entrypoints/machinery/update_atomaton.ts`, export a pure argv helper and use it from `pushBranch`:\n\n```ts\n/**\n * The argv for pushing `branch`. A GitHub https remote gets the update token as\n * its only credential: `actions/checkout` writes `http.https://github.com/.extraheader`\n * into the repository's config, and git sends that header instead of the userinfo\n * in the URL, so without the reset the push authenticates as the run's own token.\n * An empty value resets the header list to empty.\n */\nexport function pushArgs(url: string, token: string, branch: string): string[] {\n  const github = /^https:\\/\\/github\\.com\\/(.+?)(?:\\.git)?$/.exec(url);\n  if (!github) return [\"push\", \"--force\", url, `HEAD:refs/heads/${branch}`];\n  return [\n    \"-c\", \"http.extraheader=\",\n    \"-c\", \"http.https://github.com/.extraheader=\",\n    \"push\", \"--force\", `https://x-access-token:${token}@github.com/${github[1]}`, `HEAD:refs/heads/${branch}`,\n  ];\n}\n```\n\n`pushBranch` keeps reading the origin and calls `gitOrFail(pushArgs(url, token, branch), `push ${branch}`)`.\n\n2. In `src/entrypoints/machinery/update_atomaton.test.ts`, add two tests: a GitHub https remote yields both `-c` resets and the token URL; a non-GitHub remote yields exactly the old argv with no `-c` flags.\n\n3. Run `bun test ./src/entrypoints/machinery/update_atomaton.test.ts` and `bun run typecheck`. Then commit on a branch in the workspace, and leave `NOTES-578.md` plus the patch there if you cannot push.\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-22T10:12:14Z",
+        "event_type": "issue_comment",
+        "id": 7077639143,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9cf76e189bb322e5",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"pattern\": \"pushBranch|gitOrFail|const pushUrl|remote\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-ba09aef7e1a60038",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"pattern\": \"^import|^describe|^test|^const|^function|^  test\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Let me look at the relevant part of pushBranch and the test file. I need to read around line 255 of update_atomaton.ts. Let me use grep to find pushBranch.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_eba3c0cf-928f-4336-a562-0ff7eaf43945",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "60 matching line(s) under .:\n\n./.git/logs/refs/remotes/origin/main:1:0000000000000000000000000000000000000000 d5fa5133929fe3790a4a24bed2bf7d80efe71757 runner <runner@runnervm0hi8g.syty2dxqkjquxadpzfzteftr2h.xx.internal.cloudapp.net> 1795342353 +0000\tfetch --no-tags --prune --no-recurse-submodules --depth=1 origin +d5fa5133929fe3790a4a24bed2bf7d80efe71757:refs/remotes/origin/main: storing ref\n./.git/logs/refs/heads/main:1:0000000000000000000000000000000000000000 d5fa5133929fe3790a4a24bed2bf7d80efe71757 runner <runner@runnervm0hi8g.syty2dxqkjquxadpzfzteftr2h.xx.internal.cloudapp.net> 1795342353 +0000\tbranch: Created from refs/remotes/origin/main\n./.git/config:6:[remote \"origin\"]\n./.git/config:8:\tfetch = +refs/heads/*:refs/remotes/origin/*\n./.git/config:14:\tremote = origin\n./.git/hooks/push-to-checkout.sample:12:# of the remote repository has any difference from the currently\n./.git/hooks/pre-push.sample:4:# push\" after it has checked the remote status, but before anything has been\n./.git/hooks/pre-push.sample:9:# $1 -- Name of the remote to which the push is being done\n./.git/hooks/pre-push.sample:12:# If pushing without using a named remote those arguments will be equal.\n./.git/hooks/pre-push.sample:17:#   <local ref> <local oid> <remote ref> <remote oid>\n./.git/hooks/pre-push.sample:22:remote=\"$1\"\n./.git/hooks/pre-push.sample:27:while read local_ref local_oid remote_ref remote_oid\n./.git/hooks/pre-push.sample:34:\t\tif test \"$remote_oid\" = \"$zero\"\n./.git/hooks/pre-push.sample:40:\t\t\trange=\"$remote_oid..$local_oid\"\n./.git/hooks/update.sample:23:#   This boolean sets whether remotely creating branches will be denied\n./.git/hooks/update.sample:110:\trefs/remotes/*,commit)\n./.git/hooks/update.sample:113:\trefs/remotes/*,delete)\n./.git/hooks/sendemail-validate.sample:16:# The following config variables can be set to change the default remote and\n./.git/hooks/sendemail-validate.sample:17:# remote ref that are used to apply the patches against:\n./.git/hooks/sendemail-validate.sample:50:\tremote=$(git config --default origin --get sendemail.validateRemote) &&\n./.git/hooks/sendemail-validate.sample:53:\tgit worktree add -fd --checkout \"$worktree\" \"refs/remotes/$remote/$ref\" &&\n./tests/contract/generated-workflows.test.ts:687:  // name. Nothing new reaches the remote, and `checkout -B` (which this tolerates)\n./tests/contract/generated-workflows.test.ts:697:    expect(step?.run).toContain(\"refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}\");\n./tests/contract/generated-workflows.test.ts:698:    expect(step?.run).toContain('git checkout -B \"${BRANCH_NAME}\" \"refs/remotes/origin/${BRANCH_NAME}\"');\n./tests/contract/generated-workflows.test.ts:743:    expect(checkout?.run).toContain(\"refs/heads/${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}\");\n./tests/contract/generated-workflows.test.ts:749:    expect(checkout?.run).toContain('git checkout -B \"${BRANCH_NAME}\" \"refs/remotes/origin/${BRANCH_NAME}\"');\n./tests/contract/generated-workflows.test.ts:917:   * `GITHUB_REPOSITORY` was missing, which makes every `search_remote_code` call answer\n./tests/contract/attachments-publish.test.ts:23: * Publishing runs `git` and nothing else, so a real remote can be built in a\n./tests/contract/attachments-publish.test.ts:69:  remote: string;\n./tests/contract/attachments-publish.test.ts:78: * A bare remote, a clone of it with `main` checked out, and a default branch.\n./tests/contract/attachments-publish.test.ts:81: * published: `publish_draft` reads the remote's default branch out of\n./tests/contract/attachments-publish.test.ts:82: * `ls-remote --symref origin HEAD` and refuses to write to it, and a bare repository\n./tests/contract/attachments-publish.test.ts:87:  const remote = join(root, \"remote.git\");\n./tests/contract/attachments-publish.test.ts:90:  git(root, \"init\", \"--quiet\", \"--bare\", \"--initial-branch=main\", remote);\n./tests/contract/attachments-publish.test.ts:97:  git(seed, \"remote\", \"add\", \"origin\", remote);\n./tests/contract/attachments-publish.test.ts:99:  git(root, \"clone\", \"--quiet\", \"--branch\", \"main\", remote, work);\n./tests/contract/attachments-publish.test.ts:102:  return { root, remote, work };\n./tests/contract/attachments-publish.test.ts:364:  test(\"the remote's default branch is read out of ls-remote --symref\", () => {\n./tests/contract/attachments-publish.test.ts:365:    // Exactly what `git ls-remote --symref origin HEAD` prints, measured against a\n./tests/contract/attachments-publish.test.ts:366:    // temporary remote whose default branch is `trunk`.\n./tests/contract/attachments-publish.test.ts:368:    // A remote that answers without the symref line leaves the question unanswered,\n./tests/contract/attachments-publish.test.ts:374:describe(\"publishing onto a real remote\", () => {\n./tests/contract/attachments-publish.test.ts:376:    const { root, remote, work } = makeGitFixture();\n./tests/contract/attachments-publish.test.ts:403:      const parents = git(root, \"--git-dir\", remote, \"rev-list\", \"--parents\", \"-n\", \"1\", DEFAULT_DOCS_BRANCH).split(/\\s+/);\n./tests/contract/attachments-publish.test.ts:406:      expect(git(root, \"--git-dir\", remote, \"rev-parse\", \"main\")).toBe(headBefore);\n./tests/contract/attachments-publish.test.ts:407:      expect(git(root, \"--git-dir\", remote, \"show\", `${DEFAULT_DOCS_BRANCH}:designs/12/overview.md`)).toContain(\n./tests/contract/attachments-publish.test.ts:422:    const { root, remote, work } = makeGitFixture();\n./tests/contract/attachments-publish.test.ts:439:      expect(git(root, \"--git-dir\", remote, \"rev-parse\", `${appended.commit_sha}^`)).toBe(created.commit_sha);\n./tests/contract/attachments-publish.test.ts:441:      expect(git(root, \"--git-dir\", remote, \"ls-tree\", \"-r\", \"--name-only\", DEFAULT_DOCS_BRANCH).split(\"\\n\").sort()).toEqual([\n./tests/contract/attachments-publish.test.ts:445:      expect(git(root, \"--git-dir\", remote, \"show\", `${DEFAULT_DOCS_BRANCH}:designs/12/one.md`)).toBe(\"one\");\n./tests/contract/attachments-publish.test.ts:452:    const { root, remote, work } = makeGitFixture();\n./tests/contract/attachments-publish.test.ts:466:      expect(git(root, \"--git-dir\", remote, \"show\", `${DEFAULT_DOCS_BRANCH}:designs/12/overview.md`)).toBe(\"# v2\");\n./tests/contract/attachments-publish.test.ts:467:      expect(git(root, \"--git-dir\", remote, \"show\", `${DEFAULT_DOCS_BRANCH}:designs/12/copy.md`)).toBe(\"# v2\");\n./tests/contract/attachments-publish.test.ts:474:    const { root, remote, work } = makeGitFixture();\n./tests/contract/attachments-publish.test.ts:486:      const stored = execFileSync(\"git\", [\"--git-dir\", remote, \"cat-file\", \"blob\", `${DEFAULT_DOCS_BRANCH}:designs/12/original.docx`], {\n./tests/contract/attachments-publish.test.ts:505:    const { root, remote, work } = makeGitFixture();\n./tests/contract/attachments-publish.test.ts:525:      expect(git(root, \"--git-dir\", remote, \"ls-tree\", \"-r\", \"--name-only\", DEFAULT_DOCS_BRANCH).split(\"\\n\").sort()).toEqual([\n./tests/contract/attachments-publish.test.ts:548:  test(\"publishing onto the remote's default branch is refused, and nothing is pushed\", async () => {\n./tests/contract/attachments-publish.test.ts:549:    const { root, remote, work } = makeGitFixture();\n./tests/contract/attachments-publish.test.ts:556:      const mainBefore = git(root, \"--git-dir\", remote, \"rev-parse\", \"main\");\n\n[609 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "chatcmpl-tool-9cf76e189bb322e5"
+    },
+    {
+      "role": "tool",
+      "content": "60 matching line(s) under .:\n\n./.git/hooks/pre-merge-commit.sample:11:test -x \"$GIT_DIR/hooks/pre-commit\" &&\n./.git/hooks/applypatch-msg.sample:14:test -x \"$commitmsg\" && exec \"$commitmsg\" ${1+\"$@\"}\n./.git/hooks/pre-applypatch.sample:13:test -x \"$precommit\" && exec \"$precommit\" ${1+\"$@\"}\n./.git/hooks/commit-msg.sample:23:test \"\" = \"$(grep '^Signed-off-by: ' \"$1\" |\n./tests/e2e/launch-sub-agent.e2e.test.ts:14:import { describe, expect, test } from \"bun:test\";\n./tests/e2e/launch-sub-agent.e2e.test.ts:15:import { mkdtempSync, readFileSync, rmSync, writeFileSync } from \"node:fs\";\n./tests/e2e/launch-sub-agent.e2e.test.ts:16:import { tmpdir } from \"node:os\";\n./tests/e2e/launch-sub-agent.e2e.test.ts:17:import { join } from \"node:path\";\n./tests/e2e/launch-sub-agent.e2e.test.ts:18:import { setupFakeGh } from \"./fake-gh.ts\";\n./tests/e2e/launch-sub-agent.e2e.test.ts:19:import { startMockLlmServer } from \"./mock-llm-server.ts\";\n./tests/e2e/launch-sub-agent.e2e.test.ts:20:import { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from \"./run-atoma.ts\";\n./tests/e2e/launch-sub-agent.e2e.test.ts:22:const ATOMA_MCP_SCRIPT = join(REPO_ROOT, \"dist/.github/atomaton-runtime/tools/mcp/atomaton.ts\");\n./tests/e2e/launch-sub-agent.e2e.test.ts:24:describe.skipIf(!atomaAvailable)(\"E2E: real atoma binary + real mcp/atomaton.ts\", () => {\n./tests/e2e/launch-sub-agent.e2e.test.ts:25:  test(\"agent calls launch_sub_agent through the real MCP server\", async () => {\n./tests/e2e/request-close-issue.e2e.test.ts:17:import { describe, expect, test } from \"bun:test\";\n./tests/e2e/request-close-issue.e2e.test.ts:18:import { mkdtempSync, readFileSync, rmSync, writeFileSync } from \"node:fs\";\n./tests/e2e/request-close-issue.e2e.test.ts:19:import { tmpdir } from \"node:os\";\n./tests/e2e/request-close-issue.e2e.test.ts:20:import { join } from \"node:path\";\n./tests/e2e/request-close-issue.e2e.test.ts:21:import { CLOSE_REQUEST_LINE } from \"../../src/domain/work/close-request.ts\";\n./tests/e2e/request-close-issue.e2e.test.ts:22:import { setupFakeGh } from \"./fake-gh.ts\";\n./tests/e2e/request-close-issue.e2e.test.ts:23:import { startMockLlmServer } from \"./mock-llm-server.ts\";\n./tests/e2e/request-close-issue.e2e.test.ts:24:import { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from \"./run-atoma.ts\";\n./tests/e2e/request-close-issue.e2e.test.ts:26:const ATOMA_MCP_SCRIPT = join(REPO_ROOT, \"dist/.github/atomaton-runtime/tools/mcp/atomaton.ts\");\n./tests/e2e/request-close-issue.e2e.test.ts:28:describe.skipIf(!atomaAvailable)(\"E2E: real atoma binary + real mcp/atomaton.ts\", () => {\n./tests/e2e/request-close-issue.e2e.test.ts:29:  test(\"agent calls request_close_issue for a human-authored issue\", async () => {\n./tests/e2e/fixture-env.test.ts:15:import { expect, test } from \"bun:test\";\n./tests/e2e/fixture-env.test.ts:16:import { fixtureEnv } from \"./run-atoma.ts\";\n./tests/e2e/fixture-env.test.ts:22:const RUN_ENV = {\n./tests/e2e/fixture-env.test.ts:38:function withRunEnv<T>(fn: () => T): T {\n./tests/e2e/fixture-env.test.ts:51:test(\"the fixture's atoma does not inherit the run that started the suite\", () => {\n./tests/e2e/fixture-env.test.ts:62:test(\"a name a fixture means something by is still the fixture's value\", () => {\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:35:import { describe, expect, test } from \"bun:test\";\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:36:import { mkdtempSync, readFileSync, rmSync, writeFileSync } from \"node:fs\";\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:37:import { tmpdir } from \"node:os\";\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:38:import { join } from \"node:path\";\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:39:import { setupFakeGh } from \"./fake-gh.ts\";\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:40:import { startMockLlmServer } from \"./mock-llm-server.ts\";\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:41:import { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from \"./run-atoma.ts\";\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:43:const ATOMA_MCP_SCRIPT = join(REPO_ROOT, \"dist/.github/atomaton-runtime/tools/mcp/atomaton.ts\");\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:46:const PARENT = 5;\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:47:const CHILD = 99;\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:49:describe.skipIf(!atomaAvailable)(\"E2E: the aggregation branch of request_close_issue\", () => {\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts:50:  test(\"a bot-authored close walks the aggregation gate, and writes its marker the way gh accepts\", async () => {\n./tests/e2e/run-atoma.ts:9:import { existsSync } from \"node:fs\";\n./tests/e2e/run-atoma.ts:10:import { delimiter, dirname, join } from \"node:path\";\n./tests/e2e/run-atoma.ts:11:import { fileURLToPath } from \"node:url\";\n./tests/e2e/run-atoma.ts:12:import { hermeticEnv } from \"../../src/entrypoints/machinery/testing/harness.ts\";\n./tests/e2e/run-atoma.ts:14:const HERE = dirname(fileURLToPath(import.meta.url));\n./tests/e2e/fake-gh.ts:11:import { mkdtempSync, readFileSync, writeFileSync } from \"node:fs\";\n./tests/e2e/fake-gh.ts:12:import { tmpdir } from \"node:os\";\n./tests/e2e/fake-gh.ts:13:import { dirname, join } from \"node:path\";\n./tests/e2e/fake-gh.ts:14:import { fileURLToPath } from \"node:url\";\n./tests/e2e/fake-gh.ts:16:import { fakeGhEnv } from \"../../src/entrypoints/machinery/testing/fake-gh-env.ts\";\n./tests/e2e/run-agent.e2e.test.ts:24:import { describe, expect, test } from \"bun:test\";\n./tests/e2e/run-agent.e2e.test.ts:25:import { mkdtempSync, rmSync, writeFileSync } from \"node:fs\";\n./tests/e2e/run-agent.e2e.test.ts:26:import { tmpdir } from \"node:os\";\n./tests/e2e/run-agent.e2e.test.ts:27:import { join } from \"node:path\";\n./tests/e2e/run-agent.e2e.test.ts:28:import { setupFakeGh } from \"./fake-gh.ts\";\n./tests/e2e/run-agent.e2e.test.ts:29:import { startMockLlmServer } from \"./mock-llm-server.ts\";\n./tests/e2e/run-agent.e2e.test.ts:30:import { atomaAvailable, posixPath, REPO_ROOT, runAtoma } from \"./run-atoma.ts\";\n\n[21726 or more further lines. Narrow the pattern, set glob, or raise max_matches.]",
+      "tool_call_id": "chatcmpl-tool-ba09aef7e1a60038"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9b5c929550b955aa",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"pattern\": \"pushBranch|gitOrFail|pushUrl\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "My greps were too broad (no path). Let me grep in the specific files.\n\nAlso the read tool kept returning 1-167 despite offset. Odd — maybe offset wasn't passed. Let me try reading with offset properly this time by being explicit. Actually I suspect the tool-call serialization dropped my `offset` field. I'll retry once; if it fails, use bash `sed -n`? The instructions say prefer read over shell, but bash is allowed for read-only inspection. Let me try read with offset again.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_28158eeb-bce3-469d-8098-de8ce19563f6",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "27 matching line(s) under .:\n\n./src/entrypoints/tools/mcp/github.ts:1418:  // `pushBranch` posts. Without one the dispatch is refused downstream — an\n./src/entrypoints/tools/mcp/github.ts:1580:function pushBranch(branch: string): boolean {\n./src/entrypoints/tools/mcp/github.ts:1705:  const pushed = pushBranch(branch);\n./src/entrypoints/tools/mcp/github.ts:1982:  pushBranch(branch);\n./src/entrypoints/machinery/update_atomaton.ts:239:function gitOrFail(args: string[], what: string): { stdout: string } | { fail: string } {\n./src/entrypoints/machinery/update_atomaton.ts:255:function pushBranch(branch: string, token: string): { ok: true } | { fail: string } {\n./src/entrypoints/machinery/update_atomaton.ts:256:  const origin = gitOrFail([\"remote\", \"get-url\", \"origin\"], \"read the origin remote\");\n./src/entrypoints/machinery/update_atomaton.ts:260:  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\n./src/entrypoints/machinery/update_atomaton.ts:261:  const pushed = gitOrFail([\"push\", \"--force\", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);\n./src/entrypoints/machinery/update_atomaton.ts:347:  const status = gitOrFail([\"status\", \"--porcelain\"], \"read the working tree's status\");\n./src/entrypoints/machinery/update_atomaton.ts:399:  const branched = gitOrFail([\"switch\", \"-C\", branch], `create the branch ${branch}`);\n./src/entrypoints/machinery/update_atomaton.ts:404:  const staged = gitOrFail([\"add\", \"-A\"], \"stage the applied plan\");\n./src/entrypoints/machinery/update_atomaton.ts:409:  const committed = gitOrFail(\n./src/entrypoints/machinery/update_atomaton.ts:423:  const pushed = pushBranch(branch, token);\n./.github/atomaton-runtime/tools/mcp/github.ts:21589:function pushBranch(branch) {\n./.github/atomaton-runtime/tools/mcp/github.ts:21659:  const pushed = pushBranch(branch);\n./.github/atomaton-runtime/tools/mcp/github.ts:21812:  pushBranch(branch);\n./.github/atomaton-runtime/scripts/update_atomaton.ts:751:function gitOrFail(args, what) {\n./.github/atomaton-runtime/scripts/update_atomaton.ts:758:function pushBranch(branch, token) {\n./.github/atomaton-runtime/scripts/update_atomaton.ts:759:  const origin = gitOrFail([\"remote\", \"get-url\", \"origin\"], \"read the origin remote\");\n./.github/atomaton-runtime/scripts/update_atomaton.ts:764:  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\n./.github/atomaton-runtime/scripts/update_atomaton.ts:765:  const pushed = gitOrFail([\"push\", \"--force\", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);\n./.github/atomaton-runtime/scripts/update_atomaton.ts:829:  const status = gitOrFail([\"status\", \"--porcelain\"], \"read the working tree's status\");\n./.github/atomaton-runtime/scripts/update_atomaton.ts:870:  const branched = gitOrFail([\"switch\", \"-C\", branch], `create the branch ${branch}`);\n./.github/atomaton-runtime/scripts/update_atomaton.ts:875:  const staged = gitOrFail([\"add\", \"-A\"], \"stage the applied plan\");\n./.github/atomaton-runtime/scripts/update_atomaton.ts:880:  const committed = gitOrFail([\n./.github/atomaton-runtime/scripts/update_atomaton.ts:895:  const pushed = pushBranch(branch, token);",
+      "tool_call_id": "chatcmpl-tool-9b5c929550b955aa"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a9f5ce3b683c4ab7",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"path\": \"src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "src/entrypoints/machinery/update_atomaton.ts lines 1-167 of 580\n\n1\t#!/usr/bin/env bun\n2\t/**\n3\t * update_atomaton.ts — take a newer template release onto this tree.\n4\t *\n5\t * This is the other face of the machinery the notice serves. The notice (see\n6\t * `notify_new_release.ts`) computes a plan and renders it read-only; this script\n7\t * runs the same plan for real, on the checkout the workflow ran it in:\n8\t *\n9\t *     plan → apply to the tree → branch → commit → push → pull request\n10\t *        → no conflict: wait for the checks, merge, close the notice\n11\t *        → conflicts:   stop at the pull request, report where and why\n12\t *\n13\t * Nothing here decides policy. Whether a path is take/add/delete/merge is the\n14\t * plan's answer (`domain/machinery/update-plan.ts`); whether a merge collides is\n15\t * `git merge-file`'s measured answer (`lib/update-apply.ts`). A collision is not a\n16\t * failure of the run: stopping at a pull request IS the design, and the run exits\n17\t * green after reporting it. What is a failure is being unable to run at all — no\n18\t * token, no manifest, no readable release — which exits red with the reason.\n19\t *\n20\t * ## Why the token, and why it is not the workflow's own\n21\t *\n22\t * The branch this pushes must run the repository's checks, and a push made with\n23\t * the workflow's own `GITHUB_TOKEN` deliberately triggers none. The merge those\n24\t * checks gate would then be merging unverified content. So the workflow that runs\n25\t * this carries `ATOMATON_UPDATE_TOKEN`, a personal access token with repo scope,\n26\t * and a run without it fails loudly and does nothing — a person who pressed the\n27\t * button is standing there, and silence is not an answer.\n28\t *\n29\t * ## Why the stop is a pull request, and why the token does the writing\n30\t *\n31\t * A pull request is the one place this repository already has everything a\n32\t * resolution needs: visible diffs, checks that refuse broken content, and an agent\n33\t * loop a person can address with a comment. The pull request is opened, and when\n34\t * the plan is clean merged, as the update token -- an identity that starts runs.\n35\t * A pull request opened with the workflow's own token fires no `pull_request`\n36\t * event, so its required check would never start; a merge made with it fires no\n37\t * `push`, so `deploy.on_merge` would never run. The token is what makes this the\n38\t * same shape as a person pressing the buttons: checks run on the pull request,\n39\t * and the merge's push starts the deploy.\n40\t *\n41\t * The plan being clean is the plan's claim; the checks are what makes it true.\n42\t * The script waits for the required check to exist and pass before merging, and\n43\t * a red change stays unmerged.\n44\t *\n45\t * Usage:\n46\t *   update_atomaton.ts --repo OWNER/REPO [--source N] [--tag vX.Y.Z]\n47\t */\n48\timport { parseArgs } from \"node:util\";\n49\timport { gh, ghRead, ghAs } from \"../../adapters/github/gh.ts\";\n50\timport { readPullRequest } from \"../../adapters/github/pull-request.ts\";\n51\timport { LLM_CONTEXT_TAG } from \"../../adapters/github/tags.ts\";\n52\timport { machineryPath } from \"../../adapters/runner/machinery.ts\";\n53\timport { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from \"../../domain/machinery/update-plan.ts\";\n54\timport { defineScript } from \"./lib/script-ref.ts\";\n55\timport { findOpenNotice, NOTICE_MARKER } from \"./lib/notice-issue.ts\";\n56\timport { applyPlan } from \"./lib/update-apply.ts\";\n57\timport {\n58\t  UPSTREAM_REPOSITORY,\n59\t  latestReleaseTag,\n60\t  readLocalManifest,\n61\t  readTreeFiles,\n62\t  releaseFiles,\n63\t  treePaths,\n64\t} from \"./lib/release-files.ts\";\n65\t\n66\texport interface UpdateAtomatonArgs {\n67\t  /** `owner/name` of the repository being updated — the adopted tree's own. */\n68\t  repo: string;\n69\t  /**\n70\t   * The thread to answer in: the issue a `!upgrade` came from, or the notice. As\n71\t   * the workflow passes it, an empty string means nobody asked — which is what\n72\t   * starting from the Actions tab looks like.\n73\t   */\n74\t  source?: number | string;\n75\t  /** A specific release to take, instead of the newest one upstream has. */\n76\t  tag?: string;\n77\t}\n78\t\n79\texport const ref = defineScript<UpdateAtomatonArgs>(import.meta.url);\n80\t\n81\t/**\n82\t * Who the machinery says this commit is from.\n83\t *\n84\t * A plain `atomaton[bot]` identity, not a person's: a tree that later wants to\n85\t * audit what the machinery touched finds it by author, and the machinery must not\n86\t * borrow whoever happened to be running the workflow.\n87\t */\n88\tconst COMMIT_NAME = \"atomaton[bot]\";\n89\tconst COMMIT_EMAIL = \"atomaton[bot]@users.noreply.github.com\";\n90\t\n91\t/** The branch every update lands on, named for the release it takes. */\n92\texport function updateBranchFor(tag: string): string {\n93\t  return `atomaton/update-${tag}`;\n94\t}\n95\t\n96\t/** The pull request's title. */\n97\texport function updateTitle(tag: string): string {\n98\t  return `Take Atomaton ${tag} onto this tree`;\n99\t}\n100\t\n101\t/** Everything the pull request's body is rendered from. */\n102\texport interface UpdateReport {\n103\t  readonly plan: UpdatePlan;\n104\t  /** Paths whose merge collided, as `applyPlan` measured them. */\n105\t  readonly conflicts: readonly string[];\n106\t  /** Paths whose merge resolved with no conflict. */\n107\t  readonly merged: readonly string[];\n108\t  /** Paths the target no longer ships — reported, never acted on. */\n109\t  readonly leftovers: readonly string[];\n110\t}\n111\t\n112\t/** How many of a list a report renders before it counts the rest. */\n113\tconst MAX_LISTED = 15;\n114\t\n115\t/** The body of the pull request, whatever the plan turned out to be. */\n116\texport function updateBody(report: UpdateReport): string {\n117\t  const { plan } = report;\n118\t  const lines: string[] = [\n119\t    \"<!-- atomaton:update -->\",\n120\t    verdictSentence(plan.base, plan.target, report.conflicts.length, plan.kept.length),\n121\t    \"\",\n122\t    \"## The plan\",\n123\t    \"\",\n124\t    \"| | |\",\n125\t    \"| --- | --- |\",\n126\t    `| Files updated (untouched here) | ${plan.take.length} |`,\n127\t    `| Files added | ${plan.add.length} |`,\n128\t    `| Files removed (unmodified here) | ${plan.delete.length} |`,\n129\t    `| Files changed on **both** sides | ${plan.merge.length} |`,\n130\t    `| Resolved by the merge itself | ${report.merged.length} |`,\n131\t    `| Left with conflict markers | ${report.conflicts.length} |`,\n132\t    `| Paths the plan will not touch | ${plan.kept.length} |`,\n133\t    \"\",\n134\t  ];\n135\t\n136\t  const list = (title: string, paths: readonly string[]): void => {\n137\t    if (paths.length === 0) return;\n138\t    lines.push(title, \"\", ...paths.slice(0, MAX_LISTED).map((path) => `- \\`${path}\\``));\n139\t    if (paths.length > MAX_LISTED) lines.push(`- …and ${paths.length - MAX_LISTED} more`);\n140\t    lines.push(\"\");\n141\t  };\n142\t  list(\"Conflicted — resolve here, then the checks finish the job:\", report.conflicts);\n143\t  list(\"Merged cleanly by the machinery:\", report.merged);\n144\t  list(\n145\t    \"Left alone for a person to look at:\",\n146\t    plan.kept.map((entry) => entry.path),\n147\t  );\n148\t\n149\t  if (report.leftovers.length > 0) {\n150\t    lines.push(\n151\t      \"## Files upstream no longer ships\",\n152\t      \"\",\n153\t      \"Reported only — the manifest cannot tell these from files the adopter wrote,\",\n154\t      \"so nothing here deletes them on a guess:\",\n155\t      \"\",\n156\t      ...report.leftovers.slice(0, MAX_LISTED).map((path) => `- \\`${path}\\``),\n157\t      ...(report.leftovers.length > MAX_LISTED ? [`- …and ${report.leftovers.length - MAX_LISTED} more`] : []),\n158\t      \"\",\n159\t    );\n160\t  }\n161\t\n162\t  lines.push(\n163\t    \"## What happens next\",\n164\t    \"\",\n165\t    report.conflicts.length > 0\n166\t      ? \"This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge.\"\n167\t      : plan.kept.length > 0\n\n[413 more lines. Read again with offset: 168.]",
+      "tool_call_id": "chatcmpl-tool-a9f5ce3b683c4ab7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-abf8f5e65aea5aa0",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"sed -n '230,280p' src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8dfc1641e83120bc",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"sed -n '1,80p' src/entrypoints/machinery/update_atomaton.test.ts; echo ---; grep -n \\\"^describe\\\\|^test\\\\|^  test\\\\|^import\\\" src/entrypoints/machinery/update_atomaton.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The read tool refuses to honor offset — suspicious. It's returning the same content. Maybe the offset param isn't being passed by my client. Let me use bash `sed -n '230,280p'`.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_ae7656d7-1f8e-4353-b552-92c5fbe4766e",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"  const run = Bun.spawnSync({ cmd: [\\\"git\\\", ...args], stdout: \\\"pipe\\\", stderr: \\\"pipe\\\" });\\n  return {\\n    code: run.exitCode ?? 1,\\n    stdout: run.stdout?.toString(\\\"utf8\\\") ?? \\\"\\\",\\n    stderr: run.stderr?.toString(\\\"utf8\\\") ?? \\\"\\\",\\n  };\\n}\\n\\n/** `git` failing is a red run with the command that failed, not a stack trace. */\\nfunction gitOrFail(args: string[], what: string): { stdout: string } | { fail: string } {\\n  const result = git(args);\\n  if (result.code !== 0) {\\n    return { fail: `could not ${what}: ${result.stderr.trim() || `git exited ${result.code}`}` };\\n  }\\n  return { stdout: result.stdout };\\n}\\n\\n/**\\n * Push `branch`, with the update token if the remote is this script's to\\n * credential.\\n *\\n * A `https://github.com/` remote gets the token inline — the only credential this\\n * run may add. Anything else (a test's file remote, an SSH remote the checkout\\n * already carries) is pushed as-is, on the checkout's own credentials.\\n */\\nfunction pushBranch(branch: string, token: string): { ok: true } | { fail: string } {\\n  const origin = gitOrFail([\\\"remote\\\", \\\"get-url\\\", \\\"origin\\\"], \\\"read the origin remote\\\");\\n  if (\\\"fail\\\" in origin) return origin;\\n  const url = origin.stdout.trim();\\n  const github = /^https:\\\\/\\\\/github\\\\.com\\\\/(.+?)(?:\\\\.git)?$/.exec(url);\\n  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\\n  const pushed = gitOrFail([\\\"push\\\", \\\"--force\\\", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);\\n  return \\\"fail\\\" in pushed ? pushed : { ok: true };\\n}\\n\\n/** The repository's default branch, as the pull request's base. */\\nfunction defaultBranch(repo: string): string | null {\\n  const result = ghRead(\\\"api\\\", `repos/${repo}`, \\\"--jq\\\", \\\".default_branch\\\");\\n  if (result.code !== 0) {\\n    log(`WARN could not read ${repo}'s default branch: ${result.stderr.trim() || `gh exited ${result.code}`}`);\\n    return null;\\n  }\\n  const branch = result.stdout.trim();\\n  return branch === \\\"\\\" ? null : branch;\\n}\\n\\n/** An open pull request already standing on `branch`, or `0`. */\\nfunction openPrForHead(repo: string, branch: string): number {\\n  const result = ghRead(\\n    \\\"pr\\\", \\\"list\\\", \\\"--repo\\\", repo, \\\"--head\\\", branch, \\\"--state\\\", \\\"open\\\", \\\"--json\\\", \\\"number\\\",\\n  );\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":251}",
+      "tool_call_id": "chatcmpl-tool-abf8f5e65aea5aa0"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"import { afterAll, describe, expect, test } from \\\"bun:test\\\";\\nimport { crc32 } from \\\"node:zlib\\\";\\nimport { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from \\\"node:fs\\\";\\nimport { dirname, join } from \\\"node:path\\\";\\nimport { tmpdir } from \\\"node:os\\\";\\nimport { spawnSync } from \\\"node:child_process\\\";\\nimport { NOTICE_MARKER } from \\\"./notify_new_release.ts\\\";\\nimport { updateBranchFor, updateTitle } from \\\"./update_atomaton.ts\\\";\\nimport { RELEASE_MANIFEST } from \\\"../../domain/machinery/machinery-layout.ts\\\";\\nimport { ASSET_NAME } from \\\"./notify_new_release.ts\\\";\\nimport { removeTemp, runWithFakeGh, scriptPath, hermeticEnv, type FakeGhRule } from \\\"./testing/harness.ts\\\";\\n\\n/**\\n * The update, end to end against a real git repository and a fake `gh`.\\n *\\n * Everything the script does is either a write into a tree, a git command, or a\\n * `gh` call — so the fixture is all three: a checkout whose files exist, an origin\\n * that is a real bare repository the push can land in (measured afterwards by\\n * asking the bare repo for the branch), and a `gh` that answers the reads the run\\n * makes. Nothing about the push or the commit is mocked; only GitHub's API is.\\n */\\n\\n/** Temp directories this file made, removed in one place rather than at every call site. */\\nconst MADE: string[] = [];\\nafterAll(() => {\\n  for (const dir of MADE) removeTemp(dir);\\n});\\n\\nfunction temp(prefix: string): string {\\n  const dir = mkdtempSync(join(tmpdir(), prefix));\\n  MADE.push(dir);\\n  return dir;\\n}\\n\\n/** A tree's files beyond the manifest itself. */\\ntype Tree = Record<string, string>;\\n\\nconst CHECK = \\\".github/workflows/atomaton-check.yml\\\";\\nconst GONE = \\\".github/workflows/atomaton-gone.yml\\\";\\nconst BASE_FILES: Tree = { [CHECK]: \\\"check: one\\\\n\\\", [GONE]: \\\"gone: one\\\\n\\\" };\\nconst TARGET_FILES: Tree = { [CHECK]: \\\"check: two\\\\n\\\" };\\nconst UPSTREAM_REPO = \\\"yuma-seno/atomaton\\\";\\n\\nconst manifestJson = (version: string, files: string[]): string =>\\n  JSON.stringify({ version, files: [RELEASE_MANIFEST, ...files] });\\n\\n/** One zip archive of `entries` plus the manifest naming them, as the release carries them. */\\nfunction zipOf(name: string, version: string, entries: Tree): string {\\n  const listed = Object.keys(entries);\\n  const members = new Map<string, string>([\\n    [RELEASE_MANIFEST, `${manifestJson(version, listed)}\\\\n`],\\n    ...Object.entries(entries),\\n  ]);\\n  const bytes: Buffer[] = [];\\n  const central: Buffer[] = [];\\n  let offset = 0;\\n  for (const [entry, content] of members) {\\n    const data = Buffer.from(content, \\\"utf8\\\");\\n    const nameBytes = Buffer.from(entry, \\\"utf8\\\");\\n    const local = Buffer.alloc(30);\\n    local.writeUInt32LE(0x04034b50, 0);\\n    local.writeUInt16LE(20, 4);\\n    local.writeUInt32LE(crc32(data), 14);\\n    local.writeUInt32LE(data.length, 18);\\n    local.writeUInt32LE(data.length, 22);\\n    local.writeUInt16LE(nameBytes.length, 26);\\n    bytes.push(local, nameBytes, data);\\n    const header = Buffer.alloc(46);\\n    header.writeUInt32LE(0x02014b50, 0);\\n    header.writeUInt16LE(20, 4);\\n    header.writeUInt16LE(20, 6);\\n    header.writeUInt32LE(crc32(data), 16);\\n    header.writeUInt32LE(data.length, 20);\\n    header.writeUInt32LE(data.length, 24);\\n    header.writeUInt16LE(nameBytes.length, 28);\\n    header.writeUInt32LE(offset, 42);\\n    central.push(header, nameBytes);\\n    offset += local.length + nameBytes.length + data.length;\\n  }\\n  const directory = Buffer.concat(central);\\n---\\n1:import { afterAll, describe, expect, test } from \\\"bun:test\\\";\\n2:import { crc32 } from \\\"node:zlib\\\";\\n3:import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from \\\"node:fs\\\";\\n4:import { dirname, join } from \\\"node:path\\\";\\n5:import { tmpdir } from \\\"node:os\\\";\\n6:import { spawnSync } from \\\"node:child_process\\\";\\n7:import { NOTICE_MARKER } from \\\"./notify_new_release.ts\\\";\\n8:import { updateBranchFor, updateTitle } from \\\"./update_atomaton.ts\\\";\\n9:import { RELEASE_MANIFEST } from \\\"../../domain/machinery/machinery-layout.ts\\\";\\n10:import { ASSET_NAME } from \\\"./notify_new_release.ts\\\";\\n11:import { removeTemp, runWithFakeGh, scriptPath, hermeticEnv, type FakeGhRule } from \\\"./testing/harness.ts\\\";\\n204:describe(\\\"a run that cannot start\\\", () => {\\n205:  test(\\\"no token is a red run that touches nothing\\\", () => {\\n213:  test(\\\"a dirty working tree is refused before anything is written\\\", () => {\\n223:  test(\\\"a checkout with no manifest is refused, rather than reading as up to date\\\", () => {\\n230:  test(\\\"an unreadable target release is a red run, not an empty one\\\", () => {\\n243:describe(\\\"a run that is already settled\\\", () => {\\n244:  test(\\\"the tree is on the release asked for: nothing is done, nothing is called\\\", () => {\\n253:describe(\\\"a clean update\\\", () => {\\n254:  test(\\\"applies the plan, pushes the branch, opens the pull request, merges after the checks\\\", () => {\\n292:  test(\\\"a notice standing open is closed, with the pull request named\\\", () => {\\n305:  test(\\\"the pull request body reports the plan, and the leftovers it did not touch\\\", () => {\\n317:describe(\\\"a stopped update\\\", () => {\\n323:  test(\\\"the pull request stands, the merge is not requested, and the thread is told where\\\", () => {\\n351:  test(\\\"a run that came from a thread answers that thread too\\\", () => {\\n369:  test(\\\"a clean plan with kept paths stops for a person, and says which paths\\\", () => {\\n410:describe(\\\"an update that is nothing but a name\\\", () => {\\n411:  test(\\\"a target whose contents match the tree's release changes nothing and opens nothing\\\", () => {\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":173}",
+      "tool_call_id": "chatcmpl-tool-8dfc1641e83120bc"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-89b9bcf7cefce641",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"/**\\n * The argv that pushes `branch`, with the update token as the only credential\\n * when the remote is a GitHub https one.\\n *\\n * Why the two `-c` resets: `actions/checkout` leaves `persist-credentials` on by\\n * default, which writes `http.https://github.com/.extraheader` into the\\n * repository's config. Git sends a configured `Authorization` header *instead of*\\n * the userinfo in the URL, so the push would authenticate as the run's own token\\n * — and `apply-to-self` runs with `contents: read`, so that push is a 403. An\\n * empty `http.extraheader` value resets the header list to empty, and both the\\n * unscoped and the URL-scoped forms are cleared because either one can be set.\\n *\\n * A remote that is not GitHub https (a test's file remote, an SSH remote the\\n * checkout already carries) keeps the checkout's own credentials: no `-c`, no\\n * rewrite, the URL exactly as the origin carries it.\\n */\\nexport function pushArgs(url: string, token: string, branch: string): string[] {\\n  const github = /^https:\\\\/\\\\/github\\\\.com\\\\/(.+?)(?:\\\\.git)?$/.exec(url);\\n  if (!github) return [\\\"push\\\", \\\"--force\\\", url, `HEAD:refs/heads/${branch}`];\\n  return [\\n    \\\"-c\\\", \\\"http.extraheader=\\\",\\n    \\\"-c\\\", \\\"http.https://github.com/.extraheader=\\\",\\n    \\\"push\\\", \\\"--force\\\", `https://x-access-token:${token}@github.com/${github[1]}`, `HEAD:refs/heads/${branch}`,\\n  ];\\n}\\n\\n/**\\n * Push `branch`, with the update token if the remote is this script's to\\n * credential.\\n *\\n * A `https://github.com/` remote gets the token as its only credential (see\\n * `pushArgs`). Anything else (a test's file remote, an SSH remote the checkout\\n * already carries) is pushed as-is, on the checkout's own credentials.\\n */\\nfunction pushBranch(branch: string, token: string): { ok: true } | { fail: string } {\\n  const origin = gitOrFail([\\\"remote\\\", \\\"get-url\\\", \\\"origin\\\"], \\\"read the origin remote\\\");\\n  if (\\\"fail\\\" in origin) return origin;\\n  const pushed = gitOrFail(pushArgs(origin.stdout.trim(), token, branch), `push ${branch}`);\\n  return \\\"fail\\\" in pushed ? pushed : { ok: true };\\n}\", \"old_string\": \"/**\\n * Push `branch`, with the update token if the remote is this script's to\\n * credential.\\n *\\n * A `https://github.com/` remote gets the token inline — the only credential this\\n * run may add. Anything else (a test's file remote, an SSH remote the checkout\\n * already carries) is pushed as-is, on the checkout's own credentials.\\n */\\nfunction pushBranch(branch: string, token: string): { ok: true } | { fail: string } {\\n  const origin = gitOrFail([\\\"remote\\\", \\\"get-url\\\", \\\"origin\\\"], \\\"read the origin remote\\\");\\n  if (\\\"fail\\\" in origin) return origin;\\n  const url = origin.stdout.trim();\\n  const github = /^https:\\\\/\\\\/github\\\\.com\\\\/(.+?)(?:\\\\.git)?$/.exec(url);\\n  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\\n  const pushed = gitOrFail([\\\"push\\\", \\\"--force\\\", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);\\n  return \\\"fail\\\" in pushed ? pushed : { ok: true };\\n}\", \"path\": \"src/entrypoints/machinery/update_atomaton.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now I'll make the edits. The helper: note the suggested helper includes `branch` in signature. Fine.\n\nDesign concern: the helper takes (url, token, branch). Then pushBranch calls `gitOrFail(pushArgs(url, token, branch), ...)`.\n\nLet me write the helper with the doc comment explaining why the reset is there (why not: the alternative ruled out). Keep it concise.\n\nNow edit.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_a239655e-fd45-445b-b91f-5f86d69e4ddc",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/update_atomaton.ts.",
+      "tool_call_id": "chatcmpl-tool-89b9bcf7cefce641"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ad4e3c4bff347b60",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"sed -n '395,440p' src/entrypoints/machinery/update_atomaton.test.ts; echo '=== tail ==='; tail -n 20 src/entrypoints/machinery/update_atomaton.test.ts; echo '=== wc ==='; wc -l src/entrypoints/machinery/update_atomaton.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now add tests. Let me look at the end of the test file to see where the top-level describes are and add a new describe for pushArgs. Also check the import line 8 to add pushArgs.\n\nLet me see the tail of the test file.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_16cf1ec7-4705-48fe-82c1-1dce9d2db536",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"    expect(body).toContain(\\\"the plan will not touch without a person\\\");\\n\\n    // Whatever conflicted, the tree shows it, and it is not the adopted file:\\n    // a keep never gets markers, and the adopter's own file is still theirs.\\n    expect(readFileSync(join(dir, \\\".github/atomaton/adopted.md\\\"), \\\"utf8\\\")).toBe(\\\"the adopter's own file\\\\n\\\");\\n\\n    // The comment names the kept path and where the decision lives.\\n    const comments = r.ghCalls.filter((call) => call[0] === \\\"issue\\\" && call[1] === \\\"comment\\\");\\n    const comment = (comments[0] ?? [])[(comments[0] ?? []).indexOf(\\\"--body\\\") + 1] ?? \\\"\\\";\\n    expect(comment).toContain(\\\"adopted.md\\\");\\n    expect(comment).toContain(\\\"#9\\\");\\n    expect(comment).toContain(\\\"merge by hand\\\");\\n  });\\n});\\n\\ndescribe(\\\"an update that is nothing but a name\\\", () => {\\n  test(\\\"a target whose contents match the tree's release changes nothing and opens nothing\\\", () => {\\n    const { dir, bare } = fixtureRepo(BASE_FILES, \\\"v0.1.0\\\");\\n    // The target zip's manifest names the same release the tree came from, so the\\n    // plan is empty however the tag is spelled.\\n    const r = runWithFakeGh(scriptPath(\\\"update_atomaton.ts\\\"), [\\\"--repo\\\", \\\"owner/repo\\\"], {\\n      cwd: dir,\\n      env: { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" },\\n      rules: [\\n        { match: [\\\"repos/yuma-seno/atomaton/releases/latest\\\"], stdout: \\\"v0.2.0\\\" },\\n        { match: [\\\"v0.1.0\\\", \\\"release\\\", \\\"download\\\", \\\"-D\\\"], writes: [{ name: ASSET_NAME, from: zipOf(\\\"base.zip\\\", \\\"v0.1.0\\\", BASE_FILES) }] },\\n        { match: [\\\"v0.2.0\\\", \\\"release\\\", \\\"download\\\", \\\"-D\\\"], writes: [{ name: ASSET_NAME, from: zipOf(\\\"target.zip\\\", \\\"v0.1.0\\\", BASE_FILES) }] },\\n        { match: [\\\"repos/owner/repo\\\"], stdout: \\\"main\\\" },\\n      ],\\n    });\\n    expect(r.status).toBe(0);\\n    expect(r.ghCalls.filter((call) => call[0] === \\\"pr\\\" || call[0] === \\\"issue\\\")).toEqual([]);\\n    expect(pushedTip(bare, updateBranchFor(\\\"v0.2.0\\\"))).toBeNull();\\n  });\\n});\\n=== tail ===\\ndescribe(\\\"an update that is nothing but a name\\\", () => {\\n  test(\\\"a target whose contents match the tree's release changes nothing and opens nothing\\\", () => {\\n    const { dir, bare } = fixtureRepo(BASE_FILES, \\\"v0.1.0\\\");\\n    // The target zip's manifest names the same release the tree came from, so the\\n    // plan is empty however the tag is spelled.\\n    const r = runWithFakeGh(scriptPath(\\\"update_atomaton.ts\\\"), [\\\"--repo\\\", \\\"owner/repo\\\"], {\\n      cwd: dir,\\n      env: { ATOMATON_UPDATE_TOKEN: \\\"tok\\\" },\\n      rules: [\\n        { match: [\\\"repos/yuma-seno/atomaton/releases/latest\\\"], stdout: \\\"v0.2.0\\\" },\\n        { match: [\\\"v0.1.0\\\", \\\"release\\\", \\\"download\\\", \\\"-D\\\"], writes: [{ name: ASSET_NAME, from: zipOf(\\\"base.zip\\\", \\\"v0.1.0\\\", BASE_FILES) }] },\\n        { match: [\\\"v0.2.0\\\", \\\"release\\\", \\\"download\\\", \\\"-D\\\"], writes: [{ name: ASSET_NAME, from: zipOf(\\\"target.zip\\\", \\\"v0.1.0\\\", BASE_FILES) }] },\\n        { match: [\\\"repos/owner/repo\\\"], stdout: \\\"main\\\" },\\n      ],\\n    });\\n    expect(r.status).toBe(0);\\n    expect(r.ghCalls.filter((call) => call[0] === \\\"pr\\\" || call[0] === \\\"issue\\\")).toEqual([]);\\n    expect(pushedTip(bare, updateBranchFor(\\\"v0.2.0\\\"))).toBeNull();\\n  });\\n});\\n=== wc ===\\n429 src/entrypoints/machinery/update_atomaton.test.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":170}",
+      "tool_call_id": "chatcmpl-tool-ad4e3c4bff347b60"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b00798d1371464f7",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"import { updateBranchFor, updateTitle, pushArgs } from \\\"./update_atomaton.ts\\\";\", \"old_string\": \"import { updateBranchFor, updateTitle } from \\\"./update_atomaton.ts\\\";\", \"path\": \"src/entrypoints/machinery/update_atomaton.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now add import of pushArgs and a describe block. Add at line 8 import.\n\nTests:\n1. github https remote (both with and without .git maybe) → contains the two -c resets and token URL, no bare url.\n2. non-github remote (file remote path) → exactly the old argv, no -c.\n\nWrite as assertions on the full argv arrays — precise.\n\nWhere to place? At the top, after helpers, or at the end. A small pure-helper describe reads well near the top after imports? The file starts with a fixture doc. I'll append at the end of the file — simplest, and it's a pure unit test independent of the fixture. Actually placing it at the end after the e2e-ish describes is fine but slightly odd. Let me place it right after the header comment/helper utilities... hmm, that intermixes. I'll append at the end with a clear describe name.\n\nLet's write:\n\n```ts\n/**\n * The push argv, asserted directly.\n *\n * The fixture above pushes to a bare repository over a file path, which takes the\n * other branch of `pushArgs` and cannot observe the credential at all. The argv is\n * where the difference lives, so it is what the test reads.\n */\ndescribe(\"the push argv\", () => {\n  const BRANCH = \"atomaton/update-v0.24.0\";\n\n  test(\"a GitHub https remote carries the update token as the only credential\", () => {\n    expect(pushArgs(\"https://github.com/owner/repo\", \"ATOMATON_TOKEN\", BRANCH)).toEqual([\n      \"-c\", \"http.extraheader=\",\n      \"-c\", \"http.https://github.com/.extraheader=\",\n      \"push\", \"--force\", \"https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo\", `HEAD:refs/heads/${BRANCH}`,\n    ]);\n  });\n\n  test(\"the `.git` suffix is not part of the owner/name the URL is rebuilt from\", () => {\n    ...\n  });\n\n  test(\"a remote that is not GitHub https is pushed as the checkout carries it\", () => {\n    expect(pushArgs(\"/tmp/somewhere/remote.git\", \"ATOMATON_TOKEN\", BRANCH)).toEqual([\n      \"push\", \"--force\", \"/tmp/somewhere/remote.git\", `HEAD:refs/heads/${BRANCH}`,\n    ]);\n  });\n});\n```\n\nThird: also SSH remote case maybe. Could fold into one test with two assertions but keep separate minimal. I'll include ssh in the third test as a second assertion? Better: one test \"a remote that is not GitHub https ... \" with file path and ssh as two expects — it's the same claim. That's fine.\n\nAlso assertions about absence of `-c` are implied by toEqual.\n\nNote: does `toEqual` on arrays work with bun. Yes.\n\nNow, the helper token injection: URL regex `^https:\\/\\/github\\.com\\/(.+?)(?:\\.git)?$` — for \"https://github.com/owner/repo\" the non-greedy `(.+?)` with optional `.git`... the regex isn't anchored to force `.git` consumption; for \"https://github.com/owner/repo.git\", `(.+?)` non-greedy will try minimal, then `(?:\\.git)?` optional can match empty and `$` must match — so it backtracks until `(.+?)` = \"owner/repo.git\" and `.git` group empty? Non-greedy expands from minimum: it tries \"o\", then optional .git empty, then $ fails... continues until whole rest matches with optional group empty → \"owner/repo.git\". So the `.git` suffix would be kept in the URL → `https://x-access-token:TOK@github.com/owner/repo.git` which is fine actually (git accepts .git suffix). Wait but the optional group might consume it earlier? Non-greedy prefers shorter `(.+?)`, so it will stop as soon as the rest matches — at \"owner/repo\" with `.git` consumed? Let's think: at length 10 (\"owner/repo\"), remainder is \".git\"; optional group `.git` matches, then `$` matches → success. Regex engines with non-greedy quantifier attempt the optional group before expanding the lazy quantifier. So it succeeds with github[1]=\"owner/repo\". Good — that's the intent.\n\nFor \"https://github.com/owner/repo\" (no .git): at \"owner/repo\" remainder empty, optional matches empty, $ matches. Good.\n\nTest both to lock behavior.\n\nNow write the edits.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_fb81da57-ec78-4d82-a629-dbdcfc54898c",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/update_atomaton.test.ts.",
+      "tool_call_id": "chatcmpl-tool-b00798d1371464f7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-aa2c0f336c9eb573",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cat >> src/entrypoints/machinery/update_atomaton.test.ts <<'EOF'\\n\\n/**\\n * The push argv, asserted as argv.\\n *\\n * The fixture above pushes to a bare repository over a file path, which takes the\\n * other branch of `pushArgs` and cannot see a credential at all. Which credentials\\n * a push carries is decided entirely in the argv, so that is what these read:\\n * a checkout's `http.https://github.com/.extraheader` is reset, or it authenticates\\n * the push as the run's own token and a `contents: read` job gets a 403.\\n */\\ndescribe(\\\"the push argv\\\", () => {\\n  const BRANCH = \\\"atomaton/update-v0.24.0\\\";\\n\\n  test(\\\"a GitHub https remote is pushed with the update token and no header from the checkout\\\", () => {\\n    expect(pushArgs(\\\"https://github.com/owner/repo\\\", \\\"ATOMATON_TOKEN\\\", BRANCH)).toEqual([\\n      \\\"-c\\\",\\n      \\\"http.extraheader=\\\",\\n      \\\"-c\\\",\\n      \\\"http.https://github.com/.extraheader=\\\",\\n      \\\"push\\\",\\n      \\\"--force\\\",\\n      \\\"https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo\\\",\\n      `HEAD:refs/heads/${BRANCH}`,\\n    ]);\\n  });\\n\\n  test(\\\"the `.git` suffix stays out of the owner and name the URL is rebuilt from\\\", () => {\\n    expect(pushArgs(\\\"https://github.com/owner/repo.git\\\", \\\"ATOMATON_TOKEN\\\", BRANCH)).toContain(\\n      \\\"https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo\\\",\\n    );\\n  });\\n\\n  test(\\\"a remote that is not GitHub https keeps the checkout's own credentials\\\", () => {\\n    // A test's file remote, and an SSH remote the checkout already carries: the\\n    // update token is not this run's to add there, and no header is reset.\\n    for (const url of [\\\"/tmp/atomaton-fixture/remote.git\\\", \\\"git@github.com:owner/repo.git\\\"]) {\\n      expect(pushArgs(url, \\\"ATOMATON_TOKEN\\\", BRANCH)).toEqual([\\n        \\\"push\\\",\\n        \\\"--force\\\",\\n        url,\\n        `HEAD:refs/heads/${BRANCH}`,\\n      ]);\\n    }\\n  });\\n});\\nEOF\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":168}",
+      "tool_call_id": "chatcmpl-tool-aa2c0f336c9eb573"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-aa0754d99f3ac196",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  test(\\\"a GitHub https remote is pushed with the update token, the checkout's header reset\\\", () => {\", \"old_string\": \"  test(\\\"a GitHub https remote is pushed with the update token and no header from the checkout\\\", () => {\", \"path\": \"src/entrypoints/machinery/update_atomaton.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Typo in test name: \"the `.git` suffix stays out of the owner and name\" — awkward. Let me fix to \"the `.git` suffix is dropped from the owner and name the URL is rebuilt from\"? Actually it isn't dropped — behavior: it matches so group excludes it. The rebuilt URL is `.../owner/repo` without `.git`. So \"the `.git` suffix does not reach the URL the token is put in\". Hmm the assertion is `toContain` on the full token URL without `.git`. Simplify name: \"a `.git` suffix is not carried into the URL the token is put in\".\n\nAlso the first test name: \"no header from the checkout\" — meaning resets. Fine but maybe clearer: \"a GitHub https remote is pushed with the update token, and the checkout's header reset\". Keep concise.\n\nLet's polish both names.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_2736da21-7533-4143-b044-4a9661a043c9",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/update_atomaton.test.ts.",
+      "tool_call_id": "chatcmpl-tool-aa0754d99f3ac196"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b2a8ee1b07b25504",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"  test(\\\"a `.git` suffix is not carried into the URL the token is put in\\\", () => {\", \"old_string\": \"  test(\\\"the `.git` suffix stays out of the owner and name the URL is rebuilt from\\\", () => {\", \"path\": \"src/entrypoints/machinery/update_atomaton.test.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/entrypoints/machinery/update_atomaton.test.ts.",
+      "tool_call_id": "chatcmpl-tool-b2a8ee1b07b25504"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8fb9e338827b2bd4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"bun test ./src/entrypoints/machinery/update_atomaton.test.ts 2>&1 | tail -n 30\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"bun test v1.4.2 (744846f84)\\n\\nsrc/entrypoints/machinery/update_atomaton.test.ts:\\n(pass) a run that cannot start > no token is a red run that touches nothing [37.98ms]\\n(pass) a run that cannot start > a dirty working tree is refused before anything is written [44.51ms]\\n(pass) a run that cannot start > a checkout with no manifest is refused, rather than reading as up to date [15.84ms]\\n(pass) a run that cannot start > an unreadable target release is a red run, not an empty one [56.81ms]\\n(pass) a run that is already settled > the tree is on the release asked for: nothing is done, nothing is called [40.90ms]\\n(pass) a clean update > applies the plan, pushes the branch, opens the pull request, merges after the checks [163.81ms]\\n(pass) a clean update > a notice standing open is closed, with the pull request named [173.88ms]\\n(pass) a clean update > the pull request body reports the plan, and the leftovers it did not touch [148.98ms]\\n(pass) a stopped update > the pull request stands, the merge is not requested, and the thread is told where [325.12ms]\\n(pass) a stopped update > a run that came from a thread answers that thread too [121.67ms]\\n(pass) a stopped update > a clean plan with kept paths stops for a person, and says which paths [115.54ms]\\n(pass) an update that is nothing but a name > a target whose contents match the tree's release changes nothing and opens nothing [58.70ms]\\n(pass) the push argv > a GitHub https remote is pushed with the update token, the checkout's header reset [0.10ms]\\n(pass) the push argv > a `.git` suffix is not carried into the URL the token is put in [0.01ms]\\n(pass) the push argv > a remote that is not GitHub https keeps the checkout's own credentials [0.03ms]\\n\\n 15 pass\\n 0 fail\\n 68 expect() calls\\nRan 15 tests across 1 file. [1351.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1521}",
+      "tool_call_id": "chatcmpl-tool-8fb9e338827b2bd4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8e73ed6bba3d1964",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --porcelain && echo '--- tracked runtime files:' && git ls-files .github/atomaton-runtime | head -n 5 && echo '--- count:' && git ls-files .github/atomaton-runtime | wc -l && echo '--- gitignore:' && grep -n \\\"atomaton-runtime\\\\|dist\\\" .gitignore\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "All pass. Now verify the test would have caught the bug: revert the source temporarily? I can check by noting that with the old code there was no `pushArgs` export at all — so the test fails to compile/import. That's a weaker claim than \"catches the regression\". Better: temporarily make pushArgs return the old argv and confirm the first test fails, then restore. That is a cheap measurement. Let me do it with a scratch copy: apply a sed to change the function body temporarily, run test, restore via git checkout? Careful — git checkout would discard my edits. I'll do: cp file to /tmp, patch, run test, restore cp back.\n\nLet's do it.\n\nAlso run typecheck and broader machinery tests.\n\nAlso need to consider: `bun run synth` — generated `.github/atomaton-runtime/scripts/update_atomaton.ts` is tracked? The issue says the deployed copy is generated from src, and constraints say run `bun run synth` if any generated artifact is tracked. `.github/atomaton-runtime/` is generated and replaced wholesale on upgrade — \"read them, do not change them\". Per conventions skill, `dist/**` is gitignored; `.github/atomaton-runtime/` exists in the repo though it's generated and replaced on upgrade — I should not edit it by hand. But is it tracked in git? grep found `.github/atomaton-runtime/scripts/update_atomaton.ts` containing pushBranch. Let me check `git ls-files .github/atomaton-runtime | head`. If tracked, then the issue says \"the deployed copy is generated from it. Run bun run synth if any generated artifact is tracked.\" That suggests running synth to regenerate. But the system prompt says `.github/atomaton-runtime/` is generated and replaced wholesale on upgrade, so an edit there is lost: read them, do not change them. The conventions skill says generated output is not tracked (dist/). Conflict. Let me check git status and git ls-files.\n\nHmm, the issue instruction says \"Keep the change to `src/` (the deployed `.github/atomaton-runtime/scripts/` copy is generated from it). Run `bun run synth` if any generated artifact is tracked.\" So if it's tracked, run synth. Let me check.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_6fc7015a-4e15-4f9e-8925-994555db79f4",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" M src/entrypoints/machinery/update_atomaton.test.ts\\n M src/entrypoints/machinery/update_atomaton.ts\\n--- tracked runtime files:\\n.github/atomaton-runtime/scripts/aggregate_sub_issues.ts\\n.github/atomaton-runtime/scripts/check_ending.ts\\n.github/atomaton-runtime/scripts/check_live_tools.ts\\n.github/atomaton-runtime/scripts/check_sub_issue_closure.ts\\n.github/atomaton-runtime/scripts/claim_turn.ts\\n--- count:\\n88\\n--- gitignore:\\n12:# of src/, and it is distributed as a release asset by cd.yml rather than\\n15:dist/\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":254}",
+      "tool_call_id": "chatcmpl-tool-8e73ed6bba3d1964"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9538c9af67e652c7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n '\\\"scripts\\\"' -A 15 package.json && echo '--- build-dist src refs:' && grep -rn \\\"atomaton-runtime\\\" --include=*.ts --include=*.json --include=*.yml -l . | grep -v node_modules | head -n 20\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "`.github/atomaton-runtime/` IS tracked (88 files). So per the issue constraint, I should run `bun run synth` to regenerate the deployed copy so the runtime here matches src. But the system prompt says: read `.github/atomaton-runtime/`, do not change them — \"generated and replaced wholesale on upgrade, so an edit there is lost\". And conventions skill: \"Generated output is not tracked... Change src/** only. dist/** is gitignored\". Hmm, but here the tracked copy is `.github/atomaton-runtime/` and the issue explicitly says \"Run `bun run synth` if any generated artifact is tracked.\"\n\nWhich wins? The conventions skill is \"what this project has decided\". Let me read the conventions more carefully — it addresses dist/ only. The runtime tree is this repository's own copy of the machinery that runs it. Actually wait: is `.github/atomaton-runtime/` the same thing that the update machinery overwrites? Yes — the update plan ships paths from the release; `.github/atomaton-runtime/` presumably comes from the release too. So editing it in a PR would be overwritten at the next update — but between merge and next update, which copy runs? The workflows run `.github/atomaton-runtime/scripts/update_atomaton.ts` — that's the deployed script the failing job executed! So for the fix to take effect in the next `gh run rerun`, the *tracked* `.github/atomaton-runtime/scripts/update_atomaton.ts` must contain the fix (the job checks out main at run time).\n\nHmm, this is critical. The issue says: \"After this merges, `gh run rerun` is enough. The job checks out `main` at run time, so it runs the fixed script\". Which script does the workflow run — the runtime copy. So the generated runtime copy must have the fix. And the issue says \"Run `bun run synth` if any generated artifact is tracked\" — it is tracked, so run synth and include the regenerated runtime file.\n\nBut careful: synth writes into `dist/` (gitignored) and maybe also into `.github/atomaton-runtime`? Let me check the synth script and build-dist.\n\nLet me look at package.json scripts and build-dist.ts behaviour regarding `.github/atomaton-runtime`.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_f1adbf54-d7a7-4c53-8846-e32743ce0e01",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"9:  \\\"scripts\\\": {\\n10-    \\\"synth\\\": \\\"bun run src/synth-workflows.ts && bun run src/build-dist.ts\\\",\\n11-    \\\"typecheck\\\": \\\"tsc --noEmit\\\",\\n12-    \\\"pretest\\\": \\\"bun run synth\\\",\\n13-    \\\"test\\\": \\\"bun test ./src/domain ./src/shared ./src/adapters ./src/app ./src/entrypoints/machinery ./tests/contract ./src/entrypoints/tools/mcp ./src/entrypoints/tools/hooks\\\",\\n14-    \\\"pretest:e2e\\\": \\\"bun run synth\\\",\\n15-    \\\"test:e2e\\\": \\\"bun test ./tests/e2e\\\",\\n16-    \\\"lint\\\": \\\"bun run typecheck && bun run synth\\\"\\n17-  },\\n18-  \\\"devDependencies\\\": {\\n19-    \\\"@github-actions-workflow-ts/actions\\\": \\\"^2.5.0\\\",\\n20-    \\\"@github-actions-workflow-ts/cli\\\": \\\"^2.5.0\\\",\\n21-    \\\"@github-actions-workflow-ts/lib\\\": \\\"^2.5.0\\\",\\n22-    \\\"@modelcontextprotocol/sdk\\\": \\\"^1.12.1\\\",\\n23-    \\\"@octokit/webhooks-types\\\": \\\"^7.6.1\\\",\\n24-    \\\"@types/bun\\\": \\\"^1.2.14\\\",\\n--- build-dist src refs:\\n./tests/e2e/launch-sub-agent.e2e.test.ts\\n./tests/e2e/request-close-issue.e2e.test.ts\\n./tests/e2e/request-close-issue-aggregation.e2e.test.ts\\n./tests/e2e/run-agent.e2e.test.ts\\n./tests/contract/config-contract.test.ts\\n./tests/contract/agent-definitions.test.ts\\n./tests/contract/generated-workflows.test.ts\\n./tests/contract/deployment-contract.test.ts\\n./tests/contract/delegate-live-tools.test.ts\\n./src/domain/machinery/tools-file.test.ts\\n./src/domain/machinery/code-corpus.test.ts\\n./src/domain/machinery/machinery-layout.ts\\n./src/domain/machinery/shipped-servers.ts\\n./src/domain/machinery/code-corpus.ts\\n./src/domain/delivery/path-patterns.test.ts\\n./src/domain/delivery/merge-readiness.test.ts\\n./src/build-dist.ts\\n./src/entrypoints/tools/mcp/delegate.ts\\n./src/entrypoints/machinery/validate_deliverable.ts\\n./src/entrypoints/machinery/lib/script-ref.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":207}",
+      "tool_call_id": "chatcmpl-tool-9538c9af67e652c7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8ade6eebfb14d531",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '1,80p' src/build-dist.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"#!/usr/bin/env bun\\n/**\\n * build-dist.ts — Bundles every deployable entry-point script from its `src/`\\n * source into the deployed tree it mirrors.\\n *\\n * The deployed tree has two roots, and which one a thing lands in is the whole\\n * layout: `.github/atomaton/` is the adopter's, `.github/atomaton-runtime/` is ours.\\n *\\n *   - `src/entrypoints/machinery/**` (the glue a `*.wac.ts` file's `run:` step invokes)\\n *     -> `dist/.github/atomaton-runtime/scripts/`.\\n *   - `src/entrypoints/tools/**` (the MCP servers and hooks `atoma` starts)\\n *     -> `dist/.github/atomaton-runtime/tools/`, with `defaults.yaml` and\\n *     `packages.json` copied beside them.\\n *   - `src/content/**` (config, prompt template, agent definitions, skills,\\n *     rulesets) -> `dist/.github/atomaton/`, copied verbatim.\\n *\\n * The tools file the core reads is NOT built here and does not ship: it is\\n * written per run by `scripts/write_tools_file.ts`, from the config. A generated\\n * file that is distributed is a second source of truth wearing the clothes of a\\n * first -- see that script for what it cost.\\n *\\n * Every entry point is bundled with ALL of its imports inlined -- including\\n * the shared `src/lib/**` kernel (so `src/entrypoints/machinery/**` and\\n * `src/entrypoints/tools/**` can freely import shared code without any\\n * hand-duplicated files between them) and npm dependencies like\\n * `@modelcontextprotocol/sdk` (so the deployed output needs no\\n * `node_modules`/`package.json`/`bun install` step at all -- verified: a\\n * bundled `mcp/github.ts` runs standalone with zero dependencies nearby).\\n * Bundled output keeps a `.ts` extension (Bun happily runs plain JS through\\n * a `.ts`-named file) so every existing `bun run .github/.../foo.ts`\\n * reference -- in generated workflow YAML, `tools.yaml`, `ScriptRef`'s\\n * runtime-path derivation -- needs no change.\\n *\\n * `.test.ts` files are excluded from entry-point discovery -- tests are a\\n * dev-time concern for this repo, not something end users need in their\\n * own `.github/`. `dist/.github/` is fully generated output: nothing under\\n * it should ever be hand-edited directly.\\n */\\nimport { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from \\\"node:fs\\\";\\nimport { dirname, join } from \\\"node:path\\\";\\nimport { fileURLToPath } from \\\"node:url\\\";\\nimport { RELEASE_MANIFEST, SCRIPTS_DIR, sourceOf, TOOLS_DIR, USER_ROOT } from \\\"./domain/machinery/machinery-layout.ts\\\";\\nimport { buildManifest } from \\\"./domain/machinery/release-manifest.ts\\\";\\n\\n/**\\n * Packages left out of the bundle and installed on the runner instead.\\n *\\n * Everything else is inlined, which is what lets the deployed `.github/` run\\n * with no `node_modules` beside it. These cannot be: `@huggingface/transformers`\\n * reaches `onnxruntime-node`, whose `.node` binaries are not JavaScript and so\\n * are not something a JavaScript bundler can carry. Inlining the wrapper and\\n * losing the binary produces a script that builds and then fails at its first\\n * call, which is the worst of both.\\n *\\n * Anything added here has to be installed by the runner before an agent starts\\n * — see `atomaton-runtime/tools/packages.json`'s `bun` list and the step that reads it.\\n */\\nconst RUNTIME_INSTALLED = [\\\"@huggingface/transformers\\\"];\\n\\nconst REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), \\\"..\\\");\\nconst SRC_DIR = join(REPO_ROOT, \\\"src\\\");\\nconst DIST_GITHUB_DIR = join(REPO_ROOT, \\\"dist\\\", \\\".github\\\");\\n\\n/**\\n * Both ends of every tree, from the one table that holds them.\\n *\\n * A tree used to be `src/<name>` here and `.github/<name>` deployed, so this file\\n * derived one from the other by slicing the string. That stopped being true when the\\n * source was sorted by layer: `content/` deploys to `.github/atomaton/` and\\n * `entrypoints/machinery/` to `.github/atomaton-runtime/scripts/`, and neither name\\n * appears in the other.\\n *\\n * The correspondence is `BUILT_FROM` in `domain/machinery/machinery-layout.ts`, which\\n * is where the deployed side was already named. Taken from there rather than spelled\\n * again beside it: it WAS spelled again -- `join(SRC_DIR, \\\"atoma-runtime\\\", \\\"tools\\\")`\\n * -- and renaming the constants left this file walking a directory that no longer\\n * existed. A name broken into path segments is the one form of that duplicate a\\n * search for the path cannot find.\\n */\\nconst from = (deployed: string): string => join(SRC_DIR, ...sourceOf(deployed).split(\\\"/\\\"));\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":165}",
+      "tool_call_id": "chatcmpl-tool-8ade6eebfb14d531"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bf0a642664f626eb",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -n 8 -- .github/atomaton-runtime/scripts/ && echo '=== a sample commit stat:' && git log -n 1 --format='%h %s' -- .github/atomaton-runtime/scripts/ && git show --stat --format='%h %s' $(git log -n 1 --format='%h' -- .github/atomaton-runtime/scripts/) | head -n 40\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "So build-dist writes into `dist/.github/...`, and `dist/` is gitignored. So synth does NOT regenerate the tracked `.github/atomaton-runtime/`. The tracked `.github/atomaton-runtime/` is the deployed copy in *this* repository, which arrives through the release/update machinery — not through synth. That matches the system prompt: `.github/atomaton-runtime/` is generated (by build-dist at release time) and replaced wholesale on upgrade → do not edit.\n\nSo the fix takes effect here only after the next release is applied. Hmm, but the issue says \"After this merges, `gh run rerun 44929022320 --failed` is enough. The job checks out `main` at run time, so it runs the fixed script\". The workflow's job presumably runs `dist`? No — the run used `.github/atomaton-runtime/scripts/update_atomaton.ts`. Let me check the update workflow to see which script path it runs. It's in `.github/workflows/atomaton-update.yml` generated from src/workflows. Let me check what path the run step uses: likely `bun run .github/atomaton-runtime/scripts/update_atomaton.ts --repo ...`.\n\nIf so, the fix in `src/` alone won't make the rerun work until the runtime copy in `.github/` is updated. But the runtime copy in `.github/` is delivered by a release. Unless... the repo's `.github/atomaton-runtime/` IS updated by the update machinery from the release (which contains dist built from src). So the sequence per the issue: this fix merges to src → a release (v0.24.1?) is cut → applied to this repo → then rerun. Hmm, but the issue explicitly says \"the deployed copy is generated from it. Run `bun run synth` if any generated artifact is tracked.\"\n\nGiven the ambiguity, what's the right call? Let me check whether `.github/atomaton-runtime/` is in merge.governed_paths and whether it's shipped by the release manifest (RELEASE_MANIFEST / release-files). And check git log for whether previous src fixes to machinery also updated `.github/atomaton-runtime/` in the same PR. That's the empirical answer: look at recent commits touching `.github/atomaton-runtime/scripts/*.ts` and see if they accompany src changes.\n\nLet me check git log.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_41bead59-b510-4032-96f3-b4a09a482bd6",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"d5fa513 Merge pull request #573 from yuma-seno/release/v0.24.0\\n=== a sample commit stat:\\nd5fa513 Merge pull request #573 from yuma-seno/release/v0.24.0\\nd5fa513 Merge pull request #573 from yuma-seno/release/v0.24.0\\n\\n .gitattributes                                     |    31 +\\n .github/atomaton-release.json                      |   137 +\\n .../scripts/aggregate_sub_issues.ts                |  1466 ++\\n .github/atomaton-runtime/scripts/check_ending.ts   |   345 +\\n .../atomaton-runtime/scripts/check_live_tools.ts   |   384 +\\n .../scripts/check_sub_issue_closure.ts             |   141 +\\n .github/atomaton-runtime/scripts/claim_turn.ts     |   598 +\\n .github/atomaton-runtime/scripts/decide_reask.ts   |   279 +\\n .../atomaton-runtime/scripts/decide_turn_ending.ts |   118 +\\n .github/atomaton-runtime/scripts/dispatch_agent.ts |  1126 +\\n .../scripts/dispatch_if_siblings_done.ts           |  1463 ++\\n .../atomaton-runtime/scripts/dispatch_new_tags.ts  |   720 +\\n .../scripts/dispatch_post_merge.ts                 |  1235 ++\\n .../scripts/dispatch_pr_validation.ts              |   707 +\\n .../atomaton-runtime/scripts/dispatch_update.ts    |   527 +\\n .../atomaton-runtime/scripts/extract_directive.ts  |   101 +\\n .github/atomaton-runtime/scripts/fetch_events.ts   |   800 +\\n .../atomaton-runtime/scripts/get_config_value.ts   |   153 +\\n .../scripts/guard_command_on_closed.ts             |   373 +\\n .../scripts/guard_comment_during_run.ts            |   844 +\\n .../scripts/inject_callees_notice.ts               |    92 +\\n .../scripts/inject_dispatcher_notice.ts            |    68 +\\n .../scripts/inject_ending_rejection.ts             |    92 +\\n .../scripts/inject_stalled_continuation.ts         |    69 +\\n .../scripts/inject_uncommitted_notice.ts           |    60 +\\n .github/atomaton-runtime/scripts/launch_atoma.ts   |   200 +\\n .../scripts/manage_dispatch_loop.ts                |   634 +\\n .../atomaton-runtime/scripts/manage_turn_labels.ts |   286 +\\n .../scripts/merge_tool_packages.ts                 |    82 +\\n .../scripts/notify_limit_reached.ts                |   276 +\\n .../atomaton-runtime/scripts/notify_new_release.ts |   527 +\\n .../atomaton-runtime/scripts/notify_pr_rejected.ts |   465 +\\n .../atomaton-runtime/scripts/notify_unattended.ts  |   414 +\\n .../scripts/parse_comment_command.ts               |   308 +\\n .../atomaton-runtime/scripts/parse_pr_metadata.ts  |   245 +\\n .github/atomaton-runtime/scripts/plan_checks.ts    |   365 +\\n .github/atomaton-runtime/scripts/plan_deploy.ts    |   717 +\\n .../scripts/post_result_comment.ts                 |  1109 +\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":241}",
+      "tool_call_id": "chatcmpl-tool-bf0a642664f626eb"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-942abfb35e2b83e4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"update_atomaton\\\" .github/workflows/atomaton-update.yml src/workflows/*.wac.ts 2>/dev/null | head -n 10\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Only one commit ever touched `.github/atomaton-runtime/scripts/` — the release merge (#573, v0.24.0). So the runtime tree arrived with the release and is never hand-edited in work PRs. Confirms: keep the change to `src/` and do not touch `.github/atomaton-runtime/`. The issue's \"Run `bun run synth` if any generated artifact is tracked\" — synth only writes `dist/` (gitignored), so there's nothing tracked to update; running synth would produce no tracked change. I can verify by running synth and checking git status stays clean apart from my two files. That's a good measurement to include.\n\nRegarding \"the rerun is enough\": after merge, the run's checkout of `main` runs `.github/atomaton-runtime/scripts/update_atomaton.ts`, which is generated from src at release time. So the fix in src reaches it only via a new release. Hmm — wait. Let me check: does the update job run the tracked script or build from src? Look at the generated workflow for atomaton-update in `.github/workflows/` and in `src/workflows/`.\n\nThis matters for the report's \"what happens next\". Let me grep.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_3ddaf900-b3b5-478e-acdd-6e11f645a35e",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\".github/workflows/atomaton-update.yml:46:          bun run \\\"${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/update_atomaton.ts\\\" --repo \\\"${REPO}\\\" --source \\\"${SOURCE}\\\"\\nsrc/workflows/atomaton-update.wac.ts:6:import { ref as updateAtomatonRef } from \\\"../entrypoints/machinery/update_atomaton.ts\\\";\\nsrc/workflows/atomaton-update.wac.ts:16:// script (`update_atomaton.ts`), which plans, applies, opens its pull request and\\nsrc/workflows/atomaton-update.wac.ts:30:// `update_atomaton.ts`'s own comment for the whole argument.\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":177}",
+      "tool_call_id": "chatcmpl-tool-942abfb35e2b83e4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b54610cb28f6e8c3",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n \\\"apply-to-self\\\" -A 40 .github/workflows/release.yml | head -n 70\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The workflow runs `.github/atomaton-runtime/scripts/update_atomaton.ts` — the tracked deployed copy. So the fix in `src/` does not reach the failing job until the deployed copy is updated. How does that deployed copy get updated? Via the release + update machinery: the v0.24.1 (or whatever) release asset contains `dist/.github/atomaton-runtime/...` built from src, and the update job (running the *old* deployed script) applies it — the old script has the bug, but the old script's failure was in the apply-to-self step, and applying the fix requires a push... which would still 403 with the old script!\n\nHmm, that's the crux: the release machinery is bootstrapped by the broken script. The issue says \"After this merges, `gh run rerun 44929022320 --failed` is enough. The job checks out `main` at run time, so it runs the fixed script.\" That presumes the fixed script is on main. Is the deployed runtime updated by the release PR itself? Look: the release PR #573 \"release/v0.24.0\" merge added `.github/atomaton-runtime/scripts/*` and `.github/atomaton-release.json`. So the release PR carries the deployed tree! i.e., the Release workflow opens a PR that includes both the src changes and the built dist copied into `.github/atomaton-runtime/` + `atomaton-release.json`. Then the update job... hmm, but the issue says the release workflow attaches the deliverable to a release rather than writing to main (conventions: \"No workflow writes to main — the release job attaches the deliverable to a release instead\").\n\nYet #573 was \"Merge pull request #573 from yuma-seno/release/v0.24.0\" and it added `.github/atomaton-runtime/scripts/`. That is presumably how the release was landed — maybe it included the runtime tree because that release was the first to adopt the new layout, delivered via update PR merged by a person.\n\nSo: is the `.github/atomaton-runtime/` in this repo updated only through the update machinery (which requires the fixed script to be present)? Circular. Unless the fix also needs to land in the deployed copy — which the issue anticipated: \"Keep the change to `src/` (the deployed `.github/atomaton-runtime/scripts/` copy is generated from it). Run `bun run synth` if any generated artifact is tracked.\"\n\nHmm. Re-reading: \"the deployed `.github/atomaton-runtime/scripts/` copy is generated from it\" — they claim it's generated from src. But it's not generated into `.github/`, only into `dist/`. Unless there's a script that copies dist/.github into .github for this repo (an \"apply to self\" step)? The failing job is literally named `apply-to-self` in the release workflow (`.github/workflows/release.yml`). Let me read release.yml to understand what apply-to-self does — it's the hand-written workflow. That's the job that pushes `atomaton/update-v0.24.0`. So the release workflow: publish release, then run the update machinery against this repo (\"apply-to-self\") to take the new release onto `.github/`.\n\nSo the update machinery brings the new dist into `.github/atomaton-runtime/scripts/` — i.e. the fixed script would arrive only via the *next* release, whose application is itself performed by the currently-broken script. Circular — unless the fix reaches the runner differently.\n\nWait — but does the release workflow perhaps build from src and run the freshly built script? The error shows it ran the update script from... Let me read release.yml and the workflow file to see which script path apply-to-self runs, and check whether it builds first (bun run synth) so it runs `dist/.github/atomaton-runtime/scripts/update_atomaton.ts` — built from src at run time on main! That would make \"the job checks out main at run time, so it runs the fixed script\" true.\n\nLet me check release.yml, and atomaton-update.yml's ATOMATON_MACHINERY_ROOT usage.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_7cdf6d71-ce69-4880-b574-1c984bd27c1e",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"591:  apply-to-self:\\n592-    name: Apply the release through the update machinery\\n593-    needs: [release, merge-release]\\n594-    # `release` is needed alongside `merge-release` because the tag is its output:\\n595-    # GitHub exposes a job's outputs only to jobs that name it in `needs`, and a\\n596-    # run that forgot this once built a branch name from an empty tag.\\n597-    if: inputs.deploy && needs.merge-release.result == 'success'\\n598-    runs-on: ubuntu-latest\\n599-    # The application inside waits for the repository's own checks before it\\n600-    # merges (the same wait `atomaton-update.yml`'s job carries): the check's\\n601-    # path on this repository is minutes on its own, and a job killed mid-wait\\n602-    # would leave an applied-but-unmerged update pull request standing. It joins\\n603-    # the update's own concurrency group rather than standing outside it: a\\n604-    # `!upgrade` during this window would otherwise run the same plan against the\\n605-    # same branch from a second checkout, and while nothing corrupts -- one merge\\n606-    # wins -- serialising them here is free.\\n607-    timeout-minutes: 60\\n608-    concurrency:\\n609-      group: atomaton-update\\n610-      cancel-in-progress: false\\n611-    permissions:\\n612-      contents: read\\n613-      pull-requests: write\\n614-      issues: write\\n615-      # The update script reads the rollup and watches the checks its merge waits\\n616-      # behind; a private repository refuses that read to a job without it -- and\\n617-      # here the refusal would not fail loudly, it would land in the WARN branch\\n618-      # and leave the update pull request standing.\\n619-      checks: read\\n620-    steps:\\n621-      # `main`, and not the dispatch's commit: the version-bump commit this run\\n622-      # merged has moved main past it, and the tree the update applies to must\\n623-      # be the tree main holds right now.\\n624-      - name: Checkout main\\n625-        uses: actions/checkout@v4\\n626-        with:\\n627-          ref: main\\n628-\\n629-      - name: Setup Bun\\n630-        uses: oven-sh/setup-bun@v2\\n631-\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":175}",
+      "tool_call_id": "chatcmpl-tool-b54610cb28f6e8c3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-aba4e6ab9f86df29",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && sed -n '631,700p' .github/workflows/release.yml\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\n      - name: Run the update machinery on this tree\\n        env:\\n          GH_TOKEN: ${{ github.token }}\\n          ATOMATON_UPDATE_TOKEN: ${{ secrets.ATOMATON_UPDATE_TOKEN }}\\n          REPO: ${{ github.repository }}\\n          TAG: ${{ needs.release.outputs.tag }}\\n        run: |\\n          set -euo pipefail\\n\\n          # The update script itself, run on this checkout -- not dispatched to\\n          # the deployed workflow. The machinery that exists on the default branch\\n          # right now is the release BEFORE this one, and a machinery cannot\\n          # bootstrap itself through its predecessor: the first application of a\\n          # release has to be made by the code that release carries. This is the\\n          # same script, the same arguments, and the same token the machinery's\\n          # own workflow would run them with; pinned to the tag this run\\n          # published, never `latest`, which a concurrent release could move.\\n          bun src/entrypoints/machinery/update_atomaton.ts --repo \\\"$REPO\\\" --tag \\\"$TAG\\\"\\n          echo \\\"::notice::${TAG} is published and was taken onto this repository's .github/ by the update machinery. Its pull request carries the plan; a conflicted application is waiting there for a person.\\\"\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":173}",
+      "tool_call_id": "chatcmpl-tool-aba4e6ab9f86df29"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-96673a37c7b77aed",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && cp src/entrypoints/machinery/update_atomaton.ts /tmp/update_atomaton.fixed.ts && python3 - <<'PY'\\nimport re\\np = \\\"src/entrypoints/machinery/update_atomaton.ts\\\"\\ns = open(p).read()\\nold = '''  return [\\n    \\\"-c\\\", \\\"http.extraheader=\\\",\\n    \\\"-c\\\", \\\"http.https://github.com/.extraheader=\\\",\\n    \\\"push\\\", \\\"--force\\\", `https://x-access-token:${token}@github.com/${github[1]}`, `HEAD:refs/heads/${branch}`,\\n  ];'''\\nnew = '''  // TEMPORARY: the pre-fix argv, to prove the new test catches the regression.\\n  return [\\\"push\\\", \\\"--force\\\", `https://x-access-token:${token}@github.com/${github[1]}`, `HEAD:refs/heads/${branch}`];'''\\nassert old in s\\nopen(p, \\\"w\\\").write(s.replace(old, new))\\nPY\\nbun test ./src/entrypoints/machinery/update_atomaton.test.ts 2>&1 | grep -E \\\"push argv|pass|fail\\\" | tail -n 12; echo '--- restoring'; cp /tmp/update_atomaton.fixed.ts src/entrypoints/machinery/update_atomaton.ts && git diff --stat\", \"timeout_seconds\": 300}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The apply-to-self step runs `bun src/entrypoints/machinery/update_atomaton.ts` — from `src/` on the checkout of main at run time. So the fix in `src/` IS what the rerun executes. That resolves the circularity and confirms \"the job checks out main at run time, so it runs the fixed script\". \n\nSo: keep the change to src only; no runtime copy edit; `bun run synth` writes only gitignored `dist/`.\n\nNow let me verify the test catches the regression, then run typecheck and the machinery suite. Also run `bun run synth` and confirm git status unchanged (measurement that no tracked generated artifact needs committing).\n\nRegression check: temporarily revert pushArgs to the old argv and confirm the new test fails.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_ba82b4a2-b207-43af-882d-05ed720c27fd",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) a clean update > a notice standing open is closed, with the pull request named [142.23ms]\\n(pass) a clean update > the pull request body reports the plan, and the leftovers it did not touch [137.75ms]\\n(pass) a stopped update > the pull request stands, the merge is not requested, and the thread is told where [119.47ms]\\n(pass) a stopped update > a run that came from a thread answers that thread too [131.55ms]\\n(pass) a stopped update > a clean plan with kept paths stops for a person, and says which paths [120.41ms]\\n(pass) an update that is nothing but a name > a target whose contents match the tree's release changes nothing and opens nothing [61.60ms]\\n440 | describe(\\\"the push argv\\\", () => {\\n(fail) the push argv > a GitHub https remote is pushed with the update token, the checkout's header reset [0.32ms]\\n(pass) the push argv > a `.git` suffix is not carried into the URL the token is put in [0.02ms]\\n(pass) the push argv > a remote that is not GitHub https keeps the checkout's own credentials [0.03ms]\\n 14 pass\\n 1 fail\\n--- restoring\\n src/entrypoints/machinery/update_atomaton.test.ts | 47 ++++++++++++++++++++++-\\n src/entrypoints/machinery/update_atomaton.ts      | 35 ++++++++++++++---\\n 2 files changed, 75 insertions(+), 7 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1293}",
+      "tool_call_id": "chatcmpl-tool-96673a37c7b77aed"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-81b3793d4dd75512",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run typecheck 2>&1 | tail -n 15; echo \\\"typecheck exit: $?\\\"\", \"timeout_seconds\": 600}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-912b94edcb5ff18b",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun test ./src/entrypoints/machinery 2>&1 | tail -n 12\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The test catches the regression: with the pre-fix argv, the new test fails (14 pass, 1 fail). Restored.\n\nNow run typecheck and the machinery test suite.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_b9112073-55df-4b5b-b081-32d7e8eea290",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"$ tsc --noEmit\\ntypecheck exit: 0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":4319}",
+      "tool_call_id": "chatcmpl-tool-81b3793d4dd75512"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/entrypoints/machinery/lib/atomaton-data.test.ts:\\n(pass) saveWorkspace > saves the snapshot when a clone in the workspace holds a promisor file this user cannot read [106.60ms]\\n(pass) saveWorkspace > keeps the rest of the workspace when one file cannot be read, and names it [101.30ms]\\n(pass) saveWorkspace > carries the rest of the workspace unchanged, executable files included [112.22ms]\\n(pass) saveWorkspace > carries a symlink as a symlink, dangling or not [151.76ms]\\n(pass) saveWorkspace > replaces a gitlink the previous snapshot left at the same path [137.56ms]\\n(pass) saveWorkspace > leaves the previous snapshot alone when the workspace cannot be read at all [114.34ms]\\n\\n 594 pass\\n 0 fail\\n 1565 expect() calls\\nRan 594 tests across 60 files. [53.43s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":53610}",
+      "tool_call_id": "chatcmpl-tool-912b94edcb5ff18b"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-aafb9cd22cdbd63f",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth 2>&1 | tail -n 5; echo \\\"synth exit: $?\\\"; echo '--- git status after synth:'; git status --porcelain\", \"timeout_seconds\": 600}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8cf1206fdd199b1d",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun test ./tests/contract/deployment-contract.test.ts ./src/domain/machinery/code-corpus.test.ts 2>&1 | tail -n 6\", \"timeout_seconds\": 600}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Both green: typecheck exit 0 (the `$ tsc --noEmit` with no errors), machinery suite 594 pass / 0 fail.\n\nNow run `bun run synth` and check that no tracked generated artifact changes (i.e., dist/ is ignored). Then review the diff.\n\nAlso the broader required checks — the repo's `check` job runs `bun run lint` (typecheck + synth) and `bun test` across src + contract. Running the full suite may be long but worthwhile: `bun test ./src ./tests/contract` is heavy. The task said \"run `bun test ./src/entrypoints/machinery` plus the typecheck\". I did. Maybe also run the contract tests that could relate (deployment-contract, code-corpus)? My change adds an exported function to a script bundled; contract tests might assert something about the deployed scripts (e.g. no `-c`?). Unlikely. But sourceOf/code-corpus tests might check script imports. Since pretest runs synth, running the contract deployment test is cheap-ish. Let me run `bun test ./tests/contract/deployment-contract.test.ts` and `src/domain/machinery/code-corpus.test.ts` to be safe. Actually the review will run full CI. I'll run the contract test for the deliverable shape.\n\nLet me do synth + git status and those two tests in parallel.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_c1d88537-3d6a-44cb-be34-464c6037eada",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"synth-workflows: generated 11 workflow file(s) from 11 source(s) in src/workflows/\\nbuild-dist: bundled 73 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/machinery -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/scripts\\nbuild-dist: bundled 14 script(s): /home/runner/work/atomaton/atomaton/src/entrypoints/tools -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton-runtime/tools\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.24.0 (134 files)\\nsynth exit: 0\\n--- git status after synth:\\n M src/entrypoints/machinery/update_atomaton.test.ts\\n M src/entrypoints/machinery/update_atomaton.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":534}",
+      "tool_call_id": "chatcmpl-tool-aafb9cd22cdbd63f"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(pass) the corpus > windows separators are normalised [0.06ms]\\n\\n 18 pass\\n 0 fail\\n 68 expect() calls\\nRan 18 tests across 2 files. [10.00ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":179}",
+      "tool_call_id": "chatcmpl-tool-8cf1206fdd199b1d"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a5fe4ce12f9900be",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git diff\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "synth's tracked footprint: nothing — it wrote only `dist/` (gitignored), so `git status` shows just my two source files. Good measurement for the report.\n\nNote: build-dist wrote `.github/atomaton-release.json` — into `dist/.github/atomaton-release.json` presumably. git status confirms nothing tracked changed. Good.\n\nNow review the final diff.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_0646b95c-cb86-42ca-9910-30b3647ebe07",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"diff --git a/src/entrypoints/machinery/update_atomaton.test.ts b/src/entrypoints/machinery/update_atomaton.test.ts\\nindex 4253947..1db99aa 100644\\n--- a/src/entrypoints/machinery/update_atomaton.test.ts\\n+++ b/src/entrypoints/machinery/update_atomaton.test.ts\\n@@ -5,7 +5,7 @@ import { dirname, join } from \\\"node:path\\\";\\n import { tmpdir } from \\\"node:os\\\";\\n import { spawnSync } from \\\"node:child_process\\\";\\n import { NOTICE_MARKER } from \\\"./notify_new_release.ts\\\";\\n-import { updateBranchFor, updateTitle } from \\\"./update_atomaton.ts\\\";\\n+import { updateBranchFor, updateTitle, pushArgs } from \\\"./update_atomaton.ts\\\";\\n import { RELEASE_MANIFEST } from \\\"../../domain/machinery/machinery-layout.ts\\\";\\n import { ASSET_NAME } from \\\"./notify_new_release.ts\\\";\\n import { removeTemp, runWithFakeGh, scriptPath, hermeticEnv, type FakeGhRule } from \\\"./testing/harness.ts\\\";\\n@@ -427,3 +427,48 @@ describe(\\\"an update that is nothing but a name\\\", () => {\\n     expect(pushedTip(bare, updateBranchFor(\\\"v0.2.0\\\"))).toBeNull();\\n   });\\n });\\n+\\n+/**\\n+ * The push argv, asserted as argv.\\n+ *\\n+ * The fixture above pushes to a bare repository over a file path, which takes the\\n+ * other branch of `pushArgs` and cannot see a credential at all. Which credentials\\n+ * a push carries is decided entirely in the argv, so that is what these read:\\n+ * a checkout's `http.https://github.com/.extraheader` is reset, or it authenticates\\n+ * the push as the run's own token and a `contents: read` job gets a 403.\\n+ */\\n+describe(\\\"the push argv\\\", () => {\\n+  const BRANCH = \\\"atomaton/update-v0.24.0\\\";\\n+\\n+  test(\\\"a GitHub https remote is pushed with the update token, the checkout's header reset\\\", () => {\\n+    expect(pushArgs(\\\"https://github.com/owner/repo\\\", \\\"ATOMATON_TOKEN\\\", BRANCH)).toEqual([\\n+      \\\"-c\\\",\\n+      \\\"http.extraheader=\\\",\\n+      \\\"-c\\\",\\n+      \\\"http.https://github.com/.extraheader=\\\",\\n+      \\\"push\\\",\\n+      \\\"--force\\\",\\n+      \\\"https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo\\\",\\n+      `HEAD:refs/heads/${BRANCH}`,\\n+    ]);\\n+  });\\n+\\n+  test(\\\"a `.git` suffix is not carried into the URL the token is put in\\\", () => {\\n+    expect(pushArgs(\\\"https://github.com/owner/repo.git\\\", \\\"ATOMATON_TOKEN\\\", BRANCH)).toContain(\\n+      \\\"https://x-access-token:ATOMATON_TOKEN@github.com/owner/repo\\\",\\n+    );\\n+  });\\n+\\n+  test(\\\"a remote that is not GitHub https keeps the checkout's own credentials\\\", () => {\\n+    // A test's file remote, and an SSH remote the checkout already carries: the\\n+    // update token is not this run's to add there, and no header is reset.\\n+    for (const url of [\\\"/tmp/atomaton-fixture/remote.git\\\", \\\"git@github.com:owner/repo.git\\\"]) {\\n+      expect(pushArgs(url, \\\"ATOMATON_TOKEN\\\", BRANCH)).toEqual([\\n+        \\\"push\\\",\\n+        \\\"--force\\\",\\n+        url,\\n+        `HEAD:refs/heads/${BRANCH}`,\\n+      ]);\\n+    }\\n+  });\\n+});\\ndiff --git a/src/entrypoints/machinery/update_atomaton.ts b/src/entrypoints/machinery/update_atomaton.ts\\nindex 02a1a9b..b52279d 100644\\n--- a/src/entrypoints/machinery/update_atomaton.ts\\n+++ b/src/entrypoints/machinery/update_atomaton.ts\\n@@ -244,21 +244,44 @@ function gitOrFail(args: string[], what: string): { stdout: string } | { fail: s\\n   return { stdout: result.stdout };\\n }\\n \\n+/**\\n+ * The argv that pushes `branch`, with the update token as the only credential\\n+ * when the remote is a GitHub https one.\\n+ *\\n+ * Why the two `-c` resets: `actions/checkout` leaves `persist-credentials` on by\\n+ * default, which writes `http.https://github.com/.extraheader` into the\\n+ * repository's config. Git sends a configured `Authorization` header *instead of*\\n+ * the userinfo in the URL, so the push would authenticate as the run's own token\\n+ * — and `apply-to-self` runs with `contents: read`, so that push is a 403. An\\n+ * empty `http.extraheader` value resets the header list to empty, and both the\\n+ * unscoped and the URL-scoped forms are cleared because either one can be set.\\n+ *\\n+ * A remote that is not GitHub https (a test's file remote, an SSH remote the\\n+ * checkout already carries) keeps the checkout's own credentials: no `-c`, no\\n+ * rewrite, the URL exactly as the origin carries it.\\n+ */\\n+export function pushArgs(url: string, token: string, branch: string): string[] {\\n+  const github = /^https:\\\\/\\\\/github\\\\.com\\\\/(.+?)(?:\\\\.git)?$/.exec(url);\\n+  if (!github) return [\\\"push\\\", \\\"--force\\\", url, `HEAD:refs/heads/${branch}`];\\n+  return [\\n+    \\\"-c\\\", \\\"http.extraheader=\\\",\\n+    \\\"-c\\\", \\\"http.https://github.com/.extraheader=\\\",\\n+    \\\"push\\\", \\\"--force\\\", `https://x-access-token:${token}@github.com/${github[1]}`, `HEAD:refs/heads/${branch}`,\\n+  ];\\n+}\\n+\\n /**\\n  * Push `branch`, with the update token if the remote is this script's to\\n  * credential.\\n  *\\n- * A `https://github.com/` remote gets the token inline — the only credential this\\n- * run may add. Anything else (a test's file remote, an SSH remote the checkout\\n+ * A `https://github.com/` remote gets the token as its only credential (see\\n+ * `pushArgs`). Anything else (a test's file remote, an SSH remote the checkout\\n  * already carries) is pushed as-is, on the checkout's own credentials.\\n  */\\n function pushBranch(branch: string, token: string): { ok: true } | { fail: string } {\\n   const origin = gitOrFail([\\\"remote\\\", \\\"get-url\\\", \\\"origin\\\"], \\\"read the origin remote\\\");\\n   if (\\\"fail\\\" in origin) return origin;\\n-  const url = origin.stdout.trim();\\n-  const github = /^https:\\\\/\\\\/github\\\\.com\\\\/(.+?)(?:\\\\.git)?$/.exec(url);\\n-  const pushUrl = github ? `https://x-access-token:${token}@github.com/${github[1]}` : url;\\n-  const pushed = gitOrFail([\\\"push\\\", \\\"--force\\\", pushUrl, `HEAD:refs/heads/${branch}`], `push ${branch}`);\\n+  const pushed = gitOrFail(pushArgs(origin.stdout.trim(), token, branch), `push ${branch}`);\\n   return \\\"fail\\\" in pushed ? pushed : { ok: true };\\n }\\n \\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":167}",
+      "tool_call_id": "chatcmpl-tool-a5fe4ce12f9900be"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8b6fa855a04d6304",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git branch --show-current && git log --oneline -n 3\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The diff is clean and only src. One consideration: the module's header comment explains \"why the token\" — should it also mention the header reset? The `pushArgs` doc covers it at the place it lives. Fine.\n\nAlso, is the doc comment too long? It's the \"why not\"/trap — justified and under the code. It's ~15 lines. The guidance says length alone isn't the offence; it teaches the trap. Keep.\n\nNow commit and push, then create PR. Check current branch name.\n\nThe commit message should carry the why.\n\nThen create_pr with reviewer=\"reviewer\" and body describing behaviour + verification.\n\nLet me check branch name first, and then commit.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_e3823dab-5494-4bd0-99d0-ecc3f4c9366a",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"main\\nd5fa513 Merge pull request #573 from yuma-seno/release/v0.24.0\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":165}",
+      "tool_call_id": "chatcmpl-tool-8b6fa855a04d6304"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-984918668c42a6ff",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"Authenticate the update push as the update token\\n\\n`actions/checkout` persists credentials by default, writing\\n`http.https://github.com/.extraheader` into the repository's config. Git sends\\na configured Authorization header instead of the userinfo in the URL, so the\\ninline `x-access-token:` in the push URL was never used: `apply-to-self` pushed\\nas `github-actions[bot]`, and that job holds `contents: read`, so the push was\\nrefused with a 403 after the plan had already been applied.\\n\\nClearing `http.extraheader` and `http.https://github.com/.extraheader` for the\\none push makes the token the only credential on it. A remote that is not\\nGitHub https keeps the checkout's own credentials untouched.\\n\\nThe credential choice lives in argv, so it is asserted as argv by `pushArgs`;\\nthe existing fixture pushes to a bare repository over a file path and takes the\\nother branch, which cannot observe this at all.\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "chatcmpl-tool-984918668c42a6ff"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bfc3e4551dc7c0e6",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"title\": \"Authenticate the update push as the update token, not the checkout's\", \"body\": \"Fixes the `apply-to-self` 403: the update machinery applied its plan and then could not push, because the push authenticated as `github-actions[bot]`.\\n\\n## What was wrong\\n\\n`pushBranch` built a URL carrying `ATOMATON_UPDATE_TOKEN`, but `actions/checkout` leaves `persist-credentials` on and writes `http.https://github.com/.extraheader` into the repository's config. Git sends a configured `Authorization` header *instead of* the userinfo in the URL, so the token in the URL was never used. `apply-to-self` declares `contents: read`, so that identity cannot push — `remote: Permission to yuma-seno/atomaton.git denied to github-actions[bot]`, 403.\\n\\n## The change\\n\\nThe push argv now comes from an exported `pushArgs(url, token, branch)` (`src/entrypoints/machinery/update_atomaton.ts:262`), and `pushBranch` is a caller of it. For a GitHub https remote it clears `http.extraheader` and `http.https://github.com/.extraheader` with `-c` (an empty value resets the header list to empty) and puts the token in the URL, so the token is the only credential on that one push.\\n\\nA remote that is not GitHub https — a test's file remote, an SSH remote the checkout already carries — gets exactly the argv it got before: no `-c`, URL unchanged, the checkout's own credentials. The `gh` calls are untouched; they authenticate from the environment and git config does not reach them.\\n\\nOnly `src/` changed. `bun run synth` was run and leaves no tracked file modified (`dist/` is gitignored, and the deployed `.github/atomaton-runtime/` arrives through the update machinery), and the `apply-to-self` step runs `bun src/entrypoints/machinery/update_atomaton.ts` from the checkout, so the next run picks this up from `main` with no workflow edit.\\n\\n## Verification\\n\\n- `bun test ./src/entrypoints/machinery/update_atomaton.test.ts` — 15 pass, 0 fail, including three new argv tests: a GitHub https remote carries both `-c` resets and the token URL; a `.git` suffix does not reach the token URL; a file remote and an SSH remote yield the old argv with no `-c`.\\n- The new test catches the regression: with `pushArgs` made to return the pre-fix argv, `the push argv > a GitHub https remote is pushed with the update token, the checkout's header reset` fails (14 pass, 1 fail).\\n- `bun test ./src/entrypoints/machinery` — 594 pass, 0 fail across 60 files.\\n- `bun run typecheck` — exit 0.\\n- `bun test ./tests/contract/deployment-contract.test.ts ./src/domain/machinery/code-corpus.test.ts` — 18 pass, 0 fail.\\n\\nVersion untouched; no file under `.github/workflows/` changed.\\n\\n<details><summary>What the new test asserts, and why it is argv</summary>\\n\\nThe existing fixture pushes to a real bare repository over a file path, which takes the non-GitHub branch of `pushArgs` and cannot observe a credential at all. Which credentials a push carries is decided entirely in the argv, so the argv is what is asserted, as a pure helper rather than a stubbed `git`.\\n</details>\\n\\n\", \"reviewer\": \"reviewer\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":579,\"url\":\"https://github.com/yuma-seno/atomaton/pull/579\",\"base\":\"\",\"validation_dispatched\":true}",
+      "tool_call_id": "chatcmpl-tool-bfc3e4551dc7c0e6"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 2,
-      "snapshot_hash": "bba4f66f586285c15a78c4f55df32fea3a53f996e54eeb3f537614032d05dc80",
+      "event_count": 3,
+      "snapshot_hash": "4d7d6e4d5e6f1bef0b66189606cf536c76b1b68a8103ca9fe0bf391b88a2acf1",
       "version": 1
     }
   },
@@ -267,6 +1048,29 @@
         }
       },
       "started": "2026-11-22T10:10:43Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-22T10:15:08Z",
+      "ended_because": "completed",
+      "iterations": 25,
+      "messages": 74,
+      "seconds": 116,
+      "server_calls": {
+        "files": {
+          "edit": 4,
+          "grep": 3,
+          "read": 1
+        },
+        "github": {
+          "commit_and_push": 1,
+          "create_pr": 1
+        },
+        "shell": {
+          "bash": 19
+        }
+      },
+      "started": "2026-11-22T10:13:12Z"
     }
   ]
 }
