@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #583: notice: title says Atomaton, and the kept-path stop offers the agent route\n**Labels:** atomaton/waiting-for-person\n\nTwo wording corrections agreed with the owner after the first self-application (v0.24.0, apply pull request #582). Both are small, but the first one must be made as a set or the notice machinery breaks.\n\n## 1. The notice title names the machinery\n\nThe notice issue's title is:\n\n```\nTemplate release v0.24.0 is available; .github/ is on v0.23.0\n```\n\n\"Template release\" is a leftover from before the machinery had a name — the body already says \"Atomaton Update\". Rename the product word to Atomaton, in both places that must move together:\n\n- `src/entrypoints/machinery/notify_new_release.ts:191` — `noticeTitle` returns `Template release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`. Change `Template` to `Atomaton`.\n- `src/entrypoints/machinery/lib/notice-issue.ts:45` — the search that finds an open notice is `\"Template release\" in:title`. It searches the title's own words, so it must become `\"Atomaton release\" in:title` in the same commit. If only the title changed, the next run would not find the old notice and open a second one.\n- The fixtures in `notify_new_release.test.ts` and `update_atomaton.test.ts` that stub `issue list --search` must assert the new string, so the pairing stays locked. Any fixture issue *bodies* carrying the old phrase may be updated too, but the search argv is what must not drift.\n\nWhy this is safe right now: the only notice ever opened here is #577, and it is closed. After this lands, a run on `main` compares the local manifest (v0.24.0) to the latest release (still v0.24.0), so no notice opens and no stale-close runs against an old-titled issue. The deployed `.github/atomaton-runtime/scripts/` copies on `main` still carry the old string until the next release applies itself — do **not** edit them by hand; they ride the release.\n\n## 2. The kept-path comment withholds the \"ask an agent\" route\n\nA conflicted update's stop comment says: \"Comment on that pull request and ask an agent to resolve them — nothing merges until someone does.\" A kept-path update stops the same way (the merge gate treats kept like conflicts), but its comment only says \"merge by hand\", hiding the route the other stop names. In `src/entrypoints/machinery/update_atomaton.ts`:\n\n- `keptComment` (lines 208-209): keep the first sentence and ending, but close with the same offer the conflict path makes. New ending: `...and merge by hand when they read right, or comment on that pull request and ask an agent to help.`\n- The pull request body's \"What happens next\" kept branch (line 168) is the same sentence in another voice: append `— or ask an agent there to help.` before the final period.\n\n## 3. The upgrade doc never describes the kept outcome\n\n`docs/runtime/tasks/move-to-a-newer-release.md` \"Taking it\" lists two outcomes (nothing collided → self-merges; changed on both sides → conflict markers). The kept outcome — the plan declines to touch a path without a person, and the pull request holds for it — is real and merged, but undocumented. Add one bullet between or after the two, grounded in `src/domain/machinery/update-plan.ts`'s own definitions (`keep` arises where the adopter's edit or deletion stands where upstream wants its own change or addition — it is not the same as a conflict), and in the same voice as the neighbouring bullets. Close it with the agent offer, consistent with #2.\n\n## Constraints\n\n- Do not touch anything under `.github/` — the runtime scripts and workflows there were just applied from v0.24.0 and update only through a release.\n- No version bump.\n- Run the machinery tests (`bun test ./src/entrypoints/machinery`) and `bun run typecheck`; `bun run synth` should show no generated drift under `.github/`.\n",
+      "content": "Issue #583: notice: title says Atomaton, and the kept-path stop offers the agent route\n**Labels:** atomaton/in-progress\n\nTwo wording corrections agreed with the owner after the first self-application (v0.24.0, apply pull request #582). Both are small, but the first one must be made as a set or the notice machinery breaks.\n\n## 1. The notice title names the machinery\n\nThe notice issue's title is:\n\n```\nTemplate release v0.24.0 is available; .github/ is on v0.23.0\n```\n\n\"Template release\" is a leftover from before the machinery had a name — the body already says \"Atomaton Update\". Rename the product word to Atomaton, in both places that must move together:\n\n- `src/entrypoints/machinery/notify_new_release.ts:191` — `noticeTitle` returns `Template release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`. Change `Template` to `Atomaton`.\n- `src/entrypoints/machinery/lib/notice-issue.ts:45` — the search that finds an open notice is `\"Template release\" in:title`. It searches the title's own words, so it must become `\"Atomaton release\" in:title` in the same commit. If only the title changed, the next run would not find the old notice and open a second one.\n- The fixtures in `notify_new_release.test.ts` and `update_atomaton.test.ts` that stub `issue list --search` must assert the new string, so the pairing stays locked. Any fixture issue *bodies* carrying the old phrase may be updated too, but the search argv is what must not drift.\n\nWhy this is safe right now: the only notice ever opened here is #577, and it is closed. After this lands, a run on `main` compares the local manifest (v0.24.0) to the latest release (still v0.24.0), so no notice opens and no stale-close runs against an old-titled issue. The deployed `.github/atomaton-runtime/scripts/` copies on `main` still carry the old string until the next release applies itself — do **not** edit them by hand; they ride the release.\n\n## 2. The kept-path comment withholds the \"ask an agent\" route\n\nA conflicted update's stop comment says: \"Comment on that pull request and ask an agent to resolve them — nothing merges until someone does.\" A kept-path update stops the same way (the merge gate treats kept like conflicts), but its comment only says \"merge by hand\", hiding the route the other stop names. In `src/entrypoints/machinery/update_atomaton.ts`:\n\n- `keptComment` (lines 208-209): keep the first sentence and ending, but close with the same offer the conflict path makes. New ending: `...and merge by hand when they read right, or comment on that pull request and ask an agent to help.`\n- The pull request body's \"What happens next\" kept branch (line 168) is the same sentence in another voice: append `— or ask an agent there to help.` before the final period.\n\n## 3. The upgrade doc never describes the kept outcome\n\n`docs/runtime/tasks/move-to-a-newer-release.md` \"Taking it\" lists two outcomes (nothing collided → self-merges; changed on both sides → conflict markers). The kept outcome — the plan declines to touch a path without a person, and the pull request holds for it — is real and merged, but undocumented. Add one bullet between or after the two, grounded in `src/domain/machinery/update-plan.ts`'s own definitions (`keep` arises where the adopter's edit or deletion stands where upstream wants its own change or addition — it is not the same as a conflict), and in the same voice as the neighbouring bullets. Close it with the agent offer, consistent with #2.\n\n## Constraints\n\n- Do not touch anything under `.github/` — the runtime scripts and workflows there were just applied from v0.24.0 and update only through a release.\n- No version bump.\n- Run the machinery tests (`bun test ./src/entrypoints/machinery`) and `bun run typecheck`; `bun run synth` should show no generated drift under `.github/`.\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-22T14:29:24Z",
@@ -1299,13 +1299,237 @@
       "role": "tool",
       "content": "{\"number\":584,\"url\":\"https://github.com/yuma-seno/atomaton/pull/584\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "chatcmpl-tool-aa7665508d90134e"
+    },
+    {
+      "role": "user",
+      "content": "PR #584: Name the notice after Atomaton, and let the kept stop name the agent route\n**Labels:** atomaton/in-progress\n**Linked Issue:** #583\n\n/reviewer\n\nPart of #583\nThree wording corrections agreed after the first self-application (#582). No behaviour changes beyond the strings, and no version bump.\n\n## What changed\n\n**1. The notice title says Atomaton.** `noticeTitle` now returns `Atomaton release vX.Y.Z is available; .github/ is on vA.B.C`. The search that finds the open notice moves with it — `\"Atomaton release\" in:title` — because the query is the title's own words: rename the title alone and the next run cannot find the notice it opened, so it opens a second one beside it. They are one commit for that reason.\n\nThe fake-gh fixtures in `notify_new_release.test.ts` and `update_atomaton.test.ts` are pinned to the full query string instead of the `in:title` fragment, so a future rename of one half without the other is a failing test rather than a silent second notice. Fixture issue bodies carrying the older phrase were updated to match.\n\n**2. The kept-path stop offers the agent route.** A conflicted update's stop comment says \"comment on that pull request and ask an agent to help\"; a kept-path stop said only \"merge by hand\", though the merge gate treats kept like conflicts and the pull request holds for the same reason. `keptComment` and the kept branch of the pull request body's \"What happens next\" now close with the same offer.\n\n**3. The upgrade doc describes the kept outcome.** `docs/runtime/tasks/move-to-a-newer-release.md` \"Taking it\" listed two outcomes and never the third. The new bullet is grounded in `src/domain/machinery/update-plan.ts`'s own definition of `keep` — upstream adds, removes or rewrites a path the tree stands differently on — and says explicitly that it is not a collision, since nothing carries markers. It closes with the agent offer, consistent with (2).\n\n`.github/**` is untouched: the deployed runtime copies still carry the old string until the next release applies itself.\n\n<details><summary>Verification</summary>\n\n- `bun test ./src/entrypoints/machinery` — 594 pass, 0 fail, 60 files.\n- `bun run typecheck` — exit 0, no output.\n- `bun run synth` — exit 0; regenerated `dist/` only, and `git status --porcelain` after it lists the six changed source files and nothing under `.github/`.\n- `grep -rn \"Template release\" --include=*.ts --include=*.md .` excluding `.github/` — no matches.\n\n</details>\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/45033295474)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T14:34:48Z",
+        "event_type": "pr_opened",
+        "id": "pr-584",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: `reviewer` did not finish.\n\n**The session was saved.** What this run worked out is still there.\n\n- Continue: comment `/reviewer` and put what to do next on the following lines.\n- Start clean: comment `/reviewer recover`, which archives this session and rebuilds\n  it from the issue.\n\nFrom the log, which is often about the infrastructure rather than the work:\n```\n^[[2m2026-11-22T14:39:05.689078Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-22T14:39:07.137375Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-22T14:39:08.183469Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-22T14:39:08.217257Z^[[0m ^[[31mERROR^[[0m ^[[2matoma::application::runner^[[0m^[[2m:^[[0m Run failed: Aborting: 'read' was called 4 times in a row with the same arguments and returned the same answer every time. Nothing was learned; the run is going round.\nError: Aborting: 'read' was called 4 times in a row with the same arguments and returned the same answer every time. Nothing was learned; the run is going round.\n```\n\n@yuma-seno — **reviewer** stopped mid-run, and no agent will run next. Resume it, or say what to do instead.\n\n---\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45033859139) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T14:39:08Z",
+        "event_type": "pr_comment",
+        "id": 7080702844,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/reviewer\n\nYour saved session is intact — resume it, do not start over. You have already read the diff (six files: the title/search pair in `notify_new_release.ts` + `lib/notice-issue.ts`, the two kept-path strings in `update_atomaton.ts`, the two fixture files, and the docs bullet). Do not re-read them — that is the loop that has now ended two of your runs.\n\nJudge the three questions from #578-scale reasoning you already did:\n\n1. `noticeTitle` and the `findOpenNotice` search changed in the SAME commit (`Template release` → `Atomaton release` in both) — confirm, and that the fixtures pin the exact search argv so the pair cannot drift again.\n2. `keptComment` and the PR-body kept branch now offer asking an agent, matching the conflict path's wording.\n3. The docs bullet describes kept paths without calling them pairwise conflicts, and closes with the agent offer.\n\n`atomaton-check` is green. Post your verdict now — approve, or name blockers with file and line. A one-paragraph verdict is enough; no further reading is needed.\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-22T15:23:52Z",
+        "event_type": "pr_comment",
+        "id": 7081271210,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what this issue asked for. Say which acceptance criteria are met and which are not; conclude the issue when they are met, and carry on with the work when they are not.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T15:25:39Z",
+        "event_type": "issue_comment",
+        "id": 7081294354,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/docs/runtime/tasks/move-to-a-newer-release.md b/docs/runtime/tasks/move-to-a-newer-release.md\nindex 8b2cd3be..51e35dfe 100644\n--- a/docs/runtime/tasks/move-to-a-newer-release.md\n+++ b/docs/runtime/tasks/move-to-a-newer-release.md\n@@ -35,6 +35,11 @@ is decided by what the merge measured, not by a flag:\n   conflict markers in those files, naming both sides. Nothing merges until\n   someone resolves them: comment on that pull request and ask an agent, or edit\n   the files yourself. The checks run on the resolved tree, and then it can merge.\n+- **Upstream adds, removes or rewrites a path your tree stands differently on.**\n+  Not a collision, and no markers: the plan leaves that path as your tree has it\n+  and lists it, so the pull request stands and does not merge itself. Read it, and\n+  merge by hand when it reads right — or comment on that pull request and ask an\n+  agent to help.\n \n The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holding\n a token with `repo` and `workflow` scope — or, fine-grained, `Contents` and\ndiff --git a/src/entrypoints/machinery/lib/notice-issue.ts b/src/entrypoints/machinery/lib/notice-issue.ts\nindex 3b314706..9f088574 100644\n--- a/src/entrypoints/machinery/lib/notice-issue.ts\n+++ b/src/entrypoints/machinery/lib/notice-issue.ts\n@@ -42,7 +42,7 @@ export const NOTICE_MARKER = \"<!-- atomaton:new-release -->\";\n export function findOpenNotice(repo: string): number | null {\n   const result = ghRead(\n     \"issue\", \"list\", \"--repo\", repo, \"--state\", \"open\",\n-    \"--search\", `\"Template release\" in:title`,\n+    \"--search\", `\"Atomaton release\" in:title`,\n     \"--json\", \"number,body,state\",\n   );\n   if (result.code !== 0) {\ndiff --git a/src/entrypoints/machinery/notify_new_release.test.ts b/src/entrypoints/machinery/notify_new_release.test.ts\nindex 12b46868..5dac554f 100644\n--- a/src/entrypoints/machinery/notify_new_release.test.ts\n+++ b/src/entrypoints/machinery/notify_new_release.test.ts\n@@ -195,14 +195,16 @@ function reads(\n \n /** A search answering with the open notice's number, or with none. */\n const search = (number: number): FakeGhRule => ({\n-  // Anchored on `in:title` as well: an edit or create call carries the notice's\n-  // whole body on its argv, and a body that happens to contain the word \"list\"\n-  // would otherwise be answered with a search result.\n-  match: [\"issue\", \"list\", \"in:title\"],\n+  // Anchored on the search string as well: an edit or create call carries the\n+  // notice's whole body on its argv, and a body that happens to contain the word\n+  // \"list\" would otherwise be answered with a search result. Pinned to the exact\n+  // query so a title renamed without its search is a failing test, not a run that\n+  // opens a second notice beside the one it cannot find.\n+  match: [\"issue\", \"list\", `\"Atomaton release\" in:title`],\n   stdout: JSON.stringify(\n     number === 0\n       ? []\n-      : [{ number, state: \"OPEN\", body: `${NOTICE_MARKER}\\nTemplate release v0.2.0 is available.` }],\n+      : [{ number, state: \"OPEN\", body: `${NOTICE_MARKER}\\nAtomaton release v0.2.0 is available.` }],\n   ),\n });\n \n@@ -364,7 +366,7 @@ describe(\"when a tree is behind\", () => {\n           match: [\"issue\", \"list\"],\n           // The search answered with the settled notice anyway.\n           stdout: JSON.stringify([\n-            { number: 4, state: \"CLOSED\", body: `${NOTICE_MARKER}\\nTemplate release v0.1.5 is available.` },\n+            { number: 4, state: \"CLOSED\", body: `${NOTICE_MARKER}\\nAtomaton release v0.1.5 is available.` },\n           ]),\n         },\n         { match: [\"issue\", \"create\"], stdout: \"https://example.test/issues/12\" },\ndiff --git a/src/entrypoints/machinery/notify_new_release.ts b/src/entrypoints/machinery/notify_new_release.ts\nindex f991418e..8e90a717 100644\n--- a/src/entrypoints/machinery/notify_new_release.ts\n+++ b/src/entrypoints/machinery/notify_new_release.ts\n@@ -188,7 +188,7 @@ export interface PlanSummary {\n \n /** The issue's title: what changed, and where this tree stands. */\n export function noticeTitle(input: NoticeInput): string {\n-  return `Template release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`;\n+  return `Atomaton release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`;\n }\n \n /** The issue's body: what is there, how to take it, what it drops, and what changed. */\ndiff --git a/src/entrypoints/machinery/update_atomaton.test.ts b/src/entrypoints/machinery/update_atomaton.test.ts\nindex 1db99aa7..e8eee8ab 100644\n--- a/src/entrypoints/machinery/update_atomaton.test.ts\n+++ b/src/entrypoints/machinery/update_atomaton.test.ts\n@@ -177,10 +177,10 @@ function rules(\n     { match: [\"pr\", \"checks\"], stdout: \"\" },\n     { match: [\"pr\", \"merge\"], stdout: \"\" },\n     {\n-      match: [\"issue\", \"list\"],\n+      match: [\"issue\", \"list\", `\"Atomaton release\" in:title`],\n       stdout: JSON.stringify(\n         options.notice\n-          ? [{ number: options.notice, state: \"OPEN\", body: `${NOTICE_MARKER}\\nTemplate release v0.1.0 is available.` }]\n+          ? [{ number: options.notice, state: \"OPEN\", body: `${NOTICE_MARKER}\\nAtomaton release v0.1.0 is available.` }]\n           : [],\n       ),\n     },\ndiff --git a/src/entrypoints/machinery/update_atomaton.ts b/src/entrypoints/machinery/update_atomaton.ts\nindex 780f4e0b..086dcd6d 100644\n--- a/src/entrypoints/machinery/update_atomaton.ts\n+++ b/src/entrypoints/machinery/update_atomaton.ts\n@@ -167,7 +167,7 @@ export function updateBody(report: UpdateReport): string {\n     report.conflicts.length > 0\n       ? \"This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge.\"\n       : plan.kept.length > 0\n-        ? \"This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right.\"\n+        ? \"This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right, or ask an agent there to help.\"\n         : \"The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.\",\n     \"\",\n   );\n@@ -208,7 +208,8 @@ export function keptComment(report: UpdateReport, prNumber: number): string {\n     ...report.plan.kept.map((entry) => `- \\`${entry.path}\\` (${entry.upstream})`),\n     \"\",\n     `The plan is applied on #${prNumber}, which does not merge itself. Read the kept paths there — ` +\n-      \"each is this repository's words or files against a release that moved elsewhere — and merge by hand when they read right.\",\n+      \"each is this repository's words or files against a release that moved elsewhere — and merge by hand when they read right, \" +\n+      \"or comment on that pull request and ask an agent to help.\",\n   ].join(\"\\n\");\n }\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-22T15:25:44Z",
+        "event_type": "pr_diff",
+        "id": "pr-584-diff",
+        "layer": "github-context",
+        "sha": "9bb7cd26",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Merged.\n\n<details><summary>What merged</summary>\n\n`merge_pr` returned `{\"merged\":true,...,\"parent_issue\":583,\"parent_outcome\":\"reinvoked\",\"invoked_agent\":\"engineer\"}` — the change is on `main`, and the machinery re-invoked `engineer` on #583, presumably because the notice document (`docs/runtime/tasks/move-to-a-newer-release.md`) and the machinery sources need the release flow rather than anything this review sees.\n\n</details>\n\nNothing is left for me to act on: the review found no defects, `check_merge_readiness` reported no blockers, and the merge succeeded.\n\n\n---\n_Tokens: 234664 total (232175 prompt + 2489 completion, 177024 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45038140556) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-22T15:25:44Z",
+        "event_type": "pr_comment",
+        "id": 7081295338,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "The pull request merged, so the question is whether what merged satisfies #583. Let me verify the merged head rather than the description of it — no version bump, no `.github/` change, and the two halves of the title/search pair both present.\n\n\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b2e531f1a5941733",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"git log --oneline -3 2>&1; echo '--- worktree branch/state'; git status --porcelain 2>&1 | head; echo '--- version'; grep -n '\\\"version\\\"' package.json\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-84d3fcb8935bed64",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"echo '--- title + search on the merged tree'; grep -n 'is available; .github/ is on' src/entrypoints/machinery/notify_new_release.ts; grep -n 'in:title' src/entrypoints/machinery/lib/notice-issue.ts; echo '--- kept strings'; grep -n 'ask an agent there to help\\\\|or comment on that pull request and ask an agent to help' src/entrypoints/machinery/update_atomaton.ts; echo '--- doc bullet'; grep -n 'Upstream adds, removes or rewrites' docs/runtime/tasks/move-to-a-newer-release.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The PR merged. Now I must judge whether what merged satisfies issue #583's acceptance criteria, and conclude with `request_close_issue` if met.\n\nAcceptance criteria from the issue:\n\n1. `noticeTitle` renamed, and `notice-issue.ts` search changed in the same commit — met (diff shows both).\n2. Fixtures assert the new search string — met (both test files now pin `\"Atomaton release\" in:title`).\n3. `keptComment` closes with the agent offer — met.\n4. PR-body kept branch appends `— or ask an agent there to help.` — met.\n5. Docs bullet added, grounded in update-plan.ts, not described as a conflict, closing with agent offer — met.\n6. No version bump — I didn't touch package.json; must confirm.\n7. `.github/**` untouched — confirm.\n8. Tests/typecheck/synth run — I ran them, 594 pass, typecheck exit 0, synth no drift.\n\nI should verify the merged head rather than trusting: the branch that a sub-issue merges into — here the PR base was main (parent is issue #583, base \"\"), so it merged into main. I can verify by checking git log / the diff shown above, which is already the merged diff. The diff was given in this message, showing all six files. That's the merged content.\n\nBut I should confirm no version bump and no `.github/` change in the merge. Let me run a quick check: `git show --stat` on the merge commit, or check package.json version and that the merge didn't touch .github.\n\nAlso, one acceptance point deserves scrutiny: the issue said the boss that \"the title change must be made as a set or the notice machinery breaks\" — both changed. Also \"The deployed `.github/atomaton-runtime/scripts/` copies on `main` still carry the old string until the next release applies itself — do not edit them by hand\". Confirm the merge didn't touch .github.\n\nLet me verify from the local repo: fetch state? The local checkout may be on the branch that was merged. Let me check `git log --oneline -3` and `git show --stat HEAD`, and `git diff --stat origin/main`... but the local repo might be on the PR branch which is now merged. Simpler: `git log origin/main --oneline -1` and `git show --stat`.\n\nActually curl/git push are routed but read-only git inspection runs normally. Let me run `git fetch`? Fetch is a mutation-ish; probably allowed (read-only-ish) but network. Let me just check what's available: `git log --oneline -1 origin/main` — if the local clone has origin/main from clone time, it may be stale. Better: use get_pr to confirm merged state and base, and get_branch(\"main\") for the merged head SHA. But the merged diff is already given above in the message, and it's the authoritative content.\n\nLet me do a light verification: check package.json version unchanged and .github untouched in the merged commit. I can run `git show --stat` of the merge commit if the local repo knows it. Let me try bash read-only git inspection.\n\nPlan:\n1. `git log --oneline -5 --all` quick, or `git status`.\n2. Check package.json version in the worktree and confirm the merged diff contains no package.json (the diff shown has six files, none of them package.json or .github).\n3. `bun test`, typecheck already run pre-merge; the merged content equals what I validated.\n\nThen call request_close_issue with a summary.\n\nLet me do a couple of read-only checks to anchor claims.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_0b4e5672-0bce-496c-89d4-8e1c91985488",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"097ecc0 Merge pull request #584 from yuma-seno/atomaton/issue-583\\n--- worktree branch/state\\n--- version\\n5:  \\\"version\\\": \\\"0.24.0\\\",\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":298}",
+      "tool_call_id": "chatcmpl-tool-b2e531f1a5941733"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"--- title + search on the merged tree\\n191:  return `Atomaton release ${input.latestVersion} is available; .github/ is on ${input.localVersion}`;\\n45:    \\\"--search\\\", `\\\"Atomaton release\\\" in:title`,\\n--- kept strings\\n170:        ? \\\"This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right, or ask an agent there to help.\\\"\\n212:      \\\"or comment on that pull request and ask an agent to help.\\\",\\n--- doc bullet\\n38:- **Upstream adds, removes or rewrites a path your tree stands differently on.**\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":149}",
+      "tool_call_id": "chatcmpl-tool-84d3fcb8935bed64"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b11db0d65928f17a",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"echo '--- files changed by the merge'; git diff --name-only 097ecc0^1 097ecc0; echo '--- any .github in the merge:'; git diff --name-only 097ecc0^1 097ecc0 | grep '^\\\\.github/' | wc -l; echo '--- fixtures pinned'; grep -n 'match: \\\\[\\\"issue\\\", \\\"list\\\", `\\\"Atomaton release\\\" in:title`\\\\]' src/entrypoints/machinery/notify_new_release.test.ts src/entrypoints/machinery/update_atomaton.test.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The worktree is at the merge commit `097ecc0` on the merged tree. All five content changes are present on it:\n- notify_new_release.ts:191 → `Atomaton release ...`\n- notice-issue.ts:45 → `\"Atomaton release\" in:title`\n- update_atomaton.ts:170 and 212 → agent offer\n- docs line 38 → new bullet\n\nVersion still 0.24.0 — no bump. Confirm the merge touched no `.github/` file: `git show --stat 097ecc0` or `git diff --name-only` for the merge. Let me check files changed by the merge commit.\n\nAlso confirm the fixture pinning is present on the merged tree.\n\nLet me run one more check.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_e1b6f224-4c5b-4bea-99c1-654741a1d5fa",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"--- files changed by the merge\\n--- any .github in the merge:\\n0\\n--- fixtures pinned\\nsrc/entrypoints/machinery/notify_new_release.test.ts:203:  match: [\\\"issue\\\", \\\"list\\\", `\\\"Atomaton release\\\" in:title`],\\nsrc/entrypoints/machinery/update_atomaton.test.ts:180:      match: [\\\"issue\\\", \\\"list\\\", `\\\"Atomaton release\\\" in:title`],\\n\",\"stderr\":\"fatal: ambiguous argument '097ecc0^1': unknown revision or path not in the working tree.\\nUse '--' to separate paths from revisions, like this:\\n'git <command> [<revision>...] -- [<file>...]'\\nfatal: ambiguous argument '097ecc0^1': unknown revision or path not in the working tree.\\nUse '--' to separate paths from revisions, like this:\\n'git <command> [<revision>...] -- [<file>...]'\\n\",\"output_truncated\":false,\"execution_time_ms\":143}",
+      "tool_call_id": "chatcmpl-tool-b11db0d65928f17a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ab7fce158c30f0a9",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"grep -c 'Template release' .github/atomaton-runtime/scripts/notify_new_release.ts .github/atomaton-runtime/scripts/update_atomaton.ts 2>&1; echo '--- version in the applied manifest'; grep -o '\\\"version\\\":\\\"[^\\\"]*\\\"' .github/atomaton-release.json 2>/dev/null || grep -o '\\\"version\\\": *\\\"[^\\\"]*\\\"' .github/atomaton-release.json\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The shallow clone doesn't have the parent commit objects for the merge, so I can't diff against the parent. But the diff posted in the thread (the merged content) is authoritative and shows six files, none under `.github/`. And the worktree at the merged HEAD shows exactly the intended strings. The `.github/` check: I can verify that `.github/atomaton-runtime/scripts/*.ts` still carries the old string — which is expected and correct (they ride the release). Let me confirm that, since the issue explicitly says those must be untouched.\n\nLet me check `.github/atomaton-runtime/scripts/notify_new_release.ts` still has \"Template release\" — that is the expected lagging state, not drift.\n\nAlso verify the worktree is clean (it is: git status empty).\n\nI have enough. Now conclude with request_close_issue.\n\nLet me quickly confirm the .github lag state to be able to state it accurately.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_b3fda39a-7345-4ca4-8fb5-c23fc46a041f",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\".github/atomaton-runtime/scripts/notify_new_release.ts:2\\n.github/atomaton-runtime/scripts/update_atomaton.ts:1\\n--- version in the applied manifest\\n\\\"version\\\": \\\"v0.24.0\\\"\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":150}",
+      "tool_call_id": "chatcmpl-tool-ab7fce158c30f0a9"
+    },
+    {
+      "role": "assistant",
+      "content": "All five changes are on the merged tree, the version is untouched, and the deployed scripts still carry the old string exactly as the issue said they must until the next release. Concluding the issue.\n\n",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-98ac06e9b7cec818",
+          "type": "function",
+          "function": {
+            "name": "request_close_issue",
+            "arguments": "{\"summary\": \"PR #584 merged, and all three corrections are on `main` as #583 scoped them.\\n\\n**1. The notice title names the machinery, and the pair moved together.** `noticeTitle` returns `Atomaton release ... is available; .github/ is on ...` at `src/entrypoints/machinery/notify_new_release.ts:191`, and the search that finds the open notice is `\\\"Atomaton release\\\" in:title` at `src/entrypoints/machinery/lib/notice-issue.ts:45` — the same commit, so the next run finds the notice it opened instead of opening a second beside it. The fake-gh fixtures now pin the exact query rather than the `in:title` fragment (`notify_new_release.test.ts:203`, `update_atomaton.test.ts:180`), so a future rename of one half without the other is a failing test.\\n\\n**2. The kept-path stop offers the agent route.** `keptComment` closes with \\\"and merge by hand when they read right, or comment on that pull request and ask an agent to help.\\\" (`update_atomaton.ts:212`), and the pull request body's kept branch ends \\\"…or ask an agent there to help.\\\" (`update_atomaton.ts:170`). Both stops now name the same route.\\n\\n**3. The upgrade doc describes the kept outcome.** `docs/runtime/tasks/move-to-a-newer-release.md:38` adds the third \\\"Taking it\\\" bullet, grounded in `update-plan.ts`'s own definition of `keep` — upstream adds, removes or rewrites a path the tree stands differently on — and says outright that it is not a collision and carries no markers, closing with the agent offer.\\n\\n**Constraints held.** `package.json` is still `0.24.0`; the merge changed no path under `.github/`, and the deployed `.github/atomaton-runtime/scripts/` copies still carry the old string, as the issue said they should — they ride the next release. The local manifest is `v0.24.0` and the latest release is `v0.24.0`, so no notice opens and no stale-close runs against the old-titled issue #577.\\n\\n<details><summary>Verification, run before the merge on the tree that merged</summary>\\n\\n- `bun test ./src/entrypoints/machinery` — 594 pass, 0 fail, 60 files.\\n- `bun run typecheck` — exit 0.\\n- `bun run synth` — exit 0, wrote only `dist/`; `git status --porcelain` after it listed the six changed source files and nothing under `.github/`.\\n- `grep -rn \\\"Template release\\\"` over `*.ts` and `*.md`, excluding `.github/` — no matches.\\n\\n</details>\\n\\nNothing further is needed on this issue; the change takes effect for adopters when the next release is published and applied.\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Confirmed: `.github/atomaton-runtime/scripts/` still holds the old string, as the issue says it should until the next release applies itself. Local manifest v0.24.0 == latest release v0.24.0, so no notice fires — matching the issue's safety argument.\n\nAll acceptance criteria met. Conclude with request_close_issue.\n\nThe summary should state what was concluded and why the issue's work is complete, since the parent's aggregation reads it.\n\nWrite it in a compact way: what merged, which criteria are met, anchors, and the one note about the deployed scripts lagging until the next release.\n\nNote: this issue #583 has no parent (it's a root-level issue? It was given to engineer with `/engineer`). request_close_issue will post the summary.\n\nLet me write it.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_3ac11c0f-0f5d-48ee-b0fc-8c536f754b5d",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Issue #583 is concluded: your conclusion is on the issue. Nothing else is yours to do here.",
+      "tool_call_id": "chatcmpl-tool-98ac06e9b7cec818"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 3,
-      "snapshot_hash": "1721cdad888241be01e06d40db1b7402fc896a31750bcb9fd30e3875a8d3009a",
+      "event_count": 9,
+      "snapshot_hash": "dd00153c0e7f9ec9b1fd0212ee1026979f31a9249a87bbd4fa821bc8060c03f4",
       "version": 1
     }
   },
@@ -1346,6 +1570,23 @@
         }
       },
       "started": "2026-11-22T14:32:36Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-22T15:26:40Z",
+      "ended_because": "completed",
+      "iterations": 4,
+      "messages": 105,
+      "seconds": 16,
+      "server_calls": {
+        "atomaton_env": {
+          "request_close_issue": 1
+        },
+        "shell": {
+          "bash": 4
+        }
+      },
+      "started": "2026-11-22T15:26:24Z"
     }
   ]
 }
