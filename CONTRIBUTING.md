@@ -180,10 +180,15 @@ Nothing writes to main, so none of this needs a ruleset bypass.
 and creating the release. That script starts every tool server the artifact would
 ship and asks `atoma validate --with-live-tools` what each server actually
 advertises — which is what says whether a `tool_allowlist` pattern still names a
-tool that exists, and whether any server has stopped starting. The same question is
-asked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`;
-this is the last place it can withhold something, because `dist/` is the tree about
-to be published.
+tool that exists, and whether any server has stopped starting. Because `dist/` is the
+tree about to be published, this is the last place it can withhold something — and a
+pull request does not get an earlier answer to the same question here. The job that
+asks it on a pull request, `atomaton-tools` in `atomaton-check.yml`, runs
+`check_live_tools.ts`, whose paths resolve against the checkout's `.github/`: on an
+adopted tree that is the deliverable and the answer is right, while in this
+repository it is the last release, which cannot see a pull request at all. The script
+that would answer for a pull request's tree is under `.github/atomaton/scripts/`,
+which no release ships, so the shipped workflow cannot name it.
 
 It runs here, on the default branch and against `dist/`, and deliberately not on
 the pull request: it starts processes, and `tools.servers` lets a pull request name

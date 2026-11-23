@@ -257,6 +257,16 @@ const toolsJob = new DefinedJob(
     // install it once per declared check to run the same suite against the same tree.
     // This job holds no repository secret, so nothing here is a credential a pull
     // request could reach.
+    //
+    // Guarded, because this workflow SHIPS. The suite and its `test:e2e` script are
+    // this template's own, and an adopter's tree usually has neither -- Rust, Go,
+    // Python, anything not bun -- where `bun run test:e2e` fails with `Script not
+    // found` and turns the required context red over a suite that is not theirs. So
+    // the step reports what was verified instead of assuming: the suite where the
+    // script exists, and a stated skip where it does not.
+    //
+    // `grep` rather than `bun run --dry-run`, so a repository with no bun at all is
+    // answered by the same shell test rather than failing on a missing binary.
     new TypedOutputsStep({
       name: "Run the end-to-end suite against the real CLI",
       shell: "bash",
@@ -264,32 +274,24 @@ const toolsJob = new DefinedJob(
       // the install step puts it. Both platforms: the helper's default is the
       // sibling checkout, which only exists on a developer's machine.
       env: { ATOMA_BIN: "/usr/local/bin/atoma" },
-      run: `bun run test:e2e\n`,
+      run: [
+        `if [ -f package.json ] && grep -q '"test:e2e"' package.json; then`,
+        "  bun run test:e2e",
+        "else",
+        `  echo "this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here"`,
+        "fi",
+        "",
+      ].join("\n"),
     }),
-    // The live tool check, on the tree this pull request would ship.
-    //
-    // `check_live_tools.ts` above is the check an ADOPTER runs: for them `.github/`
-    // IS the deliverable, and the `machineryPath()` default resolves to it correctly.
-    // In this repository `.github/` is the LAST RELEASE -- applied by the update
-    // machinery --
-    // so that check has never seen a pull request's tree. It reports on a release
-    // that already passed, which reads exactly like a release that passes.
-    //
-    // This runs the same script the deploy job runs, on `dist/` built from the
-    // checkout. It is the check that was missing when two `unprefixed` servers began
-    // offering one tool name: the release could not be published, and nothing on the
-    // pull request that caused it said so.
-    //
-    // AFTER the end-to-end suite, and that ordering is load-bearing for the first
-    // pull request that adds this line. `pretest:e2e` runs `synth`, so `dist/` exists
-    // by then -- which means the PREVIOUS release's copy of this script, the one in
-    // `.github/`, finds a tree to check instead of failing on a missing one. The
-    // script builds `dist/` itself from here on, so the dependency only matters once.
-    new TypedOutputsStep({
-      name: "Check the tool servers this pull request would ship",
-      shell: "bash",
-      run: `bash .github/atomaton/scripts/check-live-tools.sh\n`,
-    }),
+    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a
+    // decision rather than an omission. The script builds `dist/` from the checkout,
+    // so on a pull request it was the one step that checked the tree a release would
+    // ship -- but it lives in a directory no release delivers, so a shipped workflow
+    // naming it fails on every adopter with `No such file or directory`. Dropping it
+    // costs this repository the pull-request-time answer and nothing else: the
+    // release-time run in `publish-release.sh` covers the tree after the merge, and
+    // that cost is stated in `CONTRIBUTING.md`. An adopter loses nothing, because on
+    // their tree the step above reads the deliverable itself.
   ],
 );
 

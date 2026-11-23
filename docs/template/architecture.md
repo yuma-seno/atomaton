@@ -188,12 +188,20 @@ starts at all.
 
 It runs there — on the default branch, against `dist/` — because that is the tree
 about to be published, and it is the last place a disagreement can withhold
-something. The same question is asked earlier, on every pull request, by
-`atomaton-tools` in `atomaton-check.yml`: that job starts the servers the pull
-request declares, holds no repository secret, and is what turns a guard that has
-stopped guarding into a red check rather than a discovery after the merge. Both
-scripts here are this repository's own and neither ships, so nothing in this
-section is a property of an adopted repository's release —
+something. In this repository it is also the only place. `atomaton-tools` does ask a
+version of the question on every pull request, but the step it can run there is
+`check_live_tools.ts`, which resolves its paths against the checkout's `.github/` —
+the last release, not the pull request — so the tree a pull request would ship is
+covered after the merge or not at all. The script that would answer for it lives
+under `.github/atomaton/scripts/`, a directory no release ships, which is why the
+shipped workflow cannot run it.
+
+On an adopted tree there is no such gap: `.github/` *is* the deliverable, so
+`atomaton-tools` asks the question of every pull request, holds no repository
+secret, and is what turns a guard that has stopped guarding into a red check rather
+than a discovery after the merge. Both scripts here are this repository's own and
+neither ships, so nothing in this section is a property of an adopted repository's
+release —
 [what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)
 is the adopter-facing half.
 

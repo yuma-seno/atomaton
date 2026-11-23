@@ -1529,6 +1529,56 @@ describe("generated workflows", () => {
     }
   });
 
+  /**
+   * Nothing in the shipped `atomaton-tools` job may be this template's own suite, or
+   * this repository's own release scripts.
+   *
+   * The job ships to every adopter, and both of those once assumed otherwise. `bun run
+   * test:e2e` names a script of THIS repository's `package.json`, so on a Rust or Go
+   * tree it failed with `Script not found "test:e2e"` and turned the required context
+   * red over a suite the adopter does not have. `check-live-tools.sh` lives under
+   * `.github/atomaton/scripts/`, which is deliberately never delivered at all
+   * (`adopter-terms.test.ts` names it as this repository's own), so on an adopted tree
+   * that step failed with `No such file or directory`. Both turned up on the first
+   * real adopter's adoption pull request, and neither was about that adopter's code.
+   *
+   * The checks that remain are pinned too, because the other way to make this pass is
+   * deleting what actually verifies the servers.
+   */
+  test("the tool job ships nothing that belongs only to this repository", () => {
+    type WorkflowStep = { name?: string; run?: string };
+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
+
+    const workflow = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-check.yml", "utf8")) as WorkflowDocument;
+    const steps = workflow.jobs?.["atomaton-tools"]?.steps ?? [];
+    expect(steps.length, "the tool job has no steps, so this checks nothing").toBeGreaterThan(0);
+
+    const scripts = steps.map((step) => step.run ?? "").join("\n");
+
+    // A step naming that directory can only ever pass in the repository that builds
+    // the deliverable: an adopter receives no `.github/atomaton/scripts/` at all.
+    expect(scripts, "`.github/atomaton/scripts/` is never shipped to an adopter").not.toContain(
+      ".github/atomaton/scripts/",
+    );
+
+    const endToEnd = steps.find((step) => step.run?.includes("test:e2e"));
+    expect(endToEnd, "the end-to-end suite step is gone, so nothing runs tests/e2e").toBeDefined();
+    // The guard, not the bare command: `bun run test:e2e` on its own fails on every
+    // tree whose `package.json` does not declare it.
+    expect(endToEnd?.run, "the suite must be looked for in package.json before it runs").toContain(
+      `grep -q '"test:e2e"' package.json`,
+    );
+    expect(endToEnd?.run, "the skip has to say what was skipped, and why").toContain(
+      "does not carry the template's e2e suite",
+    );
+
+    // And the check that DOES cover an adopter's servers stays: dropping the release
+    // script is only safe alongside it, since it is the step that starts them.
+    expect(scripts, "the shipped servers are checked by the runtime script, which does ship").toContain(
+      "check_live_tools.ts",
+    );
+  });
+
   // Both of these were gaps found by trying to move this repository's own
   // pipeline onto the shipped workflows, and both fail silently rather than
   // loudly, which is why they are pinned rather than left to review.
