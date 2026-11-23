@@ -64,3 +64,8 @@ in [the README](../README.md).
    `auditor` — are a template rather than a fixed set: [what an agent definition
    is](agents/overview.md), and how to add one of your own. [How to ask, and what happens
    next](work/how-it-works/what-starts-a-run.md#how-to-ask).
+
+A repository that already has a `ci.yml`, a `release.yml` and a ruleset requiring the
+check it produces leaves this path at steps 5 and 6 — those two settings are replaced
+rather than added, and the old pipeline goes in an order that keeps `main` mergeable:
+[take over an existing CI/CD](pipeline/tasks/take-over-an-existing-ci-cd.md).
