@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
  * and a release is declared by a person through **Release**, whose pull
  * request carries only that edit. Merging it is the release.
  */
-const SKILL = readFileSync(".github/atomaton/skills/project/conventions.md", "utf8");
+const SKILL = readFileSync(".github/atomaton/skills/project/conventions/SKILL.md", "utf8");
 const CONTRIBUTING = readFileSync("CONTRIBUTING.md", "utf8");
 
 describe("the version procedure is stated the same way in both documents", () => {

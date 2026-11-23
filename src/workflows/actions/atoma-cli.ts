@@ -186,8 +186,16 @@ import { TypedOutputsStep } from "./base.ts";
  * provider's cache can match it -- and the summary is counted in `usage`. It writes
  * `ATOMA_INFERENCE_USAGE` with an extra `kind=compaction` field and does not move
  * `last_prompt_tokens`, which stays the budget's measurement of the conversation.
+ *
+ * **A skill is a directory holding `SKILL.md`.** Written by the core from v0.5.0
+ * (yuma-seno/atoma#16): the loader takes a directory holding `SKILL.md` as the skill,
+ * requires its `name` to equal that directory's own name, stops descending there, and
+ * ignores a loose `.md` that is not a `SKILL.md`. The shipped skills, and this
+ * repository's own two, are in that layout; an older binary reads a loose file and a
+ * directory both, so the move was safe to land before this raise, and this is the pin
+ * that makes the loader which requires the layout the one every run runs.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.4.8";
+export const ATOMA_DEFAULT_VERSION = "v0.5.0";
 
 export const ATOMA_VERSION_DESC =
   "Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.";
