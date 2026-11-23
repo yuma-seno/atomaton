@@ -38,6 +38,7 @@ only: the reason behind a step is at the other end of that step's link.
 | [have agents start your own CI and deployment](pipeline/tasks/have-agents-start-your-own-ci-and-deployment.md) | `checks.your_workflow` and `deploy.your_workflow` |
 | [take over an existing CI/CD](pipeline/tasks/take-over-an-existing-ci-cd.md) | `config.yaml`, then the ruleset, then `.github/workflows/` — in that order |
 | [build and publish when a tag appears](pipeline/tasks/build-and-publish-when-a-tag-appears.md) | `deploy.on_merge` for the tag, `deploy.on_tag` for the build |
+| [check a pull request against a service that needs a credential](pipeline/tasks/check-a-pull-request-against-a-real-service.md) | `checks.from_default_branch`, and that entry's own `secrets` |
 | [make a workflow of your own work when Atomaton starts it](pipeline/tasks/make-a-workflow-of-your-own-work-when-atomaton-starts-it.md) | `workflow_dispatch`, in that workflow |
 | [check your config before pushing it](config/tasks/check-your-config-before-pushing-it.md) | nothing — one command |
 | [keep some paths for human review](pull-requests/tasks/keep-some-paths-for-human-review.md) | `merge.governed_paths` |
