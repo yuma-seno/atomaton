@@ -48,7 +48,7 @@ const docMap = read("docs/README.md");
 const startingARun = read("docs/work/how-it-works/what-starts-a-run.md");
 const auditorRaw = readFileSync(join(AGENT_DIR, "auditor.md"), "utf8");
 const auditor = auditorRaw.replace(/\s+/g, " ");
-const procedure = read(join(SKILL_DIR, "security/on-demand-audit.md"));
+const procedure = read(join(SKILL_DIR, "security/on-demand-audit/SKILL.md"));
 const reviewer = read(join(AGENT_DIR, "reviewer.md"));
 
 describe("the auditor", () => {
@@ -149,8 +149,8 @@ describe("a round always has a return path", () => {
 
 describe("the audit procedure", () => {
   test("is a skill an agent can load, with the two surface playbooks beside it", () => {
-    for (const name of ["security/on-demand-audit", "security/gh-actions-surface", "security/agent-prompt-surface"]) {
-      const path = join(SKILL_DIR, `${name}.md`);
+    for (const name of ["on-demand-audit", "gh-actions-surface", "agent-prompt-surface"]) {
+      const path = join(SKILL_DIR, "security", name, "SKILL.md");
       expect(existsSync(path), `${path} is a skill no run can load`).toBe(true);
       expect(read(path), `${path} is not registered under the name agents ask for`).toContain(`name: ${name}`);
     }

@@ -17,7 +17,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
-const TEMPLATE = "src/content/skills/docs/templates/report.fodt";
+const TEMPLATE = "src/content/skills/docs/customer-doc/assets/templates/report.fodt";
 
 describe("the default Word template's tables", () => {
   const xml = readFileSync(TEMPLATE, "utf8");

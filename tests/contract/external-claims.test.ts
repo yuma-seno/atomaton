@@ -45,8 +45,8 @@ const SUCCESS_IS_NOT_AN_ANSWER = "A successful call is not an answer";
  */
 const TEACHES_THE_SIGNAL = [
   "src/entrypoints/tools/mcp/web.ts",
-  "src/content/skills/research/web-search.md",
-  "src/content/skills/engineering/secrets-in-a-check.md",
+  "src/content/skills/research/web-search/SKILL.md",
+  "src/content/skills/engineering/secrets-in-a-check/SKILL.md",
 ];
 
 describe("a claim about a system outside this repository", () => {

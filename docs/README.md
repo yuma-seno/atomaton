@@ -27,7 +27,7 @@ only: the reason behind a step is at the other end of that step's link.
 | --- | --- |
 | [run an agent on a different model](agents/tasks/run-an-agent-on-a-different-model.md) | `model`, in an agent definition |
 | [add an agent of your own](agents/tasks/add-an-agent-of-your-own.md) | a new file under `agent-definitions/` |
-| [write a skill](agents/tasks/write-a-skill.md) | a new file under `skills/` |
+| [write a skill](agents/tasks/write-a-skill.md) | a new directory under `skills/`, holding a `SKILL.md` |
 | [audit your repository for security weaknesses](agents/tasks/audit-a-repository-for-security-weaknesses.md) | nothing — one `/atomaton` on an issue |
 | [have a screenshot reach an agent as a picture](agents/tasks/have-a-screenshot-reach-an-agent-as-a-picture.md) | `vision`, in an agent definition |
 | [switch between the Chat Completions and Responses APIs](agents/tasks/switch-between-the-chat-completions-and-responses-apis.md) | `provider`, in an agent definition |
@@ -50,7 +50,7 @@ only: the reason behind a step is at the other end of that step's link.
 | [use your own label names](work/tasks/use-your-own-label-names.md) | `chain.labels` |
 | [let a tool server reach something outside GitHub](tools/tasks/let-a-tool-server-reach-something-outside-github.md) | `tools.secrets`, then that server's own environment |
 | [let a tool run longer than a minute](tools/tasks/let-a-tool-run-longer-than-a-minute.md) | `request_timeout_secs`, on that server |
-| [change or remove web fetching and search](tools/tasks/change-or-remove-web-fetching-and-search.md) | the `research/web-search` skill |
+| [change or remove web fetching and search](tools/tasks/change-or-remove-web-fetching-and-search.md) | the `web-search` skill |
 | [change what a delegate may reach](tools/tasks/change-what-a-delegate-may-reach.md) | the `servers:` block in its tools file |
 | [write a tool of your own](tools/tasks/write-a-tool.md) | a new MCP server |
 | [make a branch ruleset work with agents](github/tasks/make-a-branch-ruleset-work-with-agents.md) | a server-side setting on GitHub, declared by `.github/atomaton/rulesets/main.json` |

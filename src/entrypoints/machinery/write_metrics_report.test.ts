@@ -24,9 +24,14 @@ describe("skillsUnder", () => {
     return root;
   }
 
-  test("names a nested skill the way a run loads it", () => {
-    const root = tree(["delivery/pipeline-setup.md", "engineering/tdd.md"]);
-    expect(skillsUnder(root)).toEqual(["delivery/pipeline-setup", "engineering/tdd"]);
+  /**
+   * The name is the directory's, not a path with a suffix taken off it. A run loads
+   * `pipeline-setup`: the category is where the file lives, not part of what it is
+   * called, and the loader rejects a `SKILL.md` whose `name` says otherwise.
+   */
+  test("names a skill by the directory its SKILL.md sits in", () => {
+    const root = tree(["delivery/pipeline-setup/SKILL.md", "engineering/tdd/SKILL.md"]);
+    expect(skillsUnder(root)).toEqual(["pipeline-setup", "tdd"]);
   });
 
   test("a directory that is not there is not an empty catalogue", () => {
@@ -43,9 +48,20 @@ describe("skillsUnder", () => {
     expect(skillsUnder(tree([]))).toBeUndefined();
   });
 
-  test("ignores what is not a skill", () => {
-    const root = tree(["engineering/tdd.md", "engineering/notes.txt"]);
-    expect(skillsUnder(root)).toEqual(["engineering/tdd"]);
+  /**
+   * A loose `.md` is a file the loader ignores, so counting it here would list it as
+   * never loaded, on every report, for as long as it exists. The resources beside a
+   * `SKILL.md` are not skills either.
+   */
+  test("ignores a loose .md and the resources beside a SKILL.md", () => {
+    const root = tree([
+      "engineering/tdd/SKILL.md",
+      "engineering/tdd/scripts/run.mjs",
+      "engineering/tdd/assets/template.fodt",
+      "engineering/notes.md",
+      "README.txt",
+    ]);
+    expect(skillsUnder(root)).toEqual(["tdd"]);
   });
 });
 
