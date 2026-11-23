@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #594: docs: add the page for building and publishing when a tag appears\n\nThe `deploy.on_tag` keys are in [the reference](../reference.md#deployon_tag) and the mechanics — a tag your own deployment creates does not start `on_tag` by itself — are in [which ref a pipeline is read from](../how-it-works.md). There is no page for the arrangement itself: one deployment decides the version and makes the tag on merge, another builds and publishes what the tag points at. That is the shape most repositories end up with and it is currently assembled from two pages that are each about something else.\n\n## Suggested page\n\n`docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md`, one row in `docs/README.md`.\n\n## What it has to say\n\n1. **Two moments, two arms.** A release has a decision (what version is this, and here is the tag) and a build (produce the artifacts for the commit that tag names). `on_merge` runs on the merge that raises the version and makes the tag; `on_tag` runs for the tag and does the building. One `config.yaml` fragment with both lists.\n\n2. **`tags` is required and `branches` is the guard.** `tags` takes patterns; `branches` says which branch the tagged commit has to be inside, because a tag names a commit rather than a branch. A tag pattern on `on_merge` is a deployment that never happens — that key exists here and nowhere else.\n\n3. **One entry per platform.** Each entry is one job on one runner, so three platforms are three entries with `runs_on` on each — not a matrix, and a failure names the platform it came from.\n\n4. **The tag your deployment creates does not start `on_tag` by itself.** It is created with the run's own token, so the run that made it dispatches the tag deployment, once per new tag; a run that was started by a tag does not, or a deployment that tags would start itself forever.\n\n5. **Do not restate the migration.** A repository that still has a `release.yml` doing all of this is [taking over an existing CI/CD](take-over-an-existing-ci-cd.md); this page is for a pipeline already expressed as commands.\n\n## Constraints\n\n- Docs only: the new page and one index row. No version bump, no source change.\n- One row in the `## By what you want to change` table, placed **immediately after** the row for `pipeline/tasks/take-over-an-existing-ci-cd.md`.\n- Match the neighbouring task pages: reason first, commands second, no numbered cheerleading.\n- No issue or pull request numbers anywhere in the page, and no links to this repository's issues, pull requests, runs or commits; `tests/contract/adopter-terms.test.ts` rejects them.\n- `bun test ./tests/contract` green.\n",
+      "content": "Issue #594: docs: add the page for building and publishing when a tag appears\n**Labels:** atomaton/in-progress\n\nThe `deploy.on_tag` keys are in [the reference](../reference.md#deployon_tag) and the mechanics — a tag your own deployment creates does not start `on_tag` by itself — are in [which ref a pipeline is read from](../how-it-works.md). There is no page for the arrangement itself: one deployment decides the version and makes the tag on merge, another builds and publishes what the tag points at. That is the shape most repositories end up with and it is currently assembled from two pages that are each about something else.\n\n## Suggested page\n\n`docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md`, one row in `docs/README.md`.\n\n## What it has to say\n\n1. **Two moments, two arms.** A release has a decision (what version is this, and here is the tag) and a build (produce the artifacts for the commit that tag names). `on_merge` runs on the merge that raises the version and makes the tag; `on_tag` runs for the tag and does the building. One `config.yaml` fragment with both lists.\n\n2. **`tags` is required and `branches` is the guard.** `tags` takes patterns; `branches` says which branch the tagged commit has to be inside, because a tag names a commit rather than a branch. A tag pattern on `on_merge` is a deployment that never happens — that key exists here and nowhere else.\n\n3. **One entry per platform.** Each entry is one job on one runner, so three platforms are three entries with `runs_on` on each — not a matrix, and a failure names the platform it came from.\n\n4. **The tag your deployment creates does not start `on_tag` by itself.** It is created with the run's own token, so the run that made it dispatches the tag deployment, once per new tag; a run that was started by a tag does not, or a deployment that tags would start itself forever.\n\n5. **Do not restate the migration.** A repository that still has a `release.yml` doing all of this is [taking over an existing CI/CD](take-over-an-existing-ci-cd.md); this page is for a pipeline already expressed as commands.\n\n## Constraints\n\n- Docs only: the new page and one index row. No version bump, no source change.\n- One row in the `## By what you want to change` table, placed **immediately after** the row for `pipeline/tasks/take-over-an-existing-ci-cd.md`.\n- Match the neighbouring task pages: reason first, commands second, no numbered cheerleading.\n- No issue or pull request numbers anywhere in the page, and no links to this repository's issues, pull requests, runs or commits; `tests/contract/adopter-terms.test.ts` rejects them.\n- `bun test ./tests/contract` green.\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-23T03:55:55Z",
@@ -432,14 +432,321 @@
       "role": "tool",
       "content": "{\"number\":596,\"url\":\"https://github.com/yuma-seno/atomaton/pull/596\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "chatcmpl-tool-bc4180a0cf22e787"
+    },
+    {
+      "role": "user",
+      "content": "PR #596: docs: add the page for building and publishing when a tag appears\n**Labels:** atomaton/in-progress\n**Linked Issue:** #594\n\n/reviewer\n\nPart of #594\nAdds `docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md` and one row in `docs/README.md`'s \"By what you want to change\" table, immediately after the `take-over-an-existing-ci-cd.md` row.\n\n## What the page says\n\n- **Two moments, two arms.** `on_merge` decides the version and makes the tag; `on_tag` builds and publishes what the tag points at. One `config.yaml` fragment carries both lists.\n- **`tags` is required and `branches` is the guard.** `tags` takes patterns and exists only on `on_tag`; a tag pattern on `on_merge` is a deployment that never happens. On `on_tag`, `branches` says which branch the tagged commit has to be inside, because a tag names a commit rather than a branch.\n- **One entry per platform.** `runs_on` sits on the entry, so three platforms are three entries rather than one matrix; one at a time in declared order, so a red run names the platform that broke.\n- **The tag your deployment makes does not start `on_tag` by itself.** It is created with the run's own token, so the run that created it dispatches the tag deployment once per new tag; a run started by a tag does not, or a tagging deployment would start itself forever.\n- **Not the migration page.** A repository whose `release.yml` still does all of this is pointed at `take-over-an-existing-ci-cd.md`.\n\nEvery fact is taken from `docs/pipeline/reference.md` (`deploy.on_tag`, `deploy.on_merge`, `runs_on`) and `docs/pipeline/how-it-works.md` (what a tag deployment does and does not start, deployment ordering). No issue, pull request, run or commit numbers or links; no release-only script names; no source change and no version bump.\n\n## Verification\n\n- `bun run synth` (needed because the contract tests read the generated `dist/`), then `bun test ./tests/contract`: **600 pass, 0 fail**.\n- `bun run test` (the commands this repository's required check runs, minus the secret scan): **2525 pass, 0 fail**.\n- `tests/contract/adopter-terms.test.ts` and `tests/contract/doc-links.test.ts` both pass, including their scans of the new page.\n\n/engineer's work is done; the diff is two docs files.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/45108845232)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-23T04:00:08Z",
+        "event_type": "pr_opened",
+        "id": "pr-596",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: `reviewer` did not finish.\n\n**The session was saved.** What this run worked out is still there.\n\n- Continue: comment `/reviewer` and put what to do next on the following lines.\n- Start clean: comment `/reviewer recover`, which archives this session and rebuilds\n  it from the issue.\n\nFrom the log, which is often about the infrastructure rather than the work:\n```\n^[[2m2026-11-23T04:04:18.993419Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-23T04:04:20.107535Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-23T04:04:20.893588Z^[[0m ^[[33m WARN^[[0m ^[[2matoma::application::runner::execution^[[0m^[[2m:^[[0m LLM returned finish_reason 'stop' with tool_calls — processing anyway\n^[[2m2026-11-23T04:04:20.915685Z^[[0m ^[[31mERROR^[[0m ^[[2matoma::application::runner^[[0m^[[2m:^[[0m Run failed: Aborting: 'read' was called 4 times in a row with the same arguments and returned the same answer every time. Nothing was learned; the run is going round.\nError: Aborting: 'read' was called 4 times in a row with the same arguments and returned the same answer every time. Nothing was learned; the run is going round.\n```\n\n@yuma-seno — **reviewer** stopped mid-run, and no agent will run next. Resume it, or say what to do instead.\n\n---\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45109484197) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-23T04:04:21Z",
+        "event_type": "pr_comment",
+        "id": 7091250036,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/reviewer\n\nYour last run stopped before finishing; nothing about the change has changed since. Finish the review of this pull request.\n",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-23T04:45:47Z",
+        "event_type": "pr_comment",
+        "id": 7091845523,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\nBring `main` into `atomaton/issue-594` with `merge_base_into_branch`, resolve the conflict it leaves in `docs/README.md` by keeping both new rows — this page's row stays immediately after the `take-over-an-existing-ci-cd.md` row — and push. No page content needs to change: the review found no defect in the added page or its index row.\n\n**What you concluded.** The page states only what `docs/pipeline/reference.md` and `docs/pipeline/how-it-works.md` already say, and its single index row sits exactly where the issue put it, so the change is sound as content. The pull request is unmergeable for one reason that is not a defect in it: the branch was cut before the sibling docs pull request (#595) merged, so `docs/README.md` now conflicts with `main` (`mergeStateStatus=DIRTY`).\n\n<details><summary>What backs the content verdict — five anchors</summary>\n\n- `docs/README.md:40` carries the new row immediately after the take-over row at `docs/README.md:39`, and the diff touches no other file.\n- `docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md:37` matches `docs/pipeline/reference.md:72` — `tags` is required, takes patterns, and exists only on `on_tag`; `:42` matches `reference.md:77` — `branches` on `on_tag` says which branch the tagged commit has to be inside.\n- `docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md:85` matches `docs/pipeline/how-it-works.md:51` — the tag is created with the run's own token, the run that created it dispatches once per new tag, and a run started by a tag does not.\n- `docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md:50` matches `reference.md:117` — one runner per entry, a label or a label set, so several platforms are several entries and not a matrix.\n- The contract rules that police this page hold by inspection: no `#\\d+`, no `dist/`, no `publish-release.sh`/`tag-release.sh`/`check-live-tools.sh`, no `this repository` (`tests/contract/adopter-terms.test.ts:85`), and `#deployon_merge` / `#deployon_tag` resolve to the headings at `docs/pipeline/reference.md:63` and `:70` under the slug rule in `tests/contract/doc-links.test.ts:74`. The required check `atomaton-check` on the head commit is `completed`/`success`.\n\n</details>\n\n**What you could not establish.** This run has no shell, so I did not run `bun test ./tests/contract` myself; I relied on the green required check and on reading the two contract files whose rules cover the page. The `read` tool returned lines 1–137 of `src/workflows/atomaton-deploy.wac.ts` on every attempt to read past them, so I confirmed only that a `dispatch-new-tags` job exists (`:58`, `:236`) and that `.github/workflows/atomaton-deploy.yml:175` runs `dispatch_new_tags.ts`, not the job's own condition — not load-bearing, since the page's wording comes from `how-it-works.md`. The first `check_merge_readiness` reported `mergeability-unknown`; the immediate re-check reported `conflicting`, so the conflict is GitHub's current verdict rather than a stale read.\n\n**What happens next.**\n1. `/engineer` merges `main` into `atomaton/issue-594` and resolves `docs/README.md`, keeping this page's row directly after the take-over row and the sibling page's row where it belongs.\n2. The push re-runs CI and a reviewer is dispatched on the result, which can merge once the branch is clean.\n\n\n---\n_Tokens: 297694 total (289792 prompt + 7902 completion, 237952 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45113804907) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-23T04:47:49Z",
+        "event_type": "pr_comment",
+        "id": 7091873774,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/docs/README.md b/docs/README.md\nindex 8461532e..44247892 100644\n--- a/docs/README.md\n+++ b/docs/README.md\n@@ -37,6 +37,7 @@ only: the reason behind a step is at the other end of that step's link.\n | [give a repository a pipeline an agent can write and maintain](pipeline/tasks/give-a-repository-a-pipeline-an-agent-can-write-and-maintain.md) | `checks.from_pull_request` and `deploy.on_merge` |\n | [have agents start your own CI and deployment](pipeline/tasks/have-agents-start-your-own-ci-and-deployment.md) | `checks.your_workflow` and `deploy.your_workflow` |\n | [take over an existing CI/CD](pipeline/tasks/take-over-an-existing-ci-cd.md) | `config.yaml`, then the ruleset, then `.github/workflows/` — in that order |\n+| [build and publish when a tag appears](pipeline/tasks/build-and-publish-when-a-tag-appears.md) | `deploy.on_merge` for the tag, `deploy.on_tag` for the build |\n | [make a workflow of your own work when Atomaton starts it](pipeline/tasks/make-a-workflow-of-your-own-work-when-atomaton-starts-it.md) | `workflow_dispatch`, in that workflow |\n | [check your config before pushing it](config/tasks/check-your-config-before-pushing-it.md) | nothing — one command |\n | [keep some paths for human review](pull-requests/tasks/keep-some-paths-for-human-review.md) | `merge.governed_paths` |\ndiff --git a/docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md b/docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md\nnew file mode 100644\nindex 00000000..addf8b3b\n--- /dev/null\n+++ b/docs/pipeline/tasks/build-and-publish-when-a-tag-appears.md\n@@ -0,0 +1,101 @@\n+# Build and publish when a tag appears\n+\n+A release asks two questions, and different runs answer them. The first is what\n+this release is: which version, and the tag that names it. The second is what the\n+tag points at: build the artifacts for that commit and publish them. An arm that\n+does both has no way to rebuild a release whose publish failed without deciding a\n+new version first, and no way for a tag you pushed later to be built by the same\n+commands a release is.\n+\n+[`deploy.on_merge`](../reference.md#deployon_merge) answers the first and\n+[`deploy.on_tag`](../reference.md#deployon_tag) the second. Both lists go in the\n+same `deploy` block, and the deployment that makes the tag is not the one that\n+builds it.\n+\n+```yaml\n+deploy:\n+  on_merge:\n+    - name: version-and-tag\n+      branches: [main]\n+      commands:\n+        - ./scripts/tag-next-version.sh\n+  on_tag:\n+    - name: publish-linux\n+      tags: [\"v*\"]\n+      branches: [main]\n+      runs_on: ubuntu-latest\n+      commands:\n+        - ./scripts/build.sh\n+        - ./scripts/publish.sh\n+```\n+\n+The merge arm ends when the tag exists. The tag arm is a separate run on a separate\n+event, and what the two share is the commit the tag names, not an environment.\n+\n+## `tags` is required, and `branches` is the guard\n+\n+`tags` has no default, because an entry that claims every tag is never what anyone\n+meant. It takes patterns — a literal name, or a prefix and a `*` — and it exists on\n+`on_tag` and nowhere else. A tag pattern on `on_merge` is a deployment that never\n+happens: that list is released by a merge, and a merge is not a tag.\n+\n+`branches` on `on_tag` is not a second filter over the tag. A tag names a **commit**\n+rather than a branch, so there is nothing for a branch pattern to match; `branches`\n+says which branch that commit has to be inside. It means the same thing here as on\n+`on_merge` — **which branch's reviewed content this deployment ships** — and with a\n+tag it is the only thing saying so.\n+\n+## One entry per platform\n+\n+An entry is one job on one runner, and `runs_on` sits on the entry because the\n+machine is a property of that piece of work. Three platforms are therefore three\n+entries, each naming its own runner, not one entry carrying a matrix:\n+\n+```yaml\n+deploy:\n+  on_tag:\n+    - name: publish-linux\n+      tags: [\"v*\"]\n+      branches: [main]\n+      runs_on: ubuntu-latest\n+      commands: [\"./scripts/build-and-publish.sh\"]\n+    - name: publish-macos\n+      tags: [\"v*\"]\n+      branches: [main]\n+      runs_on: macos-latest\n+      commands: [\"./scripts/build-and-publish.sh\"]\n+    - name: publish-windows\n+      tags: [\"v*\"]\n+      branches: [main]\n+      runs_on: windows-latest\n+      commands: [\"./scripts/build-and-publish.sh\"]\n+```\n+\n+`tags` and `branches` are repeated on each entry because they belong to the entry,\n+not to the list. `runs_on` takes a single label, or the set of labels one runner\n+must have — which is how a self-hosted machine is addressed — and either way it is\n+one machine per entry, however many labels.\n+\n+What the split buys shows up in the failure. Deployments run one at a time in\n+declared order and the first failure stops the rest, so a red run names the platform\n+that broke, and the entries after it did not run at all.\n+\n+## The tag your deployment makes does not start this by itself\n+\n+The merge arm creates the tag with the run's own token, and GitHub raises no event\n+for its own token. Left alone, `on_tag` would fire for a tag you pushed by hand and\n+never for the one your release just made. The run that created the tag closes that\n+gap: it dispatches the tag deployment, once per new tag.\n+\n+A run that was itself started by a tag does not, or a deployment that tags on its\n+way through publishing would start itself forever.\n+\n+So the first arm's whole job is to decide the version and make the tag. It does not\n+build, and it does not have to dispatch anything.\n+\n+## Where this starts from\n+\n+Everything above assumes the pipeline is already written as commands in\n+`config.yaml`. A repository whose `release.yml` still does the version bump, the tag\n+and the build is [taking over an existing CI/CD](take-over-an-existing-ci-cd.md),\n+and that is the page for the order to change it in.\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-23T04:48:19Z",
+        "event_type": "pr_diff",
+        "id": "pr-596-diff",
+        "layer": "github-context",
+        "sha": "a28fee85",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9c7dedd366587396",
+          "type": "function",
+          "function": {
+            "name": "merge_base_into_branch",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The request: bring main into atomaton/issue-594 with merge_base_into_branch, resolve conflict in docs/README.md keeping both new rows (this page's row immediately after the take-over row), push.\n\nLet me call merge_base_into_branch.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_d08f0610-1fde-4989-9a43-27f615758f0e",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"conflicts\",\"branch\":\"atomaton/issue-594\",\"base\":\"main\",\"base_sha\":\"96219ac70cf029a9e75bcea843a6aa8a751d9592\",\"files\":[\"docs/README.md\"],\"note\":\"Nothing was committed. The conflicts are in the worktree: a text file with git's markers, and every one of them with both sides in the index (`git show :2:<path>` for this branch, `git show :3:<path>` for the base). Resolve each and declare it in resolved_paths on commit_and_push, which closes the merge.\"}",
+      "tool_call_id": "chatcmpl-tool-9c7dedd366587396"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-befd1a3d3c6af93e",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n -A 14 '^<<<<<<<' docs/README.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Read the conflicted region of docs/README.md.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_c5e35b91-1715-4ad3-802b-497cd60b1132",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"40:<<<<<<< HEAD\\n41-| [build and publish when a tag appears](pipeline/tasks/build-and-publish-when-a-tag-appears.md) | `deploy.on_merge` for the tag, `deploy.on_tag` for the build |\\n42-=======\\n43-| [check a pull request against a service that needs a credential](pipeline/tasks/check-a-pull-request-against-a-real-service.md) | `checks.from_default_branch`, and that entry's own `secrets` |\\n44->>>>>>> refs/remotes/origin/main\\n45-| [make a workflow of your own work when Atomaton starts it](pipeline/tasks/make-a-workflow-of-your-own-work-when-atomaton-starts-it.md) | `workflow_dispatch`, in that workflow |\\n46-| [check your config before pushing it](config/tasks/check-your-config-before-pushing-it.md) | nothing — one command |\\n47-| [keep some paths for human review](pull-requests/tasks/keep-some-paths-for-human-review.md) | `merge.governed_paths` |\\n48-| [let agents merge their own pull requests](pull-requests/tasks/let-agents-merge-their-own-pull-requests.md) | `merge.policy` |\\n49-| [stop a run and pick it up again](work/tasks/stop-a-run-and-pick-it-up-again.md) | nothing — `/stop`, then `/resume` |\\n50-| [close an issue a run is working on](work/tasks/close-an-issue-a-run-is-working-on.md) | nothing — closing it is the command |\\n51-| [start an agent again from a clean session](work/tasks/start-an-agent-again-from-a-clean-session.md) | nothing — one modifier on the command |\\n52-| [stop an agent loop that is going nowhere](work/tasks/stop-an-agent-loop-that-is-going-nowhere.md) | `chain.after_handoffs`, `chain.after_runs_without_change` |\\n53-| [use your own label names](work/tasks/use-your-own-label-names.md) | `chain.labels` |\\n54-| [let a tool server reach something outside GitHub](tools/tasks/let-a-tool-server-reach-something-outside-github.md) | `tools.secrets`, then that server's own environment |\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":1627}",
+      "tool_call_id": "chatcmpl-tool-befd1a3d3c6af93e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-92e1470f8eb0cfb4",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"| [build and publish when a tag appears](pipeline/tasks/build-and-publish-when-a-tag-appears.md) | `deploy.on_merge` for the tag, `deploy.on_tag` for the build |\\n| [check a pull request against a service that needs a credential](pipeline/tasks/check-a-pull-request-against-a-real-service.md) | `checks.from_default_branch`, and that entry's own `secrets` |\\n\", \"old_string\": \"<<<<<<< HEAD\\n| [build and publish when a tag appears](pipeline/tasks/build-and-publish-when-a-tag-appears.md) | `deploy.on_merge` for the tag, `deploy.on_tag` for the build |\\n=======\\n| [check a pull request against a service that needs a credential](pipeline/tasks/check-a-pull-request-against-a-real-service.md) | `checks.from_default_branch`, and that entry's own `secrets` |\\n>>>>>>> refs/remotes/origin/main\\n\", \"path\": \"docs/README.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Keep both rows. Order: take-over row (line 39 above the conflict), then this page's row (immediately after take-over), then main's new sibling row (check a pull request against a service that needs a credential) — where does it belong? Main inserted it at that position, presumably after take-over row on main. Since our row must be immediately after take-over, the main row goes after ours. That's the natural resolution and preserves main's placement relative to its neighbours as much as possible.\n\nEdit the file.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_de2fa30f-c35b-4de4-b7a9-b39f96b90f9e",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in docs/README.md.",
+      "tool_call_id": "chatcmpl-tool-92e1470f8eb0cfb4"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9d8b48130bd0bf43",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n '[<=>]\\\\{7\\\\}' docs/README.md; sed -n '36,46p' docs/README.md; git status --short\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Oops — my old_string included `<<<<<<< HEAD` ... `>>>>>>> refs/remotes/origin/main` plus a trailing newline, and new_string replaced it with the two rows. Let me check the result — I wrote new_string with the two rows and trailing newline. Good. Let me verify no markers and the surrounding lines.\n\nWait: careful — my new_string ends with a newline after the second row, and the old_string ended with newline after `>>>>>>>`. So the following line 45 (`| [make a workflow...`) remains. Good.\n\nBut does `<<<<<<< HEAD` line get removed? new_string starts with the build row, so yes.\n\nLet me verify.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_0bf79b49-63ce-4f0c-8868-23188a5cb9cd",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"| [prefer particular upstream providers](agents/tasks/prefer-particular-upstream-providers.md) | `extra_body`, in an agent definition |\\n| [give a repository a pipeline an agent can write and maintain](pipeline/tasks/give-a-repository-a-pipeline-an-agent-can-write-and-maintain.md) | `checks.from_pull_request` and `deploy.on_merge` |\\n| [have agents start your own CI and deployment](pipeline/tasks/have-agents-start-your-own-ci-and-deployment.md) | `checks.your_workflow` and `deploy.your_workflow` |\\n| [take over an existing CI/CD](pipeline/tasks/take-over-an-existing-ci-cd.md) | `config.yaml`, then the ruleset, then `.github/workflows/` — in that order |\\n| [build and publish when a tag appears](pipeline/tasks/build-and-publish-when-a-tag-appears.md) | `deploy.on_merge` for the tag, `deploy.on_tag` for the build |\\n| [check a pull request against a service that needs a credential](pipeline/tasks/check-a-pull-request-against-a-real-service.md) | `checks.from_default_branch`, and that entry's own `secrets` |\\n| [make a workflow of your own work when Atomaton starts it](pipeline/tasks/make-a-workflow-of-your-own-work-when-atomaton-starts-it.md) | `workflow_dispatch`, in that workflow |\\n| [check your config before pushing it](config/tasks/check-your-config-before-pushing-it.md) | nothing — one command |\\n| [keep some paths for human review](pull-requests/tasks/keep-some-paths-for-human-review.md) | `merge.governed_paths` |\\n| [let agents merge their own pull requests](pull-requests/tasks/let-agents-merge-their-own-pull-requests.md) | `merge.policy` |\\n| [stop a run and pick it up again](work/tasks/stop-a-run-and-pick-it-up-again.md) | nothing — `/stop`, then `/resume` |\\nUU docs/README.md\\nA  docs/pipeline/tasks/check-a-pull-request-against-a-real-service.md\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":148}",
+      "tool_call_id": "chatcmpl-tool-9d8b48130bd0bf43"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9452cf625c833ced",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth >/dev/null 2>&1; bun test ./tests/contract 2>&1 | tail -5\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "No markers. Status: `UU docs/README.md` and main's new page file is added. Good.\n\nNow run the tests again? The merge brought main's changes; the tree now includes main's new page. Run contract tests (need synth? dist is gitignored and may be stale now after merge — main's changes could touch src). Let's run `bun test ./tests/contract` after synth via `bun run synth` (pretest of `bun run test` handles it). Just run contract tests with synth first.\n\nThen commit_and_push with resolved_paths: [\"docs/README.md\"].",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_7da7b756-6203-494f-9559-5cb7b3a1e852",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\n 601 pass\\n 0 fail\\n 2891 expect() calls\\nRan 601 tests across 57 files. [7.16s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":7604}",
+      "tool_call_id": "chatcmpl-tool-9452cf625c833ced"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-ac689d9ef52b8506",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"Merge main into atomaton/issue-594\\n\\nBrings the branch up to date with main so the pull request can merge.\\ndocs/README.md conflicted on the same index table: both rows are kept, with\\nthis page's row still immediately after take-over-an-existing-ci-cd.md.\\n\", \"resolved_paths\": [\"docs/README.md\"]}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true,\"merge_head\":\"96219ac70cf029a9e75bcea843a6aa8a751d9592\"}",
+      "tool_call_id": "chatcmpl-tool-ac689d9ef52b8506"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8b0f0ec02665d759",
+          "type": "function",
+          "function": {
+            "name": "check_merge_readiness",
+            "arguments": "{\"pull_number\": 596}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Pushed. Now the pull request #596 is updated; CI will re-run and a reviewer should be dispatched. The reviewer previously failed. Should I call create_pr again? No — the PR exists; pushing updates it. The workflow on the PR presumably re-runs validation and dispatches reviewer since the PR has a reviewer requested. The instruction from the reviewer said: \"The push re-runs CI and a reviewer is dispatched on the result\".\n\nLet me check merge readiness quickly to see state after push? That's read-only-ish (check_merge_readiness may dispatch CI when only a CI run is missing). Actually the push itself triggers the deploy/check workflows. Let me check the PR state briefly.\n\nActually the task was to merge and push. My report should state outcome. Since the branch is now merged with main and pushed, CI runs. Should I end with /reviewer to make sure a review happens? The reviewer role's own handoff line: the previous reviewer run said a reviewer is dispatched on the result. The create_pr dispatch already happened earlier; for a push, the validation workflow re-runs and dispatches the reviewer per its own logic.\n\nLet me check readiness to report accurately.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_bbad6463-9ad0-4f33-9687-394333c728ca",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":596,\"ready\":false,\"blockers\":[{\"kind\":\"checks-missing\",\"detail\":\"required check \\\"atomaton-check\\\" has not run on the head commit\"}],\"stacked_merge\":false,\"merge_state_status\":\"BLOCKED\",\"required_checks\":[\"atomaton-check\"],\"checks\":[],\"ci_dispatched\":true,\"summary\":\"Not mergeable:\\n1. [checks-missing] required check \\\"atomaton-check\\\" has not run on the head commit\\n\\nCI has been dispatched for the head commit; re-check shortly.\"}",
+      "tool_call_id": "chatcmpl-tool-8b0f0ec02665d759"
+    },
+    {
+      "role": "assistant",
+      "content": "**What you concluded.** The branch conflict is gone: `main` is now merged into `atomaton/issue-594` and pushed, with `docs/README.md` holding both new index rows and this page's row still immediately after the take-over row. The pull request is blocked only on `atomaton-check` not yet having run on the new merge head — a wait, not a defect.\n\n<details><summary>What backs it — four anchors</summary>\n\n- `merge_base_into_branch` first returned `{\"status\":\"conflicts\",\"branch\":\"atomaton/issue-594\",\"base\":\"main\",\"files\":[\"docs/README.md\"],\"note\":\"Nothing was committed.\"}`.\n- The single conflict hunk spanned only the two rows; after resolving, `grep -n '[<=>]\\{7\\}' docs/README.md` printed nothing, and `sed -n '36,46p'` shows `take-over-an-existing-ci-cd.md` → this page's row → main's `check-a-pull-request-against-a-real-service.md` row, in that order.\n- `commit_and_push(..., resolved_paths=[\"docs/README.md\"])` returned `{\"ok\":true,\"committed\":true,\"pushed\":true,\"merge_head\":\"96219ac70cf029a9e75bcea843a6aa8a751d9592\"}`.\n- `bun test ./tests/contract` after the merge: **601 pass, 0 fail** (one more than before, from the page the merge brought in).\n\n</details>\n\n**What I could not establish.** Whether the required check goes green — `check_merge_readiness` on the pushed merge head reports `merge_state_status: \"BLOCKED\"` with the single blocker `checks-missing` for `atomaton-check`, and `ci_dispatched: true`, so the run had not started reporting when this session ended. I did not re-run the wider `bun run test` for a docs-only merge; the contract suite is the one covering this change.\n\n**What happens next.** CI runs the required check on the merge commit and, when it passes, dispatches a reviewer on the result. No page content changed in this run — only the merge and the one-row resolution.",
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Conflict is gone — merge state is BLOCKED only because the required check hasn't run on the new merge head commit. CI dispatched.\n\nSince the check needs to run, and the session will end, I should report. Should I call /reviewer? The reviewer is dispatched by validation when checks pass, per the pipeline. But the earlier create_pr result showed validation_dispatched true. For this push, CI was just dispatched by check_merge_readiness; the atomaton validation workflow presumably dispatches reviewer on pass.\n\nThe most reliable hand-off: end with a call to /reviewer? The instruction says opening a PR dispatches validation which dispatches the reviewer. The previous reviewer run said \"The push re-runs CI and a reviewer is dispatched on the result\". So nothing to call — but if I end with no call, the machinery tells @yuma-seno nothing is running, which is fine and true.\n\nHmm, but who acts next? CI runs, and on green the reviewer runs. I'll end with no call, since the pipeline carries it, and mention it.\n\nActually careful: is it true that on push CI dispatches the reviewer? The atomaton-check workflow for pull_request probably triggers validation and then dispatches the reviewer when green. Given create_pr's description \"it dispatches CI validation -- ... validation runs the checks and then dispatches whichever agent the result calls for\", and the workflow runs on pull_request events including synchronize. So yes.\n\nReport: conclusion, how I know, what I could not establish, what happens next.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_7abcc103-a007-4da7-ab3d-554463da62e2",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop",
+      "atoma_metadata": {
+        "github_comment_id": 7091900593,
+        "agent": "engineer"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 2,
-      "snapshot_hash": "7b865e85149e14c6855ef2f5f3a81966e72ae74cbe42bd08d945bebcde12728d",
-      "version": 1
+      "event_count": 7,
+      "snapshot_hash": "0f46346359912af3db8e56605c4f0b771353d10250b75d2bfb437e304f56ccc9",
+      "version": 1,
+      "type": "issue",
+      "session_number": "594"
     }
   },
   "atoma_runs": [
@@ -465,6 +772,28 @@
         }
       },
       "started": "2026-11-23T03:56:59Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-23T04:49:46Z",
+      "ended_because": "completed",
+      "iterations": 8,
+      "messages": 51,
+      "seconds": 38,
+      "server_calls": {
+        "files": {
+          "edit": 1
+        },
+        "github": {
+          "check_merge_readiness": 1,
+          "commit_and_push": 1,
+          "merge_base_into_branch": 1
+        },
+        "shell": {
+          "bash": 3
+        }
+      },
+      "started": "2026-11-23T04:49:08Z"
     }
   ]
 }
