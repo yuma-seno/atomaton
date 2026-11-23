@@ -24088,6 +24088,45 @@
     ]
   },
   {
+    "path": "sessions/issue-587/engineer.json",
+    "agent": "engineer",
+    "messages": 20,
+    "calls": 10,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "project/conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "load_skill": 1,
+      "bash": 3,
+      "read": 6
+    },
+    "acts": {
+      "other": 3
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-23T01:00:23Z",
+        "ended_because": "failed",
+        "iterations": 5,
+        "messages": 20,
+        "seconds": 8,
+        "server_calls": {
+          "files": {
+            "read": 6
+          },
+          "shell": {
+            "bash": 3
+          }
+        },
+        "started": "2026-11-23T01:00:15Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
