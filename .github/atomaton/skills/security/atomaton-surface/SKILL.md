@@ -1,11 +1,11 @@
 ---
-name: security/atomaton-surface
-description: Load on top of `security/on-demand-audit` when auditing THIS repository — where its surfaces are, which decisions already constrain them, and which of its own findings are known.
+name: atomaton-surface
+description: Load on top of `on-demand-audit` when auditing THIS repository — where its surfaces are, which decisions already constrain them, and which of its own findings are known.
 ---
 
 # This repository's own surface
 
-`security/on-demand-audit` is the procedure, and it ships to everyone who adopts this
+`on-demand-audit` is the procedure, and it ships to everyone who adopts this
 template. This file does not replace it: it is what the procedure cannot know,
 because it is particular to the repository that builds Atomaton.
 
@@ -19,13 +19,13 @@ The natural cut is not by directory — it is by what each part is trusted with:
 
 | Area | What is in it | What makes it its own area |
 | --- | --- | --- |
-| `src/workflows/` | the workflow generator, and the YAML it emits | it decides `${{ }}` expansion, triggers, `permissions` and `uses:` for every workflow an adopter runs. Read with `security/gh-actions-surface` |
+| `src/workflows/` | the workflow generator, and the YAML it emits | it decides `${{ }}` expansion, triggers, `permissions` and `uses:` for every workflow an adopter runs. Read with `gh-actions-surface` |
 | `.github/workflows/release.yml` | the one hand-written workflow, the release button | the only workflow no generator produces, and the one place outside the machinery that reaches `ATOMATON_UPDATE_TOKEN`: the update it runs pushes, opens and merges as that identity, so the file is the strongest single thing an audit should read |
 | `src/entrypoints/machinery/` | the glue each generated step runs | it runs on the default branch with a write token and treats the pull request's tree as data. The whole trust story is which tree a script is executed from and which one it merely reads |
 | `src/adapters/` | GitHub, actions and MCP adapters, including dispatch | the boundary between "we decided" and "GitHub did it": dispatch, the closed-target guard, the ops log |
 | `src/entrypoints/tools/mcp/` | the tool servers an agent is handed | credential routing, the hook layer, and the hooks that can and cannot be a boundary |
 | `src/domain/delivery/` | merge gates, governed paths, declared secrets, config validation | the merge gate is a decision surface: a bypass here is worth more than a bug anywhere else |
-| `src/content/` | agents, skills, prompt template, config, skills | the instructions every run of every adopter follows. Read with `security/agent-prompt-surface` |
+| `src/content/` | agents, skills, prompt template, config, skills | the instructions every run of every adopter follows. Read with `agent-prompt-surface` |
 | `.github/**`, hand-written half | `release.yml`, the release scripts, the customized skills | this repository's own operation, applied as soon as it merges, unlike `src/` — and invisible to the update machinery, whose plan never names a path the release does not ship |
 | `package.json` + `bun.lock` | the toolchain every run installs | supply chain, structurally — `bun audit` for the advisory half |
 

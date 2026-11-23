@@ -1,5 +1,5 @@
 ---
-name: project/conventions
+name: conventions
 description: Load before making, reviewing, or committing any change here — conventions specific to THIS repository, which override the generic defaults.
 ---
 
@@ -10,7 +10,7 @@ that template and an adopter of it, which creates rules that do not apply
 anywhere else.
 
 This file is not part of the template. It lives in
-`.github/atomaton/skills/project/`, and it is deliberately absent from `src/` so
+`.github/atomaton/skills/project/conventions/`, and it is deliberately absent from `src/` so
 adopters never receive it.
 
 ## The three trees

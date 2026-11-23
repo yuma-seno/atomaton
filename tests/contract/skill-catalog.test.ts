@@ -16,7 +16,7 @@ const SKILL_FILE = "SKILL.md";
  * the CLI that loads them, and the metrics report that asks which of them nothing
  * loaded.
  */
-function skillFiles(): string[] {
+function skillFiles(root: string = SKILLS): string[] {
   const files: string[] = [];
   const walk = (directory: string): void => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -25,7 +25,7 @@ function skillFiles(): string[] {
       else if (entry.isFile() && entry.name === SKILL_FILE) files.push(path);
     }
   };
-  walk(SKILLS);
+  walk(root);
   return files;
 }
 
@@ -190,5 +190,41 @@ describe("skill catalog", () => {
       "the README is the only index of what ships, so a skill it omits is one an adopter " +
         "never learns they could tune. Add a row to the skill table",
     ).toEqual([]);
+  });
+});
+
+/**
+ * This repository keeps two skills of its own beside the shipped ones, and no
+ * release ships either: `project/conventions` is adopter-owned by design, and
+ * `security/atomaton-surface` is this repository's overlay for its own audit. The
+ * update machinery's plan enumerates the release and never names a path it does not
+ * ship, so nothing but this check moves them -- and a loose `.md` that is not a
+ * `SKILL.md` is a skill the loader ignores, silently, with nothing in the catalog to
+ * show it left.
+ */
+describe("this repository's own skill tree", () => {
+  const OWN_SKILLS = ".github/atomaton/skills";
+
+  test("no skill sits in a loose file the loader ignores", () => {
+    const loose: string[] = [];
+    const walk = (directory: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const path = join(directory, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (entry.isFile() && entry.name.endsWith(".md") && entry.name !== SKILL_FILE) loose.push(path);
+      }
+    };
+    walk(OWN_SKILLS);
+    expect(loose, "a loose .md is a skill no run loads; move it to <name>/SKILL.md").toEqual([]);
+  });
+
+  test("every skill in the tree is named after its own directory, this repository's two included", () => {
+    const files = skillFiles(OWN_SKILLS);
+    const names = files.map((file) => metadataOf(file).name!);
+    expect(names).toContain("conventions");
+    expect(names).toContain("atomaton-surface");
+    for (const file of files) {
+      expect(metadataOf(file).name, `${file}: name must equal the directory it is in`).toBe(leafName(file));
+    }
   });
 });
