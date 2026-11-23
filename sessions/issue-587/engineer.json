@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #587: The shipped atomaton-tools job runs the template's bun e2e suite, so every non-bun adopter reports atomaton-check failure\n**Labels:** atomaton/waiting-for-person\n\nThe `atomaton-tools` job of the shipped `atomaton-check.yml` fails on the first real adopter, and its failure turns the whole `atomaton-check` context red even when the adopter's own checks pass.\n\n## Evidence — atoma, the first adopter\n\natoma (yuma-seno/atoma) adopted v0.24.1: https://github.com/yuma-seno/atoma/pull/28 — a Rust project, no `package.json`, no bun scripts. On its adoption pull request the generated check ran:\n\n```\natomaton-tools  Run the end-to-end suite against the real CLI\n  bun run test:e2e\n  error: Script not found \"test:e2e\"\n  ##[error]Process completed with exit code 1.\n```\n\nand the aggregation step then failed on it:\n\n```\nPULL_REQUEST_RESULT: skipped\nDEFAULT_BRANCH_RESULT: skipped\nTOOLS_RESULT: failure\n##[error]a check job reported 'failure'\n```\n\nThe adopter's configured check (`checks.your_workflow: ci.yml`) never ran in this path at all — this is Atomaton's own tool verification reporting a template-specific suite as the adopter's failure. The first half of the same job, \"Check the tool servers against their guards\" (which drives the real `atoma` CLI over the shipped servers), PASSED on atoma: `2 server(s) advertise exactly the tools they promise.` So the server machinery is fine; the step that assumes the template's own `package.json` is the defect.\n\n## Why it only shows on adopters\n\nOn atomaton itself `package.json` declares `test:e2e` (and the e2e suite) so the step passes, and the whole job reads as \"Atomaton's own tool check\". The workflows ship to adopters where that script does not exist. Every adopter without bun — which at the moment is every adopter that is not atomaton — gets a red `atomaton-check` on machinery-relevant pull requests, for a suite that is not theirs.\n\n## Fix\n\nMake the e2e step skip when the repository does not carry it, in the workflow source it is generated from (`src/workflows/atomaton-check.wac.ts`, ending up in `atomaton-check.yml`'s `atomaton-tools` job). The skip needs a stated reason, not silence — the step's job is to be honest about what was verified. Something in the workflow's existing voice:\n\n```bash\nif [ -f package.json ] && grep -q '\"test:e2e\"' package.json; then\n  bun run test:e2e\nelse\n  echo \"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\"\nfi\n```\n\nGrep rather than `bun run --dry-run`, so a non-bun repository is handled by the same shell test and never invokes bun at all.\n\nCheck the aggregation step's expectations still hold: `TOOLS_RESULT` now lands as skipped on adopters, which the case statement already accepts (`success|skipped`). On atomaton itself the step still runs.\n\n## Constraints\n\n- No version bump.\n- Add or adjust a contract test that pins this step's generated bash (the machinery's contract suite covers generated check.yml content already), so a future edit cannot drop the guard.\n- `bun run synth` updated artifacts, tests green (`bun test ./tests/contract ./src/...` per the repo's script), then open the pull request against main.\n\nThis fix is what atoma needs to complete its adoption: the machinery's update path will apply the release that carries it, so the sooner it lands the sooner the first adopter runs whole.\n",
+      "content": "Issue #587: The shipped atomaton-tools job runs the template's bun e2e suite, so every non-bun adopter reports atomaton-check failure\n**Labels:** atomaton/in-progress\n\nThe `atomaton-tools` job of the shipped `atomaton-check.yml` fails on the first real adopter, and its failure turns the whole `atomaton-check` context red even when the adopter's own checks pass.\n\n## Evidence — atoma, the first adopter\n\natoma (yuma-seno/atoma) adopted v0.24.1: https://github.com/yuma-seno/atoma/pull/28 — a Rust project, no `package.json`, no bun scripts. On its adoption pull request the generated check ran:\n\n```\natomaton-tools  Run the end-to-end suite against the real CLI\n  bun run test:e2e\n  error: Script not found \"test:e2e\"\n  ##[error]Process completed with exit code 1.\n```\n\nand the aggregation step then failed on it:\n\n```\nPULL_REQUEST_RESULT: skipped\nDEFAULT_BRANCH_RESULT: skipped\nTOOLS_RESULT: failure\n##[error]a check job reported 'failure'\n```\n\nThe adopter's configured check (`checks.your_workflow: ci.yml`) never ran in this path at all — this is Atomaton's own tool verification reporting a template-specific suite as the adopter's failure. The first half of the same job, \"Check the tool servers against their guards\" (which drives the real `atoma` CLI over the shipped servers), PASSED on atoma: `2 server(s) advertise exactly the tools they promise.` So the server machinery is fine; the step that assumes the template's own `package.json` is the defect.\n\n## Why it only shows on adopters\n\nOn atomaton itself `package.json` declares `test:e2e` (and the e2e suite) so the step passes, and the whole job reads as \"Atomaton's own tool check\". The workflows ship to adopters where that script does not exist. Every adopter without bun — which at the moment is every adopter that is not atomaton — gets a red `atomaton-check` on machinery-relevant pull requests, for a suite that is not theirs.\n\n## Fix\n\nMake the e2e step skip when the repository does not carry it, in the workflow source it is generated from (`src/workflows/atomaton-check.wac.ts`, ending up in `atomaton-check.yml`'s `atomaton-tools` job). The skip needs a stated reason, not silence — the step's job is to be honest about what was verified. Something in the workflow's existing voice:\n\n```bash\nif [ -f package.json ] && grep -q '\"test:e2e\"' package.json; then\n  bun run test:e2e\nelse\n  echo \"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\"\nfi\n```\n\nGrep rather than `bun run --dry-run`, so a non-bun repository is handled by the same shell test and never invokes bun at all.\n\nCheck the aggregation step's expectations still hold: `TOOLS_RESULT` now lands as skipped on adopters, which the case statement already accepts (`success|skipped`). On atomaton itself the step still runs.\n\n## Constraints\n\n- No version bump.\n- Add or adjust a contract test that pins this step's generated bash (the machinery's contract suite covers generated check.yml content already), so a future edit cannot drop the guard.\n- `bun run synth` updated artifacts, tests green (`bun test ./tests/contract ./src/...` per the repo's script), then open the pull request against main.\n\nThis fix is what atoma needs to complete its adoption: the machinery's update path will apply the release that carries it, so the sooner it lands the sooner the first adopter runs whole.\n",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-22T15:49:30Z",
@@ -1002,14 +1002,506 @@
       "role": "tool",
       "content": "{\"number\":588,\"url\":\"https://github.com/yuma-seno/atomaton/pull/588\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "chatcmpl-tool-b8ae5bf874bd5ac5"
+    },
+    {
+      "role": "user",
+      "content": "PR #588: Guard the shipped e2e step and drop the release-only tool check from atomaton-tools\n**Labels:** atomaton/in-progress\n**Linked Issue:** #587\n\n/reviewer\n\nPart of #587\n## What was wrong\n\nThe generated `atomaton-tools` job ships to every adopter, and two of its steps only ever held in the repository that builds the deliverable. On the first adopter (`yuma-seno/atoma`, a Rust project — `atomaton-tools: failure` on run 45041243045 while `pull-request-checks (test)` passed) both failed for reasons that were not that repository's:\n\n- **`Run the end-to-end suite against the real CLI` ran `bun run test:e2e` unconditionally.** That is a script of *this* repository's `package.json`, so on a tree without it the step died with `Script not found \"test:e2e\"` and the aggregation step then reported `TOOLS_RESULT: failure` — a red required context over a suite the adopter does not have.\n- **`Check the tool servers this pull request would ship` ran `bash .github/atomaton/scripts/check-live-tools.sh`.** `.github/atomaton/scripts/` is never delivered to adopters at all — `tests/contract/adopter-terms.test.ts` names `check-live-tools.sh` as this repository's own release scripts — so on an adopted tree that step failed with `No such file or directory`.\n\n## What this changes\n\n`src/workflows/atomaton-check.wac.ts` (the source `atomaton-check.yml` is generated from):\n\n1. The suite step now runs only where the script exists, and states what it skipped and why otherwise:\n\n```bash\nif [ -f package.json ] && grep -q '\"test:e2e\"' package.json; then\n  bun run test:e2e\nelse\n  echo \"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\"\nfi\n```\n\n   A shell test rather than `bun run --dry-run`, so a repository with no bun at all is answered by the same test and never invokes bun. The step exits 0 in both branches, so the aggregation step's `TOOLS_RESULT` is `success` on an adopter instead of `failure` — its case statement already accepts `skipped|success`, so nothing there needed changing.\n\n2. The `check-live-tools.sh` step is removed. It is redundant for an adopter by construction: `check_live_tools.ts`, the step above it, starts every shipped server and asserts its tool set — that is the part that passed on atoma. The release-candidate script stays where it belongs, in `publish-release.sh`, which runs against `dist/` at release time.\n\n`tests/contract/generated-workflows.test.ts` gains `the tool job ships nothing that belongs only to this repository`, which parses the generated `dist/.github/workflows/atomaton-check.yml` and asserts: no step in `atomaton-tools` names `.github/atomaton/scripts/`; the step carrying `test:e2e` still exists; its `run` still greps `package.json` for `'\"test:e2e\"'` before running the suite; and it still says what it skipped; and `check_live_tools.ts` is still there — because the other way to satisfy the first assertion is deleting what actually verifies the servers.\n\nNo version bump.\n\n## Verification\n\n- `bun run synth` — exit 0. The generated `dist/.github/workflows/atomaton-check.yml` ends `atomaton-tools` with the guarded suite step and no other script, followed by the `atomaton-check` aggregation job.\n- The guard, run directly on three trees: this repository → `bun run test:e2e`; a `package.json` with no `test:e2e` → the stated skip, exit 0; a directory with no `package.json` at all → the same skip, exit 0.\n- The new contract test is load-bearing: pointed at the pre-change generated file it fails with `error: \\`.github/atomaton/scripts/\\` is never shipped to an adopter` (1 fail), and passes against the regenerated one.\n- `bun test ./tests/contract` — 598 pass, 0 fail. `bun run test` — 2523 pass, 0 fail. `bun run typecheck` — exit 0.\n\n## What a person should check\n\nThis reaches adopters through a **release**: this repository's own `.github/workflows/atomaton-check.yml` is unchanged here by design, and picks the fix up when the update machinery applies the release that carries it. Nothing in this pull request changes what CI runs here before then; the job's existing steps both pass on this tree.\n\n---\n_Opened by [`engineer`](https://github.com/yuma-seno/atomaton/actions/runs/45092939331)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-23T01:13:57Z",
+        "event_type": "pr_opened",
+        "id": "pr-588",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/engineer\n\n**Both step changes are right and are what the issue asked for. What they leave behind is not: after this change `atomaton-tools` no longer asks this repository's pull-request-time question about the servers a pull request would ship, and two documents still say it does.**\n\n## The defect\n\n`docs/template/architecture.md:189-195` states:\n\n> The same question is asked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`: that job starts the servers the pull request declares, holds no repository secret, and is what turns a guard that has stopped guarding into a red check rather than a discovery after the merge.\n\n`CONTRIBUTING.md:183-186` states the same thing. For an adopter that is still true. For this repository it is now false, for the reason the diff itself removed: the step you deleted was the only one that ran the check against `dist/` built from the pull request.\n\n- The remaining step, `check_live_tools.ts`, runs with no `ATOMATON_MACHINERY_ROOT`, so `machineryPath()` leaves its layout paths relative (`src/adapters/runner/machinery.ts:47-50`) and they resolve against the checkout's `.github/` — which in this repository is the last release, not the pull request. `tests/contract/exact-tool-sets.test.ts:9-13` says so in as many words: \"It cannot see it *here*, on the pull request that breaks it … the tree it reads is the checkout's `.github/` — and in THIS repository `.github/` is the last release\".\n- `.github/atomaton/scripts/publish-release.sh:80` still runs the release-candidate check, but only at release time, after the merge. That is the cost `CONTRIBUTING.md:188-193` already documents as deliberate (\"a guard which has stopped guarding is found after the merge that broke it\"), and it is the half that is now accurate.\n\n**Correction required:** make the record match the behaviour.\n\n1. Rewrite `docs/template/architecture.md:191-195` and `CONTRIBUTING.md:183-186` to say where the question is answered now — on an adopter's pull request by `atomaton-tools`, and in this repository only at release time by `publish-release.sh`, because the script they would use lives under `.github/atomaton/scripts/`, which no release ships.\n2. Record that reason in `src/workflows/atomaton-check.wac.ts` where the step used to be, beside the comment that now explains only the e2e guard. The deleted comment was the only in-code account of why the step existed, and the pull-request body that will be read once is not where the next editor of that file looks.\n\nIf you would rather not lose the pull-request-time coverage, the place for it is this repository's own `checks.from_pull_request` in `.github/atomaton/config.yaml` — governed, so a person merges that edit — not the shipped workflow. That is the issue's decision to take, not a blocker on the two docs.\n\n<details><summary>What I checked and found clean, and what I could not run here</summary>\n\n- **Removal is otherwise complete.** Every reference to `check-live-tools.sh` was read: `publish-release.sh:80` and `tests/contract/live-tools-check.test.ts:124-136` hold the release-time wiring (unaffected), `runner-layout.test.ts` and `run_as_untrusted.sh` mention it only in comments, `adopter-terms.test.ts:115` still classifies it as this repository's own. No workflow, test or script imported the deleted step.\n- **Generated output is handled per convention, not omitted.** `dist/**` is gitignored, and this repository's `.github/workflows/atomaton-check.yml` is an adoption applied from a release by the update machinery (`docs`/skill `project/conventions`, \"`.github/` is an adoption, not a mirror\") — so leaving its `:220-229` untouched is correct, not a missing regeneration.\n- **The new contract test is real pinning.** `tests/contract/generated-workflows.test.ts:1533-1580` parses `dist/.github/workflows/atomaton-check.yml`, rejects `.github/atomaton/scripts/`, requires the guarded `test:e2e` step, and requires `check_live_tools.ts` to survive.\n- **No version bump, no governed path.** `package.json:5` is still `0.24.1`; `.github/atomaton/config.yaml:99-111` governs `.github/**` and `package.json`, and this diff touches neither.\n- **No security-relevant shape.** The new line is a shell test over the repository's own `package.json`; nothing from a request or an issue reaches it, and the job holds no secret.\n- **I could not run the suite.** This run has no shell. My evidence for green is the head commit's checks on `23e935c4d645f0de51b582ef8c50cdf7e8ea8820`: `atomaton-check`, `atomaton-tools`, `pull-request-checks (verify)` and both plan jobs are `completed / success`. I did not execute `bun run synth` myself, so the generated text is verified by that suite rather than by me.\n\n</details>\n\n**How I know the coverage claim.** The two doc quotes are above with paths and lines; the mechanism is `src/adapters/runner/machinery.ts:47-50` and `tests/contract/exact-tool-sets.test.ts:9-13`; the surviving release-time call is `publish-release.sh:80`.\n\n**What happens next.** The engineer corrects the two passages and records the removal reason in the generator, then this comes back for review; if they instead move the check into `checks.from_pull_request`, that edit is governed and a person merges the result. Nothing else in the change needs to move.\n\n\n---\n_Tokens: 1701005 total (1665675 prompt + 35330 completion, 1574656 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/45093682866) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-23T01:20:28Z",
+        "event_type": "pr_comment",
+        "id": 7089065967,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/src/workflows/atomaton-check.wac.ts b/src/workflows/atomaton-check.wac.ts\nindex 76bcbc4f..5b95c1c0 100644\n--- a/src/workflows/atomaton-check.wac.ts\n+++ b/src/workflows/atomaton-check.wac.ts\n@@ -257,6 +257,16 @@ const toolsJob = new DefinedJob(\n     // install it once per declared check to run the same suite against the same tree.\n     // This job holds no repository secret, so nothing here is a credential a pull\n     // request could reach.\n+    //\n+    // Guarded, because this workflow SHIPS. The suite and its `test:e2e` script are\n+    // this template's own, and an adopter's tree usually has neither -- Rust, Go,\n+    // Python, anything not bun -- where `bun run test:e2e` fails with `Script not\n+    // found` and turns the required context red over a suite that is not theirs. So\n+    // the step reports what was verified instead of assuming: the suite where the\n+    // script exists, and a stated skip where it does not.\n+    //\n+    // `grep` rather than `bun run --dry-run`, so a repository with no bun at all is\n+    // answered by the same shell test rather than failing on a missing binary.\n     new TypedOutputsStep({\n       name: \"Run the end-to-end suite against the real CLI\",\n       shell: \"bash\",\n@@ -264,31 +274,14 @@ const toolsJob = new DefinedJob(\n       // the install step puts it. Both platforms: the helper's default is the\n       // sibling checkout, which only exists on a developer's machine.\n       env: { ATOMA_BIN: \"/usr/local/bin/atoma\" },\n-      run: `bun run test:e2e\\n`,\n-    }),\n-    // The live tool check, on the tree this pull request would ship.\n-    //\n-    // `check_live_tools.ts` above is the check an ADOPTER runs: for them `.github/`\n-    // IS the deliverable, and the `machineryPath()` default resolves to it correctly.\n-    // In this repository `.github/` is the LAST RELEASE -- applied by the update\n-    // machinery --\n-    // so that check has never seen a pull request's tree. It reports on a release\n-    // that already passed, which reads exactly like a release that passes.\n-    //\n-    // This runs the same script the deploy job runs, on `dist/` built from the\n-    // checkout. It is the check that was missing when two `unprefixed` servers began\n-    // offering one tool name: the release could not be published, and nothing on the\n-    // pull request that caused it said so.\n-    //\n-    // AFTER the end-to-end suite, and that ordering is load-bearing for the first\n-    // pull request that adds this line. `pretest:e2e` runs `synth`, so `dist/` exists\n-    // by then -- which means the PREVIOUS release's copy of this script, the one in\n-    // `.github/`, finds a tree to check instead of failing on a missing one. The\n-    // script builds `dist/` itself from here on, so the dependency only matters once.\n-    new TypedOutputsStep({\n-      name: \"Check the tool servers this pull request would ship\",\n-      shell: \"bash\",\n-      run: `bash .github/atomaton/scripts/check-live-tools.sh\\n`,\n+      run: [\n+        `if [ -f package.json ] && grep -q '\"test:e2e\"' package.json; then`,\n+        \"  bun run test:e2e\",\n+        \"else\",\n+        `  echo \"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\"`,\n+        \"fi\",\n+        \"\",\n+      ].join(\"\\n\"),\n     }),\n   ],\n );\ndiff --git a/tests/contract/generated-workflows.test.ts b/tests/contract/generated-workflows.test.ts\nindex 4ba623a1..6076f980 100644\n--- a/tests/contract/generated-workflows.test.ts\n+++ b/tests/contract/generated-workflows.test.ts\n@@ -1529,6 +1529,56 @@ describe(\"generated workflows\", () => {\n     }\n   });\n \n+  /**\n+   * Nothing in the shipped `atomaton-tools` job may be this template's own suite, or\n+   * this repository's own release scripts.\n+   *\n+   * The job ships to every adopter, and both of those once assumed otherwise. `bun run\n+   * test:e2e` names a script of THIS repository's `package.json`, so on a Rust or Go\n+   * tree it failed with `Script not found \"test:e2e\"` and turned the required context\n+   * red over a suite the adopter does not have. `check-live-tools.sh` lives under\n+   * `.github/atomaton/scripts/`, which is deliberately never delivered at all\n+   * (`adopter-terms.test.ts` names it as this repository's own), so on an adopted tree\n+   * that step failed with `No such file or directory`. Both turned up on the first\n+   * real adopter's adoption pull request, and neither was about that adopter's code.\n+   *\n+   * The checks that remain are pinned too, because the other way to make this pass is\n+   * deleting what actually verifies the servers.\n+   */\n+  test(\"the tool job ships nothing that belongs only to this repository\", () => {\n+    type WorkflowStep = { name?: string; run?: string };\n+    type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };\n+\n+    const workflow = Bun.YAML.parse(readFileSync(\"dist/.github/workflows/atomaton-check.yml\", \"utf8\")) as WorkflowDocument;\n+    const steps = workflow.jobs?.[\"atomaton-tools\"]?.steps ?? [];\n+    expect(steps.length, \"the tool job has no steps, so this checks nothing\").toBeGreaterThan(0);\n+\n+    const scripts = steps.map((step) => step.run ?? \"\").join(\"\\n\");\n+\n+    // A step naming that directory can only ever pass in the repository that builds\n+    // the deliverable: an adopter receives no `.github/atomaton/scripts/` at all.\n+    expect(scripts, \"`.github/atomaton/scripts/` is never shipped to an adopter\").not.toContain(\n+      \".github/atomaton/scripts/\",\n+    );\n+\n+    const endToEnd = steps.find((step) => step.run?.includes(\"test:e2e\"));\n+    expect(endToEnd, \"the end-to-end suite step is gone, so nothing runs tests/e2e\").toBeDefined();\n+    // The guard, not the bare command: `bun run test:e2e` on its own fails on every\n+    // tree whose `package.json` does not declare it.\n+    expect(endToEnd?.run, \"the suite must be looked for in package.json before it runs\").toContain(\n+      `grep -q '\"test:e2e\"' package.json`,\n+    );\n+    expect(endToEnd?.run, \"the skip has to say what was skipped, and why\").toContain(\n+      \"does not carry the template's e2e suite\",\n+    );\n+\n+    // And the check that DOES cover an adopter's servers stays: dropping the release\n+    // script is only safe alongside it, since it is the step that starts them.\n+    expect(scripts, \"the shipped servers are checked by the runtime script, which does ship\").toContain(\n+      \"check_live_tools.ts\",\n+    );\n+  });\n+\n   // Both of these were gaps found by trying to move this repository's own\n   // pipeline onto the shipped workflows, and both fail silently rather than\n   // loudly, which is why they are pinned rather than left to review.\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-23T01:20:52Z",
+        "event_type": "pr_diff",
+        "id": "pr-588-diff",
+        "layer": "github-context",
+        "sha": "23e935c4",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9ba3f800b438bbff",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git status --short && git log --oneline -2 && echo '=== architecture.md 180-200 ===' && awk 'NR>=178 && NR<=200 {printf \\\"%d\\\\t%s\\\\n\\\", NR, $0}' docs/template/architecture.md && echo '=== CONTRIBUTING 168-200 ===' && awk 'NR>=168 && NR<=200 {printf \\\"%d\\\\t%s\\\\n\\\", NR, $0}' CONTRIBUTING.md\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-a68c111ea1db83ca",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -rn \\\"asked earlier\\\\|holds no repository secret\\\\|stopped guarding\\\" tests/ src/ docs/ CONTRIBUTING.md | head -20\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The reviewer requests changes:\n\n1. Rewrite `docs/template/architecture.md:191-195` and `CONTRIBUTING.md:183-186` to say where the question is answered now.\n2. Record the reason in `src/workflows/atomaton-check.wac.ts` where the step used to be.\n\nThey also note an option: move the check into `.github/atomaton/config.yaml` `checks.from_pull_request` — but say that's the issue's decision, not a blocker on the two docs. Hmm. The reviewer said \"If you would rather not lose the pull-request-time coverage, the place for it is this repository's own `checks.from_pull_request` ... not the shipped workflow. That is the issue's decision to take, not a blocker on the two docs.\"\n\nWait — careful: `checks.from_pull_request` runs commands the pull request declares, and check-live-tools.sh validates `.github/atomaton/` config by running servers — dangerous from the pull request path (that's exactly why `validate_deliverable.ts` refuses, and why live-tools-check.test.ts asserts it is NOT wired on the pull request path). Actually check-live-tools.sh builds dist from the checkout and runs servers with `--with-live-tools` — running it from `checks.from_pull_request` would execute configuration... Let's not go there. The reviewer says it's not a blocker.\n\nHmm, but is there a real coverage loss? Yes, for this repository: the pull-request-time check against the pull request's tree is gone. That's a genuine consequence. Options:\n(a) Move it into this repo's own config.yaml `checks.from_pull_request` — but that would be a governed path (config.yaml is governed? reviewer says `.github/atomaton/config.yaml:99-111` governs `.github/**` and package.json, so editing config.yaml is governed and a person merges). Also it's arguably unsafe: from_pull_request commands run the pull request's own commands — the check script ships in `.github/atomaton/scripts/` at this repo, so the command would be `bash .github/atomaton/scripts/check-live-tools.sh`. Hmm, but from_pull_request arm is planned from the pull request tree, so a PR could... no, the workflow runs whatever config.yaml declares on the pull request's own tree — dangerous-ish but only runs this repo's own declared commands, read from the PR's config.yaml (plan-pull-request-checks checks out the PR). That means any PR could change config.yaml's checks to run arbitrary commands — but wait, that's how from_pull_request works by design (\"The pull request may choose its own checks freely, because no secret reaches them\"). Still, running live servers on a PR is exactly what `live-tools-check.test.ts` forbids. So don't.\n\nBetter and minimal: do exactly what the reviewer asks — correct the two docs to match behaviour and record the reason in the generator. And I can note in my report that the coverage for this repo at PR time is gone (deliberate cost), which the docs will now state.\n\nLet me read the docs and CONTRIBUTING passages, then edit.\n\nAlso need to re-run required checks: the contract suite has doc-claims tests perhaps (`external-claims.test.ts`, `doc-links.test.ts`). Changing docs could trip a contract test asserting those exact words. Let me check whether any test pins these passages.\n\nLet me read docs/template/architecture.md around 180-200 and CONTRIBUTING.md 170-200, plus grep tests for a phrase like \"asked earlier\" or the phrase from those docs.\n\nAlso: current PR branch — I need to make a commit on the same branch (the run is a PR run now? The message header says \"PR #588 ... /reviewer\" — this is a re-entry on the issue? The message includes the review comment as issue text, and ends with \"The people you may call...\" — this seems to be an issue run (issue #587) with the review posted. Actually the thread shows PR #588 with the reviewer comment; my context says \"Linked Issue: #587\". The run is likely an issue run on #587 or a PR run on #588. Given the message begins \"PR #588: Guard the shipped ...\" with labels and \"Linked Issue\", this looks like a pull request run... but the earlier turn in this same session was the engineer's PR creation on the issue. Now a new run: the machinery posts the PR title/body — \"PR #588: ... **Labels:** atomaton/in-progress **Linked Issue:** #587\" — that's the header format for a pull-request run. Then the reviewer's comment. So I'm on a pull request run, and my checkout should be the PR branch.\n\nLet me verify: git status/branch.\n\nPlan:\n1. Read docs/template/architecture.md 180-200 and CONTRIBUTING.md 170-200.\n2. Grep tests for pins on those passages.\n3. Edit both docs + add generator comment.\n4. Run synth + contract suite (+typecheck).\n5. commit_and_push, then... on a PR run, what's the outcome? The role table: \"If a review requests changes, inspect the current pull request and address only concrete findings, then validate, commit, and update the same pull request.\" Since the PR already exists, after commit_and_push I don't call create_pr (it would fail — PR exists). Hmm — how do I dispatch the reviewer again? The role says \"update the same pull request\". create_pr on a PR run... The tool description says create_pr creates a pull request from the checked-out branch. On a PR run it likely refuses. Let me check the outcome: after pushing, validation/CI dispatch — on a PR run, pushing a commit presumably dispatches CI validation which then dispatches the reviewer. The tool description for commit_and_push doesn't say it dispatches. Hmm.\n\nThere's a likely `create_pr` behavior: \"Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality\" — and on a PR run with an existing PR, calling create_pr may be refused. Actually many atomaton builds define create_pr to check whether a PR for the branch exists and update it... Risky.\n\nGiven the ending rules, my closing message must call exactly one thing or nobody. Since this run is (probably) a pull request run, and the machinery for a PR run dispatches the reviewer when validation is dispatched... Let me look: the earlier create_pr returned `validation_dispatched: true` and session ended. Now the question is whether pushing on a PR run dispatches validation. There is no explicit tool for it. `commit_and_push` returns JSON with success status — maybe it says something about dispatch.\n\nLet me look at the runtime? `.github/atomaton-runtime/` holds tools. I could grep for how commit_and_push behaves on a PR run / whether it dispatches validation. That's a quick check.\n\nSimplest: do the edits, commit_and_push, read the result JSON (it may carry `validation_dispatched`), and if nothing was dispatched, end with `/reviewer` in the closing message to hand it back for review. That is a legitimate call: the reviewer asked for changes; after addressing them the work goes back for review. Ending with `/reviewer` is one agent call — allowed.\n\nLet's proceed. First read docs and grep tests.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_147e3fc4-0828-41f9-86a4-e678c7222f77",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"23e935c Guard the shipped e2e step and drop the release-only tool check from atomaton-tools\\n=== architecture.md 180-200 ===\\n178\\trather than translate.\\n179\\t\\n180\\t**Atomaton's release starts the servers it would ship, and stops before publishing\\n181\\tif they disagree with it.** `.github/atomaton/scripts/publish-release.sh` runs\\n182\\t`.github/atomaton/scripts/check-live-tools.sh` between building `dist/` and creating\\n183\\tthe release. That script starts every tool server the artifact declares and asks\\n184\\t`atoma validate --with-live-tools` what each one actually advertises, which is what\\n185\\tdecides whether every `tool_allowlist` / `tool_denylist` pattern still names a tool\\n186\\tthat exists, whether two `unprefixed` servers claim one name, and whether a server\\n187\\tstarts at all.\\n188\\t\\n189\\tIt runs there — on the default branch, against `dist/` — because that is the tree\\n190\\tabout to be published, and it is the last place a disagreement can withhold\\n191\\tsomething. The same question is asked earlier, on every pull request, by\\n192\\t`atomaton-tools` in `atomaton-check.yml`: that job starts the servers the pull\\n193\\trequest declares, holds no repository secret, and is what turns a guard that has\\n194\\tstopped guarding into a red check rather than a discovery after the merge. Both\\n195\\tscripts here are this repository's own and neither ships, so nothing in this\\n196\\tsection is a property of an adopted repository's release —\\n197\\t[what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)\\n198\\tis the adopter-facing half.\\n199\\t\\n200\\t## Open questions\\n=== CONTRIBUTING 168-200 ===\\n168\\t\\n169\\tThe cost is a window: between the tag and a successful publish, a tag exists with\\n170\\tno release. `tag-release.sh` will not create it twice, so that state is reported\\n171\\trather than papered over, and the publish is idempotent:\\n172\\t\\n173\\t```sh\\n174\\tgh workflow run atomaton-deploy.yml --ref v1.2.3 -f target=publish\\n175\\t```\\n176\\t\\n177\\tNothing writes to main, so none of this needs a ruleset bypass.\\n178\\t\\n179\\t**`publish-release.sh` also runs `.github/atomaton/scripts/check-live-tools.sh`**, between building `dist/`\\n180\\tand creating the release. That script starts every tool server the artifact would\\n181\\tship and asks `atoma validate --with-live-tools` what each server actually\\n182\\tadvertises — which is what says whether a `tool_allowlist` pattern still names a\\n183\\ttool that exists, and whether any server has stopped starting. The same question is\\n184\\tasked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`;\\n185\\tthis is the last place it can withhold something, because `dist/` is the tree about\\n186\\tto be published.\\n187\\t\\n188\\tIt runs here, on the default branch and against `dist/`, and deliberately not on\\n189\\tthe pull request: it starts processes, and `tools.servers` lets a pull request name\\n190\\tany `command`. `validate_deliverable.ts` reads a pull request's `.github/atomaton/`\\n191\\tas data and runs nothing under `--root`, and that guarantee is not tradeable. The\\n192\\tcost is that a guard which has stopped guarding is found after the merge that broke\\n193\\tit rather than as a red check on its pull request.\\n194\\t\\n195\\tBoth kinds of merge reach it, by different routes. Yours fires `push` on the\\n196\\tdefault branch, which `atomaton-deploy.yml` listens for. An agent's fires nothing —\\n197\\tGitHub starts no workflow run for events its own token triggers — so `mergePr`\\n198\\tdispatches the workflow explicitly.\\n199\\t\\n200\\tTo publish by hand, or to retry a failed run:\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":377}",
+      "tool_call_id": "chatcmpl-tool-9ba3f800b438bbff"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"src/content/skills/engineering/secrets-in-a-check.md:17:- **The shell holds no repository secret.** Every tool server receives only the\\nsrc/workflows/atomaton-check.wac.ts:217: * ask what they offer, so a guard that has stopped guarding fails here rather than\\nsrc/workflows/atomaton-check.wac.ts:258:    // This job holds no repository secret, so nothing here is a credential a pull\\nsrc/workflows/atomaton-runner.wac.ts:1280: * would not close a guard that has stopped guarding, it would only remove the\\nsrc/entrypoints/machinery/report_config_findings.ts:14: * The run carries on. Stopping would not close a guard that has stopped guarding --\\nsrc/entrypoints/machinery/check_live_tools.ts:13: *     server offers — a guard that has stopped guarding\\nsrc/entrypoints/machinery/check_live_tools.ts:337:        \\\"A pattern that matches nothing is a guard that has stopped guarding.\\\",\\ndocs/template/architecture.md:191:something. The same question is asked earlier, on every pull request, by\\ndocs/template/architecture.md:193:request declares, holds no repository secret, and is what turns a guard that has\\ndocs/template/architecture.md:194:stopped guarding into a red check rather than a discovery after the merge. Both\\ndocs/pull-requests/boundaries.md:118:holds no repository secret. It declares `contents: read`, and the servers are\\ndocs/pipeline/boundaries.md:101:whether or not you declared anything, and it holds no repository secret — which is\\nCONTRIBUTING.md:184:asked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`;\\nCONTRIBUTING.md:192:cost is that a guard which has stopped guarding is found after the merge that broke\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":208}",
+      "tool_call_id": "chatcmpl-tool-a68c111ea1db83ca"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-83e3ab6b48d6784d",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a\\n    // decision rather than an omission. The script builds `dist/` from the checkout,\\n    // so on a pull request it was the one step that checked the tree a release would\\n    // ship -- but it lives in a directory no release delivers, so a shipped workflow\\n    // naming it fails on every adopter with `No such file or directory`. Dropping it\\n    // costs this repository the pull-request-time answer and nothing else: the\\n    // release-time run in `publish-release.sh` covers the tree after the merge, and\\n    // that cost is stated in `CONTRIBUTING.md`. An adopter loses nothing, because on\\n    // their tree the step above reads the deliverable itself.\\n  ],\\n);\", \"old_string\": \"  ],\\n);\", \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-check.wac.ts\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-8988264d95d32fbd",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"It runs there — on the default branch, against `dist/` — because that is the tree\\nabout to be published, and it is the last place a disagreement can withhold\\nsomething. In this repository it is also the only place. `atomaton-tools` does ask a\\nversion of the question on every pull request, but the step it can run there is\\n`check_live_tools.ts`, which resolves its paths against the checkout's `.github/` —\\nthe last release, not the pull request — so the tree a pull request would ship is\\ncovered after the merge or not at all. The script that would answer for it lives\\nunder `.github/atomaton/scripts/`, which no release ships, which is why the shipped\\nworkflow cannot run it.\\n\\nOn an adopted tree there is no such gap: `.github/` *is* the deliverable, so\\n`atomaton-tools` asks the question of every pull request, holds no repository\\nsecret, and is what turns a guard that has stopped guarding into a red check rather\\nthan a discovery after the merge. Both scripts here are this repository's own and\\nneither ships, so nothing in this section is a property of an adopted repository's\\nrelease —\\n[what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)\\nis the adopter-facing half.\", \"old_string\": \"It runs there — on the default branch, against `dist/` — because that is the tree\\nabout to be published, and it is the last place a disagreement can withhold\\nsomething. The same question is asked earlier, on every pull request, by\\n`atomaton-tools` in `atomaton-check.yml`: that job starts the servers the pull\\nrequest declares, holds no repository secret, and is what turns a guard that has\\nstopped guarding into a red check rather than a discovery after the merge. Both\\nscripts here are this repository's own and neither ships, so nothing in this\\nsection is a property of an adopted repository's release —\\n[what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)\\nis the adopter-facing half.\", \"path\": \"/home/runner/work/atomaton/atomaton/docs/template/architecture.md\"}"
+          }
+        },
+        {
+          "id": "chatcmpl-tool-b77630e191de1b9f",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"**`publish-release.sh` also runs `.github/atomaton/scripts/check-live-tools.sh`**, between building `dist/`\\nand creating the release. That script starts every tool server the artifact would\\nship and asks `atoma validate --with-live-tools` what each server actually\\nadvertises — which is what says whether a `tool_allowlist` pattern still names a\\ntool that exists, and whether any server has stopped starting. Because `dist/` is the\\ntree about to be published, this is the last place it can withhold something — and a\\npull request does not get an earlier answer to the same question here. The job that\\nasks it on a pull request, `atomaton-tools` in `atomaton-check.yml`, runs\\n`check_live_tools.ts`, whose paths resolve against the checkout's `.github/`: on an\\nadopted tree that is the deliverable and the answer is right, while in this\\nrepository it is the last release, which cannot see a pull request at all. The script\\nthat would answer for a pull request's tree is under `.github/atomaton/scripts/`,\\nwhich no release ships, so the shipped workflow cannot name it.\\n\\nIt runs here, on the default branch and against `dist/`, and deliberately not on\\nthe pull request: it starts processes, and `tools.servers` lets a pull request name\\nany `command`. `validate_deliverable.ts` reads a pull request's `.github/atomaton/`\\nas data and runs nothing under `--root`, and that guarantee is not tradeable. The\\ncost is that a guard which has stopped guarding is found after the merge that broke\\nit rather than as a red check on its pull request.\", \"old_string\": \"**`publish-release.sh` also runs `.github/atomaton/scripts/check-live-tools.sh`**, between building `dist/`\\nand creating the release. That script starts every tool server the artifact would\\nship and asks `atoma validate --with-live-tools` what each server actually\\nadvertises — which is what says whether a `tool_allowlist` pattern still names a\\ntool that exists, and whether any server has stopped starting. The same question is\\nasked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`;\\nthis is the last place it can withhold something, because `dist/` is the tree about\\nto be published.\\n\\nIt runs here, on the default branch and against `dist/`, and deliberately not on\\nthe pull request: it starts processes, and `tools.servers` lets a pull request name\\nany `command`. `validate_deliverable.ts` reads a pull request's `.github/atomaton/`\\nas data and runs nothing under `--root`, and that guarantee is not tradeable. The\\ncost is that a guard which has stopped guarding is found after the merge that broke\\nit rather than as a red check on its pull request.\", \"path\": \"/home/runner/work/atomaton/atomaton/CONTRIBUTING.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now edit both docs and add the comment in the wac file.\n\nFor architecture.md: lines 189-198. Rewrite the paragraph:\n\nCurrent:\n```\nIt runs there — on the default branch, against `dist/` — because that is the tree\nabout to be published, and it is the last place a disagreement can withhold\nsomething. The same question is asked earlier, on every pull request, by\n`atomaton-tools` in `atomaton-check.yml`: that job starts the servers the pull\nrequest declares, holds no repository secret, and is what turns a guard that has\nstopped guarding into a red check rather than a discovery after the merge. Both\nscripts here are this repository's own and neither ships, so nothing in this\nsection is a property of an adopted repository's release —\n[what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)\nis the adopter-facing half.\n```\n\nNew:\n```\nIt runs there — on the default branch, against `dist/` — because that is the tree\nabout to be published, and it is the last place a disagreement can withhold\nsomething. In this repository that is also the first place: `atomaton-tools` in\n`atomaton-check.yml` asks the same question of a pull request, but the only check it\ncan make there is `check_live_tools.ts`, which resolves its paths against the\ncheckout's `.github/` — the last release, not the pull request. The release-time\ncheck is what covers the tree a pull request would ship, and it covers it after the\nmerge that made it.\n\nThat asymmetry is this repository's alone. On an adopted tree `.github/` IS the\ndeliverable, so `atomaton-tools` does ask the question on every pull request, holds\nno repository secret, and is what turns a guard that has stopped guarding into a red\ncheck rather than a discovery after the merge. Both scripts here are this\nrepository's own and neither ships, so nothing in this section is a property of an\nadopted repository's release —\n[what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)\nis the adopter-facing half.\n```\n\nHmm, but is that accurate? On an adopter's tree, `check_live_tools.ts` runs against `.github/` which is the deliverable → yes, it asks the pull-request-time question. Good.\n\nWait — does the doc claim `atomaton-tools` \"starts the servers the pull request declares\"? On adopter tree, `.github/atomaton/agent-definitions` is the deliverable, and servers are declared in `.github/atomaton-runtime/tools.yaml`? Actually `check_live_tools.ts` writes the tools file and starts servers. Fine, keep the adopter sentence close to original.\n\nFor CONTRIBUTING.md lines 179-193:\n\nCurrent:\n```\n**`publish-release.sh` also runs `.github/atomaton/scripts/check-live-tools.sh`**, between building `dist/`\nand creating the release. That script starts every tool server the artifact would\nship and asks `atoma validate --with-live-tools` what each server actually\nadvertises — which is what says whether a `tool_allowlist` pattern still names a\ntool that exists, and whether any server has stopped starting. The same question is\nasked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`;\nthis is the last place it can withhold something, because `dist/` is the tree about\nto be published.\n\nIt runs here, on the default branch and against `dist/`, and deliberately not on\nthe pull request: it starts processes, and `tools.servers` lets a pull request name\nany `command`. `validate_deliverable.ts` reads a pull request's `.github/atomaton/`\nas data and runs nothing under `--root`, and that guarantee is not tradeable. The\ncost is that a guard which has stopped guarding is found after the merge that broke\nit rather than as a red check on its pull request.\n```\n\nNew: change the sentence \"The same question is asked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`; this is the last place it can withhold something, because `dist/` is the tree about to be published.\" to be conditional on the repository:\n\n```\n**`publish-release.sh` also runs `.github/atomaton/scripts/check-live-tools.sh`**, between building `dist/`\nand creating the release. That script starts every tool server the artifact would\nship and asks `atoma validate --with-live-tools` what each server actually\nadvertises — which is what says whether a `tool_allowlist` pattern still names a\ntool that exists, and whether any server has stopped starting. Because `dist/` is the\ntree about to be published, this is the last place it can withhold something — and in\nthis repository it is the only place: `atomaton-tools` asks a version of the question\non every pull request through `check_live_tools.ts`, which on an adopted tree reads\nthat tree's `.github/` and so is right, but here reads the checkout's `.github/` —\nthe last release — and cannot see a pull request at all. The script that would answer\nfor a pull request's tree lives under `.github/atomaton/scripts/`, which no release\nships, so `atomaton-tools` does not run it.\n```\n\nThen the \"It runs here, on the default branch and against `dist/`, and deliberately not on the pull request: ...\" paragraph stays accurate (it explains why it isn't on the pull request path). Maybe append: \"The cost is that a guard which has stopped guarding is found after the merge that broke it rather than as a red check on its pull request.\" — already there, accurate.\n\nHmm, careful about doc length/repetition. Keep it tight.\n\nAlso the wac comment: add a note where the step used to be, explaining why it is not there. Place it after the e2e step's step object, before `],`. Something like:\n\n```ts\n    // No `check-live-tools.sh` step here, and it is not an omission. That script is\n    // this repository's release-candidate check and lives under\n    // `.github/atomaton/scripts/`, which no release ships -- so a shipped workflow\n    // naming it fails on every adopter with `No such file or directory`. It also\n    // could not answer the question this job asks: it builds `dist/` from the\n    // checkout, while the step above is the one that runs against the tree a pull\n    // request declares. On an adopter's tree those are the same thing; in this\n    // repository the pull-request-time answer comes only from the release, and that\n    // cost is stated in `CONTRIBUTING.md` and `docs/template/architecture.md`.\n```\n\nHmm — \"no version bump\" fine. But should the comment reference docs? A pointer naming paths is allowed. Keep it shortish. Also careful about accuracy: check-live-tools.sh builds dist/ from the checkout itself (`bun run synth`? the reviewer said \"the script builds `dist/` itself from here on\"). Yes it builds dist from the checkout → that IS the pull request's tree when run on a PR. So that step did answer the question at pull-request time. My comment should say that plainly: the step was the only pull-request-time check here, and it cannot ship.\n\nLet me write:\n\n```ts\n    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a\n    // decision rather than an omission. The script builds `dist/` from the checkout,\n    // so it was the one step on a pull request that checked the tree a release would\n    // ship -- but it lives in a directory no release delivers, so a shipped workflow\n    // naming it fails on every adopter with `No such file or directory`. Here the\n    // release-time run in `publish-release.sh` is what covers it, after the merge;\n    // `CONTRIBUTING.md` states that cost. An adopter loses nothing: on their tree the\n    // step above reads the deliverable itself.\n```\n\nThat's good and holds the reason without incident history.\n\nNow, is \"the step above reads the deliverable itself\" accurate for adopters? Yes — `check_live_tools.ts` machineryPath defaults to `.github/atomaton-runtime`/`.github` etc. On adopter tree, `.github/` IS the deliverable. Good.\n\nLet's apply the three edits.\n\nCareful about the doc-claims contract tests: `tests/contract/external-claims.test.ts` or `doc-template-rows.test.ts` might assert specific text. Let me after editing run the contract suite; if a test pins the old wording, I'll see it fail.\n\nApply edits now (three independent edits, one turn).",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_2123f038-21a0-489e-8d34-565aa2ff92cf",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'edit' on MCP server 'files' reported an error: Error: That text appears 2 times in '/home/runner/work/atomaton/atomaton/src/workflows/atomaton-check.wac.ts'. Include enough surrounding lines to make it unique, or set replace_all.",
+      "tool_call_id": "chatcmpl-tool-83e3ab6b48d6784d"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in docs/template/architecture.md.",
+      "tool_call_id": "chatcmpl-tool-8988264d95d32fbd"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in CONTRIBUTING.md.",
+      "tool_call_id": "chatcmpl-tool-b77630e191de1b9f"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bba609f81a168c7a",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"      ].join(\\\"\\\\n\\\"),\\n    }),\\n    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a\\n    // decision rather than an omission. The script builds `dist/` from the checkout,\\n    // so on a pull request it was the one step that checked the tree a release would\\n    // ship -- but it lives in a directory no release delivers, so a shipped workflow\\n    // naming it fails on every adopter with `No such file or directory`. Dropping it\\n    // costs this repository the pull-request-time answer and nothing else: the\\n    // release-time run in `publish-release.sh` covers the tree after the merge, and\\n    // that cost is stated in `CONTRIBUTING.md`. An adopter loses nothing, because on\\n    // their tree the step above reads the deliverable itself.\\n  ],\\n);\", \"old_string\": \"      ].join(\\\"\\\\n\\\"),\\n    }),\\n  ],\\n);\", \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-check.wac.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The wac edit needs a unique anchor. Anchor on the e2e step's closing: \n```\n      ].join(\"\\n\"),\n    }),\n  ],\n);\n```\nIs that unique? Let me use it.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_344f0df7-77e6-4016-9c9a-aa3e7c4fae08",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'edit' on MCP server 'files' reported an error: Error: That text appears 2 times in '/home/runner/work/atomaton/atomaton/src/workflows/atomaton-check.wac.ts'. Include enough surrounding lines to make it unique, or set replace_all.",
+      "tool_call_id": "chatcmpl-tool-bba609f81a168c7a"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-aafedf270a808da3",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"        \\\"\\\",\\n      ].join(\\\"\\\\n\\\"),\\n    }),\\n    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a\\n    // decision rather than an omission. The script builds `dist/` from the checkout,\\n    // so on a pull request it was the one step that checked the tree a release would\\n    // ship -- but it lives in a directory no release delivers, so a shipped workflow\\n    // naming it fails on every adopter with `No such file or directory`. Dropping it\\n    // costs this repository the pull-request-time answer and nothing else: the\\n    // release-time run in `publish-release.sh` covers the tree after the merge, and\\n    // that cost is stated in `CONTRIBUTING.md`. An adopter loses nothing, because on\\n    // their tree the step above reads the deliverable itself.\\n  ],\\n);\", \"old_string\": \"        \\\"\\\",\\n      ].join(\\\"\\\\n\\\"),\\n    }),\\n  ],\\n);\", \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-check.wac.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Need a more unique anchor. Include the echo line above:\n\n```\n        `  echo \"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\"`,\n        \"fi\",\n        \"\",\n      ].join(\"\\n\"),\n    }),\n  ],\n);\n```\n\nThat's unique.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_b5f86580-6357-47d1-ac93-766ff11ce519",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'edit' on MCP server 'files' reported an error: Error: That text appears 2 times in '/home/runner/work/atomaton/atomaton/src/workflows/atomaton-check.wac.ts'. Include enough surrounding lines to make it unique, or set replace_all.",
+      "tool_call_id": "chatcmpl-tool-aafedf270a808da3"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8fa7a69927e8200d",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && grep -n 'does not carry the template' src/workflows/atomaton-check.wac.ts && awk 'NR>=276 && NR<=300 {printf \\\"%d\\\\t%s\\\\n\\\", NR, $0}' src/workflows/atomaton-check.wac.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Interesting — appears twice. There must be another step using the same join pattern (e.g. a `run: [...].join(\"\\n\")` ending with `\"\"`). Let me look at the file region again to see the current state around the tools job and find a unique anchor.\n\nLet me grep for `\\`  echo \"this repository does not carry` — should be unique.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_871a0a13-2d2a-4b9e-a2fa-503ba9ea0556",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"281:        `  echo \\\"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\\\"`,\\n276\\t      env: { ATOMA_BIN: \\\"/usr/local/bin/atoma\\\" },\\n277\\t      run: [\\n278\\t        `if [ -f package.json ] && grep -q '\\\"test:e2e\\\"' package.json; then`,\\n279\\t        \\\"  bun run test:e2e\\\",\\n280\\t        \\\"else\\\",\\n281\\t        `  echo \\\"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\\\"`,\\n282\\t        \\\"fi\\\",\\n283\\t        \\\"\\\",\\n284\\t      ].join(\\\"\\\\n\\\"),\\n285\\t    }),\\n286\\t  ],\\n287\\t);\\n288\\t\\n289\\t/**\\n290\\t * The one job a ruleset names, and all it does is agree with the jobs before it.\\n291\\t *\\n292\\t * A required context has to be a fixed string, and the jobs doing the work are not:\\n293\\t * a matrix entry is reported as `default-branch-checks (cloud-names)`. A required\\n294\\t * context that stops existing is not a check that fails — it is every pull request\\n295\\t * waiting on a name nothing reports, and an administrator is needed to undo it. So\\n296\\t * the name lives here, where nothing can rename it.\\n297\\t *\\n298\\t * `if: always()`, because a job skipped by a failed dependency reports nothing, which\\n299\\t * a required check cannot distinguish from success that has not arrived yet. The\\n300\\t * verdict is read from the results instead, and `skipped` is a pass: it is what an\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":192}",
+      "tool_call_id": "chatcmpl-tool-8fa7a69927e8200d"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b96ecb0bfab9de54",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"        `  echo \\\"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\\\"`,\\n        \\\"fi\\\",\\n        \\\"\\\",\\n      ].join(\\\"\\\\n\\\"),\\n    }),\\n    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a\\n    // decision rather than an omission. The script builds `dist/` from the checkout,\\n    // so on a pull request it was the one step that checked the tree a release would\\n    // ship -- but it lives in a directory no release delivers, so a shipped workflow\\n    // naming it fails on every adopter with `No such file or directory`. Dropping it\\n    // costs this repository the pull-request-time answer and nothing else: the\\n    // release-time run in `publish-release.sh` covers the tree after the merge, and\\n    // that cost is stated in `CONTRIBUTING.md`. An adopter loses nothing, because on\\n    // their tree the step above reads the deliverable itself.\\n  ],\\n);\", \"old_string\": \"        `  echo \\\"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\\\"`,\\n        \\\"fi\\\",\\n        \\\"\\\",\\n      ].join(\\\"\\\\n\\\"),\\n    }),\\n  ],\\n);\", \"path\": \"/home/runner/work/atomaton/atomaton/src/workflows/atomaton-check.wac.ts\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Now insert the comment before line 286 `  ],`. Use a unique anchor: line 285-287 `    }),\\n  ],\\n);` — appears twice? The other occurrence likely in another job with the same ending. Use the awk-derived unique anchor including line 281? Simpler: anchor on `      ].join(\"\\\\n\"),\\n    }),\\n  ],\\n);` — hmm, edit's old_string is literal file text; backslash-n in the file is `\\n` two chars within a string literal `\"\\n\"`. I must reproduce exactly: `].join(\"\\n\"),`.\n\nLet me instead do a targeted python insertion by line number — precise and simple:\n\npython3 - <<'EOF'\npath = \"src/workflows/atomaton-check.wac.ts\"\nlines = open(path).read().split(\"\\n\")\n# insert before the line index of line 286 (1-based) -> index 285\ncomment = [...]\nlines[285:285] = comment\nopen(path,\"w\").write(\"\\n\".join(lines))\nEOF\n\nBut careful with trailing newline handling. The file ends with newline; split/join preserves if last element \"\".\n\nThat's reliable. But shell writes into the repo... allowed (the tool is for formatting/building; but hand-writing via python is fine—no rule against it, only \"never hand-edit generated output\").\n\nActually simpler with the edit tool: use a larger unique anchor that includes the echo line. Include the whole block lines 277-287. That's unique for sure.\n\nold_string:\n```\n      run: [\n        `if [ -f package.json ] && grep -q '\"test:e2e\"' package.json; then`,\n        \"  bun run test:e2e\",\n        \"else\",\n        `  echo \"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\"`,\n        \"fi\",\n        \"\",\n      ].join(\"\\n\"),\n    }),\n  ],\n);\n```\nHmm, the first line `      run: [` may appear elsewhere but the whole block is unique. Wait, the previous failure said `\"\",\\n      ].join(\"\\n\"),\\n    }),\\n  ],\\n);` appears twice — so there's another step with `run` array ending the same. But including the echo line makes it unique.\n\nNote: in the file the echo line has no escaping — the awk output shows `\\\"` because awk printed... no, awk printed the raw line: `        \\`  echo \\\"this repository ...\\\"\\`,` — the backslashes are from the JSON encoding of the tool output, not the file. So in the file it's `  echo \"this repository...`.\n\nLet me construct carefully.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_156c229f-11bd-4596-af90-1a66e36973a7",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in src/workflows/atomaton-check.wac.ts.",
+      "tool_call_id": "chatcmpl-tool-b96ecb0bfab9de54"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-bf8e193c49a22918",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && awk 'NR>=276 && NR<=302 {printf \\\"%d\\\\t%s\\\\n\\\", NR, $0}' src/workflows/atomaton-check.wac.ts\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"276\\t      env: { ATOMA_BIN: \\\"/usr/local/bin/atoma\\\" },\\n277\\t      run: [\\n278\\t        `if [ -f package.json ] && grep -q '\\\"test:e2e\\\"' package.json; then`,\\n279\\t        \\\"  bun run test:e2e\\\",\\n280\\t        \\\"else\\\",\\n281\\t        `  echo \\\"this repository does not carry the template's e2e suite (no test:e2e script in package.json); Atomaton's own suite is verified upstream, not here\\\"`,\\n282\\t        \\\"fi\\\",\\n283\\t        \\\"\\\",\\n284\\t      ].join(\\\"\\\\n\\\"),\\n285\\t    }),\\n286\\t    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a\\n287\\t    // decision rather than an omission. The script builds `dist/` from the checkout,\\n288\\t    // so on a pull request it was the one step that checked the tree a release would\\n289\\t    // ship -- but it lives in a directory no release delivers, so a shipped workflow\\n290\\t    // naming it fails on every adopter with `No such file or directory`. Dropping it\\n291\\t    // costs this repository the pull-request-time answer and nothing else: the\\n292\\t    // release-time run in `publish-release.sh` covers the tree after the merge, and\\n293\\t    // that cost is stated in `CONTRIBUTING.md`. An adopter loses nothing, because on\\n294\\t    // their tree the step above reads the deliverable itself.\\n295\\t  ],\\n296\\t);\\n297\\t\\n298\\t/**\\n299\\t * The one job a ruleset names, and all it does is agree with the jobs before it.\\n300\\t *\\n301\\t * A required context has to be a fixed string, and the jobs doing the work are not:\\n302\\t * a matrix entry is reported as `default-branch-checks (cloud-names)`. A required\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":190}",
+      "tool_call_id": "chatcmpl-tool-bf8e193c49a22918"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-8efc023027f23629",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run synth >/dev/null 2>&1; echo \\\"synth exit=$?\\\"; bun run typecheck 2>&1 | tail -3; bun test ./tests/contract 2>&1 | tail -4\", \"timeout_seconds\": 900}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Good. Now run synth, typecheck, contract suite, and the full test suite (docs tests may pin language). Run synth + typecheck + contract first; then full suite.\n\nAlso check doc-links / doc-claims tests for the changed paragraphs. Just run tests.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_521462f4-9b86-43d9-887a-a61f13e98d4b",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"synth exit=0\\n$ tsc --noEmit\\n 598 pass\\n 0 fail\\n 2885 expect() calls\\nRan 598 tests across 57 files. [11.07s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":17190}",
+      "tool_call_id": "chatcmpl-tool-8efc023027f23629"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-b534493b55d350ad",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && bun run test 2>&1 | tail -5; echo '=== diff stat ==='; git diff --stat; git status --short\", \"timeout_seconds\": 1800}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\n 2523 pass\\n 0 fail\\n 7516 expect() calls\\nRan 2523 tests across 192 files. [120.89s]\\n=== diff stat ===\\n CONTRIBUTING.md                     | 13 +++++++++----\\n docs/template/architecture.md       | 20 ++++++++++++++------\\n src/workflows/atomaton-check.wac.ts |  9 +++++++++\\n 3 files changed, 32 insertions(+), 10 deletions(-)\\n M CONTRIBUTING.md\\n M docs/template/architecture.md\\n M src/workflows/atomaton-check.wac.ts\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":121579}",
+      "tool_call_id": "chatcmpl-tool-b534493b55d350ad"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-a54aa55a59c598d7",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git diff -- CONTRIBUTING.md docs/template/architecture.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "All green. Now check the generated dist workflow still fine (comment only, so no change). Commit and push, then update the PR. Since the PR already exists, how do I get it re-reviewed? On a PR run, the closing message can end with `/reviewer`. Or commit_and_push may report validation dispatch. Let me see the result JSON.\n\nCommit message: why — records the withdrawn coverage claim.\n\nThen read result; if no dispatch, end with `/reviewer` and the report.\n\nLet me check the diff of the docs once for wording sanity before committing. Quick read of the two new paragraphs.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_a9db69a7-d63f-4bb6-964e-740593d174ae",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md\\nindex 27b6fb4..584b923 100644\\n--- a/CONTRIBUTING.md\\n+++ b/CONTRIBUTING.md\\n@@ -180,10 +180,15 @@ Nothing writes to main, so none of this needs a ruleset bypass.\\n and creating the release. That script starts every tool server the artifact would\\n ship and asks `atoma validate --with-live-tools` what each server actually\\n advertises — which is what says whether a `tool_allowlist` pattern still names a\\n-tool that exists, and whether any server has stopped starting. The same question is\\n-asked earlier, on every pull request, by `atomaton-tools` in `atomaton-check.yml`;\\n-this is the last place it can withhold something, because `dist/` is the tree about\\n-to be published.\\n+tool that exists, and whether any server has stopped starting. Because `dist/` is the\\n+tree about to be published, this is the last place it can withhold something — and a\\n+pull request does not get an earlier answer to the same question here. The job that\\n+asks it on a pull request, `atomaton-tools` in `atomaton-check.yml`, runs\\n+`check_live_tools.ts`, whose paths resolve against the checkout's `.github/`: on an\\n+adopted tree that is the deliverable and the answer is right, while in this\\n+repository it is the last release, which cannot see a pull request at all. The script\\n+that would answer for a pull request's tree is under `.github/atomaton/scripts/`,\\n+which no release ships, so the shipped workflow cannot name it.\\n \\n It runs here, on the default branch and against `dist/`, and deliberately not on\\n the pull request: it starts processes, and `tools.servers` lets a pull request name\\ndiff --git a/docs/template/architecture.md b/docs/template/architecture.md\\nindex eb29a0f..6a534e0 100644\\n--- a/docs/template/architecture.md\\n+++ b/docs/template/architecture.md\\n@@ -188,12 +188,20 @@ starts at all.\\n \\n It runs there — on the default branch, against `dist/` — because that is the tree\\n about to be published, and it is the last place a disagreement can withhold\\n-something. The same question is asked earlier, on every pull request, by\\n-`atomaton-tools` in `atomaton-check.yml`: that job starts the servers the pull\\n-request declares, holds no repository secret, and is what turns a guard that has\\n-stopped guarding into a red check rather than a discovery after the merge. Both\\n-scripts here are this repository's own and neither ships, so nothing in this\\n-section is a property of an adopted repository's release —\\n+something. In this repository it is also the only place. `atomaton-tools` does ask a\\n+version of the question on every pull request, but the step it can run there is\\n+`check_live_tools.ts`, which resolves its paths against the checkout's `.github/` —\\n+the last release, not the pull request — so the tree a pull request would ship is\\n+covered after the merge or not at all. The script that would answer for it lives\\n+under `.github/atomaton/scripts/`, which no release ships, which is why the shipped\\n+workflow cannot run it.\\n+\\n+On an adopted tree there is no such gap: `.github/` *is* the deliverable, so\\n+`atomaton-tools` asks the question of every pull request, holds no repository\\n+secret, and is what turns a guard that has stopped guarding into a red check rather\\n+than a discovery after the merge. Both scripts here are this repository's own and\\n+neither ships, so nothing in this section is a property of an adopted repository's\\n+release —\\n [what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)\\n is the adopter-facing half.\\n \\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":204}",
+      "tool_call_id": "chatcmpl-tool-a54aa55a59c598d7"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-9daee58b74c05de0",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\": \"covered after the merge or not at all. The script that would answer for it lives\\nunder `.github/atomaton/scripts/`, a directory no release ships, which is why the\\nshipped workflow cannot run it.\", \"old_string\": \"covered after the merge or not at all. The script that would answer for it lives\\nunder `.github/atomaton/scripts/`, which no release ships, which is why the shipped\\nworkflow cannot run it.\", \"path\": \"/home/runner/work/atomaton/atomaton/docs/template/architecture.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "One wording nit in architecture.md: \"under `.github/atomaton/scripts/`, which no release ships, which is why the shipped workflow cannot run it.\" — double \"which\". Fix: \"The script that would answer for it lives under `.github/atomaton/scripts/`, a directory no release ships, which is why the shipped workflow cannot run it.\"\n\nMake that edit, then commit & push.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_cb59cf2b-d04d-49dc-ae1b-4076e2ad7c68",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in docs/template/architecture.md.",
+      "tool_call_id": "chatcmpl-tool-9daee58b74c05de0"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-89d2d9c3b25fda8b",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\": \"Record what dropping the release-only tool check cost this repository\\n\\nReview found the behaviour right and the record wrong. Two documents still said\\n`atomaton-tools` asks, on every pull request, the question `check-live-tools.sh`\\nanswers — which the previous commit made false here, for the reason it removed the\\nstep: the script builds `dist/` from the checkout but lives under a directory no\\nrelease ships.\\n\\n`docs/template/architecture.md` and `CONTRIBUTING.md` now say where the question is\\nactually answered in each kind of tree: on an adopter's pull request by\\n`atomaton-tools`, whose `check_live_tools.ts` reads that tree's `.github/` because\\nthere `.github/` IS the deliverable; here only at release time by\\n`publish-release.sh`, after the merge, because the checkout's `.github/` is the last\\nrelease and cannot see a pull request at all.\\n\\n`atomaton-check.wac.ts` carries that reason beside the steps, where the deleted\\ncomment used to be, so the next editor of the job does not read its absence as an\\noversight.\"}"
+          }
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "chatcmpl-tool-89d2d9c3b25fda8b"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "chatcmpl-tool-91461b9eef988478",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\": \"cd /home/runner/work/atomaton/atomaton && git log --oneline -2 && git status --short && echo '---' && sed -n '186,206p' docs/template/architecture.md\"}"
+          }
+        }
+      ],
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "The result has no `validation_dispatched` key. On a PR run, pushing a commit — does the machinery dispatch validation? The response was just {ok, committed, pushed}. Earlier create_pr told us about validation. Here nothing.\n\nPer role: \"If a review requests changes, inspect the current pull request and address only concrete findings, then validate, commit, and update the same pull request.\" The hand-back is `/reviewer` in my closing message.\n\nShould I check whether a check run exists / needs dispatch? There's `get_check_runs`. The reviewer reviewed at head 23e935c; the new head needs a review again. I'll dispatch by ending with `/reviewer`.\n\nBut wait — is ending with `/reviewer` right on a pull request run? The instructions say one agent from the list, `/reviewer`, with the request after it. That dispatches the reviewer for PR #588. Yes.\n\nLet me write the report per format: conclusion, how I know, what I could not establish, what happens next — and then a `/reviewer` line with the request, details folded.\n\nStructure: The report body, then final lines:\n\n```\n/reviewer\n\nReview PR #588 again — the two documents and the generator comment in commit <sha> address both findings.\n<details><summary>...</summary>...</details>\n```\n\nCareful: the slash line must hold nothing but `/reviewer`, and what follows is the request. The report body precedes it. The report's \"What happens next\" — say the correction is pushed and the review is asked again.\n\nActually the format: report parts (What you concluded / How you know / What you could not establish / What happens next), then the directive line at the end. The directive line is part of the closing message; the machinery parses the last agent line.\n\nWhere to put the `/reviewer` line? Guidance: \"The call is in your closing message, and it is the last thing that message does\". Typically the report, then the slash line at the end with the request following? But \"What follows it is the request\" — so the request text comes after the slash line. Yet the report should come first. Hmm: \"Lead with the request itself — what to do, in the work's own words — and fold the grounds for it ... two lines of ask, the detail one click away.\"\n\nSo the standard shape: report (conclusion, evidence, unknown, next), then `/reviewer` line, then 1-2 lines of request, then details fold. But the report's \"what happens next\" would duplicate. I'll keep the report tight, then the slash line + request lines at the end.\n\nLet me get the new commit sha for the message. Quick: git log --oneline -1.\n\nAlso confirm nothing else pending: git status clean. Let me get the sha.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_aa3f8489-fbcc-4b0a-9bc0-71fc9d338f85",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"e2b2d5c Record what dropping the release-only tool check cost this repository\\n23e935c Guard the shipped e2e step and drop the release-only tool check from atomaton-tools\\n---\\nthat exists, whether two `unprefixed` servers claim one name, and whether a server\\nstarts at all.\\n\\nIt runs there — on the default branch, against `dist/` — because that is the tree\\nabout to be published, and it is the last place a disagreement can withhold\\nsomething. In this repository it is also the only place. `atomaton-tools` does ask a\\nversion of the question on every pull request, but the step it can run there is\\n`check_live_tools.ts`, which resolves its paths against the checkout's `.github/` —\\nthe last release, not the pull request — so the tree a pull request would ship is\\ncovered after the merge or not at all. The script that would answer for it lives\\nunder `.github/atomaton/scripts/`, a directory no release ships, which is why the\\nshipped workflow cannot run it.\\n\\nOn an adopted tree there is no such gap: `.github/` *is* the deliverable, so\\n`atomaton-tools` asks the question of every pull request, holds no repository\\nsecret, and is what turns a guard that has stopped guarding into a red check rather\\nthan a discovery after the merge. Both scripts here are this repository's own and\\nneither ships, so nothing in this section is a property of an adopted repository's\\nrelease —\\n[what a pull request is checked against](../pull-requests/boundaries.md#what-a-pull-request-is-checked-against)\\nis the adopter-facing half.\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":199}",
+      "tool_call_id": "chatcmpl-tool-91461b9eef988478"
+    },
+    {
+      "role": "assistant",
+      "content": "Both findings are addressed in `e2b2d5c`, which is pushed to PR #588.\n\n**What I concluded.** The behaviour from the first commit is unchanged and correct; what was wrong was the record around it. `CONTRIBUTING.md` and `docs/template/architecture.md` now say where the server question is actually answered in each kind of tree, and the generator carries the reason the release-only step is absent instead of leaving its deletion to be read as an oversight.\n\n**How I know.**\n\n- `docs/template/architecture.md:189` now reads: \"In this repository it is also the only place. `atomaton-tools` does ask a version of the question on every pull request, but the step it can run there is `check_live_tools.ts`, which resolves its paths against the checkout's `.github/` — the last release, not the pull request — so the tree a pull request would ship is covered after the merge or not at all.\" The following paragraph keeps the adopter claim, scoped: \"On an adopted tree there is no such gap: `.github/` *is* the deliverable, so `atomaton-tools` asks the question of every pull request\".\n- `CONTRIBUTING.md:179` carries the same correction in its own words, and its \"deliberately not on the pull request\" paragraph — the documented cost — is unchanged and now the accurate one.\n- `src/workflows/atomaton-check.wac.ts:286` records the removal where the step used to be: \"Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a decision rather than an omission. The script builds `dist/` from the checkout, so on a pull request it was the one step that checked the tree a release would ship -- but it lives in a directory no release delivers …\".\n- `bun run synth` — exit 0; `bun run typecheck` — exit 0; `bun test ./tests/contract` — 598 pass, 0 fail; `bun run test` — 2523 pass, 0 fail. Both commits' generated `atomaton-check.yml` render as before: the guarded suite step, no `.github/atomaton/scripts/` path.\n\n<details><summary>The alternative I ruled out, and what I could not run</summary>\n\nThe review offered moving the check into this repository's own `checks.from_pull_request` in `.github/atomaton/config.yaml` to keep pull-request-time coverage. I did not, and the reason is written down in the repository rather than only here: that arm runs the commands the pull request declares, and `check-live-tools.sh` starts servers from `tools.servers` — the execution `tests/contract/live-tools-check.test.ts:4-19` and `CONTRIBUTING.md:188-193` exist to keep off the pull request path. Running it there would trade a red-check gap for a path that runs a pull request's configuration. So the loss of coverage here is real, deliberate, and now stated in both documents; it is not something a guard can recover.\n\nI did not measure the adopter-side behaviour on `yuma-seno/atoma` — there is no credential here to run that tree, so the evidence for that half is the review's and the issue's, plus the guard run locally against a `package.json` with no `test:e2e` (stated skip, exit 0) and a directory with no `package.json` at all (same skip, exit 0).\n\n</details>\n\n**What happens next.** PR #588 at `e2b2d5c` needs the re-review the two doc corrections and the generator comment ask for; nothing else in the change moves.\n\n/reviewer\n\nReview PR #588 again at `e2b2d5c` — the two passage rewrites and the generator comment are the whole delta since your review, and the code behaviour is unchanged from `23e935c`.\n\n<details><summary>What changed, and why the coverage alternative was not taken</summary>\n\n- `docs/template/architecture.md:189-206`: the \"asked earlier, on every pull request\" claim is split by kind of tree — locally only at release time, on an adopter's tree on every pull request.\n- `CONTRIBUTING.md:179-190`: the same correction, with the missing path stated.\n- `src/workflows/atomaton-check.wac.ts:286-294`: why the step is gone, beside the steps it left.\n- `checks.from_pull_request` was not used as the replacement: it runs the pull request's declared commands, and starting servers from there is what `tests/contract/live-tools-check.test.ts:4-19` and `CONTRIBUTING.md:188-193` keep off the pull request path.\n\nVerification: `bun run synth` exit 0, `bun run typecheck` exit 0, contract suite 598 pass, full suite 2523 pass, 0 fail.\n\n</details>",
+      "provider_items": [
+        {
+          "content": [
+            {
+              "text": "Everything is in place, tree clean, both commits pushed.\n\nNote: I should double-check that the new doc sentence \"a directory no release ships\" is accurate — yes, adopter-terms test says so and the reviewer confirmed.\n\nNow write the closing report and end with `/reviewer`.\n\nReport content:\n\n**What you concluded.** Both review findings are addressed in commit e2b2d5c: the two documents now say where the server question is actually answered in this repository, and the generator carries the reason the release-only step is absent.\n\n**How you know.**\n- `CONTRIBUTING.md:179-190` and `docs/template/architecture.md:189-206` — quote.\n- `src/workflows/atomaton-check.wac.ts:286-294` — the comment.\n- `bun run synth` exit 0; `bun test ./tests/contract` 598 pass / 0 fail; `bun run test` 2523 pass / 0 fail; `bun run typecheck` exit 0.\n\n**What you could not establish.** The reviewer offered the alternative of moving the check into `checks.from_pull_request` in config.yaml. I did not do that and record why: that arm runs the pull request's declared commands, and `live-tools-check.test.ts:4-19` plus `CONTRIBUTING.md`'s \"deliberately not on the pull request\" paragraph say running `--with-live-tools` there would execute a pull request's configuration. So the coverage is genuinely only at release time here, and the docs now say so. That is a decision recorded, not a gap. Hmm — this is a decision I made (means), so stating it as a ruled-out alternative is right.\n\nAlso: I did not verify the adopter-side effect on atoma itself (no credential to run there); evidence is the reviewer's and the issue's.\n\n**What happens next.** Review of PR #588 at e2b2d5c.\n\nThen `/reviewer` + request.\n\nKeep the report within limits. Use a fold for evidence? \"Fold what verifies; keep what acts.\" I'll fold the verification list. But the report format requires \"How you know\" part — can be folded.\n\nLet me write it.\n\nNote: no @yuma-seno mention needed since I'm calling /reviewer. Only one call.\n\nWait — \"Report to whoever started this run.\" This run was started by the machinery (a PR run resumed with the review comment). So no person to report to; the `/reviewer` dispatch is the outcome. Good.\n\nWrite final message.",
+              "type": "reasoning_text"
+            }
+          ],
+          "id": "rs_1e5777b5-7434-4018-a0dd-6e747a9c7cf3",
+          "status": "completed",
+          "summary": [],
+          "type": "reasoning"
+        }
+      ],
+      "finish_reason": "stop",
+      "atoma_metadata": {
+        "github_comment_id": 7089120605,
+        "agent": "engineer"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "engineer",
-      "event_count": 4,
-      "snapshot_hash": "d2eb1ba15a0b0a1b50a6d07ff0c18d924ade2eca3bfb4ea29f4d055dd422f324",
-      "version": 1
+      "event_count": 7,
+      "snapshot_hash": "ff1564012e3d02b56f5cd591fe091c38c96f78f5fd019139c45b39a7049e217e",
+      "version": 1,
+      "type": "issue",
+      "session_number": "587"
     }
   },
   "atoma_runs": [
@@ -1051,6 +1543,26 @@
         }
       },
       "started": "2026-11-23T01:10:26Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-23T01:24:44Z",
+      "ended_because": "completed",
+      "iterations": 14,
+      "messages": 101,
+      "seconds": 178,
+      "server_calls": {
+        "files": {
+          "edit": 7
+        },
+        "github": {
+          "commit_and_push": 1
+        },
+        "shell": {
+          "bash": 8
+        }
+      },
+      "started": "2026-11-23T01:21:46Z"
     }
   ]
 }
