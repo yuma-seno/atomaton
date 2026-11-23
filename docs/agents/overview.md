@@ -27,7 +27,7 @@ portable because it describes an agent, not a delivery pipeline.
 `.github/atomaton/prompt-template.md` is what every agent is told, whichever one
 it is — it is passed to Atoma with `--template` on every runner invocation, and
 each role prompt is placed inside it. Skills live under
-`.github/atomaton/skills/**/*.md`; `.github/atomaton/README.md` says which of
+`.github/atomaton/skills/**/SKILL.md`; `.github/atomaton/README.md` says which of
 those directories the template ships and which are yours outright.
 
 ## Why the shipped provider is a recommendation

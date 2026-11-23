@@ -57,6 +57,27 @@ your own workflows, your project skills — are invisible to it and are never
 written or deleted. One list is reported but never acted on: paths you have under
 `.github/` that the target release no longer ships.
 
+**Your own skills may need a rename before they load again.** A skill is a directory
+holding a `SKILL.md`, and that is what the runtime loads. If you wrote skills under
+the older flat layout — `skills/<category>/<name>.md` — then from the first run on a
+release carrying that loader they are files it ignores: they stay in your tree,
+nothing reports them, and the catalog simply stops listing them. The update cannot
+move them for you, because your own skills are paths the release does not ship and
+its plan never names them.
+
+Moving one is a rename plus the name in its own frontmatter:
+
+```bash
+mkdir -p .github/atomaton/skills/<your-name>
+git mv .github/atomaton/skills/<where-it-was>.md \
+       .github/atomaton/skills/<your-name>/SKILL.md
+# then set `name: <your-name>` in the frontmatter — the directory's own name, with
+# no category in front of it
+```
+
+[Write a skill](../../agents/tasks/write-a-skill.md) is the layout, and the rules the
+name is checked against.
+
 **What did upstream delete?** Extracting never deletes, so a file the template
 dropped stays in your tree — and that is not cosmetic. Two workflows were removed
 in v0.1.71 because work should start only when somebody asks; keeping them keeps

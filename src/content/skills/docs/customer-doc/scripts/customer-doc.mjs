@@ -11,8 +11,9 @@
  *
  * Two legs, and which one runs is decided by the template:
  *
- * - a `.fodt`/`.fodp`/`.fods` template (the shipped ones under `templates/`, or
- *   the agent's copy of one) is filled **as text** — placeholders substituted in
+ * - a `.fodt`/`.fodp`/`.fods` template (the shipped ones under
+ *   `../assets/templates/`, or the agent's copy of one) is filled **as text** —
+ *   placeholders substituted in
  *   the XML, then `--convert-to` the requested binary format. The filled flat
  *   file is kept next to the output as the diffable record of what was filled —
  *   a fix is an edit to a copy of the template (`template <fmt> --out DIR`) and
@@ -42,7 +43,9 @@ import { basename, dirname, join, resolve } from "node:path";
 import { CACHE_DIR, convert, deps, ensure, record } from "./deps.mjs";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
-const TEMPLATES = join(HERE, "templates");
+// The templates are a resource of the skill, not of this script: `scripts/` and
+// `assets/` sit side by side under the `SKILL.md`.
+const TEMPLATES = join(HERE, "..", "assets", "templates");
 
 /** The shipped default template per output format, as flat ODF text. */
 const DEFAULT_TEMPLATES = {

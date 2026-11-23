@@ -70,7 +70,7 @@ which are exact and free and cannot be argued out of a finding. [Give a reposito
 pipeline an agent can write and maintain](../../pipeline/tasks/give-a-repository-a-pipeline-an-agent-can-write-and-maintain.md)
 is where those go.
 
-The skills the auditor loads are `security/on-demand-audit`,
-`security/gh-actions-surface` and `security/agent-prompt-surface`; [write a
+The skills the auditor loads are `on-demand-audit`,
+`gh-actions-surface` and `agent-prompt-surface`; [write a
 skill](write-a-skill.md) is how they are shaped, and how to change what one of them
 says.

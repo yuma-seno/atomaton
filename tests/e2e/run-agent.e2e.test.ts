@@ -199,7 +199,7 @@ You are a test agent.
             // `skill_name`, which is the only spelling the pinned binary takes:
             // v0.1.45 names the argument and drops the four aliases, so `name` is
             // refused before the skill is loaded (see `atoma-cli.ts`'s pin comment).
-            arguments: { skill_name: "engineering/environment" },
+            arguments: { skill_name: "environment" },
           },
         ],
       },
@@ -257,11 +257,11 @@ You are a test agent.
       // which one edit here did, and this test then failed over where a line ended
       // rather than over anything it is about.
       const initialPrompt = String(mock.requests[0]!.messages[0]?.content).replace(/\s+/g, " ");
-      expect(initialPrompt).toContain("`engineering/environment`");
-      expect(initialPrompt).toContain("`engineering/environment`");
+      expect(initialPrompt).toContain("`environment`");
+      expect(initialPrompt).toContain("`environment`");
 
       const toolMessage = mock.requests[1]!.messages.find((message) => message.role === "tool");
-      expect(String(toolMessage?.content)).toContain("# Skill: engineering/environment");
+      expect(String(toolMessage?.content)).toContain("# Skill: environment");
       expect(String(toolMessage?.content)).toContain("Is it a library your project declares?");
     } finally {
       mock.stop();

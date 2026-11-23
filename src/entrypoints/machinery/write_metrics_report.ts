@@ -274,8 +274,17 @@ function tokensReported(repo: string): TokenRecord[] {
   return out;
 }
 
+/** The file whose presence makes a directory a skill. */
+const SKILL_FILE = "SKILL.md";
+
 /**
  * The skills a tree ships, under the names a run loads them by.
+ *
+ * A skill is a directory holding `SKILL.md`, and its name is that directory's own —
+ * the loader rejects a `SKILL.md` whose frontmatter `name` is anything else, so the
+ * directory is the name without reading a file. A loose `.md` is not a skill: the
+ * loader stops descending at a directory holding `SKILL.md` and ignores everything
+ * else, so counting one here would list it as never loaded, forever.
  *
  * From the filesystem rather than from git, which is the fix and not a preference.
  * `ATOMATON_MACHINERY_ROOT` points at `${RUNNER_TEMP}/atomaton-machinery` -- a release
@@ -297,10 +306,12 @@ export function skillsUnder(dir: string): string[] | undefined {
     return undefined;
   }
   const skills = entries
-    .filter((entry) => entry.endsWith(".md"))
-    // `recursive` yields the platform's separator, and a skill is loaded by a name
-    // with slashes in it -- `delivery/pipeline-setup`, on Windows too.
-    .map((entry) => entry.replaceAll("\\", "/").slice(0, -".md".length))
+    // `recursive` yields the platform's separator, and the name taken below is one
+    // path segment, so it is normalised first.
+    .map((entry) => entry.replaceAll("\\", "/"))
+    // A `SKILL.md` at the root of `dir` names the catalogue itself, not a skill.
+    .filter((entry) => entry.endsWith(`/${SKILL_FILE}`))
+    .map((entry) => entry.slice(0, -(SKILL_FILE.length + 1)).split("/").pop() ?? "")
     .sort();
   return skills.length === 0 ? undefined : skills;
 }

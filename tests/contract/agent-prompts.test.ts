@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { WORKSPACE_PATH } from "../../src/domain/work/workspace.ts";
 
@@ -1035,9 +1035,8 @@ describe("agent prompt contracts", () => {
       "One sentence, one actor, one action",
     );
 
-    const writing = readdirSync("src/content/skills", { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name === "writing")
-      .flatMap((entry) => readdirSync(join("src/content/skills", entry.name)));
+    const writing = readdirSync("src/content/skills/writing", { withFileTypes: true })
+      .filter((entry) => existsSync(join("src/content/skills/writing", entry.name, "SKILL.md")));
     expect(
       writing.length,
       "the template sends runs to a writing skill; with none shipped, that sentence sends them nowhere",

@@ -1,7 +1,7 @@
 # Change or remove web fetching and search
 
 Searching is a skill rather than a tool.
-`.github/atomaton/skills/research/web-search.md` tells agents to fetch a search engine's
+`.github/atomaton/skills/research/web-search/SKILL.md` tells agents to fetch a search engine's
 results page and read the links out of it. The endpoint lives in that file on purpose:
 
 - To use a different service — one with an API key, or your own instance — edit the
