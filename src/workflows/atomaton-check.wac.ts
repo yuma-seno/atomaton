@@ -283,6 +283,15 @@ const toolsJob = new DefinedJob(
         "",
       ].join("\n"),
     }),
+    // Nothing here runs `.github/atomaton/scripts/check-live-tools.sh`, and that is a
+    // decision rather than an omission. The script builds `dist/` from the checkout,
+    // so on a pull request it was the one step that checked the tree a release would
+    // ship -- but it lives in a directory no release delivers, so a shipped workflow
+    // naming it fails on every adopter with `No such file or directory`. Dropping it
+    // costs this repository the pull-request-time answer and nothing else: the
+    // release-time run in `publish-release.sh` covers the tree after the merge, and
+    // that cost is stated in `CONTRIBUTING.md`. An adopter loses nothing, because on
+    // their tree the step above reads the deliverable itself.
   ],
 );
 
