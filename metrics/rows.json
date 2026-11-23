@@ -24626,8 +24626,8 @@
   {
     "path": "sessions/issue-594/reviewer.json",
     "agent": "reviewer",
-    "messages": 56,
-    "calls": 32,
+    "messages": 69,
+    "calls": 37,
     "failed": 0,
     "refused": 0,
     "skills": [
@@ -24640,13 +24640,14 @@
       "list_pr_review_comments": 1,
       "grep": 6,
       "list": 1,
-      "read": 15,
+      "read": 17,
       "get_pr": 1,
       "glob": 1,
-      "get_check_runs": 1,
-      "check_merge_readiness": 2,
+      "get_check_runs": 2,
+      "check_merge_readiness": 3,
       "search_remote_code": 1,
-      "list_prs": 1
+      "list_prs": 1,
+      "merge_pr": 1
     },
     "acts": {},
     "runs": [
@@ -24692,6 +24693,25 @@
           }
         },
         "started": "2026-11-23T04:47:09Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-23T05:18:36Z",
+        "ended_because": "completed",
+        "iterations": 4,
+        "messages": 69,
+        "seconds": 24,
+        "server_calls": {
+          "files_readonly": {
+            "read": 2
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "merge_pr": 1
+          }
+        },
+        "started": "2026-11-23T05:18:12Z"
       }
     ]
   },
