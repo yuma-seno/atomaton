@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 51 | 25.5% | 48 | 696 | 9 | 6.4 |
-| Last 30 days | 558 | 9.5% | 240 | 6,099 | 12 | 17.6 |
-| Last year | 831 | 8.5% | 259 | 10,246 | 14 | 19.7 |
-| All time | 831 | 8.5% | 259 | 10,246 | 14 | 19.7 |
+| Last 7 days | 52 | 26.9% | 56 | 696 | 10 | 6.5 |
+| Last 30 days | 559 | 9.7% | 240 | 6,099 | 12 | 17.6 |
+| Last year | 832 | 8.7% | 259 | 10,246 | 14 | 19.7 |
+| All time | 832 | 8.7% | 259 | 10,246 | 14 | 19.7 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,12 +22,12 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 760 |
-| `failed` | 60 |
+| `failed` | 61 |
 | `stopped` | 11 |
 
 ## Last 7 days
 
-22 sessions.
+23 sessions.
 
 **Ran to an end without a report:** 7 of 22 sessions whose last run the core recorded as `completed` — 31.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -38,37 +38,37 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 610,350 | 3,400,391 | 7,840,910 | 7,840,910 | 23,307,448 |
-| messages per session | 81 | 177 | 198 | 198 | 2,012 |
+| messages per session | 69 | 177 | 198 | 198 | 2,068 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `engineer` | 10 | 45.5% |
-| `reviewer` | 10 | 45.5% |
-| `atomaton` | 2 | 9.1% |
+| `reviewer` | 11 | 47.8% |
+| `engineer` | 10 | 43.5% |
+| `atomaton` | 2 | 8.7% |
 
 **Refused** is the machinery saying no — a denylist, an allowlist, a hook. A guard working is not a tool breaking, and a reader cannot act on the two the same way, so they are counted apart. **Failed** is everything else that came back as an error, by string match, so it is an estimate.
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `read` | 336 | 2 | 0 | 0.6% |
+| `read` | 351 | 2 | 0 | 0.6% |
 | `bash` | 304 | 4 | 2 | 1.3% |
-| `grep` | 196 | 0 | 0 | 0% |
+| `grep` | 206 | 0 | 0 | 0% |
 | `edit` | 73 | 3 | 0 | 4.1% |
-| `list` | 29 | 0 | 0 | 0% |
+| `list` | 30 | 0 | 0 | 0% |
 | `load_skill` | 20 | 0 | 0 | 0% |
-| `fetch` | 16 | 0 | 0 | 0% |
-| `get_check_runs` | 15 | 0 | 0 | 0% |
-| `get_pr` | 15 | 0 | 0 | 0% |
+| `fetch` | 19 | 0 | 0 | 0% |
+| `get_check_runs` | 16 | 0 | 0 | 0% |
+| `get_pr` | 16 | 0 | 0 | 0% |
 | `check_merge_readiness` | 14 | 0 | 0 | 0% |
-| `glob` | 13 | 0 | 0 | 0% |
+| `glob` | 14 | 0 | 0 | 0% |
 | `commit_and_push` | 12 | 1 | 0 | 8.3% |
 | `create_pr` | 12 | 3 | 0 | 25% |
-| `get_pr_reviews` | 9 | 0 | 0 | 0% |
+| `get_pr_reviews` | 10 | 0 | 0 | 0% |
+| `get_issue_comments` | 9 | 0 | 0 | 0% |
 | `request_close_issue` | 9 | 0 | 0 | 0% |
 | `get_branch` | 8 | 0 | 0 | 0% |
-| `get_issue_comments` | 8 | 0 | 0 | 0% |
 | `get_issue` | 7 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 6 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 7 | 0 | 0 | 0% |
 | `merge_pr` | 6 | 0 | 0 | 0% |
 | `write` | 6 | 0 | 0 | 0% |
 | `search_remote_code` | 5 | 3 | 0 | 60% |
@@ -96,7 +96,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## Last 30 days
 
-201 sessions.
+202 sessions.
 
 **Ran to an end without a report:** 37 of 191 sessions whose last run the core recorded as `completed` — 19.4%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -107,12 +107,12 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,201,847 | 6,417,588 | 20,308,488 | 29,805,044 | 600,417,128 |
-| messages per session | 120 | 307 | 408 | 439 | 30,540 |
+| messages per session | 120 | 307 | 408 | 439 | 30,596 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `engineer` | 85 | 42.3% |
-| `reviewer` | 85 | 42.3% |
+| `reviewer` | 86 | 42.6% |
+| `engineer` | 85 | 42.1% |
 | `atomaton` | 30 | 14.9% |
 | `architect` | 1 | 0.5% |
 
@@ -121,15 +121,15 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 5,928 | 128 | 83 | 2.2% |
-| `read` | 3,380 | 13 | 4 | 0.4% |
-| `grep` | 2,775 | 63 | 14 | 2.3% |
+| `read` | 3,395 | 13 | 4 | 0.4% |
+| `grep` | 2,785 | 63 | 14 | 2.3% |
 | `edit` | 1,155 | 22 | 0 | 1.9% |
-| `fetch` | 716 | 62 | 0 | 8.7% |
-| `get_check_runs` | 222 | 8 | 0 | 3.6% |
-| `get_pr` | 221 | 0 | 3 | 0% |
-| `get_issue_comments` | 195 | 0 | 0 | 0% |
-| `list` | 180 | 3 | 0 | 1.7% |
-| `glob` | 178 | 0 | 0 | 0% |
+| `fetch` | 719 | 62 | 0 | 8.6% |
+| `get_check_runs` | 223 | 8 | 0 | 3.6% |
+| `get_pr` | 222 | 0 | 3 | 0% |
+| `get_issue_comments` | 196 | 0 | 0 | 0% |
+| `list` | 181 | 3 | 0 | 1.7% |
+| `glob` | 179 | 0 | 0 | 0% |
 | `get_issue` | 163 | 1 | 1 | 0.6% |
 | `commit_and_push` | 145 | 5 | 0 | 3.4% |
 | `check_merge_readiness` | 139 | 0 | 0 | 0% |
@@ -140,9 +140,9 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `atoma_builtin__load_skill` | 92 | 1 | 0 | 1.1% |
 | `get_pr_diff` | 83 | 0 | 0 | 0% |
 | `request_close_issue` | 75 | 1 | 0 | 1.3% |
-| `get_pr_reviews` | 73 | 0 | 0 | 0% |
+| `get_pr_reviews` | 74 | 0 | 0 | 0% |
 | `merge_pr` | 59 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 53 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 54 | 0 | 0 | 0% |
 | `search_issues` | 44 | 0 | 1 | 0% |
 | `list_prs` | 33 | 0 | 0 | 0% |
 | `search_code` | 31 | 0 | 0 | 0% |
@@ -183,7 +183,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## Last year
 
-322 sessions.
+323 sessions.
 
 **Ran to an end without a report:** 62 of 309 sessions whose last run the core recorded as `completed` — 20.1%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -194,12 +194,12 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,291,903 | 6,183,128 | 27,846,035 | 73,718,100 | 1,134,242,465 |
-| messages per session | 131 | 334 | 583 | 731 | 53,486 |
+| messages per session | 129 | 334 | 583 | 731 | 53,542 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 134 | 41.6% |
-| `engineer` | 107 | 33.2% |
+| `reviewer` | 135 | 41.8% |
+| `engineer` | 107 | 33.1% |
 | `atomaton` | 80 | 24.8% |
 | `architect` | 1 | 0.3% |
 
@@ -208,17 +208,17 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 8,575 | 172 | 128 | 2% |
-| `read` | 6,477 | 34 | 8 | 0.5% |
-| `grep` | 4,970 | 112 | 21 | 2.3% |
+| `read` | 6,492 | 34 | 8 | 0.5% |
+| `grep` | 4,980 | 112 | 21 | 2.2% |
 | `edit` | 2,233 | 38 | 0 | 1.7% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
-| `fetch` | 1,058 | 98 | 0 | 9.3% |
-| `list` | 391 | 5 | 0 | 1.3% |
+| `fetch` | 1,061 | 98 | 0 | 9.2% |
+| `list` | 392 | 5 | 0 | 1.3% |
 | `get_issue` | 367 | 14 | 5 | 3.8% |
-| `get_pr` | 364 | 9 | 3 | 2.5% |
-| `get_issue_comments` | 361 | 0 | 10 | 0% |
-| `get_check_runs` | 354 | 13 | 0 | 3.7% |
-| `glob` | 331 | 1 | 1 | 0.3% |
+| `get_pr` | 365 | 9 | 3 | 2.5% |
+| `get_issue_comments` | 362 | 0 | 10 | 0% |
+| `get_check_runs` | 355 | 13 | 0 | 3.7% |
+| `glob` | 332 | 1 | 1 | 0.3% |
 | `check_merge_readiness` | 221 | 0 | 0 | 0% |
 | `get_branch` | 213 | 0 | 0 | 0% |
 | `atoma_builtin__load_skill` | 210 | 1 | 0 | 0.5% |
@@ -230,10 +230,10 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `search_issues` | 134 | 0 | 3 | 0% |
 | `request_close_issue` | 111 | 1 | 0 | 0.9% |
 | `load_skill` | 101 | 9 | 0 | 8.9% |
-| `get_pr_reviews` | 91 | 0 | 0 | 0% |
+| `get_pr_reviews` | 92 | 0 | 0 | 0% |
 | `merge_pr` | 71 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 69 | 0 | 0 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 68 | 0 | 0 | 0% |
 | `list_prs` | 68 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `search_code` | 52 | 0 | 0 | 0% |
@@ -306,7 +306,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 ## All time
 
-341 sessions.
+342 sessions.
 
 **Ran to an end without a report:** 62 of 309 sessions whose last run the core recorded as `completed` — 20.1%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
@@ -319,12 +319,12 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,291,903 | 6,183,128 | 27,846,035 | 73,718,100 | 1,134,242,465 |
-| messages per session | 119 | 330 | 583 | 731 | 53,610 |
+| messages per session | 119 | 330 | 583 | 731 | 53,666 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
-| `reviewer` | 140 | 41.1% |
-| `engineer` | 117 | 34.3% |
+| `reviewer` | 141 | 41.2% |
+| `engineer` | 117 | 34.2% |
 | `atomaton` | 83 | 24.3% |
 | `architect` | 1 | 0.3% |
 
@@ -333,17 +333,17 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 8,575 | 172 | 128 | 2% |
-| `read` | 6,477 | 34 | 8 | 0.5% |
-| `grep` | 4,970 | 112 | 21 | 2.3% |
+| `read` | 6,492 | 34 | 8 | 0.5% |
+| `grep` | 4,980 | 112 | 21 | 2.2% |
 | `edit` | 2,233 | 38 | 0 | 1.7% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
-| `fetch` | 1,058 | 98 | 0 | 9.3% |
-| `list` | 391 | 5 | 0 | 1.3% |
+| `fetch` | 1,061 | 98 | 0 | 9.2% |
+| `list` | 392 | 5 | 0 | 1.3% |
 | `get_issue` | 367 | 14 | 5 | 3.8% |
-| `get_pr` | 364 | 9 | 3 | 2.5% |
-| `get_issue_comments` | 361 | 0 | 10 | 0% |
-| `get_check_runs` | 354 | 13 | 0 | 3.7% |
-| `glob` | 331 | 1 | 1 | 0.3% |
+| `get_pr` | 365 | 9 | 3 | 2.5% |
+| `get_issue_comments` | 362 | 0 | 10 | 0% |
+| `get_check_runs` | 355 | 13 | 0 | 3.7% |
+| `glob` | 332 | 1 | 1 | 0.3% |
 | `check_merge_readiness` | 221 | 0 | 0 | 0% |
 | `get_branch` | 213 | 0 | 0 | 0% |
 | `atoma_builtin__load_skill` | 210 | 1 | 0 | 0.5% |
@@ -355,10 +355,10 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | `search_issues` | 134 | 0 | 3 | 0% |
 | `request_close_issue` | 111 | 1 | 0 | 0.9% |
 | `load_skill` | 101 | 9 | 0 | 8.9% |
-| `get_pr_reviews` | 91 | 0 | 0 | 0% |
+| `get_pr_reviews` | 92 | 0 | 0 | 0% |
 | `merge_pr` | 71 | 0 | 0 | 0% |
+| `list_pr_review_comments` | 69 | 0 | 0 | 0% |
 | `github__get_issue` | 68 | 0 | 0 | 0% |
-| `list_pr_review_comments` | 68 | 0 | 0 | 0% |
 | `list_prs` | 68 | 0 | 0 | 0% |
 | `github__get_issue_comments` | 64 | 0 | 0 | 0% |
 | `search_code` | 52 | 0 | 0 | 0% |
