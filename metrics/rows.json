@@ -24799,12 +24799,12 @@
   {
     "path": "sessions/issue-597/reviewer.json",
     "agent": "reviewer",
-    "messages": 36,
-    "calls": 21,
+    "messages": 41,
+    "calls": 22,
     "failed": 0,
     "refused": 0,
     "skills": [],
-    "reported": false,
+    "reported": true,
     "tools": {
       "get_pr": 1,
       "get_pr_diff": 1,
@@ -24813,7 +24813,8 @@
       "list": 1,
       "glob": 3,
       "grep": 6,
-      "read": 7
+      "read": 7,
+      "check_merge_readiness": 1
     },
     "acts": {},
     "runs": [
@@ -24839,6 +24840,20 @@
           }
         },
         "started": "2026-11-23T10:08:30Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-23T10:12:03Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "messages": 41,
+        "seconds": 67,
+        "server_calls": {
+          "github": {
+            "check_merge_readiness": 1
+          }
+        },
+        "started": "2026-11-23T10:10:56Z"
       }
     ]
   },
