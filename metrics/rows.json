@@ -25046,8 +25046,8 @@
   {
     "path": "sessions/issue-603/engineer.json",
     "agent": "engineer",
-    "messages": 54,
-    "calls": 32,
+    "messages": 65,
+    "calls": 38,
     "failed": 1,
     "refused": 0,
     "skills": [
@@ -25056,7 +25056,7 @@
     "reported": false,
     "tools": {
       "bash": 9,
-      "read": 12,
+      "read": 18,
       "fetch": 10,
       "load_skill": 1
     },
@@ -25083,6 +25083,20 @@
           }
         },
         "started": "2026-11-25T17:28:16Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-25T18:44:29Z",
+        "ended_because": "failed",
+        "iterations": 3,
+        "messages": 65,
+        "seconds": 12,
+        "server_calls": {
+          "files": {
+            "read": 6
+          }
+        },
+        "started": "2026-11-25T18:44:17Z"
       }
     ]
   },
