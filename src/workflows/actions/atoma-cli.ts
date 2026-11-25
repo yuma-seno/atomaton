@@ -194,8 +194,18 @@ import { TypedOutputsStep } from "./base.ts";
  * repository's own two, are in that layout; an older binary reads a loose file and a
  * directory both, so the move was safe to land before this raise, and this is the pin
  * that makes the loader which requires the layout the one every run runs.
+ *
+ * **`loop_abort`, the verdict behind a `loop` ending.** Written by the core from
+ * v0.6.0 (yuma-seno/atoma#41): the rule the guard applied, the tool, its arguments,
+ * how many times it repeated and whether the answer was cut by the output cap, beside
+ * `ended_because: "loop"` on the last `atoma_runs` entry. Two readers are built on it:
+ * `decide_reask.ts` gives that run the same one second turn the other premature endings
+ * get, and `post_result_comment.ts` names the call that repeated so nobody has to open
+ * the log. Without the field both fall back to what they did before -- no second turn,
+ * and a comment quoting only the log -- so a run under an older binary loses the
+ * recovery rather than failing, which is why this raise can land on its own.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.5.0";
+export const ATOMA_DEFAULT_VERSION = "v0.6.0";
 
 export const ATOMA_VERSION_DESC =
   "Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.";

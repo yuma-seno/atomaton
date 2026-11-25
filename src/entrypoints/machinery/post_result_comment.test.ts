@@ -38,6 +38,35 @@ describe("post_result_comment.ts buildCommentBody", () => {
     expect(body.indexOf("Nobody was notified")).toBeLessThan(body.indexOf("_run by"));
   });
 
+  /**
+   * A run the loop guard stopped names the call that repeated. The verdict is
+   * structured in the session, so the comment can say what happened without sending
+   * the person to the workflow log.
+   */
+  test("names the call the loop guard stopped, without the log", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      endedBecause: "loop",
+      runUrl: "http://example.com/run/1",
+      output: "Halfway through the file.",
+      loopAbort: { rule: "identical_answers", tool: "read", arguments: '{"path":"a.rs"}', count: 4, capped: false },
+    });
+    expect(body).toContain("loop guard stopped this run");
+    expect(body).toContain("`read`");
+    expect(body).toContain('{"path":"a.rs"}');
+    expect(body).toContain("4 times in a row");
+  });
+
+  test("and says nothing about a loop when the run did not loop", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      endedBecause: "completed",
+      runUrl: "http://example.com/run/1",
+      output: "All done.",
+    });
+    expect(body).not.toContain("loop guard");
+  });
+
   test("and says nothing when nothing was defused", () => {
     const body = buildCommentBody({
       agent: "engineer",
