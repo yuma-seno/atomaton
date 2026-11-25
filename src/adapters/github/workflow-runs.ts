@@ -56,21 +56,24 @@ export const RUN_WAIT_INTERVAL_MS_VAR = "ATOMATON_RUN_WAIT_INTERVAL_MS";
 const DEFAULT_ATTEMPTS = 420;
 const DEFAULT_INTERVAL_MS = 10_000;
 
+/**
+ * A positive whole number from the environment, or the fallback.
+ *
+ * The interval used to accept `0`, and `Number("")` is `0`: an unset variable was
+ * read as "poll with no sleep", spent the 420-poll bound in minutes, and reported a
+ * deploy that was still building as unreadable. Neither setting has a useful zero,
+ * so absent, zero and nonsense all fall back.
+ */
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number((raw ?? "").trim());
   return Number.isInteger(value) && value > 0 ? value : fallback;
-}
-
-function nonNegativeInt(raw: string | undefined, fallback: number): number {
-  const value = Number((raw ?? "").trim());
-  return Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
 /** The wait bounds this process was configured with. */
 export function runWaitOptions(env: NodeJS.ProcessEnv = process.env): RunWaitOptions {
   return {
     attempts: positiveInt(env[RUN_WAIT_ATTEMPTS_VAR], DEFAULT_ATTEMPTS),
-    intervalMs: nonNegativeInt(env[RUN_WAIT_INTERVAL_MS_VAR], DEFAULT_INTERVAL_MS),
+    intervalMs: positiveInt(env[RUN_WAIT_INTERVAL_MS_VAR], DEFAULT_INTERVAL_MS),
   };
 }
 
@@ -136,7 +139,22 @@ export function waitForDispatchRun(
 }
 
 /**
- * Wait for `runId` to finish, and return how it ended.
+ * What a bounded wait saw.
+ *
+ * `finished` is the run once it completed. `null` means the bound was spent first,
+ * and the other two fields are then the failure's evidence: how many reads were
+ * made, and what the last one said. A wait that gives up and reports only "could
+ * not be read" leaves the person who has to recover from it nothing to act on.
+ */
+export interface RunWaitOutcome {
+  readonly finished: WorkflowRun | null;
+  readonly polls: number;
+  readonly last: WorkflowRun | null;
+}
+
+/**
+ * Wait for `runId` to finish, and say how it ended and, when it did not, what was
+ * seen instead.
  *
  * A run that has completed is returned even when its conclusion is not `success`;
  * deciding what a failure means belongs to the caller, and the dispatch script is
@@ -146,8 +164,11 @@ export function waitForRunCompletion(
   repo: string,
   runId: number,
   options: RunWaitOptions = runWaitOptions(),
-): WorkflowRun | null {
+): RunWaitOutcome {
+  let last: WorkflowRun | null = null;
+  let polls = 0;
   for (let attempt = 0; attempt < options.attempts; attempt += 1) {
+    polls += 1;
     const { code, stdout } = ghRead(
       "run",
       "view",
@@ -160,12 +181,15 @@ export function waitForRunCompletion(
     if (code === 0) {
       try {
         const run = parseRun(JSON.parse(stdout || "{}") as unknown);
-        if (run && run.status === "completed") return run;
+        if (run) {
+          last = run;
+          if (run.status === "completed") return { finished: run, polls, last };
+        }
       } catch {
         // A malformed answer is not the run having finished; ask again.
       }
     }
     if (attempt + 1 < options.attempts) Bun.sleepSync(options.intervalMs);
   }
-  return null;
+  return { finished: null, polls, last };
 }

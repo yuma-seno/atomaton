@@ -63,7 +63,7 @@
 import { parseArgs } from "node:util";
 import { dispatchTagDeploy } from "../../adapters/actions/dispatch-targets.ts";
 import { readTagNames, tagsAdded } from "../../adapters/github/git-tags.ts";
-import { runWaitOptions, waitForRunCompletion } from "../../adapters/github/workflow-runs.ts";
+import { runWaitOptions, waitForRunCompletion, type RunWaitOutcome } from "../../adapters/github/workflow-runs.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface DispatchNewTagsArgs {
@@ -85,6 +85,22 @@ export function parseBefore(raw: string): string[] | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The evidence behind "could not be read to a conclusion".
+ *
+ * That sentence alone told the person left to recover nothing: not whether the
+ * deploy was still building, not whether the reads were failing, not which run to
+ * open. The poll count and the last answer are what tell "still running when the
+ * bound ran out" apart from "never read at all".
+ */
+function unreadable(repo: string, tag: string, runId: number, outcome: RunWaitOutcome): string {
+  const seen =
+    outcome.last === null
+      ? `none of ${outcome.polls} polls could read it`
+      : `the last of ${outcome.polls} polls read status '${outcome.last.status}', conclusion '${outcome.last.conclusion ?? "none"}'`;
+  return `The deployment for ${tag} (run ${runId}) could not be read to a conclusion: ${seen}. https://github.com/${repo}/actions/runs/${runId}`;
 }
 
 function main(): void {
@@ -134,12 +150,13 @@ function main(): void {
     }
     console.error(`Started a deployment for the new tag ${tag} (run ${run.id}).`);
 
-    const finished = waitForRunCompletion(repo, run.id, wait);
-    if (!finished) {
+    const outcome = waitForRunCompletion(repo, run.id, wait);
+    if (!outcome.finished) {
       failed += 1;
-      console.error(`::error::The deployment for ${tag} (run ${run.id}) could not be read to a conclusion.`);
+      console.error(`::error::${unreadable(repo, tag, run.id, outcome)}`);
       continue;
     }
+    const finished = outcome.finished;
     if (finished.conclusion !== "success") {
       failed += 1;
       console.error(`::error::The deployment for ${tag} (run ${run.id}) ended '${finished.conclusion ?? "unknown"}', so it was not published.`);

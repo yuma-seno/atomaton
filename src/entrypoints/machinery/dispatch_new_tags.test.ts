@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
+import { runWaitOptions } from "../../adapters/github/workflow-runs.ts";
 import { parseBefore, TAGS_BEFORE_VAR } from "./dispatch_new_tags.ts";
-import { makeConfigDir, runWithFakeGh, scriptPath } from "./testing/harness.ts";
+import { makeConfigDir, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
 
 /**
  * The endpoint's shape, as `readTags` asks for it: the ref and the commit it names.
@@ -29,8 +30,9 @@ const successRun = (id = 7): FakeRun => ({
  * the ambient `config.yaml` an input. A test that let the repository's own file
  * answer would pass here and say nothing about an adopter's.
  *
- * The wait is one attempt and no interval, so the test exercises the answer rather
- * than the clock. The run it waits for is the fake's, not a real one.
+ * The wait is one attempt, so the test exercises the answer rather than the clock:
+ * nothing sleeps between a first and a last poll that are the same poll. The run it
+ * waits for is the fake's, not a real one.
  */
 function dispatch(
   before: string,
@@ -55,7 +57,7 @@ function dispatch(
       env: {
         [TAGS_BEFORE_VAR]: before,
         ATOMATON_RUN_WAIT_ATTEMPTS: "1",
-        ATOMATON_RUN_WAIT_INTERVAL_MS: "0",
+        ATOMATON_RUN_WAIT_INTERVAL_MS: "1",
       },
     });
   } finally {
@@ -65,6 +67,47 @@ function dispatch(
 
 const dispatched = (calls: string[][]) =>
   calls.filter((call) => call[0] === "workflow").map((call) => call[call.indexOf("--ref") + 1]);
+
+/** The polls of the dispatched run, which is what the wait's bound is spent on. */
+const views = (calls: string[][]) => calls.filter((call) => call[0] === "run" && call[1] === "view");
+
+/** `gh run view --json databaseId,status,conclusion` output for run 42. */
+const runJson = (status: string, conclusion: string | null) =>
+  JSON.stringify({ databaseId: 42, status, conclusion });
+
+/**
+ * Run the script over one new tag, with the wait seams set and the answers its polls
+ * should get.
+ *
+ * Three polls is enough to tell "spent the bound" from "gave up on the first answer",
+ * and a millisecond between them keeps the suite from sleeping through the real
+ * interval. Run 42 is the one the dispatch found.
+ */
+function waiting(view: FakeGhRule[], env: Record<string, string> = {}) {
+  const dir = makeConfigDir({});
+  try {
+    return runWithFakeGh(scriptPath("dispatch_new_tags.ts"), ["--repo", "o/r"], {
+      cwd: dir,
+      rules: [
+        { match: ["api", "matching-refs/tags"], stdout: refs("v1.0.0") },
+        {
+          match: ["run", "list"],
+          stdout: JSON.stringify([{ databaseId: 42, status: "in_progress", conclusion: null }]),
+        },
+        ...view,
+        { match: ["workflow", "run"], stdout: "" },
+      ],
+      env: {
+        [TAGS_BEFORE_VAR]: "[]",
+        ATOMATON_RUN_WAIT_ATTEMPTS: "3",
+        ATOMATON_RUN_WAIT_INTERVAL_MS: "1",
+        ...env,
+      },
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 /**
  * The fifth instance of the hole `dispatch-targets.ts` names four of: GitHub starts
@@ -112,6 +155,39 @@ describe("dispatch_new_tags.ts", () => {
     const r = dispatch("[]", refs("v1.0.0"));
     expect(r.status).toBe(0);
     expect(r.ghCalls.some((call) => call[0] === "run" && call[1] === "view")).toBe(true);
+  });
+
+  /**
+   * The bound is 420 polls ten seconds apart, and an unset interval was read as
+   * zero: 420 reads with no sleep between them spent the bound in minutes and called
+   * a deploy that was still building unreadable. A wait that gives up must also say
+   * what it kept seeing, because the person who recovers from it has nothing else.
+   */
+  describe("the wait for the dispatched run", () => {
+    test("a run still in progress spends the whole bound, then reports what it saw", () => {
+      const r = waiting([{ match: ["run", "view"], stdout: runJson("in_progress", null) }]);
+      expect(r.status).toBe(1);
+      expect(views(r.ghCalls)).toHaveLength(3);
+      expect(r.stderr).toContain("the last of 3 polls read status 'in_progress', conclusion 'none'");
+      expect(r.stderr).toContain("https://github.com/o/r/actions/runs/42");
+    });
+
+    test("a run that finishes before the bound is published, not reported unreadable", () => {
+      const r = waiting([
+        { match: ["run", "view"], attempt: 1, stdout: runJson("in_progress", null) },
+        { match: ["run", "view"], attempt: 2, stdout: runJson("completed", "success") },
+      ]);
+      expect(r.status).toBe(0);
+      expect(views(r.ghCalls)).toHaveLength(2);
+      expect(r.stderr).toContain("Deployed v1.0.0");
+    });
+
+    test("a read that never produced the run still says how many polls and where to look", () => {
+      const r = waiting([{ match: ["run", "view"], code: 1 }]);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("none of 3 polls could read it");
+      expect(r.stderr).toContain("https://github.com/o/r/actions/runs/42");
+    });
   });
 
   test("a tag deployment that ended red fails this job", () => {
@@ -181,6 +257,26 @@ describe("dispatch_new_tags.ts", () => {
       expect(r.status).toBe(1);
       expect(r.stderr).toContain("JSON array");
     });
+  });
+});
+
+/**
+ * Where the 3 m 31 s came from: `Number("")` is 0, and the interval check accepted
+ * "not negative", so an unset variable meant "poll with no sleep". These pin the
+ * fallback rather than the clock.
+ */
+describe("runWaitOptions", () => {
+  test("an interval that is not set is the default, not zero", () => {
+    expect(runWaitOptions({})).toEqual({ attempts: 420, intervalMs: 10_000 });
+  });
+
+  test("an interval that is set is honoured", () => {
+    expect(runWaitOptions({ ATOMATON_RUN_WAIT_INTERVAL_MS: "25" }).intervalMs).toBe(25);
+  });
+
+  test("zero and nonsense fall back to the default", () => {
+    expect(runWaitOptions({ ATOMATON_RUN_WAIT_INTERVAL_MS: "0" }).intervalMs).toBe(10_000);
+    expect(runWaitOptions({ ATOMATON_RUN_WAIT_INTERVAL_MS: "soon" }).intervalMs).toBe(10_000);
   });
 });
 
