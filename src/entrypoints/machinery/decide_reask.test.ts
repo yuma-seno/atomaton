@@ -26,11 +26,32 @@ const BREAKING = "Done.\n\n/engineer\n\n@alice, your call.";
 const PEOPLE = JSON.stringify({ humans: ["alice", "bob"], notify: "alice" });
 const SESSION = JSON.stringify({ messages: [{ role: "assistant", content: BREAKING }] });
 
+/**
+ * A run the loop guard stopped: atoma recorded the ending and the verdict behind it,
+ * which is the shape that arrives from v0.6.0. The exit code is the soft stop, since
+ * that is what a saved session is written under.
+ */
+const LOOP_ABORT = {
+  rule: "identical_answers",
+  tool: "read",
+  arguments: '{"path":"src/domain/tool_loop.rs"}',
+  count: 4,
+  call: 5,
+  capped: false,
+  last_error: null,
+};
+const LOOP = JSON.stringify({
+  messages: [{ role: "assistant", content: "", tool_calls: [{ function: { name: "read" } }] }],
+  atoma_runs: [{ ended_because: "loop", loop_abort: LOOP_ABORT }],
+});
+
 interface RunResult {
   status: number;
   stdout: string;
   /** The session's roles after the decision, in order. */
   messages: string[];
+  /** What the machinery told the run, in order. */
+  notes: string[];
   output: string;
 }
 
@@ -104,6 +125,8 @@ function run(opts: {
   mode?: "ok" | "fail" | "stop";
   deadlineOffsetSecs?: number;
   output?: string;
+  /** The session atoma left; the breaking ending by default. */
+  session?: string;
   withStopFile?: boolean;
 }): RunResult & { dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "atomaton-reask-"));
@@ -115,7 +138,7 @@ function run(opts: {
   writeFileSync(join(defs, "engineer.md"), "---\nname: engineer\n---\n");
   const runDir = join(dir, "run");
   mkdirSync(runDir, { recursive: true });
-  writeFileSync(join(runDir, "session.json"), SESSION);
+  writeFileSync(join(runDir, "session.json"), opts.session ?? SESSION);
   writeFileSync(join(runDir, "atomaton_output.txt"), opts.output ?? BREAKING);
   writeFileSync(join(runDir, "callees.json"), PEOPLE);
   if (opts.withStopFile) writeFileSync(join(optsStopPath(dir)), "stop");
@@ -150,11 +173,13 @@ function run(opts: {
   const session = JSON.parse(readFileSync(join(runDir, "session.json"), "utf8")) as {
     messages?: Array<{ role: string; content: string }>;
   };
+  const messages = session.messages ?? [];
   const output = exists(join(runDir, "atomaton_output.txt")) ? readFileSync(join(runDir, "atomaton_output.txt"), "utf8") : "";
   return {
     status: run.status ?? -1,
     stdout: run.stdout ?? "",
-    messages: (session.messages ?? []).map((m) => m.role),
+    messages: messages.map((m) => m.role),
+    notes: messages.filter((m) => m.role === "user").map((m) => m.content),
     output,
     dir,
   };
@@ -215,6 +240,48 @@ describe("decide_reask.ts", () => {
     const r = run({ exitCode: "0", mode: "ok", output: "Done; nothing left to run." });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("exit_code=0");
+  });
+
+  test("a run the loop guard stopped is asked for one more turn", () => {
+    const r = run({ exitCode: "2", session: LOOP });
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout, "the second turn's own exit is the run's").toContain("exit_code=0");
+    expect(r.stdout).toContain("ending_invalid=false");
+    expect(r.messages, "the note is a user turn in the session").toEqual(["assistant", "user"]);
+    expect(r.notes[0], "and it names the call that repeated").toContain('{"path":"src/domain/tool_loop.rs"}');
+    expect(r.output, "the second attempt's report is the run's").toContain("Done; nothing left to run.");
+    expect(r.output).not.toContain(BREAKING);
+  });
+
+  test("a loop abort with no time left keeps the first turn's ending", () => {
+    const r = run({ exitCode: "2", session: LOOP, deadlineOffsetSecs: -10 });
+    expect(r.status).toBe(0);
+    expect(r.stdout, "nothing was asked, so nothing changed the exit").toContain("exit_code=2");
+    expect(r.messages, "nothing is injected when there is no time to ask").toEqual(["assistant"]);
+  });
+
+  /**
+   * The pin's other half: a binary older than v0.6.0 records the ending and no
+   * verdict. There is nothing to tell the run, so it keeps the ending it had.
+   */
+  test("a loop ending with no verdict is treated as it is today", () => {
+    const r = run({
+      exitCode: "2",
+      session: JSON.stringify({
+        messages: [{ role: "assistant", content: "Nothing here." }],
+        atoma_runs: [{ ended_because: "loop" }],
+      }),
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("exit_code=2");
+    expect(r.messages).toEqual(["assistant"]);
+  });
+
+  test("the person stopping during the loop's second turn outranks it", () => {
+    const r = run({ exitCode: "2", session: LOOP, mode: "stop" });
+    expect(r.status).toBe(0);
+    expect(r.stdout, "the stop outranks the retry").toContain("exit_code=2");
+    expect(r.output, "whatever the second attempt wrote stands").toContain("stopped mid-sentence");
   });
 
   test("the person stopping during the second turn makes the run a soft stop", () => {

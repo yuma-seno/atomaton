@@ -948,7 +948,8 @@ echo "=== Atoma Logs ===" >&2
 cat "${RUN_DIR}/atomaton_logs.txt" >&2
 
 # The one second turn this run is allowed: a closing message that broke the
-# one-call rule, or a run that stopped on a sentence having changed nothing.
+# one-call rule, a run that stopped on a sentence having changed nothing, or a run
+# the loop guard stopped.
 # The whole decision -- the ending checks after each turn, the injections, the
 # bounded second invocation, and what a person's stop during it means -- is
 # \`decide_reask.ts\` now, and it answers with the exit code the ending
