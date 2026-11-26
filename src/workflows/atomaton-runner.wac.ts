@@ -54,6 +54,7 @@ import { ref as writeToolsFileRef } from "../entrypoints/machinery/write_tools_f
 import { ref as summarizeRunRef } from "../entrypoints/machinery/summarize_run.ts";
 import { ref as launchAtomaRef } from "../entrypoints/machinery/launch_atoma.ts";
 import { ref as decideReaskRef } from "../entrypoints/machinery/decide_reask.ts";
+import { ref as askAgainRef } from "../entrypoints/machinery/ask_again.ts";
 import { ref as postResultCommentRef } from "../entrypoints/machinery/post_result_comment.ts";
 import { ref as recordRunMetadataRef } from "../entrypoints/machinery/record_run_metadata.ts";
 import { ref as saveAgentSessionRef } from "../entrypoints/machinery/save_agent_session.ts";
@@ -811,7 +812,8 @@ const runAgentStep = new TypedOutputsStep(
     // remains here is the glue and the contracts: the tools file, the sudo
     // preflights, the boundary flag, and one call per script. The environment
     // is `lib/agent-env.ts`, the invocation `lib/atoma-launch.ts`, the second
-    // turn `decide_reask.ts`, the step outputs `summarize_run.ts`.
+    // turn `decide_reask.ts` and `ask_again.ts` in the step below, the step
+    // outputs `summarize_run.ts`.
     "continue-on-error": true,
     // No credentials here, and that is the point of the step above.
     //
@@ -947,31 +949,126 @@ ${scriptCommandWithArgs(launchAtomaRef, {
 echo "=== Atoma Logs ===" >&2
 cat "${RUN_DIR}/atomaton_logs.txt" >&2
 
-# The one second turn this run is allowed: a closing message that broke the
-# one-call rule, a run that stopped on a sentence having changed nothing, or a run
-# the loop guard stopped.
-# The whole decision -- the ending checks after each turn, the injections, the
-# bounded second invocation, and what a person's stop during it means -- is
-# \`decide_reask.ts\` now, and it answers with the exit code the ending
-# classification below consumes (a stop during the second turn makes the run a
-# soft stop) and whether the closing message's calls were refused.
-ENDING_INVALID=false
+# The one second turn this run is allowed is DECIDED here and RUN by the next
+# step: a closing message that broke the one-call rule, a run that stopped on a
+# sentence having changed nothing, or a run the loop guard stopped.
+#
+# The split is the credentials file's. atoma reads that file and deletes it before
+# starting any tool server -- tested, and what keeps the file and the servers from
+# ever coexisting -- so the file this run wrote is gone by the time this turn is
+# over. Only a step holding the values can write another, and holding them here
+# would put them in the step whose bash lived for the whole of that turn. So this
+# step decides, backs the session up and puts the note in; the step below launches
+# on a credentials file of its own. The bound is \`decide_reask.ts\`'s, and the
+# reason it prints is what crosses.
+#
+# Nothing here exits on atoma's failure: the exit code the run ends on is the one
+# the second turn leaves, and a first-turn failure that a second turn repairs must
+# not colour this step.
 REASK_RESULT=$(${scriptCommandWithArgs(decideReaskRef, {
   "run-dir": `${RUN_DIR}`,
-  "tool-cache": `${TOOL_CACHE}`,
-  "tools-file": `${RUN_DIR}/tools.yaml`,
-  "credentials-file": `${CREDENTIALS_FILE}`,
   "stop-file": `${STOP_FILE}`,
   "deadline-at": deadlineStep.outputs.at,
   "min-budget-secs": `${MIN_AGENT_BUDGET_SECS}`,
   "exit-code": "\${EXIT_CODE}",
 })}) || { echo "::error::the second-turn decision failed; the run's ending is unknown"; exit 1; }
+REASK=$(printf '%s' "$REASK_RESULT" | sed -n 's/^reask=//p')
+REASK_BUDGET=$(printf '%s' "$REASK_RESULT" | sed -n 's/^budget_secs=//p')
 EXIT_CODE=$(printf '%s' "$REASK_RESULT" | sed -n 's/^exit_code=//p')
 ENDING_INVALID=$(printf '%s' "$REASK_RESULT" | sed -n 's/^ending_invalid=//p')
+{
+  echo "reask=$REASK"
+  echo "reask_budget=$REASK_BUDGET"
+  echo "exit_code=$EXIT_CODE"
+  echo "ending_invalid=$ENDING_INVALID"
+} >> "$GITHUB_OUTPUT"
+`,
+  },
+  // What the second step needs, and nothing else: the reason it is asked (empty
+  // when it is not), the budget decided for it, the ending this turn had, and
+  // whether that ending's calls were refused because there was no time to ask.
+  // The step outputs the post steps consume are the re-ask step's -- `reported`
+  // and `ended_because` are read out of the saved session by read_run_ending.ts,
+  // `atoma_failed` is written only for atoma's own failure, and both live where
+  // the run's final exit code is known.
+  ["reask", "reask_budget", "exit_code", "ending_invalid"] as const,
+);
 
-# The watcher has nothing left to watch for. Killed rather than left to the job,
-# because a poller that outlives the run it was polling for spends API budget on an
-# answer nobody will read.
+/**
+ * The one second turn a run is allowed, in the one step that can write it a
+ * credentials file.
+ *
+ * `decide_reask.ts` in the step above decides whether it is wanted and puts the
+ * note in the session; this runs it, and the ending the run finally has is decided
+ * here. The two are separate because of what atoma does with the credentials file:
+ * it reads the file and deletes it before starting any tool server -- deliberate,
+ * tested, and what keeps the file and the servers from ever coexisting -- so the
+ * one this run wrote is gone by the time the first turn is over.
+ *
+ * So the values reach this step's `env:` and no other. That is the trade the shape
+ * makes, and the smallest window that leaves a second turn possible at all: on a
+ * run that does not ask, this step holds them for the few seconds the ending is
+ * read and the summary written, and on one that does, for the length of the second
+ * turn. atoma still deletes the file before any server starts, which is what keeps
+ * the servers of that second turn from ever seeing it -- and they run as another
+ * user, so this process's own environment is not theirs to read either. Read
+ * "Collect this run's credentials into a file" first: this step is that one, again,
+ * on the runs that need it.
+ */
+const reaskStep = new TypedOutputsStep(
+  {
+    name: "Ask the run for one more turn",
+    id: "reask",
+    // Whenever the agent step ran -- success or failure, because a first-turn
+    // failure is exactly how the loop guard's abort arrives. Not on a cancellation:
+    // a run a person stopped is not asked for anything, and "Report a cancelled
+    // run" is what speaks for it.
+    if: `always() && (${runAgentStep.rawOutcome} == 'success' || ${runAgentStep.rawOutcome} == 'failure') && ${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+    shell: "bash",
+    env: {
+      // The same set the first file was written from, and for the same reason.
+      ...runCredentialEnv(),
+      GH_TOKEN: "${{ github.token }}",
+      ...secretSlotEnv(),
+    },
+    run: `
+EXIT_CODE='\${{ steps.atoma.outputs.exit_code }}'
+ENDING_INVALID='\${{ steps.atoma.outputs.ending_invalid }}'
+REASK='\${{ steps.atoma.outputs.reask }}'
+REASK_BUDGET='\${{ steps.atoma.outputs.reask_budget }}'
+
+# Nothing published means the step above failed before it could decide, so the
+# machinery is what failed and not atoma. The boundary flag stays unwritten, and
+# "Post result comment" reads that as red.
+if [ -z "$EXIT_CODE" ]; then
+  echo "::error::the run never reached an ending; the machinery failed before it did"
+  exit 1
+fi
+
+if [ "$REASK" != "" ]; then
+  # atoma read the first file and deleted it, so the second turn gets its own.
+  ${scriptCommandWithArgs(writeCredentialsFileRef, { out: CREDENTIALS_FILE })}
+  sudo chown ${TOOL_USER} "${CREDENTIALS_FILE}"
+  # The reason travels in rather than being looked for again: \`decide_reask.ts\` is
+  # where two turns and no more is held.
+  ASK_RESULT=$(${scriptCommandWithArgs(askAgainRef, {
+    "run-dir": `${RUN_DIR}`,
+    "tool-cache": `${TOOL_CACHE}`,
+    "tools-file": `${RUN_DIR}/tools.yaml`,
+    "credentials-file": `${CREDENTIALS_FILE}`,
+    "stop-file": `${STOP_FILE}`,
+    reask: "\${REASK}",
+    "budget-secs": "\${REASK_BUDGET}",
+    "exit-code": "\${EXIT_CODE}",
+  })}) || { echo "::error::the second turn could not be run; the run's ending is unknown"; exit 1; }
+  EXIT_CODE=$(printf '%s' "$ASK_RESULT" | sed -n 's/^exit_code=//p')
+  ENDING_INVALID=$(printf '%s' "$ASK_RESULT" | sed -n 's/^ending_invalid=//p')
+fi
+
+# The watcher has nothing left to watch for here, and only here: the second turn is
+# a turn a person may still stop, and the file it writes is what atoma is handed.
+# Killed rather than left to the job, because a poller that outlives the run it was
+# polling for spends API budget on an answer nobody will read.
 if [ -f "${RUN_DIR}/stop-watch.pid" ]; then
   kill "$(cat "${RUN_DIR}/stop-watch.pid")" 2>/dev/null || true
 fi
@@ -989,8 +1086,8 @@ fi
 # decided by the flag the failure branch below publishes.
 if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
   ${scriptCommandWithArgs(readRunEndingRef, {
-    // The same two paths the agent step just handed atoma, from the same constants,
-    // so the file this reads cannot drift from the file that was written.
+    // The same two paths atoma was handed, from the same constants, so the file this
+    // reads cannot drift from the file that was written.
     session: `${RUN_DIR}/session.json`,
     "exit-code": "\${EXIT_CODE}",
     "stop-file": STOP_FILE,
@@ -998,12 +1095,12 @@ if [ "$EXIT_CODE" = "2" ] || [ "$EXIT_CODE" = "0" ]; then
 elif [ "$EXIT_CODE" != "0" ]; then
   # atoma's own failure — neither success nor the soft stop — published for
   # "Post result comment", which leaves the run green only for this case. Everything
-  # the machinery does around atoma — the tools file, the sudo preflight above,
-  # and the reads that turn a 0/2 exit into an ending, which this bash runs with
-  # \`-e\` — leaves the flag unwritten, and unwritten is red: the machinery's.
-  # The residue is a machinery failure that arrives as atoma's exit code (a sudo
-  # that passed the preflight and failed inside the real invocation), which
-  # nothing here can tell from atoma's own; the log will say.
+  # the machinery does around atoma — and the reads that turn a 0/2 exit into an
+  # ending, which this bash runs with \`-e\` — leaves the flag unwritten, and
+  # unwritten is red: the machinery's. The residue is a machinery failure that
+  # arrives as atoma's exit code (a sudo that passed the preflight and failed inside
+  # the real invocation), which nothing here can tell from atoma's own; the log will
+  # say.
   echo "atoma_failed=true" >> "$GITHUB_OUTPUT"
   exit $EXIT_CODE
 fi
@@ -1103,7 +1200,7 @@ const postResultCommentStep = new TypedOutputsStep(
     // `directive` emptiness.
     name: "Post result comment",
     id: "post-result",
-    if: `always() && (${runAgentStep.rawOutcome} == 'success' || ${runAgentStep.rawOutcome} == 'failure') && ${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+    if: `always() && (${reaskStep.rawOutcome} == 'success' || ${reaskStep.rawOutcome} == 'failure') && ${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     shell: "bash",
     env: { GH_TOKEN: "${{ github.token }}" },
     run: `${scriptCommandWithArgs(postResultCommentRef, {
@@ -1114,27 +1211,27 @@ const postResultCommentStep = new TypedOutputsStep(
       // about a pull request.
       type: "${{ inputs.type }}",
       notify: notifyStep.outputs.notify,
-      directive: runAgentStep.outputs.directive,
-      "chain-continues": runAgentStep.outputs.chain_continues,
-      "ended-because": runAgentStep.outputs.ended_because,
+      directive: reaskStep.outputs.directive,
+      "chain-continues": reaskStep.outputs.chain_continues,
+      "ended-because": reaskStep.outputs.ended_because,
       // Whether the agent's step came back at all, and whether the failure was atoma's
       // own. Together they are the whole of what a crash needs: the first says there IS
       // one, the second decides the run's colour. See post_result_comment.ts's "The exit
       // code is that colour".
-      outcome: runAgentStep.outcome,
-      "atoma-failed": runAgentStep.outputs.atoma_failed,
+      outcome: reaskStep.outcome,
+      "atoma-failed": reaskStep.outputs.atoma_failed,
       // Whether the run left a report, so the mention can tell the two silences apart:
       // a hand-off that ended the session through a tool, and a run that simply never
       // said anything. Observed off the session, not inferred from the empty output
       // file -- both look the same there.
-      reported: runAgentStep.outputs.reported,
+      reported: reaskStep.outputs.reported,
       // Where this run's own messages begin, so a salvage cannot reach below it into
       // an earlier run's conclusion. See `lastAgentText`.
       "messages-before": buildContextStep.outputs.messages_before,
       // Written into the comment, because that is where the next run reads it:
       // the no-progress limit counts consecutive runs from the thread rather than
       // from a counter -- see domain/work/progress.ts.
-      changed: runAgentStep.outputs.changed,
+      changed: reaskStep.outputs.changed,
       "run-url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
       // Passed in, because the script used to open these by their bare names --
       // relative paths that stopped resolving when the run's files moved out
@@ -1155,7 +1252,7 @@ const postResultCommentStep = new TypedOutputsStep(
       // Written by the run above when the closing message called more than one thing
       // and was still not fixed the second time: its calls are left as text, and this
       // is what makes the comment say so and the machinery make the call itself.
-      "ending-invalid": runAgentStep.outputs.ending_invalid,
+      "ending-invalid": reaskStep.outputs.ending_invalid,
       // The people the run was told it may call, read before it started. The comment's
       // escaping and the ending check's counting are the same set because they are the
       // same file -- see lib/callees.ts.
@@ -1192,7 +1289,11 @@ const postResultCommentStep = new TypedOutputsStep(
  */
 const reportCancelledStep = new TypedOutputsStep({
   name: "Report a cancelled run",
-  if: `always() && ${runAgentStep.rawOutcome} == 'cancelled' && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+  // Either step, because a run can be cancelled in either turn now: the first is
+  // "Run agent"'s, and the second -- the one a re-ask run spends its time in -- is
+  // the re-ask step's. Naming only the first would leave a claim standing on
+  // exactly the runs that took longest to work through.
+  if: `always() && (${runAgentStep.rawOutcome} == 'cancelled' || ${reaskStep.rawOutcome} == 'cancelled') && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
   shell: "bash",
   env: {
     GH_TOKEN: "${{ github.token }}",
@@ -1217,7 +1318,7 @@ const recordRunMetadataStep = new TypedOutputsStep({
   // here covers both original composite-action steps' separate conditions
   // in one go.
   name: "Record run metadata",
-  if: `${runAgentStep.rawOutcome} == 'success' && ${postResultCommentStep.rawOutputs.comment_id} != ''`,
+  if: `${reaskStep.rawOutcome} == 'success' && ${postResultCommentStep.rawOutputs.comment_id} != ''`,
   shell: "bash",
   run: `${scriptCommandWithArgs(recordRunMetadataRef, {
     session: `${RUN_DIR}/session.json`,
@@ -1263,7 +1364,7 @@ const dirtyStep = new TypedOutputsStep(
   {
     name: "Check for uncommitted changes",
     id: "dirty",
-    if: `${runAgentStep.rawOutcome} == 'success'`,
+    if: `${reaskStep.rawOutcome} == 'success'`,
     shell: "bash",
     run: `if [ -n "$(git status --porcelain)" ]; then
   echo "has_changes=true" >> "$GITHUB_OUTPUT"
@@ -1313,7 +1414,7 @@ const loopControlStep = new TypedOutputsStep(
   {
     name: "Manage auto-dispatch loop control",
     id: "loop-control",
-    if: `${runAgentStep.rawOutcome} == 'success'`,
+    if: `${reaskStep.rawOutcome} == 'success'`,
     shell: "bash",
     env: { GH_TOKEN: "${{ github.token }}" },
     // The target number and nothing else. The tally is counted from that object's
@@ -1351,13 +1452,13 @@ const turnEndingStep = new TypedOutputsStep(
     if: "always()",
     shell: "bash",
     run: `${scriptCommandWithArgs(decideTurnEndingRef, {
-      outcome: runAgentStep.outcome,
-      "ended-because": runAgentStep.outputs.ended_because,
+      outcome: reaskStep.outcome,
+      "ended-because": reaskStep.outputs.ended_because,
       "loop-limit-reached": loopControlStep.outputs.loop_limit_reached,
-      "chain-continues": runAgentStep.outputs.chain_continues,
-      parked: runAgentStep.outputs.parked,
-      directive: runAgentStep.outputs.directive,
-      reported: runAgentStep.outputs.reported,
+      "chain-continues": reaskStep.outputs.chain_continues,
+      parked: reaskStep.outputs.parked,
+      directive: reaskStep.outputs.directive,
+      reported: reaskStep.outputs.reported,
     })}\n`,
   },
   ["ended", "should_release", "dispatch_to", "chain_over_to"] as const,
@@ -2121,6 +2222,9 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
   writeCredentialsStep,
   startStopWatcherStep,
   runAgentStep,
+  // Immediately after it: the second turn it decided on runs here, and every
+  // output the post steps consume is this step's.
+  reaskStep,
   tokenUsageStep,
   postResultCommentStep,
   reportCancelledStep,
@@ -2131,7 +2235,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
   // the run reads from one workspace and writes to another with nothing saying so.
   new TypedOutputsStep({
     name: "Save the agent's workspace",
-    if: `${runAgentStep.rawOutcome} == 'success'`,
+    if: `${reaskStep.rawOutcome} == 'success'`,
     shell: "bash",
     run: `${scriptCommandWithArgs(saveWorkspaceRef, {
       "root-issue": restoreWorkspaceStep.outputs.root_issue,
@@ -2182,7 +2286,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
     // footer now. When the comment was skipped, or stayed silent by design (a
     // closed sub-issue), `notified` is empty or false and this notice still speaks:
     // the fallback is unchanged.
-    if: `(${runAgentStep.rawOutputs.ended_because} == 'runtime' || ${runAgentStep.rawOutputs.ended_because} == 'iterations' || ${runAgentStep.rawOutputs.ended_because} == 'loop') && ${postResultCommentStep.rawOutputs.notified} != 'true'`,
+    if: `(${reaskStep.rawOutputs.ended_because} == 'runtime' || ${reaskStep.rawOutputs.ended_because} == 'iterations' || ${reaskStep.rawOutputs.ended_because} == 'loop') && ${postResultCommentStep.rawOutputs.notified} != 'true'`,
     shell: "bash",
     env: {
       GH_TOKEN: "${{ github.token }}",
@@ -2194,7 +2298,7 @@ echo "tool servers run as ${TOOL_USER} (credentials) and ${UNTRUSTED_USER} (shel
       number: "\${NUMBER}",
       agent: "\${AGENT}",
       notify: "\${NOTIFY}",
-      "ended-because": runAgentStep.outputs.ended_because,
+      "ended-because": reaskStep.outputs.ended_because,
     })}
 `,
   }),
