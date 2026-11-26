@@ -35,8 +35,8 @@
  * `identical_failures` are not that — nothing came back, or the same error came
  * back — and a note telling the run its answer was already above would be
  * describing a fact that is not true of it. `cycle` is a run of calls coming back
- * round to where it started, where no single answer repeated at all. `last_error` is the tool's own sentence about the
- * failure, quoted rather than paraphrased.
+ * round to where it started, where no single answer repeated at all. `last_error` is
+ * the tool's own sentence about the failure, quoted rather than paraphrased.
  *
  * # Why there is no `changed` test
  *

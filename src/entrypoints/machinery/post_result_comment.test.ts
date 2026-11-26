@@ -563,6 +563,91 @@ describe("post_result_comment.ts main", () => {
    * iterations, every one a tool call, no assistant text at all. Skipping there
    * drops the machinery's own sentence along with the agent's silence.
    */
+  /**
+   * The verdict reaches the comment through `main`, not only through
+   * `buildCommentBody`, because the gate that decides it lives in `main` and that is
+   * where it went wrong (#610): it read `endedBecause === "loop"`, and atoma records
+   * this abort as `failed`, so the section was hidden on every run it is for while
+   * every `buildCommentBody` test passed.
+   *
+   * Held here on a session, so the assertion is about the whole path: the entry's
+   * verdict in, the warning block out.
+   */
+  test("names the repeated call from the session's verdict on a failed run", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "Halfway through the file.");
+      writeFileSync(
+        join(dir, "session.json"),
+        JSON.stringify({
+          messages: [{ role: "assistant", content: "Halfway through the file." }],
+          atoma_runs: [
+            {
+              ended_because: "failed",
+              loop_abort: {
+                rule: "identical_answers",
+                tool: "read",
+                arguments: '{"path":"src/domain/tool_loop.rs"}',
+                count: 4,
+                call: 5,
+                capped: false,
+                last_error: null,
+              },
+            },
+          ],
+        }),
+      );
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        [
+          "--number", "610", "--type", "issue", "--agent", "engineer", "--notify", "octocat",
+          "--ended-because", "failed", "--run-url", "http://example.com/run/1",
+          "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt"),
+        ],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const body = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(body, "the section the gate used to hide").toContain("loop guard stopped this run");
+      expect(body).toContain("`read`");
+      expect(body).toContain('{"path":"src/domain/tool_loop.rs"}');
+      expect(body).toContain("4 times in a row");
+      expect(body, "and the failure notice it belongs to is still there").toContain("did not finish");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** And an ordinary failure carries none of it, which is the same path one field apart. */
+  test("says nothing about the loop guard when the session carries no verdict", () => {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
+    try {
+      writeFileSync(join(dir, "atomaton_output.txt"), "Halfway through the file.");
+      writeFileSync(
+        join(dir, "session.json"),
+        JSON.stringify({
+          messages: [{ role: "assistant", content: "Halfway through the file." }],
+          atoma_runs: [{ ended_because: "failed" }],
+        }),
+      );
+      const r = runWithFakeGh(
+        scriptPath("post_result_comment.ts"),
+        [
+          "--number", "610", "--type", "issue", "--agent", "engineer", "--notify", "octocat",
+          "--ended-because", "failed", "--run-url", "http://example.com/run/1",
+          "--session", join(dir, "session.json"), "--output", join(dir, "atomaton_output.txt"),
+        ],
+        { cwd: dir, env: { GITHUB_REPOSITORY: "owner/repo" }, rules: [{ match: ["api", "comments"], stdout: "42" }] },
+      );
+      expect(r.status).toBe(0);
+      const body = r.ghCalls.find((c) => c.join(" ").includes("_run by"))?.join(" ") ?? "";
+      expect(body).not.toContain("loop guard");
+      expect(body, "the notice every failed run gets still goes out").toContain("did not finish");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("posts for a stopped run that said nothing, rather than skipping with it", () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-post-result-"));
     try {

@@ -195,15 +195,22 @@ import { TypedOutputsStep } from "./base.ts";
  * directory both, so the move was safe to land before this raise, and this is the pin
  * that makes the loader which requires the layout the one every run runs.
  *
- * **`loop_abort`, the verdict behind a `loop` ending.** Written by the core from
- * v0.6.0 (yuma-seno/atoma#41): the rule the guard applied, the tool, its arguments,
- * how many times it repeated and whether the answer was cut by the output cap, beside
- * `ended_because: "loop"` on the last `atoma_runs` entry. Two readers are built on it:
- * `decide_reask.ts` gives that run the same one second turn the other premature endings
- * get, and `post_result_comment.ts` names the call that repeated so nobody has to open
- * the log. Without the field both fall back to what they did before -- no second turn,
- * and a comment quoting only the log -- so a run under an older binary loses the
- * recovery rather than failing, which is why this raise can land on its own.
+ * **`loop_abort`, the verdict a stopped run carries.** Written by the core from
+ * v0.6.0 (yuma-seno/atoma#41): the rule the guard applied, the tool, its arguments, how
+ * many times it repeated and whether the answer was cut by the output cap, on the last
+ * `atoma_runs` entry.
+ *
+ * The verdict is what is read, and the ending word beside it is not. The core records a
+ * tool-loop abort as `ended_because: "failed"` -- its `soft_stop_ending` maps only
+ * `Repetition`, a different guard that watches the model's own output -- so anything
+ * keyed to the word `loop` finds nothing on a run that actually looped (#610). Three
+ * readers are built on the verdict: `decide_reask.ts` gives that run the same one
+ * second turn the other premature endings get, `inject_loop_continuation.ts` writes the
+ * note that names what repeated, and `post_result_comment.ts` puts the same facts in the
+ * comment so nobody has to open the log. Without the field all three fall back to what
+ * they did before -- no second turn, and a comment quoting only the log -- so a run
+ * under an older binary loses the recovery rather than failing, which is why this raise
+ * can land on its own.
  */
 export const ATOMA_DEFAULT_VERSION = "v0.6.0";
 
