@@ -119,7 +119,9 @@ function main(): void {
   // guard stopped a run that was working, the verdict in the session names exactly
   // what it repeated, and one turn is what turns that into a report a person can
   // read -- see `domain/work/loop-continuation.ts` for why that run is worth asking
-  // and what it is told.
+  // and what it is told. The verdict is what is read, not the ending word or the exit
+  // code: atoma records this abort as `failed`, so both of those say only that the run
+  // did not finish.
   let reask = "";
   if (!existsSync(stopFile)) {
     if (exitCode === "0") {
