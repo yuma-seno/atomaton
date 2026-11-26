@@ -25342,6 +25342,45 @@
     ]
   },
   {
+    "path": "sessions/issue-610/engineer.json",
+    "agent": "engineer",
+    "messages": 12,
+    "calls": 4,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "read": 4
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-26T11:47:06Z",
+        "ended_because": "failed",
+        "iterations": 4,
+        "loop_abort": {
+          "arguments": "{\"path\":\"src/adapters/github/workflow-runs.ts\"}",
+          "call": 4,
+          "capped": false,
+          "count": 4,
+          "last_error": null,
+          "rule": "identical_answers",
+          "tool": "read"
+        },
+        "messages": 12,
+        "seconds": 11,
+        "server_calls": {
+          "files": {
+            "read": 4
+          }
+        },
+        "started": "2026-11-26T11:46:55Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
