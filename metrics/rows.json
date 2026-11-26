@@ -25588,6 +25588,61 @@
     ]
   },
   {
+    "path": "sessions/issue-614/reviewer.json",
+    "agent": "reviewer",
+    "messages": 27,
+    "calls": 11,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "get_pr_diff": 1,
+      "get_pr": 1,
+      "get_issue_comments": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "grep": 1,
+      "glob": 1,
+      "read": 4
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-26T15:28:16Z",
+        "ended_because": "failed",
+        "iterations": 7,
+        "loop_abort": {
+          "arguments": "{\"path\":\"src/workflows/atomaton-runner.wac.ts\"}",
+          "call": 11,
+          "capped": false,
+          "count": 4,
+          "last_error": null,
+          "rule": "identical_answers",
+          "tool": "read"
+        },
+        "messages": 27,
+        "seconds": 11,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 1,
+            "read": 4
+          },
+          "github": {
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          }
+        },
+        "started": "2026-11-26T15:28:05Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
