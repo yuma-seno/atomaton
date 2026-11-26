@@ -1,8 +1,9 @@
 {
-  "version": "v0.25.2",
+  "version": "v0.25.3",
   "files": [
     ".github/atomaton-release.json",
     ".github/atomaton-runtime/scripts/aggregate_sub_issues.ts",
+    ".github/atomaton-runtime/scripts/ask_again.ts",
     ".github/atomaton-runtime/scripts/check_ending.ts",
     ".github/atomaton-runtime/scripts/check_live_tools.ts",
     ".github/atomaton-runtime/scripts/check_sub_issue_closure.ts",
