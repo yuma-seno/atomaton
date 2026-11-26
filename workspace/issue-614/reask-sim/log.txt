@@ -1,0 +1,4 @@
+Wrote 2 credential(s) for this run: ORCAROUTER_API_KEY, GH_TOKEN
+closing message calls nobody
+ask_again: exit_code=0 ending_invalid=false
+read_run_ending: ended_because=completed reported=true

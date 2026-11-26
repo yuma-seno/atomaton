@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+if [ "$1" = "-n" ] && [ "$2" = "-u" ] && [ "$3" = "atomaton-tools" ] && [ "$4" = "env" ]; then
+  # Find --credentials-file, read it, delete it: what atoma does on start.
+  prev=""
+  for a in "$@"; do
+    if [ "$prev" = "--credentials-file" ]; then
+      if [ ! -f "$a" ]; then
+        echo "Error: Failed to read credentials file: \"$a\"" >&2
+        exit 1
+      fi
+      cp "$a" "$RUNNER_TEMP/credentials-seen-by-atoma.json"
+      rm -f "$a"
+    fi
+    prev="$a"
+  done
+  echo "Done; nothing left to run."
+  exit 0
+fi
+exit 0
