@@ -1,8 +1,8 @@
 ended_because=completed
 reported=true
-result<<55559cab645ad4cf348100e5981841
-Done; nothing left to run.
-55559cab645ad4cf348100e5981841
+result<<f4eeac10fb12b23c3d06e14a71ed68
+Done; the second turn's report.
+f4eeac10fb12b23c3d06e14a71ed68
 directive=
 ending_invalid=false
 chain_continues=false

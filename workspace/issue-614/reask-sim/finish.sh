@@ -1,30 +1,17 @@
 
-EXIT_CODE=''
-ENDING_INVALID=''
-REASK=''
-REASK_BUDGET=''
+EXIT_CODE='0'
+ENDING_INVALID='false'
 
-# Nothing published means the step above failed before it could decide, so the
-# machinery is what failed and not atoma. The boundary flag stays unwritten, and
-# "Post result comment" reads that as red.
+# Nothing published means the step above never reached an ending, so the machinery
+# is what failed and not atoma. The boundary flag stays unwritten, and "Post result
+# comment" reads that as red.
 if [ -z "$EXIT_CODE" ]; then
   echo "::error::the run never reached an ending; the machinery failed before it did"
   exit 1
 fi
 
-if [ "$REASK" != "" ]; then
-  # atoma read the first file and deleted it, so the second turn gets its own.
-  bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/write_credentials_file.ts" --out "$RUNNER_TEMP/atomaton-credentials/credentials.json"
-  sudo chown atomaton-tools "$RUNNER_TEMP/atomaton-credentials/credentials.json"
-  # The reason travels in rather than being looked for again: `decide_reask.ts` is
-  # where two turns and no more is held.
-  ASK_RESULT=$(bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/ask_again.ts" --run-dir "${RUNNER_TEMP}/atomaton-run" --tool-cache "${RUNNER_TEMP}/atomaton-tool-cache" --tools-file "${RUNNER_TEMP}/atomaton-run/tools.yaml" --credentials-file "$RUNNER_TEMP/atomaton-credentials/credentials.json" --stop-file "${RUNNER_TEMP}/atomaton-run/stop-requested" --reask "${REASK}" --budget-secs "${REASK_BUDGET}" --exit-code "${EXIT_CODE}" --ending-invalid "${ENDING_INVALID}") || { echo "::error::the second turn could not be run; the run's ending is unknown"; exit 1; }
-  EXIT_CODE=$(printf '%s' "$ASK_RESULT" | sed -n 's/^exit_code=//p')
-  ENDING_INVALID=$(printf '%s' "$ASK_RESULT" | sed -n 's/^ending_invalid=//p')
-fi
-
-# The watcher has nothing left to watch for here, and only here: the second turn is
-# a turn a person may still stop, and the file it writes is what atoma is handed.
+# The watcher has nothing left to watch for here, and only here: the second turn was
+# a turn a person could still stop, and the file it writes is what atoma is handed.
 # Killed rather than left to the job, because a poller that outlives the run it was
 # polling for spends API budget on an answer nobody will read.
 if [ -f "${RUNNER_TEMP}/atomaton-run/stop-watch.pid" ]; then
