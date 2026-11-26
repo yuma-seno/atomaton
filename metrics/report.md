@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 72 | 25% | 48 | 696 | 10 | 6.8 |
-| Last 30 days | 427 | 11.9% | 255 | 6,099 | 11 | 21.4 |
-| Last year | 853 | 8.9% | 257 | 10,246 | 14 | 19.1 |
-| All time | 853 | 8.9% | 257 | 10,246 | 14 | 19.1 |
+| Last 7 days | 73 | 26% | 45 | 696 | 9 | 6.7 |
+| Last 30 days | 428 | 12.1% | 255 | 6,099 | 11 | 21.2 |
+| Last year | 854 | 9% | 257 | 10,246 | 14 | 19.1 |
+| All time | 854 | 9% | 257 | 10,246 | 14 | 19.1 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -22,7 +22,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | ended because | runs |
 | --- | ---: |
 | `completed` | 777 |
-| `failed` | 65 |
+| `failed` | 66 |
 | `stopped` | 11 |
 
 ## Last 7 days
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 610,350 | 2,512,747 | 7,840,910 | 7,840,910 | 31,359,690 |
-| messages per session | 83 | 186 | 219 | 219 | 2,790 |
+| messages per session | 83 | 186 | 219 | 219 | 2,800 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -51,7 +51,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 462 | 7 | 2 | 1.5% |
-| `read` | 429 | 2 | 0 | 0.5% |
+| `read` | 433 | 2 | 0 | 0.5% |
 | `grep` | 247 | 0 | 0 | 0% |
 | `edit` | 87 | 4 | 0 | 4.6% |
 | `fetch` | 37 | 1 | 0 | 2.7% |
@@ -110,7 +110,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,300,539 | 8,271,355 | 21,812,397 | 29,805,044 | 506,185,194 |
-| messages per session | 144 | 339 | 425 | 439 | 23,569 |
+| messages per session | 144 | 339 | 425 | 439 | 23,579 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -124,7 +124,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 4,534 | 105 | 59 | 2.3% |
-| `read` | 2,662 | 13 | 0 | 0.5% |
+| `read` | 2,666 | 13 | 0 | 0.5% |
 | `grep` | 2,282 | 47 | 13 | 2.1% |
 | `edit` | 749 | 15 | 0 | 2% |
 | `fetch` | 653 | 60 | 0 | 9.2% |
@@ -199,7 +199,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,286,863 | 6,181,709 | 27,846,035 | 73,718,100 | 1,142,294,707 |
-| messages per session | 126 | 334 | 583 | 731 | 54,291 |
+| messages per session | 126 | 334 | 583 | 731 | 54,301 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -213,7 +213,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 8,736 | 175 | 128 | 2% |
-| `read` | 6,574 | 34 | 8 | 0.5% |
+| `read` | 6,578 | 34 | 8 | 0.5% |
 | `grep` | 5,023 | 112 | 21 | 2.2% |
 | `edit` | 2,247 | 39 | 0 | 1.7% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
@@ -325,7 +325,7 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,286,863 | 6,181,709 | 27,846,035 | 73,718,100 | 1,142,294,707 |
-| messages per session | 119 | 330 | 583 | 731 | 54,415 |
+| messages per session | 119 | 330 | 583 | 731 | 54,425 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -339,7 +339,7 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
 | `bash` | 8,736 | 175 | 128 | 2% |
-| `read` | 6,574 | 34 | 8 | 0.5% |
+| `read` | 6,578 | 34 | 8 | 0.5% |
 | `grep` | 5,023 | 112 | 21 | 2.2% |
 | `edit` | 2,247 | 39 | 0 | 1.7% |
 | `shell__shell_execute` | 1,548 | 19 | 22 | 1.2% |
