@@ -1109,7 +1109,13 @@ const finishStep = new TypedOutputsStep(
     name: "Write the turn's ending",
     // Named, because four steps downstream read its outputs and its outcome.
     id: "finish",
-    if: `always() && (${runAgentStep.rawOutcome} == 'success' || ${runAgentStep.rawOutcome} == 'failure') && ${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
+    // The first turn's outcome, because that is the step whose run reached this one —
+    // and the asking step's, because the exit code read below is ITS output. A person
+    // cancelling the second turn leaves that output unwritten, and this step would
+    // then report a machinery failure for a run somebody stopped on purpose, beside
+    // the handback "Report a cancelled run" posts for the same run. One stopped run
+    // gets one comment, and for a cancellation it is the handback's.
+    if: `always() && (${runAgentStep.rawOutcome} == 'success' || ${runAgentStep.rawOutcome} == 'failure') && ${reaskStep.rawOutcome} != 'cancelled' && ${hasTurn} && ${claimTurnStep.rawOutputs.claimed} == 'true'`,
     shell: "bash",
     run: `
 EXIT_CODE='\${{ steps.reask.outputs.exit_code }}'
