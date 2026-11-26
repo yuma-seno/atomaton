@@ -1,30 +1,40 @@
 /**
- * decide_reask.test.ts  Ethe one second turn a run is allowed, and the bounds
- * around it.
+ * decide_reask.test.ts — whether a run gets its one second turn, and why.
  *
- * The counting is `domain/work/ending-calls.test.ts`'s and the scripts it calls
- * have their own files; what this pins is the orchestration, which is the part
- * a refactor can break without anything failing: that a failed or stopped first
- * turn is never asked, that the second turn runs only when there is time for it,
- * that the session is restored when the second attempt dies, and that a person's
- * stop during the ask outranks everything the machinery was about to do.
+ * The turn itself is `ask_again.test.ts`'s, in a step of its own: atoma deletes the
+ * credentials file it read, so the second turn cannot be launched from here. What
+ * this pins is the judgement and its bounds — a failed or stopped first turn is
+ * never asked, a run with no time left is warned about instead of asked, the
+ * session is only touched when a turn will actually follow, and the loop guard's
+ * abort is reached through the session's verdict rather than through an ending word
+ * or an exit code.
  *
- * The second turn is `sudo ... atoma run`, and tests cannot run sudo  Eso a fake
- * `sudo` on PATH stands in for it, driven by `FAKE_SUDO_MODE`. What the fake
- * answers for is the exec and its exit code; the launch library's argv is held
- * by the contract tests on the generated workflow.
+ * The second turn is `sudo ... atoma run`, which tests cannot run, and nothing here
+ * launches — that is the property, so no fake `sudo` is needed on PATH.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hermeticEnv, removeTemp, scriptPath } from "./testing/harness.ts";
+import { hermeticEnv, scriptPath } from "./testing/harness.ts";
 
 /** The breaking ending: two calls, the fixture `check_ending` refuses. */
 const BREAKING = "Done.\n\n/engineer\n\n@alice, your call.";
 const PEOPLE = JSON.stringify({ humans: ["alice", "bob"], notify: "alice" });
 const SESSION = JSON.stringify({ messages: [{ role: "assistant", content: BREAKING }] });
+
+/**
+ * A run that stopped on the sentence that announced its next step: `completed`, no
+ * tool call in the last turn, nothing changed, and nobody named — the four facts
+ * `domain/work/stalled-continuation.ts` reads. The ending word lives in the session,
+ * which is where `read_run_ending.ts` reads it from.
+ */
+const STALLED_TEXT = "I will now read the file:";
+const STALLED = JSON.stringify({
+  messages: [{ role: "assistant", content: STALLED_TEXT }],
+  atoma_runs: [{ ended_because: "completed" }],
+});
 
 /**
  * A run the loop guard stopped, in the shape a real one arrives in (#610): atoma
@@ -54,87 +64,23 @@ interface RunResult {
   messages: string[];
   /** What the machinery told the run, in order. */
   notes: string[];
-  output: string;
-}
-
-function makeSudo(dir: string): string {
-  const bin = join(dir, "bin");
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(
-    join(bin, "sudo"),
-    [
-      "#!/usr/bin/env bash",
-      '# Fakes `sudo -n -u USER env ... atoma run ...`  Ethe exec and its exit code.',
-      'mode="${FAKE_SUDO_MODE:-ok}"',
-      'if [ "$mode" = "stop" ]; then',
-      '  prev=""',
-      '  for a in "$@"; do',
-      '    if [ "$prev" = "--stop-file" ]; then touch "$a"; fi',
-      '    prev="$a"',
-      "  done",
-      '  echo "stopped mid-sentence"',
-      "  # atoma saw the stop and answered with its own soft stop.",
-      "  exit 2",
-      "fi",
-      'if [ "$mode" = "fail" ]; then',
-      '  echo "the second attempt died" >&2',
-      "  exit 3",
-      "fi",
-      'echo "Done; nothing left to run."',
-      "exit 0",
-      "",
-    ].join("\n"),
-  );
-  // Windows resolves `sudo` through PATHEXT to sudo.cmd below, where execute
-  // bits do not exist; a POSIX runner needs the bit, or the exec fails and the
-  // second turn reads as failed.
-  if (process.platform !== "win32") chmodSync(join(bin, "sudo"), 0o755);
-  // The sh spelling is what a Linux runner executes; the .cmd spelling is what
-  // Windows resolves through PATHEXT when these tests run on a checkout.
-  writeFileSync(
-    join(bin, "sudo.cmd"),
-    [
-      "@echo off",
-      'if /i "%FAKE_SUDO_MODE%"=="stop" goto stop',
-      'if /i "%FAKE_SUDO_MODE%"=="fail" goto fail',
-      "echo Done; nothing left to run.",
-      "exit /b 0",
-      ":stop",
-      'set "prev="',
-      'set "stopfile="',
-      ":nextarg",
-      'if "%~1"=="" goto stopped',
-      'if "%prev%"=="--stop-file" set "stopfile=%~1"',
-      'set "prev=%~1"',
-      "shift",
-      "goto nextarg",
-      ":stopped",
-      'if not "%stopfile%"=="" type nul > "%stopfile%"',
-      "echo stopped mid-sentence",
-      "rem atoma saw the stop and answered with its own soft stop.",
-      "exit /b 2",
-      ":fail",
-      "echo the second attempt died 1>&2",
-      "exit /b 3",
-      "",
-    ].join("\r\n"),
-  );
-  return bin;
+  /** Whether the decision kept a copy of the session to restore from. */
+  keptSession: boolean;
 }
 
 function run(opts: {
   exitCode: string;
-  mode?: "ok" | "fail" | "stop";
   deadlineOffsetSecs?: number;
   output?: string;
   /** The session atoma left; the breaking ending by default. */
   session?: string;
   withStopFile?: boolean;
-}): RunResult & { dir: string } {
-  const dir = mkdtempSync(join(tmpdir(), "atomaton-reask-"));
-  const bin = makeSudo(dir);
+  /** Arguments to leave out, to hold the caller's contract. */
+  omit?: string;
+}): RunResult {
+  const dir = mkdtempSync(join(tmpdir(), "atomaton-decide-"));
   // The definitions live under the machinery root's `.github/atomaton/`, exactly
-  // where a deployed tree carries them  Ethe decision resolves them itself.
+  // where a deployed tree carries them — the decision resolves them itself.
   const defs = join(dir, ".github", "atomaton", "agent-definitions");
   mkdirSync(defs, { recursive: true });
   writeFileSync(join(defs, "engineer.md"), "---\nname: engineer\n---\n");
@@ -143,74 +89,55 @@ function run(opts: {
   writeFileSync(join(runDir, "session.json"), opts.session ?? SESSION);
   writeFileSync(join(runDir, "atomaton_output.txt"), opts.output ?? BREAKING);
   writeFileSync(join(runDir, "callees.json"), PEOPLE);
-  if (opts.withStopFile) writeFileSync(join(optsStopPath(dir)), "stop");
+  const stopFile = join(dir, "stop-requested");
+  if (opts.withStopFile) writeFileSync(stopFile, "stop");
 
   const deadline = Math.floor(Date.now() / 1000) + (opts.deadlineOffsetSecs ?? 3600);
-  // Windows joins PATH with `;`; the fake sudo must be found before any real one.
-  const pathSep = process.platform === "win32" ? ";" : ":";
-  const run = spawnSync(
-    "bun",
-    [
-      "run", scriptPath("decide_reask.ts"),
-      "--run-dir", runDir,
-      "--tool-cache", join(dir, "cache"),
-      "--tools-file", join(dir, "tools.yaml"),
-      "--credentials-file", join(dir, "credentials.json"),
-      "--stop-file", optsStopPath(dir),
-      "--deadline-at", String(deadline),
-      "--min-budget-secs", "60",
-      "--exit-code", opts.exitCode,
-    ],
-    {
-      encoding: "utf8",
-      env: {
-        ...hermeticEnv(),
-        AGENT: "engineer",
-        ATOMATON_MACHINERY_ROOT: dir,
-        FAKE_SUDO_MODE: opts.mode ?? "ok",
-        PATH: `${bin}${pathSep}${process.env.PATH ?? ""}`,
-      },
-    },
-  );
+  const args: Record<string, string> = {
+    "run-dir": runDir,
+    "stop-file": stopFile,
+    "deadline-at": String(deadline),
+    "min-budget-secs": "60",
+    "exit-code": opts.exitCode,
+  };
+  const argv = ["run", scriptPath("decide_reask.ts")];
+  for (const [flag, value] of Object.entries(args)) {
+    if (flag === opts.omit) continue;
+    argv.push(`--${flag}`, value);
+  }
+
+  const decided = spawnSync("bun", argv, {
+    encoding: "utf8",
+    env: { ...hermeticEnv(), AGENT: "engineer", ATOMATON_MACHINERY_ROOT: dir },
+  });
   const session = JSON.parse(readFileSync(join(runDir, "session.json"), "utf8")) as {
     messages?: Array<{ role: string; content: string }>;
   };
   const messages = session.messages ?? [];
-  const output = exists(join(runDir, "atomaton_output.txt")) ? readFileSync(join(runDir, "atomaton_output.txt"), "utf8") : "";
   return {
-    status: run.status ?? -1,
-    stdout: run.stdout ?? "",
+    status: decided.status ?? -1,
+    stdout: decided.stdout ?? "",
     messages: messages.map((m) => m.role),
     notes: messages.filter((m) => m.role === "user").map((m) => m.content),
-    output,
-    dir,
+    keptSession: existsSync(join(runDir, "session_before_reask.json")),
   };
-
-  function optsStopPath(base: string): string {
-    return join(base, "stop-requested");
-  }
-  function exists(path: string): boolean {
-    try {
-      readFileSync(path);
-      return true;
-    } catch {
-      return false;
-    }
-  }
 }
 
 describe("decide_reask.ts", () => {
   test("a failed first turn is never asked", () => {
-    const r = run({ exitCode: "3", mode: "ok" });
+    const r = run({ exitCode: "3" });
     expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain("reask=\n");
     expect(r.stdout).toContain("exit_code=3");
     expect(r.stdout).toContain("ending_invalid=false");
     expect(r.messages, "the session stands as atoma wrote it").toEqual(["assistant"]);
+    expect(r.keptSession, "and nothing is kept to restore from").toBe(false);
   });
 
   test("and nor is a run the person stopped", () => {
     const r = run({ exitCode: "0", withStopFile: true });
     expect(r.status).toBe(0);
+    expect(r.stdout).toContain("reask=\n");
     expect(r.stdout).toContain("exit_code=0");
     expect(r.messages).toEqual(["assistant"]);
   });
@@ -218,46 +145,50 @@ describe("decide_reask.ts", () => {
   test("a breaking ending with no time left refuses its calls without a second turn", () => {
     const r = run({ exitCode: "0", deadlineOffsetSecs: -10 });
     expect(r.status).toBe(0);
+    expect(r.stdout, "and there is no turn to hand a budget to").toContain("reask=\n");
+    expect(r.stdout).toContain("budget_secs=0");
     expect(r.stdout).toContain("ending_invalid=true");
     expect(r.stdout).toContain("exit_code=0");
     expect(r.messages, "nothing is injected when there is no time to ask").toEqual(["assistant"]);
-    expect(r.output, "and the first ending stands").toContain(BREAKING);
+    expect(r.keptSession, "and nothing is kept to restore from").toBe(false);
   });
 
-  test("a breaking ending is rejected in the session, and the second turn replaces the first", () => {
-    const r = run({ exitCode: "0", mode: "ok" });
-    expect(r.status).toBe(0);
+  test("a breaking ending is rejected in the session, and a second turn is asked for", () => {
+    const r = run({ exitCode: "0" });
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain("reask=ending\n");
+    expect(r.stdout, "the budget decided for the second turn travels with the reason").toMatch(/budget_secs=[1-9]\d*\n/);
+    expect(r.stdout).toContain("injected=true");
     expect(r.stdout).toContain("exit_code=0");
-    expect(r.stdout, "the second ending kept the one-call rule").toContain("ending_invalid=false");
     expect(r.messages, "the rejection is a user turn in the session").toContain("user");
-    expect(r.output, "the second attempt's report is the run's").toContain("Done; nothing left to run.");
-    expect(r.output).not.toContain(BREAKING);
+    expect(r.keptSession, "the first ending is kept to restore from if the second turn dies").toBe(true);
   });
 
   test("a stalled run is continued the same way", () => {
-    // A clean ending is not a call, so the only reason left is the stall  Ewhich
-    // `should_continue_stalled.ts` decides from the session and the ops log. Its
-    // own tests hold the judgement; here it only has to be reachable, which is
-    // visible in the session gaining a user turn while the ending stays valid.
-    const r = run({ exitCode: "0", mode: "ok", output: "Done; nothing left to run." });
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("exit_code=0");
+    // The judgement is `should_continue_stalled.ts`'s, and its own tests hold it;
+    // here it only has to be reachable, and to put its note in the session.
+    const r = run({ exitCode: "0", session: STALLED, output: STALLED_TEXT });
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain("reask=stalled\n");
+    expect(r.messages, "the note is a user turn in the session").toEqual(["assistant", "user"]);
+    expect(r.keptSession).toBe(true);
   });
 
   test("a run the loop guard stopped is asked for one more turn", () => {
     const r = run({ exitCode: "1", session: LOOP });
     expect(r.status, r.stdout).toBe(0);
-    expect(r.stdout, "the second turn's own exit is the run's").toContain("exit_code=0");
+    expect(r.stdout, "the reason comes from the verdict, not the exit code").toContain("reask=loop\n");
+    expect(r.stdout, "the first turn's exit travels unchanged: the second turn's is the one that counts").toContain("exit_code=1");
     expect(r.stdout).toContain("ending_invalid=false");
     expect(r.messages, "the note is a user turn in the session").toEqual(["assistant", "user"]);
     expect(r.notes[0], "and it names the call that repeated").toContain('{"path":"src/domain/tool_loop.rs"}');
-    expect(r.output, "the second attempt's report is the run's").toContain("Done; nothing left to run.");
-    expect(r.output).not.toContain(BREAKING);
+    expect(r.keptSession).toBe(true);
   });
 
   test("a loop abort with no time left keeps the first turn's ending", () => {
     const r = run({ exitCode: "1", session: LOOP, deadlineOffsetSecs: -10 });
-    expect(r.status).toBe(0);
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toContain("reask=\n");
     expect(r.stdout, "nothing was asked, so nothing changed the exit").toContain("exit_code=1");
     expect(r.messages, "nothing is injected when there is no time to ask").toEqual(["assistant"]);
   });
@@ -277,30 +208,13 @@ describe("decide_reask.ts", () => {
       }),
     });
     expect(r.status).toBe(0);
+    expect(r.stdout).toContain("reask=\n");
     expect(r.stdout).toContain("exit_code=1");
     expect(r.messages).toEqual(["assistant"]);
   });
 
-  test("the person stopping during the loop's second turn outranks it", () => {
-    const r = run({ exitCode: "1", session: LOOP, mode: "stop" });
-    expect(r.status).toBe(0);
-    expect(r.stdout, "the stop outranks the retry").toContain("exit_code=2");
-    expect(r.output, "whatever the second attempt wrote stands").toContain("stopped mid-sentence");
-  });
-
-  test("the person stopping during the second turn makes the run a soft stop", () => {
-    const r = run({ exitCode: "0", mode: "stop" });
-    expect(r.status).toBe(0);
-    expect(r.stdout, "the stop outranks the retry").toContain("exit_code=2");
-    expect(r.messages, "the rejection was already in").toContain("user");
-    expect(r.output, "whatever the second attempt wrote stands").toContain("stopped mid-sentence");
-  });
-
-  test("a second attempt that failed restores the first run's session", () => {
-    const r = run({ exitCode: "0", mode: "fail" });
-    expect(r.status).toBe(0);
-    expect(r.stdout, "the first ending is the one the run had").toContain("exit_code=0");
-    expect(r.stdout).toContain("ending_invalid=true");
-    expect(r.messages, "the session is back as atoma wrote it").toEqual(["assistant"]);
+  test("a caller that leaves an argument out is refused, not defaulted", () => {
+    const r = run({ exitCode: "0", omit: "min-budget-secs" });
+    expect(r.status, "a missing bound cannot be read as a budget").toBe(2);
   });
 });

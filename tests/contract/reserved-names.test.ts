@@ -56,6 +56,19 @@ describe("reserved names match the workflows they describe", () => {
   });
 
   /**
+   * The step that asks again carries the same run environment plus the credentials, so
+   * it can be shadowed the same way -- and it is the step where a shadowed `NUMBER` or
+   * `ATOMATON_OPS_LOG` would be read by tools belonging to a turn nobody could trace.
+   */
+  test("the step that asks again", () => {
+    expectAllReserved(
+      "tools.secrets",
+      TOOL_SECRETS.reserved,
+      carrierEnvKeys("atomaton-runner.yml", "run", "Ask the run for one more turn"),
+    );
+  });
+
+  /**
    * The pull request's own checks have no list to reserve against, and that is the
    * point: their commands are the pull request's own, so a declared credential would
    * be one the change being judged could read. What is checked instead is that

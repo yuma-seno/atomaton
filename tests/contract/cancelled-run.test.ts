@@ -37,6 +37,25 @@ describe("the cancelled run's inside report", () => {
     expect(step?.if ?? "").toContain("steps.claim.outputs.claimed == 'true'");
   });
 
+  /**
+   * One stopped run, one comment.
+   *
+   * "Write the turn's ending" reads its exit code from the asking step's outputs, and
+   * a cancelled asking step publishes none: gated on the FIRST turn alone, it ran,
+   * found the code empty and exited with "the machinery failed before it did" — which
+   * "Post result comment" then posted as a death, beside the handback for the same
+   * run. Cancelling the second turn is now the commonest way to stop a re-ask run, so
+   * the condition is the whole of the fix and is held here.
+   */
+  test("and no other step reports an ending for the same cancelled run", () => {
+    const ending = steps.find((s) => s.name === "Write the turn's ending");
+    expect(ending, "the step that reads, and reports, the run's ending").toBeDefined();
+    expect(
+      ending?.if ?? "",
+      "a cancellation during the second turn leaves the report to the handback",
+    ).toContain("steps.reask.outcome != 'cancelled'");
+  });
+
   test("the report carries the turn's identity, so it closes the claim it answers", () => {
     const step = steps.find((s) => s.name === "Report a cancelled run");
     expect(step?.run ?? "").toContain("report_cancelled_run.ts");
