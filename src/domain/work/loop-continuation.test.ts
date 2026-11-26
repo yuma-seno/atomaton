@@ -46,15 +46,43 @@ describe("the verdict a loop ending records", () => {
     expect(loopAbortFromSession(session([{ ended_because: "loop" }]))).toBeUndefined();
   });
 
+  /**
+   * The shape a real run has (#610). atoma's `soft_stop_ending` maps only
+   * `Repetition`, so a tool-loop abort is recorded as `failed` with the verdict
+   * beside it -- keying on the word found nothing on any run that ever looped.
+   */
+  test("the ending word is not the signal: a failed run carrying a verdict was stopped by the guard", () => {
+    const abort = loopAbortFromSession(session([{ ended_because: "failed", loop_abort: ANSWERS }]));
+    expect(abort?.rule).toBe("identical_answers");
+    expect(loopContinuationMessage(abort!)).toContain('{"path":"src/domain/tool_loop.rs"}');
+  });
+
+  /** Nor is it read the other way round: a verdict is a verdict under any word. */
+  test("a verdict under any other ending is read the same", () => {
+    for (const ended_because of ["loop", "stopped", "runtime", "completed"]) {
+      expect(loopAbortFromSession(session([{ ended_because, loop_abort: ANSWERS }])), ended_because).toBeDefined();
+    }
+  });
+
   /** A run that looped and then finished on its second turn is a run that finished. */
   test("an earlier loop is not this run's ending", () => {
     expect(
-      loopAbortFromSession(session([{ ended_because: "loop", loop_abort: ANSWERS }, { ended_because: "completed" }])),
+      loopAbortFromSession(session([{ ended_because: "failed", loop_abort: ANSWERS }, { ended_because: "completed" }])),
     ).toBeUndefined();
   });
 
-  test("a verdict under any other ending is not read", () => {
-    expect(loopAbortFromSession(session([{ ended_because: "stopped", loop_abort: ANSWERS }]))).toBeUndefined();
+  /**
+   * The ending word alone says nothing here: `loop` without a verdict is the older
+   * binary, and `failed` without one is an ordinary failure.
+   */
+  test("an entry with neither a verdict nor anything else yields nothing", () => {
+    for (const ended_because of ["loop", "failed", "completed"]) {
+      expect(loopAbortFromSession(session([{ ended_because }])), ended_because).toBeUndefined();
+    }
+  });
+
+  test("an entry with neither field at all yields nothing", () => {
+    expect(loopAbortFromSession(session([{}]))).toBeUndefined();
   });
 
   test("a session with no run record at all says nothing", () => {

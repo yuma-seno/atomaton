@@ -6,15 +6,27 @@
  *
  * A run that calls one tool with the same arguments, gets the same answer back and
  * does it again is stopped by atoma's loop guard. The guard is right, and since
- * v0.6.0 the ending is typed: the last `atoma_runs` entry carries
- * `ended_because: "loop"` and a `loop_abort` verdict naming the rule, the tool, the
- * arguments, how many times it repeated, and whether the answer was cut by the
- * output cap.
+ * v0.6.0 the abort is typed: the last `atoma_runs` entry carries a `loop_abort`
+ * verdict naming the rule, the tool, the arguments, how many times it repeated, and
+ * whether the answer was cut by the output cap.
  *
  * Recovering from that used to be a person's job — read the log, work out which file
  * was being re-read, write a scoped instruction, comment again. The run had every one
  * of those facts the whole time. So the same one-second-turn machinery the other two
  * premature endings are offered is offered here, and this is the note it is handed.
+ *
+ * # The verdict is the signal, not the ending word
+ *
+ * atoma records this abort under `ended_because: "failed"`, not `loop`: its
+ * `soft_stop_ending` maps only `Repetition`, a different guard that watches the
+ * model's own output, so a tool-loop abort comes back as an ordinary failure with a
+ * verdict attached. Detection here keyed on the word first and therefore found
+ * nothing on any real run — the second turn and the comment section were both
+ * skipped while the verdict sat in the session unread (#610).
+ *
+ * So `loop_abort` is what is read, and `ended_because` is not consulted at all. It is
+ * the fact the core actually writes, it is unambiguous about what stopped the run,
+ * and the day the core gives this abort an ending word of its own this keeps working.
  *
  * # Why each rule is worded separately
  *
@@ -22,8 +34,8 @@
  * back, so re-reading cannot produce anything new. `empty_results` and
  * `identical_failures` are not that — nothing came back, or the same error came
  * back — and a note telling the run its answer was already above would be
- * describing a fact that is not true of it. `cycle` is a run of calls coming back round to where it started, where
- * no single answer repeated at all. `last_error` is the tool's own sentence about the
+ * describing a fact that is not true of it. `cycle` is a run of calls coming back
+ * round to where it started, where no single answer repeated at all. `last_error` is the tool's own sentence about the
  * failure, quoted rather than paraphrased.
  *
  * # Why there is no `changed` test
@@ -39,13 +51,17 @@
  * # The session written by an older binary
  *
  * `loop_abort` arrives with atoma v0.6.0. A session written by anything older records
- * `loop` and nothing beside it, and `loopAbortFromSession` answers `undefined` for
- * that, so the run is treated exactly as it is today.
+ * no verdict at all, and `loopAbortFromSession` answers `undefined` for it, so the run
+ * is treated exactly as it is today — whichever word its ending carries.
  */
 import type { Session } from "./session.ts";
 
 /**
  * The verdict atoma's loop guard records, as this reader needs it.
+ *
+ * The object a run entry carries when the guard stopped it. `ended_because` is not
+ * part of this and is not read beside it: the entry this arrives on says `failed`, so
+ * the word is not the signal — see the module comment for why.
  *
  * A projection, not the wire shape: `call` — the index of the tool call the verdict
  * was reached on — is recorded and not read, because the note names the call rather
@@ -74,16 +90,19 @@ export interface LoopAbort {
 /**
  * The verdict, when this run was stopped by the loop guard.
  *
- * `undefined` is every other case, and it includes the one a pin has to allow for: a
- * session whose last run entry says `loop` but carries no verdict, which is what any
- * binary before v0.6.0 writes.
+ * `undefined` is every other case: an ordinary ending, and the one a pin has to allow
+ * for — a session written by a binary before v0.6.0, which records no verdict
+ * whichever word its ending carries.
+ *
+ * The last entry only, because a session is resumed and an earlier run's verdict is
+ * not this run's ending. A run that was stopped by the guard and then finished on its
+ * second turn has a later entry without one, and reads as the finished run it is.
  */
 export function loopAbortFromSession(session: Session | undefined): LoopAbort | undefined {
   const runs = session?.atoma_runs;
   if (!Array.isArray(runs) || runs.length === 0) return undefined;
-  const last = runs[runs.length - 1] as { ended_because?: unknown; loop_abort?: unknown };
-  if (last?.ended_because !== "loop") return undefined;
-  const recorded = last.loop_abort;
+  const last = runs[runs.length - 1] as { loop_abort?: unknown };
+  const recorded = last?.loop_abort;
   if (typeof recorded !== "object" || recorded === null) return undefined;
   const verdict = recorded as Record<string, unknown>;
   if (typeof verdict.rule !== "string" || verdict.rule === "") return undefined;

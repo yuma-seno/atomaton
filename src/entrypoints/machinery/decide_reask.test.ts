@@ -27,9 +27,11 @@ const PEOPLE = JSON.stringify({ humans: ["alice", "bob"], notify: "alice" });
 const SESSION = JSON.stringify({ messages: [{ role: "assistant", content: BREAKING }] });
 
 /**
- * A run the loop guard stopped: atoma recorded the ending and the verdict behind it,
- * which is the shape that arrives from v0.6.0. The exit code is the soft stop, since
- * that is what a saved session is written under.
+ * A run the loop guard stopped, in the shape a real one arrives in (#610): atoma
+ * records the verdict beside `ended_because: "failed"`, because its `soft_stop_ending`
+ * maps only a different guard that watches the model's own output. So the run reaches
+ * here as a failure with exit 1 and the verdict in the session, and neither the exit
+ * code nor the ending word may be what the decision reads.
  */
 const LOOP_ABORT = {
   rule: "identical_answers",
@@ -42,7 +44,7 @@ const LOOP_ABORT = {
 };
 const LOOP = JSON.stringify({
   messages: [{ role: "assistant", content: "", tool_calls: [{ function: { name: "read" } }] }],
-  atoma_runs: [{ ended_because: "loop", loop_abort: LOOP_ABORT }],
+  atoma_runs: [{ ended_because: "failed", loop_abort: LOOP_ABORT }],
 });
 
 interface RunResult {
@@ -243,7 +245,7 @@ describe("decide_reask.ts", () => {
   });
 
   test("a run the loop guard stopped is asked for one more turn", () => {
-    const r = run({ exitCode: "2", session: LOOP });
+    const r = run({ exitCode: "1", session: LOOP });
     expect(r.status, r.stdout).toBe(0);
     expect(r.stdout, "the second turn's own exit is the run's").toContain("exit_code=0");
     expect(r.stdout).toContain("ending_invalid=false");
@@ -254,31 +256,33 @@ describe("decide_reask.ts", () => {
   });
 
   test("a loop abort with no time left keeps the first turn's ending", () => {
-    const r = run({ exitCode: "2", session: LOOP, deadlineOffsetSecs: -10 });
+    const r = run({ exitCode: "1", session: LOOP, deadlineOffsetSecs: -10 });
     expect(r.status).toBe(0);
-    expect(r.stdout, "nothing was asked, so nothing changed the exit").toContain("exit_code=2");
+    expect(r.stdout, "nothing was asked, so nothing changed the exit").toContain("exit_code=1");
     expect(r.messages, "nothing is injected when there is no time to ask").toEqual(["assistant"]);
   });
 
   /**
-   * The pin's other half: a binary older than v0.6.0 records the ending and no
-   * verdict. There is nothing to tell the run, so it keeps the ending it had.
+   * The pin's other half: a binary older than v0.6.0 records no verdict, and an
+   * ordinary failure has none either. There is nothing to tell the run, so it keeps
+   * the ending it had -- and the word `loop`, which nothing here reads, changes
+   * nothing.
    */
   test("a loop ending with no verdict is treated as it is today", () => {
     const r = run({
-      exitCode: "2",
+      exitCode: "1",
       session: JSON.stringify({
         messages: [{ role: "assistant", content: "Nothing here." }],
         atoma_runs: [{ ended_because: "loop" }],
       }),
     });
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("exit_code=2");
+    expect(r.stdout).toContain("exit_code=1");
     expect(r.messages).toEqual(["assistant"]);
   });
 
   test("the person stopping during the loop's second turn outranks it", () => {
-    const r = run({ exitCode: "2", session: LOOP, mode: "stop" });
+    const r = run({ exitCode: "1", session: LOOP, mode: "stop" });
     expect(r.status).toBe(0);
     expect(r.stdout, "the stop outranks the retry").toContain("exit_code=2");
     expect(r.output, "whatever the second attempt wrote stands").toContain("stopped mid-sentence");

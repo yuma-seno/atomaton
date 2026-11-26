@@ -42,11 +42,15 @@ describe("post_result_comment.ts buildCommentBody", () => {
    * A run the loop guard stopped names the call that repeated. The verdict is
    * structured in the session, so the comment can say what happened without sending
    * the person to the workflow log.
+   *
+   * `failed` rather than `loop`, because that is the word atoma records a tool-loop
+   * abort under (#610): a section keyed on the ending word would be hidden on every
+   * run it is for, which is the gap this pins shut.
    */
   test("names the call the loop guard stopped, without the log", () => {
     const body = buildCommentBody({
       agent: "engineer",
-      endedBecause: "loop",
+      endedBecause: "failed",
       runUrl: "http://example.com/run/1",
       output: "Halfway through the file.",
       loopAbort: { rule: "identical_answers", tool: "read", arguments: '{"path":"a.rs"}', count: 4, capped: false },
@@ -55,6 +59,7 @@ describe("post_result_comment.ts buildCommentBody", () => {
     expect(body).toContain("`read`");
     expect(body).toContain('{"path":"a.rs"}');
     expect(body).toContain("4 times in a row");
+    expect(body, "and the failure notice it belongs to is still there").toContain("did not finish");
   });
 
   test("and says nothing about a loop when the run did not loop", () => {
@@ -65,6 +70,17 @@ describe("post_result_comment.ts buildCommentBody", () => {
       output: "All done.",
     });
     expect(body).not.toContain("loop guard");
+  });
+
+  /** The word alone carries no verdict, so it renders no section either. */
+  test("a loop ending with no verdict says nothing about the loop guard", () => {
+    const body = buildCommentBody({
+      agent: "engineer",
+      endedBecause: "loop",
+      runUrl: "http://example.com/run/1",
+      output: "Halfway through the file.",
+    });
+    expect(body).not.toContain("loop guard stopped this run");
   });
 
   test("and says nothing when nothing was defused", () => {

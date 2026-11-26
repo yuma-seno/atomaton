@@ -771,8 +771,12 @@ export function buildCommentBody(args: {
    * The run's log names the call it was repeating, and a person reading a "did not
    * finish" comment should not have to open the log to learn which one: the verdict
    * is structured in the session, and `domain/work/loop-continuation.ts` words it.
-   * Absent for every ending but `loop`, and for a session written by a binary older
-   * than v0.6.0 — which is the same silence this comment had before.
+   *
+   * Absent when the session's last run entry carries no verdict — an ordinary
+   * ending, or a session written by a binary older than v0.6.0, which is the same
+   * silence this comment had before. The ending word does not decide it: atoma
+   * records this abort as `failed`, so a check on the word would hide the section on
+   * every run it is for.
    */
   loopAbort?: LoopAbort;
 }): string {
@@ -1306,11 +1310,12 @@ function main(): void {
     // log is this file's input, not the body's: the same separation as the output,
     // the tokens and the session.
     excerpt: failed ? logExcerptFrom(values["logs-file"]) : undefined,
-    // Read from the session for the same reason the excerpt is read from the log:
-    // the fact is there, and only a `loop` ending has it. `decide_reask.ts` restores
-    // the session when its second turn died, so this is the verdict of the run whose
-    // ending is being reported either way.
-    loopAbort: endedBecause === "loop" ? loopAbortFromSession(readSession(values.session)) : undefined,
+    // Read from the session, and from the last run entry only, for the same reason the
+    // excerpt is read from the log: the fact is there. Not gated on `endedBecause` --
+    // a tool-loop abort is recorded as `failed` with the verdict beside it, so the word
+    // would suppress this on exactly the runs it is for. `decide_reask.ts` restores the
+    // session when its second turn died, so the entry read here is the aborted run's.
+    loopAbort: loopAbortFromSession(readSession(values.session)),
   });
 
   const { code, stdout, stderr } = gh(
