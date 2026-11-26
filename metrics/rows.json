@@ -25805,9 +25805,9 @@
   {
     "path": "sessions/issue-616/atomaton.json",
     "agent": "atomaton",
-    "messages": 137,
-    "calls": 75,
-    "failed": 1,
+    "messages": 167,
+    "calls": 91,
+    "failed": 2,
     "refused": 0,
     "skills": [
       "japanese"
@@ -25816,9 +25816,9 @@
     "tools": {
       "list": 4,
       "search_code": 6,
-      "grep": 23,
-      "read": 24,
-      "search_issues": 5,
+      "grep": 29,
+      "read": 33,
+      "search_issues": 6,
       "list_prs": 1,
       "get_issue_comments": 3,
       "get_issue": 2,
@@ -25859,6 +25859,24 @@
           }
         },
         "started": "2026-11-26T16:08:19Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-26T16:56:44Z",
+        "ended_because": "completed",
+        "iterations": 12,
+        "messages": 167,
+        "seconds": 701,
+        "server_calls": {
+          "files": {
+            "grep": 6,
+            "read": 9
+          },
+          "search": {
+            "search_issues": 1
+          }
+        },
+        "started": "2026-11-26T16:45:03Z"
       }
     ]
   },
