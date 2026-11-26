@@ -211,8 +211,17 @@ import { TypedOutputsStep } from "./base.ts";
  * they did before -- no second turn, and a comment quoting only the log -- so a run
  * under an older binary loses the recovery rather than failing, which is why this raise
  * can land on its own.
+ *
+ * **`loop_recoveries`, the note a looping run got in-run.** Written by the core from
+ * v0.7.0 (yuma-seno/atoma#45): under `--loop-retries`, the guard hands the run one
+ * recovery note on the verdict's own terms instead of stopping, and never resets the
+ * tracker, so the same call once more stops the run for real and the machinery's
+ * second turn (above) takes it from there. Recorded in the envelope and the
+ * `atoma_runs` record next to `loop_abort`; a run under v0.6.0 simply never recovers
+ * in-run and surfaces at the second turn as before, so nothing here breaks by it --
+ * this is the raise that turns the two-layer recovery on.
  */
-export const ATOMA_DEFAULT_VERSION = "v0.6.0";
+export const ATOMA_DEFAULT_VERSION = "v0.7.0";
 
 export const ATOMA_VERSION_DESC =
   "Atoma CLI version tag to install (e.g. v0.4.5). Use `source` to build from a checkout of yuma-seno/atoma@main.";
