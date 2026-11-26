@@ -90,6 +90,16 @@ function main(): void {
 
   const checkArgs = ["--output-file", output, "--def-dir", join(root, AGENT_DEFINITIONS_DIR), "--problem-file", problemFile, "--people-file", peopleFile];
 
+  // The launch builds `--agent-def .../<agent>.md`, so an empty name is a path to a
+  // file that cannot exist -- atoma would die on a missing definition instead of
+  // asking anything, and the run would look as though it had tried. The step hands
+  // this in from the same value the first turn used.
+  const agent = process.env.AGENT ?? "";
+  if (agent === "") {
+    console.error("ask_again: AGENT is empty; the second turn would have no agent definition to run");
+    process.exit(2);
+  }
+
   let exitCode = values["exit-code"]!;
   // Nothing upstream can hand this in as refused: an ending whose calls were refused
   // for want of time is never asked, and the first ending survives only when the
@@ -100,7 +110,7 @@ function main(): void {
   // no prompt source continues from the session -- the documented path, and
   // the reason this does not use `--prompt-file`.
   const secondExit = launchAtoma({
-    agent: process.env.AGENT ?? "",
+    agent,
     machineryRoot: root,
     toolsFile: values["tools-file"]!,
     credentialsFile: values["credentials-file"]!,

@@ -84,6 +84,8 @@ function run(opts: {
   withoutKeptSession?: boolean;
   /** Arguments to leave out, to hold the caller's contract. */
   omit?: string;
+  /** Leave `AGENT` out, to hold the step's own contract. */
+  withoutAgent?: boolean;
 }): RunResult {
   const dir = mkdtempSync(join(tmpdir(), "atomaton-ask-again-"));
   const bin = makeSudo(dir);
@@ -119,7 +121,7 @@ function run(opts: {
     encoding: "utf8",
     env: {
       ...hermeticEnv(),
-      AGENT: "engineer",
+      ...(opts.withoutAgent ? {} : { AGENT: "engineer" }),
       ATOMATON_MACHINERY_ROOT: dir,
       FAKE_SUDO_MODE: opts.mode ?? "ok",
       PATH: `${bin}:${process.env.PATH ?? ""}`,
@@ -192,6 +194,15 @@ describe("ask_again.ts", () => {
     // that was never put back.
     const r = run({ mode: "fail", withoutKeptSession: true });
     expect(r.status, "the script's own failure reaches the step").not.toBe(0);
+  });
+
+  test("no agent name is refused before anything is launched", () => {
+    // The launch builds `--agent-def .../<agent>.md`, so an empty name is a path to a
+    // file that cannot exist: atoma would die on a missing definition, and the run
+    // would report a second turn that never had one.
+    const r = run({ mode: "ok", withoutAgent: true });
+    expect(r.status, "a launch with no agent definition is not a turn").toBe(2);
+    expect(r.output, "and the first turn's report is untouched").toContain(BREAKING);
   });
 
   test("a caller that leaves an argument out is refused, not defaulted", () => {
