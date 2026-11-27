@@ -121,6 +121,26 @@ still the person's to say. A run that guessed would release under a number nobod
 chose, so picking nothing is refused. There is nothing to bump on the first
 release, when `package.json` declares no version yet, so that one names a version.
 
+**Marking a release the template wants adopted promptly.** A release that closes
+something an adopter should not keep running — a vulnerability, a defect in a shipped
+path — says so in its own notes, by carrying the line
+
+```markdown
+`atomaton:adopt` — take this one promptly.
+```
+
+`update.detection_scope: marked` is what an adopter sets to be told about only these,
+so the line is the whole mechanism: a release whose body carries it is noticed by such
+a tree, and one whose body does not is not. `--generate-notes` writes that body, so the
+line is added after the release is published — **Edit release** on its page, and append
+it. The token is `ADOPT_MARKER` in
+`src/entrypoints/machinery/notify_new_release.ts`, matched as a substring, so the
+sentence around it may change and the token may not.
+
+Whether a release is worth interrupting every adopter for is a judgement about the
+release, made by the person cutting it, which is why it is this step and not something
+a version number decides.
+
 The mirror of that rule is for every other pull request: **do not edit `version` in
 one.** A work change merged without a version edit publishes nothing, and that is the
 normal case — the release follows when a person declares it. A pull request that

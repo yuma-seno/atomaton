@@ -11,8 +11,8 @@ import { DEFAULT_GOVERNED_PATHS } from "../../domain/delivery/merge-readiness.ts
 import { CHECKS_FROM_DEFAULT_BRANCH, CHECKS_FROM_PULL_REQUEST } from "../../domain/delivery/check-jobs.ts";
 import { resolveDeclaredJobs, type DeclaredJobsResolution } from "../../domain/delivery/declared-jobs.ts";
 import { resolveMergeGates, type MergeGatesResolution } from "../../domain/delivery/merge-gates.ts";
-import type { AtomaConfig, NewReleaseMode } from "../../domain/delivery/declared-config.ts";
-import { isNewReleaseMode } from "../../domain/delivery/declared-config.ts";
+import type { AtomaConfig, NewReleaseMode, NewReleaseScope } from "../../domain/delivery/declared-config.ts";
+import { isNewReleaseMode, isNewReleaseScope } from "../../domain/delivery/declared-config.ts";
 import { CONFIG_FILE } from "../../domain/machinery/machinery-layout.ts";
 import { machineryPath } from "./machinery.ts";
 
@@ -95,6 +95,20 @@ export function getMergePolicy(fallback = "auto"): string {
 export function getNewReleaseMode(fallback: NewReleaseMode = "issue"): NewReleaseMode {
   const mode = loadConfig().update?.on_new_release;
   return isNewReleaseMode(mode) ? mode : fallback;
+}
+
+/**
+ * Which newer releases are noticed: `all` or `marked`.
+ *
+ * `all` is the default, and it is what an absent key, a value that is not a scope and
+ * an unreadable value all answer. The trade is the same one `getNewReleaseMode`
+ * makes and lands the other way round on purpose: a setting that cannot be read
+ * notices MORE than it asked to, and a project that misspelled the key learns about
+ * it from `configProblems` rather than by silently missing the release it wanted.
+ */
+export function getNewReleaseScope(fallback: NewReleaseScope = "all"): NewReleaseScope {
+  const scope = loadConfig().update?.detection_scope;
+  return isNewReleaseScope(scope) ? scope : fallback;
 }
 
 /**

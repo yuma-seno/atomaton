@@ -45,7 +45,7 @@ import { resolveDeclaredSecrets, TOOL_SECRETS } from "./declared-secrets.ts";
 import { DEPLOY_ARMS, resolveDeployJobs } from "./deploy-jobs.ts";
 import { resolveDeclaredJobs } from "./declared-jobs.ts";
 import { resolveMergeGates } from "./merge-gates.ts";
-import { NEW_RELEASE_MODES, isNewReleaseMode } from "./declared-config.ts";
+import { NEW_RELEASE_MODES, NEW_RELEASE_SCOPES, isNewReleaseMode, isNewReleaseScope } from "./declared-config.ts";
 import { DEFAULT_CD_WORKFLOW, DEFAULT_CI_WORKFLOW } from "./shipped-workflows.ts";
 
 /**
@@ -124,7 +124,7 @@ const CONFIG_SCHEMA: Section = {
     // `null` says only that a level this file does not describe decides what may be
     // in it, and the rule that a mode is one of three words is a rule about the
     // value, not about the key's name.
-    update: { children: { on_new_release: null } },
+    update: { children: { on_new_release: null, detection_scope: null } },
     chain: {
       children: {
         after_handoffs: null,
@@ -377,6 +377,16 @@ export function configProblems(facts: DeliverableFacts): string[] {
     problems.push(
       `\`update.on_new_release\` is '${String(mode)}', which is not a mode. ` +
         `Set ${NEW_RELEASE_MODES.map((name) => `\`${name}\``).join(", ")} (the first is the default).`,
+    );
+  }
+  // The scope is the same silence in its own place: the reader takes a value it does
+  // not recognise as `all`, so a project that meant `marked` would be told about every
+  // release and never learn that its own setting was not read.
+  const scope = update.detection_scope;
+  if (scope !== undefined && !isNewReleaseScope(scope)) {
+    problems.push(
+      `\`update.detection_scope\` is '${String(scope)}', which is not a scope. ` +
+        `Set ${NEW_RELEASE_SCOPES.map((name) => `\`${name}\``).join(" or ")} (the first is the default).`,
     );
   }
   // The one conditional requirement in this file, and the reason both names are in

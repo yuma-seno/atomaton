@@ -184,3 +184,36 @@ notice. Neither makes the daily run fail.
 
 An unrecognised value is not a mode: it is reported by the check that reads your
 config, and until it is fixed the machinery behaves as though the key were unset.
+
+## `update.detection_scope`
+
+```yaml
+update:
+  detection_scope: marked
+```
+
+Which newer releases are noticed at all. Two values, and an absent key means `all`.
+
+`all` is every release newer than the one your tree came from. It is what an absent key
+means, and what every project noticed before this key existed, so a repository that
+writes nothing keeps the behaviour it had.
+
+`marked` is only the releases whose own notes carry `atomaton:adopt`. The daily
+comparison still runs, finds a newer release, and then finds no mark behind its notes:
+no notice is written, no update is dispatched, and the run stays green. Silence is the
+answer here and not a failure — a release nobody flagged is the ordinary case.
+
+The mark is the release's own claim, which is the point of the setting. How far a
+version number moves is a statement about compatibility and nothing about importance: a
+patch can close a vulnerability, and a minor can be a feature nobody is waiting for. A
+project that would rather be interrupted only for what the template calls urgent sets
+`marked`; everything else keeps `all`.
+
+`marked` reads the release list before it does anything else, so a list that cannot be
+read stops the run with an error rather than reading as "nothing is marked". Reading it
+the other way would be a watch that silently stopped for as long as the API was
+blipping.
+
+A value that is not one of the two is not a scope: it is reported by the check that
+reads your config, and until it is fixed the machinery behaves as though the key were
+unset — that is, `all`.

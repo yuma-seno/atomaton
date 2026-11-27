@@ -294,6 +294,22 @@ describe("names that have to resolve to a file", () => {
     expect(problemsFor({ ...SOUND, update: { on_new_release: "pr" } })).toEqual([]);
   });
 
+  // The scope is the same silence in its own place: the reader answers a value it does
+  // not recognise with `all`, so a project that meant `marked` would be told about
+  // every release and never learn that its own setting was not read.
+  test("a detection scope that is not one of the two is reported", () => {
+    const problems = problemsFor({ ...SOUND, update: { detection_scope: "important" } });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("`update.detection_scope`");
+    expect(problems[0], "and says what a scope can be").toContain("`marked`");
+  });
+
+  test("both scopes are sound, and so is naming neither", () => {
+    expect(problemsFor({ ...SOUND, update: { detection_scope: "marked" } })).toEqual([]);
+    expect(problemsFor({ ...SOUND, update: { detection_scope: "all" } })).toEqual([]);
+    expect(problemsFor({ ...SOUND, update: {} })).toEqual([]);
+  });
+
   // Checked with the mode off as well: the name is read the moment somebody turns the
   // mode on, and a name that resolves to nothing is the same failure then.
   test("an agent named for a mode that is off is still checked", () => {

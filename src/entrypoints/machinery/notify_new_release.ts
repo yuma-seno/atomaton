@@ -82,7 +82,7 @@ import { findOpenNotice, NOTICE_MARKER } from "./lib/notice-issue.ts";
 import { openPrForHead } from "./lib/open-pull-request.ts";
 import { updateBranchFor } from "./lib/update-branch.ts";
 import { dispatchUpdate } from "../../adapters/actions/dispatch-targets.ts";
-import { getNewReleaseMode } from "../../adapters/runner/config.ts";
+import { getNewReleaseMode, getNewReleaseScope } from "../../adapters/runner/config.ts";
 import type { NewReleaseMode } from "../../domain/delivery/declared-config.ts";
 import {
   ASSET_NAME,
@@ -154,6 +154,39 @@ export function releaseWindow(
 }
 
 /**
+ * The token a release's notes carry when it should be adopted promptly.
+ *
+ * The mark is the release's own claim, which is what lets `update.detection_scope:
+ * marked` mean something a version number cannot: a patch that closes a vulnerability
+ * is marked, and a minor nobody is waiting for is not. Matched as a substring, so the
+ * line around it is free to explain itself -- what has to stay fixed is this token,
+ * and `CONTRIBUTING.md` quotes it from here rather than keeping a second copy.
+ */
+export const ADOPT_MARKER = "atomaton:adopt";
+
+/** Whether one release's notes carry the mark. */
+export function isMarked(note: ReleaseNote): boolean {
+  return note.body.includes(ADOPT_MARKER);
+}
+
+/**
+ * The tags, newer than `localVersion`, whose notes carry the mark -- newest first.
+ *
+ * The whole newer side of the list, not the `MAX_RELEASES` a notice prints: this feeds
+ * the gate that decides whether a notice exists at all, and a mark that fell off the
+ * end of what the notice would print is still the reason to print one.
+ *
+ * The `per_page=100` the list is read with is the ceiling underneath this -- the same
+ * one the notice's own window has. A tree more than a hundred releases behind cannot
+ * see a mark older than that, and the notice says so for the notes it carries.
+ */
+export function markedReleases(notes: readonly ReleaseNote[], localVersion: string): string[] {
+  return releaseWindow(notes, localVersion, notes.length)
+    .newer.filter(isMarked)
+    .map((note) => note.tag);
+}
+
+/**
  * One release's notes, bounded and demoted.
  *
  * Demoted because release notes carry their own `##` and `###` headings, and a
@@ -179,6 +212,15 @@ export interface NoticeInput {
   readonly window: ReleaseWindow | null;
   /** Why the list is `null`, for the notice to say instead of showing nothing. */
   readonly windowWhy: string;
+  /**
+   * The window's releases whose notes carry [`ADOPT_MARKER`], or `null` when
+   * `update.detection_scope` is `all`.
+   *
+   * `null` rather than an empty list because the two say opposite things: `all` makes
+   * no claim about marks, and the notice for such a repository reads exactly as it
+   * always has.
+   */
+  readonly markedReleases: readonly string[] | null;
   /** Paths the latest release no longer ships, or `null` when that could not be worked out. */
   readonly removed: readonly string[] | null;
   readonly removedWhy: string;
@@ -269,9 +311,23 @@ export function noticeBody(input: NoticeInput): string {
     `| This repository's \`.github/\` is from | \`${input.localVersion}\` |`,
     `| The latest release is | \`${input.latestVersion}\` |`,
     "",
-    "## Taking it",
-    "",
   );
+
+  // Only on the `marked` path; `all` writes the notice it always wrote. It names the
+  // releases the setting actually noticed, which matters because the notice always
+  // announces the latest: when the marked release is an older one, this line is what
+  // says which release made the notice appear.
+  if (input.markedReleases !== null) {
+    const tags = input.markedReleases.map((tag) => `\`${tag}\``).join(", ");
+    lines.push(
+      `\`update.detection_scope\` is \`marked\`: of the releases newer than ${input.localVersion}, ` +
+        `${tags} ${input.markedReleases.length === 1 ? "carries" : "carry"} \`${ADOPT_MARKER}\`. ` +
+        "That mark is the reason this notice exists, and taking the latest release takes it too.",
+      "",
+    );
+  }
+
+  lines.push("## Taking it", "");
 
   // The same sentence the update workflow leads with, so the notice and the run it
   // offers never disagree. Its inputs are the plan's counts, which is why it walks
@@ -497,6 +553,37 @@ function main(): void {
     return;
   }
 
+  // Which releases are noticed at all. `marked` narrows the comparison to the ones the
+  // release itself flagged, and a window with no flag in it ends the run here: before a
+  // mode is dispatched, before anything is downloaded, and without touching an open
+  // notice -- a setting is not a release, and closing that notice would say one had
+  // been taken.
+  //
+  // The list is read once and reused by the notice below. In `all` mode nothing here
+  // reads it, so that path makes exactly the calls it always made.
+  const scope = getNewReleaseScope();
+  const scoped = scope === "marked" ? releaseNotes() : undefined;
+  let marked: string[] | null = null;
+  if (scope === "marked") {
+    if (scoped === null || scoped === undefined) {
+      // "Could not read" is not "nothing is marked": reading it as one would stop the
+      // watch for as long as the API was blipping, and say nothing about having done so.
+      console.error(
+        `::error::\`update.detection_scope\` is \`marked\` and ${UPSTREAM_REPOSITORY}'s release list could not be ` +
+          "read, so there is nothing to compare against. A failed read is not the answer 'nothing is marked'.",
+      );
+      process.exit(1);
+    }
+    marked = markedReleases(scoped, local.manifest.version);
+    if (marked.length === 0) {
+      log(
+        `nothing to announce: \`update.detection_scope\` is \`marked\`, and no release newer than ` +
+          `${local.manifest.version} carries ${ADOPT_MARKER}`,
+      );
+      return;
+    }
+  }
+
   // What the repository asked the machinery to do with a newer release, read before
   // anything is downloaded: in `pr` and `pr-agent` modes the answer can end this run
   // here -- no notice, and none of the two asset downloads the update is about to do
@@ -566,7 +653,9 @@ function main(): void {
     process.exit(1);
   }
 
-  const notes = releaseNotes();
+  // `marked` already read the list above, and the tag list it produced proves the read
+  // landed; `all` reads it here, at the point it always did.
+  const notes = scoped !== undefined ? scoped : releaseNotes();
   const targetRelease = releaseFiles(latest.tag);
 
   // What the target release no longer ships: the manifest inside its asset against
@@ -612,6 +701,7 @@ function main(): void {
     latestVersion: latest.tag,
     window: notes === null ? null : releaseWindow(notes, local.manifest.version),
     windowWhy: `the release list could not be read.`,
+    markedReleases: marked,
     removed,
     removedWhy,
     plan,

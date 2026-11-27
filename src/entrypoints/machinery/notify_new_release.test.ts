@@ -4,9 +4,11 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  ADOPT_MARKER,
   ASSET_NAME,
   MAX_RELEASES,
   NOTICE_MARKER,
+  markedReleases,
   releaseWindow,
   UPSTREAM_REPOSITORY,
   type ReleaseNote,
@@ -713,5 +715,102 @@ describe("when the repository asked for the update to be taken", () => {
     const r = announce(behindWith(PR_MODE), dispatchable, { ATOMATON_UPDATE_TOKEN: "tok" });
     const listed = r.ghCalls.find((call) => call[0] === "pr" && call[1] === "list") ?? [];
     expect(listed[listed.indexOf("--head") + 1]).toBe("atomaton/update-v0.2.0");
+  });
+});
+
+/**
+ * `update.detection_scope`, from the noticing side.
+ *
+ * `marked` narrows the comparison to the releases whose own notes carry
+ * `atomaton:adopt`. This is a gate and not a filter on what the notice prints: a
+ * window with no marked release produces no notice at all, in every mode, and the run
+ * stays green -- a daily cron that failed because nothing was flagged would be red in
+ * the ordinary case, which is every release nobody flagged.
+ */
+describe("when update.detection_scope is marked", () => {
+  const MARKED = "base_branch: main\nupdate:\n  detection_scope: marked\n";
+  const ALL = "base_branch: main\nupdate:\n  detection_scope: all\n";
+
+  const announce = (dir: string, rules: FakeGhRule[], env: Record<string, string> = {}) =>
+    runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      env,
+      rules: [search(0), { match: ["issue", "create"], stdout: "https://example.test/issues/9" }, ...rules],
+    });
+
+  /** What the fixture's releases list answers: the target, one in between, and the tree's own. */
+  const unmarked = [release("v0.2.0"), release("v0.1.5"), release("v0.1.0")];
+  const oneMarked = [release("v0.2.0"), release("v0.1.5", `\`${ADOPT_MARKER}\` — take this one`), release("v0.1.0")];
+
+  const notices = (calls: string[][]) =>
+    calls.filter((call) => call[0] === "issue" && (call[1] === "create" || call[1] === "edit"));
+  const downloads = (calls: string[][]) => calls.filter((call) => call[0] === "release");
+
+  test("nothing marked is no notice, and the gate runs before the downloads", () => {
+    const r = announce(behindWith(MARKED), reads("v0.2.0", { notes: unmarked }));
+    expect(r.status, "a release nobody flagged is the ordinary case, not a failure").toBe(0);
+    expect(notices(r.ghCalls), "an unflagged window announces nothing").toEqual([]);
+    expect(downloads(r.ghCalls), "and nothing is downloaded for a notice that will not be written").toEqual([]);
+    expect(r.stderr).toContain("nothing to announce");
+  });
+
+  test("a marked release is announced, and the body says which one made it", () => {
+    const r = announce(behindWith(MARKED), reads("v0.2.0", { notes: oneMarked }));
+    expect(r.status).toBe(0);
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body, "the mark is why this notice exists").toContain(ADOPT_MARKER);
+    expect(body, "and the release carrying it is named").toContain("`v0.1.5`");
+    expect(body, "the notice is still about the latest release").toContain("v0.2.0");
+  });
+
+  test("`all` notices both windows, and says nothing about marks", () => {
+    for (const notes of [unmarked, oneMarked]) {
+      const r = announce(behindWith(ALL), reads("v0.2.0", { notes }));
+      expect(r.status).toBe(0);
+      expect(notices(r.ghCalls), "`all` notices a release whether or not it is marked").toHaveLength(1);
+      const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+      expect(body, "`all` never mentions the setting").not.toContain("update.detection_scope");
+    }
+  });
+
+  /**
+   * The one read that cannot degrade. "Could not read" and "nothing is marked" are the
+   * two answers this gate must never confuse: reading a failed list as an unmarked
+   * window would stop the watch for as long as the API was blipping, silently.
+   */
+  test("a failed release read stops the run rather than reading as unmarked", () => {
+    const r = announce(behindWith(MARKED), reads("v0.2.0", { notesFail: true }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("::error::");
+    expect(notices(r.ghCalls)).toEqual([]);
+  });
+
+  test("an unmarked window takes nothing even in `pr` mode", () => {
+    const r = announce(
+      behindWith("base_branch: main\nupdate:\n  detection_scope: marked\n  on_new_release: pr\n"),
+      [
+        ...reads("v0.2.0", { notes: unmarked }),
+        { match: ["pr", "list"], stdout: "[]" },
+        { match: ["workflow", "run", "atomaton-update.yml"] },
+      ],
+      { ATOMATON_UPDATE_TOKEN: "tok" },
+    );
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((call) => call[0] === "workflow"), "nothing is taken").toEqual([]);
+    expect(notices(r.ghCalls)).toEqual([]);
+  });
+});
+
+describe("markedReleases", () => {
+  const note = (tag: string, body = ""): ReleaseNote => ({ tag, body, url: "" });
+
+  test("only the marked ones newer than the tree's own version", () => {
+    const notes = [note("v0.3.0"), note("v0.2.0", `\`${ADOPT_MARKER}\``), note("v0.1.5"), note("v0.1.0", ADOPT_MARKER)];
+    expect(markedReleases(notes, "v0.1.5")).toEqual(["v0.2.0"]);
+  });
+
+  test("a version the page does not reach keeps every mark the page carries", () => {
+    const notes = [note("v0.3.0", ADOPT_MARKER), note("v0.2.0")];
+    expect(markedReleases(notes, "v0.0.1")).toEqual(["v0.3.0"]);
   });
 });
