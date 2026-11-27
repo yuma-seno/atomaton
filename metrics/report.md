@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 123 | 23.6% | 45 | 1,413 | 8 | 7.0 |
-| Last 30 days | 480 | 12.9% | 244 | 6,099 | 11 | 19.7 |
-| Last year | 906 | 9.6% | 248 | 10,246 | 13 | 18.5 |
-| All time | 906 | 9.6% | 248 | 10,246 | 13 | 18.5 |
+| Last 7 days | 124 | 23.4% | 48 | 1,413 | 8 | 7.2 |
+| Last 30 days | 481 | 12.9% | 244 | 6,099 | 11 | 19.9 |
+| Last year | 907 | 9.6% | 248 | 10,246 | 13 | 18.5 |
+| All time | 907 | 9.6% | 248 | 10,246 | 13 | 18.5 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 819 |
+| `completed` | 820 |
 | `failed` | 76 |
 | `stopped` | 11 |
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 663,589 | 3,832,760 | 7,840,910 | 7,840,910 | 73,009,944 |
-| messages per session | 105 | 198 | 293 | 293 | 5,189 |
+| messages per session | 105 | 198 | 293 | 293 | 5,201 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -50,16 +50,16 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `bash` | 926 | 19 | 4 | 2.1% |
+| `bash` | 928 | 19 | 4 | 2% |
 | `read` | 687 | 7 | 0 | 1% |
 | `grep` | 405 | 7 | 1 | 1.7% |
 | `edit` | 194 | 11 | 0 | 5.7% |
 | `fetch` | 51 | 1 | 0 | 2% |
 | `list` | 43 | 0 | 0 | 0% |
-| `load_skill` | 39 | 0 | 0 | 0% |
+| `load_skill` | 40 | 0 | 0 | 0% |
 | `get_issue_comments` | 35 | 0 | 0 | 0% |
 | `get_check_runs` | 34 | 0 | 0 | 0% |
-| `get_pr` | 33 | 0 | 0 | 0% |
+| `get_pr` | 34 | 0 | 0 | 0% |
 | `check_merge_readiness` | 30 | 0 | 0 | 0% |
 | `create_pr` | 29 | 9 | 0 | 31% |
 | `commit_and_push` | 27 | 1 | 0 | 3.7% |
@@ -67,8 +67,8 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `write` | 25 | 0 | 0 | 0% |
 | `glob` | 24 | 0 | 0 | 0% |
 | `get_pr_reviews` | 19 | 0 | 0 | 0% |
+| `request_close_issue` | 19 | 0 | 0 | 0% |
 | `get_issue` | 18 | 0 | 0 | 0% |
-| `request_close_issue` | 18 | 0 | 0 | 0% |
 | `get_branch` | 14 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 14 | 0 | 0 | 0% |
 | `merge_pr` | 14 | 0 | 0 | 0% |
@@ -87,20 +87,20 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 688 | 74.3% |
+| `other` | 688 | 74.1% |
 | `edit` | 175 | 18.9% |
-| `search` | 36 | 3.9% |
+| `search` | 37 | 4% |
 | `open` | 15 | 1.6% |
-| `verify` | 12 | 1.3% |
+| `verify` | 13 | 1.4% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 15 | 38.5% |
-| `conventions` | 13 | 33.3% |
-| `japanese` | 7 | 17.9% |
-| `research/web-search` | 2 | 5.1% |
-| `on-demand-audit` | 1 | 2.6% |
-| `web-search` | 1 | 2.6% |
+| `project/conventions` | 15 | 37.5% |
+| `conventions` | 13 | 32.5% |
+| `japanese` | 8 | 20% |
+| `research/web-search` | 2 | 5% |
+| `on-demand-audit` | 1 | 2.5% |
+| `web-search` | 1 | 2.5% |
 
 ## Last 30 days
 
@@ -115,7 +115,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,279,746 | 7,840,910 | 20,308,488 | 29,805,044 | 548,522,528 |
-| messages per session | 147 | 334 | 425 | 439 | 26,026 |
+| messages per session | 147 | 334 | 425 | 439 | 26,038 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -128,17 +128,17 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `bash` | 5,000 | 117 | 61 | 2.3% |
+| `bash` | 5,002 | 117 | 61 | 2.3% |
 | `read` | 2,937 | 18 | 0 | 0.6% |
 | `grep` | 2,449 | 54 | 14 | 2.2% |
 | `edit` | 856 | 22 | 0 | 2.6% |
 | `fetch` | 667 | 60 | 0 | 9% |
 | `list` | 175 | 2 | 0 | 1.1% |
 | `glob` | 169 | 0 | 0 | 0% |
-| `get_pr` | 167 | 0 | 0 | 0% |
+| `get_pr` | 168 | 0 | 0 | 0% |
 | `get_check_runs` | 161 | 3 | 0 | 1.9% |
 | `get_issue_comments` | 143 | 0 | 0 | 0% |
-| `load_skill` | 121 | 7 | 0 | 5.8% |
+| `load_skill` | 122 | 7 | 0 | 5.7% |
 | `commit_and_push` | 116 | 2 | 0 | 1.7% |
 | `get_issue` | 112 | 1 | 0 | 0.9% |
 | `write` | 112 | 1 | 0 | 0.9% |
@@ -147,7 +147,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `get_branch` | 76 | 0 | 0 | 0% |
 | `get_pr_reviews` | 65 | 0 | 0 | 0% |
 | `get_pr_diff` | 60 | 0 | 0 | 0% |
-| `request_close_issue` | 58 | 0 | 0 | 0% |
+| `request_close_issue` | 59 | 0 | 0 | 0% |
 | `search_code` | 55 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 47 | 0 | 0 | 0% |
 | `merge_pr` | 43 | 0 | 0 | 0% |
@@ -174,19 +174,19 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | act | calls | share |
 | --- | ---: | ---: |
-| `other` | 4,178 | 83.6% |
+| `other` | 4,178 | 83.5% |
 | `edit` | 500 | 10% |
-| `search` | 168 | 3.4% |
+| `search` | 169 | 3.4% |
 | `open` | 125 | 2.5% |
-| `verify` | 29 | 0.6% |
+| `verify` | 30 | 0.6% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 88 | 54.7% |
-| `writing/japanese` | 33 | 20.5% |
-| `conventions` | 13 | 8.1% |
-| `research/web-search` | 8 | 5% |
-| `japanese` | 7 | 4.3% |
+| `project/conventions` | 88 | 54.3% |
+| `writing/japanese` | 33 | 20.4% |
+| `conventions` | 13 | 8% |
+| `japanese` | 8 | 4.9% |
+| `research/web-search` | 8 | 4.9% |
 | `delivery/pipeline-setup` | 3 | 1.9% |
 | `docs/customer-doc` | 3 | 1.9% |
 | `engineering/secrets-in-a-check` | 3 | 1.9% |
@@ -207,7 +207,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,279,073 | 6,056,423 | 27,846,035 | 73,718,100 | 1,184,632,041 |
-| messages per session | 129 | 330 | 583 | 731 | 56,748 |
+| messages per session | 129 | 330 | 583 | 731 | 56,760 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -220,7 +220,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `bash` | 9,202 | 187 | 130 | 2% |
+| `bash` | 9,204 | 187 | 130 | 2% |
 | `read` | 6,849 | 39 | 8 | 0.6% |
 | `grep` | 5,190 | 119 | 22 | 2.3% |
 | `edit` | 2,354 | 46 | 0 | 2% |
@@ -228,7 +228,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `fetch` | 1,093 | 99 | 0 | 9.1% |
 | `list` | 413 | 5 | 0 | 1.2% |
 | `get_issue_comments` | 390 | 0 | 10 | 0% |
-| `get_pr` | 383 | 9 | 3 | 2.3% |
+| `get_pr` | 384 | 9 | 3 | 2.3% |
 | `get_issue` | 382 | 14 | 5 | 3.7% |
 | `get_check_runs` | 373 | 13 | 0 | 3.5% |
 | `glob` | 343 | 1 | 1 | 0.3% |
@@ -241,8 +241,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `get_pr_diff` | 150 | 3 | 0 | 2% |
 | `web__fetch` | 148 | 10 | 0 | 6.8% |
 | `search_issues` | 146 | 0 | 3 | 0% |
-| `load_skill` | 123 | 9 | 0 | 7.3% |
-| `request_close_issue` | 121 | 1 | 0 | 0.8% |
+| `load_skill` | 124 | 9 | 0 | 7.3% |
+| `request_close_issue` | 122 | 1 | 0 | 0.8% |
 | `get_pr_reviews` | 101 | 0 | 0 | 0% |
 | `merge_pr` | 79 | 0 | 0 | 0% |
 | `search_code` | 79 | 0 | 0 | 0% |
@@ -302,19 +302,19 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | --- | ---: | ---: |
 | `other` | 7,301 | 79.3% |
 | `edit` | 807 | 8.8% |
-| `search` | 563 | 6.1% |
+| `search` | 564 | 6.1% |
 | `open` | 278 | 3% |
-| `verify` | 253 | 2.7% |
+| `verify` | 254 | 2.8% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 241 | 72.4% |
+| `project/conventions` | 241 | 72.2% |
 | `writing/japanese` | 33 | 9.9% |
 | `conventions` | 13 | 3.9% |
 | `delivery/pipeline-setup` | 10 | 3% |
 | `research/web-search` | 10 | 3% |
+| `japanese` | 8 | 2.4% |
 | `engineering/environment` | 7 | 2.1% |
-| `japanese` | 7 | 2.1% |
 | `engineering/secrets-in-a-check` | 6 | 1.8% |
 | `docs/customer-doc` | 3 | 0.9% |
 | `docs/design-doc` | 1 | 0.3% |
@@ -336,7 +336,7 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,279,073 | 6,056,423 | 27,846,035 | 73,718,100 | 1,184,632,041 |
-| messages per session | 120 | 327 | 583 | 731 | 56,872 |
+| messages per session | 120 | 327 | 583 | 731 | 56,884 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -349,7 +349,7 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 
 | tool | calls | failed | refused | failure rate |
 | --- | ---: | ---: | ---: | ---: |
-| `bash` | 9,202 | 187 | 130 | 2% |
+| `bash` | 9,204 | 187 | 130 | 2% |
 | `read` | 6,849 | 39 | 8 | 0.6% |
 | `grep` | 5,190 | 119 | 22 | 2.3% |
 | `edit` | 2,354 | 46 | 0 | 2% |
@@ -357,7 +357,7 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | `fetch` | 1,093 | 99 | 0 | 9.1% |
 | `list` | 413 | 5 | 0 | 1.2% |
 | `get_issue_comments` | 390 | 0 | 10 | 0% |
-| `get_pr` | 383 | 9 | 3 | 2.3% |
+| `get_pr` | 384 | 9 | 3 | 2.3% |
 | `get_issue` | 382 | 14 | 5 | 3.7% |
 | `get_check_runs` | 373 | 13 | 0 | 3.5% |
 | `glob` | 343 | 1 | 1 | 0.3% |
@@ -370,8 +370,8 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | `get_pr_diff` | 150 | 3 | 0 | 2% |
 | `web__fetch` | 148 | 10 | 0 | 6.8% |
 | `search_issues` | 146 | 0 | 3 | 0% |
-| `load_skill` | 123 | 9 | 0 | 7.3% |
-| `request_close_issue` | 121 | 1 | 0 | 0.8% |
+| `load_skill` | 124 | 9 | 0 | 7.3% |
+| `request_close_issue` | 122 | 1 | 0 | 0.8% |
 | `get_pr_reviews` | 101 | 0 | 0 | 0% |
 | `merge_pr` | 79 | 0 | 0 | 0% |
 | `search_code` | 79 | 0 | 0 | 0% |
@@ -431,19 +431,19 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | --- | ---: | ---: |
 | `other` | 7,301 | 79.3% |
 | `edit` | 807 | 8.8% |
-| `search` | 563 | 6.1% |
+| `search` | 564 | 6.1% |
 | `open` | 278 | 3% |
-| `verify` | 253 | 2.7% |
+| `verify` | 254 | 2.8% |
 
 | skill | loads | share |
 | --- | ---: | ---: |
-| `project/conventions` | 241 | 72.4% |
+| `project/conventions` | 241 | 72.2% |
 | `writing/japanese` | 33 | 9.9% |
 | `conventions` | 13 | 3.9% |
 | `delivery/pipeline-setup` | 10 | 3% |
 | `research/web-search` | 10 | 3% |
+| `japanese` | 8 | 2.4% |
 | `engineering/environment` | 7 | 2.1% |
-| `japanese` | 7 | 2.1% |
 | `engineering/secrets-in-a-check` | 6 | 1.8% |
 | `docs/customer-doc` | 3 | 0.9% |
 | `docs/design-doc` | 1 | 0.3% |
