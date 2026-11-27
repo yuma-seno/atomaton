@@ -1,21 +1,16 @@
-# #636 状態ノート（2025年終盤run）
+# #636 状態ノート（最終）
 
 ## 状態
-- **実装完了、テスト全件 green**（`bun run test` 2606/2606、lint/typecheck/synth OK）。
-- ブランチ `atomaton/issue-636`、コミット 1件（046bb90、メッセージは誤って「test: probe…」になっている — worktree 全変更がこの1コミットに乗った。PR 本文で説明）。
-- 残り: create_pr + re-invocation でのマージ判定。
+- **完了**。PR #643 は main にマージ（846af68）。reviewer 承認（5点の根拠、blockers 空）。
+- reviewer の未読2点はマージ後判定 run で消し込み済み:
+  - ending writer は runner 内で3箇所、すべて `inputs.ask || steps.claim.outputs.ask`（runner.wac.ts:836/:1340/:1382）。素の `inputs.ask` は検証ステップ(:407)とclaim step(:687)のみ。
+  - agent 名は入力検証で `[a-z][a-z0-9-]*`（runner.wac.ts:414, AGENT_NAME_PATTERN=domain/work/agent-name.ts）、ask は `^[0-9]*$`（:430）。marker本文への注入なし。
+- `request_close_issue` で結論投稿済み（クローズ判断は機械側）。
 
-## 実装した設計（確定済み）
-**本文起点runもclaimを書く — ただし ask コメントを自分で mint する方式。**
-- `claim_turn.ts`: `ask<=0` なら `--agent` を使って dispatch marker（`postDispatchMarker` と同型の3行）をPOSTし、そのコメントidをaskとして既存のmarker-in-place経路へ。خرج力に `ask=<id>` を追加。`--agent` 空は非ゼロ終了。mint後、表示が確認できるまで READ_DELAYS_MS でpoll。
-- runner: `ATOMATON_ASK_ID`・`post-result ask`・`reportCancelled ASK` を `${{ inputs.ask || steps.claim.outputs.ask }}` に。claim env に AGENT/TYPE 追加、outputs に `ask` 追加。
-- shapedThread 以下の読み手・ガードは**無変更**。
-- 追従プローズ更新: tags.ts(TOOK_TAG), thread.ts readers, turn-identity.ts, post_result_comment.ts, dispatch.ts, run-watch.wac.ts, reconcile_run_ending.ts, docs/work/how-it-works/what-keeps-two-runs-off-one-issue.md, dispatch.test.ts コメント。
+## 残ること
+- 実環境の検証条件（新規Issue本文 /atomaton → run中にコメント → 削除+通知）は、**リリース適用後でのみ確認可能**。リリース宣言は人の意思決定。適用後は確認1回で消化。
+- PR本文で約束した「リリース適用後に確認コメント→close」は、適用後の run が自動で立たないため、結論コメント内で人に一手を明示する形に修正済み。
 
-## 検証
-- claim_turn.test.ts に mint の describe 追加（mint+in-place claim+ask出力、PR用語、agent空は拒否、不可視markerはfail）27/27 pass。
-- guard や shapedThread の個別テストは追加不要（既存の marker disaptch と同形になったため）。
-
-## 注意
-- scan_secrets は gitleaks の最新リリース解決に失敗し、credentials スキャンがスキップ警告（環境起因）。CI の verify で同じ警告が出る可能性。
-- 実環境検証（body run 中にコメント→削除+通知）はリリース適用後に scratch issue で確認する（issue本文の閉条件を参照）。
+## 参照
+- mint 本体: src/entrypoints/machinery/claim_turn.ts（markerBody/mintMarker、`## The minted ask (#636)` 節）
+- テスト: claim_turn.test.ts の mint describe 4件 + 全体 2606 pass（マージ木と同一内容）
