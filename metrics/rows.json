@@ -27382,6 +27382,119 @@
     ]
   },
   {
+    "path": "sessions/issue-635/reviewer.json",
+    "agent": "reviewer",
+    "messages": 79,
+    "calls": 46,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "get_pr": 1,
+      "read": 16,
+      "grep": 16,
+      "search_code": 1,
+      "glob": 1,
+      "get_check_runs": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "get_issue_comments": 1,
+      "delegate_readonly": 1,
+      "fetch": 1,
+      "list_prs": 1,
+      "get_pr_diff": 3,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:48:44Z",
+        "ended_because": "completed",
+        "iterations": 23,
+        "loop_recoveries": 0,
+        "messages": 79,
+        "seconds": 118,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1
+          },
+          "files_readonly": {
+            "glob": 1,
+            "grep": 16,
+            "read": 16
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 3,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1,
+            "list_prs": 1
+          },
+          "search": {
+            "search_code": 1
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-27T16:46:46Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/issue-636/archive/atomaton-1.json",
+    "agent": "atomaton",
+    "messages": 131,
+    "calls": 65,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "load_skill": 1,
+      "grep": 17,
+      "read": 36,
+      "get_issue": 4,
+      "glob": 1,
+      "get_issue_comments": 2,
+      "search_issues": 4
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:29:13Z",
+        "ended_because": "failed",
+        "iterations": 61,
+        "loop_recoveries": 0,
+        "messages": 129,
+        "seconds": 1965,
+        "server_calls": {
+          "files": {
+            "glob": 1,
+            "grep": 17,
+            "read": 36
+          },
+          "github": {
+            "get_issue": 4,
+            "get_issue_comments": 2
+          },
+          "search": {
+            "search_issues": 4
+          }
+        },
+        "started": "2026-11-27T15:56:28Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-636/atomaton.json",
     "agent": "atomaton",
     "messages": 129,
