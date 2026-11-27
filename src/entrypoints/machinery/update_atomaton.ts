@@ -56,7 +56,7 @@ import { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from "../..
 import { defineScript } from "./lib/script-ref.ts";
 import { openPrForHead } from "./lib/open-pull-request.ts";
 import { dispatchUpdateConflictAgent } from "../../adapters/actions/dispatch-targets.ts";
-import { getNewReleaseMode, getUpdateConflictAgent } from "../../adapters/runner/config.ts";
+import { tryGetUpdateConflictPolicy } from "../../adapters/runner/config.ts";
 import { updateBranchFor } from "./lib/update-branch.ts";
 import { findOpenNotice, NOTICE_MARKER } from "./lib/notice-issue.ts";
 import { applyPlan } from "./lib/update-apply.ts";
@@ -491,7 +491,19 @@ function main(): void {
   // run's to decide, so this is the reading that counts. `kept` is deliberately not
   // covered: the plan declined to decide there, and a person decides -- whatever the
   // mode says.
-  const conflictAgent = getNewReleaseMode() === "pr-agent" ? getUpdateConflictAgent() : "";
+  //
+  // Non-throwing, because the file it reads is one this run has just written: when
+  // config.yaml is itself a path both sides changed, it carries conflict markers, and
+  // an exception here would end the run after the push and before the pull request --
+  // leaving a marker-carrying branch, no pull request, and nobody told (#638).
+  const policy = tryGetUpdateConflictPolicy();
+  if (!policy.readable) {
+    log(
+      "WARN config.yaml could not be read after the plan was applied — it is one of the paths the merge left with conflict markers. " +
+        "The collision policy is unknown, so no agent is started and the run stops for a person at the pull request.",
+    );
+  }
+  const conflictAgent = policy.agent;
 
   const report: UpdateReport = { plan, conflicts, merged, leftovers };
   const existing = openPrForHead(repo, branch);
