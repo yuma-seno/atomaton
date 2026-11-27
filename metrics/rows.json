@@ -27659,24 +27659,32 @@
   {
     "path": "sessions/issue-636/atomaton.json",
     "agent": "atomaton",
-    "messages": 129,
-    "calls": 65,
-    "failed": 1,
-    "refused": 0,
+    "messages": 230,
+    "calls": 115,
+    "failed": 4,
+    "refused": 1,
     "skills": [
-      "conventions"
+      "conventions",
+      "japanese"
     ],
     "reported": false,
     "tools": {
-      "load_skill": 1,
-      "grep": 17,
-      "read": 36,
-      "get_issue": 4,
-      "glob": 1,
-      "get_issue_comments": 2,
-      "search_issues": 4
+      "search_issues": 2,
+      "read": 25,
+      "grep": 25,
+      "edit": 32,
+      "bash": 24,
+      "load_skill": 2,
+      "sync_branch": 1,
+      "commit_and_push": 1,
+      "list_prs": 1,
+      "write": 1,
+      "create_pr": 1
     },
-    "acts": {},
+    "acts": {
+      "other": 23,
+      "edit": 1
+    },
     "runs": [
       {
         "compactions": 0,
@@ -27701,6 +27709,33 @@
           }
         },
         "started": "2026-11-27T15:56:28Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-27T16:59:28Z",
+        "ended_because": "completed",
+        "iterations": 93,
+        "loop_recoveries": 0,
+        "messages": 230,
+        "seconds": 1519,
+        "server_calls": {
+          "files": {
+            "edit": 32,
+            "grep": 16,
+            "read": 18,
+            "write": 1
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1,
+            "list_prs": 1,
+            "sync_branch": 1
+          },
+          "shell": {
+            "bash": 24
+          }
+        },
+        "started": "2026-11-27T16:34:09Z"
       }
     ]
   },
