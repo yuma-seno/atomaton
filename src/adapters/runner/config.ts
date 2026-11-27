@@ -112,6 +112,32 @@ export function getUpdateConflictAgent(): string {
 }
 
 /**
+ * The collision policy, read from a tree this run has just written itself.
+ *
+ * Every other reader in this file throws on a config.yaml that exists and will not
+ * parse, and that is right for a caller deciding what to do before anything is
+ * written. The update is the one caller that reads the file AFTER it has applied the
+ * plan, committed and pushed: when config.yaml is itself one of the paths both sides
+ * changed, what it reads carries conflict markers. A throw there lands between the
+ * push and the pull request, so the marker-carrying branch is all that survives — no
+ * pull request, no comment, nobody told (#638).
+ *
+ * So this answers instead of throwing. `readable: false` means the policy could not
+ * be read, and the only honest use of it is what the default mode does: stop at the
+ * pull request and leave the decision to a person.
+ */
+export function tryGetUpdateConflictPolicy(): { agent: string; readable: boolean } {
+  try {
+    return {
+      agent: getNewReleaseMode() === "pr-agent" ? getUpdateConflictAgent() : "",
+      readable: true,
+    };
+  } catch {
+    return { agent: "", readable: false };
+  }
+}
+
+/**
  * Branch an issue's work starts from and targets, or "" for the default branch.
  *
  * Empty is deliberately the normal answer: callers pass it straight to `gh`,
