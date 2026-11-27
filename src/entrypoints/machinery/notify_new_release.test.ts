@@ -645,6 +645,10 @@ describe("when the repository asked for the update to be taken", () => {
     expect(r.status, "a repository with no secret still learns there is a release").toBe(0);
     expect(started(r.ghCalls)).toEqual([]);
     expect(r.stderr).toContain("WARN");
+    // And no search: the only identity available to it is this workflow's own, which
+    // a private repository refuses a pull-request read to -- and the refusal would
+    // come back as "no pull request is open", the answer that dispatches.
+    expect(r.ghCalls.filter((call) => call[0] === "pr"), "no token, no question to ask").toEqual([]);
 
     const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
     expect(body).toContain("ATOMATON_UPDATE_TOKEN");

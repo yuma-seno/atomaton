@@ -537,21 +537,32 @@ function main(): void {
   const updateToken = (process.env.ATOMATON_UPDATE_TOKEN ?? "").trim();
   let autoUpdate: AutoUpdate | null = null;
   if (mode !== "issue") {
-    const open = openPrForHead(repo, updateBranchFor(latest.tag));
     if (updateToken === "") {
       // Not a failure, and deliberately not one: a missing secret would otherwise cost
       // the repository the announcement as well. The WARN is for whoever reads the run
       // log; the notice carries the same sentence to the person who can set it.
+      //
+      // Nothing is searched for either. The search would have to run as this
+      // workflow's own token, which cannot list pull requests on a private repository
+      // -- and the refusal reads as "no pull request is open".
       log(`WARN update.on_new_release is ${mode}, but ATOMATON_UPDATE_TOKEN is not set — nothing was started`);
       autoUpdate = {
         mode,
         started: false,
         why: "no `ATOMATON_UPDATE_TOKEN` secret is set here, and this workflow's own token may not start a run",
       };
-    } else if (open > 0) {
-      autoUpdate = { mode, started: false, why: `an update pull request for ${latest.tag} (#${open}) is already open` };
     } else {
-      autoUpdate = { mode, started: true, why: "" };
+      // As the update's PAT, not this workflow's own token: `atomaton-new-release.yml`
+      // declares `contents: read` and `issues: write`, and a scope a workflow does not
+      // list is `none` -- so a private repository refuses this read to the notice, and
+      // a refused read is the answer "no update pull request is open". That answer
+      // dispatches, so the refusal would cost one update run and one re-push per day
+      // for as long as the release waits on its pull request.
+      const open = openPrForHead(repo, updateBranchFor(latest.tag), updateToken);
+      autoUpdate =
+        open > 0
+          ? { mode, started: false, why: `an update pull request for ${latest.tag} (#${open}) is already open` }
+          : { mode, started: true, why: "" };
     }
   }
 
