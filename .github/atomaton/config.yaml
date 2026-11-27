@@ -138,12 +138,13 @@ merge:
 # What the machinery does when it notices a newer release of the template.
 #
 #   issue    the notice and nothing else: taking the release is your decision, with
-#            `!upgrade` or the Actions button. The default, and what an unset key means.
+#            `!upgrade` or the Actions button. Also what an unset key means.
 #   pr       the release is taken without a notice: the update starts as soon as the
 #            release is noticed -- it applies it, opens its pull request, and merges it
 #            itself when nothing collided. A collision stops at that pull request for you.
 #   pr-agent the same, and an agent is started on the pull request that stopped. It
-#            needs `agents.on_update_conflict` to name that agent.
+#            needs `agents.on_update_conflict` to name that agent, which this template
+#            ships below.
 #
 # `pr` and `pr-agent` need the ATOMATON_UPDATE_TOKEN secret, which the update itself
 # needs anyway. Without it nothing is started and the machinery writes the notice
