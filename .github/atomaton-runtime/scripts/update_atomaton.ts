@@ -793,6 +793,16 @@ function getNewReleaseMode(fallback = "issue") {
 function getUpdateConflictAgent() {
   return (loadConfig().agents?.on_update_conflict ?? "").trim();
 }
+function tryGetUpdateConflictPolicy() {
+  try {
+    return {
+      agent: getNewReleaseMode() === "pr-agent" ? getUpdateConflictAgent() : "",
+      readable: true
+    };
+  } catch {
+    return { agent: "", readable: false };
+  }
+}
 
 // src/adapters/runner/ops-log.ts
 import { appendFileSync } from "fs";
@@ -1823,7 +1833,11 @@ ${targetTag} differs from ${local.manifest.version} by name only: applying it wo
     console.error(`::error::could not read ${repo}'s default branch, so no pull request can be opened against it.`);
     process.exit(1);
   }
-  const conflictAgent = getNewReleaseMode() === "pr-agent" ? getUpdateConflictAgent() : "";
+  const policy = tryGetUpdateConflictPolicy();
+  if (!policy.readable) {
+    log4("WARN config.yaml could not be read after the plan was applied \u2014 it is one of the paths the merge left with conflict markers. " + "The collision policy is unknown, so no agent is started and the run stops for a person at the pull request.");
+  }
+  const conflictAgent = policy.agent;
   const report = { plan, conflicts, merged, leftovers };
   const existing = openPrForHead(repo, branch);
   let prNumber;

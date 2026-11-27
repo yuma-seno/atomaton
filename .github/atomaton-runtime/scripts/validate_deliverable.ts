@@ -517,6 +517,10 @@ var NEW_RELEASE_MODES = ["issue", "pr", "pr-agent"];
 function isNewReleaseMode(value) {
   return typeof value === "string" && NEW_RELEASE_MODES.includes(value);
 }
+var NEW_RELEASE_SCOPES = ["all", "marked"];
+function isNewReleaseScope(value) {
+  return typeof value === "string" && NEW_RELEASE_SCOPES.includes(value);
+}
 
 // src/domain/delivery/shipped-workflows.ts
 var DEFAULT_CI_WORKFLOW = "atomaton-check.yml";
@@ -544,7 +548,7 @@ var CONFIG_SCHEMA = {
       }
     },
     merge: { children: { policy: null, governed_paths: null, gates: null } },
-    update: { children: { on_new_release: null } },
+    update: { children: { on_new_release: null, detection_scope: null } },
     chain: {
       children: {
         after_handoffs: null,
@@ -641,6 +645,10 @@ function configProblems(facts) {
   const mode = update.on_new_release;
   if (mode !== undefined && !isNewReleaseMode(mode)) {
     problems.push(`\`update.on_new_release\` is '${String(mode)}', which is not a mode. ` + `Set ${NEW_RELEASE_MODES.map((name) => `\`${name}\``).join(", ")} (the first is the default).`);
+  }
+  const scope = update.detection_scope;
+  if (scope !== undefined && !isNewReleaseScope(scope)) {
+    problems.push(`\`update.detection_scope\` is '${String(scope)}', which is not a scope. ` + `Set ${NEW_RELEASE_SCOPES.map((name) => `\`${name}\``).join(" or ")} (the first is the default).`);
   }
   const conflictAgent = typeof agents.on_update_conflict === "string" ? agents.on_update_conflict.trim() : "";
   if (mode === "pr-agent" && conflictAgent === "") {
