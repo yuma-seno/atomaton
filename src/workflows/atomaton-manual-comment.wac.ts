@@ -329,9 +329,9 @@ Atomaton command error: \${ERROR}"
  * it.
  *
  * `asked-by-person` is one bit now: whether the CI-waiting comment is worth a
- * person's thread while validation waits. It no longer routes the verdict -- a
- * failed check tells a person either way, and a green one is gated on where the
- * thread's ball sits. See `notifyCiWaiting` in `validate_pull_request.ts`.
+ * person's thread while validation waits. It no longer routes the verdict -- red
+ * and green are gated the same way, on where the thread's ball sits. See
+ * `notifyCiWaiting` in `validate_pull_request.ts`.
  *
  * There is deliberately no "CI is waiting" comment in this workflow, though the wait
  * is minutes long. It used to be one, posted the moment the command was handed over

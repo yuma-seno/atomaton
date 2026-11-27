@@ -100,28 +100,28 @@ export interface ValidationOutcome {
  *
  * Neither dispatches on its own: `reviewerAgent` runs only where the hold says a
  * call is waiting (`free` or `parked`), and `engineerAgent` is never dispatched at
- * all -- it is the name a notification carries, the agent a person can ask for.
+ * all -- it is the name the failure comment offers, the agent a person can ask for.
  *
  * Either may be empty, and empty is a real answer: nobody was named. The verdict
- * then dispatches nobody and the caller tells a person, which is the one outcome
- * that cannot be silently wrong.
+ * then dispatches nobody, and the failure comment is the only thing left that can
+ * say who a person could ask for the work.
  */
 export interface ValidationInput {
   /** GitHub's own conclusion for the dispatched run. Empty means it never reached one. */
   conclusion: string;
   /** The agent the thread's newest call names: the body's `/<agent>` line, or a comment's. */
   reviewerAgent: string;
-  /** The agent that opened the pull request, from `atomaton:origin-agent` -- named in notifications. */
+  /** The agent that opened the pull request, from `atomaton:origin-agent` -- the name the failure comment offers. */
   engineerAgent: string;
   /**
    * Where the ball sits when the verdict lands, from `threadHold`.
    *
-   * The gate on the green verdict's dispatch. A call waiting for the work (`free`)
+   * The gate on every verdict's dispatch. A call waiting for the work (`free`)
    * and the park that promised the machinery would collect it (`parked`) let the
    * standing request run; a run in flight, a chain already started, or a turn
-   * handed back to a person hand the verdict to a mention instead. Absent reads as
-   * `with-person` -- the direction that starts nothing, which is the side that
-   * cannot start a run nobody asked for.
+   * handed back to a person start nothing. Absent reads as `with-person` -- the
+   * direction that starts nothing, which is the side that cannot start a run
+   * nobody asked for.
    */
   hold?: ThreadHold;
   /**

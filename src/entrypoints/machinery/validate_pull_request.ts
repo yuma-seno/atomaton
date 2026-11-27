@@ -123,9 +123,10 @@ export interface ValidatePullRequestArgs {
    * Whether a person asked for this run, rather than an agent.
    *
    * It decides one thing now: whether the "CI is running" comment is worth a
-   * person's thread. It no longer routes the verdict -- a red check tells a person
-   * either way -- and the flag stays only because the waiting comment is the one
-   * thing a person-asked run owes that an agent's own push does not.
+   * person's thread. It no longer routes the verdict -- red and green read the same
+   * hold gate, so asking as a person changes nobody who runs -- and the flag stays
+   * only because the waiting comment is the one thing a person-asked run owes that
+   * an agent's own push does not.
    * See `notifyCiWaiting`.
    */
   "asked-by-person"?: string;
@@ -280,9 +281,9 @@ export function findExistingCiRun(runs: CiRun[], workflow: string, headSha: stri
  * they want from there, and pasting a log costs tokens on every read whether or not
  * the relevant lines are in the part that fits.
  *
- * Nobody is dispatched by this verdict any more -- the comment is addressed to the
- * person the mention reaches, and read by the run that eventually follows as the
- * thread's record of what failed and where.
+ * A red verdict may dispatch a run and still posts this: the URL and the problem
+ * list are the record the dispatched run reads, and where nothing was dispatched
+ * they are what a person reads instead.
  */
 function reportFailure(
   repo: string,
