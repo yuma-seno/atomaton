@@ -17,7 +17,7 @@ guarding; it would only remove the agent's ability to repair the configuration.
 So something has to read that line, open an issue about it, and put an agent on
 that issue. This key names that agent.
 
-**It is required, and it is the only required key in `config.yaml`.** Every other
+**It is required, and it is the one key `config.yaml` requires outright.** Every other
 run is started by something that already knows who it wants — a person types
 `/<agent>`, an agent writes a handoff, a pull request carries the agent that
 opened it, a parent issue carries the agent that was working on it — and those are
@@ -26,6 +26,12 @@ reacting to a condition. A default here would be the deliverable naming an agent
 which is the hardcoding this section exists to remove, and a project that renamed
 its engineer would get a run for an agent that does not exist. A missing key fails
 the pull request's own check.
+
+The one other name that is ever required is
+[`agents.on_update_conflict`](#agentson_update_conflict), and a setting rather
+than the file requires it: `update.on_new_release` at `pr-agent` makes a
+configuration without it invalid, because the mode is the repository asking for a
+run nobody is watching. `issue` and `pr` owe no name.
 
 Nothing else belongs in this section. A name that a thread can answer is answered
 from the thread.
@@ -136,8 +142,13 @@ check that reads your config.
 
 ```yaml
 update:
-  on_new_release: issue
+  on_new_release: pr-agent
+agents:
+  on_update_conflict: engineer
 ```
+
+This is what the template ships — the mode and, because the mode asks for one, the
+name. Omit both and an absent key means `issue`.
 
 What the machinery does when its daily comparison finds a newer release of the
 template. Three values, and the file itself carries the one-line difference between
