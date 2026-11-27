@@ -27251,6 +27251,56 @@
     ]
   },
   {
+    "path": "sessions/issue-637/atomaton.json",
+    "agent": "atomaton",
+    "messages": 42,
+    "calls": 24,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "get_issue": 1,
+      "get_issue_comments": 1,
+      "list": 4,
+      "load_skill": 1,
+      "read": 8,
+      "search_code": 1,
+      "glob": 2,
+      "grep": 6
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:29:12Z",
+        "ended_because": "failed",
+        "iterations": 14,
+        "loop_recoveries": 0,
+        "messages": 42,
+        "seconds": 1291,
+        "server_calls": {
+          "files": {
+            "glob": 2,
+            "grep": 6,
+            "list": 4,
+            "read": 8
+          },
+          "github": {
+            "get_issue": 1,
+            "get_issue_comments": 1
+          },
+          "search": {
+            "search_code": 1
+          }
+        },
+        "started": "2026-11-27T16:07:41Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
