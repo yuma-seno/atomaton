@@ -143,7 +143,7 @@ What the machinery does when its daily comparison finds a newer release of the
 template. Three values, and the file itself carries the one-line difference between
 them.
 
-`issue` — the default, and what an absent key means — opens the notice and stops
+`issue` — what an absent key means — opens the notice and stops
 there. Taking the release is a person's decision, made with **`!upgrade`** or the
 Actions button, and nothing in the tree changes until somebody makes it.
 
@@ -156,6 +156,8 @@ the files.
 `pr-agent` is `pr` plus `agents.on_update_conflict` above, started on that pull
 request. It resolves the markers and stops there: the run that started the update has
 already ended, the checks run on the resolved tree, and the merge is a person's.
+
+This is the mode this template ships, the name shipped beside it as one pair.
 
 Two things this setting does **not** do. It does not decide who may start an update:
 `pr-agent` on a repository where a person typed `!upgrade` still starts the agent if

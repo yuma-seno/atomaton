@@ -27,14 +27,15 @@ describe("config.yaml", () => {
     expect(c.agents?.on_config_finding).toBe("engineer");
     // Shipped default: an agent may merge when nothing else objects (#218).
     expect(c.merge?.policy).toBe("auto");
-    // And the shipped default for a newer release is the notice alone: taking one is
-    // the adopting project's decision, and a template that took its own releases
-    // would be doing it on day one, in a tree nobody has looked at yet.
-    expect(c.update?.on_new_release).toBe("issue");
-    // No agent is named for a collision the template does not ask for. An unset key
-    // is the honest default here -- naming one would be this file deciding an
-    // adopter's engineer -- and `pr-agent` without it fails the pull request's check.
-    expect(c.agents?.on_update_conflict).toBeUndefined();
+    // And the shipped release mode takes the release itself: a newer release is
+    // applied without waiting for a person, and stops at its pull request where
+    // nothing collided. The notice-alone behavior is one edit away -- `issue`,
+    // which is also what an unset key means.
+    expect(c.update?.on_new_release).toBe("pr-agent");
+    // The pair ships together. `pr-agent` is the repository asking for a run, so
+    // the name cannot be left absent: `pr-agent` with no name here fails the
+    // pull request's own check.
+    expect(c.agents?.on_update_conflict).toBe("engineer");
     expect(c.chain?.labels).toBeDefined();
   });
 

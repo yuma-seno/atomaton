@@ -184,9 +184,10 @@ agents:
   on_config_finding: engineer
 
   # Started on an update pull request that stopped on a conflict. Required only
-  # when `update.on_new_release` is `pr-agent` -- that setting is the repository
-  # asking for a run, and nothing reads a name until it is set.
-  # on_update_conflict: engineer
+  # when `update.on_new_release` is `pr-agent` -- named here though this
+  # repository runs `issue`, because every no-thread agent name the template
+  # ships, this adoption ships too.
+  on_update_conflict: engineer
 
 
 # What an agent can reach, and under what watch.
