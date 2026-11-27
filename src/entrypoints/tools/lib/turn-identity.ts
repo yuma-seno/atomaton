@@ -12,8 +12,9 @@
  * them here rather than threading two more values through every tool's schema, which
  * would put a bookkeeping question in front of a model. Absent or unreadable on
  * either is `0` — an answer to no ask, from no run — which matches no real comment
- * or run id and is the honest record for a turn that claimed nothing (a run started
- * by a new issue's body, whose ask is not a comment).
+ * or run id. A run that took a turn always has both: a run whose ask is a comment
+ * claims it, and a body-started run claims the marker it minted (#636), so `0`
+ * today means only a run that never took the turn at all.
  */
 export function endingIdentity(): { answers?: number; run?: number } {
   const ask = Number(process.env.ATOMATON_ASK_ID ?? "");

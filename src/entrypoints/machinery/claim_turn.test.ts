@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimCommentBody, claimOnMarkerBody, raceOutcome } from "./claim_turn.ts";
@@ -279,4 +279,109 @@ describe("claim_turn.ts on a dispatch marker", () => {
     expect(r.output).toContain("claimed=true");
     expect(r.ghCalls.some((c) => c.includes("PATCH"))).toBe(false);
   });
+});
+
+/**
+ * The minted ask (#636): a run started by a new issue's body has no comment to
+ * claim, so it mints a dispatch marker of its own and claims that. What is pinned
+ * here is the shape the thread receives — byte-compatible with
+ * `postDispatchMarker`'s marker, because every reader treats the two as the same
+ * kind of comment — and the `ask=` output the runner carries to its ending writers,
+ * so the ending answers the minted ask and the claim does not stand unclosed.
+ */
+describe("claim_turn.ts with no ask comment (a body-started run mints its ask)", () => {
+  function runMint(rules: FakeGhRule[], extraArgs: string[] = []) {
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-claim-"));
+    const outputFile = join(dir, "github_output");
+    try {
+      const result = runWithFakeGh(
+        scriptPath("claim_turn.ts"),
+        ["--number", "5", "--run-id", "7", ...extraArgs],
+        { rules, env: { GITHUB_REPOSITORY: "owner/repo", GITHUB_OUTPUT: outputFile } },
+      );
+      return {
+        ...result,
+        // A run that failed before its first `record` wrote nothing: absent is
+        // the shape, not an error.
+        output: existsSync(outputFile) ? readFileSync(outputFile, "utf8") : "",
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  const MINTED = [
+    LLM_CONTEXT_TAG.write("exclude"),
+    DISPATCH_TAG.write("atomaton"),
+    "Atomaton: `atomaton` starting on this issue.",
+  ].join("\n");
+  const MINTED_CLAIMED = claimOnMarkerBody(MINTED, { ask: 90, run: 7 });
+
+  test("mints a dispatch marker and claims it in place; the ask output names the minted id", () => {
+    const mint = claimOnMarkerBody(MINTED, { ask: 90, run: 7 });
+    const listed = (body: string) => JSON.stringify([{ id: 90, body, user: { type: "Bot" } }]);
+    const r = runMint([
+      // 1. the mint POST, then the reads in wire order: 2./3. the marker-visibility
+      // poll (empty, then the marker, 1s apart), 4. the pre-claim listing, 5. the
+      // read-back of the PATCH, 6. the race read.
+      { match: ["api", "issues/5/comments", "--method", "POST"], stdout: "90" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 1, stdout: "[]" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 2, stdout: listed(MINTED) },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 3, stdout: listed(MINTED) },
+      { match: ["api", "issues/comments/90", "--method", "PATCH"], stdout: "" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 4, stdout: listed(mint) },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 5, stdout: listed(mint) },
+    ], ["--agent", "atomaton", "--type", "issue"]);
+    expect(r.status).toBe(0);
+    expect(r.output).toContain("claimed=true");
+    expect(r.output).toContain("ask=90");
+
+    // The marker's own shape: the same three lines a machinery dispatch writes, and
+    // the claim appended to it rather than posted beside it.
+    const post = r.ghCalls.find((c) => c.includes("--method") && c.includes("POST")) ?? [];
+    // `-f body=<the body>`: the value element carries the flag's name.
+    const postedBody = (post[post.indexOf("-f") + 1] ?? "").slice("body=".length);
+    expect(postedBody).toBe(MINTED);
+    const patch = r.ghCalls.find((c) => c.includes("PATCH")) ?? [];
+    const patchedBody = patch[patch.indexOf("-f") + 1] ?? "";
+    expect(patchedBody).toContain("atomaton:took=90 run=7");
+    expect(readers.claim(patchedBody)).toEqual({ ask: 90, run: 7 });
+    expect(patchedBody).toContain("atomaton:dispatch=atomaton");
+  });
+
+  test("a pull request run mints a marker that says pull request", () => {
+    const r = runMint([
+      { match: ["api", "issues/5/comments", "--method", "POST"], stdout: "90" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 1, stdout: JSON.stringify([{ id: 90, body: MINTED, user: { type: "Bot" } }]) },
+      { match: ["api", "issues/comments/90", "--method", "PATCH"], stdout: "" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 2, stdout: JSON.stringify([{ id: 90, body: MINTED_CLAIMED, user: { type: "Bot" } }]) },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 3, stdout: JSON.stringify([{ id: 90, body: MINTED_CLAIMED, user: { type: "Bot" } }]) },
+    ], ["--agent", "reviewer", "--type", "pr"]);
+    expect(r.status).toBe(0);
+    const post = r.ghCalls.find((c) => c.includes("--method") && c.includes("POST")) ?? [];
+    const postedBody = post[post.indexOf("-f") + 1] ?? "";
+    expect(postedBody).toContain("starting on this pull request");
+    expect(postedBody).toContain("atomaton:dispatch=reviewer");
+  });
+
+  test("refuses to mint without an agent: an ask no reader could route is not minted", () => {
+    const r = runMint([
+      { match: ["api", "issues/5/comments", "--method", "POST"], stdout: "90" },
+    ]);
+    expect(r.status).not.toBe(0);
+    expect(r.ghCalls.some((c) => c.includes("PATCH"))).toBe(false);
+  });
+
+  test("a marker that never becomes visible fails the step rather than claiming blind", () => {
+    const r = runMint([
+      { match: ["api", "issues/5/comments", "--method", "POST"], stdout: "90" },
+      // Never visible in any listing.
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 1, stdout: "[]" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 2, stdout: "[]" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 3, stdout: "[]" },
+      { match: ["api", "issues/5/comments", "--paginate"], attempt: 4, stdout: "[]" },
+    ], ["--agent", "atomaton", "--type", "issue"]);
+    expect(r.status).not.toBe(0);
+    expect(r.ghCalls.some((c) => c.includes("PATCH"))).toBe(false);
+  }, 20_000);
 });

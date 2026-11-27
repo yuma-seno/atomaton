@@ -53,10 +53,12 @@
  *     speak.
  *
  * The notice waits for both halves: claimed and unreported. A run that never
- * claimed — most entry runs, whose ask is the node's body and not a comment — took
- * no turn the thread can name, and stays silent whatever happened to it. That is
- * the estimate-erasing half of #285: the three-condition guess at "was this MY
- * turn" is gone, because the thread now answers it by comparison.
+ * claimed took no turn the thread can name, and stays silent whatever happened to
+ * it — that is the estimate-erasing half of #285: the three-condition guess at
+ * "was this MY turn" is gone, because the thread now answers it by comparison.
+ * Every run that works a node claims one, including a body-started run, which
+ * mints its own ask at claim time (#636) — so the adjudication reads out of an
+ * entry run's thread the same way it reads out of a command's.
  *
  * The notice itself closes what it reports: it is an ending carrying
  * `answers=<ask> run=<this watch's id>`, so the ask the dead run claimed reads as

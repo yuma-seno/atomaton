@@ -75,6 +75,30 @@
  * never this run's to touch: the read-back below shows whose the marker holds, and
  * the answer is to stand down.
  *
+ * ## The minted ask (#636)
+ *
+ * A run started by a new issue's body has no comment to claim — the body is the ask,
+ * and the body is not a comment. It used to take no turn the thread could name,
+ * write no claim, and stay silent on the watch: the honest shape of "the body is
+ * not an ask", until #634 showed what that honesty cost. The guard's shaping reads
+ * the ball from an open claim, so a body-started run was invisible to it for its
+ * whole life — a person's comment mid-run arrived on the page and, worse, raced a
+ * slash-command dispatch.
+ *
+ * So a run with no ask mints one. The claim step posts the machinery's dispatch
+ * marker for the run's own agent — the same body `dispatchRunner` posts for a
+ * machinery-dispatched run, `llm-context=exclude` and all — takes the marker's
+ * comment id as its ask, and claims it in place like any other marker. One comment
+ * says "an agent is starting on this issue", and the claim's line on it is the
+ * naming what took it up. Every ending the run writes answers the marker back
+ * (`ATOMATON_ASK_ID` carries the minted id from the runner), and the run watch
+ * compares the pair by id exactly as it does for a claimed command.
+ *
+ * The agent name is required on this path. A marker read as an ask names the agent
+ * the thread should route to (`parseCommentCommand` reads it off the dispatch tag),
+ * so minting one without a name would put an unroutable ask on the thread; the run
+ * exits non-zero instead.
+ *
  * ## The exit code
  *
  * A claim GitHub refused is a machinery failure and exits non-zero: the run would
@@ -84,8 +108,8 @@
  * which is what losing a race looks like.
  *
  * Usage:
- *   claim_turn.ts --number N --ask ID --run-id ID [--repo R]
- * Writes `claimed=true|false` to $GITHUB_OUTPUT.
+ *   claim_turn.ts --number N --ask ID --run-id ID [--agent NAME] [--type issue|pr] [--repo R]
+ * Writes `claimed=true|false` and `ask=<id>` to $GITHUB_OUTPUT.
  */
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
@@ -97,10 +121,21 @@ import { defineScript } from "./lib/script-ref.ts";
 
 export interface ClaimTurnArgs {
   number: string | number;
-  /** The ask comment id this run takes up; empty for a run whose ask is the body. */
+  /** The ask comment id this run takes up; empty when the run mints its own (see below). */
   ask?: string;
   "run-id"?: string;
   repo?: string;
+  /**
+   * The agent this run is, named on the marker an ask-less run mints for itself.
+   *
+   * Required once `--ask` is absent: the mint is a dispatch marker, and a marker
+   * that names no agent would be an ask no reader could route (`parseCommentCommand`
+   * reads the agent off the tag). The runner always has one; a call without it is a
+   * broken dispatcher, which exits non-zero rather than claiming identity-less.
+   */
+  agent?: string;
+  /** The node's kind, `"issue"` or `"pr"` — the marker's visible line says which. */
+  type?: string;
 }
 
 export const ref = defineScript<ClaimTurnArgs>(import.meta.url);
@@ -173,6 +208,43 @@ function patchCommentBody(repo: string, commentId: number, body: string): { code
 }
 
 /**
+ * The marker an ask-less run mints for itself (#636), and its comment id.
+ *
+ * The body is the one `postDispatchMarker` writes for a machinery-dispatched run —
+ * audience tag, dispatch tag with the agent, and the visible line — byte for byte,
+ * because every reader treats the two as the same kind of comment: an ask named
+ * `atomaton:dispatch=<agent>` that a run claims at start and answers with its
+ * ending. Only who wrote it differs (the runner itself, at claim time, rather than
+ * the dispatcher), and no reader asks for the author.
+ *
+ * Exits non-zero when GitHub refuses the POST: an ask that was not minted is a run
+ * that cannot claim its turn, the same failure a refused claim is.
+ */
+export function markerBody(agent: string, type: string): string {
+  const noun = type === "pr" ? "pull request" : "issue";
+  return `${LLM_CONTEXT_TAG.write("exclude")}\n${DISPATCH_TAG.write(agent)}\n` +
+    `Atomaton: \`${agent}\` starting on this ${noun}.`;
+}
+
+async function mintMarker(repo: string, number: number, agent: string, type: string): Promise<number> {
+  if (!agent) {
+    // A marker read as an ask names the agent the thread routes to
+    // (`parseCommentCommand` reads it off the dispatch tag). Minting one without a
+    // name would leave an unroutable ask on the thread — refused, as `dispatchRunner`
+    // refuses an empty agent.
+    throw new Error("--agent is required when --ask is absent: an ask-less run mints its ask from a marker that names the agent");
+  }
+  const posted = gh(
+    "api", `repos/${repo}/issues/${number}/comments`, "--method", "POST",
+    "-f", `body=${markerBody(agent, type)}`, "--jq", ".id",
+  );
+  if (posted.code !== 0) throw new Error(`could not mint the dispatch marker on #${number}: ${posted.stderr || posted.stdout}`);
+  const markerId = Number(posted.stdout.trim());
+  if (!Number.isInteger(markerId) || markerId <= 0) throw new Error(`the minted marker's id came back unreadable: ${posted.stdout.trim()}`);
+  return markerId;
+}
+
+/**
  * Whether this run holds the turn for its ask: the claim is posted, visible, and
  * no older claim on the same ask exists.
  *
@@ -211,33 +283,59 @@ async function main(): Promise<void> {
       ask: { type: "string" },
       "run-id": { type: "string" },
       repo: { type: "string" },
+      agent: { type: "string" },
+      type: { type: "string" },
     },
   });
 
   const repo = values.repo ?? process.env.GITHUB_REPOSITORY ?? "";
   const number = Number(values.number);
   const runId = Number(values["run-id"] ?? process.env.GITHUB_RUN_ID ?? 0);
-  const ask = Number(values.ask ?? 0) || 0;
+  let ask = Number(values.ask ?? 0) || 0;
 
-  const record = (claimed: boolean): void => {
+  const record = (claimed: boolean, askId: number): void => {
     const out = process.env.GITHUB_OUTPUT;
     if (out) {
       const { appendFileSync } = require("node:fs") as typeof import("node:fs");
       appendFileSync(out, `claimed=${claimed ? "true" : "false"}\n`);
+      // The ask the run holds, minted when it had none. The runner passes it on to
+      // every ending writer (`ATOMATON_ASK_ID` and the two machinery reports), so
+      // the ending answers the ask the claim opened even when the ask was minted
+      // here rather than arriving in `--ask`.
+      appendFileSync(out, `ask=${askId}\n`);
     }
-    console.error(`claim_turn: claimed=${claimed ? "true" : "false"} (ask=${ask}, run=${runId})`);
+    console.error(`claim_turn: claimed=${claimed ? "true" : "false"} (ask=${askId}, run=${runId})`);
   };
 
-  // No ask comment to claim: a run started by a new issue's body, or by anything
-  // else that is not a comment. It takes no turn the thread can name, writes no
-  // claim, and the watch stays silent on it — the honest shape of "the body is
-  // not an ask".
   if (!Number.isInteger(number) || number <= 0) throw new Error("--number must be a positive number");
+  // Whether the ask was minted here rather than arriving in `--ask` — the only
+  // arrival that needs the visibility poll above.
+  let minted = false;
   if (ask <= 0) {
-    record(true);
-    return;
+    // No ask comment to claim: a run started by a new issue's body, or by anything
+    // else that is not a comment. It mints the ask it needs — the dispatch marker a
+    // machinery-dispatched run would have had — and claims that. See "The minted
+    // ask" in the module comment.
+    ask = await mintMarker(repo, number, (values.agent ?? "").trim(), values.type ?? "");
+    minted = true;
   }
   if (!Number.isInteger(runId) || runId <= 0) throw new Error("--run-id must be a positive number");
+  if (minted) {
+    // GitHub does not guarantee read-after-write: until the listing shows the
+    // marker this run just POSTed, the read below has not caught up, and an
+    // invisible marker would drop the claim to the separate-comment path — a
+    // second comment beside a marker that exists. Poll the same way the posted
+    // claim does; one that never becomes visible is a read the race check cannot
+    // be trusted on.
+    for (let attempt = 0; attempt <= READ_DELAYS_MS.length; attempt += 1) {
+      if (readComments(repo, number).some((comment) => comment.id === ask)) break;
+      const delay = READ_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        throw new Error(`the minted marker on #${number} never became visible, so the race check cannot be trusted`);
+      }
+      await Bun.sleep(delay);
+    }
+  }
 
   const comments = readComments(repo, number);
   const askComment = comments.find((comment) => comment.id === ask);
@@ -269,7 +367,7 @@ async function main(): Promise<void> {
       // carries the same ask and the same obligation. Same read the guard makes
       // (`lockAbandoned`): an unreadable run stays the conservative answer.
       if (!runFinishedOn(repo, existing.run)) {
-        record(false);
+        record(false, ask);
         return;
       }
       // Strip the dead claim's line and write this run's in its place — one line,
@@ -291,14 +389,14 @@ async function main(): Promise<void> {
         runFinishedOn(repo, run),
       );
       if (outcome === "held") {
-        record(true);
+        record(true, ask);
         return;
       }
       const restored = patchCommentBody(repo, ask, original);
       if (restored.code !== 0) {
         throw new Error(`could not take back the claim on #${number}: ${restored.stderr || restored.stdout}`);
       }
-      record(false);
+      record(false, ask);
       return;
     }
 
@@ -327,7 +425,7 @@ async function main(): Promise<void> {
     }
     if (held === undefined) throw new Error(`the claim on #${number} never became visible, so the race check cannot be trusted`);
     if (!held) {
-      record(false);
+      record(false, ask);
       return;
     }
 
@@ -340,7 +438,7 @@ async function main(): Promise<void> {
       runFinishedOn(repo, run),
     );
     if (outcome === "held") {
-      record(true);
+      record(true, ask);
       return;
     }
     const restored = patchCommentBody(repo, ask, original);
@@ -352,7 +450,7 @@ async function main(): Promise<void> {
       // comparison above.
       throw new Error(`could not take back the claim on #${number}: ${restored.stderr || restored.stdout}`);
     }
-    record(false);
+    record(false, ask);
     return;
   }
 
@@ -381,7 +479,7 @@ async function main(): Promise<void> {
     runFinishedOn(repo, run),
   );
   if (outcome === "held") {
-    record(true);
+    record(true, ask);
     return;
   }
 
@@ -394,7 +492,7 @@ async function main(): Promise<void> {
     // re-run's own claim either holds or deletes this one by the same comparison.
     throw new Error(`could not take back the claim on #${number}: ${removed.stderr || removed.stdout}`);
   }
-  record(false);
+  record(false, ask);
 }
 
 if (import.meta.main) void main();

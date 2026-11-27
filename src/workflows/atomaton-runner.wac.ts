@@ -118,10 +118,11 @@ const RELOAD_COUNT_INPUT_DESC = "How many times this work has already rebuilt it
  * the started run cannot work this out for itself.
  */
 const DISPATCHED_BY_INPUT_DESC = "Agent that started this run, for the run to report back to (empty when a person or the machinery started it)";
-// #285: the ask comment id this run claims at start. Empty for a run whose ask is
-// the node's body (a new issue) — that run writes no claim, and the watch stays
-// silent on it, because the thread names no turn it took.
-const ASK_INPUT_DESC = "Ask comment id this run claims (atomaton:took); empty when the ask is the node's body";
+// #285: the ask comment id this run claims at start. Empty when the ask is the
+// node's body (a new issue) — that run mints its own ask from a dispatch marker at
+// claim time (#636), so the claim and every ending still name a comment the thread
+// carries, and the run watch reads the pair by id like any other run.
+const ASK_INPUT_DESC = "Ask comment id this run claims (atomaton:took); empty when the ask is the node's body (minted at claim time)";
 // The version this installs, the description of the input that overrides it, and the
 // two steps that install it live in `actions/atoma-cli.ts` -- along with the record of
 // what each raise of the pin was coupled to, which is the part worth not losing.
@@ -685,14 +686,22 @@ const claimTurnStep = new TypedOutputsStep(
       NUMBER: "${{ inputs.number }}",
       ASK: "${{ inputs.ask }}",
       RUN_ID: "${{ github.run_id }}",
+      // The agent this run is, and the node's kind. An ask-less run -- a body-started
+      // one -- mints its own ask from a dispatch marker (#636), and both are needed to
+      // write that marker: the tag names the agent the thread routes to and the line
+      // says which kind of node the run is on.
+      AGENT: "${{ inputs.agent }}",
+      TYPE: "${{ inputs.type }}",
     },
     run: `${scriptCommandWithArgs(claimTurnRef, {
       number: "\${NUMBER}",
       ask: "\${ASK}",
       "run-id": "\${RUN_ID}",
+      agent: "\${AGENT}",
+      type: "\${TYPE}",
     })}\n`,
   },
-  ["claimed"] as const,
+  ["claimed", "ask"] as const,
 );
 
 const toolSecretsStep = secretNamesStep();
@@ -820,9 +829,11 @@ const atomaRunEnv = {
   ATOMATON_RELOAD_COUNT: "${{ inputs.reload_count }}",
   // The ask this run claimed (#285). Session-ending tools write it back onto
   // their endings (`answers=`), which is what closes the ask the claim opened.
-  // Empty for a body-started run: `endingIdentity()` reads the absence as 0,
-  // which matches no comment id.
-  ATOMATON_ASK_ID: "${{ inputs.ask }}",
+  // Empty `inputs.ask` — a body-started run — falls to the ask the claim step
+  // minted (#636): the marker's id is what the claim took, and the ending has to
+  // answer it back, or the claim it opened would stand unclosed. Skipped claim
+  // (no turn) leaves both empty, and the ending answers nothing, as before.
+  ATOMATON_ASK_ID: `\${{ inputs.ask || ${claimTurnStep.rawOutputs.ask} }}`,
   NOTIFY: notifyStep.outputs.notify,
   // The agent that started this run, or empty when a person or the machinery
   // did. Read by the prompt layer so the run knows who to report back to.
@@ -1323,8 +1334,10 @@ const postResultCommentStep = new TypedOutputsStep(
       // same file -- see lib/callees.ts.
       "people-file": `${RUN_DIR}/callees.json`,
       // The turn's identity closing (#285): what this comment answers and which run
-      // answered it, the same ids the claim carried at start.
-      ask: "${{ inputs.ask }}",
+      // answered it, the same ids the claim carried at start. Empty `inputs.ask` —
+      // a body-started run — falls to the minted marker's id (#636), same as the
+      // agent environment reads.
+      ask: `\${{ inputs.ask || ${claimTurnStep.rawOutputs.ask} }}`,
       "run-id": "${{ github.run_id }}",
     })}\n`,
   },
@@ -1364,7 +1377,9 @@ const reportCancelledStep = new TypedOutputsStep({
     GH_TOKEN: "${{ github.token }}",
     NUMBER: "${{ inputs.number }}",
     AGENT: "${{ inputs.agent }}",
-    ASK: "${{ inputs.ask }}",
+    // Empty `inputs.ask` — a body-started run — falls to the minted ask the claim
+    // step wrote (#636): the cancellation's ending closes the claim that was taken.
+    ASK: `\${{ inputs.ask || ${claimTurnStep.rawOutputs.ask} }}`,
     RUN_ID: "${{ github.run_id }}",
   },
   run: `${scriptCommandWithArgs(reportCancelledRunRef, {
@@ -2454,8 +2469,9 @@ export interface AtomaRunnerInputs {
    * The ask comment id this run claims at start (#285) — `claim_turn.ts` writes
    * `atomaton:took=<ask> run=<run>` from it, and the ending the run eventually
    * writes names the same ask back. Empty is the honest "the ask is the node's
-   * body, which is not a comment": that run writes no claim, and the run watch
-   * stays silent on it because the thread names no turn it took.
+   * body, which is not a comment": that run mints its own ask from a dispatch
+   * marker at claim time (#636), so the thread still names the turn it took, and
+   * the run watch reads the claim-claiming pair by id like any other run.
    */
   ask?: string;
 }

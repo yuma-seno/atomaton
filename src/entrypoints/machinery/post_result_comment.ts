@@ -154,9 +154,10 @@ export interface PostResultCommentArgs {
    *
    * Together they are the second half of the turn's identity: the ending this comment
    * carries names what it answers and who answered. The runner passes both — the ask
-   * it claimed at start, its own `github.run_id`. Absent (`0`) is the honest "claimed
-   * no ask" — the body of a new issue is not a comment — and matches nothing, so a
-   * reader comparing ids reads it as an answer to no ask rather than guessing one.
+   * it claimed at start (its own, or the marker a body-started run minted at claim
+   * time, #636), its own `github.run_id`. Absent (`0`) is the honest "claimed no
+   * ask" — this run backed off to another — and matches nothing, so a reader
+   * comparing ids reads it as an answer to no ask rather than guessing one.
    */
   ask?: string | number;
   "run-id"?: string | number;
