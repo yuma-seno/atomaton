@@ -27338,6 +27338,91 @@
     ]
   },
   {
+    "path": "sessions/issue-634/reviewer.json",
+    "agent": "reviewer",
+    "messages": 79,
+    "calls": 40,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "get_pr_diff": 1,
+      "get_pr": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "list": 2,
+      "read": 16,
+      "grep": 13,
+      "glob": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 1,
+      "delegate_readonly": 1,
+      "merge_pr": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:55:18Z",
+        "ended_because": "failed",
+        "iterations": 10,
+        "loop_abort": {
+          "arguments": "{\"path\":\"src/entrypoints/machinery/validate_pull_request.ts\"}",
+          "call": 20,
+          "capped": false,
+          "count": 5,
+          "last_error": null,
+          "rule": "identical_answers",
+          "tool": "read"
+        },
+        "loop_recoveries": 1,
+        "messages": 44,
+        "seconds": 21,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 4,
+            "list": 1,
+            "read": 10
+          },
+          "github": {
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          }
+        },
+        "started": "2026-11-27T16:54:57Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:56:48Z",
+        "ended_because": "completed",
+        "iterations": 14,
+        "loop_recoveries": 0,
+        "messages": 79,
+        "seconds": 90,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1
+          },
+          "files_readonly": {
+            "grep": 9,
+            "list": 1,
+            "read": 6
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "merge_pr": 1
+          }
+        },
+        "started": "2026-11-27T16:55:18Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-635/atomaton.json",
     "agent": "atomaton",
     "messages": 47,
