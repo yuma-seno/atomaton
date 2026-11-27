@@ -27200,7 +27200,7 @@
   {
     "path": "sessions/issue-635/atomaton.json",
     "agent": "atomaton",
-    "messages": 20,
+    "messages": 24,
     "calls": 10,
     "failed": 0,
     "refused": 1,
@@ -27247,6 +27247,17 @@
           }
         },
         "started": "2026-11-27T15:36:28Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:29:13Z",
+        "ended_because": "failed",
+        "iterations": 0,
+        "loop_recoveries": 0,
+        "messages": 24,
+        "seconds": 817,
+        "server_calls": {},
+        "started": "2026-11-27T16:15:36Z"
       }
     ]
   },
