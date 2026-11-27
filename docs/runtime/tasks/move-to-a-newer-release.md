@@ -10,7 +10,7 @@ the release, runs once a day and compares `.github/atomaton-release.json` agains
 the latest release. When they differ it does what `update.on_new_release` says —
 and that setting decides whether you are reading an issue at all.
 
-In the default mode it opens one issue — updated in place rather than opened again
+In `issue` mode it opens one issue — updated in place rather than opened again
 — carrying both versions, the release notes in between, a preview of what taking
 the release would do to your tree (files updated, added, removed, and — most useful
 — files you changed AND upstream changed), and the paths upstream no longer ships.
@@ -21,8 +21,8 @@ it by hand from the Actions tab if you would rather ask now than wait for the ne
 day.
 
 **It can also take the release for you.** `update.on_new_release` decides what
-happens when the comparison finds a newer release, and its default is the notice
-alone:
+happens when the comparison finds a newer release, and what an unset key means
+is the notice alone:
 
 - `issue` — what this page has described so far, and what an unset key means.
   Nothing is taken until somebody says so.
@@ -32,6 +32,10 @@ alone:
 - `pr-agent` — the same, and
   [`agents.on_update_conflict`](../../work/reference.md#agentson_update_conflict)
   is started on the pull request that stopped, to resolve the conflict markers.
+
+The template itself ships `pr-agent`, the agent name included. A repository that
+would rather read the notice first deletes the line, or sets `issue` — which is
+also what an absent key means.
 
 `pr` and `pr-agent` need `ATOMATON_UPDATE_TOKEN`, which the update needs anyway.
 Without it nothing can be started, so the run settles for the notice it would have

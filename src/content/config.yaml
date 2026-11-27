@@ -111,19 +111,20 @@ merge:
 # What the machinery does when it notices a newer release of the template.
 #
 #   issue    the notice and nothing else: taking the release is your decision, with
-#            `!upgrade` or the Actions button. The default, and what an unset key means.
+#            `!upgrade` or the Actions button. Also what an unset key means.
 #   pr       the release is taken without a notice: the update starts as soon as the
 #            release is noticed -- it applies it, opens its pull request, and merges it
 #            itself when nothing collided. A collision stops at that pull request for you.
 #   pr-agent the same, and an agent is started on the pull request that stopped. It
-#            needs `agents.on_update_conflict` to name that agent.
+#            needs `agents.on_update_conflict` to name that agent, which this template
+#            ships below.
 #
 # `pr` and `pr-agent` need the ATOMATON_UPDATE_TOKEN secret, which the update itself
 # needs anyway. Without it nothing is started and the machinery writes the notice
 # after all, headed by a warning that says why: neither that nor a refused dispatch
 # is a reason for the daily run to fail.
 update:
-  on_new_release: issue
+  on_new_release: pr-agent
 
 
 # When a chain of runs stops and asks a person.
@@ -155,10 +156,10 @@ agents:
   # report that the tools file it was handed has a defect it carried on past.
   on_config_finding: engineer
 
-  # Started on an update pull request that stopped on a conflict. Required only
-  # when `update.on_new_release` is `pr-agent` -- that setting is the repository
-  # asking for a run, and nothing reads a name until it is set.
-  # on_update_conflict: engineer
+  # Started on an update pull request that stopped on a conflict. Required when
+  # `update.on_new_release` is `pr-agent` -- the shipped value above is that mode,
+  # so the name ships beside it: the two are checked as a pair.
+  on_update_conflict: engineer
 
 
 # What an agent can reach, and under what watch.
