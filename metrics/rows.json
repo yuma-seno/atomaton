@@ -25980,8 +25980,8 @@
   {
     "path": "sessions/issue-616/reviewer.json",
     "agent": "reviewer",
-    "messages": 61,
-    "calls": 31,
+    "messages": 85,
+    "calls": 44,
     "failed": 3,
     "refused": 0,
     "skills": [
@@ -25996,10 +25996,12 @@
       "load_skill": 1,
       "list": 1,
       "glob": 1,
-      "grep": 4,
-      "read": 18,
+      "grep": 10,
+      "read": 22,
       "delegate_readonly": 1,
-      "delegate_readonly_large": 1
+      "delegate_readonly_large": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 2
     },
     "acts": {},
     "runs": [
@@ -26065,6 +26067,41 @@
           }
         },
         "started": "2026-11-27T00:27:20Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T00:46:35Z",
+        "ended_because": "completed",
+        "iterations": 5,
+        "loop_recoveries": 0,
+        "messages": 81,
+        "seconds": 32,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 6,
+            "read": 4
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1
+          }
+        },
+        "started": "2026-11-27T00:46:03Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T00:46:45Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "loop_recoveries": 0,
+        "messages": 85,
+        "seconds": 10,
+        "server_calls": {
+          "github": {
+            "check_merge_readiness": 1
+          }
+        },
+        "started": "2026-11-27T00:46:35Z"
       }
     ]
   },
