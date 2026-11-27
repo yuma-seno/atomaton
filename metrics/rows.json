@@ -25947,8 +25947,8 @@
   {
     "path": "sessions/issue-616/reviewer.json",
     "agent": "reviewer",
-    "messages": 43,
-    "calls": 22,
+    "messages": 61,
+    "calls": 31,
     "failed": 3,
     "refused": 0,
     "skills": [
@@ -25964,7 +25964,9 @@
       "list": 1,
       "glob": 1,
       "grep": 4,
-      "read": 11
+      "read": 18,
+      "delegate_readonly": 1,
+      "delegate_readonly_large": 1
     },
     "acts": {},
     "runs": [
@@ -26011,6 +26013,25 @@
         "seconds": 21,
         "server_calls": {},
         "started": "2026-11-27T00:25:43Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T00:27:59Z",
+        "ended_because": "completed",
+        "iterations": 7,
+        "loop_recoveries": 1,
+        "messages": 61,
+        "seconds": 39,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1,
+            "delegate_readonly_large": 1
+          },
+          "files_readonly": {
+            "read": 7
+          }
+        },
+        "started": "2026-11-27T00:27:20Z"
       }
     ]
   },
