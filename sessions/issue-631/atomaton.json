@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #631: 配布時の初期値を update.on_new_release: pr-agent にしたい\n\n/atomaton\n\n配布用初期設定（`src/content/config.yaml`）の `update.on_new_release` の初期値を `issue` から `pr-agent` に変更してください。\n\nあわせて:\n\n- `pr-agent` の必須条件を初期状態で満たすため、`agents.on_update_conflict` の初期値として `engineer` を明記する\n- `docs/config/reference.md` などドキュメントの記述を追随させる\n- `tests/contract/config-contract.test.ts` の初期値の期待値も追随させる\n\natomaton 自リポジトリの `config.yaml` は対象外です（配布物の初期値の話）。",
+      "content": "Issue #631: 配布時の初期値を update.on_new_release: pr-agent にしたい\n**Labels:** atomaton/in-progress\n\n/atomaton\n\n配布用初期設定（`src/content/config.yaml`）の `update.on_new_release` の初期値を `issue` から `pr-agent` に変更してください。\n\nあわせて:\n\n- `pr-agent` の必須条件を初期状態で満たすため、`agents.on_update_conflict` の初期値として `engineer` を明記する\n- `docs/config/reference.md` などドキュメントの記述を追随させる\n- `tests/contract/config-contract.test.ts` の初期値の期待値も追随させる\n\natomaton 自リポジトリの `config.yaml` は対象外です（配布物の初期値の話）。",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-27T13:18:59Z",
@@ -610,14 +610,351 @@
       "role": "tool",
       "content": "{\"number\":632,\"url\":\"https://github.com/yuma-seno/atomaton/pull/632\",\"base\":\"\",\"validation_dispatched\":true}",
       "tool_call_id": "call_ae8a21922807494bbf8a4cba"
+    },
+    {
+      "role": "user",
+      "content": "PR #632: 配布用初期値を update.on_new_release: pr-agent に (#631)\n**Labels:** atomaton/in-progress\n**Linked Issue:** #631\n\n/reviewer\n\nPart of #631\n## 変更の概要\n\n配布物の初期設定 (`src/content/config.yaml`) の初期値を 2 点変更します。\n\n| key | 旧 | 新 |\n|---|---|---|\n| `update.on_new_release` | `issue` | `pr-agent` |\n| `agents.on_update_conflict` | (コメントアウト) | `engineer` |\n\n`pr-agent` は `agents.on_update_conflict` の名前を必須とするため、テンプレートは必ず **ペア** で出荷する必要があります。未設定キーの挙動は変えていません。`getNewReleaseMode` の fallback は `issue` のまま (`src/adapters/runner/config.ts:95`)。docs の「default」記述はすべて「未設定 key = `issue`」を正として保持しています。\n\n## `.github/atomaton/config.yaml` (自リポジトリ) に手を触れている理由\n\nIssue では「atomaton 自リポジトリの `config.yaml` は対象外」とされていますが、`tests/contract/deployed-config.test.ts:83` が **`src/content/config.yaml` (shipped) 側に存在する no-thread agent キー (`agents.*`) は、`.github/atomaton/config.yaml` (採用側) にも同じ値で存在する** という契約を持っているため、`agents.on_update_conflict` の追加に伴い採用側へ一行を追加する必要がありました。**採用側の動作 (`update.on_new_release: issue`) は変えていません**。削除・変更していただいて構いません。\n\n## ドキュメントの追随\n\n- `docs/work/reference.md` : `issue` は何も変わる ＝ 「absent key の意味」を保持。`pr-agent` の段落に「出荷初期値 こっ客要求 key (163 行目付近)」を追加。\n- `docs/runtime/tasks/move-to-a-newer-release.md` : 「its default is the notice alone」とあった部分を「unset key では notice alone」と明記し、「テンプレート自身は `pr-agent` を出荷、agent 名は併記された key」との注記。\n- `docs/config/reference.md` : index のみしかなく default 記述がないため変更なし ( investigated )。\n\n## テストの追随\n\n`tests/contract/config-contract.test.ts` の期待値とコメント (旧: `issue` 出荷理由 #218 という言説) を、#631 決定の新出荷値 (`pr-agent` + `engineer`) に追随させました。\n\n## 検証\n\n- `bun test` : **2607 pass / 6 skip / 0 fail** (203 files, 129s)\n- `bun run synth` 時に `configProblems` が shipped pair を validate (`tests/contract/config-contract.test.ts:356`) して問題なし\n\n## Merge\n\n`.github/**` は `merge.governed_paths` に含まれるため、本 PR の merge は **person (リポジトリオーナー) の仕事** です。\n\n`tests/contract/deployed-config.test.ts:83` 契約の目的 (template が no-thread agent キーを得たとき採用側の付け替え) から、「自リポジトリは issue に留める」方針を本 PR に集約し、両方をこの一連にまとめて出しています。\n---\n_Opened by [`atomaton`](https://github.com/yuma-seno/atomaton/actions/runs/46006056857)_\n",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-27T13:32:35Z",
+        "event_type": "pr_opened",
+        "id": "pr-632",
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n\n配布初期値の変更そのものは正しく入っています。ただし、この変更で意味が変わった記述が `docs/work/reference.md` に 2 か所残っています。この 2 点を直せば、レビューとして通せます（マージは governed path のため人です）。\n\n## 直してほしい箇所\n\n1. `docs/work/reference.md:137-140` の例が `on_new_release: issue` のままです。同じ節の `docs/work/reference.md:160` は「This is the mode this template ships」として `pr-agent` を出荷値に挙げており、例と本文が食い違います。このファイルの他の例（`on_config_finding: engineer`、`chain.after_handoffs: 5`）は配布値・既定値を示す書き方なので、この例だけが配布物と逆の値を案内します。例を `pr-agent` にしてください。未設定なら `issue` という説明は `docs/work/reference.md:146` にすでにあるので、そこはそのままで足ります。\n\n2. `docs/work/reference.md:20` の「It is required, and it is the only required key in `config.yaml`」は、出荷値が `pr-agent` になった今は配布 config 上で成り立ちません。`src/domain/delivery/deliverable-integrity.ts:389` は `pr-agent` で `agents.on_update_conflict` が未設定のときを構成の問題として報告するので、出荷された設定ではこの名前も必須です。「無条件に必須な唯一のキー」と限定するか、`on_update_conflict` がモードに条件付きで必須であることを一文添えてください。\n\n<details><summary>確認したこと（根拠）</summary>\n\n- 出荷値は `src/content/config.yaml:127` の `on_new_release: pr-agent` と、その下の `on_update_conflict: engineer`（同ファイル `agents` 節）。未設定キーの fallback は `src/adapters/runner/config.ts:95` の `getNewReleaseMode` で `issue` のままなので、本文の「未設定 = `issue`」という説明は正しいです。\n- `.github/atomaton/config.yaml` への追記は契約上やむを得ないものです。`tests/contract/deployed-config.test.ts:88-92` が「`src/content/config.yaml` の `agents.*` は `.github/atomaton/config.yaml` に同じ値で存在する」ことを要求しており、出荷側にキーを足すと採用側にも要ります。採用側のモードは `.github/atomaton/config.yaml:153` で `issue` のままなので、Issue の「自リポジトリは対象外」は動作として守られています。\n- `docs/config/reference.md` は 53 行の索引だけで既定値の記述を持たないため、PR 本文の「変更なし」は正しいです。\n- 生成物への直接編集はありません。`dist/**` は gitignore、`.github/atomaton-runtime/**` と `.github/workflows/**` は差分に含まれず、`src/content/config.yaml` は配布物のソースです。\n- 必須チェックは head で通っています（`atomaton-check` は success、`check_merge_readiness` が返した blocker は `governance-change` の 1 件のみ）。\n\n</details>\n\n### 結論\n\n差分の実装部分（出荷値のペア、採用側への追記、テストの期待値）は意図どおりで、残るのはドキュメントの追随漏れ 2 か所だけです。これを直せば、この PR はレビューを通る状態になります。\n\n### 確かめられなかったこと\n\nこの run にはシェルがないため、`bun test` と `bun run synth` は実行していません。テストの合否は head の `atomaton-check`（success）で判断しました。また、`.github/atomaton/config.yaml` に `on_update_conflict: engineer` を `issue` モードのまま置くことが `configProblems` で問題にならないことは、`tests/contract/deployed-config.test.ts:66` が同じ構成を検証していることと `docs/work/reference.md:47-53` の記述から確認しましたが、バリデータ本体の該当行は直接読めていません（`read` が同じ範囲しか返さなかったため）。\n\n### 次に起きること\n\n1. 上記 2 か所を `docs/work/reference.md` で直して push してください。CI が通り次第、reviewer が再確認します。\n2. その後もマージは人の仕事です。この PR は `.github/atomaton/config.yaml` を変更するため `governance-change` が付き、`merge_pr` は通りません。\n\n\n---\n_Tokens: 642261 total (627946 prompt + 14315 completion, 552576 of the prompt cached)_\n_run by [reviewer](https://github.com/yuma-seno/atomaton/actions/runs/46008481977) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-27T13:37:30Z",
+        "event_type": "pr_comment",
+        "id": 7219729545,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "```diff\ndiff --git a/.github/atomaton/config.yaml b/.github/atomaton/config.yaml\nindex cc427adf..152be264 100644\n--- a/.github/atomaton/config.yaml\n+++ b/.github/atomaton/config.yaml\n@@ -184,9 +184,10 @@ agents:\n   on_config_finding: engineer\n \n   # Started on an update pull request that stopped on a conflict. Required only\n-  # when `update.on_new_release` is `pr-agent` -- that setting is the repository\n-  # asking for a run, and nothing reads a name until it is set.\n-  # on_update_conflict: engineer\n+  # when `update.on_new_release` is `pr-agent` -- named here though this\n+  # repository runs `issue`, because every no-thread agent name the template\n+  # ships, this adoption ships too.\n+  on_update_conflict: engineer\n \n \n # What an agent can reach, and under what watch.\ndiff --git a/docs/runtime/tasks/move-to-a-newer-release.md b/docs/runtime/tasks/move-to-a-newer-release.md\nindex ddb453bd..64259011 100644\n--- a/docs/runtime/tasks/move-to-a-newer-release.md\n+++ b/docs/runtime/tasks/move-to-a-newer-release.md\n@@ -10,7 +10,7 @@ the release, runs once a day and compares `.github/atomaton-release.json` agains\n the latest release. When they differ it does what `update.on_new_release` says —\n and that setting decides whether you are reading an issue at all.\n \n-In the default mode it opens one issue — updated in place rather than opened again\n+In `issue` mode it opens one issue — updated in place rather than opened again\n — carrying both versions, the release notes in between, a preview of what taking\n the release would do to your tree (files updated, added, removed, and — most useful\n — files you changed AND upstream changed), and the paths upstream no longer ships.\n@@ -21,8 +21,8 @@ it by hand from the Actions tab if you would rather ask now than wait for the ne\n day.\n \n **It can also take the release for you.** `update.on_new_release` decides what\n-happens when the comparison finds a newer release, and its default is the notice\n-alone:\n+happens when the comparison finds a newer release, and what an unset key means\n+is the notice alone:\n \n - `issue` — what this page has described so far, and what an unset key means.\n   Nothing is taken until somebody says so.\n@@ -33,6 +33,10 @@ alone:\n   [`agents.on_update_conflict`](../../work/reference.md#agentson_update_conflict)\n   is started on the pull request that stopped, to resolve the conflict markers.\n \n+The template itself ships `pr-agent`, the agent name included. A repository that\n+would rather read the notice first deletes the line, or sets `issue` — which is\n+also what an absent key means.\n+\n `pr` and `pr-agent` need `ATOMATON_UPDATE_TOKEN`, which the update needs anyway.\n Without it nothing can be started, so the run settles for the notice it would have\n written in `issue` mode — headed by a warning that says so — rather than leaving a\ndiff --git a/docs/work/reference.md b/docs/work/reference.md\nindex 1dd1a362..093d89dd 100644\n--- a/docs/work/reference.md\n+++ b/docs/work/reference.md\n@@ -143,7 +143,7 @@ What the machinery does when its daily comparison finds a newer release of the\n template. Three values, and the file itself carries the one-line difference between\n them.\n \n-`issue` — the default, and what an absent key means — opens the notice and stops\n+`issue` — what an absent key means — opens the notice and stops\n there. Taking the release is a person's decision, made with **`!upgrade`** or the\n Actions button, and nothing in the tree changes until somebody makes it.\n \n@@ -157,6 +157,8 @@ the files.\n request. It resolves the markers and stops there: the run that started the update has\n already ended, the checks run on the resolved tree, and the merge is a person's.\n \n+This is the mode this template ships, the name shipped beside it as one pair.\n+\n Two things this setting does **not** do. It does not decide who may start an update:\n `pr-agent` on a repository where a person typed `!upgrade` still starts the agent if\n that run collides, because the mode is a policy for the collision and not a property\ndiff --git a/src/content/config.yaml b/src/content/config.yaml\nindex 54b54b18..be394406 100644\n--- a/src/content/config.yaml\n+++ b/src/content/config.yaml\n@@ -111,19 +111,20 @@ merge:\n # What the machinery does when it notices a newer release of the template.\n #\n #   issue    the notice and nothing else: taking the release is your decision, with\n-#            `!upgrade` or the Actions button. The default, and what an unset key means.\n+#            `!upgrade` or the Actions button. Also what an unset key means.\n #   pr       the release is taken without a notice: the update starts as soon as the\n #            release is noticed -- it applies it, opens its pull request, and merges it\n #            itself when nothing collided. A collision stops at that pull request for you.\n #   pr-agent the same, and an agent is started on the pull request that stopped. It\n-#            needs `agents.on_update_conflict` to name that agent.\n+#            needs `agents.on_update_conflict` to name that agent, which this template\n+#            ships below.\n #\n # `pr` and `pr-agent` need the ATOMATON_UPDATE_TOKEN secret, which the update itself\n # needs anyway. Without it nothing is started and the machinery writes the notice\n # after all, headed by a warning that says why: neither that nor a refused dispatch\n # is a reason for the daily run to fail.\n update:\n-  on_new_release: issue\n+  on_new_release: pr-agent\n \n \n # When a chain of runs stops and asks a person.\n@@ -155,10 +156,10 @@ agents:\n   # report that the tools file it was handed has a defect it carried on past.\n   on_config_finding: engineer\n \n-  # Started on an update pull request that stopped on a conflict. Required only\n-  # when `update.on_new_release` is `pr-agent` -- that setting is the repository\n-  # asking for a run, and nothing reads a name until it is set.\n-  # on_update_conflict: engineer\n+  # Started on an update pull request that stopped on a conflict. Required when\n+  # `update.on_new_release` is `pr-agent` -- the shipped value above is that mode,\n+  # so the name ships beside it: the two are checked as a pair.\n+  on_update_conflict: engineer\n \n \n # What an agent can reach, and under what watch.\ndiff --git a/tests/contract/config-contract.test.ts b/tests/contract/config-contract.test.ts\nindex 546303eb..c374754c 100644\n--- a/tests/contract/config-contract.test.ts\n+++ b/tests/contract/config-contract.test.ts\n@@ -27,14 +27,15 @@ describe(\"config.yaml\", () => {\n     expect(c.agents?.on_config_finding).toBe(\"engineer\");\n     // Shipped default: an agent may merge when nothing else objects (#218).\n     expect(c.merge?.policy).toBe(\"auto\");\n-    // And the shipped default for a newer release is the notice alone: taking one is\n-    // the adopting project's decision, and a template that took its own releases\n-    // would be doing it on day one, in a tree nobody has looked at yet.\n-    expect(c.update?.on_new_release).toBe(\"issue\");\n-    // No agent is named for a collision the template does not ask for. An unset key\n-    // is the honest default here -- naming one would be this file deciding an\n-    // adopter's engineer -- and `pr-agent` without it fails the pull request's check.\n-    expect(c.agents?.on_update_conflict).toBeUndefined();\n+    // And the shipped release mode takes the release itself: a newer release is\n+    // applied without waiting for a person, and stops at its pull request where\n+    // nothing collided. The notice-alone behavior is one edit away -- `issue`,\n+    // which is also what an unset key means.\n+    expect(c.update?.on_new_release).toBe(\"pr-agent\");\n+    // The pair ships together. `pr-agent` is the repository asking for a run, so\n+    // the name cannot be left absent: `pr-agent` with no name here fails the\n+    // pull request's own check.\n+    expect(c.agents?.on_update_conflict).toBe(\"engineer\");\n     expect(c.chain?.labels).toBeDefined();\n   });\n```",
+      "atoma_metadata": {
+        "author": "github",
+        "created_at": "2026-11-27T13:37:56Z",
+        "event_type": "pr_diff",
+        "id": "pr-632-diff",
+        "layer": "github-context",
+        "sha": "e866fe11",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_3d5587be836f4744b5b9d16e",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":45,\"offset\":10,\"path\":\"docs/work/reference.md\"}"
+          }
+        },
+        {
+          "id": "call_e34fcd82af494cc49fabb3ca",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":40,\"offset\":130,\"path\":\"docs/work/reference.md\"}"
+          }
+        },
+        {
+          "id": "call_ba933cdadbbd4960b5a1b763",
+          "type": "function",
+          "function": {
+            "name": "read",
+            "arguments": "{\"limit\":30,\"offset\":370,\"path\":\"src/domain/delivery/deliverable-integrity.ts\"}"
+          }
+        }
+      ],
+      "reasoning_content": "The reviewer found two documentation gaps in `docs/work/reference.md`:\n\n1. `docs/work/reference.md:137-140` — the YAML example for `update.on_new_release` still shows `on_new_release: issue`. Since the shipped value is now `pr-agent`, the example should show `pr-agent`. The \"unset means issue\" explanation at line 146 stays.\n\n2. `docs/work/reference.md:20` — \"It is required, and it is the only required key in `config.yaml`\" refers to `agents.on_config_finding`. Now that the shipped config sets `on_new_release: pr-agent`, the validator reports `agents.on_update_conflict` as required when the mode is `pr-agent` (`src/domain/delivery/deliverable-integrity.ts:389`), so in the shipped config, `on_update_conflict` is also effectively required. The reviewer says: either narrow the claim (\"the only unconditionally required key\") or add a sentence saying `on_update_conflict` is conditionally required depending on the mode.\n\nLet me read the current state of those two places in docs/work/reference.md, make the two edits, and push. This is on my current PR branch (the machinery branch from this run). I'm on PR #632's branch.\n\nLet me first read the current text around those lines.\n\nThe reviewer says at lines 137-140 the example is:\n\n```yaml\nupdate:\n  on_new_release: issue\n```\n\nI need to change to `pr-agent`.\n\nAnd line 20: \"**It is required, and it is the only required key in `config.yaml`.**\" — in context:\n\n```\n20\t**It is required, and it is the only required key in `config.yaml`.** Every other\n21\trun is started by something that already knows who it wants — a person types\n22\t`/<agent>`, an agent writes a handoff, a pull request carries the agent that\n23\topened it, a parent issue carries the agent that was working on it — and those are\n24\tread from the thread at run time. This one has no thread to read: it is a workflow\n25\treacting to a condition. A default here would be the deliverable naming an agent,\n26\twhich is the hardcoding this section exists to remove, and a project that\n27\trenamed its engineer would get a run for an agent that does not exist. A missing key fails\n28\tthe pull request's own check.\n```\n\nI should verify the validator behavior at deliverable-integrity.ts:389 to write the sentence accurately. Let me read that region.\n\nAlso I need to check the shipped config's own comment — src/content/config.yaml:159-162 changed comment says \"Required when `update.on_new_release` is `pr-agent` -- the shipped value above is that mode, so the name ships beside it: the two are checked as a pair.\" Good.\n\nBoth config files (shipped + adopted) now have `on_update_conflict: engineer` set unconditionally. But an adopter who doesn't set `pr-agent` doesn't have the key, and that's fine — the validator only reports it when mode is `pr-agent`. Let me verify by reading the validator code.\n\nPlan:\n1. Read docs/work/reference.md lines ~15-60 and ~130-165 (current state, since I've edited it already).\n2. Read src/domain/delivery/deliverable-integrity.ts around line 389.\n3. Make the two edits.\n4. Commit and push (same branch, PR #632).\n5. Maybe run the relevant tests that read docs (config-contract tests check docs? Actually \"every config path any page names is one the schema recognises\" — a test that reads doc pages and checks config paths mentioned exist. The example with `on_new_release: pr-agent` — does that test parse YAML examples in docs? There was a test \"every config path any page names is one the schema recognises\". That test reads doc pages for config paths like `on_new_release` and checks against the schema. `pr-agent` value change shouldn't affect it, but check the test to be safe.\n\nAlso update PR-related wording? The PR body is already posted; can't easily change, fine.\n\nThen end by reporting. This run started as the /atomaton agent re-invoked on... actually this is a re-entry on the PR #632 with the reviewer's feedback. I should make the fixes, re-run tests, push, and then end. Who to call? The reviewer said they'd re-check once CI passes. The machinery: after push, validation is dispatched? The PR was created via create_pr with reviewer; CI dispatch happens on push automatically (the project's atomaton-check runs on pushes). The reviewer said \"上記 2 か所を docs/work/reference.md で直して push してください。CI が通り次第、reviewer が再確認します。\"\n\nSo after I push, the reviewer will be re-invoked automatically (the machinery dispatches reviewer when CI passes, per the create_pr description: \"On success it dispatches CI validation... the reviewer when they pass\"). Actually that dispatch happens on PR creation; for subsequent pushes, the machinery presumably re-runs. The system prompt says validation is dispatched on PR creation. For a push, \"GitHub carries the rest\" — the atomaton-check workflow runs on pushes to PR branches, and the reviewer agent might be re-dispatched by the machinery when checks pass. I shouldn't call /reviewer myself in the closing message — hmm, but actually, should I hand back to reviewer? The reviewer said they'll re-check once CI is green. The machinery handles dispatching the reviewer on check pass (that's how this flow worked for the previous run: PR opened → reviewer was run automatically). But to be safe: the closing message guidance says a run ends by calling one thing or nobody. If the machinery re-dispatches the reviewer on CI pass, then ending with nobody is fine and the machinery tells the person. But actually for PR runs, when checks pass, the reviewer is dispatched — that happened automatically before. But wait — this is an issue-run context? The prompt header says \"Issue #631\" first, then \"PR #632: ... /reviewer\" — this run is a continuation on PR #632. The re-invocation on PR after checks pass dispatches the reviewer... The previous flow: create_pr → validation_dispatched → reviewer ran on the PR. That was machinery-driven.\n\nGiven the reviewer explicitly stated \"CI が通り次次、reviewer が再確認します\" (once CI passes, reviewer will re-check), and the machinery re-dispatches the reviewer when checks turn green (that's how the earlier cycle ran), I can end with nobody — the machinery handles it. But is that reliable? The system prompt for create_pr says validation dispatches \"the reviewer when they pass and the engineer when they do not.\" That's on create. For pushes... I'm not certain the machinery re-dispatches. Hmm.\n\nActually, looking at the conversation: this run started with the header \"Issue #631 ... /atomaton\" then the second message \"PR #632 ... /reviewer\" — meaning this session continues and the reviewer's comment was fed to me as instruction. So I'm the atomaton agent working on the PR in response to reviewer feedback. The natural ending: make fixes, push, and end telling nobody (the machinery will dispatch reviewer when CI passes — as evidenced by the first run ending with \"validation_dispatched: true\" and the reviewer then running automatically).\n\nHmm, but there's a risk: if the machinery only dispatches reviewer at PR creation, the PR would sit with green checks and no reviewer, silently. The reviewer's own closing message said \"仕上げはCI が通り次次、reviewer が再確認します\" — implying the machinery does re-check. But to be safer, I could end my message with `/reviewer` line dispatching the reviewer explicitly with a short request to re-review the doc fixes. That guarantees the re-check happens. The guidance says \"To hand the work to a colleague, write a line that holds nothing but a slash and that colleague's name\" — so I can do that. The reviewer is in the list of colleagues? The list includes `reviewer`: \"Reviews one pull request for concrete merge-blocking defects and applies the configured merge policy.\" Yes! `/reviewer` is a valid agent to hand off to.\n\nSo: fix docs, verify tests, commit_and_push, then closing message with `/reviewer` and the request.\n\nWait — but would that double-dispatch if machinery also auto-dispatches on green checks? The first reviewer run was triggered by the machinery when CI passed after create_pr. For a new push, I don't know if machinery re-dispatches. The reviewer itself said it will re-check once CI passes — that suggests it (or the machinery) set up to do so. Hmm, actually the previous reviewer run's \"次に起きること\" is just its report text, not a promise of machinery behavior. The safest: explicitly call /reviewer with the re-review request. That's what \"hand the work to a colleague\" means. If the machinery also dispatches on green, there could be two reviewer runs — but duplicate review is less harmful than a silently-stalled PR. Actually wait — the instructions warn \"Two calls is not a hand-off with a courtesy copy\" about calling two things. A single /reviewer call is fine.\n\nHmm, but also — \"A run ends by calling one thing, or nobody.\" I'll call /reviewer.\n\nLet me now also consider whether to update the PR body's \"Docs work\" claims — the PR body says \"docs/work/reference.md: issue は何も変わる =「absent key の意味」を保持。pr-agent の段落に「出荷初期値 こっ客要求 key (163 行目付近)」を追加。\" — gibberish aside, that's already posted; can't edit it via tools easily. Not needed.\n\nNow the two edits:\n\nEdit 1: example block. Current (docs/work/reference.md around 135-141):\n\n```yaml\n## `update.on_new_release`\n\n```yaml\nupdate:\n  on_new_release: issue\n```\n```\n\nChange `issue` → `pr-agent`? The reviewer explicitly asked: \"例を `pr-agent` にしてください。未設定なら `issue` という説明は docs/work/reference.md:146 にすでにある\".\n\nBut wait — following lines say \"`issue` — what an absent key means — opens the notice and stops there.\" That ordering still works: example shows pr-agent, then the prose explains the three values starting with `issue`. Hmm, slight dissonance: example shows `pr-agent` but prose starts with `issue`. The reviewer explicitly requested this, referencing other examples in this file showing shipped/default values (e.g. `on_config_finding: engineer`, `chain.after_handoffs: 5`). OK, do as asked.\n\nMaybe add after the yaml example a line noting this reflects the shipped value? The prose at the new inserted sentence near :160 says \"This is the mode this template ships, the name shipped beside it as one pair.\" Hmm wait — where exactly is that sentence? I inserted it after the \"`pr-agent` is `pr` plus ...\" paragraph at 156-158. Actually looking at the diff:\n\n```\nrequest. It resolves the markers and stops there: the run that started the update has\nalready ended, the checks run on the resolved tree, and the merge is a person's.\n\n+This is the mode this template ships, the name shipped beside it as one pair.\n+\nTwo things this setting does **not** do.\n```\n\nHmm, that placement is odd — the paragraph before it describes `pr-agent` behavior, so \"This is the mode this template ships\" reads OK. But with the example changed to pr-agent, maybe the sentence could move/merge. Keep it simple: make the two requested edits. I might refine my inserted sentence slightly but not necessary.\n\nActually, hold on. Let me reconsider sentence 1's requested change: the example currently:\n\n```yaml\nupdate:\n  on_new_release: issue\n```\n\nReview other examples in the file: `chain.after_handoffs: 5`, `chain.after_runs_without_change: 2`, `agents.on_config_finding` example? Let me look at the top of the file to see how examples are written — line 20 area is about `agents.on_config_finding` intro (the section before it is probably `agents`). The reviewer says other examples show shipped/default values. So change the yaml example to `pr-agent`.\n\nEdit 2: line 20 area. Current text:\n\n\"**It is required, and it is the only required key in `config.yaml`.** Every other run is started by...\"\n\nNeed to narrow: \"It is required unconditionally\" and note `on_update_conflict` is required when the mode is `pr-agent`. The reviewer's suggested phrasing: 「無条件に必須な唯一のキー」と限定するか、`on_update_conflict` がモードに条件付きで必須であることを一文添えてください。\n\nSo something like:\n\n\"**It is required, and it is the only key required in every `config.yaml`.** ...\" — hmm. Better: keep the bold claim but adjust:\n\n\"**It is required, and no other key is required before a setting asks for one.**\" Hmm, awkward. Let me write:\n\n\"**It is required, and it is the only key `config.yaml` requires outright.** Every other run is started by ... A missing key fails the pull request's own check. The one other required-in-context name is `agents.on_update_conflict`, which `pr-agent` mode makes required — that is a mode asking for a run, and it is covered below.\"\n\nHmm, but wait — is `on_update_conflict` actually reported by configProblems only when mode is `pr-agent`? Reviewer cites `src/domain/delivery/deliverable-integrity.ts:389`. I should read that code to write accurately. Also check how the error is worded — the docs elsewhere (§ on_update_conflict, lines 47-53) say: \"The pair is checked as a pair — a `pr-agent` mode with no name fails the pull request's own check, and the sentence names both keys.\" So docs already document conditional requirement in the on_update_conflict section. The line 20 claim just needs narrowing.\n\nLet me read the validator code around 380-400 to confirm the exact condition.\n\nAlso verify current file state of docs/work/reference.md lines 15-55 and 130-165 (I edited it; line numbers shifted by -1 due to my earlier edit? My first edit only changed wording, not line count. The inserted sentence added 2 lines? \"This is the mode this template ships, the name shipped beside it as one pair.\" added 1 line + blank = 2 lines. The \"issue\" example edit is 1 line, same count.)\n\nLet me read the file sections and the validator, in parallel.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "docs/work/reference.md lines 10-54 of 175\n\n10\tThe agent started on the issue opened for an `ATOMA_CONFIG_FINDING` line.\n11\t\n12\t`atoma` checks the tools file it is handed before it starts any server, and a\n13\tdefect it finds — a guard pattern matching none of its server's tools, two servers\n14\tclaiming one tool name — is written to the run log as one machine-readable line\n15\tand the run carries on. Stopping would not close a guard that has stopped\n16\tguarding; it would only remove the agent's ability to repair the configuration.\n17\tSo something has to read that line, open an issue about it, and put an agent on\n18\tthat issue. This key names that agent.\n19\t\n20\t**It is required, and it is the only required key in `config.yaml`.** Every other\n21\trun is started by something that already knows who it wants — a person types\n22\t`/<agent>`, an agent writes a handoff, a pull request carries the agent that\n23\topened it, a parent issue carries the agent that was working on it — and those are\n24\tread from the thread at run time. This one has no thread to read: it is a workflow\n25\treacting to a condition. A default here would be the deliverable naming an agent,\n26\twhich is the hardcoding this section exists to remove, and a project that renamed\n27\tits engineer would get a run for an agent that does not exist. A missing key fails\n28\tthe pull request's own check.\n29\t\n30\tNothing else belongs in this section. A name that a thread can answer is answered\n31\tfrom the thread.\n32\t\n33\t## `agents.on_update_conflict`\n34\t\n35\t```yaml\n36\tupdate:\n37\t  on_new_release: pr-agent\n38\tagents:\n39\t  on_update_conflict: engineer\n40\t```\n41\t\n42\tThe agent started on an update pull request that stopped on a conflict — the third\n43\tof the [ways to take a newer release](../runtime/tasks/move-to-a-newer-release.md),\n44\tand the one place where a run nobody asked for is started on work that has to be\n45\tjudged.\n46\t\n47\tIt is required only when `update.on_new_release` is `pr-agent`, and it is the only\n48\tkey in this section that is not required outright: until the mode asks for an agent,\n49\tnothing reads a name. Set it and leave the mode alone and it is still checked against\n50\tthe definitions that exist, because a name that resolves to nothing is the same\n51\tfailure whenever the mode is turned on. The pair is checked as a pair — a `pr-agent`\n52\tmode with no name fails the pull request's own check, and the sentence names both\n53\tkeys, because either one is the edit that fixes it.\n54\t\n\n[121 more lines. Read again with offset: 55. The same call and the same arguments, plus this one.]",
+      "tool_call_id": "call_3d5587be836f4744b5b9d16e"
+    },
+    {
+      "role": "tool",
+      "content": "docs/work/reference.md lines 130-169 of 175\n\n130\t[use your own label names](tasks/use-your-own-label-names.md).\n131\t\n132\tThis level accepts names of your own, so a misspelling here is not caught by the\n133\tcheck that reads your config.\n134\t\n135\t## `update.on_new_release`\n136\t\n137\t```yaml\n138\tupdate:\n139\t  on_new_release: issue\n140\t```\n141\t\n142\tWhat the machinery does when its daily comparison finds a newer release of the\n143\ttemplate. Three values, and the file itself carries the one-line difference between\n144\tthem.\n145\t\n146\t`issue` — what an absent key means — opens the notice and stops\n147\tthere. Taking the release is a person's decision, made with **`!upgrade`** or the\n148\tActions button, and nothing in the tree changes until somebody makes it.\n149\t\n150\t`pr` starts the update instead of writing the notice: no notice is opened at all, and\n151\tthe pull request the update opens is the one thread. It applies the release on a\n152\tbranch and merges it itself when nothing collided. A collision stops that pull\n153\trequest with markers in the files, where resolving it is a person's; its body names\n154\tthe files.\n155\t\n156\t`pr-agent` is `pr` plus `agents.on_update_conflict` above, started on that pull\n157\trequest. It resolves the markers and stops there: the run that started the update has\n158\talready ended, the checks run on the resolved tree, and the merge is a person's.\n159\t\n160\tThis is the mode this template ships, the name shipped beside it as one pair.\n161\t\n162\tTwo things this setting does **not** do. It does not decide who may start an update:\n163\t`pr-agent` on a repository where a person typed `!upgrade` still starts the agent if\n164\tthat run collides, because the mode is a policy for the collision and not a property\n165\tof the command that started the run. And it does not apply to `plan.kept`, which is\n166\tnever something an agent is started for.\n167\t\n168\t`pr` and `pr-agent` need the `ATOMATON_UPDATE_TOKEN` secret — the same one the update\n169\tneeds to push and merge at all. Without it nothing is started, and the machinery\n\n[6 more lines. Read again with offset: 170. The same call and the same arguments, plus this one.]",
+      "tool_call_id": "call_e34fcd82af494cc49fabb3ca"
+    },
+    {
+      "role": "tool",
+      "content": "src/domain/delivery/deliverable-integrity.ts lines 370-399 of 444\n\n370\t  // `update.on_new_release` decides whether a notice is all that happens. The reader\n371\t  // treats a value it does not recognise as the default, which by itself is silent:\n372\t  // a project that wrote `on_new_release: pr_agent` would get the notice-only\n373\t  // behaviour it did not ask for and no sentence anywhere saying why.\n374\t  const update = isRecord(config.update) ? config.update : {};\n375\t  const mode = update.on_new_release;\n376\t  if (mode !== undefined && !isNewReleaseMode(mode)) {\n377\t    problems.push(\n378\t      `\\`update.on_new_release\\` is '${String(mode)}', which is not a mode. ` +\n379\t        `Set ${NEW_RELEASE_MODES.map((name) => `\\`${name}\\``).join(\", \")} (the first is the default).`,\n380\t    );\n381\t  }\n382\t  // The one conditional requirement in this file, and the reason both names are in\n383\t  // the sentence: either key is the edit that fixes it. `pr-agent` is the repository\n384\t  // asking for an agent to take a collision, and there is nothing to fall back to --\n385\t  // the run that would start it is the one place nobody is watching.\n386\t  const conflictAgent = typeof agents.on_update_conflict === \"string\" ? agents.on_update_conflict.trim() : \"\";\n387\t  if (mode === \"pr-agent\" && conflictAgent === \"\") {\n388\t    problems.push(\n389\t      \"`update.on_new_release` is `pr-agent`, so `agents.on_update_conflict` must name the agent \" +\n390\t        \"to start on an update pull request that stops on a conflict.\",\n391\t    );\n392\t  }\n393\t  // Checked whether or not the mode is on, because the name is read the moment\n394\t  // somebody turns the mode on -- and a name that resolves to no definition is the\n395\t  // same failure however long it sat unused.\n396\t  if (conflictAgent !== \"\" && agentNames.length > 0 && !agentNames.includes(conflictAgent)) {\n397\t    problems.push(\n398\t      `\\`agents.on_update_conflict\\` names '${conflictAgent}', which has no agent-definitions/${conflictAgent}.md.`,\n399\t    );\n\n[45 more lines. Read again with offset: 400. The same call and the same arguments, plus this one.]",
+      "tool_call_id": "call_ba933cdadbbd4960b5a1b763"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_12dcfefa1c9749239ae44933",
+          "type": "function",
+          "function": {
+            "name": "grep",
+            "arguments": "{\"context\":6,\"path\":\"src/domain/delivery/deliverable-integrity.ts\",\"pattern\":\"on_config_finding\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Confirmed the validator behavior:\n- `deliverable-integrity.ts:387-391`: `mode === \"pr-agent\" && conflictAgent === \"\"` → problem. So `on_update_conflict` is conditionally required when the mode is `pr-agent`.\n- Also line 396: when set (regardless of mode), the name must resolve to a definition. So in the shipped config, `on_update_conflict: engineer` is set, required (mode is pr-agent), and checked.\n\nNow the two edits:\n\n**Edit A** — `docs/work/reference.md:20`:\n\nCurrent:\n```\n**It is required, and it is the only required key in `config.yaml`.** Every other\nrun is started by something that already knows who it wants — a person types\n`/<agent>`, an agent writes a handoff, a pull request carries the agent that\nopened it, a parent issue carries the agent that was working on it — and those are\nread from the thread at run time. This one has no thread to read: it is a workflow\nreacting to a condition. A default here would be the deliverable naming an agent,\nwhich is the hardcoding this section exists to remove, and a project that renamed\nits engineer would get a run for an agent that does not exist. A missing key fails\nthe pull request's own check.\n```\n\nRewrite: narrow the claim to \"required outright\" and add one sentence about `agents.on_update_conflict` being conditionally required by `pr-agent` mode. Something like:\n\n```\n**It is required, and it is the only key required in every `config.yaml`.** Every\nother run is started by something that already knows who it wants — a person types\n`/<agent>`, an agent writes a handoff, a pull request carries the agent that\nopened it, a parent issue carries the agent that was working on it — and those are\nread from the thread at run time. This one has no thread to read: it is a workflow\nreacting to a condition. A default here would be the deliverable naming an agent,\nwhich is the hardcoding this section exists to remove, and a project that renamed\nits engineer would get a run for an agent that does not exist. A missing key fails\nthe pull request's own check.\n\nOne other key becomes required, not of every config but of the setting that asks\nfor it: [`agents.on_update_conflict`](#agentson_update_conflict) must name an\nagent when `update.on_new_release` is `pr-agent`. That is a mode asking for a run,\ncovered below — not a second name required of every repository.\n```\n\nHmm, \"required in every config.yaml\" — hmm. Alternatively: \"the only key required outright\". The reviewer suggested 「無条件に必須な唯一のキー」と限定する (absolutely/unconditionally required) or add a sentence. I'll do both — narrow and add one sentence pointing below. Keep it concise: I'll integrate the sentence into the same paragraph? The paragraph's topic is `on_config_finding`'s requiredness; a trailing sentence about the conditional pair fits.\n\nActually let me be careful about the anchor link: within file `#agentson_update_conflict`. The section heading is \"## `agents.on_update_conflict`\" → anchor likely `#agentson_update_conflict`. Check existing doc for such anchor usage — line 33 heading; other docs link `reference.md#agentson_update_conflict`. Within same file, markdown link `[...]`(#agentson_update_conflict). Good.\n\nDraft:\n\n```\n**It is required, and it is the only key required outright.** Every other\nrun is started by ... (**unchanged middle**) ... A missing key fails the\npull request's own check. The one other name that is ever required is\n[`agents.on_update_conflict`](#agentson_update_conflict), and it is required\nby a setting rather than by the file: when `update.on_new_release` is\n`pr-agent`, a configuration without it is invalid, because the mode is the\nrepository asking for a run nobody else would start.\n```\n\nHmm, wait \"required in every config.yaml\" is factually the claim: on_config_finding must be present no matter what. \"required outright\" matches the existing language in the on_update_conflict section: \"It is required only when `update.on_new_release` is `pr-agent`, and it is the only key in this section that is not required outright\". So using \"outright\" ties in nicely.\n\nWait — hmm, but there's subtlety: with shipped config now `pr-agent`, in the shipped config `on_update_conflict` IS required. But `on_config_finding` remains the only *unconditionally* required. The sentence: \"It is required, and it is the only key required outright.\" then add: \"The other name that is ever required is `agents.on_update_conflict`, and `pr-agent` mode is what requires it — a mode that asks for an agent raises the same failure the missing key would.\"\n\nLet me keep close to reviewer's ask: narrow + one sentence. \n\n**Edit B** — example at 137-140:\n\n```yaml\n## `update.on_new_release`\n\n```yaml\nupdate:\n  on_new_release: issue\n```\n```\n\nChange to `pr-agent`. But then the prose order: \"`issue` — what an absent key means...\" starts. That's fine — the example is now the shipped value and prose explains all three values. Maybe add a tiny lead-in so the example doesn't confuse: e.g. after the intro sentence \"What the machinery does ... Three values, ...\" — the example sits before this prose. Other sections in this file (chain.after_handoffs: 5) show the shipped value in the example and prose explains. Fine as-is.\n\nHmm — one consideration: should the example show the full pair (update + agents)? The on_update_conflict section already shows the pair. Minimal change: just swap `issue` → `pr-agent` in the example. The reviewer asked exactly that.\n\nWait, but there's a wrinkle: the example section immediately under \"## `update.on_new_release`\" showing `on_new_release: pr-agent` without `agents.on_update_conflict` would itself be an INVALID config (pr-agent needs a name). That's a bit awkward — an example that fails validation. Options: (a) show pair in the example:\n\n```yaml\nupdate:\n  on_new_release: pr-agent\nagents:\n  on_update_conflict: engineer\n```\n\nThat duplicates the pair example from the on_update_conflict section (lines 35-40) but makes the shipped example valid, and matches \"other examples show shipped values\". The on_update_conflict section's example is about the agent key; this section's example is about the mode — showing the pair here is honest because the mode demands the name.\n\nHmm, reviewer only asked \"例を `pr-agent` にしてください\" — minimal swap. But a bare invalid example is worse. The file's own note in on_update_conflict says the pair is checked as a pair and \"either one is the edit that fixes it\". I think showing the shipped pair here keeps it valid and self-documenting, while the prose below explains each value including unset=issue. I'll show the pair. Wait — but the on_update_conflict section already shows exactly this pair in yaml; showing the identical block twice in the same file is redundant. Alternative: show the mode value with the name beside it in one yaml block but with the agents key present only to satisfy the pair. It IS the same block. Redundant but each section heading covers both keys anyway... Actually, is redundancy bad here? The `on_update_conflict` section cross-lists both keys in its example; the `on_new_release` section listing both again makes both sections' examples valid. Modest duplication; common in reference docs.\n\nAlternatively minimal swap and rely on the prose: \"Three values, and the file itself carries the one-line difference between them\" — and my added sentence at :160 says the shipped mode + name ship as a pair. Hmm, \"the file itself carries the one-line difference\" refers to config.yaml comments. If the example shows pr-agent alone, a reader copying it gets an invalid config → the check fails and names both keys (good error messages exist: \"either one is the edit that fixes it\"). But a reference doc shouldn't invite an invalid copy where one line avoids it.\n\nDecision: swap the value AND include the agent name so the example is the shipped, valid config. This is within the reviewer's ask, and it also satisfies their complaint that the example is out of line with shipped values.\n\nHmm, wait. Let me reconsider: reviewer said the other examples (`on_config_finding: engineer`, `chain.after_handoffs: 5`) show 配布値・既定値 (shipped values). For on_config_finding the section heading is the key; example probably `agents: on_config_finding: engineer`. For a mode whose value implies another key, showing the implication is natural. OK.\n\nBut hmm — there's a subtle catch: the test `config-contract.test.ts` \"every config path any page names is one the schema recognises\" — walks docs pages finding config paths. Adding `agents:` block in this section — the pair already appears in on_update_conflict section, so paths are already recognized. No schema change. Fine.\n\nAlso the japanese skill said read through before posting; my report is in Japanese — check sentence endings etc. The reviewer's feedback is in Japanese; my closing report should be Japanese too (run's report language: the issue and review are in Japanese, so write in Japanese).\n\nAlso: should I update `docs/runtime/tasks/move-to-a-newer-release.md`? Not required by reviewer. Leave.\n\nAlso — line 146 prose \"Three values, and the file itself carries the one-line difference between them.\" — keep.\n\nNow, also consider: my inserted sentence at :160 \"This is the mode this template ships, the name shipped beside it as one pair.\" — with the example now showing pr-agent, this sentence could be merged or kept. It's fine; maybe tighten: \"This — with the name beside it, as one pair — is the mode the template ships.\" Keep existing; it's accurate and short. Actually the reviewer didn't complain about it; leave it (minimal change).\n\nWait, one more check — the example edit: after swapping the example at lines 137-140, does any test assert on docs content? The test suite includes tests reading `docs/work/reference.md`? Earlier grep showed merge-gates doc checks reading `docs/pull-requests/reference.md`. For work/reference.md, there might be a docs-drift test checking the example blocks parse to known values? Unlikely. I'll run the full suite after edits (or at least the contract tests). Full suite took 129s — acceptable once.\n\nAlso `bun run synth` not needed since docs don't affect dist; but the config.yaml unchanged this time... wait, the shipped config.yaml comments unchanged this round. Full bun test is the verification.\n\nNow — do NOT re-touch anything else. Two edits, one run of tests, commit_and_push, then closing message calling /reviewer.\n\nLet me also double check the \"It is required\" paragraph — the reviewer's point 2 says the claim is wrong \"配布 config 上では\" (in the shipped config, on_update_conflict is also required). Two ways to fix: qualify the claim or add a sentence. My rewrite:\n\n\"**It is required, and it is the only key required outright.**\" — clear.\n\nThen after \"A missing key fails the pull request's own check.\" add:\n\n\"The one other name that is ever required is\n[`agents.on_update_conflict`](#agentson_update_conflict), and a setting rather\nthan the file requires it: `update.on_new_release` at `pr-agent` makes a config\nwithout the name invalid, because the mode is the repository asking for a run\nand there is nothing to fall back to.\"\n\nHmm, \"and there is nothing to fall back to\" — echoes validator comment. Slightly long. Trim:\n\n\"The one other name that is ever required is\n[`agents.on_update_conflict`](#agentson_update_conflict): `update.on_new_release`\nat `pr-agent` makes a configuration without it invalid — a mode asking for a run,\nnot a second name every repository owes the file.\"\n\nI like that. ~3 lines.\n\nWait, actually also reconsider point: is it accurate that on_config_finding is required even when unset... yes REQUIRED_AGENT_KEYS presumably includes on_config_finding, and configProblems reports missing on_config_finding always (that was the deployed-config incident). Let me quickly confirm REQUIRED_AGENT_KEYS to be safe — I haven't read where on_config_finding is required. Line ~350ish in deliverable-integrity.ts probably. Let me grep for on_config_finding in the validator. Actually earlier deployed-config.test.ts header says \"The `agents` section was added to the template with `on_config_finding` required\" and configProblems reports it. Trust that; but a 5-second grep is cheap and makes the doc sentence solid. Let me grep \"on_config_finding\" in src/domain/delivery/deliverable-integrity.ts.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "27 line(s), match and context, under src/domain/delivery/deliverable-integrity.ts:\n\n73- *\n74- * One list, read by both the schema above and the check below, so a key added to\n75- * one cannot be missing from the other. Each is a workflow that reacts to a\n76- * condition rather than to a request, which is why it has no thread to read a name\n77- * from -- see `AtomaConfig.agents`.\n78- */\n79:const REQUIRED_AGENT_KEYS = [\"on_config_finding\"] as const;\n80-\n81-/**\n82- * config.yaml's recognised keys.\n83- *\n84- * `AtomaConfig` in `domain/delivery/declared-config.ts` is the definition; this is the runtime mirror,\n85- * because an interface is erased before anything can consult it.\n--\n133-      },\n134-    },\n135-    // The agents a workflow starts when no thread can name one. Enumerated rather\n136-    // than `anyName`, because each key is a specific workflow's decision and a\n137-    // misspelled one would silently start nobody -- the failure this whole module\n138-    // is about. `REQUIRED_AGENT_KEYS` below is what makes an absent one a problem.\n139:    agents: { children: { on_config_finding: null, on_update_conflict: null } },\n140-    // `servers` is not enumerated: every key inside a server entry is passed to the\n141-    // core verbatim, so listing them here would refuse a setting the core accepts --\n142-    // `url` and `headers` for a remote server, and whatever a later release adds.\n143-    tools: {\n144-      children: {\n145-        secrets: null,",
+      "tool_call_id": "call_12dcfefa1c9749239ae44933"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_6f12ef9b480a47ce9b2e6fee",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\":\"**It is required, and it is the one key `config.yaml` requires outright.** Every other\\nrun is started by something that already knows who it wants — a person types\\n`/<agent>`, an agent writes a handoff, a pull request carries the agent that\\nopened it, a parent issue carries the agent that was working on it — and those are\\nread from the thread at run time. This one has no thread to read: it is a workflow\\nreacting to a condition. A default here would be the deliverable naming an agent,\\nwhich is the hardcoding this section exists to remove, and a project that renamed\\nits engineer would get a run for an agent that does not exist. A missing key fails\\nthe pull request's own check.\\n\\nThe one other name that is ever required is\\n[`agents.on_update_conflict`](#agentson_update_conflict), and a setting rather\\nthan the file requires it: `update.on_new_release` at `pr-agent` makes a\\nconfiguration without it invalid, because the mode is the repository asking for a\\nrun nobody is watching. `issue` and `pr` owe no name.\",\"old_string\":\"**It is required, and it is the only required key in `config.yaml`.** Every other\\nrun is started by something that already knows who it wants — a person types\\n`/<agent>`, an agent writes a handoff, a pull request carries the agent that\\nopened it, a parent issue carries the agent that was working on it — and those are\\nread from the thread at run time. This one has no thread to read: it is a workflow\\nreacting to a condition. A default here would be the deliverable naming an agent,\\nwhich is the hardcoding this section exists to remove, and a project that renamed\\nits engineer would get a run for an agent that does not exist. A missing key fails\\nthe pull request's own check.\",\"path\":\"docs/work/reference.md\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Confirmed: `REQUIRED_AGENT_KEYS = [\"on_config_finding\"]` — `on_config_finding` is the only outright-required key; `on_update_conflict` gets the conditional check (mode === \"pr-agent\" → required), plus a resolve-check when set.\n\nNow make the two edits.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in docs/work/reference.md.",
+      "tool_call_id": "call_6f12ef9b480a47ce9b2e6fee"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_2c9da34f07864315b6ff1388",
+          "type": "function",
+          "function": {
+            "name": "edit",
+            "arguments": "{\"new_string\":\"## `update.on_new_release`\\n\\n```yaml\\nupdate:\\n  on_new_release: pr-agent\\nagents:\\n  on_update_conflict: engineer\\n```\\n\\nThis is what the template ships — the mode and, because the mode asks for one, the\\nname. Omit both and an absent key means `issue`.\",\"old_string\":\"## `update.on_new_release`\\n\\n```yaml\\nupdate:\\n  on_new_release: issue\\n```\",\"path\":\"docs/work/reference.md\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Now edit the example at ~137-140 (shifted by +7 lines now). Change `issue` to the shipped pair so the example is (a) the shipped value and (b) a valid config.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "Replaced 1 occurrence(s) in docs/work/reference.md.",
+      "tool_call_id": "call_2c9da34f07864315b6ff1388"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_0f2e52b6bbd1454f9a834676",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test 2>&1 | tail -5\",\"timeout_seconds\":600}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" 6 skip\\n 89 fail\\n 7 errors\\n 7099 expect() calls\\nRan 2592 tests across 203 files. [117.28s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":118871}",
+      "tool_call_id": "call_0f2e52b6bbd1454f9a834676"
+    },
+    {
+      "role": "assistant",
+      "content": "89失敗は異常です。まず失敗の内容を確認します。",
+      "tool_calls": [
+        {
+          "id": "call_4cdbc55dc07f4deab22798e4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"bun test 2>&1 | grep -E \\\"^\\\\(fail\\\\)\\\" | head -20\",\"timeout_seconds\":600}"
+          }
+        }
+      ],
+      "reasoning_content": "WOW — 89 fail! Something is very broken. Let me look at what failed. Possibly my docs edits broke a test that reads the docs pages (e.g., \"every config path any page names is one the schema recognises\" — the anchor link or the added yaml?). Or... 89 failures is a huge number — could be an environment issue (e.g., dist/ missing again? I ran bun test without synth and dist existed from earlier run this session... wait, dist/ was created earlier in the session via bun run synth, and /home/runner paths persist within the run; but 89 fails + 7 errors...).\n\nActually wait — the earlier full run at the start of this continuation: I ran `bun test` AFTER edits? No — first full run was 2607/0 fail AFTER my edits and synth. Then commit_and_push succeeded. The re-invocation now: a NEW run? No — the machine says the reviewer ran a separate run; this conversation is one atomaton session continuing (this seems to be a resumed session after the reviewer turn — actually looking at the conversation, the PR came back with reviewer feedback; the /reviewer comment was inlined; now I'm asked to continue).\n\nWhy would tests fail now? Maybe the doc example yaml block I added — `agents:` with `on_update_conflict: engineer` inside the example — causes a docs-contract test that parses every yaml block in docs? If such a parser exists and my block is fine it should parse. 89 failures though — massive.\n\nLet me look at the failure output.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"(fail) provider credential check against the real atoma > the binary understands --credentials-present [0.20ms]\\n(fail) provider credential check against the real atoma > stops and names the secret to add when the provider's credential is absent [0.19ms]\\n(fail) provider credential check against the real atoma > continues in silence when the provider's credential is there [0.09ms]\\n(fail) generated jobs > each one is bounded, by itself or by the workflow it calls [0.10ms]\\n(fail) generated jobs > a job that calls a reusable workflow finds the bound there [0.09ms]\\n(fail) config.yaml's recognised keys > the shipped config.yaml declares only recognised keys [0.32ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-runner sets the environment up before \\\"Run agent\\\" [0.15ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-check sets the environment up before \\\"Run this check's commands\\\" [0.02ms]\\n(fail) environment setup reaches every job that runs project commands > atomaton-deploy sets the environment up before \\\"Run this deployment's commands\\\" [0.02ms]\\n(fail) environment setup reaches every job that runs project commands > setup runs before any secret enters the environment [0.09ms]\\n(fail) environment setup reaches every job that runs project commands > no step before the setup carries a secret's value [0.21ms]\\n(fail) reserved names match the workflows they describe > the agent's step [0.10ms]\\n(fail) reserved names match the workflows they describe > the step that asks again [0.04ms]\\n(fail) reserved names match the workflows they describe > the pull request's check step carries no declared credential at all [0.04ms]\\n(fail) reserved names match the workflows they describe > the credentialed check step [0.05ms]\\n(fail) reserved names match the workflows they describe > the deploy step [0.04ms]\\n(fail) the credentials step and RUN_CREDENTIALS > every credential the run declares is supplied to the step [0.08ms]\\n(fail) the credentials step and RUN_CREDENTIALS > the step supplies nothing that is not a declared credential or a secret slot [0.07ms]\\n(fail) generated workflows > the reranker cache is one directory, reachable by both users [0.31ms]\\n(fail) generated workflows > the untrusted user exists, can be reached only downward, and is read-only on the run's own files [0.15ms]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":115571}",
+      "tool_call_id": "call_4cdbc55dc07f4deab22798e4"
+    },
+    {
+      "role": "assistant",
+      "content": "dist が再生成されていないだけの可能性が高いです（checkout 後の再実行）。確認して synth を回します。",
+      "tool_calls": [
+        {
+          "id": "call_7d68dbb301484f5e91528f5f",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"ls dist/.github 2>&1; echo \\\"---\\\"; bun run synth 2>&1 | tail -2 && bun test 2>&1 | tail -5\",\"timeout_seconds\":600}"
+          }
+        }
+      ],
+      "reasoning_content": "The failures are about \"generated jobs\", \"generated workflows\", \"dist\", \"credentials step\" — these all read `dist/`-like artifacts or the generated workflows tree. This looks like the environment lost something: probably `dist/` is gone (it's gitignored, wasn't committed), and re-generated... no wait, I ran synth earlier IN THIS SESSION? This looks like a NEW session (the earlier session's in-memory state is gone but the filesystem should persist... Actually the filesystem persists only /tmp/atomaton-workspace and the repo checkout at the pushed state. The checkout is at my pushed commit — dist/ is gitignored so it's absent from the checkout → dist-dependent tests fail.\n\nEarlier in the original run I ran `bun run synth` first — that's why tests passed. In this continuation the environment was re-provisioned (checked out fresh), so dist/ is missing. That explains \"config.yaml's recognised keys > the shipped config.yaml declares only recognised keys\" (needs dist/.github/workflows) and the workflow-generation tests (they compare generated workflows? or need the runner?).\n\nSo: run `bun run synth` again, then rerun the failing subset/full suite. That was the known earlier fix. Let me verify quickly: ls dist.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"ls: cannot access 'dist/.github': No such file or directory\\n---\\nbuild-dist: copied static content: /home/runner/work/atomaton/atomaton/src/content -> /home/runner/work/atomaton/atomaton/dist/.github/atomaton\\nbuild-dist: wrote .github/atomaton-release.json for v0.26.0 (135 files)\\n 2607 pass\\n 6 skip\\n 0 fail\\n 7980 expect() calls\\nRan 2613 tests across 203 files. [119.81s]\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":120348}",
+      "tool_call_id": "call_7d68dbb301484f5e91528f5f"
+    },
+    {
+      "role": "assistant",
+      "content": "dist 再生成で全緑（2607 pass / 0 fail）。2 か所の修正を同じブランチに push します。",
+      "tool_calls": [
+        {
+          "id": "call_ec1f5491554f4c0fa6c74480",
+          "type": "function",
+          "function": {
+            "name": "commit_and_push",
+            "arguments": "{\"message\":\"Re-review fixes in docs/work/reference.md (#632)\\n\\nTwo follow-ups from review:\\n\\n- The `update.on_new_release` example now shows the shipped pair\\n  (pr-agent + agents.on_update_conflict: engineer) instead of `issue`,\\n  so the example matches the delivered values and is itself a valid\\n  configuration. The unset-key-means-issue explanation keeps in the prose\\n  below and now also beside the example.\\n- `agents.on_config_finding`'s \\\"the only required key in config.yaml\\\" is\\n  narrowed to \\\"the one key required outright\\\", with one sentence naming\\n  agents.on_update_conflict as the other name ever required, conditionally\\n  on pr-agent mode, matching REQUIRED_AGENT_KEYS and configProblems.\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Confirmed: dist/ was missing (fresh checkout this continuation — the earlier synth output didn't survive), and after `bun run synth` the full suite is green: 2607 pass / 6 skip / 0 fail.\n\nNow commit and push the two doc fixes.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"ok\":true,\"committed\":true,\"pushed\":true}",
+      "tool_call_id": "call_ec1f5491554f4c0fa6c74480"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e281a567afed4bc28498d8c9",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git show --stat HEAD | head -12\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"commit dddae0c9f12bed6c8e7afcad419b1a96550be83e\\nAuthor: atomaton-atomaton <atomaton-atomaton@users.noreply.github.com>\\nDate:   Fri Nov 27 13:47:58 2026 +0000\\n\\n    Re-review fixes in docs/work/reference.md (#632)\\n    \\n    Two follow-ups from review:\\n    \\n    - The `update.on_new_release` example now shows the shipped pair\\n      (pr-agent + agents.on_update_conflict: engineer) instead of `issue`,\\n      so the example matches the delivered values and is itself a valid\\n      configuration. The unset-key-means-issue explanation keeps in the prose\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":175}",
+      "tool_call_id": "call_e281a567afed4bc28498d8c9"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_8f00a221c96a4cf68c0f842e",
+          "type": "function",
+          "function": {
+            "name": "get_check_runs",
+            "arguments": "{\"ref\":\"dddae0c9f12bed6c8e7afcad419b1a96550be83e\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Pushed. Now close the run. The reviewer said they'd re-check once CI is green. I should hand back to /reviewer with a slash line.\n\nReport in Japanese (the reviewer's feedback and the issue are in Japanese; the japanese skill says write reports in the thread's language).\n\nReport structure per contract: conclusion, evidence, gaps, next steps. Keep concise.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "[]",
+      "tool_call_id": "call_8f00a221c96a4cf68c0f842e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_03b560565a92488c87aa042b",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"sleep 60; echo done\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"done\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":60169}",
+      "tool_call_id": "call_03b560565a92488c87aa042b"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_0166dd9b035d4a2ea015f111",
+          "type": "function",
+          "function": {
+            "name": "get_check_runs",
+            "arguments": "{\"ref\":\"dddae0c9f12bed6c8e7afcad419b1a96550be83e\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "[{\"name\":\"default-branch-checks (${{ matrix.name }})\",\"status\":\"completed\",\"conclusion\":\"skipped\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/46010256495/job/140543748050\"},{\"name\":\"pull-request-checks (verify)\",\"status\":\"in_progress\",\"conclusion\":null,\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/46010256495/job/140543704864\"},{\"name\":\"atomaton-tools\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/46010256495/job/140543657240\"},{\"name\":\"plan-default-branch-checks\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/46010256495/job/140543657118\"},{\"name\":\"plan-pull-request-checks\",\"status\":\"completed\",\"conclusion\":\"success\",\"html_url\":\"https://github.com/yuma-seno/atomaton/actions/runs/46010256495/job/140543656667\"}]",
+      "tool_call_id": "call_0166dd9b035d4a2ea015f111"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_26b64a3d77214ec1901a9bb4",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git show --stat HEAD | tail -3\"}"
+          }
+        }
+      ],
+      "reasoning_content": "CI is in progress on the head commit (`pull-request-checks (verify)` still running; atomaton-tools, plan-* passed). I cannot wait for it to finish — but the reviewer said CI passing triggers their re-check, and the machinery dispatches the reviewer when checks pass on a PR (as happened earlier in this cycle: create_pr → validation_dispatched → reviewer ran). For a push follow-up, the earlier cycle worked identically: the reviewer was re-invoked by the machinery after green checks.\n\nSo I end my run by handing to /reviewer with the request to re-review the two doc fixes. The closing message must call exactly one thing: `/reviewer`.\n\nWrite the report in Japanese (japanese skill): conclusion first, no opening/closing fluff, evidence with anchors, what couldn't be established, next steps. Keep the slash line as the ONLY call, at the end? No — the slash line must be part of the closing message; the report text plus the /reviewer line. Order: guidance says \"To hand the work to a colleague, write a line that holds nothing but a slash and that colleague's name... Put the concrete request on the lines after it.\" The closing message calls it by containing the line; the placement — the message IS the posted comment. I'll structure: report body, then `/reviewer` line with the request below it. Wait — \"Lead with the request itself\" — the /name line first, then the request with details folded. But this comment is also the run report read by the machinery. Hmm — the machinery takes the last message as the comment. If I lead with `/reviewer`, the report follows after. That matches \"a line holding nothing but a slash and the agent's name. What follows it is the request.\"\n\nLet me write:\n\n```\n/reviewer\ndocs/work/reference.md の 2 か所を直して push しました。CI が緑になれば再確認をお願いします。\n...details...\n```\n\nContent (Japanese, per japanese skill):\n\n結論: reviewer が挙げた 2 か所を直し、head に push しました (commit dddae0c)。\n\n修正内容:\n1. `docs/work/reference.md` の `update.on_new_release` の例: `issue` → 出荷値のペア (`on_new_release: pr-agent` + `agents.on_update_conflict: engineer`)。例自体が有効な構成になります。未設定 = `issue` の説明は例の直下と :146 の本文に残っています。\n2. `agents.on_config_finding` の段落 (docs/work/reference.md:20): 「the only required key in config.yaml」→「the one key required outright」に限定し、`on_update_conflict` が `pr-agent` モードで条件付き必須になる一文を追加。\n\n検証: `bun run synth` → `bun test` 2607 pass / 0 fail。dist が今回のセッションに無かったにもかかわらず最初の run が 89 fail となったが、synth で解消 (dist は gitignore の生成物)。head の CI は `pull-request-checks (verify)` 実行中、それ以外 success。フルの緑は確認できていない。\n\nわからなかったこと/確認済み: 必須の裏取り — `REQUIRED_AGENT_KEYS = [\"on_config_finding\"]` (src/domain/delivery/deliverable-integrity.ts:79) と `mode === \"pr-agent\" && conflictAgent === \"\"` の条件 (同 :387) を読んで文面を合わせた。\n\n次: CI 緑後の再確認 → governed path なのでマージは人の仕事 (@yuma-seno)。\n\nFold the evidence details. Keep visible: conclusion + the two fixes + next step.\n\nWait — one concern: the reviewer run \"could not run bun test\" — minor. And regarding the reviewer's note that they couldn't read the validator around :389 — I read it now (mode === \"pr-agent\" && conflictAgent === \"\" → problem). Good.\n\nAlso note in the fold: `.github/atomaton/config.yaml` は未変更 (this commit only touches docs/work/reference.md)。\n\nThe evidence per contract: name files+lines. Let me write the closing message now. Keep the /reviewer line bare on its own line, request after.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"\\n docs/work/reference.md | 15 +++++++++++++--\\n 1 file changed, 13 insertions(+), 2 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":172}",
+      "tool_call_id": "call_26b64a3d77214ec1901a9bb4"
+    },
+    {
+      "role": "assistant",
+      "content": "/reviewer\n追加指摘の 2 か所を直し、head `dddae0c` として push しました。CI が緑になったら再確認をお願いします。\n\n## 直した 2 か所\n\n1. **`docs/work/reference.md` の `update.on_new_release` の例**： `issue` → 出荷値のペア \"`on_new_release: pr-agent`\" + \"`agents.on_update_conflict: engineer`\" にしました。とのことで、この標記はそのまま有効な構成になります（pr-agent が 1 行だけ記述された無効な構成の例にならないように）。未設定キーが `issue` を意味することは、例の直下と :152 の本文の両方に書きました。\n2. **`docs/work/reference.md:20` の「It is required, and it is the only required key in `config.yaml`」**： 「the one key `config.yaml` requires outright」に限定し、続けて一文を追加しました — `agents.on_update_conflict` は設定 (`pr-agent` モード) によって必須になるもの、という書きぶりです。無条件必須と条件付き必須の区別が読み取れる形にしました。\n\n## 確認したこと\n\n<details><summary>根拠と検証</summary>\n\n- 文面の裏取り： `REQUIRED_AGENT_KEYS = [\"on_config_finding\"]` (`src/domain/delivery/deliverable-integrity.ts:79`) と、`mode === \"pr-agent\" && conflictAgent === \"\"` のときに設定を問題として報告する条件 (`src/domain/delivery/deliverable-integrity.ts:387-391`) を直接読んで合わせました。前回のレビューで「直接読めていなかった」点はここで補完済みです。\n- テスト: このセッションの checkout には `dist/` がなく最初の全テストが 89 fail しましたが、gitignore 済みの生成物のみが原因でした。`bun run synth` 後の再実行で **2607 pass / 0 fail** (2613 tests, 203 files)。\n- 本コミットの変更は `docs/work/reference.md` のみ (+13/-2)。template・採用側 config・テストには手を入れていません。\n- head の CI: `pull-request-checks (verify)` 実行中、`atomaton-tools` と `plan-*` は success。フルの緑までは確認していません。\n\n</details>\n\n## マージについて\n\n引き続き governed path (`.github/**`) への変更を含むため、マージは人の仕事です。",
+      "finish_reason": "stop",
+      "atoma_metadata": {
+        "github_comment_id": 7219994178,
+        "agent": "atomaton"
+      }
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 1,
-      "snapshot_hash": "9f7acb6db58de0b209b7076c4af802391205e77e6611c18183007164a6f1012c",
-      "version": 1
+      "event_count": 4,
+      "snapshot_hash": "7e03b3b402a9893359cfac12475b70bdabd36edfbaabf51daaaf124b701f4033",
+      "version": 1,
+      "type": "issue",
+      "session_number": "631"
     }
   },
   "atoma_runs": [
@@ -645,6 +982,30 @@
         }
       },
       "started": "2026-11-27T13:20:00Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-27T13:49:43Z",
+      "ended_because": "completed",
+      "iterations": 14,
+      "loop_recoveries": 0,
+      "messages": 89,
+      "seconds": 647,
+      "server_calls": {
+        "files": {
+          "edit": 2,
+          "grep": 1,
+          "read": 3
+        },
+        "github": {
+          "commit_and_push": 1,
+          "get_check_runs": 2
+        },
+        "shell": {
+          "bash": 6
+        }
+      },
+      "started": "2026-11-27T13:38:56Z"
     }
   ]
 }
