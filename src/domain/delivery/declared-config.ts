@@ -24,6 +24,32 @@
  * `docs/config/reference.md`. They used to be in both, and a reason written twice
  * is a reason that will disagree with itself.
  */
+/**
+ * The three modes `update.on_new_release` accepts.
+ *
+ * One list, so the interface, the runtime schema's check and the reader cannot
+ * disagree about what a mode is called. Written in the child's own words
+ * deliberately: `pr-agent` is a mode, and the agent's name is not part of it --
+ * naming one is `agents.on_update_conflict`'s job, the same way
+ * `agents.on_config_finding` names the agent for a config finding.
+ */
+export const NEW_RELEASE_MODES = ["issue", "pr", "pr-agent"] as const;
+
+/** One of [`NEW_RELEASE_MODES`]. */
+export type NewReleaseMode = (typeof NEW_RELEASE_MODES)[number];
+
+/**
+ * Whether a value read out of YAML is one of the modes.
+ *
+ * Both ends ask this of the same list: `configProblems` reports a value that is not
+ * a mode, and the reader falls back to the default rather than acting on one it does
+ * not understand. A type predicate rather than a cast at each call site, because the
+ * narrowing is the point.
+ */
+export function isNewReleaseMode(value: unknown): value is NewReleaseMode {
+  return typeof value === "string" && (NEW_RELEASE_MODES as readonly string[]).includes(value);
+}
+
 export interface AtomaConfig {
   /** Where work branches from and merges back to. Empty means the default branch. */
   base_branch?: string;
@@ -88,6 +114,29 @@ export interface AtomaConfig {
     gates?: unknown;
   };
 
+  /**
+   * What the machinery does when it notices a newer release of the template.
+   *
+   * `issue` is the notice and nothing else: a person decides when to take the
+   * release, with `!upgrade` or the Actions button. `pr` takes it as soon as it is
+   * noticed -- the update applies the plan, opens its pull request, and merges it
+   * itself when nothing collided. `pr-agent` is `pr` plus an agent on the pull
+   * request when it stops on a conflict.
+   *
+   * A mode is a policy for the COLLISION, not a property of how the update was
+   * started: `pr-agent` on a repository where a person typed `!upgrade` still starts
+   * the agent if that run stops on a conflict, and `issue` starts none however the
+   * run was started. `plan.kept` is not a collision -- the plan declined to decide,
+   * and a person decides -- so no mode starts an agent for it.
+   */
+  update?: {
+    /**
+     * `issue` (default), `pr` or `pr-agent`. An unset key means `issue`, and any
+     * other value is a configuration problem rather than a mode.
+     */
+    on_new_release?: NewReleaseMode;
+  };
+
   /** When a chain of runs stops and asks a person. */
   chain?: {
     after_handoffs?: unknown;
@@ -119,17 +168,32 @@ export interface AtomaConfig {
    * as an `ATOMA_CONFIG_FINDING` line and carries on, and something has to open an
    * issue about it and put an agent on that issue.
    *
-   * ## Required, not defaulted
+   * ## Required, or required when its mode is on
    *
-   * Every key here is required. A default would be this file naming an agent, which
-   * is the hardcoding this section exists to remove -- and a project that renamed
-   * its engineer would get a run for an agent that does not exist. `configProblems`
-   * reports a missing key, so the pull request that would ship it fails its check
-   * instead of the run failing later.
+   * The keys a workflow always starts have no default: a default would be this file
+   * naming an agent, which is the hardcoding this section exists to remove -- and a
+   * project that renamed its engineer would get a run for an agent that does not
+   * exist. `configProblems` reports a missing key, so the pull request that would
+   * ship it fails its check instead of the run failing later.
+   *
+   * `on_update_conflict` is required only when `update.on_new_release` is
+   * `pr-agent`: that setting is the repository asking for a run on a collision, and
+   * nothing else needs a name until it is set.
    */
   agents?: {
     /** The agent to start on an issue opened for an `ATOMA_CONFIG_FINDING`. */
     on_config_finding?: string;
+    /**
+     * The agent to start on an update pull request that stopped on a conflict.
+     *
+     * Required only when `update.on_new_release` is `pr-agent` -- the mode is the
+     * repository saying a run should take the collision, and this names which one.
+     * `configProblems` reports the pair when the mode is set and this is not.
+     *
+     * No default, for the reason above: a default would be this file naming an
+     * agent, and only the project knows what its engineer is called.
+     */
+    on_update_conflict?: string;
   };
 
   /**

@@ -351,14 +351,26 @@ export function ghPaginated<T = unknown>(...args: string[]): T[] {
  * is the substance here, not boilerplate.
  *
  * `context` prefixes both messages so a log line still says who was dispatching.
+ *
+ * ## `token`, for the one caller whose own token cannot start a run
+ *
+ * Every caller but the release machinery dispatches as the ambient `GH_TOKEN`, which
+ * is right: whichever workflow holds it, `actions: write` is declared there. The
+ * update lane is the exception -- its workflow declares no `actions: write`, on
+ * purpose, because widening the permission of the job that rewrites `.github/` is a
+ * bigger decision than carrying a PAT for the one dispatch it needs. So the token is
+ * passed, through `ghAs`, and the env assembly is the same as the ambient path's:
+ * `ghAs` builds a per-process environment and lets it die with the process.
  */
 export function dispatchWorkflow(
   context: string,
   workflow: string,
   args: string[] = [],
   log: (message: string) => void = (m) => console.error(m),
+  token = "",
 ): boolean {
-  const { code, stdout, stderr } = gh("workflow", "run", workflow, ...args);
+  const argv = ["workflow", "run", workflow, ...args];
+  const { code, stdout, stderr } = token.trim() ? ghAs(token.trim(), ...argv) : gh(...argv);
   if (code) {
     log(`${context}: WARN failed to dispatch ${workflow}: ${stderr || stdout}`);
     return false;

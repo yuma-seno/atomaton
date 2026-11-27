@@ -45,6 +45,7 @@ import { resolveDeclaredSecrets, TOOL_SECRETS } from "./declared-secrets.ts";
 import { DEPLOY_ARMS, resolveDeployJobs } from "./deploy-jobs.ts";
 import { resolveDeclaredJobs } from "./declared-jobs.ts";
 import { resolveMergeGates } from "./merge-gates.ts";
+import { NEW_RELEASE_MODES, isNewReleaseMode } from "./declared-config.ts";
 import { DEFAULT_CD_WORKFLOW, DEFAULT_CI_WORKFLOW } from "./shipped-workflows.ts";
 
 /**
@@ -119,6 +120,11 @@ const CONFIG_SCHEMA: Section = {
       },
     },
     merge: { children: { policy: null, governed_paths: null, gates: null } },
+    // One value, enumerated by `configProblems` below rather than by this tree:
+    // `null` says only that a level this file does not describe decides what may be
+    // in it, and the rule that a mode is one of three words is a rule about the
+    // value, not about the key's name.
+    update: { children: { on_new_release: null } },
     chain: {
       children: {
         after_handoffs: null,
@@ -130,7 +136,7 @@ const CONFIG_SCHEMA: Section = {
     // than `anyName`, because each key is a specific workflow's decision and a
     // misspelled one would silently start nobody -- the failure this whole module
     // is about. `REQUIRED_AGENT_KEYS` below is what makes an absent one a problem.
-    agents: { children: { on_config_finding: null } },
+    agents: { children: { on_config_finding: null, on_update_conflict: null } },
     // `servers` is not enumerated: every key inside a server entry is passed to the
     // core verbatim, so listing them here would refuse a setting the core accepts --
     // `url` and `headers` for a remote server, and whatever a later release adds.
@@ -357,6 +363,40 @@ export function configProblems(facts: DeliverableFacts): string[] {
         `\`agents.${key}\` names '${value.trim()}', which has no agent-definitions/${value.trim()}.md.`,
       );
     }
+  }
+
+  // ── what the machinery does with a newer release ──────────────────────────
+  //
+  // `update.on_new_release` decides whether a notice is all that happens. The reader
+  // treats a value it does not recognise as the default, which by itself is silent:
+  // a project that wrote `on_new_release: pr_agent` would get the notice-only
+  // behaviour it did not ask for and no sentence anywhere saying why.
+  const update = isRecord(config.update) ? config.update : {};
+  const mode = update.on_new_release;
+  if (mode !== undefined && !isNewReleaseMode(mode)) {
+    problems.push(
+      `\`update.on_new_release\` is '${String(mode)}', which is not a mode. ` +
+        `Set ${NEW_RELEASE_MODES.map((name) => `\`${name}\``).join(", ")} (the first is the default).`,
+    );
+  }
+  // The one conditional requirement in this file, and the reason both names are in
+  // the sentence: either key is the edit that fixes it. `pr-agent` is the repository
+  // asking for an agent to take a collision, and there is nothing to fall back to --
+  // the run that would start it is the one place nobody is watching.
+  const conflictAgent = typeof agents.on_update_conflict === "string" ? agents.on_update_conflict.trim() : "";
+  if (mode === "pr-agent" && conflictAgent === "") {
+    problems.push(
+      "`update.on_new_release` is `pr-agent`, so `agents.on_update_conflict` must name the agent " +
+        "to start on an update pull request that stops on a conflict.",
+    );
+  }
+  // Checked whether or not the mode is on, because the name is read the moment
+  // somebody turns the mode on -- and a name that resolves to no definition is the
+  // same failure however long it sat unused.
+  if (conflictAgent !== "" && agentNames.length > 0 && !agentNames.includes(conflictAgent)) {
+    problems.push(
+      `\`agents.on_update_conflict\` names '${conflictAgent}', which has no agent-definitions/${conflictAgent}.md.`,
+    );
   }
 
   // ── the two workflows a dispatch names ────────────────────────────────────

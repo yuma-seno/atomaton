@@ -255,6 +255,52 @@ describe("names that have to resolve to a file", () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("agent-definitions");
   });
+
+  /**
+   * `update.on_new_release` and the agent it names, which is the only requirement in
+   * this file that is conditional.
+   *
+   * The reader answers an unrecognised value with the default, so a typo is not a
+   * broken run -- it is the notice-only behaviour the project did not ask for, in
+   * silence. That is the failure these rules exist to turn into a sentence.
+   */
+  test("a mode that is not one of the three is reported", () => {
+    const problems = problemsFor({ ...SOUND, update: { on_new_release: "pr_agent" } });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("`update.on_new_release`");
+    expect(problems[0], "and says what a mode can be").toContain("`pr-agent`");
+  });
+
+  test("`pr-agent` with no agent named is reported against both keys", () => {
+    const problems = problemsFor({ ...SOUND, update: { on_new_release: "pr-agent" } });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("`update.on_new_release`");
+    expect(problems[0], "either key is the edit that fixes it").toContain("`agents.on_update_conflict`");
+  });
+
+  test("`pr-agent` naming an agent with no definition is reported", () => {
+    const problems = problemsFor({
+      ...SOUND,
+      update: { on_new_release: "pr-agent" },
+      agents: { on_config_finding: "engineer", on_update_conflict: "nobody" },
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("agent-definitions/nobody.md");
+  });
+
+  // `pr` starts a run, and starts nobody: the name is needed by the mode that starts
+  // an agent, and required by nothing else.
+  test("`pr` needs no agent", () => {
+    expect(problemsFor({ ...SOUND, update: { on_new_release: "pr" } })).toEqual([]);
+  });
+
+  // Checked with the mode off as well: the name is read the moment somebody turns the
+  // mode on, and a name that resolves to nothing is the same failure then.
+  test("an agent named for a mode that is off is still checked", () => {
+    const problems = problemsFor({ ...SOUND, agents: { on_config_finding: "engineer", on_update_conflict: "nobody" } });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("`agents.on_update_conflict`");
+  });
 });
 
 describe("the workflows a dispatch names", () => {
