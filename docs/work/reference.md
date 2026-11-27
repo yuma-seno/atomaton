@@ -147,10 +147,11 @@ them.
 there. Taking the release is a person's decision, made with **`!upgrade`** or the
 Actions button, and nothing in the tree changes until somebody makes it.
 
-`pr` starts the update as the notice is written: it applies the release on a branch,
-opens its pull request, and merges it itself when nothing collided. A collision stops
-the pull request with markers in the files, where resolving it is a person's; the
-notice says which files.
+`pr` starts the update instead of writing the notice: no notice is opened at all, and
+the pull request the update opens is the one thread. It applies the release on a
+branch and merges it itself when nothing collided. A collision stops that pull
+request with markers in the files, where resolving it is a person's; its body names
+the files.
 
 `pr-agent` is `pr` plus `agents.on_update_conflict` above, started on that pull
 request. It resolves the markers and stops there: the run that started the update has
@@ -163,8 +164,10 @@ of the command that started the run. And it does not apply to `plan.kept`, which
 never something an agent is started for.
 
 `pr` and `pr-agent` need the `ATOMATON_UPDATE_TOKEN` secret — the same one the update
-needs to push and merge at all. Without it nothing is started, the daily run stays
-green, and [the notice says so](../runtime/tasks/move-to-a-newer-release.md#taking-it).
+needs to push and merge at all. Without it nothing is started, and the machinery
+writes the notice after all, headed by a warning that says why. A dispatch GitHub
+refuses ends the same way, with the reason left in the run log rather than in the
+notice. Neither makes the daily run fail.
 
 An unrecognised value is not a mode: it is reported by the check that reads your
 config, and until it is fixed the machinery behaves as though the key were unset.
