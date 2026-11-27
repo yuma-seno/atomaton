@@ -27797,6 +27797,92 @@
     ]
   },
   {
+    "path": "sessions/issue-637/reviewer.json",
+    "agent": "reviewer",
+    "messages": 62,
+    "calls": 29,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "conventions",
+      "japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "load_skill": 2,
+      "get_pr": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "grep": 7,
+      "read": 9,
+      "get_check_runs": 1,
+      "delegate_readonly": 2,
+      "fetch": 1,
+      "check_merge_readiness": 2,
+      "merge_pr": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:55:30Z",
+        "ended_because": "failed",
+        "iterations": 7,
+        "loop_abort": {
+          "arguments": "{\"path\":\"src/entrypoints/machinery/notify_new_release.ts\"}",
+          "call": 12,
+          "capped": false,
+          "count": 5,
+          "last_error": null,
+          "rule": "identical_answers",
+          "tool": "read"
+        },
+        "loop_recoveries": 1,
+        "messages": 29,
+        "seconds": 15,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 3,
+            "read": 5
+          },
+          "github": {
+            "get_pr": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          }
+        },
+        "started": "2026-11-27T16:55:15Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:57:22Z",
+        "ended_because": "completed",
+        "iterations": 15,
+        "loop_recoveries": 0,
+        "messages": 62,
+        "seconds": 111,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 2
+          },
+          "files_readonly": {
+            "grep": 4,
+            "read": 4
+          },
+          "github": {
+            "check_merge_readiness": 2,
+            "get_check_runs": 1,
+            "merge_pr": 2
+          },
+          "web": {
+            "fetch": 1
+          }
+        },
+        "started": "2026-11-27T16:55:31Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-638/atomaton.json",
     "agent": "atomaton",
     "messages": 65,
