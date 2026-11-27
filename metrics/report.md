@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 116 | 24.1% | 42 | 1,230 | 8 | 7.0 |
-| Last 30 days | 473 | 12.9% | 244 | 6,099 | 11 | 19.9 |
-| Last year | 899 | 9.6% | 248 | 10,246 | 13 | 18.6 |
-| All time | 899 | 9.6% | 248 | 10,246 | 13 | 18.6 |
+| Last 7 days | 117 | 23.9% | 42 | 1,230 | 8 | 7.0 |
+| Last 30 days | 474 | 12.9% | 244 | 6,099 | 11 | 19.9 |
+| Last year | 900 | 9.6% | 249 | 10,246 | 13 | 18.7 |
+| All time | 900 | 9.6% | 249 | 10,246 | 13 | 18.7 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 813 |
+| `completed` | 814 |
 | `failed` | 75 |
 | `stopped` | 11 |
 
@@ -38,7 +38,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 663,589 | 3,832,760 | 7,840,910 | 7,840,910 | 70,296,815 |
-| messages per session | 105 | 198 | 293 | 293 | 4,833 |
+| messages per session | 105 | 198 | 293 | 293 | 4,843 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -57,7 +57,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `fetch` | 41 | 1 | 0 | 2.4% |
 | `list` | 39 | 0 | 0 | 0% |
 | `load_skill` | 35 | 0 | 0 | 0% |
-| `get_check_runs` | 30 | 0 | 0 | 0% |
+| `get_check_runs` | 31 | 0 | 0 | 0% |
 | `get_issue_comments` | 29 | 0 | 0 | 0% |
 | `get_pr` | 29 | 0 | 0 | 0% |
 | `create_pr` | 28 | 9 | 0 | 32.1% |
@@ -66,8 +66,8 @@ What is left over is not the same as work delivered. `completed` is the core say
 | `commit_and_push` | 26 | 1 | 0 | 3.8% |
 | `write` | 25 | 0 | 0 | 0% |
 | `glob` | 23 | 0 | 0 | 0% |
+| `request_close_issue` | 17 | 0 | 0 | 0% |
 | `get_pr_reviews` | 16 | 0 | 0 | 0% |
-| `request_close_issue` | 16 | 0 | 0 | 0% |
 | `get_issue` | 15 | 0 | 0 | 0% |
 | `search_issues` | 13 | 0 | 0 | 0% |
 | `merge_pr` | 12 | 0 | 0 | 0% |
@@ -114,7 +114,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,279,746 | 7,840,910 | 20,308,488 | 29,805,044 | 545,809,399 |
-| messages per session | 144 | 334 | 425 | 439 | 25,670 |
+| messages per session | 144 | 334 | 425 | 439 | 25,680 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -135,7 +135,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `list` | 171 | 2 | 0 | 1.2% |
 | `glob` | 168 | 0 | 0 | 0% |
 | `get_pr` | 163 | 0 | 0 | 0% |
-| `get_check_runs` | 157 | 3 | 0 | 1.9% |
+| `get_check_runs` | 158 | 3 | 0 | 1.9% |
 | `get_issue_comments` | 137 | 0 | 0 | 0% |
 | `load_skill` | 117 | 7 | 0 | 6% |
 | `commit_and_push` | 115 | 2 | 0 | 1.7% |
@@ -146,7 +146,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `get_branch` | 73 | 0 | 0 | 0% |
 | `get_pr_reviews` | 62 | 0 | 0 | 0% |
 | `get_pr_diff` | 59 | 0 | 0 | 0% |
-| `request_close_issue` | 56 | 0 | 0 | 0% |
+| `request_close_issue` | 57 | 0 | 0 | 0% |
 | `search_code` | 55 | 0 | 0 | 0% |
 | `list_pr_review_comments` | 44 | 0 | 0 | 0% |
 | `merge_pr` | 41 | 0 | 0 | 0% |
@@ -205,7 +205,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,279,746 | 6,099,372 | 27,846,035 | 73,718,100 | 1,181,918,912 |
-| messages per session | 126 | 330 | 583 | 731 | 56,392 |
+| messages per session | 126 | 330 | 583 | 731 | 56,402 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -228,7 +228,7 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `get_issue_comments` | 384 | 0 | 10 | 0% |
 | `get_issue` | 379 | 14 | 5 | 3.7% |
 | `get_pr` | 379 | 9 | 3 | 2.4% |
-| `get_check_runs` | 369 | 13 | 0 | 3.5% |
+| `get_check_runs` | 370 | 13 | 0 | 3.5% |
 | `glob` | 342 | 1 | 1 | 0.3% |
 | `check_merge_readiness` | 234 | 0 | 0 | 0% |
 | `write` | 224 | 2 | 0 | 0.9% |
@@ -239,8 +239,8 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 | `get_pr_diff` | 149 | 3 | 0 | 2% |
 | `web__fetch` | 148 | 10 | 0 | 6.8% |
 | `search_issues` | 145 | 0 | 3 | 0% |
+| `request_close_issue` | 120 | 1 | 0 | 0.8% |
 | `load_skill` | 119 | 9 | 0 | 7.6% |
-| `request_close_issue` | 119 | 1 | 0 | 0.8% |
 | `get_pr_reviews` | 98 | 0 | 0 | 0% |
 | `search_code` | 79 | 0 | 0 | 0% |
 | `merge_pr` | 77 | 0 | 0 | 0% |
@@ -333,7 +333,7 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | tokens per run | 1,279,746 | 6,099,372 | 27,846,035 | 73,718,100 | 1,181,918,912 |
-| messages per session | 120 | 327 | 583 | 731 | 56,516 |
+| messages per session | 120 | 327 | 583 | 731 | 56,526 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -356,7 +356,7 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | `get_issue_comments` | 384 | 0 | 10 | 0% |
 | `get_issue` | 379 | 14 | 5 | 3.7% |
 | `get_pr` | 379 | 9 | 3 | 2.4% |
-| `get_check_runs` | 369 | 13 | 0 | 3.5% |
+| `get_check_runs` | 370 | 13 | 0 | 3.5% |
 | `glob` | 342 | 1 | 1 | 0.3% |
 | `check_merge_readiness` | 234 | 0 | 0 | 0% |
 | `write` | 224 | 2 | 0 | 0.9% |
@@ -367,8 +367,8 @@ Neither figure covers 19 sessions with no run record at all — without one, nei
 | `get_pr_diff` | 149 | 3 | 0 | 2% |
 | `web__fetch` | 148 | 10 | 0 | 6.8% |
 | `search_issues` | 145 | 0 | 3 | 0% |
+| `request_close_issue` | 120 | 1 | 0 | 0.8% |
 | `load_skill` | 119 | 9 | 0 | 7.6% |
-| `request_close_issue` | 119 | 1 | 0 | 0.8% |
 | `get_pr_reviews` | 98 | 0 | 0 | 0% |
 | `search_code` | 79 | 0 | 0 | 0% |
 | `merge_pr` | 77 | 0 | 0 | 0% |
