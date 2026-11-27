@@ -932,6 +932,19 @@ function reportFailure(repo, number, runUrl, summary, details = []) {
   if (posted.code)
     log(`WARN could not post the failure comment: ${posted.stderr}`);
 }
+function writeCheckRun(repo, headSha, name, conclusion) {
+  const post = () => gh("api", "--method", "POST", `repos/${repo}/check-runs`, "-f", `name=${name}`, "-f", `head_sha=${headSha}`, "-f", "status=completed", "-f", `conclusion=${conclusion}`);
+  let written = post();
+  if (written.code) {
+    log(`WARN could not write check "${name}" as ${conclusion}: ${written.stderr || written.stdout}; retrying once`);
+    written = post();
+  }
+  if (written.code) {
+    console.error(`::error::could not write the required check "${name}" on ${headSha.slice(0, 7)}: ` + `${written.stderr || written.stdout}`);
+    return;
+  }
+  log(`wrote check "${name}" as ${conclusion}`);
+}
 function notifyCiWaiting(repo, number, askedByPerson, runUrl) {
   if (!askedByPerson)
     return;
@@ -1069,13 +1082,8 @@ function main() {
     deliverableProblems
   });
   const conclusionForContexts = contextsPassed(outcome.verdict) ? "success" : "failure";
-  for (const check of requiredContexts.map((name) => ({ name, conclusion: conclusionForContexts }))) {
-    const created = gh("api", "--method", "POST", `repos/${repo}/check-runs`, "-f", `name=${check.name}`, "-f", `head_sha=${headSha}`, "-f", "status=completed", "-f", `conclusion=${check.conclusion}`);
-    if (created.code)
-      log(`WARN could not write check "${check.name}": ${created.stderr}`);
-    else
-      log(`wrote check "${check.name}" as ${check.conclusion}`);
-  }
+  for (const name of requiredContexts)
+    writeCheckRun(repo, headSha, name, conclusionForContexts);
   if (outcome.verdict !== "passed") {
     reportFailure(repo, values.number ?? "", runUrl, outcome.summary, deliverableProblems);
   }
