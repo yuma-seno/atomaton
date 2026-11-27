@@ -27073,6 +27073,53 @@
     ]
   },
   {
+    "path": "sessions/issue-631/reviewer.json",
+    "agent": "reviewer",
+    "messages": 47,
+    "calls": 30,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "conventions",
+      "japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "load_skill": 2,
+      "grep": 2,
+      "get_issue_comments": 1,
+      "get_pr_reviews": 1,
+      "read": 22,
+      "glob": 1,
+      "check_merge_readiness": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T13:37:29Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "loop_recoveries": 1,
+        "messages": 47,
+        "seconds": 56,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 2,
+            "read": 22
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_issue_comments": 1,
+            "get_pr_reviews": 1
+          }
+        },
+        "started": "2026-11-27T13:36:33Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
