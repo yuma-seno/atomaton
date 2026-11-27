@@ -30,6 +30,38 @@ the pull request's own check.
 Nothing else belongs in this section. A name that a thread can answer is answered
 from the thread.
 
+## `agents.on_update_conflict`
+
+```yaml
+update:
+  on_new_release: pr-agent
+agents:
+  on_update_conflict: engineer
+```
+
+The agent started on an update pull request that stopped on a conflict — the third
+of the [ways to take a newer release](../runtime/tasks/move-to-a-newer-release.md),
+and the one place where a run nobody asked for is started on work that has to be
+judged.
+
+It is required only when `update.on_new_release` is `pr-agent`, and it is the only
+key in this section that is not required outright: until the mode asks for an agent,
+nothing reads a name. Set it and leave the mode alone and it is still checked against
+the definitions that exist, because a name that resolves to nothing is the same
+failure whenever the mode is turned on. The pair is checked as a pair — a `pr-agent`
+mode with no name fails the pull request's own check, and the sentence names both
+keys, because either one is the edit that fixes it.
+
+It is a different question from `on_config_finding`, and the difference is the shape
+of the condition: that one is `atoma` reporting a defect in a tools file, which
+happens on any repository at any time; this one is a collision between your tree and
+a release, which happens only when you have asked for updates to be taken for you.
+A project that never sets `pr-agent` never needs this key.
+
+`plan.kept` does not start an agent, whatever the mode. The plan declining to touch a
+path is it asking a person, and a mode decides what happens when two edits actually
+collide — not who answers a question the plan refused to answer.
+
 ## `base_branch`
 
 Where agent branches start from and where their pull requests target. Empty means
@@ -99,3 +131,40 @@ request. Change these only on a name collision —
 
 This level accepts names of your own, so a misspelling here is not caught by the
 check that reads your config.
+
+## `update.on_new_release`
+
+```yaml
+update:
+  on_new_release: issue
+```
+
+What the machinery does when its daily comparison finds a newer release of the
+template. Three values, and the file itself carries the one-line difference between
+them.
+
+`issue` — the default, and what an absent key means — opens the notice and stops
+there. Taking the release is a person's decision, made with **`!upgrade`** or the
+Actions button, and nothing in the tree changes until somebody makes it.
+
+`pr` starts the update as the notice is written: it applies the release on a branch,
+opens its pull request, and merges it itself when nothing collided. A collision stops
+the pull request with markers in the files, where resolving it is a person's; the
+notice says which files.
+
+`pr-agent` is `pr` plus `agents.on_update_conflict` above, started on that pull
+request. It resolves the markers and stops there: the run that started the update has
+already ended, the checks run on the resolved tree, and the merge is a person's.
+
+Two things this setting does **not** do. It does not decide who may start an update:
+`pr-agent` on a repository where a person typed `!upgrade` still starts the agent if
+that run collides, because the mode is a policy for the collision and not a property
+of the command that started the run. And it does not apply to `plan.kept`, which is
+never something an agent is started for.
+
+`pr` and `pr-agent` need the `ATOMATON_UPDATE_TOKEN` secret — the same one the update
+needs to push and merge at all. Without it nothing is started, the daily run stays
+green, and [the notice says so](../runtime/tasks/move-to-a-newer-release.md#taking-it).
+
+An unrecognised value is not a mode: it is reported by the check that reads your
+config, and until it is fixed the machinery behaves as though the key were unset.

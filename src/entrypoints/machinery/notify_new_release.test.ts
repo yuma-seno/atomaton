@@ -81,6 +81,11 @@ function checkout(entries: Tree, version = "v0.1.0"): string {
   }
   mkdirSync(dirname(join(dir, RELEASE_MANIFEST)), { recursive: true });
   writeFileSync(join(dir, RELEASE_MANIFEST), `${manifestJson(version, Object.keys(entries))}\n`);
+  // Every adopted tree carries this file, and the notice reads it -- for
+  // `update.on_new_release` only. A fixture without one would be a tree the
+  // deliverable does not ship.
+  mkdirSync(dirname(join(dir, ".github/atomaton/config.yaml")), { recursive: true });
+  writeFileSync(join(dir, ".github/atomaton/config.yaml"), 'base_branch: ""\n');
   return dir;
 }
 
@@ -224,6 +229,22 @@ function flagValue(call: string[], flag: string): string {
 function behind(): string {
   return checkout(BASE_FILES, "v0.1.0");
 }
+
+/**
+ * The same tree, with the one setting this file is about written into it.
+ *
+ * `config.yaml` is in neither release, so the plan never proposes touching it -- the
+ * notice only reads it, and only for `update.on_new_release`.
+ */
+function behindWith(config: string): string {
+  const dir = behind();
+  mkdirSync(dirname(join(dir, ".github/atomaton/config.yaml")), { recursive: true });
+  writeFileSync(join(dir, ".github/atomaton/config.yaml"), config);
+  return dir;
+}
+
+/** The `gh` calls that would start the update, as argv arrays. */
+const started = (calls: string[][]): string[][] => calls.filter((call) => call[0] === "workflow");
 
 describe("when a tree is up to date", () => {
   test("nothing is written at all", () => {
@@ -530,5 +551,128 @@ describe("which releases are in the window", () => {
     const window = releaseWindow([...many, release("v0.0.1")], "v0.0.1");
     expect(window.newer).toHaveLength(MAX_RELEASES);
     expect(window.omitted).toBe(5);
+  });
+});
+
+/**
+ * `update.on_new_release`, from the noticing side.
+ *
+ * The mode is a conflict-time policy, but the notice is where a `pr` or `pr-agent`
+ * repository's update is actually STARTED -- so this is the half that decides whether
+ * a daily cron turns into a run at all, and the half that has to stay silent in
+ * `issue` mode. Every case below shares one question: what does a person see in the
+ * notice, and what did the machinery start.
+ */
+describe("when the repository asked for the update to be taken", () => {
+  const PR_MODE = "base_branch: main\nupdate:\n  on_new_release: pr\n";
+  const AGENT_MODE = "base_branch: main\nupdate:\n  on_new_release: pr-agent\n";
+
+  /** The answers a dispatched update needs: no pull request yet, and the dispatch landing. */
+  const dispatchable: FakeGhRule[] = [
+    { match: ["pr", "list"], stdout: "[]" },
+    // Matched on the workflow's name too: `workflow` and `run` appear inside the
+    // notice's own body (the paths it lists), and a rule that answers `issue create`
+    // with this one is a test measuring itself.
+    { match: ["workflow", "run", "atomaton-update.yml"], stdout: "" },
+  ];
+
+  const announce = (dir: string, rules: FakeGhRule[], env: Record<string, string>) =>
+    runWithFakeGh(scriptPath("notify_new_release.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      env,
+      rules: [
+        ...reads("v0.2.0"),
+        search(0),
+        { match: ["issue", "create"], stdout: "https://example.test/owner/repo/issues/9" },
+        ...rules,
+      ],
+    });
+
+  /**
+   * The default, and the pin the whole change rests on: a repository that set nothing
+   * is a repository where nothing is taken. A token in the environment does not change
+   * that -- unset means `issue`, and `issue` means the notice and no more.
+   */
+  test("an unset mode dispatches nothing, even with a token in the environment", () => {
+    const r = announce(behind(), dispatchable, { ATOMATON_UPDATE_TOKEN: "tok" });
+    expect(r.status).toBe(0);
+    expect(started(r.ghCalls), "the notice must start no run").toEqual([]);
+    expect(r.ghCalls.filter((call) => call[0] === "pr"), "and must not go looking for one").toEqual([]);
+    expect(writeBody(r.ghCalls.find((call) => call[1] === "create") ?? [])).not.toContain("update.on_new_release");
+  });
+
+  test("`issue` behaves exactly as the unset default does", () => {
+    const r = announce(behindWith("base_branch: main\nupdate:\n  on_new_release: issue\n"), dispatchable, {
+      ATOMATON_UPDATE_TOKEN: "tok",
+    });
+    expect(r.status).toBe(0);
+    expect(started(r.ghCalls)).toEqual([]);
+  });
+
+  /**
+   * `pr` starts the update as the notice is written, and names the notice as its
+   * source -- so every report the update writes lands in the thread that announced
+   * the release, not on a pull request nobody was watching yet.
+   */
+  test("`pr` dispatches the update against the notice it just wrote", () => {
+    const r = announce(behindWith(PR_MODE), dispatchable, { ATOMATON_UPDATE_TOKEN: "tok" });
+    expect(r.status).toBe(0);
+
+    const sent = started(r.ghCalls);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("atomaton-update.yml");
+    expect(sent[0], "the update answers in the notice").toContain("source=9");
+
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body).toContain("update.on_new_release");
+    expect(body, "and says the release is being taken, not that it was").toContain("taken without anyone asking");
+  });
+
+  test("`pr-agent` starts the update the same way", () => {
+    const r = announce(behindWith(AGENT_MODE), dispatchable, { ATOMATON_UPDATE_TOKEN: "tok" });
+    expect(r.status).toBe(0);
+    expect(started(r.ghCalls)).toHaveLength(1);
+    expect(writeBody(r.ghCalls.find((call) => call[1] === "create") ?? [])).toContain("pr-agent");
+  });
+
+  /**
+   * The case a person has to act on. The daily run stays green -- failing it would
+   * announce nothing at all -- and the notice is where the reason has to be, because
+   * the log of a cron nobody watches is not a place a person looks.
+   */
+  test("no update token is a notice that says so, and no dispatch", () => {
+    const r = announce(behindWith(PR_MODE), dispatchable, {});
+    expect(r.status, "a repository with no secret still learns there is a release").toBe(0);
+    expect(started(r.ghCalls)).toEqual([]);
+    expect(r.stderr).toContain("WARN");
+
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body).toContain("ATOMATON_UPDATE_TOKEN");
+    expect(body).toContain("nothing was started");
+  });
+
+  /**
+   * One pull request per release, which is what the update itself enforces by editing
+   * the pull request it already made -- but a daily cron would dispatch a run every
+   * day to find that out. The head branch is the one the update names its pull request
+   * after, and it is read from the same module the update writes it from.
+   */
+  test("an update pull request already open is not dispatched again", () => {
+    const r = announce(behindWith(PR_MODE), [{ match: ["pr", "list"], stdout: JSON.stringify([{ number: 4 }]) }], {
+      ATOMATON_UPDATE_TOKEN: "tok",
+    });
+    expect(r.status).toBe(0);
+    expect(started(r.ghCalls)).toEqual([]);
+
+    const body = writeBody(r.ghCalls.find((call) => call[1] === "create") ?? []);
+    expect(body).toContain("#4");
+    expect(body).toContain("already open");
+  });
+
+  /** The read that decides it is the head branch, not a title or a search. */
+  test("the pull request it looks for is the one on this release's update branch", () => {
+    const r = announce(behindWith(PR_MODE), dispatchable, { ATOMATON_UPDATE_TOKEN: "tok" });
+    const listed = r.ghCalls.find((call) => call[0] === "pr" && call[1] === "list") ?? [];
+    expect(listed[listed.indexOf("--head") + 1]).toBe("atomaton/update-v0.2.0");
   });
 });

@@ -12,10 +12,11 @@
  *   `issues: write` is also the whole argument for shipping this half of the
  *   upgrade problem before the sync half, so losing it silently withdraws the
  *   reason.
- * - **no dispatch, no checkout of anything else.** The notice is a read of two
- *   release tags and one issue write. Anything that starts a run, writes a
- *   workflow or opens a pull request from here is the capability this was designed
- *   NOT to need.
+ * - **no dispatch of its own, and no checkout of anything else.** The notice is a
+ *   read of two release tags, one issue write, and -- only for a repository that
+ *   asked -- one dispatch through `dispatchUpdate`. Anything that runs `gh workflow
+ *   run` in its shell, writes a workflow or opens a pull request from here would be
+ *   the capability this was designed NOT to need, in the place nobody can gate it.
  * - **the schedule, and its absence in the other direction.** A cron is easy to
  *   delete while tidying and impossible to notice afterwards: the workflow stays
  *   green and simply never runs.
@@ -109,13 +110,28 @@ describe("the new-release notice", () => {
   });
 
   /**
-   * And no secret. A `secrets.` anywhere in this file would mean an adopter has to
-   * configure something before they are told there is an upgrade -- which is the
-   * ordering this whole half exists to avoid.
+   * And one secret, read for the mode that asked for it and required by neither.
+   *
+   * The ordering this half exists to protect is unchanged: a repository that
+   * configures nothing is told there is an upgrade with no secret at all. What the
+   * PAT buys is the dispatch that `update.on_new_release: pr` asks for, and this
+   * workflow cannot start a run with its own token -- `actions: write` is not in the
+   * permission set above and must not be added for this. So the secret travels
+   * inside the step's env, where the script reads it and can say "nothing was
+   * started" instead of failing.
+   *
+   * Named exactly, because a second secret here would be a second thing an adopter
+   * has to mint before being told about a release.
    */
-  test("no secret is named anywhere in it", () => {
+  test("the one secret it reads is the update's own token, and only the notice step sees it", () => {
     const text = readFileSync(WORKFLOW, "utf8");
-    expect(text).not.toContain("${{ secrets.");
+    const named = [...text.matchAll(/secrets\.([A-Za-z0-9_]+)/g)].map((match) => match[1] ?? "");
+    expect([...new Set(named)]).toEqual(["ATOMATON_UPDATE_TOKEN"]);
+
+    const step = steps.find((candidate) => (candidate.run ?? "").includes("notify_new_release.ts"));
+    expect(step?.env?.ATOMATON_UPDATE_TOKEN, "the dispatch reads it through the step's env").toBe(
+      "${{ secrets.ATOMATON_UPDATE_TOKEN }}",
+    );
   });
 
   /** The upstream it compares against, so the workflow and the script cannot disagree. */

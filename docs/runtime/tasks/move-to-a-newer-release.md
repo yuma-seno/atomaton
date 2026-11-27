@@ -13,9 +13,26 @@ preview of what taking the release would do to your tree (files updated, added,
 removed, and — most useful — files you changed AND upstream changed), and the
 paths upstream no longer ships. Once a notice's version is the one you are on, it
 closes itself, so an open one always means an upgrade is still waiting. It needs
-no secret: `contents: read` to read the releases and `issues: write` to write the
-notice. Run it by hand from the Actions tab if you would rather ask now than wait
-for the next day.
+no secret of its own: `contents: read` to read the releases and `issues: write` to
+write the notice. Run it by hand from the Actions tab if you would rather ask now
+than wait for the next day.
+
+**It can also take the release for you.** `update.on_new_release` decides what
+happens after the notice is written, and its default is the notice alone:
+
+- `issue` — what this page has described so far, and what an unset key means.
+  Nothing is taken until somebody says so.
+- `pr` — the update starts as the notice is written. A clean plan merges itself
+  once your checks pass; a collision stops at the pull request, and the notice
+  names the files.
+- `pr-agent` — the same, and
+  [`agents.on_update_conflict`](../../work/reference.md#agentson_update_conflict)
+  is started on the pull request that stopped, to resolve the conflict markers.
+
+The mode is a policy for the collision, not for the command that started the run:
+on a `pr-agent` repository, `!upgrade` that collides gets the agent too. `pr` and
+`pr-agent` need `ATOMATON_UPDATE_TOKEN`, which the update needs anyway; without it
+nothing starts, the daily run stays green, and the notice says why.
 
 ## Taking it
 

@@ -100,7 +100,11 @@ function gitIn(dir: string, args: string[]): string {
  * A checkout standing in for the adopted tree: the manifest and its files
  * committed on `main`, with a bare repository as `origin` the push can reach.
  */
-function fixtureRepo(entries: Tree, version: string): { dir: string; bare: string } {
+function fixtureRepo(
+  entries: Tree,
+  version: string,
+  config = "base_branch: main\ndeploy: {}\n",
+): { dir: string; bare: string } {
   const dir = temp("update-repo-");
   for (const [path, content] of Object.entries(entries)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
@@ -113,7 +117,7 @@ function fixtureRepo(entries: Tree, version: string): { dir: string; bare: strin
   // neither release is invisible to the plan, and this is that property under a
   // file the run itself reads through another door.
   mkdirSync(dirname(join(dir, ".github/atomaton/config.yaml")), { recursive: true });
-  writeFileSync(join(dir, ".github/atomaton/config.yaml"), "base_branch: main\ndeploy: {}\n");
+  writeFileSync(join(dir, ".github/atomaton/config.yaml"), config);
   gitIn(dir, ["-c", "init.defaultBranch=main", "init"]);
   gitIn(dir, ["add", "-A"]);
   gitIn(dir, ["-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "seed"]);
@@ -189,15 +193,63 @@ function rules(
   ];
 }
 
+/**
+ * The two modes, as the trees that declare them.
+ *
+ * `pr-agent` names `engineer`; `pr` names nobody, because nothing would be read.
+ */
+const PR_AGENT = "base_branch: main\ndeploy: {}\nupdate:\n  on_new_release: pr-agent\nagents:\n  on_update_conflict: engineer\n";
+const PR_ONLY = "base_branch: main\ndeploy: {}\nupdate:\n  on_new_release: pr\n";
+
+/** The id the fake `gh` answers with where the directive comment is posted. */
+const DIRECTIVE_ID = 555;
+
+/**
+ * What a run for an agent on pull request #9 asks GitHub, in the order that decides it.
+ *
+ * The dispatch is the runner's own machinery -- target state, then the thread read
+ * that proves the directive comment is visible, then the dispatch. Written as rules
+ * rather than asserted from the outside because the real thing is exercised: the
+ * closed-target guard and the marker check run here, and a run that skipped them
+ * would pass a shallower test.
+ */
+function dispatchRules(): FakeGhRule[] {
+  return [
+    // More specific first: the comments URL contains the issue URL, and the generic
+    // `issue comment` rule in `rules()` matches both.
+    {
+      match: ["api", "repos/owner/repo/issues/9/comments", "POST"],
+      stdout: String(DIRECTIVE_ID),
+    },
+    {
+      match: ["api", "repos/owner/repo/issues/9/comments"],
+      stdout: JSON.stringify([{ id: DIRECTIVE_ID, body: "", user: { type: "Bot" } }]),
+    },
+    {
+      match: ["api", "repos/owner/repo/issues/9"],
+      stdout: JSON.stringify({ state: "open", pull_request: {}, labels: [] }),
+    },
+    // The dispatch itself, matched on the workflow's name as well: `workflow` and
+    // `run` are short enough to appear inside a pull request BODY, and a rule that
+    // answers `pr create` with this one is a test measuring itself.
+    { match: ["workflow", "run", "atomaton-runner.yml"], stdout: "" },
+  ];
+}
+
 const run = (
   dir: string,
   extraArgs: string[] = [],
   env: Record<string, string> = {},
   options: { notice?: number } = {},
+  // Prepended, because the rules for a dispatch are MORE specific than the ones
+  // above: a `gh api .../issues/9/comments` call would otherwise match the generic
+  // `issue comment` rule, whose match is two substrings that argv carries inside one
+  // path segment.
+  extraRules: FakeGhRule[] = [],
 ) =>
   runWithFakeGh(scriptPath("update_atomaton.ts"), ["--repo", "owner/repo", ...extraArgs], {
     cwd: dir,
-    rules: rules("v0.2.0", options),
+    rules: [...extraRules, ...rules("v0.2.0", options)],
     env,
   });
 
@@ -328,6 +380,9 @@ describe("a stopped update", () => {
     const created = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "create");
     expect(created).toHaveLength(1);
     expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge")).toEqual([]);
+    // And this tree is on the default mode, so no agent is started for the collision:
+    // the pull request standing is all the run leaves behind for whoever reads it.
+    expect(r.ghCalls.filter((call) => call[0] === "workflow")).toEqual([]);
 
     const body = (created[0] ?? [])[(created[0] ?? []).indexOf("--body") + 1] ?? "";
     expect(body).toContain("needs a decision");
@@ -404,6 +459,97 @@ describe("a stopped update", () => {
     expect(comment).toContain("adopted.md");
     expect(comment).toContain("#9");
     expect(comment).toContain("merge by hand");
+  });
+
+  /**
+   * `update.on_new_release: pr-agent`, and the collision it was configured for.
+   *
+   * The agent is started on the pull request itself, not on the notice: the notice is
+   * where the release was announced, and the work is on the branch. Resolving markers
+   * is a judgement about two edits, and the conflict is the whole input it needs.
+   */
+  test("`pr-agent` starts the named agent on the pull request that stopped", () => {
+    const { dir } = fixtureRepo({ ...BASE_FILES, [CHECK]: "customised by the adopter\n" }, "v0.1.0", PR_AGENT);
+    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: "tok" }, { notice: 12 }, dispatchRules());
+    expect(r.status).toBe(0);
+
+    // The stop is unchanged: nothing was merged and no check was watched.
+    expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge")).toEqual([]);
+    expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "checks")).toEqual([]);
+
+    const sent = r.ghCalls.filter((call) => call[0] === "workflow");
+    expect(sent, "one run, for the agent the config names").toHaveLength(1);
+    expect(sent[0]).toContain("atomaton-runner.yml");
+    expect(sent[0]).toContain("agent=engineer");
+    expect(sent[0], "on the pull request, not the issue that announced it").toContain("type=pr");
+    expect(sent[0]).toContain("number=9");
+
+    // The directive is a comment on the pull request, and it is this dispatch's ask.
+    const directive = r.ghCalls.find((call) => call[0] === "api" && call.includes("POST"));
+    expect(directive, "the agent is told what to do on the thread it will read").toBeDefined();
+    expect((directive ?? []).join(" ")).toContain("repos/owner/repo/issues/9/comments");
+
+    // The notice reports what actually started, not what was meant to.
+    const comments = r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "comment");
+    const toNotice = (comments[0] ?? [])[(comments[0] ?? []).indexOf("--body") + 1] ?? "";
+    expect(toNotice).toContain("engineer");
+    expect(toNotice).toContain("has been started");
+  });
+
+  /** The pull request body says an agent is coming, so a reader there is not told to go find one. */
+  test("`pr-agent` writes the resolution into the pull request body as well", () => {
+    const { dir } = fixtureRepo({ ...BASE_FILES, [CHECK]: "customised\n" }, "v0.1.0", PR_AGENT);
+    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: "tok" }, { notice: 12 }, dispatchRules());
+    const created = r.ghCalls.find((call) => call[0] === "pr" && call[1] === "create") ?? [];
+    const body = created[created.indexOf("--body") + 1] ?? "";
+    expect(body).toContain("engineer");
+    expect(body).toContain("is started on it to resolve them");
+  });
+
+  /**
+   * The mode is a policy for the collision, not for the command that started the run.
+   * A person's `!upgrade` on a `pr-agent` repository collides exactly like the notice's
+   * dispatch does, and the repository said what should happen then.
+   */
+  test("`pr-agent` starts the agent however the update was started", () => {
+    const { dir } = fixtureRepo({ ...BASE_FILES, [CHECK]: "customised\n" }, "v0.1.0", PR_AGENT);
+    const r = run(dir, ["--source", "31"], { ATOMATON_UPDATE_TOKEN: "tok" }, { notice: 12 }, dispatchRules());
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((call) => call[0] === "workflow")).toHaveLength(1);
+  });
+
+  /**
+   * `pr` is the mode that stops at the pull request, and stopping there means starting
+   * nobody: the whole difference between the two modes is this one dispatch.
+   */
+  test("`pr` leaves the same conflict for a person, and starts no agent", () => {
+    const { dir } = fixtureRepo({ ...BASE_FILES, [CHECK]: "customised\n" }, "v0.1.0", PR_ONLY);
+    const r = run(dir, [], { ATOMATON_UPDATE_TOKEN: "tok" }, { notice: 12 }, dispatchRules());
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((call) => call[0] === "workflow"), "no mode, no run").toEqual([]);
+    expect(r.ghCalls.filter((call) => call[0] === "api" && call.includes("POST"))).toEqual([]);
+
+    const comments = r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "comment");
+    const toNotice = (comments[0] ?? [])[(comments[0] ?? []).indexOf("--body") + 1] ?? "";
+    expect(toNotice).toContain("nothing merges until someone does");
+    expect(toNotice).not.toContain("engineer");
+  });
+
+  /**
+   * A kept path is the plan declining to decide -- not a collision -- and no mode
+   * starts an agent for a question the plan refused to answer.
+   */
+  test("`pr-agent` starts nobody for a kept path", () => {
+    const tree: Tree = { ...BASE_FILES, ".github/atomaton/adopted.md": "the adopter's own file\n" };
+    const target: Tree = { ...TARGET_FILES, ".github/atomaton/adopted.md": "a file upstream started shipping\n" };
+    const { dir } = fixtureRepo(tree, "v0.1.0", PR_AGENT);
+    const r = runWithFakeGh(scriptPath("update_atomaton.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      env: { ATOMATON_UPDATE_TOKEN: "tok" },
+      rules: [...dispatchRules(), ...rules("v0.2.0", { target, notice: 12 })],
+    });
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.filter((call) => call[0] === "workflow")).toEqual([]);
   });
 });
 

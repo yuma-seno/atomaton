@@ -54,6 +54,10 @@ import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { machineryPath } from "../../adapters/runner/machinery.ts";
 import { leftoversOf, planUpdate, verdictSentence, type UpdatePlan } from "../../domain/machinery/update-plan.ts";
 import { defineScript } from "./lib/script-ref.ts";
+import { openPrForHead } from "./lib/open-pull-request.ts";
+import { dispatchUpdateConflictAgent } from "../../adapters/actions/dispatch-targets.ts";
+import { getNewReleaseMode, getUpdateConflictAgent } from "../../adapters/runner/config.ts";
+import { updateBranchFor } from "./lib/update-branch.ts";
 import { findOpenNotice, NOTICE_MARKER } from "./lib/notice-issue.ts";
 import { applyPlan } from "./lib/update-apply.ts";
 import {
@@ -90,10 +94,13 @@ export const ref = defineScript<UpdateAtomatonArgs>(import.meta.url);
 const COMMIT_NAME = "atomaton[bot]";
 const COMMIT_EMAIL = "atomaton[bot]@users.noreply.github.com";
 
-/** The branch every update lands on, named for the release it takes. */
-export function updateBranchFor(tag: string): string {
-  return `atomaton/update-${tag}`;
-}
+/**
+ * The branch every update lands on, named for the release it takes.
+ *
+ * Defined in `lib/update-branch.ts` because the notice reads the same name: a head
+ * branch written twice is one that drifts once, and the drift is silent.
+ */
+export { updateBranchFor };
 
 /** The pull request's title. */
 export function updateTitle(tag: string): string {
@@ -114,8 +121,15 @@ export interface UpdateReport {
 /** How many of a list a report renders before it counts the rest. */
 const MAX_LISTED = 15;
 
-/** The body of the pull request, whatever the plan turned out to be. */
-export function updateBody(report: UpdateReport): string {
+/**
+ * The body of the pull request, whatever the plan turned out to be.
+ *
+ * `conflictAgent` is the agent `update.on_new_release: pr-agent` names, or "": the
+ * body is what a resolver reads first, so it has to say whether one is coming. A
+ * promise made here and not kept is answered by `stopComment`, which is written
+ * after the dispatch has actually answered.
+ */
+export function updateBody(report: UpdateReport, conflictAgent = ""): string {
   const { plan } = report;
   const lines: string[] = [
     "<!-- atomaton:update -->",
@@ -165,7 +179,9 @@ export function updateBody(report: UpdateReport): string {
     "## What happens next",
     "",
     report.conflicts.length > 0
-      ? "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge."
+      ? conflictAgent !== ""
+        ? `This pull request does not merge on its own: the conflicted files above carry markers naming both sides. \`${conflictAgent}\` is started on it to resolve them — the checks run on the resolved tree, and then it can merge.`
+        : "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge."
       : plan.kept.length > 0
         ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right, or ask an agent there to help."
         : "The repository's checks run on this pull request; when they pass, the update merges it and closes the notice.",
@@ -174,8 +190,33 @@ export function updateBody(report: UpdateReport): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
+/**
+ * What became of the agent a `pr-agent` update started, or `null` when the mode
+ * starts none.
+ *
+ * `started` is the dispatch's own answer rather than an intention: the comment below
+ * tells the thread what is running, and a dispatch GitHub refused is a thread with
+ * nobody on it.
+ */
+export interface ConflictResolution {
+  readonly agent: string;
+  readonly started: boolean;
+}
+
 /** The comment a stopped update leaves in the thread that asked for it. */
-export function stopComment(report: UpdateReport, prNumber: number): string {
+export function stopComment(
+  report: UpdateReport,
+  prNumber: number,
+  resolution: ConflictResolution | null = null,
+): string {
+  const next =
+    resolution === null
+      ? "Comment on that pull request and ask an agent to resolve them — nothing merges until someone does."
+      : resolution.started
+        ? `\`${resolution.agent}\` has been started on that pull request to resolve them. The checks run on ` +
+          "the resolved tree; the merge itself is a person's."
+        : `\`${resolution.agent}\` was to be started on that pull request and could not be — the run's log says ` +
+          "why. Comment there and ask an agent, or resolve them yourself; nothing merges until someone does.";
   return [
     // Tagged `exclude`: this is addressed to the person (or the agent they will
     // ask) ON the pull request — the thread that asked learns where the work
@@ -185,8 +226,7 @@ export function stopComment(report: UpdateReport, prNumber: number): string {
     "",
     ...report.conflicts.map((path) => `- \`${path}\``),
     "",
-    `The plan is applied on #${prNumber}, where the conflicts carry markers naming both sides. ` +
-      "Comment on that pull request and ask an agent to resolve them — nothing merges until someone does.",
+    `The plan is applied on #${prNumber}, where the conflicts carry markers naming both sides. ${next}`,
   ].join("\n");
 }
 
@@ -297,21 +337,6 @@ function defaultBranch(repo: string): string | null {
   }
   const branch = result.stdout.trim();
   return branch === "" ? null : branch;
-}
-
-/** An open pull request already standing on `branch`, or `0`. */
-function openPrForHead(repo: string, branch: string): number {
-  const result = ghRead(
-    "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "number",
-  );
-  if (result.code !== 0) return 0;
-  try {
-    const parsed = JSON.parse(result.stdout || "[]") as Array<{ number?: unknown }>;
-    const number = Number(parsed[0]?.number ?? 0);
-    return Number.isInteger(number) && number > 0 ? number : 0;
-  } catch {
-    return 0;
-  }
 }
 
 function main(): void {
@@ -460,11 +485,19 @@ function main(): void {
     process.exit(1);
   }
 
+  // The collision policy, read HERE rather than carried in from whoever started this
+  // run. The notice read the same key to decide whether to start the run at all, and
+  // a project can change the value in between; what happens on a collision is this
+  // run's to decide, so this is the reading that counts. `kept` is deliberately not
+  // covered: the plan declined to decide there, and a person decides -- whatever the
+  // mode says.
+  const conflictAgent = getNewReleaseMode() === "pr-agent" ? getUpdateConflictAgent() : "";
+
   const report: UpdateReport = { plan, conflicts, merged, leftovers };
   const existing = openPrForHead(repo, branch);
   let prNumber: number;
   if (existing > 0) {
-    const edited = gh("pr", "edit", String(existing), "--repo", repo, "--title", updateTitle(targetTag), "--body", updateBody(report));
+    const edited = gh("pr", "edit", String(existing), "--repo", repo, "--title", updateTitle(targetTag), "--body", updateBody(report, conflictAgent));
     if (edited.code !== 0) {
       console.error(`::error::could not update the pull request #${existing}: ${edited.stderr.trim() || `gh exited ${edited.code}`}`);
       process.exit(1);
@@ -483,7 +516,7 @@ function main(): void {
     const created = ghAs(
       token,
       "pr", "create", "--repo", repo, "--base", base, "--head", branch,
-      "--title", updateTitle(targetTag), "--body", updateBody(report),
+      "--title", updateTitle(targetTag), "--body", updateBody(report, conflictAgent),
     );
     if (created.code !== 0) {
       console.error(`::error::could not open the pull request: ${created.stderr.trim() || `gh exited ${created.code}`}`);
@@ -577,7 +610,20 @@ function main(): void {
   // markers, and the threads that asked are told where to resolve them. The
   // notice stays open — no merge happened, so its promise is still unkept.
   if (conflicts.length > 0) {
-    const said = stopComment(report, prNumber);
+    // The agent first, so the comment below reports what actually happened to it
+    // rather than what this run meant to do. A dispatch GitHub refuses leaves the
+    // pull request for a person, which is `pr`'s behaviour and not a failed run.
+    const resolution: ConflictResolution | null =
+      conflictAgent === ""
+        ? null
+        : {
+            agent: conflictAgent,
+            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent, { token }),
+          };
+    if (resolution !== null && !resolution.started) {
+      log(`WARN could not start ${conflictAgent} on #${prNumber}; the pull request stands for a person`);
+    }
+    const said = stopComment(report, prNumber, resolution);
     if (notice !== null && notice !== 0) {
       const told = gh("issue", "comment", String(notice), "--repo", repo, "--body", said);
       if (told.code !== 0) log(`WARN could not report to the notice #${notice}: ${told.stderr.trim()}`);
