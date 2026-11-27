@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #635: v0.27.0 の自己適用が config.yaml の競合で失敗している\n\n/atomaton\n\n## 状況\n\nv0.27.0 リリース時の自己適用と、手動の Atomaton Update がどちらも失敗した。原因は `.github/atomaton/config.yaml` の競合（ブランチ `atomaton/update-v0.27.0` に競合マーカー入りのまま残っている）。競合したファイルが YAML として読めず、update が落ちている。\n\n競合の中身：配布側の新しい初期値 `pr-agent` と、このリポジトリ自身が明記している `issue`。\n\n## やってほしいこと\n\nv0.27.0 の取り込みを完了させてほしい。config.yaml の競合は、このリポジトリ自身の設定として `update.on_new_release: issue` を維持して解消すること（配布初期値の変更は #631 で対象外にした、このリポジトリ自身の選択）。",
+      "content": "Issue #635: v0.27.0 の自己適用が config.yaml の競合で失敗している\n**Labels:** atomaton/waiting-for-person\n\n/atomaton\n\n## 状況\n\nv0.27.0 リリース時の自己適用と、手動の Atomaton Update がどちらも失敗した。原因は `.github/atomaton/config.yaml` の競合（ブランチ `atomaton/update-v0.27.0` に競合マーカー入りのまま残っている）。競合したファイルが YAML として読めず、update が落ちている。\n\n競合の中身：配布側の新しい初期値 `pr-agent` と、このリポジトリ自身が明記している `issue`。\n\n## やってほしいこと\n\nv0.27.0 の取り込みを完了させてほしい。config.yaml の競合は、このリポジトリ自身の設定として `update.on_new_release: issue` を維持して解消すること（配布初期値の変更は #631 で対象外にした、このリポジトリ自身の選択）。",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-27T15:35:28Z",
@@ -192,13 +192,37 @@
     {
       "role": "user",
       "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n\n前回の run はプロバイダ側の応答断絶で終わっていた。保存されたセッションから続行して、v0.27.0 の取り込みと config.yaml の競合解消（このリポジトリ自身は `update.on_new_release: issue` を維持）を完了してほしい。",
+      "atoma_metadata": {
+        "author": "yuma-seno",
+        "created_at": "2026-11-27T16:14:40Z",
+        "event_type": "issue_comment",
+        "id": 7223028787,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
+    },
+    {
+      "role": "user",
+      "content": "Your previous attempt at this turn was cut off mid-answer because the connection dropped. Continue from where it stopped and finish the same request; do not repeat what you already wrote."
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 1,
-      "snapshot_hash": "8120fbbc431ca3aadebac38548a8007cde895e1d6e9dadaae5819c37b704d4f8",
+      "event_count": 2,
+      "snapshot_hash": "4bcf69f9a777c852f73d23ac8a060778cdb5eab5810693bbe3ce8aae286cfa27",
       "version": 1
     }
   },
@@ -228,6 +252,17 @@
         }
       },
       "started": "2026-11-27T15:36:28Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-27T16:29:13Z",
+      "ended_because": "failed",
+      "iterations": 0,
+      "loop_recoveries": 0,
+      "messages": 24,
+      "seconds": 817,
+      "server_calls": {},
+      "started": "2026-11-27T16:15:36Z"
     }
   ]
 }
