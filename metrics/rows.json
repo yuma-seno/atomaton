@@ -27470,22 +27470,26 @@
   {
     "path": "sessions/issue-638/atomaton.json",
     "agent": "atomaton",
-    "messages": 33,
-    "calls": 20,
+    "messages": 65,
+    "calls": 39,
     "failed": 0,
     "refused": 0,
-    "skills": [],
-    "reported": false,
+    "skills": [
+      "conventions",
+      "japanese"
+    ],
+    "reported": true,
     "tools": {
       "get_issue": 1,
-      "list": 6,
-      "bash": 8,
-      "read": 5
+      "list": 7,
+      "bash": 16,
+      "read": 13,
+      "load_skill": 2
     },
     "acts": {
-      "other": 3,
-      "edit": 1,
-      "search": 4
+      "other": 4,
+      "edit": 3,
+      "search": 9
     },
     "runs": [
       {
@@ -27509,6 +27513,25 @@
           }
         },
         "started": "2026-11-27T16:15:05Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:42:07Z",
+        "ended_because": "completed",
+        "iterations": 11,
+        "loop_recoveries": 0,
+        "messages": 65,
+        "seconds": 476,
+        "server_calls": {
+          "files": {
+            "list": 1,
+            "read": 8
+          },
+          "shell": {
+            "bash": 8
+          }
+        },
+        "started": "2026-11-27T16:34:11Z"
       }
     ]
   },
