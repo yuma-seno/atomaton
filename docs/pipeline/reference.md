@@ -140,12 +140,13 @@ The workflow Atomaton runs against an agent's pull request before anyone reviews
 it. Defaults to `atomaton-check.yml`. Name yours exactly as the file is called, or
 the dispatch fails silently and every merge is refused for a missing check.
 
-Its result decides what happens next: when it passes, the agent the calls name
-runs — but only where a call is waiting for one. Where the verdict would be
-handed to a person, a mention carries it; where a run already holds the turn —
-in flight, or a chain carrying the call — nothing is posted on the verdict,
-because that run's own report is the thread's next word. When CI fails, nothing
-is dispatched at all: a person is told, and asks whoever should fix it.
+Its result decides what happens next: the agent the calls name runs, but only
+where a call is waiting for one — green or red alike, so a person who asked for the
+fix gets it instead of being told CI failed. Where no call is waiting — a run
+already holding the turn, a chain carrying it, or the turn handed back to a person
+— nothing is dispatched and nothing is posted on the verdict, because that run's
+own report is the thread's next word. A red verdict posts what failed first, which
+is the one thing a person reads there.
 
 ## `deploy.your_workflow`
 

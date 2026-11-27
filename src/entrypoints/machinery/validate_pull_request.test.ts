@@ -230,6 +230,7 @@ describe("notifyCiWaiting, through the whole script", () => {
     existingRun: Record<string, unknown> | undefined,
     askedByPerson: boolean,
     thread: unknown[] = [],
+    agents: string[] = [],
   ): Validation {
     const runsRule = { match: ["actions/runs?head_sha="] };
     const runs = (list: Record<string, unknown>[]) => JSON.stringify({ total_count: list.length, workflow_runs: list });
@@ -262,6 +263,9 @@ describe("notifyCiWaiting, through the whole script", () => {
       writeFileSync(report, "");
       const defDir = join(dir, "agent-definitions");
       mkdirSync(defDir);
+      // A `/<agent>` line is only a request when a definition exists for it, so a
+      // test that expects a dispatch has to give the name one.
+      for (const agent of agents) writeFileSync(join(defDir, `${agent}.md`), "");
       const outputFile = join(dir, "out");
       writeFileSync(outputFile, "");
       const result = runWithFakeGh(
@@ -369,30 +373,55 @@ describe("notifyCiWaiting, through the whole script", () => {
   }, WAIT);
 
   /**
-   * The `unattended` output, as the whole script writes it (#547). The workflow's
-   * "tell a person" step reads this, so the contract test on the generated YAML
-   * pins the gate's demand and these pin the script's answer: an in-flight thread
-   * must answer `false` -- the run's own report is the thread's next word -- while
-   * the empty-thread default stays `true`, the original unattended case.
+   * A green verdict on a thread a run already holds starts nothing. The thread's
+   * next word is that run's own report, and this workflow posts nothing on the
+   * verdict -- no dispatch, and no notice either.
    *
    * The in-flight thread is the #546 shape: a chain dispatch the run claimed and
-   * has not reported on. Green lands, nothing is dispatched, and nothing is
-   * announced.
+   * has not reported on.
    */
-  test("a run already holding the thread answers unattended=false", () => {
+  test("a run already holding the thread dispatches nobody and posts nothing", () => {
     const v = runValidation(ciActionRun("completed", "success"), true, [
       { id: 1, body: "<!-- atomaton:dispatch=engineer -->\nAtomaton: `engineer` starting.", user: { type: "Bot" } },
       { id: 2, body: "<!-- atomaton:took=1 run=4 -->", user: { type: "Bot" } },
     ]);
     expect(v.out.conclusion).toBe("success");
     expect(v.out.next_agent).toBe("");
-    expect(v.out.unattended).toBe("false");
     expect(v.comments).toEqual([]);
   }, WAIT);
 
-  test("an empty thread answers unattended=true", () => {
-    const v = runValidation(ciActionRun("completed", "success"), true);
+  /**
+   * A red verdict posts its brief -- what CI concluded, and the failing run's URL --
+   * and nothing else. It used to be followed by a second comment telling a person
+   * that no agent had been dispatched; that comment is gone, and the brief is the
+   * one thing left on the pull request.
+   */
+  test("a red verdict posts its brief and nothing else", () => {
+    const v = runValidation(ciActionRun("completed", "failure"), true);
     expect(v.out.next_agent).toBe("");
-    expect(v.out.unattended).toBe("true");
+    expect(v.comments.length).toBe(1);
+    expect(v.comments[0]).toContain("CI concluded failure");
+  }, WAIT);
+
+  /**
+   * Red meets the same gate as green, through the whole script (#616).
+   *
+   * A call waiting on the pull request is what a red verdict dispatches, and the
+   * name is the thread's -- here a person's `/engineer` comment -- not the opener's.
+   * The brief is still posted, once: the run that starts reads what failed from it,
+   * and its summary carries no line addressed to a person, because that summary is
+   * the context a run starts with.
+   */
+  test("a red verdict dispatches the call the thread is waiting with", () => {
+    const v = runValidation(
+      ciActionRun("completed", "failure"),
+      true,
+      [{ id: 1, body: "/engineer", user: { type: "User" } }],
+      ["engineer"],
+    );
+    expect(v.out.next_agent).toBe("engineer");
+    expect(v.out.summary).not.toContain("Comment /");
+    expect(v.comments.length).toBe(1);
+    expect(v.comments[0]).toContain("CI concluded failure");
   }, WAIT);
 });

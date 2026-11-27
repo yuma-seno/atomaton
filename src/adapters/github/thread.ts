@@ -758,7 +758,7 @@ export interface ThreadRequest {
    * This is what decides whether the verdict's dispatch may start at all: a call
    * waiting for it (`free`, or the park that promised the machinery would collect)
    * may be fulfilled; a run in flight, a chain already started, or a turn handed to
-   * a person hands the verdict to a mention instead.
+   * a person starts nothing.
    */
   hold: ThreadHold;
 }

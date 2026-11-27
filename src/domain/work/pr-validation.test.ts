@@ -21,8 +21,9 @@ describe("decideValidationOutcome", () => {
     expect(outcome.verdict).toBe("passed");
     expect(contextsPassed(outcome.verdict)).toBe(true);
     expect(outcome.next?.agent).toBe("reviewer");
-    // Somebody was dispatched, so there is nothing unattended to announce.
-    expect(outcome.unattended).toBe(false);
+    // The dispatched run's brief says what happened, and carries no line addressed
+    // to a person: the agent reads that context, not a person on the pull request.
+    expect(outcome.summary).not.toContain("Comment /");
   });
 
   // GitHub's own list of conclusions that satisfy a required check, so a job the
@@ -36,44 +37,61 @@ describe("decideValidationOutcome", () => {
     }
   });
 
-  // Red dispatches nobody. The opener is named in the mention instead: it made the
-  // change, and asking it for the fix is one comment for the person to write. The
-  // automatic retry this replaced started that agent without a call, on a verdict
-  // nobody had asked it to act on -- and more than once, while its own report was
-  // still being written.
-  test("a failing run writes failing checks and dispatches nobody", () => {
+  // Red takes the same gate as green: a call already waiting for this answer gets
+  // the fix run. The automatic retry this replaced started the OPENER without a
+  // call, on a verdict nobody had asked it to act on -- and more than once, while
+  // its own report was still being written. Neither of those is this: the agent
+  // started here is the one the thread asked for, and it is asked for once.
+  test("a failing run hands the fix to the call the thread is waiting with", () => {
     const outcome = decide("failure");
     expect(outcome.verdict).toBe("failed");
     expect(contextsPassed(outcome.verdict)).toBe(false);
-    expect(outcome.next).toBeUndefined();
+    expect(outcome.next?.agent).toBe("reviewer");
     expect(outcome.summary).toContain("failure");
-    // The work really is waiting on a person now.
-    expect(outcome.unattended).toBe(true);
   });
 
-  test("a red verdict names the agent a person can ask for the fix", () => {
-    const outcome = decide("failure");
+  // A person who asked for the engineer asked for the engineer, not for whichever
+  // agent opened the pull request: the name is the thread's, not a role default.
+  test("a red verdict starts the agent the thread named, not the opener", () => {
+    const outcome = decideValidationOutcome({
+      conclusion: "failure",
+      reviewerAgent: "engineer",
+      engineerAgent: "atomaton",
+      hold: { kind: "free" },
+    });
+    expect(outcome.next?.agent).toBe("engineer");
+  });
+
+  // The dispatch context is the brief the run starts with, so a line addressed to
+  // a person there is read by the agent instead.
+  test("a dispatched red verdict's brief invites nobody", () => {
+    expect(decide("failure").summary).not.toContain("Comment /");
+  });
+
+  test("a red verdict nobody is waiting for names the agent a person can ask", () => {
+    const outcome = decide("failure", { kind: "with-person" });
+    expect(outcome.next).toBeUndefined();
     expect(outcome.summary).toContain("/engineer");
   });
 
-  test("cancelled and timed_out dispatch nobody too", () => {
+  test("cancelled and timed_out are red verdicts, not no-conclusion", () => {
     for (const conclusion of ["cancelled", "timed_out"]) {
-      const outcome = decide(conclusion);
-      expect(outcome.verdict, conclusion).toBe("failed");
-      expect(outcome.next, conclusion).toBeUndefined();
+      expect(decide(conclusion).verdict, conclusion).toBe("failed");
     }
   });
 
   // No conclusion means the run never reported -- it timed out here, or could not
   // be found. There is no defect for an engineer to fix, and dispatching one
-  // spends a model run to discover that. Block the merge and stop.
+  // spends a model run to discover that. Block the merge and stop: not even a
+  // waiting call changes this, because there is nothing to hand it.
   test("no conclusion writes a failing check but dispatches nobody", () => {
-    const outcome = decide("");
-    expect(outcome.verdict).toBe("no-conclusion");
-    expect(contextsPassed(outcome.verdict)).toBe(false);
-    expect(outcome.next).toBeUndefined();
-    expect(outcome.summary).toContain("human");
-    expect(outcome.unattended).toBe(true);
+    for (const hold of [free, { kind: "parked" } as const, { kind: "with-person" } as const]) {
+      const outcome = decide("", hold);
+      expect(outcome.verdict, hold.kind).toBe("no-conclusion");
+      expect(contextsPassed(outcome.verdict), hold.kind).toBe(false);
+      expect(outcome.next, hold.kind).toBeUndefined();
+    }
+    expect(decide("").summary).toContain("human");
   });
 
   /**
@@ -110,7 +128,6 @@ describe("where the ball sits decides whether a green verdict starts anything", 
   test("a parked turn is the machinery keeping its own promise", () => {
     const outcome = decide("success", { kind: "parked" });
     expect(outcome.next?.agent).toBe("reviewer");
-    expect(outcome.unattended).toBe(false);
   });
 
   // A run is still working on this node. Starting another over it is what put two
@@ -144,23 +161,6 @@ describe("where the ball sits decides whether a green verdict starts anything", 
     expect(outcome.next).toBeUndefined();
   });
 
-  // The suppressed mentions still say how a person starts the review themselves,
-  // when a name exists to say.
-  test("a suppressed verdict names the agent a person can call", () => {
-    const outcome = decide("success", { kind: "with-person" });
-    expect(outcome.summary).toContain("/reviewer");
-  });
-
-  test("a suppressed verdict with nobody named suggests nothing", () => {
-    const outcome = decideValidationOutcome({
-      conclusion: "success",
-      reviewerAgent: "",
-      engineerAgent: "engineer",
-      hold: { kind: "with-person" },
-    });
-    expect(outcome.summary).not.toContain("Comment /");
-  });
-
   // An absent hold is a caller that could not answer, which reads as the state
   // that starts nothing -- the direction that cannot start a run nobody asked for.
   test("an absent hold reads as the ball being with a person", () => {
@@ -170,72 +170,47 @@ describe("where the ball sits decides whether a green verdict starts anything", 
 });
 
 /**
- * The unattended notice, and the line it must not cross (#547).
+ * Red and green read the same gate.
  *
- * `next_agent == ""` alone used to gate the workflow's "tell a person" step, and
- * for a year the two situations it covers could not both occur. The hold gate
- * changed that: a green verdict now routinely lands on a thread a run is already
- * working -- every push whose CI outlasts the chain's dispatch of the next agent.
- * On #546 (2026-11-13) the notice went out two minutes after the chain-dispatched
- * reviewer had claimed the turn, inviting a person to start a review that was
- * running: noise on the thread, and an invitation the guard refuses.
- *
- * So the outcome carries `unattended`, and the workflow's step gate reads it.
- * True: the work waits on a person with nobody coming. False: a run holds the
- * node -- `in-flight` or `chain` -- and the run's own report is the thread's next
- * word. `unreadable` stays true on purpose: silence there would be the exact
- * failure this notice exists to prevent, while a stray notice costs a refused
- * comment.
+ * A red verdict used to dispatch nobody on purpose and tell a person instead, so
+ * the gate only ever had to hold for green. Now that a failure hands the fix to the
+ * call the thread is making, every state that must not start a run has to hold for
+ * red too -- and where the thread names nobody, the failure comment is what carries
+ * the name a person can ask.
  */
-describe("whether the work is unattended, not merely undispatched", () => {
-  test("a run in flight is not unattended -- nothing is announced, the run reports", () => {
-    const outcome = decide("success", { kind: "in-flight" });
-    expect(outcome.next).toBeUndefined();
-    expect(outcome.unattended).toBe(false);
+describe("a red verdict meets the same gate as a green one", () => {
+  test("a run in flight, a chain, or a person holding the turn starts nothing", () => {
+    const holds = [
+      { kind: "in-flight" as const },
+      { kind: "chain" as const },
+      { kind: "with-person" as const },
+      { kind: "unreadable" as const },
+    ];
+    for (const hold of holds) {
+      const outcome = decide("failure", hold);
+      expect(outcome.verdict, hold.kind).toBe("failed");
+      expect(outcome.next, hold.kind).toBeUndefined();
+      // The failure comment still names who a person can ask for the fix.
+      expect(outcome.summary, hold.kind).toContain("/engineer");
+    }
   });
 
-  test("a chain carrying the call is not unattended either", () => {
-    const outcome = decide("success", { kind: "chain" });
-    expect(outcome.unattended).toBe(false);
+  test("a parked turn is collected on red as it is on green", () => {
+    expect(decide("failure", { kind: "parked" }).next?.agent).toBe("reviewer");
   });
 
-  test("a turn handed back to a person IS unattended", () => {
-    const outcome = decide("success", { kind: "with-person" });
-    expect(outcome.unattended).toBe(true);
-  });
-
-  test("an unreadable thread errs toward announcing", () => {
-    const outcome = decide("success", { kind: "unreadable" });
-    expect(outcome.unattended).toBe(true);
-  });
-
-  // The original unattended case, unchanged: green, a call waiting, nobody named.
-  test("green with nobody named is unattended", () => {
+  test("a call that names nobody starts nobody", () => {
     const outcome = decideValidationOutcome({
-      conclusion: "success",
+      conclusion: "failure",
       reviewerAgent: "",
       engineerAgent: "engineer",
       hold: free,
     });
+    expect(outcome.verdict).toBe("failed");
     expect(outcome.next).toBeUndefined();
-    expect(outcome.unattended).toBe(true);
-  });
-
-  test("a dispatched verdict is never unattended", () => {
-    expect(decide("success", { kind: "parked" }).unattended).toBe(false);
-    expect(decide("success").unattended).toBe(false);
-  });
-
-  // And the undispatched-but-not-unattended pair's summaries stay honest: they
-  // say a run holds the node, without inviting anybody to start another.
-  test("the in-flight and chain summaries invite nobody", () => {
-    for (const hold of [{ kind: "in-flight" as const }, { kind: "chain" as const }]) {
-      const outcome = decide("success", hold);
-      expect(outcome.summary).not.toContain("Comment /");
-    }
+    expect(outcome.summary).toContain("/engineer");
   });
 });
-
 /**
  * A pull request whose own `.github/atomaton/` cannot start a run.
  *
@@ -248,18 +223,27 @@ describe("whether the work is unattended, not merely undispatched", () => {
 describe("a deliverable that cannot start a run", () => {
   const problems = ["engineer.md: mcp_servers 'shell': not found in tools file"];
 
-  const decideWith = (deliverableProblems: string[], conclusion = "") =>
+  const decideWith = (deliverableProblems: string[], conclusion = "", hold: ThreadHold = free) =>
     decideValidationOutcome({
       conclusion,
       ...agents,
-      hold: free,
+      hold,
       deliverableProblems,
     });
 
-  test("blocks the merge and dispatches nobody", () => {
+  test("blocks the merge, and hands the fix to a waiting call like any other red", () => {
     const outcome = decideWith(problems);
     expect(outcome.verdict).toBe("deliverable-invalid");
     expect(contextsPassed(outcome.verdict)).toBe(false);
+    expect(outcome.next?.agent).toBe("reviewer");
+    // The dispatched run's brief carries the count and no instruction to a person;
+    // the problems themselves are the failure comment's.
+    expect(outcome.summary).not.toContain("Comment /");
+  });
+
+  test("dispatches nobody where no call is waiting", () => {
+    const outcome = decideWith(problems, "", { kind: "with-person" });
+    expect(outcome.verdict).toBe("deliverable-invalid");
     expect(outcome.next).toBeUndefined();
   });
 
@@ -292,8 +276,10 @@ describe("a deliverable that cannot start a run", () => {
     expect(decideWith(problems, "success").verdict).toBe("deliverable-invalid");
   });
 
+  // Nobody was dispatched, so the failure comment is the whole message: it names
+  // the agent that wrote the breakage, which is who a person asks for the fix.
   test("the mention names the agent that wrote what is broken", () => {
-    expect(decideWith(problems).summary).toContain("/engineer");
+    expect(decideWith(problems, "", { kind: "with-person" }).summary).toContain("/engineer");
   });
 
   test("an empty list is the normal case and changes nothing", () => {
@@ -327,7 +313,7 @@ describe("a role with nobody in it", () => {
       conclusion: "failure",
       reviewerAgent: "reviewer",
       engineerAgent: "   ",
-      hold: free,
+      hold: { kind: "with-person" },
     });
     expect(outcome.verdict).toBe("failed");
     expect(outcome.next).toBeUndefined();

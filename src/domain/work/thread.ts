@@ -542,8 +542,7 @@ export function latestRequestedAgent(body: string, comments: readonly ThreadEntr
  * Where the ball sits when a validation's verdict lands, as `threadHold` answers it.
  *
  * The question the verdict's dispatch gates on: machinery may hand work to an agent
- * only where a CALL is waiting for it. Everything else hands the turn to a person
- * with a mention instead.
+ * only where a CALL is waiting for it. Everything else starts nothing.
  */
 export type ThreadHold =
   /**

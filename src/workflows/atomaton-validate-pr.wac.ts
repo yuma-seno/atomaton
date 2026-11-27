@@ -11,7 +11,6 @@ import { ref as validatePullRequestRef } from "../entrypoints/machinery/validate
 import { ref as validateDeliverableRef } from "../entrypoints/machinery/validate_deliverable.ts";
 import { buildArgv as configValueArgv, ref as getConfigValueRef } from "../entrypoints/machinery/get_config_value.ts";
 import { ref as dispatchAgentRef } from "../entrypoints/machinery/dispatch_agent.ts";
-import { ref as notifyUnattendedRef } from "../entrypoints/machinery/notify_unattended.ts";
 
 // Runs CI against an agent's pull request and decides who works next.
 //
@@ -130,7 +129,7 @@ const validateStep = new TypedOutputsStep(
       "deliverable-report": DELIVERABLE_REPORT,
     })}\n`,
   },
-  ["next_agent", "unattended", "conclusion", "verdict_passed", "summary"] as const,
+  ["next_agent", "conclusion", "verdict_passed", "summary"] as const,
 );
 
 export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
@@ -212,8 +211,13 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
       // not anything had been, and a refusal now says so itself.
       new TypedOutputsStep({
         name: "Dispatch the agent the result calls for",
-        // Empty when CI never reported. There is no defect to hand anyone, so
-        // the failing check stands and a human picks it up.
+        // Empty when the verdict dispatches nobody: CI never reported (there is no
+        // defect to hand anyone, so the failing check stands and a human picks it
+        // up), the thread names no agent, or the thread's ball is somewhere other
+        // than a call waiting for this answer -- a run in flight, a chain already
+        // carrying the call, a turn handed back to a person. Nothing is posted on
+        // those verdicts either: the run that holds the turn says the next word,
+        // and a red verdict has already left its failure comment.
         if: `${validateStep.rawOutputs.next_agent} != ''`,
         shell: "bash",
         env: {
@@ -252,37 +256,6 @@ export const atomaValidatePr = new Workflow("atomaton-validate-pr", {
           // verdict, red refutes it and the retry goes.
           "verdict-passed": "\${VERDICT_PASSED}",
           context: "validation of #\${NUMBER} finished: \${SUMMARY}",
-        })}
-`,
-      }),
-      // Nobody was dispatched, so a person is told rather than left to notice --
-      // but only when nobody is coming.
-      //
-      // The verdict hands to a person in two situations that are not the same,
-      // and the script answers which one happened through the `unattended`
-      // output. `true`: the result names no agent, the result dispatches nobody
-      // on purpose -- a red run, or a deliverable that cannot start one -- the
-      // verdict went green but the turn was handed back to a person, or the
-      // thread could not be read. `false`: green, and a run ALREADY holds the
-      // node -- an in-flight run, or the chain carrying the call. There the
-      // notice would invite a person to start a run that is already working
-      // (#546), and the run's own report is the thread's next word, so this step
-      // stays out of the way. Either way the check is written; the one thing that
-      // must not happen is a pull request that waits unannounced.
-      new TypedOutputsStep({
-        name: "Tell a person nobody was dispatched",
-        if: `${validateStep.rawOutputs.next_agent} == '' && ${validateStep.rawOutputs.unattended} == 'true'`,
-        shell: "bash",
-        env: {
-          GH_TOKEN: "${{ github.token }}",
-          NUMBER: "${{ inputs.number }}",
-          SUMMARY: validateStep.outputs.summary,
-          REPO: "${{ github.repository }}",
-        },
-        run: `${scriptCommandWithArgs(notifyUnattendedRef, {
-          repo: "\${REPO}",
-          number: "\${NUMBER}",
-          summary: "\${SUMMARY}",
         })}
 `,
       }),

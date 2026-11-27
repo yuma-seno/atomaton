@@ -49,8 +49,9 @@ Two counters stop a chain of runs — `chain.after_handoffs`, and
 defaults are in [the work reference](reference.md); neither is repeated here, so
 this page cannot go stale against them, and
 [why there are two](how-it-works/why-there-are-two-counters.md) is a question of
-its own. Validation adds no bound of its own: a red result dispatches nobody —
-a person is told, and the work moves only when they ask for it.
+its own. Validation adds no bound of its own: it dispatches whichever call the
+thread is waiting with, red or green, and the run that starts hands off like any
+other — so its handoffs meet the two limits above.
 
 **There is no token or cost ceiling**: the bounds are on how many runs happen, not
 on what they spend.

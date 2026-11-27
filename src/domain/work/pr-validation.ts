@@ -13,12 +13,19 @@
  * Machinery starts an agent only where a CALL is waiting: a person's command, an
  * agent's hand-off, the `/<agent>` line the pull request was opened with. Where the
  * thread's ball is anywhere else -- a run in flight, a chain already started, a turn
- * a run handed back to a person -- the verdict hands the work to a mention instead.
- * The routing used to send a green verdict back to whoever made the newest ask, and
- * a red one to the engineer who opened the pull request, both without a call: the
- * asker was re-run to judge its own answer, and the opener was re-run to fix a
- * failure nobody asked it to fix, in both cases while its own report was still being
- * written. The mention is what replaced them.
+ * a run handed back to a person -- nothing is dispatched, and nothing is posted on
+ * the verdict either. The routing used to send a green verdict back to whoever made
+ * the newest ask, and a red one to the engineer who opened the pull request, both
+ * without a call: the asker was re-run to judge its own answer, and the opener was
+ * re-run to fix a failure nobody asked it to fix, in both cases while its own report
+ * was still being written.
+ *
+ * A red verdict meets the same gate as a green one. It used to dispatch on green
+ * alone and leave red to a person, through a notice that ended up with nobody to
+ * read it: on a release pull request it pinged the repository owner after every run,
+ * and on an agent's pull request it repeated what the run that pushed had already
+ * said. What tells a person what failed is the failure comment this domain's caller
+ * posts; what continues the work is the call the thread carries, red or green.
  */
 import type { ThreadHold } from "./thread.ts";
 import type { NextTurn } from "./turn.ts";
@@ -30,7 +37,8 @@ const PASSING = new Set(["success", "skipped", "neutral"]);
  * What this validation run concluded, as one of four distinguishable answers.
  *
  * `passed`               CI is green; the call the thread names works next, where the ball is with one.
- * `failed`               CI is red. Nobody is dispatched; a person is told, and names who fixes it.
+ * `failed`               CI is red; the same call works next, where one is waiting, and
+ *                        the failure comment tells a person what broke.
  * `no-conclusion`        the run timed out, was cancelled, or could not be found.
  * `deliverable-invalid`  the pull request would merge a `.github/atomaton/` that
  *                        cannot start a run, so CI was never dispatched.
@@ -70,31 +78,8 @@ export interface ValidationOutcome {
    * request, and this is who it gives it to.
    */
   next?: NextTurn;
-  /** One line for the comment that tells whoever is left holding the work. */
+  /** One line saying what the verdict concluded and who it went to. */
   summary: string;
-  /**
-   * Whether the person-facing unattended notice should go out.
-   *
-   * `next_agent == ""` covers two situations that are not the same, and this is
-   * the field that separates them. True: the work is now waiting on a person
-   * with nobody coming — a red result, a deliverable that cannot start a run, no
-   * conclusion at all, or a green result whose ball sits with a person or behind
-   * a thread that could not be read. False: nobody was dispatched because a run
-   * ALREADY holds the node (`in-flight`) or the chain is carrying the call
-   * (`chain`) — the run's own report is the thread's next word, and an unattended
-   * notice there is both noise and a false invitation: it says "comment
-   * `/<agent>` to start one" of a run that is already working, and a person who
-   * obeys is refused by the guard. Observed live on #546 (2026-11-13): the
-   * chain-dispatched reviewer claimed the turn two minutes before the green
-   * verdict landed, and the notice went out anyway.
-   *
-   * It was `next_agent == ""` alone, in the workflow's step gate, because for a
-   * year nobody was ever dispatched without a name and the two situations could
-   * not both occur. The hold gate changed that: green verdicts now land on
-   * threads that runs are already working, routinely — every push whose CI
-   * outlasts the chain's dispatch.
-   */
-  unattended: boolean;
 }
 
 /**
@@ -115,28 +100,28 @@ export interface ValidationOutcome {
  *
  * Neither dispatches on its own: `reviewerAgent` runs only where the hold says a
  * call is waiting (`free` or `parked`), and `engineerAgent` is never dispatched at
- * all -- it is the name a notification carries, the agent a person can ask for.
+ * all -- it is the name the failure comment offers, the agent a person can ask for.
  *
  * Either may be empty, and empty is a real answer: nobody was named. The verdict
- * then dispatches nobody and the caller tells a person, which is the one outcome
- * that cannot be silently wrong.
+ * then dispatches nobody, and the failure comment is the only thing left that can
+ * say who a person could ask for the work.
  */
 export interface ValidationInput {
   /** GitHub's own conclusion for the dispatched run. Empty means it never reached one. */
   conclusion: string;
   /** The agent the thread's newest call names: the body's `/<agent>` line, or a comment's. */
   reviewerAgent: string;
-  /** The agent that opened the pull request, from `atomaton:origin-agent` -- named in notifications. */
+  /** The agent that opened the pull request, from `atomaton:origin-agent` -- the name the failure comment offers. */
   engineerAgent: string;
   /**
    * Where the ball sits when the verdict lands, from `threadHold`.
    *
-   * The gate on the green verdict's dispatch. A call waiting for the work (`free`)
+   * The gate on every verdict's dispatch. A call waiting for the work (`free`)
    * and the park that promised the machinery would collect it (`parked`) let the
    * standing request run; a run in flight, a chain already started, or a turn
-   * handed back to a person hand the verdict to a mention instead. Absent reads as
-   * `with-person` -- the direction that starts nothing, which is the side that
-   * cannot start a run nobody asked for.
+   * handed back to a person start nothing. Absent reads as `with-person` -- the
+   * direction that starts nothing, which is the side that cannot start a run
+   * nobody asked for.
    */
   hold?: ThreadHold;
   /**
@@ -189,9 +174,9 @@ function handTo(agent: string): { next?: NextTurn } {
 /**
  * The sentence fragment that says who can be asked for the fix, when a name exists.
  *
- * `engineerAgent` -- the pull request's origin agent -- is not dispatched by this
- * verdict; it is the name a person needs to act on the verdict. Empty, the whole
- * clause goes: a person's own pull request has nobody to suggest.
+ * `engineerAgent` -- the pull request's origin agent -- is never dispatched by this
+ * verdict; it is the name a person needs when the verdict dispatches nobody. Empty,
+ * the whole clause goes: a person's own pull request has nobody to suggest.
  */
 function askFor(engineerAgent: string): string {
   const named = engineerAgent.trim();
@@ -200,6 +185,19 @@ function askFor(engineerAgent: string): string {
 
 /**
  * Translate a completed CI run into a verdict, who works next, and one sentence.
+ *
+ * The same gate on every verdict that has work behind it: where the thread's ball is
+ * a call waiting for this answer (`free`, or the `parked` whose collection this
+ * validation is), the agent that call names works next. Everywhere else -- a run in
+ * flight, a chain already carrying the call, a turn handed back to a person, a thread
+ * that could not be read, or a call that names nobody -- nothing is dispatched.
+ *
+ * Red meets that gate like green, and did not always. It dispatched nobody on the
+ * theory that the failure was a person's to route, and told them so through a notice
+ * of its own; a person who had already asked for the fix got the notice instead of
+ * the fix. What a red verdict owes a person is what broke, which is the failure
+ * comment this domain's caller posts, and what it owes the work is the call the
+ * thread is holding.
  *
  * An empty `conclusion` — the run timed out, was cancelled, or could not be
  * found — is deliberately NOT treated as a failure to hand to the engineer:
@@ -211,22 +209,31 @@ function askFor(engineerAgent: string): string {
 export function decideValidationOutcome(input: ValidationInput): ValidationOutcome {
   const { conclusion, reviewerAgent, engineerAgent } = input;
 
+  // The one gate every verdict below reads. Absent is a caller that could not
+  // answer, and it reads as `with-person` -- the direction that starts nothing,
+  // which is the side that cannot start a run nobody asked for.
+  const hold = input.hold ?? ({ kind: "with-person" } as const);
+  const callWaiting = hold.kind === "free" || hold.kind === "parked";
+  const next = callWaiting ? handTo(reviewerAgent) : {};
+  // Whether the work was actually handed on. Not the same question as `callWaiting`:
+  // a call that names nobody starts nothing either, and then the failure comment is
+  // the only thing that can carry a name.
+  const handedOn = next.next !== undefined;
+
   // Judged first, and treated as the red CI run it stands in for: failing checks so
   // the merge is blocked, a comment so whoever acts next has the problems at once.
-  // Nobody is dispatched — the pull request's own agent is named in the mention
-  // instead, and a person asks for the fix. Failing the workflow step instead would
-  // have written no check at all, which leaves the required context pending forever
-  // — a pull request only a human can rescue, for a mistake an agent makes in the
-  // ordinary course of editing its own tool surface.
+  // Failing the workflow step instead would have written no check at all, which
+  // leaves the required context pending forever — a pull request only a human can
+  // rescue, for a mistake an agent makes in the ordinary course of editing its own
+  // tool surface.
   const deliverableProblems = input.deliverableProblems ?? [];
   if (deliverableProblems.length > 0) {
     const count = `${deliverableProblems.length} problem${deliverableProblems.length === 1 ? "" : "s"}`;
+    const headline = `.github/atomaton/ is not internally consistent (${count}), so CI was not run.`;
     return {
       verdict: "deliverable-invalid",
-      unattended: true,
-      summary:
-        `.github/atomaton/ is not internally consistent (${count}), so CI was not run.` +
-        `${askFor(engineerAgent)}`,
+      ...next,
+      summary: handedOn ? headline : `${headline}${askFor(engineerAgent)}`,
     };
   }
 
@@ -234,70 +241,41 @@ export function decideValidationOutcome(input: ValidationInput): ValidationOutco
   const passed = PASSING.has(normalised);
 
   if (passed) {
-    // The hold is the whole gate. A green verdict starts the standing request only
-    // where a call is waiting for it: the ball with nobody yet, an ask nobody has
-    // taken up, or the park whose collection this validation is. Everywhere else --
-    // a run in flight (its own report is the thread's next word), a chain that
-    // already carries the call, a turn a run handed back to a person -- the verdict
-    // is delivered as a mention, and the person decides. This is the rule the
-    // re-ask-the-asker routing replaced: a green run there re-started whoever made
-    // the newest ask, call or no call, and its report was still being written when
-    // the machinery started the next run over it.
-    const hold = input.hold ?? { kind: "with-person" as const };
-    if (hold.kind === "free" || hold.kind === "parked") {
-      return {
-        verdict: "passed",
-        ...handTo(reviewerAgent),
-        unattended: reviewerAgent.trim() === "",
-        summary: `CI concluded ${normalised}.`,
-      };
+    if (handedOn) {
+      return { verdict: "passed", ...next, summary: `CI concluded ${normalised}.` };
     }
-    const because: Record<string, string> = {
+    // Every state that hands the turn elsewhere, named: the summary is a step output
+    // and, for these verdicts, the whole of what this run says about itself.
+    const because: Record<ThreadHold["kind"], string> = {
+      free: "the thread names no agent to start",
+      parked: "the thread names no agent to start",
       "in-flight": "a run already holds this pull request, and its own report is the thread's next word",
       chain: "the thread's newest word handed the work to another agent, and that call is the chain's to carry",
       "with-person": "the thread's newest word handed the turn back to a person",
       unreadable: "the thread could not be read to rule out a run in flight",
     };
-    // A run in flight or a chain carrying the call is not an unattended pull
-    // request -- the notice the workflow posts from `unattended` would invite a
-    // person to start a run that is already running (#546). With-person and
-    // unreadable are the states where the work genuinely waits on a person, and
-    // unreadable errs that way on purpose: silence there is the one failure this
-    // notice exists to prevent, while a stray notice costs a refused comment.
-    if (hold.kind === "in-flight" || hold.kind === "chain") {
-      return {
-        verdict: "passed",
-        unattended: false,
-        summary: `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind]}.`,
-      };
-    }
     return {
       verdict: "passed",
-      unattended: true,
-      summary:
-        `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind] ?? because["with-person"]}.` +
-        `${reviewerAgent.trim() === "" ? "" : ` Comment /${reviewerAgent.trim()} to start the review yourself.`}`,
+      summary: `CI concluded ${normalised}, and nothing was dispatched: ${because[hold.kind]}.`,
     };
   }
 
   if (!normalised) {
     return {
       verdict: "no-conclusion",
-      unattended: true,
       summary: "CI never reported a conclusion. Nothing was dispatched; a human should look.",
     };
   }
 
-  // Red, and nobody is dispatched. The engineer who opened the pull request is the
-  // one who made the change, so the mention names it and the person asks for the
-  // fix; the failing-run URL and the checks ride on the comment this verdict's
-  // caller posts. The automatic retry this replaced started the opener without a
-  // call, on a verdict nobody had asked it to act on.
+  // Red. The failing-run URL and the checks ride on the comment this verdict's caller
+  // posts, so a dispatched run gets the one line and reads the comment for the rest.
+  // The automatic retry this replaced started the opener without a call, on a verdict
+  // nobody had asked it to act on.
   return {
     verdict: "failed",
-    unattended: true,
-    summary:
-      `CI concluded ${normalised}. Nobody was dispatched to fix it.` +
-      `${askFor(engineerAgent)}`,
+    ...next,
+    summary: handedOn
+      ? `CI concluded ${normalised}.`
+      : `CI concluded ${normalised}. Nobody was dispatched to fix it.${askFor(engineerAgent)}`,
   };
 }
