@@ -36,6 +36,13 @@ describe("config.yaml", () => {
     // the name cannot be left absent: `pr-agent` with no name here fails the
     // pull request's own check.
     expect(c.agents?.on_update_conflict).toBe("engineer");
+    // The shipped scope is the mark, not the machinery's own absent-key reading:
+    // the template states `marked` outright so a new adoption notices only the
+    // releases the notes flag. `marked` narrows what is noticed, so the line is
+    // not a default the machinery keeps for a repo that never writes the key --
+    // an update merge bringing the line in is what narrows an existing one,
+    // and the template's own comment is where that reader looks first.
+    expect(c.update?.detection_scope).toBe("marked");
     expect(c.chain?.labels).toBeDefined();
   });
 

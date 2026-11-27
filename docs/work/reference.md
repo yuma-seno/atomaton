@@ -205,9 +205,15 @@ answer here and not a failure — a release nobody flagged is the ordinary case.
 
 The mark is the release's own claim, which is the point of the setting. How far a
 version number moves is a statement about compatibility and nothing about importance: a
-patch can close a vulnerability, and a minor can be a feature nobody is waiting for. A
-project that would rather be interrupted only for what the template calls urgent sets
-`marked`; everything else keeps `all`.
+patch can close a vulnerability, and a minor can be a feature nobody is waiting for.
+
+The shipped template states `marked` outright, because the mark is what the setting is
+for. The absent-key reading stays `all`: it is what every repository noticed before the
+key existed, and changing the reading would rewrite the behaviour of a config that never
+named the key. The line reaches such a repository through an update merge, and that is
+the moment its scope narrows — releases whose notes carry no mark stop being noticed. A
+project that wants its previous breadth sets `all` here; for the rest, marking a release
+is how its notes say it should be taken promptly.
 
 `marked` reads the release list before it does anything else, so a list that cannot be
 read stops the run with an error rather than reading as "nothing is marked". Reading it
