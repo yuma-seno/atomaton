@@ -26370,23 +26370,24 @@
   {
     "path": "sessions/issue-623/engineer.json",
     "agent": "engineer",
-    "messages": 230,
-    "calls": 128,
-    "failed": 2,
+    "messages": 162,
+    "calls": 77,
+    "failed": 3,
     "refused": 0,
     "skills": [],
-    "reported": false,
+    "reported": true,
     "tools": {
-      "bash": 104,
-      "read": 1,
-      "edit": 17,
-      "write": 3,
-      "commit_and_push": 1,
-      "create_pr": 2
+      "bash": 68,
+      "write": 1,
+      "commit_and_push": 2,
+      "create_pr": 3,
+      "get_pr": 1,
+      "get_check_runs": 1,
+      "check_merge_readiness": 1
     },
     "acts": {
-      "other": 55,
-      "edit": 49
+      "other": 40,
+      "edit": 28
     },
     "runs": [
       {
@@ -26455,6 +26456,28 @@
           }
         },
         "started": "2026-11-27T11:08:26Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-27T11:33:31Z",
+        "ended_because": "completed",
+        "iterations": 17,
+        "loop_recoveries": 0,
+        "messages": 162,
+        "seconds": 225,
+        "server_calls": {
+          "github": {
+            "check_merge_readiness": 1,
+            "commit_and_push": 1,
+            "create_pr": 1,
+            "get_check_runs": 1,
+            "get_pr": 1
+          },
+          "shell": {
+            "bash": 11
+          }
+        },
+        "started": "2026-11-27T11:29:46Z"
       }
     ]
   },
@@ -29572,6 +29595,97 @@
           }
         },
         "started": "2026-11-26T15:12:22Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/pr-624/archive/engineer-1.json",
+    "agent": "engineer",
+    "messages": 236,
+    "calls": 128,
+    "failed": 2,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "bash": 104,
+      "read": 1,
+      "edit": 17,
+      "write": 3,
+      "commit_and_push": 1,
+      "create_pr": 2
+    },
+    "acts": {
+      "other": 55,
+      "edit": 49
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T11:01:39Z",
+        "ended_because": "failed",
+        "iterations": 12,
+        "loop_abort": {
+          "arguments": "{\"path\":\"/home/runner/work/atomaton/atomaton/src/adapters/runner/config.ts\"}",
+          "call": 21,
+          "capped": false,
+          "count": 5,
+          "last_error": null,
+          "rule": "identical_answers",
+          "tool": "read"
+        },
+        "loop_recoveries": 1,
+        "messages": 38,
+        "seconds": 27,
+        "server_calls": {
+          "files": {
+            "read": 10
+          },
+          "github": {
+            "get_issue": 2,
+            "get_issue_comments": 6
+          },
+          "shell": {
+            "bash": 2
+          }
+        },
+        "started": "2026-11-27T11:01:12Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T11:01:46Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "loop_recoveries": 0,
+        "messages": 40,
+        "seconds": 7,
+        "server_calls": {},
+        "started": "2026-11-27T11:01:39Z"
+      },
+      {
+        "compactions": 1,
+        "ended": "2026-11-27T11:22:52Z",
+        "ended_because": "completed",
+        "iterations": 111,
+        "loop_recoveries": 0,
+        "messages": 230,
+        "seconds": 866,
+        "server_calls": {
+          "files": {
+            "edit": 17,
+            "grep": 1,
+            "read": 10,
+            "write": 3
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 2
+          },
+          "shell": {
+            "bash": 118
+          }
+        },
+        "started": "2026-11-27T11:08:26Z"
       }
     ]
   }
