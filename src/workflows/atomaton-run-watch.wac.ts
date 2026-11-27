@@ -115,13 +115,14 @@ export const atomaRunWatch = new Workflow("atomaton-run-watch", {
       // GitHub records NO run for a called workflow — they execute the runner as a
       // reusable workflow, so the first run of every chain (a person's command, a
       // new issue) exists only as its caller's run, and a caller that was cancelled
-      // or timed out would jam its thread with no watch on it at all. Most entry
-      // runs never took a turn; `reconcile_run_ending`'s second gate (`tookTurn`)
-      // is what keeps the watch silent on those, and it reads the event that
-      // started the watched run (`workflow_run.event`, below) to tell a
-      // command-consuming run from one — an entry run started by a new issue —
-      // that must never claim a person's command as its own. This workflow's own
-      // runs are not in the list and never re-trigger it.
+      // or timed out would jam its thread with no watch on it at all. A run that
+      // never took a turn — a no-op entry whose event count was zero — writes no
+      // claim; `reconcile_run_ending`'s second gate (`tookTurn`) keeps the watch
+      // silent on those, and it reads the event that started the watched run
+      // (`workflow_run.event`, below) to tell a command-consuming run from one —
+      // an entry run started by a new issue, whose run mints its own ask at claim
+      // time (#636) — that must never claim a person's command as its own. This
+      // workflow's own runs are not in the list and never re-trigger it.
       workflows: ["Atomaton Runner", "Atomaton Entry", "Atomaton Manual Comment"],
       types: ["completed"],
     },

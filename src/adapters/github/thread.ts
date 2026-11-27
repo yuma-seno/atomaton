@@ -92,8 +92,10 @@ export const readers: TurnReaders = {
   isDispatchMarker: (body) => DISPATCH_TAG.hasProse(body),
   // The turn's identity (#285): the claim a took tag carries, the ask an ending
   // answers, and the agent an ending's result tag names. `answers=0` is an ending
-  // that answers no comment — a run started by a new issue's body — and reads as
-  // undefined, which is the honest "answers nothing" rather than a matchable id.
+  // that answers no comment — written outside a run, or by a run whose claim
+  // backed off — and reads as undefined, which is the honest "answers nothing"
+  // rather than a matchable id. A body-started run answers the marker it minted
+  // (#636), so a real run's ending always names a real ask.
   claim: (body) => TOOK_TAG.readProse(body),
   answeredAsk: (body) => {
     const answers = ENDED_TAG.readProse(body)?.answers;

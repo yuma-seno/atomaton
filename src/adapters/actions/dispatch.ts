@@ -104,9 +104,11 @@ export interface RunnerDispatch {
    *     request. Required there: an answers-request dispatch that names no ask has
    *     nothing to verify its wait against, and is refused rather than sent.
    *
-   * A run started by a new issue's body has no ask comment (the body is not one),
-   * and is started by the reusable-workflow call rather than this dispatcher — its
-   * `ask` input stays empty and it writes no claim.
+   * A run started by a new issue's body has no ask comment at dispatch time (the
+   * body is not one), and is started by the reusable-workflow call rather than
+   * this dispatcher — its `ask` input stays empty, and the runner mints its ask
+   * at claim time: a dispatch marker of its own, the same shape this module
+   * posts (#636).
    */
   ask?: number | string;
   /**
@@ -754,8 +756,9 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
     "--field", `number=${d.number}`,
     "--field", `type=${d.type}`,
     "--field", `notify=${d.notify ?? ""}`,
-    // The ask this run claims at start (#285). Empty is the honest "no ask comment" —
-    // a body-started run — and the runner writes no claim for it.
+    // The ask this run claims at start (#285). Empty is the honest "no ask comment
+    // yet" — a body-started run, which mints its own at claim time (#636) and
+    // claims that.
     "--field", `ask=${ask ?? ""}`,
     // Always sent, so the input has a value on every path rather than defaulting in
     // one place and being absent in another.

@@ -246,7 +246,9 @@ export const ENDED_TAG = makeCompoundTag<{ verb: string; answers: number; run: n
  * than being folded into "some run is working". Two runs reaching for one ask are
  * separated by the ids themselves: the claim comment with the smaller id holds the
  * turn, and the other run backs off. `ask=0` is never written — a run with no ask
- * comment (a new issue's body) writes no claim at all.
+ * comment (a new issue's body) mints one: it posts the dispatch marker its own
+ * agent would have had and claims that, so every claim on the thread names a
+ * comment a later ending can answer (#636).
  */
 export const TOOK_TAG = makeCompoundTag<{ ask: number; run: number }>(
   "took",

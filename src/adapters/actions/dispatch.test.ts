@@ -534,8 +534,8 @@ console.log(outcome);
  * `postDispatchMarker` failing used to be harmless: the dispatch went out with the
  * ordering check skipped. What that leaves is a run nobody can account for — no
  * `atomaton:dispatch` on the node for `wasLaunchedOn`, `mostRecentAgentOn` or the
- * guard to read, and no ask for the runner to claim, so `claim_turn.ts` writes nothing
- * and the run watch cannot tell a run that took no turn from a run that died.
+ * guard to read, and no ask for the runner to claim, so `claim_turn.ts` cannot even
+ * mint one and the run watch cannot tell a run that took no turn from a run that died.
  *
  * A dispatch that names an ask of its OWN is not in that position: the caller's comment
  * is the record, and the run's claim goes on it. It still goes out with the ordering

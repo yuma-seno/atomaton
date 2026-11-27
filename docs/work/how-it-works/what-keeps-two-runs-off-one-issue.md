@@ -13,6 +13,9 @@ ask back (`ended=... answers=<ask> run=<run>`). The pair is what every reader
 compares against: the run watch's "did this run report", the guard's "is a comment
 arriving mid-turn", and a dispatch that waited minutes for CI all read the same
 ids instead of estimating who took the turn from timestamps and event shapes.
+A run started by a new issue's body has no comment to claim — the body is the
+ask — so it mints one at claim time: it posts the dispatch marker its own agent
+would have had and claims that, so the pair on its thread reads the same way.
 
 A hand-off is a promise, and the thread holds it open: after
 `ended=handoff answers=<ask> run=<run>` every reader treats the node as "a run
