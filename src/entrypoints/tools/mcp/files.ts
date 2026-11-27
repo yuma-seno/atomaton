@@ -158,8 +158,15 @@ function readFile(a: z.infer<typeof READ_SCHEMA>): McpToolResult {
   }
 
   const last = from + out.length - 1;
+  // The same-arguments clause is deliberate. The failure this marker meets -- #607, #627,
+  // atoma#47, all verified against session transcripts -- is a caller repeating the call
+  // unchanged because its reasoning believes it already passed the offset it meant to.
+  // Naming that the rest of the call does not change is for that belief, not for an
+  // instruction the caller could not follow.
   const more =
-    last < total ? `\n\n[${total - last} more lines. Read again with offset: ${last + 1}.]` : "";
+    last < total
+      ? `\n\n[${total - last} more lines. Read again with offset: ${last + 1}. The same call and the same arguments, plus this one.]`
+      : "";
   log(`read ${shown(full)} ${from}-${last}/${total}`);
   return { text: `${shown(full)} lines ${from}-${last} of ${total}\n\n${out.join("\n")}${more}` };
 }
@@ -196,7 +203,9 @@ const GREP_SCHEMA = z.object({
   path: z
     .preprocess(serialisedPathList, z.union([z.string(), z.array(z.string()).min(1)]))
     .optional()
-    .describe("File or directory to search, or several of them. Default: the working directory."),
+    .describe(
+      "File or directory to search, or several of them. Default: the working directory, which is searched with node_modules and .git skipped -- say exclude: [] to search even those.",
+    ),
   glob: z
     .string()
     .optional()
@@ -204,7 +213,9 @@ const GREP_SCHEMA = z.object({
   exclude: z
     .array(z.string())
     .optional()
-    .describe("Skip files and directories whose name matches any of these globs, such as `node_modules` or `*.min.js`."),
+    .describe(
+      "Skip files and directories whose name matches any of these globs, such as `node_modules` or `*.min.js`. A list passed here replaces the defaults, so `exclude: []` skips nothing: it is how a search without path reaches node_modules and .git.",
+    ),
   context: z
     .number()
     .int()
@@ -220,6 +231,23 @@ const GREP_SCHEMA = z.object({
     .describe(`How many lines to return. Default ${DEFAULT_MAX_MATCHES}. With context set, the surrounding lines count towards it. The result says when it stopped early.`),
   case_sensitive: z.boolean().optional().default(true).describe("Match case. Default true."),
 });
+
+/**
+ * What a whole-tree search skips before the caller's own exclusions apply.
+ *
+ * A call without `path` is the search's default as much as the caller's choice, and
+ * its noise is the server's to keep out: measured on #607 and #627, a pattern-only
+ * call answered with `node_modules/` rows on the matches it did want, truncating the
+ * result before them. The two directories here are machine-written on every tree an
+ * agent meets; `node_modules` is third-party packages and `.git` is the repository's
+ * own history, and neither is what a content search is looking for.
+ *
+ * The default does not reach a caller that named `path`: what it names is what is
+ * searched, and `path: ["node_modules"]` still works exactly as asked. And an
+ * explicit `exclude` replaces these entirely -- `exclude: []` is a named, tested
+ * opt-out, the way back to the old whole-tree behaviour, not an error.
+ */
+const DEFAULT_SKIPS = ["node_modules", ".git"];
 
 /**
  * Content search, with the file and line on every match.
@@ -242,6 +270,17 @@ function grepFiles(a: z.infer<typeof GREP_SCHEMA>): McpToolResult {
     return rel === "" ? "." : rel.startsWith("..") ? full : rel.split(sep).join("/");
   });
 
+  // The skip set, decided before the flags are: a caller's own `exclude` replaces the
+  // defaults rather than extending them, so `exclude: ["min.js"]` searches node_modules
+  // -- a surprise is only ever a surprise once, and this way it is named in the result.
+  // The defaults apply to the whole-tree search only, because that is the shape whose
+  // volume a caller did not choose; everything else is bound by what it named.
+  const defaultsApply = a.exclude === undefined && a.path === undefined;
+  const skips = a.exclude?.length ? a.exclude : defaultsApply ? DEFAULT_SKIPS : [];
+  const skipNote = defaultsApply
+    ? " (node_modules and .git skipped; pass exclude: [] to search everything)"
+    : "";
+
   const args = ["-E", "-n", "-I", "-r"];
   if (!a.case_sensitive) args.push("-i");
   if (a.context) args.push(`-C${a.context}`);
@@ -249,7 +288,7 @@ function grepFiles(a: z.infer<typeof GREP_SCHEMA>): McpToolResult {
   // Both forms per pattern, because a caller writing `node_modules` means the
   // directory and one writing `*.min.js` means the files, and asking which they meant
   // is a round trip to learn something neither of them cares about.
-  for (const skip of a.exclude ?? []) {
+  for (const skip of skips) {
     args.push(`--exclude=${skip}`, `--exclude-dir=${skip}`);
   }
   // `-m` is per file, not per search, so it does not bound the answer -- a hundred
@@ -269,7 +308,7 @@ function grepFiles(a: z.infer<typeof GREP_SCHEMA>): McpToolResult {
   const found = (run.stdout || "").split("\n").filter((line) => line.length > 0);
   if (found.length === 0) {
     return {
-      text: `No match for ${a.pattern}${a.glob ? ` in ${a.glob} files` : ""} under ${targets.join(", ")}.`,
+      text: `No match for ${a.pattern}${a.glob ? ` in ${a.glob} files` : ""} under ${targets.join(", ")}${skipNote}.`,
     };
   }
 
@@ -289,7 +328,7 @@ function grepFiles(a: z.infer<typeof GREP_SCHEMA>): McpToolResult {
   // Lines, not matches: with context set, most of them are the lines around one.
   const what = a.context ? "line(s), match and context," : "matching line(s)";
   log(`grep ${a.pattern} -> ${kept.length} line(s)${dropped > 0 ? `, ${dropped} dropped` : ""}`);
-  return { text: `${kept.length} ${what} under ${targets.join(", ")}:\n\n${kept.join("\n")}${note}` };
+  return { text: `${kept.length} ${what} under ${targets.join(", ")}${skipNote}:\n\n${kept.join("\n")}${note}` };
 }
 
 const GLOB_SCHEMA = z.object({
@@ -436,7 +475,7 @@ const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "grep",
     description:
-      "Search file contents for an extended regular expression, returning file, line number and the matching line. path takes one place to look or several. Set glob to restrict which files are searched, exclude to skip directories such as node_modules, and context to include surrounding lines. Prefer this over grep through the shell. A search says where something is, not what it means: when it finds the place, read the file around it rather than searching again with a different pattern.",
+      "Search file contents for an extended regular expression, returning file, line number and the matching line. path takes one place to look or several. Set glob to restrict which files are searched, and context to include surrounding lines; without path, node_modules and .git are skipped, and exclude changes what is skipped. Prefer this over grep through the shell. A search says where something is, not what it means: when it finds the place, read the file around it rather than searching again with a different pattern.",
     schema: GREP_SCHEMA,
     handler: grepFiles,
   }),
