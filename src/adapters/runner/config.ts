@@ -11,7 +11,8 @@ import { DEFAULT_GOVERNED_PATHS } from "../../domain/delivery/merge-readiness.ts
 import { CHECKS_FROM_DEFAULT_BRANCH, CHECKS_FROM_PULL_REQUEST } from "../../domain/delivery/check-jobs.ts";
 import { resolveDeclaredJobs, type DeclaredJobsResolution } from "../../domain/delivery/declared-jobs.ts";
 import { resolveMergeGates, type MergeGatesResolution } from "../../domain/delivery/merge-gates.ts";
-import type { AtomaConfig } from "../../domain/delivery/declared-config.ts";
+import type { AtomaConfig, NewReleaseMode } from "../../domain/delivery/declared-config.ts";
+import { isNewReleaseMode } from "../../domain/delivery/declared-config.ts";
 import { CONFIG_FILE } from "../../domain/machinery/machinery-layout.ts";
 import { machineryPath } from "./machinery.ts";
 
@@ -78,6 +79,36 @@ export function getLabel(key: LabelKey): string {
 /** Look up `merge.policy` from config.yaml. The fallback is the shipped default. */
 export function getMergePolicy(fallback = "auto"): string {
   return loadConfig().merge?.policy ?? fallback;
+}
+
+/**
+ * What the machinery does when it notices a newer release: `issue`, `pr` or
+ * `pr-agent`.
+ *
+ * `issue` is the default, and it is also what an absent key, an unreadable value and
+ * a value that is not a mode all answer. That is deliberate for the same reason
+ * `getMergePolicy` defaults rather than throws: the notice-only behaviour changes
+ * nothing in the tree, so a project that misspelled the key learns about it from
+ * `configProblems` on its pull request rather than from a run that took the release
+ * on its behalf.
+ */
+export function getNewReleaseMode(fallback: NewReleaseMode = "issue"): NewReleaseMode {
+  const mode = loadConfig().update?.on_new_release;
+  return isNewReleaseMode(mode) ? mode : fallback;
+}
+
+/**
+ * The agent `update.on_new_release: pr-agent` starts on a conflicted update pull
+ * request, or "" when the repository names none.
+ *
+ * Empty rather than a default, for the reason `AtomaConfig.agents` gives: a default
+ * would be this file naming an agent. `configProblems` reports the pair when the
+ * mode is `pr-agent` and this is unset, so the empty answer is a tree that never
+ * passed its own check -- and the update then stops for a person, which is what
+ * `issue` and `pr` do.
+ */
+export function getUpdateConflictAgent(): string {
+  return (loadConfig().agents?.on_update_conflict ?? "").trim();
 }
 
 /**

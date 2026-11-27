@@ -17,6 +17,7 @@ everything else about the runner. This table is the one place that knows both.
 | Key | Its entry |
 | --- | --- |
 | `agents.on_config_finding` | [work](../work/reference.md#agentson_config_finding) |
+| `agents.on_update_conflict` | [work](../work/reference.md#agentson_update_conflict) |
 | `base_branch` | [work](../work/reference.md#base_branch) |
 | `chain.after_handoffs` | [work](../work/reference.md#chainafter_handoffs) |
 | `chain.after_runs_without_change` | [work](../work/reference.md#chainafter_runs_without_change) |
@@ -41,6 +42,7 @@ everything else about the runner. This table is the one place that knows both.
 | `tools.secrets` | [tools](../tools/reference.md#toolssecrets) |
 | `tools.servers` | [tools](../tools/reference.md#toolsservers) |
 | `tools.watch` | [tools](../tools/reference.md#toolswatch) |
+| `update.on_new_release` | [work](../work/reference.md#updateon_new_release) |
 | `runs_on`, on any `checks` or `deploy` entry | [pipeline](../pipeline/reference.md#runs_on) |
 
 A key that is not on this list is one nothing reads — see

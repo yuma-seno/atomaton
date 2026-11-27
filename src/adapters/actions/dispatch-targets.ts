@@ -18,7 +18,8 @@
  * | `dispatchCd` | `push` to the branch a merge landed on |
  * | `dispatchTagDeploy` | `push` of a tag a deployment created, and the publish that follows |
  * | `dispatchPostMergeAgent` | `pull_request.closed`, when an agent did the merging |
- * | `dispatchUpdate` | `!upgrade` — a comment command fires no event GitHub would act on |
+ * | `dispatchUpdate` | `!upgrade`, and the release the notice just announced |
+ * | `dispatchUpdateConflictAgent` | `update.on_new_release: pr-agent` — nothing fires for a pull request that stopped |
  * | `dispatchRunner` (`dispatch.ts`) | every hand-off from one agent to the next |
  *
  * A pull request closed without merging dispatches nobody: the close is told to a
@@ -196,12 +197,76 @@ export function dispatchCi(branch: string): boolean {
  * reports only where the machinery reports anyway: the pull request, and the
  * notice when one stands open.
  */
-export function dispatchUpdate(repo: string, source: number): boolean {
+export function dispatchUpdate(
+  repo: string,
+  source: number,
+  options: {
+    /**
+     * The update's own PAT, when the caller that noticed the release has no
+     * `actions: write` to dispatch with. Passed by the new-release notice, whose
+     * workflow declares `contents: read` and `issues: write` and nothing else.
+     */
+    token?: string;
+  } = {},
+): boolean {
   return dispatchWorkflow(
     `dispatchUpdate: taking a newer release onto ${repo}`,
     "atomaton-update.yml",
     ["--repo", repo, "-f", `source=${source > 0 ? String(source) : ""}`],
     log,
+    options.token,
+  );
+}
+
+/**
+ * Start the agent `update.on_new_release: pr-agent` names, on the update pull
+ * request that stopped on a conflict.
+ *
+ * The mode is a policy for the collision, so this is called by the update run itself
+ * -- whoever started it. A person's `!upgrade` that collides starts the agent on a
+ * repository that chose `pr-agent`, because the repository chose what happens on a
+ * collision, not what happens on a comment.
+ *
+ * `plan.kept` never reaches here: the plan declined to decide, and a person decides.
+ * Only actual conflict markers do, which is the same line the update already draws
+ * between the two kinds of stop.
+ *
+ * The directive comment is this dispatch's marker AND its run's ask, the way the
+ * post-merge re-invocation does it -- tagged `include`, because it is the first
+ * message the resolving agent reads and it is what tells it what to do.
+ */
+export function dispatchUpdateConflictAgent(
+  repo: string,
+  prNumber: number,
+  agent: string,
+  options: { token?: string } = {},
+): boolean {
+  const directive =
+    `${LLM_CONTEXT_TAG.write("include")}\n${DISPATCH_TAG.write(agent)}\n` +
+    "Atomaton: this pull request takes a newer release onto this tree and stopped where the two " +
+    "sides disagree — the files listed above carry conflict markers naming both. Resolve them, " +
+    "keeping what this repository wrote where it was deliberate and taking what the release " +
+    "changed everywhere else, and say in your report which side you took for each file and why. " +
+    "Nothing merges from here: the repository's checks run on the resolved tree, and the merge is " +
+    "a person's.";
+  const markerCommentId = commentOnWithId(repo, prNumber, directive);
+  if (markerCommentId === null) {
+    log(
+      `dispatchUpdateConflictAgent: could not post the resolution directive on #${prNumber}, so ${agent} was not started`,
+    );
+    return false;
+  }
+  return (
+    dispatchRunner({
+      context: `the update pull request #${prNumber} stopped on a conflict, so ${agent} was to resolve it`,
+      agent,
+      type: "pr",
+      number: prNumber,
+      repo,
+      markerCommentId,
+      token: options.token,
+      log,
+    }) === "dispatched"
   );
 }
 

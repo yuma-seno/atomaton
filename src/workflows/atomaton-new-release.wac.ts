@@ -16,13 +16,21 @@ import { ref as notifyNewReleaseRef } from "../entrypoints/machinery/notify_new_
 // this exists for is a repository that has not been touched in weeks -- exactly the
 // one where a busy trigger fires nothing.
 //
-// ## What it does NOT need
+// ## What it needs
 //
-// A secret. `contents: read` to read the releases and the manifest at the tag,
-// `issues: write` to open the notice, and nothing else -- no PAT, no GitHub App, no
-// branch protection. That is the whole reason this ships before the sync half of
-// the same problem: an upgrade nobody knows about is the first barrier, and it can
-// be removed without asking an adopter to configure anything.
+// `contents: read` to read the releases and the manifest at the tag, `issues: write`
+// to open the notice -- and nothing else in the way of permissions, no GitHub App and
+// no branch protection. That is the whole reason this ships before the sync half of
+// the same problem: an upgrade nobody knows about is the first barrier, and it can be
+// removed without asking an adopter to configure anything.
+//
+// One secret is READ, and only for the project that asked for it: with
+// `update.on_new_release` set to `pr` or `pr-agent` the notice dispatches the update
+// workflow, and this workflow's own token may not start a run (`actions: write` is
+// not declared here and will not be -- widening the permission of the job that
+// rewrites `.github/` is a bigger decision than carrying the PAT that already exists
+// for this lane). The secret is empty in a repository that never set it, which is
+// exactly the default mode: `issue` reads it, sees nothing, and dispatches nothing.
 //
 // ## In this repository it is a no-op
 //
@@ -81,6 +89,11 @@ export const atomaNewRelease = new Workflow("atomaton-new-release", {
           // built this way regardless so that the next value to travel this path
           // does not have to be reasoned about again.
           REPO: "${{ github.repository }}",
+          // Read, never required: the mode that starts an update is the one that
+          // needs it, and `issue` -- the default, and what an unset key means -- is
+          // the notice and nothing else. Empty is a value here, not an absence: the
+          // script checks it and says so in the notice rather than failing the run.
+          ATOMATON_UPDATE_TOKEN: "${{ secrets.ATOMATON_UPDATE_TOKEN }}",
         },
         run: `${scriptCommandWithArgs(notifyNewReleaseRef, { repo: "\${REPO}" })}\n`,
       }),
