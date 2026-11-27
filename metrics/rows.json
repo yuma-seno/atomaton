@@ -27198,6 +27198,73 @@
     ]
   },
   {
+    "path": "sessions/issue-634/atomaton.json",
+    "agent": "atomaton",
+    "messages": 129,
+    "calls": 68,
+    "failed": 2,
+    "refused": 3,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "get_issue": 1,
+      "list": 3,
+      "read": 26,
+      "get_pr": 1,
+      "get_issue_comments": 2,
+      "get_check_runs": 1,
+      "grep": 7,
+      "bash": 7,
+      "fetch": 15,
+      "get_pr_reviews": 1,
+      "list_prs": 1,
+      "delegate": 1,
+      "delegate_large": 1,
+      "get_branch": 1
+    },
+    "acts": {
+      "other": 7
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:29:13Z",
+        "ended_because": "failed",
+        "iterations": 55,
+        "loop_recoveries": 0,
+        "messages": 129,
+        "seconds": 3219,
+        "server_calls": {
+          "delegate": {
+            "delegate": 1,
+            "delegate_large": 1
+          },
+          "files": {
+            "grep": 7,
+            "list": 3,
+            "read": 26
+          },
+          "github": {
+            "get_branch": 1,
+            "get_check_runs": 1,
+            "get_issue": 1,
+            "get_issue_comments": 2,
+            "get_pr": 1,
+            "get_pr_reviews": 1,
+            "list_prs": 1
+          },
+          "shell": {
+            "bash": 7
+          },
+          "web": {
+            "fetch": 15
+          }
+        },
+        "started": "2026-11-27T15:35:34Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-635/atomaton.json",
     "agent": "atomaton",
     "messages": 24,
@@ -27258,6 +27325,54 @@
         "seconds": 817,
         "server_calls": {},
         "started": "2026-11-27T16:15:36Z"
+      }
+    ]
+  },
+  {
+    "path": "sessions/issue-636/atomaton.json",
+    "agent": "atomaton",
+    "messages": 129,
+    "calls": 65,
+    "failed": 1,
+    "refused": 0,
+    "skills": [
+      "conventions"
+    ],
+    "reported": false,
+    "tools": {
+      "load_skill": 1,
+      "grep": 17,
+      "read": 36,
+      "get_issue": 4,
+      "glob": 1,
+      "get_issue_comments": 2,
+      "search_issues": 4
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-27T16:29:13Z",
+        "ended_because": "failed",
+        "iterations": 61,
+        "loop_recoveries": 0,
+        "messages": 129,
+        "seconds": 1965,
+        "server_calls": {
+          "files": {
+            "glob": 1,
+            "grep": 17,
+            "read": 36
+          },
+          "github": {
+            "get_issue": 4,
+            "get_issue_comments": 2
+          },
+          "search": {
+            "search_issues": 4
+          }
+        },
+        "started": "2026-11-27T15:56:28Z"
       }
     ]
   },
