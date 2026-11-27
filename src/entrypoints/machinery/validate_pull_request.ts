@@ -309,6 +309,56 @@ function reportFailure(
 }
 
 /**
+ * Write one mirrored check run, retrying a failed write once.
+ *
+ * The Checks API, not a workflow's own check. See the header: only this form satisfies
+ * a required status check for an agent's pull request.
+ *
+ * A failed write used to be a `WARN` and nothing else — the run went on to exit green,
+ * the required context was absent from the commit, and a pull request could be handed
+ * to a person who then could not merge it (#632). The `::error::` puts the failure
+ * where the run's own summary is read and names the context, so "which check is
+ * missing" does not have to be worked out from the commit afterwards.
+ *
+ * The exit code deliberately does not follow it. The steps after this one read this
+ * script's outputs through `if:` conditions, so a red step stops the chain — the
+ * verdict is never dispatched, the run's result is never posted — over a failure whose
+ * only consequence is that the commit is not yet mergeable. `lib/handoff-validation.ts`
+ * is the other half: it looks for exactly this absence when a turn reaches a person.
+ */
+function writeCheckRun(repo: string, headSha: string, name: string, conclusion: string): void {
+  const post = () =>
+    gh(
+      "api",
+      "--method",
+      "POST",
+      `repos/${repo}/check-runs`,
+      "-f",
+      `name=${name}`,
+      "-f",
+      `head_sha=${headSha}`,
+      "-f",
+      "status=completed",
+      "-f",
+      `conclusion=${conclusion}`,
+    );
+
+  let written = post();
+  if (written.code) {
+    log(`WARN could not write check "${name}" as ${conclusion}: ${written.stderr || written.stdout}; retrying once`);
+    written = post();
+  }
+  if (written.code) {
+    console.error(
+      `::error::could not write the required check "${name}" on ${headSha.slice(0, 7)}: ` +
+        `${written.stderr || written.stdout}`,
+    );
+    return;
+  }
+  log(`wrote check "${name}" as ${conclusion}`);
+}
+
+/**
  * Tell the person who asked for this run that CI is actually running, and where to
  * watch it.
  *
@@ -625,26 +675,7 @@ function main(): void {
   // that same answer, and this script then had two places to read it from. It read
   // the wrong one; see `contextsPassed`.
   const conclusionForContexts = contextsPassed(outcome.verdict) ? "success" : "failure";
-  for (const check of requiredContexts.map((name) => ({ name, conclusion: conclusionForContexts }))) {
-    // The Checks API, not a workflow's own check. See the header: only this form
-    // satisfies a required status check for an agent's pull request.
-    const created = gh(
-      "api",
-      "--method",
-      "POST",
-      `repos/${repo}/check-runs`,
-      "-f",
-      `name=${check.name}`,
-      "-f",
-      `head_sha=${headSha}`,
-      "-f",
-      "status=completed",
-      "-f",
-      `conclusion=${check.conclusion}`,
-    );
-    if (created.code) log(`WARN could not write check "${check.name}": ${created.stderr}`);
-    else log(`wrote check "${check.name}" as ${check.conclusion}`);
-  }
+  for (const name of requiredContexts) writeCheckRun(repo, headSha, name, conclusionForContexts);
 
   // Posted whenever CI did not pass: the failing-run URL and the problem list are
   // what whoever acts next needs, whether that is the run this verdict dispatches or

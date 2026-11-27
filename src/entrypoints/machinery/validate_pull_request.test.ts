@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FAKE_GH_IMPL } from "./testing/fake-gh-env.ts";
 import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
-import { parseGithubOutput, removeTemp, runWithFakeGh, scriptPath } from "./testing/harness.ts";
+import { parseGithubOutput, removeTemp, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
 import { findExistingCiRun, pickDispatchedRun } from "./validate_pull_request.ts";
 
 type Run = Parameters<typeof pickDispatchedRun>[0][number];
@@ -211,6 +211,8 @@ describe("notifyCiWaiting, through the whole script", () => {
     comments: string[];
     /** Every argv `gh` was invoked with, so a missing dispatch is assertable. */
     ghCalls: string[][];
+    /** The script's own log, where its warnings and error annotations land. */
+    stderr: string;
     out: Record<string, string>;
   }
 
@@ -231,10 +233,14 @@ describe("notifyCiWaiting, through the whole script", () => {
     askedByPerson: boolean,
     thread: unknown[] = [],
     agents: string[] = [],
+    extraRules: FakeGhRule[] = [],
   ): Validation {
     const runsRule = { match: ["actions/runs?head_sha="] };
     const runs = (list: Record<string, unknown>[]) => JSON.stringify({ total_count: list.length, workflow_runs: list });
     const rules = [
+      // A test's own answers come first: first-match-wins, so an override of one of the
+      // fixtures below has to be in front of it.
+      ...extraRules,
       // First-match-wins in the fake, so the more specific rules come first: the
       // comments URL contains `issues/7` as a substring, and the runs URL contains
       // both `workflow` and `run`.
@@ -290,6 +296,7 @@ describe("notifyCiWaiting, through the whole script", () => {
         status: result.status,
         comments,
         ghCalls: result.ghCalls,
+        stderr: result.stderr,
         out: parseGithubOutput(readFileSync(outputFile, "utf8")),
       };
     } finally {
@@ -424,4 +431,53 @@ describe("notifyCiWaiting, through the whole script", () => {
     expect(v.comments.length).toBe(1);
     expect(v.comments[0]).toContain("CI concluded failure");
   }, WAIT);
+
+  /**
+   * The mirror is the only check a ruleset accepts (see the script's header), and a
+   * write that failed used to be a warning with a green exit: the run looked fine, the
+   * head commit carried no required check, and the pull request went to a person who
+   * could not merge it (#632). It is retried once now, and a second failure is an error
+   * annotation naming the check.
+   *
+   * The exit code still does not follow the failure. The steps after this one read this
+   * script's outputs through `if:`, so a red step would take the verdict with it — and
+   * the verdict is written either way.
+   */
+  describe("the mirrored check", () => {
+    /** One required context on the base branch, so the mirror loop writes exactly one. */
+    const required = {
+      match: ["repos/o/r/rules/branches/main"],
+      stdout: JSON.stringify([
+        { type: "required_status_checks", parameters: { required_status_checks: [{ context: "atomaton-check" }] } },
+      ]),
+    };
+
+    const posts = (v: Validation): string[][] =>
+      v.ghCalls.filter((call) => call.includes("POST") && call.join(" ").includes("check-runs"));
+
+    test("a write that fails once is retried, and the check is written", () => {
+      const v = runValidation(ciActionRun("completed", "success"), false, [], [], [
+        required,
+        { match: ["POST", "check-runs"], code: 1, stdout: "HTTP 502", attempt: 1 },
+        { match: ["POST", "check-runs"], stdout: "{}" },
+      ]);
+      expect(posts(v).length).toBe(2);
+      expect(v.stderr).toContain("retrying once");
+      expect(v.stderr).toContain('wrote check "atomaton-check" as success');
+    }, WAIT);
+
+    test("a write that keeps failing is an error naming the check, and the run still ends green", () => {
+      const v = runValidation(ciActionRun("completed", "success"), false, [], [], [
+        required,
+        { match: ["POST", "check-runs"], code: 1, stdout: "HTTP 500" },
+      ]);
+      expect(v.status).toBe(0);
+      expect(posts(v).length).toBe(2);
+      expect(v.stderr).toContain("::error::");
+      expect(v.stderr).toContain('"atomaton-check"');
+      // The outputs the steps after this one read are still written.
+      expect(v.out.conclusion).toBe("success");
+      expect(v.out.verdict_passed).toBe("true");
+    }, WAIT);
+  });
 });

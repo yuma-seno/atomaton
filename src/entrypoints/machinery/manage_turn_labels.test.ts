@@ -35,12 +35,13 @@ const stateOpenBare = {
 
 type FakeGhOpts = NonNullable<Parameters<typeof runWithFakeGh>[2]>;
 
-function run(phase: string, rules: FakeGhOpts["rules"]) {
+function run(phase: string, rules: FakeGhOpts["rules"], env: Record<string, string> = {}) {
   const configDir = makeConfigDir({});
   try {
     return runWithFakeGh(scriptPath("manage_turn_labels.ts"), ["--phase", phase, "--number", "42"], {
       cwd: configDir,
       rules,
+      env,
     });
   } finally {
     rmSync(configDir, { recursive: true, force: true });
@@ -51,6 +52,55 @@ const addsOf = (r: ReturnType<typeof run>) => r.ghCalls.filter((c) => c.includes
 const removesOf = (r: ReturnType<typeof run>) =>
   r.ghCalls.filter((c) => c.includes("--remove-label")).map((c) => c.join(" "));
 const createsOf = (r: ReturnType<typeof run>) => r.ghCalls.filter((c) => c[0] === "label").map((c) => c.join(" "));
+
+/**
+ * The #632 shape: an open pull request handed to a person, whose head commit carries no
+ * `atomaton-check` — no mirror, so the ruleset blocks the merge. See
+ * `lib/handoff-validation.ts`.
+ *
+ * The state read keeps the `{owner}/{repo}` placeholder, because the runner's release
+ * step names no repository; the reads below name `o/r`, which is what
+ * `GITHUB_REPOSITORY` answers when the caller passes none.
+ */
+const prOpenNoMirror = {
+  match: ["repos/{owner}/{repo}/issues/42"],
+  stdout: JSON.stringify({
+    state: "open",
+    pull_request: { merged_at: null },
+    labels: [{ name: "atomaton/in-progress" }],
+  }),
+};
+
+const HEAD = "dddae0c";
+
+const prView = (overrides: Record<string, unknown> = {}) => ({
+  match: ["pr", "view", "42"],
+  stdout: JSON.stringify({
+    headRefOid: HEAD,
+    headRefName: "atomaton/issue-634",
+    isCrossRepository: false,
+    baseRefName: "main",
+    isDraft: false,
+    state: "OPEN",
+    mergeStateStatus: "BLOCKED",
+    ...overrides,
+  }),
+});
+
+const requiresAtomatonCheck = {
+  match: ["rules/branches/main"],
+  stdout: JSON.stringify([
+    { type: "required_status_checks", parameters: { required_status_checks: [{ context: "atomaton-check" }] } },
+  ]),
+};
+
+const checksOnHead = (runs: Record<string, unknown>[]) => ({
+  match: ["commits/", "check-runs"],
+  stdout: JSON.stringify({ total_count: runs.length, check_runs: runs }),
+});
+
+/** Only the turn labels: no rule answers a pull request read. */
+const labelRulesOnly = [{ match: ["label"] }, { match: ["issue", "edit"] }];
 
 describe("manage_turn_labels.ts", () => {
   test("running: the in-progress label goes on, the person's comes off", () => {
@@ -147,5 +197,74 @@ describe("manage_turn_labels.ts", () => {
     const r = run("whenever", [{ match: ["label"] }, { match: ["issue", "edit"] }]);
     expect(r.status).toBe(2);
     expect(r.ghCalls.length).toBe(0);
+  });
+
+  /**
+   * A person handed a pull request has to be able to merge it (#632). The check the
+   * ruleset accepts is the mirror `validate_pull_request.ts` writes, and a validation
+   * for the final head may never have run — so the handoff starts one, as neither a
+   * person's request nor a claimed ask (`lib/handoff-validation.ts`).
+   */
+  test("with-person on a pull request whose head has no mirror dispatches a validation", () => {
+    const r = run(
+      "with-person",
+      [
+        prOpenNoMirror,
+        prView(),
+        requiresAtomatonCheck,
+        checksOnHead([]),
+        ...labelRulesOnly,
+        { match: ["workflow", "run"], stdout: "" },
+      ],
+      { GITHUB_REPOSITORY: "o/r" },
+    );
+    expect(r.status).toBe(0);
+    const dispatch = r.ghCalls.find((c) => c[0] === "workflow" && c[1] === "run") ?? [];
+    expect(dispatch[2]).toBe("atomaton-validate-pr.yml");
+    expect(dispatch).toContain("number=42");
+    expect(dispatch).toContain("branch=atomaton/issue-634");
+    // Nobody is asked and nothing is claimed: the turn is the person's, and the
+    // validation exists for the check run, not for an agent.
+    expect(dispatch).toContain("asked_by_person=false");
+    expect(dispatch).toContain("ask=");
+    // The labels moved first: a dispatch that fails must not cost the person their turn.
+    const labelled = r.ghCalls.findIndex((c) => c.includes("--add-label"));
+    const dispatched = r.ghCalls.findIndex((c) => c[0] === "workflow");
+    expect(labelled).toBeGreaterThanOrEqual(0);
+    expect(labelled).toBeLessThan(dispatched);
+  });
+
+  test("with-person on a pull request whose head already passes dispatches nothing", () => {
+    const r = run(
+      "with-person",
+      [
+        prOpenNoMirror,
+        prView(),
+        requiresAtomatonCheck,
+        checksOnHead([{ name: "atomaton-check", status: "completed", conclusion: "success" }]),
+        ...labelRulesOnly,
+      ],
+      { GITHUB_REPOSITORY: "o/r" },
+    );
+    expect(r.status).toBe(0);
+    expect(addsOf(r).some((c) => c.includes("atomaton/waiting-for-person"))).toBe(true);
+    expect(r.ghCalls.some((c) => c[0] === "workflow")).toBe(false);
+  });
+
+  test("with-person on an issue never reads a pull request", () => {
+    const r = run("with-person", [stateOpen, ...labelRulesOnly], { GITHUB_REPOSITORY: "o/r" });
+    expect(r.status).toBe(0);
+    expect(r.ghCalls.some((c) => c[0] === "pr")).toBe(false);
+  });
+
+  // Best effort, like every handoff write: a pull request that cannot be read still
+  // hands the turn over. A person waiting on a label that never arrived is worse than
+  // a check run written a run later.
+  test("a head that cannot be read hands the turn over anyway", () => {
+    const r = run("with-person", [prOpenNoMirror, ...labelRulesOnly], { GITHUB_REPOSITORY: "o/r" });
+    expect(r.status).toBe(0);
+    expect(addsOf(r).some((c) => c.includes("atomaton/waiting-for-person"))).toBe(true);
+    expect(r.ghCalls.some((c) => c[0] === "workflow")).toBe(false);
+    expect(r.stderr).toContain("WARN");
   });
 });
