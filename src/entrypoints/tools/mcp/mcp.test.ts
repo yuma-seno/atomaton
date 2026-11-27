@@ -4231,6 +4231,11 @@ describe("mcp/files.ts", () => {
     expect(text).toContain("lines 5-14 of 40");
     expect(text).toContain("5\tline 5");
     expect(text).toContain("offset: 15");
+    // The continuation is one argument added to the call the caller just made. The
+    // marker spells that out for the recorded failure -- #607 and #627 -- whose
+    // transcripts show a caller repeating a call unchanged while believing it had
+    // already passed the offset it meant to.
+    expect(text).toContain("The same call and the same arguments, plus this one.");
   });
 
   test("a read that reaches the end says nothing about continuing", async () => {
@@ -4263,6 +4268,55 @@ describe("mcp/files.ts", () => {
     const r = await call(root, "grep", { pattern: "absent" });
     expect(r.result.isError).toBe(false);
     expect(r.result.content[0].text).toContain("No match");
+  });
+
+  /**
+   * `context` is the lines around each match, on the search itself. It is the one
+   * argument of this tool no test covered when #627 was filed, and the one whose
+   * absence the #607 report felt: line numbers alone answer where a thing is, not
+   * what it reads like, so the caller re-opened the file for every hit.
+   */
+  test("grep returns the lines around a match when context says so", async () => {
+    const root = fixture({
+      "one.ts": "keep1\nkeep2\nhit one\nkeep3\nkeep4\n",
+      "two.ts": "keep1\nhit two\nkeep2\n",
+    });
+    const r = await call(root, "grep", { pattern: "hit", path: ["one.ts", "two.ts"], context: 1 });
+    expect(r.result.isError).toBe(false);
+    const text = r.result.content[0].text;
+    expect(text).toContain("line(s), match and context");
+    expect(text).toContain("one.ts:3:hit one");
+    expect(text).toContain("one.ts-2-keep2");
+    expect(text).toContain("one.ts-4-keep3");
+    expect(text).toContain("two.ts:2:hit two");
+    expect(text).toContain("two.ts-1-keep1");
+  });
+
+  /**
+   * A call without `path` used to answer in `node_modules/` rows the caller never
+   * asked for -- the shape recorded on every one of these reports, because the caller
+   * that omits `path` is the one that omits everything after the first argument. The
+   * default is skipped and named; a caller that names places (or says `exclude: []`)
+   * searched exactly what it meant, unchanged.
+   */
+  test("a whole-tree search skips node_modules, names that, and has a way back", async () => {
+    const root = fixture({ "wanted.ts": "wanted\n", "node_modules/pkg/index.js": "wanted\n" });
+    const scoped = await call(root, "grep", { pattern: "wanted" });
+    expect(scoped.result.isError).toBe(false);
+    const text = scoped.result.content[0].text;
+    expect(text).toContain("wanted.ts:1:");
+    expect(text).not.toContain("node_modules/pkg");
+    expect(text).toContain("node_modules and .git skipped");
+
+    const everything = await call(root, "grep", { pattern: "wanted", exclude: [] });
+    expect(everything.result.content[0].text).toContain("node_modules/pkg/index.js:1:");
+
+    // Naming a place binds the search to it, and turns the note off: this fixture's
+    // package directory holds a hit, and the search that names it finds it.
+    const named = await call(root, "grep", { pattern: "wanted", path: "node_modules" });
+    const namedText = named.result.content[0].text;
+    expect(namedText).toContain("node_modules/pkg/index.js:1:");
+    expect(namedText).not.toContain("skipped");
   });
 
   /**
