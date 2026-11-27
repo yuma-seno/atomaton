@@ -8,8 +8,22 @@
  * An adopted tree is a copy, and nothing tells its owner a copy is stale. The
  * documented upgrade (`docs/runtime/tasks/move-to-a-newer-release.md`) starts with
  * `gh release download` — so the barrier is not the diff, it is not knowing there
- * is anything to download. This is the announcement, and it is the whole of it:
- * nothing is written into the tree from here.
+ * is anything to download. This is the announcement.
+ *
+ * ## Which is sometimes the whole of it, and sometimes the first step
+ *
+ * `update.on_new_release` decides. In `issue` mode — the default — the notice is
+ * written and the release waits for a person. In `pr` and `pr-agent` modes the
+ * machinery takes the release itself, and a notice would then be a second thread
+ * about work already under way: the update is dispatched from here and the pull
+ * request it opens is where everything is reported. So no notice is written on that
+ * path, and none of the comparison below runs either — the update is about to do the
+ * same work on the same tree.
+ *
+ * The exception is the case a person has to act on: no `ATOMATON_UPDATE_TOKEN`, or
+ * GitHub refusing the dispatch. Then the notice IS written, headed by a warning that
+ * says the repository asked for an automatic update and did not get one. The log of a
+ * cron nobody watches is not where somebody looks for that.
  *
  * It downloads the release's asset twice — the release this tree came from, and
  * the one being announced — into temporary directories it then deletes, because
@@ -176,47 +190,45 @@ export interface NoticeInput {
   readonly plan: PlanSummary | null;
   readonly planWhy: string;
   /**
-   * What the machinery did about the release, when `update.on_new_release` asked it
-   * to do anything. `null` in `issue` mode, which is the whole reason a notice from
-   * such a repository reads exactly as it always has.
+   * What stopped the automatic update, when `update.on_new_release` asked it to take
+   * the release. `null` in `issue` mode, which is the whole reason a notice from such
+   * a repository reads exactly as it always has.
    */
-  readonly autoUpdate: AutoUpdate | null;
+  readonly autoUpdateFailure: AutoUpdateFailure | null;
 }
 
 /**
- * The automatic half of the notice: the mode the repository chose, and what came of
- * it.
+ * The automatic half of the notice: the mode the repository chose, when nothing came
+ * of it.
  *
- * `started` is decided from what the run could see BEFORE it wrote the notice -- the
- * token, and whether an update pull request for this tag already stands open -- because
- * the dispatch needs the notice's own number as its source. So the sentence the notice
- * carries is what the repository's setting means, and the one case it cannot report is
- * a dispatch GitHub refused after everything looked ready; that is a WARN in the log,
- * and the next run retries it (no pull request exists, so nothing dedupes it away).
+ * This exists only for the notice that should not have been necessary — the
+ * repository asked for the update to be taken and it was not. `null` in `issue` mode,
+ * which is the whole reason a notice from such a repository reads exactly as it
+ * always has, and `null` too on the path where the dispatch landed, because that path
+ * writes no notice at all.
  */
-export interface AutoUpdate {
+export interface AutoUpdateFailure {
   /** The mode, which is never `issue` here. */
   readonly mode: Exclude<NewReleaseMode, "issue">;
-  /** Whether the update was dispatched as this notice was written. */
-  readonly started: boolean;
-  /** Why it was not, in the notice's own words. Empty when `started`. */
+  /** Why nothing was started, in the notice's own words. */
   readonly why: string;
 }
 
 /**
- * What the notice says about an automatic update, or nothing in `issue` mode.
+ * The warning a notice opens with when the repository asked for an automatic update
+ * and did not get one.
  *
- * The not-started case is the one a person has to act on, so it says which setting is
- * on and what stopped it -- "the update is automatic" with nothing happening is the
- * worst of both answers.
+ * At the top rather than in "Taking it": the body is a long page about a release, and
+ * the sentence that says why nothing is happening has to be readable before it. The
+ * alert is GitHub's own syntax, so it renders as a callout instead of as one more
+ * paragraph to scroll past.
  */
-function autoUpdateLines(autoUpdate: AutoUpdate): string[] {
-  if (!autoUpdate.started) {
-    return [`\`update.on_new_release\` is \`${autoUpdate.mode}\`, but nothing was started: ${autoUpdate.why}.`];
-  }
+function autoUpdateWarningLines(failure: AutoUpdateFailure): string[] {
   return [
-    `\`update.on_new_release\` is \`${autoUpdate.mode}\`: this release is taken without anyone asking. ` +
-      "The update works on the pull request it opens, and its report lands on this thread.",
+    "> [!WARNING]",
+    `> \`update.on_new_release\` is \`${failure.mode}\` here, but nothing was started: ${failure.why}.`,
+    `> Take the release by hand with the steps below, or see [move to a newer release](${UPGRADE_DOC}).`,
+    "",
   ];
 }
 
@@ -241,8 +253,15 @@ export function noticeTitle(input: NoticeInput): string {
 
 /** The issue's body: what is there, how to take it, what it drops, and what changed. */
 export function noticeBody(input: NoticeInput): string {
-  const lines: string[] = [
-    NOTICE_MARKER,
+  const lines: string[] = [NOTICE_MARKER];
+
+  // Only when the repository asked for an automatic update and nothing started. In
+  // `issue` mode this is absent and the rest of the body is untouched -- which is
+  // what "unset behaves exactly as it always did" means, in the one place a reader
+  // can see it.
+  if (input.autoUpdateFailure !== null) lines.push(...autoUpdateWarningLines(input.autoUpdateFailure));
+
+  lines.push(
     `Upstream has published **${input.latestVersion}**. This repository's \`.github/\` came from **${input.localVersion}**.`,
     "",
     "| | |",
@@ -252,12 +271,7 @@ export function noticeBody(input: NoticeInput): string {
     "",
     "## Taking it",
     "",
-  ];
-
-  // Only when the repository asked for something to happen. In `issue` mode this is
-  // absent and the rest of the body is untouched -- which is what "unset behaves
-  // exactly as it always did" means, in the one place a reader can see it.
-  if (input.autoUpdate !== null) lines.push(...autoUpdateLines(input.autoUpdate), "");
+  );
 
   // The same sentence the update workflow leads with, so the notice and the run it
   // offers never disagree. Its inputs are the plan's counts, which is why it walks
@@ -448,21 +462,19 @@ function main(): void {
   }
   const latest = { tag: latestTag };
 
-  // Searched before the comparison, because both outcomes have something to do with
-  // an open notice: one updates it and the other is the reason it should not still
-  // be open. A search that fails stops the run either way — told apart from "there
-  // is none", because opening a notice on every run the search blips is how a
-  // repository gets one issue per day.
-  const existing = findOpenNotice(repo);
-  if (existing === null) {
-    console.error(`::error::could not search ${repo} for an existing notice, so this run wrote nothing.`);
-    process.exit(1);
-  }
-
   if (latest.tag === local.manifest.version) {
-    // Caught up. An open notice that says otherwise is worse than no notice: the
-    // next release would then be announced by editing an issue whose whole body is
-    // about a version that is no longer the one waiting.
+    // Caught up, and this branch is entirely about the notice: settle it, or say
+    // there is nothing to settle. A search that fails stops the run rather than
+    // reading as "there is none", because it is the only thing that can close a
+    // notice whose comparison no longer holds.
+    const existing = findOpenNotice(repo);
+    if (existing === null) {
+      console.error(`::error::could not search ${repo} for an existing notice, so this run wrote nothing.`);
+      process.exit(1);
+    }
+    // An open notice that says otherwise is worse than no notice: the next release
+    // would then be announced by editing an issue whose whole body is about a
+    // version that is no longer the one waiting.
     if (existing === 0) {
       log(`${local.manifest.version} is the latest release; nothing to announce`);
       return;
@@ -483,6 +495,75 @@ function main(): void {
     }
     log(`caught up to ${local.manifest.version}; closed the settled notice #${existing}`);
     return;
+  }
+
+  // What the repository asked the machinery to do with a newer release, read before
+  // anything is downloaded: in `pr` and `pr-agent` modes the answer can end this run
+  // here -- no notice, and none of the two asset downloads the update is about to do
+  // for itself on the same tree.
+  //
+  // In `issue` mode nothing below runs, down to the pull-request search, because that
+  // path has to stay the one it always was.
+  const mode = getNewReleaseMode();
+  const updateToken = (process.env.ATOMATON_UPDATE_TOKEN ?? "").trim();
+
+  // Set only where the repository asked for the update and did not get it. A notice is
+  // written exactly then; the path that dispatched writes none at all.
+  let autoUpdateFailure: AutoUpdateFailure | null = null;
+  if (mode !== "issue") {
+    if (updateToken === "") {
+      // Not a failure, and deliberately not one: a missing secret would otherwise cost
+      // the repository the announcement as well. The WARN is for whoever reads the run
+      // log; the notice carries the same sentence to the person who can set it.
+      //
+      // Nothing is searched for either. The search would have to run as this
+      // workflow's own token, which cannot list pull requests on a private repository
+      // -- and the refusal reads as "no pull request is open".
+      log(`WARN update.on_new_release is ${mode}, but ATOMATON_UPDATE_TOKEN is not set — nothing was started`);
+      autoUpdateFailure = {
+        mode,
+        why: "no `ATOMATON_UPDATE_TOKEN` secret is set here, and this workflow's own token may not start a run",
+      };
+    } else {
+      // As the update's PAT, not this workflow's own token: `atomaton-new-release.yml`
+      // declares `contents: read` and `issues: write`, and a scope a workflow does not
+      // list is `none` -- so a private repository refuses this read to the notice, and
+      // a refused read is the answer "no update pull request is open". That answer
+      // dispatches, so the refusal would cost one update run and one re-push per day
+      // for as long as the release waits on its pull request.
+      const open = openPrForHead(repo, updateBranchFor(latest.tag), updateToken);
+      if (open > 0) {
+        // The update is already under way, and its pull request is the thread its
+        // report belongs on. Nothing to start, and a notice here would be a second
+        // thread about the same release.
+        log(`an update pull request for ${latest.tag} (#${open}) is already open; nothing was started`);
+        return;
+      }
+      if (dispatchUpdate(repo, 0, { token: updateToken })) {
+        // `source` is empty, so this is the Actions-button run: no thread asked for it,
+        // and the pull request it opens is where everything is reported.
+        log(`started the update to ${latest.tag}; its report lands on the pull request it opens`);
+        return;
+      }
+      // A refused dispatch is the one case somebody has to be told about, and the
+      // reason GitHub gave stays in this run's log rather than in an issue: it names a
+      // credential, and an issue body is not where a credential is described.
+      log(`WARN GitHub refused the dispatch of the update to ${latest.tag}`);
+      autoUpdateFailure = {
+        mode,
+        why: "GitHub refused the dispatch, and this run's log is where the reason is",
+      };
+    }
+  }
+
+  // Searched only on the path that writes a notice -- the one where the release is
+  // waiting for somebody. A search that fails stops the run rather than reading as
+  // "there is none", because opening a notice on every run the search blips is how a
+  // repository gets one issue per day.
+  const existing = findOpenNotice(repo);
+  if (existing === null) {
+    console.error(`::error::could not search ${repo} for an existing notice, so this run wrote nothing.`);
+    process.exit(1);
   }
 
   const notes = releaseNotes();
@@ -526,46 +607,6 @@ function main(): void {
     };
   }
 
-  // What the repository asked the machinery to do with this release, worked out
-  // BEFORE the notice is written: the dispatch needs the notice's own number as its
-  // source, so it can only happen after, and a body written first and corrected after
-  // would be two writes and a lie in between.
-  //
-  // In `issue` mode nothing here runs -- not even the pull-request search -- because
-  // that path has to stay the one it always was, down to the `gh` calls it makes.
-  const mode = getNewReleaseMode();
-  const updateToken = (process.env.ATOMATON_UPDATE_TOKEN ?? "").trim();
-  let autoUpdate: AutoUpdate | null = null;
-  if (mode !== "issue") {
-    if (updateToken === "") {
-      // Not a failure, and deliberately not one: a missing secret would otherwise cost
-      // the repository the announcement as well. The WARN is for whoever reads the run
-      // log; the notice carries the same sentence to the person who can set it.
-      //
-      // Nothing is searched for either. The search would have to run as this
-      // workflow's own token, which cannot list pull requests on a private repository
-      // -- and the refusal reads as "no pull request is open".
-      log(`WARN update.on_new_release is ${mode}, but ATOMATON_UPDATE_TOKEN is not set — nothing was started`);
-      autoUpdate = {
-        mode,
-        started: false,
-        why: "no `ATOMATON_UPDATE_TOKEN` secret is set here, and this workflow's own token may not start a run",
-      };
-    } else {
-      // As the update's PAT, not this workflow's own token: `atomaton-new-release.yml`
-      // declares `contents: read` and `issues: write`, and a scope a workflow does not
-      // list is `none` -- so a private repository refuses this read to the notice, and
-      // a refused read is the answer "no update pull request is open". That answer
-      // dispatches, so the refusal would cost one update run and one re-push per day
-      // for as long as the release waits on its pull request.
-      const open = openPrForHead(repo, updateBranchFor(latest.tag), updateToken);
-      autoUpdate =
-        open > 0
-          ? { mode, started: false, why: `an update pull request for ${latest.tag} (#${open}) is already open` }
-          : { mode, started: true, why: "" };
-    }
-  }
-
   const input: NoticeInput = {
     localVersion: local.manifest.version,
     latestVersion: latest.tag,
@@ -575,7 +616,7 @@ function main(): void {
     removedWhy,
     plan,
     planWhy,
-    autoUpdate,
+    autoUpdateFailure,
   };
 
   const title = noticeTitle(input);
@@ -595,21 +636,6 @@ function main(): void {
 
   const where = existing === 0 ? written.stdout.trim() : `#${existing}`;
   log(`announced ${latest.tag} (this tree is on ${local.manifest.version}) at ${where}`);
-
-  // Now, and not before: `source` is the notice, so every report the update writes --
-  // what it applied, where it stopped -- lands in the thread that announced the
-  // release. The dispatch is not allowed to fail the announcement: a notice with no
-  // update started is recoverable by a person or by tomorrow's run, a release nobody
-  // was told about is not.
-  if (autoUpdate !== null && autoUpdate.started) {
-    const notice = Number(/\/issues\/(\d+)/.exec(written.stdout.trim())?.[1] ?? existing) || existing;
-    const sent = dispatchUpdate(repo, notice, { token: updateToken });
-    log(
-      sent
-        ? `started the update to ${latest.tag}, reporting on ${notice > 0 ? `#${notice}` : "its pull request"}`
-        : `WARN could not start the update to ${latest.tag}; the notice stands and the next run tries again`,
-    );
-  }
 }
 
 if (import.meta.main) main();

@@ -7,32 +7,40 @@ procedure is in the appendix at the end.
 
 **You do not have to watch for it.** `atomaton-new-release.yml`, which ships with
 the release, runs once a day and compares `.github/atomaton-release.json` against
-the latest release. When they differ it opens one issue — updated in place rather
-than opened again — carrying both versions, the release notes in between, a
-preview of what taking the release would do to your tree (files updated, added,
-removed, and — most useful — files you changed AND upstream changed), and the
-paths upstream no longer ships. Once a notice's version is the one you are on, it
-closes itself, so an open one always means an upgrade is still waiting. It needs
-no secret of its own: `contents: read` to read the releases and `issues: write` to
-write the notice. Run it by hand from the Actions tab if you would rather ask now
-than wait for the next day.
+the latest release. When they differ it does what `update.on_new_release` says —
+and that setting decides whether you are reading an issue at all.
+
+In the default mode it opens one issue — updated in place rather than opened again
+— carrying both versions, the release notes in between, a preview of what taking
+the release would do to your tree (files updated, added, removed, and — most useful
+— files you changed AND upstream changed), and the paths upstream no longer ships.
+Once a notice's version is the one you are on, it closes itself, so an open one
+always means an upgrade is still waiting. It needs no secret of its own:
+`contents: read` to read the releases and `issues: write` to write the notice. Run
+it by hand from the Actions tab if you would rather ask now than wait for the next
+day.
 
 **It can also take the release for you.** `update.on_new_release` decides what
-happens after the notice is written, and its default is the notice alone:
+happens when the comparison finds a newer release, and its default is the notice
+alone:
 
 - `issue` — what this page has described so far, and what an unset key means.
   Nothing is taken until somebody says so.
-- `pr` — the update starts as the notice is written. A clean plan merges itself
-  once your checks pass; a collision stops at the pull request, and the notice
-  names the files.
+- `pr` — no notice is written: the update is started instead, and the pull request
+  it opens is the thread. A clean plan merges itself once your checks pass; a
+  collision stops at the pull request, whose body names the files.
 - `pr-agent` — the same, and
   [`agents.on_update_conflict`](../../work/reference.md#agentson_update_conflict)
   is started on the pull request that stopped, to resolve the conflict markers.
 
+`pr` and `pr-agent` need `ATOMATON_UPDATE_TOKEN`, which the update needs anyway.
+Without it nothing can be started, so the run settles for the notice it would have
+written in `issue` mode — headed by a warning that says so — rather than leaving a
+green run with nothing to show for it. The same happens, with a different sentence,
+if GitHub refuses the dispatch.
+
 The mode is a policy for the collision, not for the command that started the run:
-on a `pr-agent` repository, `!upgrade` that collides gets the agent too. `pr` and
-`pr-agent` need `ATOMATON_UPDATE_TOKEN`, which the update needs anyway; without it
-nothing starts, the daily run stays green, and the notice says why.
+on a `pr-agent` repository, `!upgrade` that collides gets the agent too.
 
 ## Taking it
 
