@@ -42,6 +42,7 @@ everything else about the runner. This table is the one place that knows both.
 | `tools.secrets` | [tools](../tools/reference.md#toolssecrets) |
 | `tools.servers` | [tools](../tools/reference.md#toolsservers) |
 | `tools.watch` | [tools](../tools/reference.md#toolswatch) |
+| `update.detection_scope` | [work](../work/reference.md#updatedetection_scope) |
 | `update.on_new_release` | [work](../work/reference.md#updateon_new_release) |
 | `runs_on`, on any `checks` or `deploy` entry | [pipeline](../pipeline/reference.md#runs_on) |
 

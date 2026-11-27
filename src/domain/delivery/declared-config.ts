@@ -50,6 +50,28 @@ export function isNewReleaseMode(value: unknown): value is NewReleaseMode {
   return typeof value === "string" && (NEW_RELEASE_MODES as readonly string[]).includes(value);
 }
 
+/**
+ * The two scopes `update.detection_scope` accepts.
+ *
+ * `all` is every release newer than the tree's own, which is what every adoption
+ * noticed before this key existed. `marked` is only the releases whose own notes
+ * carry the adoption mark.
+ *
+ * Not a version-bump width, deliberately. patch/minor says what the change is
+ * compatible with and nothing about whether it matters: a patch can close a
+ * vulnerability and a minor can be a feature nobody is waiting for. Whether a
+ * release is worth interrupting every adopter for is the release's claim to make.
+ */
+export const NEW_RELEASE_SCOPES = ["all", "marked"] as const;
+
+/** One of [`NEW_RELEASE_SCOPES`]. */
+export type NewReleaseScope = (typeof NEW_RELEASE_SCOPES)[number];
+
+/** Whether a value read out of YAML is one of the scopes. Same both-ends rule as [`isNewReleaseMode`]. */
+export function isNewReleaseScope(value: unknown): value is NewReleaseScope {
+  return typeof value === "string" && (NEW_RELEASE_SCOPES as readonly string[]).includes(value);
+}
+
 export interface AtomaConfig {
   /** Where work branches from and merges back to. Empty means the default branch. */
   base_branch?: string;
@@ -135,6 +157,16 @@ export interface AtomaConfig {
      * other value is a configuration problem rather than a mode.
      */
     on_new_release?: NewReleaseMode;
+
+    /**
+     * Which newer releases are noticed at all: `all` (default) or `marked`.
+     *
+     * `marked` narrows the comparison to releases whose notes carry the adoption
+     * mark, so a project that only wants the releases the template flagged as
+     * important can say so. An unset key means `all`, which is what every adoption
+     * noticed before this key existed.
+     */
+    detection_scope?: NewReleaseScope;
   };
 
   /** When a chain of runs stops and asks a person. */

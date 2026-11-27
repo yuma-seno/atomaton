@@ -37,6 +37,14 @@ The template itself ships `pr-agent`, the agent name included. A repository that
 would rather read the notice first deletes the line, or sets `issue` — which is
 also what an absent key means.
 
+**Which releases are noticed at all** is
+[`update.detection_scope`](../../work/reference.md#updatedetection_scope), and an
+absent key means every one. At `marked`, only the releases whose notes carry
+`atomaton:adopt` are noticed: a newer release with no mark in its notes writes no
+notice and starts nothing, and the daily run stays green. The template marks a release
+when a stale tree should stop waiting for it, which is a judgement about the release
+rather than about how far its version number moved.
+
 `pr` and `pr-agent` need `ATOMATON_UPDATE_TOKEN`, which the update needs anyway.
 Without it nothing can be started, so the run settles for the notice it would have
 written in `issue` mode — headed by a warning that says so — rather than leaving a
