@@ -958,23 +958,16 @@ describe("generated workflows", () => {
   });
 
   /**
-   * The unattended notice fires only when nobody is COMING, not merely when
-   * nobody was dispatched (#547).
+   * The validation workflow ends at the dispatch. Nothing tells a person that
+   * validation finished without starting an agent (#616).
    *
-   * `next_agent == ""` alone gated the "tell a person" step, and for a year that
-   * was sound: nobody was ever dispatched without a name. The hold gate changed
-   * it -- a green verdict now lands on threads a run is already working, every
-   * time CI outlasts the chain's dispatch -- and on #546 (2026-11-13) the notice
-   * went out two minutes after the chain-dispatched reviewer claimed the turn,
-   * inviting a person to start a review that was running.
-   *
-   * So the script answers `unattended=`, and the step's gate demands it. Both
-   * halves are pinned here against the GENERATED workflow, because the generated
-   * file is what runs: a regression that re-widens the step's `if`, or drops the
-   * output from the script, must fail here rather than re-appear on a live
-   * thread.
+   * The step that did is gone with the `unattended` answer that gated it, and this
+   * is pinned against the GENERATED workflow because that file is what runs: a
+   * regression that brings either back must fail here rather than on a live thread.
+   * What a person is told about a failure is the brief `validate_pull_request.ts`
+   * posts, which is the script's, not a step of its own.
    */
-  test("the unattended notice is gated on the unattended answer, not on next_agent alone", () => {
+  test("no step tells a person that validation finished without starting an agent", () => {
     type WorkflowStep = { name?: string; run?: string; if?: string };
     type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
 
@@ -983,12 +976,10 @@ describe("generated workflows", () => {
     ) as WorkflowDocument;
     const steps = workflow.jobs?.validate?.steps ?? [];
 
-    const unattended = steps.find((step) => step.name === "Tell a person nobody was dispatched");
-    expect(unattended, "the person-facing notice step").toBeDefined();
-    // Exact, not `toContain`: a gate that gets WIDER than this -- the regression
-    // #547 recorded -- must fail here, and a `toContain` on one conjunct would
-    // pass a widened `if` untouched.
-    expect(unattended?.if).toBe("steps.validate.outputs.next_agent == '' && steps.validate.outputs.unattended == 'true'");
+    expect(steps.find((step) => step.name === "Tell a person nobody was dispatched")).toBeUndefined();
+    expect(steps.some((step) => (step.run ?? "").includes("notify_unattended.ts"))).toBe(false);
+    // And no gate anywhere reads the output the removed step was gated on.
+    expect(steps.some((step) => (step.if ?? "").includes("unattended"))).toBe(false);
   });
 
   /**

@@ -5,12 +5,18 @@ token](../work/how-it-works/github-raises-no-event-for-its-own-token.md) — so
 `create_pr` dispatches `atomaton-validate-pr.yml` as its last act. That workflow
 runs the configured CI on the branch, writes the result as a check run, and then
 acts on the result. The machinery starts an agent only where a call is waiting
-for one: when CI is green and the pull request carries a `/<agent>` line (or a
-comment named one), that agent runs. When CI is red, or the thread's turn was
-handed back to a person, nothing is dispatched, and a person is told instead,
-with the agent they can ask for named in the mention. Where the turn is held by
-a run in flight, or by a chain already carrying the call, the workflow posts
-nothing on the verdict: that run's own report is the thread's next word.
+for one: when the pull request carries a `/<agent>` line, or a comment named one,
+that agent runs — on a green result and on a red one alike. Red posts what failed
+first, so the run it starts has the failing run and the checks, and where nobody
+asked for that agent nothing is dispatched at all.
+
+Three states start nothing and post nothing on the verdict: the turn handed back
+to a person, a run already holding the pull request, and a chain already carrying
+the call. In each of them the thread's next word is somebody else's — the run that
+holds it, or the person's own. Nothing tells a person that validation finished
+without starting an agent: that notice repeated what the run which pushed had
+already said, and on a release pull request it pinged a person after every run
+that was about to merge itself.
 
 ## When nobody is named to look at it
 
@@ -32,12 +38,13 @@ Before your CI is asked to run at all, the pull request is checked for whether t
 `.github/atomaton/` it would merge can still start a run —
 [what a pull request is checked against](boundaries.md#what-a-pull-request-is-checked-against).
 
-When that fails, the required check goes red, the problems are listed in a comment
-on the pull request, and a person is told — with the agent that opened the pull
-request named, so asking for the fix is one comment. Nothing is dispatched on
-this verdict either: a run reads its machinery from
-[the default branch](../pipeline/how-it-works.md) rather than from the pull
-request, so an agent asked to fix the breakage is unaffected by it.
+When that fails, the required check goes red and the problems are listed in a
+comment on the pull request. Past that it is red like any other verdict: the call
+the thread is waiting with gets the fix, and where there is no such call the
+comment names the agent that opened the pull request, so asking for the fix is
+one comment. Nothing about it blocks an agent from working: a run reads its
+machinery from [the default branch](../pipeline/how-it-works.md) rather than from
+the pull request, so a run asked to fix the breakage is unaffected by it.
 
 ## When a person closes it without merging
 
