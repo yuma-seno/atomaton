@@ -34,10 +34,15 @@
  *
  * Best effort throughout, like every label write: the thread is the turn's record
  * and the labels are its cache. Every failure is a warning naming what was lost.
+ *
+ * `with-person` also looks at the pull request's head commit (`lib/handoff-validation.ts`):
+ * a required status check missing from it is a merge the person cannot make and
+ * nothing else will repair (#632). That runs after the labels and cannot fail them.
  */
 import { gh } from "../../../adapters/github/gh.ts";
 import { getLabel } from "../../../adapters/runner/config.ts";
 import { readTargetState } from "../../../adapters/github/target-state.ts";
+import { ensureMergeableAtHandoff } from "./handoff-validation.ts";
 
 export type TurnLabelPhase =
   /** A run took the turn: `in-progress` on, `waiting-for-person` off. */
@@ -113,4 +118,11 @@ export function applyTurnLabels(phase: TurnLabelPhase, repo: string, number: str
   remove(inProgress);
   const added = edit("--add-label", waitingForPerson);
   if (added.code !== 0) console.error(`::warning::could not add '${waitingForPerson}' to #${number}`);
+
+  // Last, and never before the labels: the turn is the person's whatever the head
+  // commit looks like, so a check that fails must not leave the node wearing the
+  // running side. A pull request handed over with a required check missing from its
+  // head is one the person cannot merge and nothing will repair (#632); see
+  // `lib/handoff-validation.ts` for what is checked and what is deliberately not.
+  if (state.known) ensureMergeableAtHandoff(state.kind, repo, number);
 }
