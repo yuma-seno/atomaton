@@ -28323,6 +28323,72 @@
     ]
   },
   {
+    "path": "sessions/issue-644/atomaton.json",
+    "agent": "atomaton",
+    "messages": 202,
+    "calls": 102,
+    "failed": 1,
+    "refused": 1,
+    "skills": [
+      "japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "bash": 67,
+      "glob": 1,
+      "read": 15,
+      "search_code": 3,
+      "grep": 3,
+      "get_issue": 5,
+      "get_issue_comments": 3,
+      "list_prs": 1,
+      "fetch": 2,
+      "search_issues": 1,
+      "load_skill": 1
+    },
+    "acts": {
+      "other": 27,
+      "search": 12,
+      "open": 3,
+      "edit": 24,
+      "verify": 1
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T03:17:53Z",
+        "ended_because": "completed",
+        "iterations": 96,
+        "loop_recoveries": 0,
+        "messages": 202,
+        "seconds": 1890,
+        "server_calls": {
+          "files": {
+            "glob": 1,
+            "grep": 3,
+            "read": 15
+          },
+          "github": {
+            "get_issue": 5,
+            "get_issue_comments": 3,
+            "list_prs": 1
+          },
+          "search": {
+            "search_code": 3,
+            "search_issues": 1
+          },
+          "shell": {
+            "bash": 67
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-28T02:46:23Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-647/atomaton.json",
     "agent": "atomaton",
     "messages": 91,
