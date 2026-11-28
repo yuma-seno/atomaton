@@ -245,7 +245,9 @@ gh workflow run atomaton-update.yml --ref main
 What runs is the same machinery an adopter's `!upgrade` runs. The manifest records
 the release this tree came from, the plan is a three-way merge against that release
 and the new one, and a path this repository edited and upstream changed opens a
-pull request with conflict markers and stops for a person. A clean application
+pull request with conflict markers and stops for a person. `config.yaml` is the one
+path without markers: a marker there would leave a config no job can read, so both
+sides go into the pull request's body and this tree's copy stays. A clean application
 merges itself; a conflicted one waits. Files the release does not ship — this
 repository's own `release.yml`, the customized skills — are not manifest paths and
 are never touched.

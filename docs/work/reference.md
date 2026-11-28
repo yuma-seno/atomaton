@@ -225,7 +225,10 @@ Actions button, and nothing in the tree changes until somebody makes it.
 the pull request the update opens is the one thread. It applies the release on a
 branch and merges it itself when nothing collided. A collision stops that pull
 request with markers in the files, where resolving it is a person's; its body names
-the files.
+the files. One path carries no marker: a collision on `.github/atomaton/config.yaml`
+is reported in the pull request's body with both sides, the tree keeps its copy, and
+the request stops for a person just the same — a config carrying markers leaves a
+pull request whose checks cannot be planned and whose runs cannot start.
 
 `pr-agent` is `pr` plus `agents.on_update_conflict` above, started on that pull
 request. It resolves the markers it can and stops there: a conflicted path under
@@ -233,7 +236,9 @@ request. It resolves the markers it can and stops there: a conflicted path under
 person and named in the agent's report — see
 [`agents.on_update_conflict`](#agentson_update_conflict). The run that started the
 update has already ended, the checks run on the resolved tree, and the merge is a
-person's.
+person's. A pull request whose only collision is `config.yaml` starts nobody: there is
+no marker on the branch for an agent to resolve, and choosing between the two
+versions of a setting is a person's call whatever the mode says.
 
 This is the mode this template ships, the name shipped beside it as one pair.
 
