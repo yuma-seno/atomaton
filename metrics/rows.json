@@ -28325,7 +28325,7 @@
   {
     "path": "sessions/issue-644/atomaton.json",
     "agent": "atomaton",
-    "messages": 202,
+    "messages": 207,
     "calls": 102,
     "failed": 1,
     "refused": 1,
@@ -28385,6 +28385,28 @@
           }
         },
         "started": "2026-11-28T02:46:23Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T09:33:14Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "loop_recoveries": 0,
+        "messages": 205,
+        "seconds": 43,
+        "server_calls": {},
+        "started": "2026-11-28T09:32:31Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T09:35:22Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "loop_recoveries": 0,
+        "messages": 207,
+        "seconds": 128,
+        "server_calls": {},
+        "started": "2026-11-28T09:33:14Z"
       }
     ]
   },
