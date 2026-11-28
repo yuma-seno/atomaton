@@ -609,15 +609,22 @@ function main(): void {
       log(`WARN update.on_new_release is ${mode}, but ATOMATON_UPDATE_TOKEN is not set — nothing was started`);
       autoUpdateFailure = {
         mode,
-        why: "no `ATOMATON_UPDATE_TOKEN` secret is set here, and this workflow's own token may not start a run",
+        why:
+          "no `ATOMATON_UPDATE_TOKEN` secret is set here, and the update cannot push, open " +
+          "its pull request or merge without it",
       };
     } else {
-      // As the update's PAT, not this workflow's own token: `atomaton-new-release.yml`
-      // declares `contents: read` and `issues: write`, and a scope a workflow does not
-      // list is `none` -- so a private repository refuses this read to the notice, and
-      // a refused read is the answer "no update pull request is open". That answer
-      // dispatches, so the refusal would cost one update run and one re-push per day
-      // for as long as the release waits on its pull request.
+      // Read as the update's PAT, not this workflow's own token: `atomaton-new-release.yml`
+      // declares no `pull-requests`, and a scope a workflow does not list is `none` -- so a
+      // private repository refuses this read to the notice, and a refused read is the answer
+      // "no update pull request is open". That answer dispatches, so the refusal would cost
+      // one update run and one re-push per day for as long as the release waits on its pull
+      // request.
+      //
+      // The dispatch below is not part of that: it runs as this workflow's own token, the
+      // way every other dispatch here does, and the `actions: write` that makes it work is
+      // in the workflow's permission block where a reader can see it. The secret is what
+      // the update then pushes, opens its pull request and merges with.
       const open = openPrForHead(repo, updateBranchFor(latest.tag), updateToken);
       if (open > 0) {
         // The update is already under way, and its pull request is the thread its
@@ -626,7 +633,7 @@ function main(): void {
         log(`an update pull request for ${latest.tag} (#${open}) is already open; nothing was started`);
         return;
       }
-      if (dispatchUpdate(repo, 0, { token: updateToken })) {
+      if (dispatchUpdate(repo, 0)) {
         // `source` is empty, so this is the Actions-button run: no thread asked for it,
         // and the pull request it opens is where everything is reported.
         log(`started the update to ${latest.tag}; its report lands on the pull request it opens`);

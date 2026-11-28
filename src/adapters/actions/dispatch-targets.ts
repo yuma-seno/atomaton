@@ -179,24 +179,12 @@ export function dispatchCi(branch: string): boolean {
  * reports only where the machinery reports anyway: the pull request, and the
  * notice when one stands open.
  */
-export function dispatchUpdate(
-  repo: string,
-  source: number,
-  options: {
-    /**
-     * The update's own PAT, when the caller that noticed the release has no
-     * `actions: write` to dispatch with. Passed by the new-release notice, whose
-     * workflow declares `contents: read` and `issues: write` and nothing else.
-     */
-    token?: string;
-  } = {},
-): boolean {
+export function dispatchUpdate(repo: string, source: number): boolean {
   return dispatchWorkflow(
     `dispatchUpdate: taking a newer release onto ${repo}`,
     "atomaton-update.yml",
     ["--repo", repo, "-f", `source=${source > 0 ? String(source) : ""}`],
     log,
-    options.token,
   );
 }
 
@@ -225,17 +213,11 @@ export function dispatchUpdate(
  * here would mean deciding, before the files are read, which collision needs a
  * person.
  */
-export function dispatchUpdateConflictAgent(
-  repo: string,
-  prNumber: number,
-  agent: string,
-  options: { token?: string } = {},
-): boolean {
+export function dispatchUpdateConflictAgent(repo: string, prNumber: number, agent: string): boolean {
   return (
     dispatchDirective(repo, prNumber, agent, {
       context: `the update pull request #${prNumber} stopped on a conflict, so ${agent} was to resolve it`,
       type: "pr",
-      ...(options.token === undefined ? {} : { token: options.token }),
       directive:
         "Atomaton: this pull request takes a newer release onto this tree and stopped where the two " +
         "sides disagree — the files listed above carry conflict markers naming both. Resolve them, " +

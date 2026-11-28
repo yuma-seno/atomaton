@@ -633,7 +633,7 @@ function main(): void {
         ? null
         : {
             agent: conflictAgent,
-            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent, { token }),
+            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent),
           };
     if (resolution !== null && !resolution.started) {
       log(`WARN could not start ${conflictAgent} on #${prNumber}; the pull request stands for a person`);
