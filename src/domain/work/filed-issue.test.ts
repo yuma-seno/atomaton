@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   AGENT_ISSUE_OFF,
   duplicateIssueOf,
-  filedFromLine,
+  reportedFromLine,
   normaliseIssueTitle,
   resolveAgentIssueLauncher,
 } from "./filed-issue.ts";
@@ -70,21 +70,21 @@ describe("duplicateIssueOf", () => {
   });
 });
 
-describe("filedFromLine", () => {
+describe("reportedFromLine", () => {
   test("names the node, the agent and the run", () => {
-    expect(filedFromLine({ node: 644, agent: "reviewer", runUrl: "https://example.test/runs/1" })).toBe(
-      "Filed from #644 by `reviewer` (https://example.test/runs/1).",
+    expect(reportedFromLine({ node: 644, agent: "reviewer", runUrl: "https://example.test/runs/1" })).toBe(
+      "Reported from #644 by `reviewer` (https://example.test/runs/1).",
     );
   });
 
   test("says only what it knows", () => {
-    expect(filedFromLine({ node: 644 })).toBe("Filed from #644.");
-    expect(filedFromLine({ runUrl: "https://example.test/runs/1" })).toBe("Filed from a run (https://example.test/runs/1).");
+    expect(reportedFromLine({ node: 644 })).toBe("Reported from #644.");
+    expect(reportedFromLine({ runUrl: "https://example.test/runs/1" })).toBe("Reported from a run (https://example.test/runs/1).");
   });
 
-  // A git hook or a hand-run script has neither, and a sentence saying "Filed from ."
+  // A git hook or a hand-run script has neither, and a sentence saying "Reported from ."
   // is worse than no sentence.
   test("says nothing when nothing is known", () => {
-    expect(filedFromLine({})).toBe("");
+    expect(reportedFromLine({})).toBe("");
   });
 });

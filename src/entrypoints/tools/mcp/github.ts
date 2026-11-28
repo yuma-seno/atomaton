@@ -69,7 +69,7 @@ import { findOpenIssueWithTitle } from "../../../adapters/github/duplicate-issue
 import { getAgentIssueLauncher } from "../../../adapters/runner/config.ts";
 import { dispatchAgentOnFiledIssue, filedIssueStartNote } from "../../../adapters/actions/dispatch-targets.ts";
 import type { DispatchOutcome } from "../../../adapters/actions/dispatch.ts";
-import type { FilingContext } from "../../../domain/work/filed-issue.ts";
+import type { ReportingRun } from "../../../domain/work/filed-issue.ts";
 
 function log(msg: string): void {
   console.error(`[atomaton-github] ${msg}`);
@@ -746,14 +746,14 @@ function startAgentOn(
   if (setting.agent === "") return undefined;
 
   const node = nodeNumber();
-  const filing: FilingContext = {
+  const report: ReportingRun = {
     ...(node === undefined ? {} : { node }),
     runUrl: (process.env.ATOMATON_RUN_URL ?? "").trim(),
     agent: (process.env.AGENT ?? "").trim(),
   };
   const outcome = dispatchAgentOnFiledIssue(REPO, number, setting.agent, {
     notify: (process.env.NOTIFY ?? "").trim(),
-    filing,
+    report,
   });
   if (outcome !== "dispatched") {
     // Every other outcome has already been said on the issue where it belongs — the
@@ -2604,7 +2604,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "create_root_issue",
-    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. Two things happen around the filing. An open issue that already carries the same title is not filed again: the report goes onto that issue as a comment and the result says `created: false, duplicate_of: <n>`, so do not file it again yourself. And unless the repository sets `agents.on_agent_issue: off`, an agent is started on the issue right away — the machinery's own filing produces no event any workflow would react to. The result says which agent and what happened in `auto_start`. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. Returns {number, url, parent: null, root: true} when it filed one and {number, url, created: false, duplicate_of} when it did not, and mutates GitHub in the first case only.",
+    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. Two things happen around the filing. An open issue that already carries the same title is not filed again: the report goes onto that issue as a comment and the result says `created: false, duplicate_of: <n>`, so do not file it again yourself. And unless the repository sets `agents.on_agent_issue: off`, an agent is started on the issue right away — the machinery's own filing produces no event any workflow would react to. The result says which agent and what happened in `auto_start`. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. Returns {number, url, parent: null, root: true} when it filed one and {number, url, created: false, duplicate_of} when it did not, and mutates GitHub either way: a new issue, or a comment on the one that already carried the title.",
     schema: ISSUE_ARGS_SCHEMA,
     handler: createRootIssue,
   }),

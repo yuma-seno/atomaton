@@ -2103,8 +2103,14 @@ describe("mcp/github.ts", () => {
         expect(directive).toContain("<!-- atomaton:llm-context=include -->");
         expect(directive).toContain("<!-- atomaton:dispatch=atomaton -->");
         expect(directive).toContain("@octocat");
-        expect(directive).toContain("Auto-started");
-        expect(directive).toContain("Filed from #644 by `engineer` (https://github.com/owner/repo/actions/runs/99).");
+        // An ask, not an announcement. The same comment is posted when a duplicate sends
+        // the report to an issue an earlier run filed, where the dispatch may be refused
+        // and where this run did not file anything -- so "starting" and "filed this issue"
+        // would be false there, and this wording is true on both paths.
+        expect(directive).toContain("is asked to take up this issue");
+        expect(directive).not.toContain("starting on this issue");
+        expect(directive).toContain("The machinery put this report here during a run");
+        expect(directive).toContain("Reported from #644 by `engineer` (https://github.com/owner/repo/actions/runs/99).");
         expect(directive).toContain("Start with the reproduction");
 
         const dispatched = callsIn(log).find((argv) => argv[0] === "workflow") ?? [];
@@ -2155,7 +2161,7 @@ describe("mcp/github.ts", () => {
 
     test("a title an open issue already carries is linked there instead of filed", async () => {
       const dir = mkdtempSync(join(tmpdir(), "atomaton-root-duplicate-"));
-      const configDir = makeConfigDir({ agents: { on_agent_issue: "off" } });
+      const configDir = makeConfigDir({ agents: { on_agent_issue: "atomaton" } });
       const log = join(dir, "gh.log");
       try {
         const r = await sendRequest(
@@ -2167,12 +2173,16 @@ describe("mcp/github.ts", () => {
           {
             ...fakeGhSeam(),
             NUMBER: "21",
+            NOTIFY: "octocat",
             ATOMATON_MACHINERY_ROOT: configDir,
             FAKE_GH_LOG: log,
             FAKE_GH_RESPONSES: JSON.stringify([
               { match: ["issue", "list"], stdout: JSON.stringify([{ number: 644, title: "search   server reports nothing" }]) },
-              { match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/999" },
+              // Both comments posted on this path: the report, then the directive.
               { match: ["api", "issues/644/comments", "POST"], stdout: "901" },
+              { match: ["api", "issues/644/comments"], stdout: JSON.stringify([{ id: 901, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
+              { match: ["api", "issues/644"], stdout: JSON.stringify({ state: "open" }) },
+              { match: ["workflow", "run"], stdout: "" },
             ]),
           },
         );
@@ -2182,15 +2192,29 @@ describe("mcp/github.ts", () => {
           created: false,
           duplicate_of: 644,
           linked: true,
+          auto_start: { agent: "atomaton", outcome: "dispatched" },
         });
 
         const calls = callsIn(log);
         expect(calls.some((argv) => argv[0] === "issue" && argv[1] === "create"), "nothing new was filed").toBe(false);
-        const posted = calls.find((argv) => argv[0] === "api" && argv.includes("POST")) ?? [];
-        const comment = posted[posted.indexOf("-f") + 1] ?? "";
+
+        const posted = calls
+          .filter((argv) => argv[0] === "api" && argv.includes("POST"))
+          .map((argv) => argv[argv.indexOf("-f") + 1] ?? "");
         // The second report is not thrown away: the run on that issue is the reader
         // that would otherwise never see it.
-        expect(comment).toContain("Seen again on main.");
+        expect(posted.some((body) => body.includes("Seen again on main."))).toBe(true);
+
+        // And the directive on this path asks rather than announces: this run did not
+        // file the issue, and the dispatch may be refused because a request is already
+        // standing there.
+        const directive = posted.find((body) => body.includes("atomaton:dispatch=atomaton")) ?? "";
+        expect(directive).toContain("is asked to take up this issue");
+        expect(directive).not.toContain("filed this issue");
+        expect(directive).toContain("Reported from #21.");
+
+        const dispatched = calls.find((argv) => argv[0] === "workflow") ?? [];
+        expect(dispatched.join(" "), "the one run the issue needs").toContain("number=644");
       } finally {
         removeTemp(dir);
         removeTemp(configDir);

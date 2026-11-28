@@ -113,29 +113,31 @@ export function duplicateIssueOf(title: string, open: readonly OpenIssueTitle[])
   return open.find((issue) => normaliseIssueTitle(issue.title) === wanted)?.number ?? 0;
 }
 
-/** Where a filing run was, when the environment says. All of it is optional. */
-export interface FilingContext {
-  /** The node the filing run sits on: the issue or pull request number it was working. */
+/** The run a report came from, when the environment says. All of it is optional. */
+export interface ReportingRun {
+  /** The node the reporting run sits on: the issue or pull request number it was working. */
   readonly node?: number;
-  /** The filing run's own URL. */
+  /** The reporting run's own URL. */
   readonly runUrl?: string;
   /** The agent that filed it. */
   readonly agent?: string;
 }
 
 /**
- * The "filed from" sentence the started run reads, or `""` when nothing is known.
+ * The "reported from" sentence the started run reads, or `""` when nothing is known.
  *
  * Prose rather than dispatch inputs, because the started run learns what to do from
- * its thread: a run that cannot see where its issue came from has no way to go and
- * read the pull request or the run that found the defect.
+ * its thread: a run that cannot see where the report came from has no way to go and
+ * read the pull request or the run that found the defect. "Reported", not "filed": the
+ * issue may have been filed by an earlier run entirely, and what this line says is
+ * where the report the agent is about to read came from.
  */
-export function filedFromLine(filing: FilingContext): string {
-  const where = filing.node === undefined ? "" : `#${filing.node}`;
-  const by = (filing.agent ?? "").trim();
-  const url = (filing.runUrl ?? "").trim();
+export function reportedFromLine(report: ReportingRun): string {
+  const where = report.node === undefined ? "" : `#${report.node}`;
+  const by = (report.agent ?? "").trim();
+  const url = (report.runUrl ?? "").trim();
   const origin = [where, by === "" ? "" : `by \`${by}\``].filter((part) => part !== "").join(" ");
   if (origin === "" && url === "") return "";
   const link = url === "" ? "" : ` (${url})`;
-  return `Filed from ${origin === "" ? "a run" : origin}${link}.`;
+  return `Reported from ${origin === "" ? "a run" : origin}${link}.`;
 }

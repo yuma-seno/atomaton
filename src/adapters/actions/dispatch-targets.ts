@@ -20,8 +20,8 @@
  * | `dispatchPostMergeAgent` | `pull_request.closed`, when an agent did the merging |
  * | `dispatchUpdate` | `!upgrade`, and the release the notice just announced |
  * | `dispatchUpdateConflictAgent` | `update.on_new_release: pr-agent` — nothing fires for a pull request that stopped |
- * | `dispatchAgentOnFiledIssue` | `issues.opened`, for a root issue an agent filed with `create_root_issue` |
- * | `dispatchConfigFindingAgent` | `issues.opened`, for the issue opened for an `ATOMA_CONFIG_FINDING` line |
+ * | `dispatchAgentOnFiledIssue` | `issues.opened`, which GitHub does not deliver for an issue `create_root_issue` creates with the run's own token |
+ * | `dispatchConfigFindingAgent` | `issue_comment.created`, which GitHub does not deliver for the `/agent` comment `report_config_findings.ts` used to post |
  * | `dispatchRunner` (`dispatch.ts`) | every hand-off from one agent to the next |
  *
  * A pull request closed without merging dispatches nobody: the close is told to a
@@ -51,7 +51,7 @@ import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { commentOnWithId } from "../../adapters/github/work-tree.ts";
 import { getDeploySection, getWorkflowName } from "../../adapters/runner/config.ts";
 import { dispatchRunner, type DispatchOutcome } from "./dispatch.ts";
-import { filedFromLine, type FilingContext } from "../../domain/work/filed-issue.ts";
+import { reportedFromLine, type ReportingRun } from "../../domain/work/filed-issue.ts";
 import { mentionPrefix } from "../../domain/work/mention.ts";
 import { resolveNotify } from "../../adapters/github/notify.ts";
 import { isIssueBranch } from "../../adapters/github/branch-placement.ts";
@@ -363,7 +363,8 @@ function deployDispatch(
 }
 
 /**
- * Start an agent on a root issue an agent has just filed.
+ * Start an agent on a root issue an agent filed, or on the open issue that already
+ * carried the report.
  *
  * `create_root_issue` is the one tool that files an issue with no parent — a defect in
  * the machinery, or a decision somebody has to make — and the issue it creates with the
@@ -371,6 +372,14 @@ function deployDispatch(
  * and before this the issue waited for a person to ask for a run on it. That is the
  * suppressed event this stands in for, and the reason it is here rather than in the
  * creating tool.
+ *
+ * Two callers, one comment. `create_root_issue` reaches it after filing, and again when
+ * a title an open issue already carries sends the report there instead — and on that
+ * second path the issue was filed by an earlier run, and the dispatch may be refused
+ * because a request is already standing. So the directive asks rather than announces:
+ * `is asked to take up this issue`, never "starting on this issue", and `Reported from`,
+ * which is true of whichever run produced the report. That is also why this takes a
+ * `ReportingRun` rather than a filing context: what it describes is the report.
  *
  * The directive comment is also this dispatch's marker and the run's ask, the way
  * `dispatchPostMergeAgent` does it. Tagged `include`: it is the first thing the started
@@ -389,17 +398,16 @@ export function dispatchAgentOnFiledIssue(
   repo: string,
   issue: number,
   agent: string,
-  options: { notify?: string; filing?: FilingContext } = {},
+  options: { notify?: string; report?: ReportingRun } = {},
 ): DispatchOutcome {
   const notify = (options.notify ?? "").trim();
-  const from = filedFromLine(options.filing ?? {});
+  const from = reportedFromLine(options.report ?? {});
   return dispatchDirective(repo, issue, agent, {
-    context: `root issue #${issue} was filed during a run, so ${agent} was to start on it`,
+    context: `a report on root issue #${issue} was filed during a run, so ${agent} was asked to take it up`,
     notify,
     directive:
-      `${mentionPrefix(notify)}\`${agent}\` starting on this issue.\n\n` +
-      "Auto-started: the machinery filed this issue during a run, and no person asked for a run " +
-      "on it.\n" +
+      `${mentionPrefix(notify)}\`${agent}\` is asked to take up this issue.\n\n` +
+      "The machinery put this report here during a run, and no person asked for a run on it.\n" +
       (from === "" ? "" : `${from}\n`) +
       "\n" +
       "Start with the reproduction. If it no longer reproduces, or the defect is already fixed, " +
