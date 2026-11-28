@@ -17897,12 +17897,28 @@ function shown(full) {
   return rel && !rel.startsWith("..") ? rel.split(sep).join("/") : full;
 }
 var READ_SCHEMA = objectType({
-  path: stringType().describe("File to read. Relative to the working directory, or absolute."),
+  path: stringType().describe("File to read. Relative to the working directory, or absolute. A line or a range may be written into it -- `src/x.ts:120-260`, both ends included -- and then no other argument is needed."),
   offset: numberType().int().min(1).optional().describe("First line to return, counting from 1. Default 1. To continue a read that stopped early, pass the offset its result named."),
   limit: numberType().int().min(1).optional().describe(`How many lines to return. Default ${DEFAULT_READ_LINES}. A larger number is clipped by the size budget, and the result says how far it actually got.`)
 });
+function rangeInPath(arg) {
+  const at = arg.lastIndexOf(":");
+  if (at <= 0)
+    return null;
+  const found = /^([1-9]\d*)(?:-([1-9]\d*))?$/.exec(arg.slice(at + 1));
+  if (!found)
+    return null;
+  const from = Number(found[1]);
+  const to = found[2] === undefined ? undefined : Number(found[2]);
+  if (to !== undefined && to < from) {
+    throw new Error(`'${arg}' is not a range: it ends at line ${to}, before line ${from}.`);
+  }
+  return { path: arg.slice(0, at), offset: from, limit: to === undefined ? undefined : to - from + 1 };
+}
 function readFile(a) {
-  const full = within(a.path);
+  const named = within(a.path);
+  const range = existsSync(named) ? null : rangeInPath(a.path);
+  const full = range ? within(range.path) : named;
   if (!existsSync(full))
     throw new Error(`'${a.path}' does not exist.`);
   if (statSync2(full).isDirectory())
@@ -17922,12 +17938,12 @@ function readFile(a) {
   if (lines.length > 0 && lines[lines.length - 1] === "")
     lines.pop();
   const total = lines.length;
-  const from = a.offset ?? 1;
+  const from = a.offset ?? range?.offset ?? 1;
   if (total === 0)
     return { text: `${shown(full)} is empty.` };
   if (from > total)
     throw new Error(`'${a.path}' has ${total} lines; offset ${from} is past the end.`);
-  const wanted = Math.min(a.limit ?? DEFAULT_READ_LINES, total - from + 1);
+  const wanted = Math.min(a.limit ?? range?.limit ?? DEFAULT_READ_LINES, total - from + 1);
   const out = [];
   let used = 0;
   for (let i = 0;i < wanted; i += 1) {
@@ -17940,7 +17956,7 @@ function readFile(a) {
   const last = from + out.length - 1;
   const more = last < total ? `
 
-[${total - last} more lines. Read again with offset: ${last + 1}. The same call and the same arguments, plus this one.]` : "";
+[${total - last} more lines. Continue with read(path: "${shown(full)}:${last + 1}"), or add offset: ${last + 1} to this call.]` : "";
   log(`read ${shown(full)} ${from}-${last}/${total}`);
   return { text: `${shown(full)} lines ${from}-${last} of ${total}
 
@@ -18126,7 +18142,7 @@ ${rows.join(`
 var { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "read",
-    description: "Read a range of lines from a file, numbered. Give offset and limit to read part of a large file; a result that stopped early names the offset to continue from, so a file of any size can be read in order without guessing. A file that holds an image comes back as an image, for an agent whose definition sets vision. Prefer this over cat, head, tail or sed through the shell, which return unnumbered text and cost a round trip.",
+    description: "Read a range of lines from a file, numbered. Write the range into path -- `src/x.ts:120-260`, both ends included, or `src/x.ts:120` to read on from there -- which is one argument; offset and limit say the same thing when you want to give them. A result that stopped early names the path to continue from, so a file of any size can be read in order without guessing. A file that holds an image comes back as an image, for an agent whose definition sets vision. Prefer this over cat, head, tail or sed through the shell, which return unnumbered text and cost a round trip.",
     schema: READ_SCHEMA,
     handler: readFile
   }),
