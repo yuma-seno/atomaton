@@ -172,7 +172,7 @@ describe("Release", () => {
     // fails after doing the work that came before it: `gh workflow run` under
     // the hood is an `actions: write` call, and a job granted only reads gets
     // all the way to a red step after the release is already published.
-    for (const name of ["release", "merge-release"]) {
+    for (const name of ["release", "merge-release", "apply-to-self"]) {
       expect(jobs[name]?.permissions?.["actions"], `${name} may dispatch`).toBe("write");
     }
     // And no raw dispatch hides in the step bodies. The same rule as

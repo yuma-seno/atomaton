@@ -180,7 +180,7 @@ export function updateBody(report: UpdateReport, conflictAgent = ""): string {
     "",
     report.conflicts.length > 0
       ? conflictAgent !== ""
-        ? `This pull request does not merge on its own: the conflicted files above carry markers naming both sides. \`${conflictAgent}\` is started on it to resolve them — the checks run on the resolved tree, and then it can merge.`
+        ? `This pull request does not merge on its own: the conflicted files above carry markers naming both sides. \`${conflictAgent}\` is started on it to resolve them — the checks run on the resolved tree, and then it can merge. One kind is not the agent's: a path under \`.github/workflows/\` cannot be written with its token, so those markers are left for a person, and a pull request carrying both kinds is handled the same way.`
         : "This pull request does not merge on its own: the conflicted files above carry markers naming both sides. Comment on this pull request and ask an agent to resolve them — the checks will run on the resolved tree, and only then can this merge."
       : plan.kept.length > 0
         ? "This pull request does not merge itself: the kept paths above are the plan declining to touch them without a person. Read them — each is a place this repository's words and the release disagree — and merge by hand when they read right, or ask an agent there to help."
@@ -213,7 +213,10 @@ export function stopComment(
     resolution === null
       ? "Comment on that pull request and ask an agent to resolve them — nothing merges until someone does."
       : resolution.started
-        ? `\`${resolution.agent}\` has been started on that pull request to resolve them. The checks run on ` +
+        ? `\`${resolution.agent}\` has been started on that pull request to resolve them. A conflicted ` +
+          "path under `.github/workflows/` is left for a person, because an agent's token cannot write " +
+          "a workflow file; a pull request carrying those alongside ordinary conflicts is handled the " +
+          "same way. The checks run on " +
           "the resolved tree; the merge itself is a person's."
         : `\`${resolution.agent}\` was to be started on that pull request and could not be — the run's log says ` +
           "why. Comment there and ask an agent, or resolve them yourself; nothing merges until someone does.";
@@ -630,7 +633,7 @@ function main(): void {
         ? null
         : {
             agent: conflictAgent,
-            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent, { token }),
+            started: dispatchUpdateConflictAgent(repo, prNumber, conflictAgent),
           };
     if (resolution !== null && !resolution.started) {
       log(`WARN could not start ${conflictAgent} on #${prNumber}; the pull request stands for a person`);

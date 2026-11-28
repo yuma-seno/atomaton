@@ -31,7 +31,11 @@ is the notice alone:
   collision stops at the pull request, whose body names the files.
 - `pr-agent` — the same, and
   [`agents.on_update_conflict`](../../work/reference.md#agentson_update_conflict)
-  is started on the pull request that stopped, to resolve the conflict markers.
+  is started on the pull request that stopped, to resolve the conflict markers it can.
+  A conflicted path under `.github/workflows/` is a person's — GitHub refuses a
+  workflow file written with the agent's token — so the agent leaves those markers in
+  place and names the paths in its report, and a pull request mixing the two kinds
+  stops half-resolved.
 
 The template itself ships `pr-agent`, the agent name included. A repository that
 would rather read the notice first deletes the line, or sets `issue` — which is
@@ -83,7 +87,9 @@ The update cannot run without `ATOMATON_UPDATE_TOKEN`, a repository secret holdi
 a token with `repo` and `workflow` scope — or, fine-grained, `Contents` and
 `Pull requests` read and write, plus `Workflows` write. That is deliberate: a push
 made with the workflow's own token starts no checks, so a merge gated on them
-would gate on nothing. The second scope is not optional: the release ships
+would gate on nothing. Starting the update is not something this token does: the
+notice workflow dispatches it with its own `GITHUB_TOKEN`, so `Actions` is not a
+scope you need to add. The second scope is not optional: the release ships
 workflows, and GitHub refuses any push that changes a file under
 `.github/workflows/` without it. If the secret is missing the run fails loudly and
 changes nothing — set the secret and run it again.

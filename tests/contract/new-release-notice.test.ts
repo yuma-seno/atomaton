@@ -9,9 +9,11 @@
  * edit away from being lost and none of them fail loudly:
  *
  * - **the permission set.** Broadening it costs nothing visible. `contents: read` +
- *   `issues: write` is also the whole argument for shipping this half of the
- *   upgrade problem before the sync half, so losing it silently withdraws the
- *   reason.
+ *   `issues: write` + `actions: write` is also the whole argument for shipping this
+ *   half of the upgrade problem before the sync half, so losing it silently withdraws
+ *   the reason: `actions` is what starts the update workflow the notice announces,
+ *   and `checks: write` is what it must never hold, because that is the permission
+ *   that could produce a check result of its own.
  * - **no dispatch of its own, and no checkout of anything else.** The notice is a
  *   read of two release tags, one issue write, and -- only for a repository that
  *   asked -- one dispatch through `dispatchUpdate`. Anything that runs `gh workflow
@@ -60,12 +62,21 @@ describe("the new-release notice", () => {
   });
 
   /**
-   * The permission set, exactly. Read on releases and write on issues is the whole
-   * of what the notice needs, and it is what makes this shippable without asking an
-   * adopter for a secret.
+   * The permission set, exactly. Read on releases, write on issues, and `actions:
+   * write` to start the update workflow — that is the whole of what the notice needs,
+   * and the third is the one this test used to forbid.
+   *
+   * It forbade it because the dispatch used to run as the update's PAT instead, and
+   * the argument then was that widening the permission of the job that rewrites
+   * `.github/` is a bigger decision than carrying a token that already exists. The
+   * token turned out not to have `Actions` in its documented scope — `Contents`,
+   * `Pull requests`, `Workflows` — so a repository set up as documented got a 403 on
+   * every dispatch, and the notice it fell back to said the update had not been
+   * started. `workflow_dispatch` is the documented exception a `GITHUB_TOKEN` can
+   * still make, which is why every other machinery dispatch already works this way.
    */
-  test("it holds `contents: read` and `issues: write` and nothing else", () => {
-    expect(document.permissions).toEqual({ contents: "read", issues: "write" });
+  test("it holds `contents: read`, `issues: write` and `actions: write` and nothing else", () => {
+    expect(document.permissions).toEqual({ contents: "read", issues: "write", actions: "write" });
   });
 
   test("one job, bounded", () => {
@@ -114,11 +125,13 @@ describe("the new-release notice", () => {
    *
    * The ordering this half exists to protect is unchanged: a repository that
    * configures nothing is told there is an upgrade with no secret at all. What the
-   * PAT buys is the dispatch that `update.on_new_release: pr` asks for, and this
-   * workflow cannot start a run with its own token -- `actions: write` is not in the
-   * permission set above and must not be added for this. So the secret travels
-   * inside the step's env, where the script reads it and can say "nothing was
-   * started" instead of failing.
+   * PAT buys is no longer the dispatch -- the workflow's own `actions: write` starts
+   * the run, so a PAT without `Actions` in its scope is enough -- but the update the
+   * dispatch starts, which pushes, opens its pull request and merges only as that
+   * identity, and the pull-request read this notice makes along `openPrForHead`,
+   * which its permission block does not grant. So the secret travels inside the
+   * step's env, where the script reads it and can say "nothing was started" instead
+   * of failing.
    *
    * Named exactly, because a second secret here would be a second thing an adopter
    * has to mint before being told about a release.
