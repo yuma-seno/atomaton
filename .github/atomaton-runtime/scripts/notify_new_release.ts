@@ -54,9 +54,9 @@ function looksTransient(result) {
     return true;
   return /(timeout|timed out|connection reset|unexpected EOF|TLS handshake|temporary failure)/i.test(text);
 }
-function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m), token = "") {
+function dispatchWorkflow(context, workflow, args = [], log = (m) => console.error(m)) {
   const argv = ["workflow", "run", workflow, ...args];
-  const { code, stdout, stderr } = token.trim() ? ghAs(token.trim(), ...argv) : gh(...argv);
+  const { code, stdout, stderr } = gh(...argv);
   if (code) {
     log(`${context}: WARN failed to dispatch ${workflow}: ${stderr || stdout}`);
     return false;
@@ -686,8 +686,8 @@ var TRIGGERS = Object.keys(DEPLOY_ARMS);
 function log2(message) {
   console.error(`[atomaton-github] ${message}`);
 }
-function dispatchUpdate(repo, source, options = {}) {
-  return dispatchWorkflow(`dispatchUpdate: taking a newer release onto ${repo}`, "atomaton-update.yml", ["--repo", repo, "-f", `source=${source > 0 ? String(source) : ""}`], log2, options.token);
+function dispatchUpdate(repo, source) {
+  return dispatchWorkflow(`dispatchUpdate: taking a newer release onto ${repo}`, "atomaton-update.yml", ["--repo", repo, "-f", `source=${source > 0 ? String(source) : ""}`], log2);
 }
 
 // src/entrypoints/machinery/lib/release-files.ts
@@ -1026,7 +1026,7 @@ ${LLM_CONTEXT_TAG.write("exclude")}
       log4(`WARN update.on_new_release is ${mode}, but ATOMATON_UPDATE_TOKEN is not set \u2014 nothing was started`);
       autoUpdateFailure = {
         mode,
-        why: "no `ATOMATON_UPDATE_TOKEN` secret is set here, and this workflow's own token may not start a run"
+        why: "no `ATOMATON_UPDATE_TOKEN` secret is set here, and the update cannot push, open " + "its pull request or merge without it"
       };
     } else {
       const open = openPrForHead(repo, updateBranchFor(latest.tag), updateToken);
@@ -1034,7 +1034,7 @@ ${LLM_CONTEXT_TAG.write("exclude")}
         log4(`an update pull request for ${latest.tag} (#${open}) is already open; nothing was started`);
         return;
       }
-      if (dispatchUpdate(repo, 0, { token: updateToken })) {
+      if (dispatchUpdate(repo, 0)) {
         log4(`started the update to ${latest.tag}; its report lands on the pull request it opens`);
         return;
       }
