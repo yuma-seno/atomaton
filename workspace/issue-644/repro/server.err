@@ -1,0 +1,3 @@
+SRV-ERR: [atomaton-files] this process is now unreadable to its peers
+SRV-ERR: [atomaton-files] also removed 4 PATH entries this process cannot inspect
+SRV-ERR: [atomaton-files] read src/workflows/atomaton-runner.wac.ts 660-719/2542
