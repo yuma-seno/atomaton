@@ -10,10 +10,10 @@ A session appears in a dated window only if it recorded when its runs ended. Ses
 
 | window | runs | gave up | median seconds | longest | median round trips | median seconds each |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Last 7 days | 166 | 24.7% | 83 | 3,219 | 9 | 7.8 |
-| Last 30 days | 511 | 14.3% | 238 | 6,099 | 11 | 19.9 |
-| Last year | 949 | 10.4% | 248 | 10,246 | 13 | 18.6 |
-| All time | 949 | 10.4% | 248 | 10,246 | 13 | 18.6 |
+| Last 7 days | 167 | 24.6% | 83 | 3,219 | 9 | 7.8 |
+| Last 30 days | 512 | 14.3% | 240 | 6,099 | 10 | 19.9 |
+| Last year | 950 | 10.4% | 248 | 10,246 | 13 | 18.6 |
+| All time | 950 | 10.4% | 248 | 10,246 | 13 | 18.6 |
 
 **Gave up** is every ending that is not `completed` — a ceiling reached, a person asking, a provider hanging up, a loop cut short. Each one is a mechanism deciding the run should not continue, which is worth watching whether or not it was right.
 
@@ -21,7 +21,7 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 | ended because | runs |
 | --- | ---: |
-| `completed` | 850 |
+| `completed` | 851 |
 | `failed` | 88 |
 | `stopped` | 11 |
 
@@ -31,14 +31,14 @@ What is left over is not the same as work delivered. `completed` is the core say
 
 **Ran to an end without a report:** 20 of 63 sessions whose last run the core recorded as `completed` — 31.7%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**96,485,731 tokens** over 64 runs that reported them, **98.8% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**96,577,146 tokens** over 65 runs that reported them, **98.8% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
 **90.9% of that prompt was served from cache**, over the runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 771,671 | 3,818,849 | 8,244,501 | 8,244,501 | 96,485,731 |
-| messages per session | 93 | 198 | 293 | 293 | 7,225 |
+| tokens per run | 733,423 | 3,818,849 | 8,244,501 | 8,244,501 | 96,577,146 |
+| messages per session | 93 | 198 | 293 | 293 | 7,229 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -110,14 +110,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 **Ran to an end without a report:** 33 of 167 sessions whose last run the core recorded as `completed` — 19.8%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**550,757,811 tokens** over 218 runs that reported them, **97.7% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**550,849,226 tokens** over 219 runs that reported them, **97.7% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
-**94.3% of that prompt was served from cache**, over the 216 of 218 runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
+**94.3% of that prompt was served from cache**, over the 217 of 219 runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,242,560 | 7,133,020 | 20,308,488 | 29,805,044 | 550,757,811 |
-| messages per session | 131 | 328 | 425 | 439 | 27,432 |
+| tokens per run | 1,224,669 | 7,133,020 | 20,308,488 | 29,805,044 | 550,849,226 |
+| messages per session | 131 | 328 | 425 | 439 | 27,436 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -202,14 +202,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 **Ran to an end without a report:** 75 of 352 sessions whose last run the core recorded as `completed` — 21.3%. These are not runs that gave up: nothing stopped them, they simply ended without writing a closing line, so the work is in a saved session and nowhere a person or the next agent reads.
 
-**1,208,107,828 tokens** over 456 runs that reported them, **97.8% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**1,208,199,243 tokens** over 457 runs that reported them, **97.8% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
-**94.8% of that prompt was served from cache**, over the 454 of 456 runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
+**94.8% of that prompt was served from cache**, over the 455 of 457 runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,251,353 | 6,056,423 | 27,846,035 | 73,718,100 | 1,208,107,828 |
-| messages per session | 125 | 327 | 583 | 731 | 58,784 |
+| tokens per run | 1,242,645 | 6,056,423 | 27,846,035 | 73,718,100 | 1,208,199,243 |
+| messages per session | 125 | 327 | 583 | 731 | 58,788 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
@@ -331,14 +331,14 @@ What the agents do when they reach for a shell. `search` without a matching `ope
 
 Neither figure covers 20 sessions with no run record at all — without one, neither question can be asked. Everything from before atoma recorded its runs is in there.
 
-**1,208,107,828 tokens** over 456 runs that reported them, **97.8% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
+**1,208,199,243 tokens** over 457 runs that reported them, **97.8% of it prompt** — what the agents were made to read, not what they wrote. Anything spent on making runs cheaper belongs on that side. No money here, deliberately: of the four providers only one reports a cost, and a price table goes quietly stale and then prints confident wrong numbers.
 
-**94.8% of that prompt was served from cache**, over the 454 of 456 runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
+**94.8% of that prompt was served from cache**, over the 455 of 457 runs whose provider reported it. A cached prompt token costs a fraction of a fresh one, so this is most of what separates the counts above from the bill — and it is the figure that moves when what gets resent changes.
 
 | | p50 | p90 | p99 | max | total |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| tokens per run | 1,251,353 | 6,056,423 | 27,846,035 | 73,718,100 | 1,208,107,828 |
-| messages per session | 119 | 323 | 583 | 731 | 58,911 |
+| tokens per run | 1,242,645 | 6,056,423 | 27,846,035 | 73,718,100 | 1,208,199,243 |
+| messages per session | 119 | 323 | 583 | 731 | 58,915 |
 
 | agent | sessions | share |
 | --- | ---: | ---: |
