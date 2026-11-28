@@ -29696,6 +29696,74 @@
     ]
   },
   {
+    "path": "sessions/issue-668/atomaton.json",
+    "agent": "atomaton",
+    "messages": 144,
+    "calls": 88,
+    "failed": 1,
+    "refused": 2,
+    "skills": [
+      "japanese"
+    ],
+    "reported": false,
+    "tools": {
+      "bash": 25,
+      "get_pr": 1,
+      "get_issue_comments": 1,
+      "sync_branch": 2,
+      "fetch": 3,
+      "write": 1,
+      "read": 14,
+      "edit": 33,
+      "get_branch": 2,
+      "list_prs": 1,
+      "commit_and_push": 2,
+      "merge_base_into_branch": 1,
+      "load_skill": 1,
+      "create_pr": 1
+    },
+    "acts": {
+      "other": 17,
+      "search": 2,
+      "verify": 6
+    },
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T15:16:02Z",
+        "ended_because": "completed",
+        "iterations": 45,
+        "loop_recoveries": 0,
+        "messages": 144,
+        "seconds": 2469,
+        "server_calls": {
+          "files": {
+            "edit": 33,
+            "read": 14,
+            "write": 1
+          },
+          "github": {
+            "commit_and_push": 2,
+            "create_pr": 1,
+            "get_branch": 2,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "list_prs": 1,
+            "merge_base_into_branch": 1,
+            "sync_branch": 2
+          },
+          "shell": {
+            "bash": 25
+          },
+          "web": {
+            "fetch": 3
+          }
+        },
+        "started": "2026-11-28T14:34:53Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-668/engineer.json",
     "agent": "engineer",
     "messages": 170,
@@ -30288,6 +30356,19 @@
         "started": "2026-11-28T15:04:48Z"
       }
     ]
+  },
+  {
+    "path": "sessions/issue-676/archive/engineer-1.json",
+    "agent": "engineer",
+    "messages": 3,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
   },
   {
     "path": "sessions/issue-96/archive/engineer-1.json",
