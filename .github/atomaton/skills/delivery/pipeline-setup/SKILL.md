@@ -42,44 +42,57 @@ environment:
 
 Write it here once and every job runs it: the agent's own shell, the checks, and
 the deployment. That is the point of the separate block. Putting `bun install` at
-the front of a `checks.from_pull_request` entry instead looks equivalent and is not —
-the agent's shell then has the dependencies and CI installs them again, or the
-reverse, and the two environments drift. A test that passes for the agent and
-fails in CI comes back to an engineer as a defect that does not reproduce.
+the front of a check's entry instead looks equivalent and is not — the agent's
+shell then has the dependencies and CI installs them again, or the reverse, and the
+two environments drift. A test that passes for the agent and fails in CI comes back
+to an engineer as a defect that does not reproduce.
+
+**A pull request that adds a dependency needs nothing extra.** The setup step runs
+in the pull request's own tree, from the default branch's `setup_commands`, before
+that pull request's checks — so a new dependency in the manifest is installed there
+and the same pull request proves it. Do not add an install command to a check to
+make this work.
 
 System packages belong here too, and only here. An agent cannot install one during
 a run.
 
 ## Verification
 
-`checks` has two arms and takes exactly one. Fill in Atomaton's lists and the shipped
-workflow runs your commands:
+`checks` is one list, or `checks.your_workflow` instead — never both. Fill in the
+list and the shipped workflow runs your commands:
 
 ```yaml
 checks:
-  from_pull_request:
+  jobs:
     - name: verify
       commands:
         - bun run typecheck
         - bun test
 ```
 
-Each entry becomes one job in `atomaton-check.yml`, running after the environment setup
-above; its commands run in order and the first failure ends that job.
+Each entry becomes one job in `atomaton-check.yml`, running after the environment
+setup above; its commands run in order and the first failure ends that job.
 Whatever a contributor would type to check the project locally is what belongs
 here — read the README, the package manifest's scripts, and any CONTRIBUTING
 file before writing this, rather than guessing a stack.
 
+**The list is read from the default branch, and the pull request is its working
+tree.** So a check cannot arrive in the pull request that is being judged by it:
+the branch doing the judging does not carry the entry yet. Adding a check is
+therefore a change that takes effect from the next pull request after it merges —
+write it so that it is right on arrival, and say so in the pull request rather than
+expecting it to prove itself.
+
 **If `checks.your_workflow` already names a workflow, that one is correct.** A
 repository with its own CI has it for reasons that are not in front of you. Leave
-both alone, and in particular do not add a list beside it: a section
-carrying both arms is reported as a configuration error rather than resolved by a
-precedence rule, so the change comes back rejected instead of half-applied.
+both alone, and in particular do not add a list beside it: a section carrying both
+is reported as a configuration error rather than resolved by a precedence rule, so
+the change comes back rejected instead of half-applied.
 
 ## Deployment
 
-The same two arms, and the same rule — Atomaton's lists, or `deploy.your_workflow`,
-never both. Here there are three lists, one per event that ships:
+The same rule — Atomaton's lists, or `deploy.your_workflow`, never both. Here there
+are three lists, one per event that ships:
 
 ```yaml
 deploy:
@@ -128,7 +141,7 @@ the place that needs it:
 
 ```yaml
 checks:
-  from_default_branch:
+  jobs:
     - name: cloud-names
       secrets: ["AWS_ROLE_ARN"]
       commands: ["./scripts/check-env-names.sh \"$ATOMATON_PR_TREE\""]
@@ -144,11 +157,22 @@ It arrives as an environment variable under that name, in that job and no other.
 `tools.secrets` is separate on purpose and must not be merged with these: it is the
 only list that enters the agent's own environment.
 
-**`checks.from_pull_request` has no `secrets` key, and cannot.** Those commands are
-the pull request's own and it may rewrite them, so a credential named beside one is
-one the change being judged can read. A check that needs a credential goes in
-`checks.from_default_branch`, whose commands come from the default branch and which
-is handed the pull request as a path at `$ATOMATON_PR_TREE`.
+**A check may name `secrets`, and the reason is where the list comes from.** The
+commands and the secret names are both read from the default branch, so a pull
+request cannot add one, rename one, or widen one — it cannot edit the list that is
+reading it. An entry that names none runs in a job with no secret slots in it at
+all, not empty ones.
+
+**An entry that names a secret runs in your default branch's tree.** A relative
+path in its commands is the file you released, not the one the pull request wrote —
+so `./scripts/check-env-names.sh` is safe to write there, and a change cannot reach
+the credential by editing that file. The pull request arrives beside it as a path
+at `$ATOMATON_PR_TREE`: read it, and do not execute it.
+
+An entry that names **no** secret is the other way round — the pull request is its
+working tree, so `bun test` reads the change in place with no credential in reach.
+That is where a check that runs the project's own code belongs, which is why most
+entries say nothing about secrets at all.
 
 **`tools.secrets` needs a second step, and the others do not.** Naming a secret
 there authorises the run to hold it; it does not deliver it to any tool. The tool
@@ -199,7 +223,8 @@ runner. Routing a credential anywhere else produces a tool that never receives i
 with nothing reporting why.
 
 `checks` and `deploy` need no routing step: their commands run in a workflow of
-their own rather than beside an agent.
+their own rather than beside an agent. A check's own `secrets` is the whole of it —
+it arrives as an environment variable under that name, in that job and no other.
 
 **Do not invent a secret name and hope.** If a deployment needs a credential you
 cannot see, say so in your report and name exactly which one — a person adds it

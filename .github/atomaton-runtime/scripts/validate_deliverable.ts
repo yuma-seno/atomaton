@@ -88,7 +88,8 @@ var TOOL_SECRETS = {
   reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
 };
 var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
-var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var PR_TREE_VAR = "ATOMATON_PR_TREE";
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, MACHINERY_ROOT_VAR, PR_TREE_VAR]);
 var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
 function resolveDeclaredSecrets(raw, destination) {
   const { field, reserved } = destination;
@@ -130,32 +131,6 @@ function resolveDeclaredSecrets(raw, destination) {
   }
   return problems.length > 0 ? { names: [], problems } : { names, problems };
 }
-
-// src/domain/delivery/check-jobs.ts
-var CHECKS_FROM_PULL_REQUEST = {
-  where: "checks.from_pull_request",
-  secrets: {
-    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
-  }
-};
-var CHECKS_FROM_DEFAULT_BRANCH = {
-  where: "checks.from_default_branch",
-  secrets: { reserved: CHECK_JOB_RESERVED }
-};
-var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
-
-// src/domain/work/control-commands.ts
-var CONTROL_COMMAND_NAMES = ["stop", "resume", "upgrade"];
-function isControlCommand(name) {
-  return CONTROL_COMMAND_NAMES.includes(name);
-}
-
-// src/domain/work/agent-name.ts
-var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
-var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
-
-// src/domain/work/filed-issue.ts
-var AGENT_ISSUE_OFF = "off";
 
 // src/domain/delivery/runner-label.ts
 var DEFAULT_RUNNER = "ubuntu-latest";
@@ -241,22 +216,63 @@ function resolveDeclaredJobs(raw, rules) {
   });
   return { jobs, problems };
 }
-function readSecrets(raw, rule, path, where, problems) {
+function readSecrets(raw, reserved, path, where, problems) {
   if (raw === undefined || raw === null)
     return [];
-  if ("refused" in rule) {
-    if (Array.isArray(raw) && raw.length === 0)
-      return [];
-    problems.push(`${where}: \`secrets\` cannot be named here. ${rule.refused}`);
-    return null;
-  }
   const { names, problems: found } = resolveDeclaredSecrets(raw, {
     field: `${path}.secrets`,
-    reserved: rule.reserved
+    reserved
   });
   problems.push(...found);
   return found.length > 0 ? null : names;
 }
+
+// src/domain/delivery/check-jobs.ts
+var CHECKS = { where: "checks.jobs", secrets: CHECK_JOB_RESERVED };
+var LEGACY_CHECK_KEYS = ["from_pull_request", "from_default_branch"];
+function resolveChecks(section) {
+  const container = typeof section === "object" && section !== null ? section : {};
+  const problems = [];
+  const jobs = [];
+  const declaredIn = new Map;
+  const deprecated = [];
+  for (const key of ["jobs", ...LEGACY_CHECK_KEYS]) {
+    const raw = container[key];
+    if (raw === undefined)
+      continue;
+    const rules = key === "jobs" ? CHECKS : { where: `checks.${key}`, secrets: CHECK_JOB_RESERVED };
+    if (key !== "jobs")
+      deprecated.push(rules.where);
+    const resolved = resolveDeclaredJobs(raw, rules);
+    problems.push(...resolved.problems);
+    for (const job of resolved.jobs) {
+      const already = declaredIn.get(job.name);
+      const spansTheOldArms = key !== "jobs" && already !== undefined && already !== rules.where && already !== CHECKS.where;
+      if (already !== undefined && !spansTheOldArms) {
+        problems.push(`\`${rules.where}\`: '${job.name}' is already declared in \`${already}\`.`);
+        continue;
+      }
+      if (already === undefined)
+        declaredIn.set(job.name, rules.where);
+      jobs.push(job);
+    }
+  }
+  return { jobs, problems, deprecated };
+}
+var NO_CHECKS = "This check verified nothing: `checks.jobs` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
+
+// src/domain/work/control-commands.ts
+var CONTROL_COMMAND_NAMES = ["stop", "resume", "upgrade"];
+function isControlCommand(name) {
+  return CONTROL_COMMAND_NAMES.includes(name);
+}
+
+// src/domain/work/agent-name.ts
+var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
+var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
+
+// src/domain/work/filed-issue.ts
+var AGENT_ISSUE_OFF = "off";
 
 // src/domain/delivery/deploy-jobs.ts
 function refPatternProblem(pattern) {
@@ -303,7 +319,7 @@ var DEPLOY_ARMS = {
     key: "on_merge",
     rules: {
       where: "deploy.on_merge",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       extra: refsFrom({ branches: true })
     }
   },
@@ -311,7 +327,7 @@ var DEPLOY_ARMS = {
     key: "on_tag",
     rules: {
       where: "deploy.on_tag",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       extra: refsFrom({ branches: true, tags: true })
     }
   },
@@ -319,7 +335,7 @@ var DEPLOY_ARMS = {
     key: "on_demand",
     rules: {
       where: "deploy.on_demand",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       extra: { keys: [], read: () => ({ branches: [], tags: [] }) }
     }
   }
@@ -544,8 +560,8 @@ var CONFIG_SCHEMA = {
     environment: { children: { setup_commands: null, max_reloads: null } },
     checks: {
       children: {
-        from_pull_request: null,
-        from_default_branch: null,
+        jobs: null,
+        ...Object.fromEntries(LEGACY_CHECK_KEYS.map((key) => [key, null])),
         your_workflow: null
       }
     },
@@ -577,9 +593,6 @@ var CONFIG_SCHEMA = {
     }
   }
 };
-function leafOf(path) {
-  return path.slice(path.lastIndexOf(".") + 1);
-}
 function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -614,7 +627,7 @@ function configProblems(facts) {
     problems.push(`\`${key}\` in config.yaml is not a setting Atomaton reads. Check the spelling.`);
   }
   for (const [section, atomatonLists] of [
-    ["checks", [CHECKS_FROM_PULL_REQUEST, CHECKS_FROM_DEFAULT_BRANCH].map((rules) => leafOf(rules.where))],
+    ["checks", ["jobs", ...LEGACY_CHECK_KEYS]],
     ["deploy", Object.values(DEPLOY_ARMS).map((arm) => arm.key)]
   ]) {
     const value = config[section];
@@ -629,9 +642,7 @@ function configProblems(facts) {
   const merge = isRecord4(config.merge) ? config.merge : {};
   problems.push(...resolveMergeGates(merge.gates).problems);
   problems.push(...resolveDeployJobs(config.deploy).problems);
-  const checks = isRecord4(config.checks) ? config.checks : {};
-  problems.push(...resolveDeclaredJobs(checks.from_pull_request, CHECKS_FROM_PULL_REQUEST).problems);
-  problems.push(...resolveDeclaredJobs(checks.from_default_branch, CHECKS_FROM_DEFAULT_BRANCH).problems);
+  problems.push(...resolveChecks(config.checks).problems);
   const tools = isRecord4(config.tools) ? config.tools : {};
   problems.push(...resolveDeclaredSecrets(tools.secrets, TOOL_SECRETS).problems);
   for (const name of agentNames.filter(isControlCommand).sort()) {

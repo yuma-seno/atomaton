@@ -1,6 +1,21 @@
 #!/usr/bin/env bun
 // @bun
 
+// src/adapters/runner/config.ts
+import { readFileSync } from "fs";
+
+// src/domain/delivery/merge-readiness.ts
+var CI_WOULD_BE_WASTED = new Set([
+  "not-open",
+  "draft",
+  "conflicting",
+  "behind",
+  "mergeability-unknown",
+  "checks-pending",
+  "checks-failing"
+]);
+var PASSING = new Set(["success", "neutral", "skipped"]);
+
 // src/domain/machinery/machinery-layout.ts
 var USER_ROOT = ".github/atomaton";
 var RUNTIME_ROOT = ".github/atomaton-runtime";
@@ -71,7 +86,8 @@ var TOOL_SECRETS = {
   reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
 };
 var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
-var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var PR_TREE_VAR = "ATOMATON_PR_TREE";
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, MACHINERY_ROOT_VAR, PR_TREE_VAR]);
 var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
 function resolveDeclaredSecrets(raw, destination) {
   const { field, reserved } = destination;
@@ -113,34 +129,6 @@ function resolveDeclaredSecrets(raw, destination) {
   }
   return problems.length > 0 ? { names: [], problems } : { names, problems };
 }
-
-// src/domain/delivery/check-jobs.ts
-var CHECKS_FROM_PULL_REQUEST = {
-  where: "checks.from_pull_request",
-  secrets: {
-    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
-  }
-};
-var CHECKS_FROM_DEFAULT_BRANCH = {
-  where: "checks.from_default_branch",
-  secrets: { reserved: CHECK_JOB_RESERVED }
-};
-var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
-
-// src/adapters/runner/config.ts
-import { readFileSync } from "fs";
-
-// src/domain/delivery/merge-readiness.ts
-var CI_WOULD_BE_WASTED = new Set([
-  "not-open",
-  "draft",
-  "conflicting",
-  "behind",
-  "mergeability-unknown",
-  "checks-pending",
-  "checks-failing"
-]);
-var PASSING = new Set(["success", "neutral", "skipped"]);
 
 // src/domain/delivery/runner-label.ts
 var DEFAULT_RUNNER = "ubuntu-latest";
@@ -229,22 +217,61 @@ function resolveDeclaredJobs(raw, rules) {
   });
   return { jobs, problems };
 }
-function readSecrets(raw, rule, path, where, problems) {
+function readSecrets(raw, reserved, path, where, problems) {
   if (raw === undefined || raw === null)
     return [];
-  if ("refused" in rule) {
-    if (Array.isArray(raw) && raw.length === 0)
-      return [];
-    problems.push(`${where}: \`secrets\` cannot be named here. ${rule.refused}`);
-    return null;
-  }
   const { names, problems: found } = resolveDeclaredSecrets(raw, {
     field: `${path}.secrets`,
-    reserved: rule.reserved
+    reserved
   });
   problems.push(...found);
   return found.length > 0 ? null : names;
 }
+
+// src/domain/delivery/check-jobs.ts
+var CHECKS = { where: "checks.jobs", secrets: CHECK_JOB_RESERVED };
+var LEGACY_CHECK_KEYS = ["from_pull_request", "from_default_branch"];
+function resolveChecks(section) {
+  const container = typeof section === "object" && section !== null ? section : {};
+  const problems = [];
+  const jobs = [];
+  const declaredIn = new Map;
+  const deprecated = [];
+  for (const key of ["jobs", ...LEGACY_CHECK_KEYS]) {
+    const raw = container[key];
+    if (raw === undefined)
+      continue;
+    const rules = key === "jobs" ? CHECKS : { where: `checks.${key}`, secrets: CHECK_JOB_RESERVED };
+    if (key !== "jobs")
+      deprecated.push(rules.where);
+    const resolved = resolveDeclaredJobs(raw, rules);
+    problems.push(...resolved.problems);
+    for (const job of resolved.jobs) {
+      const already = declaredIn.get(job.name);
+      const spansTheOldArms = key !== "jobs" && already !== undefined && already !== rules.where && already !== CHECKS.where;
+      if (already !== undefined && !spansTheOldArms) {
+        problems.push(`\`${rules.where}\`: '${job.name}' is already declared in \`${already}\`.`);
+        continue;
+      }
+      if (already === undefined)
+        declaredIn.set(job.name, rules.where);
+      jobs.push(job);
+    }
+  }
+  return { jobs, problems, deprecated };
+}
+function deprecatedCheckNotice(keys) {
+  const named = keys.map((key) => `\`${key}\``).join(" and ");
+  return `${named} ${keys.length === 1 ? "is" : "are"} read into \`checks.jobs\`, the one list of checks. ` + "An entry from either spelling now runs the same way: the list comes from the default branch, and " + "each entry may name its own `secrets`. Move the entries under `checks.jobs` when convenient.";
+}
+var saidDeprecated = false;
+function announceDeprecatedChecks(keys, log = console.error) {
+  if (saidDeprecated || keys.length === 0)
+    return;
+  saidDeprecated = true;
+  log(`::warning::${deprecatedCheckNotice(keys)}`);
+}
+var NO_CHECKS = "This check verified nothing: `checks.jobs` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
 
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
@@ -270,39 +297,10 @@ function loadConfig() {
   }
   return cached;
 }
-function getPullRequestChecks() {
-  return resolveDeclaredJobs(loadConfig().checks?.from_pull_request, CHECKS_FROM_PULL_REQUEST);
-}
-function getDefaultBranchChecks() {
-  return resolveDeclaredJobs(loadConfig().checks?.from_default_branch, CHECKS_FROM_DEFAULT_BRANCH);
-}
-
-// src/entrypoints/machinery/lib/cli.ts
-function parseAcrossReleases(names, argv) {
-  const known = new Set(names);
-  const values = Object.fromEntries(names.map((name) => [name, ""]));
-  const ignored = [];
-  for (let index = 0;index < argv.length; index += 1) {
-    const token = argv[index] ?? "";
-    if (!token.startsWith("--"))
-      continue;
-    const [flag, inline] = splitFlag(token.slice(2));
-    const value = inline ?? argv[index + 1] ?? "";
-    if (inline === undefined)
-      index += 1;
-    if (known.has(flag))
-      values[flag] = value;
-    else
-      ignored.push(flag);
-  }
-  if (ignored.length > 0) {
-    console.error(`::warning::Ignored ${ignored.map((flag) => `\`--${flag}\``).join(", ")}: this script is from an ` + "older release than the workflow that ran it. It will understand them once the upgrade reaches " + "the default branch.");
-  }
-  return values;
-}
-function splitFlag(token) {
-  const at = token.indexOf("=");
-  return at === -1 ? [token, undefined] : [token.slice(0, at), token.slice(at + 1)];
+function getChecks() {
+  const { deprecated, ...resolution } = resolveChecks(loadConfig().checks);
+  announceDeprecatedChecks(deprecated);
+  return resolution;
 }
 
 // src/entrypoints/machinery/lib/publish-matrix.ts
@@ -341,25 +339,15 @@ function defineScript(importMetaUrl) {
 
 // src/entrypoints/machinery/plan_checks.ts
 var ref = defineScript(import.meta.url);
-var ARMS = {
-  "pull-request": { read: getPullRequestChecks, key: CHECKS_FROM_PULL_REQUEST.where, warnWhenEmpty: NO_PULL_REQUEST_CHECKS },
-  "default-branch": { read: getDefaultBranchChecks, key: CHECKS_FROM_DEFAULT_BRANCH.where, warnWhenEmpty: "" }
-};
 function main() {
-  const values = parseAcrossReleases(["arm"], Bun.argv.slice(2));
-  const arm = ARMS[values.arm ?? ""];
-  if (!arm) {
-    console.error(`usage: plan_checks.ts --arm ${Object.keys(ARMS).join("|")}`);
-    process.exit(2);
-  }
-  const { jobs, problems } = arm.read();
+  const { jobs, problems } = getChecks();
   if (problems.length > 0) {
     for (const problem of problems)
       console.error(`::error::${problem}`);
-    console.error(`::error::\`${arm.key}\` could not be read, so none of its checks ran.`);
+    console.error("::error::`checks` could not be read, so none of its entries ran.");
     process.exit(1);
   }
-  publishMatrix(jobs, { what: `\`${arm.key}\` job`, warnWhenEmpty: arm.warnWhenEmpty });
+  publishMatrix(jobs, { what: "`checks` job", warnWhenEmpty: NO_CHECKS });
 }
 if (import.meta.main)
   main();
