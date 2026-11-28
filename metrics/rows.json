@@ -30525,6 +30525,59 @@
     "runs": []
   },
   {
+    "path": "sessions/issue-676/engineer.json",
+    "agent": "engineer",
+    "messages": 240,
+    "calls": 119,
+    "failed": 2,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {
+      "bash": 107,
+      "read": 8,
+      "get_issue": 1,
+      "write": 1,
+      "commit_and_push": 1,
+      "create_pr": 1
+    },
+    "acts": {
+      "edit": 15,
+      "other": 92
+    },
+    "runs": [
+      {
+        "compactions": 2,
+        "ended": "2026-11-28T15:24:30Z",
+        "ended_because": "completed",
+        "iterations": 206,
+        "loop_recoveries": 0,
+        "messages": 240,
+        "seconds": 966,
+        "server_calls": {
+          "files": {
+            "edit": 13,
+            "read": 21,
+            "write": 4
+          },
+          "github": {
+            "commit_and_push": 1,
+            "create_pr": 1,
+            "get_issue": 2,
+            "get_issue_comments": 3
+          },
+          "search": {
+            "search_issues": 1
+          },
+          "shell": {
+            "bash": 169
+          }
+        },
+        "started": "2026-11-28T15:08:24Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
