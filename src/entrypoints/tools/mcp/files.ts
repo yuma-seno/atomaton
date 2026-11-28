@@ -90,7 +90,11 @@ function shown(full: string): string {
 }
 
 const READ_SCHEMA = z.object({
-  path: z.string().describe("File to read. Relative to the working directory, or absolute."),
+  path: z
+    .string()
+    .describe(
+      "File to read. Relative to the working directory, or absolute. A line or a range may be written into it -- `src/x.ts:120-260`, both ends included -- and then no other argument is needed.",
+    ),
   offset: z
     .number()
     .int()
@@ -110,13 +114,43 @@ const READ_SCHEMA = z.object({
 });
 
 /**
+ * A range written into the `path` argument: `src/x.ts:120-260`, or `src/x.ts:120` for
+ * everything from there.
+ *
+ * One argument, because it is the only one that survives: a caller that loses the rest
+ * of a call still sends `path` (#644, #658 -- their recorded calls held nothing else,
+ * so there was no `offset` for the server to honour). It is also the notation this
+ * project writes a place in, `path/file.ts:42`, so it is one a caller already uses.
+ *
+ * A file may hold a colon in its name: `read` tries the literal path first and only
+ * reads the tail as a range when no such file exists. Hence null, rather than a guess,
+ * when the tail is not one.
+ */
+function rangeInPath(arg: string): { path: string; offset: number; limit?: number } | null {
+  const at = arg.lastIndexOf(":");
+  if (at <= 0) return null;
+  const found = /^([1-9]\d*)(?:-([1-9]\d*))?$/.exec(arg.slice(at + 1));
+  if (!found) return null;
+  const from = Number(found[1]);
+  const to = found[2] === undefined ? undefined : Number(found[2]);
+  if (to !== undefined && to < from) {
+    throw new Error(`'${arg}' is not a range: it ends at line ${to}, before line ${from}.`);
+  }
+  return { path: arg.slice(0, at), offset: from, limit: to === undefined ? undefined : to - from + 1 };
+}
+
+/**
  * Lines of a file, numbered, and how to get the rest.
  *
  * Numbered because every error a compiler emits and every other tool here speaks in
  * line numbers, and a range asked for by line is unusable when what comes back is not.
  */
 function readFile(a: z.infer<typeof READ_SCHEMA>): McpToolResult {
-  const full = within(a.path);
+  const named = within(a.path);
+  // The literal path wins: a file whose name holds a colon is that file, and the range
+  // form is a reading of it only when no such file exists.
+  const range = existsSync(named) ? null : rangeInPath(a.path);
+  const full = range ? within(range.path) : named;
   if (!existsSync(full)) throw new Error(`'${a.path}' does not exist.`);
   if (statSync(full).isDirectory()) throw new Error(`'${a.path}' is a directory. Use list.`);
 
@@ -141,11 +175,11 @@ function readFile(a: z.infer<typeof READ_SCHEMA>): McpToolResult {
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
 
   const total = lines.length;
-  const from = a.offset ?? 1;
+  const from = a.offset ?? range?.offset ?? 1;
   if (total === 0) return { text: `${shown(full)} is empty.` };
   if (from > total) throw new Error(`'${a.path}' has ${total} lines; offset ${from} is past the end.`);
 
-  const wanted = Math.min(a.limit ?? DEFAULT_READ_LINES, total - from + 1);
+  const wanted = Math.min(a.limit ?? range?.limit ?? DEFAULT_READ_LINES, total - from + 1);
   const out: string[] = [];
   let used = 0;
   for (let i = 0; i < wanted; i += 1) {
@@ -158,14 +192,13 @@ function readFile(a: z.infer<typeof READ_SCHEMA>): McpToolResult {
   }
 
   const last = from + out.length - 1;
-  // The same-arguments clause is deliberate. The failure this marker meets -- #607, #627,
-  // atoma#47, all verified against session transcripts -- is a caller repeating the call
-  // unchanged because its reasoning believes it already passed the offset it meant to.
-  // Naming that the rest of the call does not change is for that belief, not for an
-  // instruction the caller could not follow.
+  // A `path` rather than an added `offset`, because every recorded failure of this
+  // marker -- #607, #627, #644, #658 -- is a call whose second argument never reached
+  // the server: an instruction to add one is an instruction that caller cannot follow.
+  // The offset form stays named for a caller that can add one, since it is shorter.
   const more =
     last < total
-      ? `\n\n[${total - last} more lines. Read again with offset: ${last + 1}. The same call and the same arguments, plus this one.]`
+      ? `\n\n[${total - last} more lines. Continue with read(path: "${shown(full)}:${last + 1}"), or add offset: ${last + 1} to this call.]`
       : "";
   log(`read ${shown(full)} ${from}-${last}/${total}`);
   return { text: `${shown(full)} lines ${from}-${last} of ${total}\n\n${out.join("\n")}${more}` };
@@ -468,7 +501,7 @@ const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "read",
     description:
-      "Read a range of lines from a file, numbered. Give offset and limit to read part of a large file; a result that stopped early names the offset to continue from, so a file of any size can be read in order without guessing. A file that holds an image comes back as an image, for an agent whose definition sets vision. Prefer this over cat, head, tail or sed through the shell, which return unnumbered text and cost a round trip.",
+      "Read a range of lines from a file, numbered. Write the range into path -- `src/x.ts:120-260`, both ends included, or `src/x.ts:120` for the rest of the file -- which is one argument; offset and limit say the same thing when you want to give them. A result that stopped early names the path to continue from, so a file of any size can be read in order without guessing. A file that holds an image comes back as an image, for an agent whose definition sets vision. Prefer this over cat, head, tail or sed through the shell, which return unnumbered text and cost a round trip.",
     schema: READ_SCHEMA,
     handler: readFile,
   }),
