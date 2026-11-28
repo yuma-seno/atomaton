@@ -6,7 +6,7 @@
     },
     {
       "role": "user",
-      "content": "Issue #672: PR 上のファイルを機械が実行・参照する設計をやめる\n**Labels:** atomaton/waiting-for-person\n\n方針として、PR 上にあるファイルを機械が実行したり、それを根拠に動作を決めたりする設計をやめたい。対象は設定ファイル、実行スクリプト、環境セットアップのコマンドなど、PR のツリーにあるもの全般です。何を実行するかは常にデフォルトブランチ側が決め、PR のツリーは調べる対象のデータとしてのみ扱う形に整理してください。あわせて、先に設定ファイルだけ競合マーカーを書かないようにした例外的な対策（設定ファイルが読めず CI が落ちた件の修正）も外し、マーカーの扱いは全ファイルで一様に戻してください。この原則が立てば、設定にマーカーが入っても機械は困らないはずです。PR チェックの PR 側の処理、エージェント実行時にブランチの設定を読む処理など、PR 上のファイルを根拠に動く処理が残っていないか全体を見直してください。設計変更が大きいので、実装の前にまず設計案を出してください。",
+      "content": "Issue #672: PR 上のファイルを機械が実行・参照する設計をやめる\n**Labels:** atomaton/in-progress\n\n方針として、PR 上にあるファイルを機械が実行したり、それを根拠に動作を決めたりする設計をやめたい。対象は設定ファイル、実行スクリプト、環境セットアップのコマンドなど、PR のツリーにあるもの全般です。何を実行するかは常にデフォルトブランチ側が決め、PR のツリーは調べる対象のデータとしてのみ扱う形に整理してください。あわせて、先に設定ファイルだけ競合マーカーを書かないようにした例外的な対策（設定ファイルが読めず CI が落ちた件の修正）も外し、マーカーの扱いは全ファイルで一様に戻してください。この原則が立てば、設定にマーカーが入っても機械は困らないはずです。PR チェックの PR 側の処理、エージェント実行時にブランチの設定を読む処理など、PR 上のファイルを根拠に動く処理が残っていないか全体を見直してください。設計変更が大きいので、実装の前にまず設計案を出してください。",
       "atoma_metadata": {
         "author": "yuma-seno",
         "created_at": "2026-11-28T14:17:41Z",
@@ -831,14 +831,237 @@
       "role": "tool",
       "content": "{\"dispatched\":[\"#676→engineer\"],\"failed\":[],\"complete\":true,\"note\":\"Every sub-agent is running. This session ends here, and resumes when all sub-issues are closed.\"}",
       "tool_call_id": "call_f7b0e54785644c8f93d739ae"
+    },
+    {
+      "role": "user",
+      "content": "<details><summary>Report</summary>\n\n**Sub-issue #676**\n\n**結論**: #676 が求めた 4 つの受け入れ基準はすべて満たされています。PR #680 が `atomaton/issue-672` に merge され、契約テストが新形式と旧綴りの読み替えの両方を pin し、その head の CI は緑でした。残るのは release 適用後に新しい workflow が runner 上で初めて走ることで、それは #672 の納品で起きる話なのでこの sub-issue の未達ではありません。\n\n**受け入れ基準ごとの判定**\n\n1. *新形式の 1 エントリが CI で動き、secrets はそのエントリのジョブだけに届き、付けていないエントリのジョブは slots を一切持たない* — 満たしています。生成 YAML の `checks` ジョブは `ATOMATON_SECRET_*` も names 変数も持たず、`credentialled-checks` は `secrets[matrix.secrets[N]]` だけで受け取ります（`tests/contract/generated-workflows.test.ts` の `atomaton-check reads the machinery, never the pull request` が pin）。このリポジトリ自身の CI でも 1 エントリ（`verify`）が緑で通りました。\n2. *旧形式（両キー）の config が新コードで読み替えて動く* — 満たしています。`resolveChecks` が `jobs` → `from_pull_request` → `from_default_branch` の順に同じ規則で読み、旧綴りで secrets を書いたエントリも合法で、使われたキーは `::warning::` で 1 回だけ名指されます。単体テスト（`src/domain/delivery/check-jobs.test.ts`）と、このリポジトリの旧綴り config に対する実測（`verify` 1 件、警告 1 回、exit 0）で確認しました。\n3. *生成 YAML に PR ツリーを計画・起動の根拠にする経路が無く、tools ジョブの起動対象が machinery 由来* — 満たしています。plan ジョブは既定ブランチだけを checkout し、資格なし／資格ありの各ジョブと `atomaton-tools` は既定ブランチを `ATOMATON_MACHINERY_ROOT` に据えます。資格ありジョブは逆に既定ブランチを作業ツリーにし、PR は `$ATOMATON_PR_TREE` のパスとしてだけ渡します（レビュー指摘を受けた修正で、相対パスが PR 側のファイルに解決される経路を塞ぎました）。\n4. *`bun run test` / `typecheck` / `synth` / `scan_secrets` が通る* — 満たしています。私の run で 2696 pass / 6 skip（実 CLI が要る E2E）/ 0 fail、typecheck クリーン、synth 11 ファイル、`scan_secrets` exit 0。\n\n**根拠**\n\n- PR #680 は `state: MERGED`、base `atomaton/issue-672`、head `atomaton/issue-676`。\n- head `b7c0d3dc3f648db86c589e878389831f97f12c9e` の check runs: `atomaton-check` success、`pull-request-checks (verify)` success、`atomaton-tools` success、`default-branch-checks (...) skipped`、両 plan ジョブ success（run 46162338540）。`verify` が typecheck・synth・`bun test` を回しており、契約テストはそこで生成物に対して実行されています。\n- merge された diff（`get_pr_diff(680)`）に、レビュー後の最終形が入っています。`docs/pipeline/boundaries.md` の hunk は「**A credentialed check runs in the default branch's tree.**」と `$ATOMATON_PR_TREE` をデータとして読む規則を追加しており、レビュー前の「PR を全チェックの作業ツリーにする」記述ではありません。\n\n**確かめられなかったこと**\n\n- 新しい `atomaton-check.yml` 自体はまだ runner 上で一度も実行されていません。head の CI のジョブ名が旧 `plan-pull-request-checks` / `plan-default-branch-checks` / `pull-request-checks` であることがその証拠で、走ったのは現行の配置済み workflow です。新しい YAML の形は契約テストが pin していますが、実行の確認は release 適用後の最初の run になります。\n- 資格ありジョブの実際の secret 解決（`secrets[matrix.secrets[i]]`）は、このリポジトリに secrets 付きエントリが無いため runner 上では未実行です（旧 `default-branch-checks` も skipped）。形の保証は契約テストのみです。\n- #680 の本文はレビュー前の設計（PR を全ジョブの作業ツリーにする）を書いたままで、merge されたコードと食い違っています。run から本文を更新する手段が無いため残っています。設計の最新の記述は `docs/pipeline/boundaries.md` と `docs/pipeline/reference.md` にあります。\n\n**次に何が起きるか**\n\n親 #672 が集約 PR でこのブランチを既定ブランチへ納品します。release が `.github/workflows/atomaton-check.yml` と `.github/atomaton-runtime/scripts/plan_checks.ts` を置き換えた後の最初の pull request で、新しい workflow が初めて実行されます。その時点で `.github/atomaton/config.yaml` は旧綴りのままなので、plan step の読み替えと 1 回の deprecation warning がそのまま効きます。\n\nLinked pull requests:\n- #680 checks: one list, each entry with its own secrets (done)\n\n</details>",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-28T16:00:57Z",
+        "event_type": "issue_comment",
+        "id": 7241908306,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "Atomaton: All sub-tasks completed (last: #676). Re-invoking the parent's agent for aggregation.",
+      "atoma_metadata": {
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-28T16:00:58Z",
+        "event_type": "issue_comment",
+        "id": 7241908686,
+        "layer": "github-context",
+        "source": "github"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    },
+    {
+      "role": "assistant",
+      "content": "子 #676 の納品を確認し、親ブランチの状態を整えてから集約 PR を開きます。まず子の状態とローカルのブランチ状態を確かめます。",
+      "tool_calls": [
+        {
+          "id": "call_4c50f4523997480ea08a076d",
+          "type": "function",
+          "function": {
+            "name": "get_issue",
+            "arguments": "{\"issue_number\":676}"
+          }
+        },
+        {
+          "id": "call_96e53d41eb804cd9b974793c",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git status --short --branch && git log --oneline -3\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Let me take stock. I'm the atomaton agent on issue #672. My child sub-issue #676 completed — its PR #680 merged into `atomaton/issue-672` (the parent's branch). Now I'm re-invoked for aggregation.\n\nPer my role contract's Re-entry and Aggregation section:\n\n1. Verify each child's state via GitHub tools (open/closed, launched).\n2. Launch only pending children whose dependencies are satisfied.\n3. If no pending work remains, inspect completed results and verify they satisfy the parent outcome.\n4. If integration gaps remain, create narrowly scoped follow-up children and dispatch.\n5. Deliver the accumulated work: each child merged into this issue's own branch — call `create_pr` for this issue's branch, or hand to `/engineer` when it needs work first. Skip only when no child produced code.\n6. Once that PR merged, judge what merged against what the issue asked, take whichever of the two post-merge outcomes.\n\nSo the child's work landed on `atomaton/issue-672`. Now I need to deliver: create the PR for this issue's branch (`atomaton/issue-672` → base branch, which is presumably `main`).\n\nWait — but there's a subtlety. The issue asked for a design proposal first (\"設計変更が大きいので、実装の前にまず設計案を出してください\"), and then the person approved the design with the two decisions. So implementation was approved. The child #676 delivered the implementation on my branch. Now I aggregate: verify the child's state, then deliver via create_pr.\n\nBefore create_pr, I must ensure the worktree is clean and HEAD matches origin. The create_pr tool requires commit_and_push first: \"Call commit_and_push first: this tool requires a clean worktree and exact local/remote HEAD equality\".\n\nBut wait — did I push anything myself? The child engineer's PR #680 merged into `atomaton/issue-672` on GitHub. My local checkout may be behind. Let me check the state: `git status`, `git log`. I might need to sync_branch first to bring my local branch up to the remote, then create_pr.\n\nActually, let me think about what needs verification first:\n\n1. Verify sub-issue #676 is closed (the child's report says accepted criteria met).\n2. Check the current branch state — is `atomaton/issue-672` my checked-out branch? Yes, presumably the worktree is on `atomaton/issue-672`.\n3. Check for open PRs already — maybe #680 is against `atomaton/issue-672`, and there's no PR yet for `atomaton/issue-672` → `main`.\n\nAlso, there was a note in the child's report about some uncertainties:\n- \"PR #680 の本文はレビュー前の設計...run から本文を更新する手段が無いため残っています\" — the PR body is stale, but that PR is merged already, so not much to do.\n- The new workflow hasn't run on runner yet — that's post-release.\n- `Não` marker reversal (#668) is being handled separately by another run — I must not touch it.\n\nLet me also check whether there are any remaining gaps: the child's report says docs/pipeline/boundaries.md was rewritten. Good.\n\nAlso — per the aggregation rules — I should verify the child actually closed. Let me fetch #676 state.\n\nThen: is there anything else outstanding on #672? The issue asked: review all processes that act on PR-tree files — we did that (design), person approved, we implemented the two decided changes. Marker uniformity was moved to #668 (another run). So #672's deliverable = the unified checks design implemented + the tools job change. The design proposal itself was delivered earlier as a comment.\n\nSo now: aggregate, create PR for `atomaton/issue-672` → base branch (main), name reviewer.\n\nWait — one thing: is this issue really an \"engineer-ready leaf\" that I hand to /engineer, or do I call create_pr myself? Per section 5: \"Deliver the accumulated work... call `create_pr(title=..., body=...)` to open that branch's pull request, or hand the delivery to `/engineer` when it needs work first. Skip this only when no child produced code.\"\n\nThe child produced code that's merged into my branch. So I call create_pr myself. No further work needed unless the worktree needs syncing.\n\nSteps now:\n\n1. Check git state: branch, status, log — need to bring in the merged #680 changes? Actually, if #680 merged into `atomaton/issue-672` on GitHub, my local checkout of that branch might be behind origin. `sync_branch` can fast-forward. The create_pr tool requires clean worktree and exact local/remote HEAD equality, so sync first.\n\nLet me check the current branch and status quickly, then sync_branch, then get_issue for 676 to confirm closed, then create_pr.\n\nActually, batching: I can call get_issue(676) and bash git status in one turn. Then next: sync_branch if needed, then create_pr.\n\nAlso, before creating the PR body, I should write a summary in Japanese (person writes in Japanese) referencing: the design principle, the two decisions, what changed (one list with per-entry secrets, tools job redesign, docs), test results, remaining notes (release applies later; #668 separate).\n\nOne more question — what's the base branch for this issue's PR? \"A sub-issue's PR targets its parent's branch, and anything else targets the configured base branch.\" I'm on the parent issue #672 itself, whose branch is `atomaton/issue-672`; its PR targets the configured base branch. From conventions: main is the protected default branch, so base = main presumably. The create_pr tool resolves it from the tree — not mine to choose.\n\nReviewer: the previous PR used 'reviewer'. I should name the reviewer in create_pr — the machinery dispatches the reviewer after CI passes. Yes: \"create_pr ... On success it dispatches CI validation ... dispatches whichever agent the result calls for, the reviewer when they pass\". So I pass reviewer: 'reviewer'.\n\nLet me start: verify child + git state.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"kind\":\"issue\",\"closedAt\":\"2026-11-28T16:00:55Z\",\"createdAt\":\"2026-11-28T15:07:29Z\",\"labels\":[{\"id\":\"LA_kwDOUudl8s8AAAAC4zfP2Q\",\"name\":\"atomaton/sub-issue\",\"description\":\"Child delivery task managed by Atomaton\",\"color\":\"8250df\"},{\"id\":\"LA_kwDOUudl8s8AAAAC4zfeDA\",\"name\":\"atomaton/launched\",\"description\":\"Atomaton has dispatched an agent for this sub-task\",\"color\":\"1f883d\"}],\"number\":676,\"state\":\"CLOSED\",\"title\":\"checks を 1 本の一覧（エントリごとの secrets）に統一し、PR ツリーを実行根拠にしないチェック機構にする\",\"body\":\"## 前提（#672 での本人決定、済み事項）\\n\\n- #672 の設計案は決定済み（同 thread 参照）。本人判断 2 点がこの実装の足場です。\\n  1. チェックの 2 本のアーム（`checks.from_pull_request` / `checks.from_default_branch`）を廃止し、**1 本の一覧に統一**する。各チェックが自分の `secrets` を宣言する。資格情報なしのチェックは今までどおり **シークレットの無いジョブ** で動くよう、実行環境の分離を残す。**既存の設定の移行も含める**。\\n  2. マージ後の tools ライブチェックは新設しない。\\n- 原則は「機械が読むものはすべてデフォルトブランチから。PR ツリーはデータとしてのみ扱う」です。\\n- **マーカーの一様化（`update-apply.ts` の `NEVER_MARKED` 廃止・update PR 本文の `held` 描画撤去・docs/runtime 系 3 ファイル）は #668 で別 run が進行中**。本件では触れません（制約参照）。\\n\\n## 背景（現状と根拠）\\n\\n- `atomaton-check` は 2 本のアームで構成されます。`checks.from_pull_request` は PR が宣言したコマンドを PR ツリーで実行し（plan ジョブの checkout がそのまま PR: `src/workflows/atomaton-check.wac.ts:107-112`、マトリクス `:198-203`）、`checks.from_default_branch` はデフォルトブランチ宣言のコマンドを PR を `$ATOMATON_PR_TREE` データとして渡して実行します。\\n- PR ツリーを実行根拠にする残件は 3 か所です: 上記 plan/マトリクス 2 か所と、`atomaton-tools` ジョブ（PR のみを checkout し `ATOMATON_MACHINERY_ROOT` 未設定、check_live_tools が `.` に落ちて PR の config・定義・tools.yaml を読み PR 宣言のサーバーを起動する: `src/workflows/atomaton-check.wac.ts:229-296`）。\\n- runner（エージェント実行）と validate-pr はすでに原則どおりです。機構をデフォルトブランチ第二 checkout に置き `ATOMATON_MACHINERY_ROOT` で指す形（`src/workflows/atomaton-runner.wac.ts:141-158, 1733-1756`）。この形を踏襲します。\\n- `check_live_tools.ts` 本体はすべて `machineryPath` で解決しており（`src/entrypoints/machinery/check_live_tools.ts:268,299-329`）、root を指すだけで読むもの・起動するものが変わります。本体の変更は最小の見込みです。\\n\\n## スコープ（やること）\\n\\n1. **config**: `checks` を 1 本の一覧に。各エントリは `name` / `commands` / `runs_on` に加え `secrets`（省略可）。旧キー `from_pull_request` と `from_default_branch` は**削除ではなく読み替えて統合**（理由は制約参照）。旧 from_default_branch のエントリは secrets 付きで統合し、旧 from_pull_request は secrets なしで統合する。旧綴りで secrets を書いたエントリは新形式では差がないので合法にする。読み替えた旨と新綴りを名指す deprecation の語を 1 回出力する。\\n   - `src/content/config.yaml` の既定値とコメントを新形式に書き換える。\\n   - このリポジトリ自身の `.github/atomaton/config.yaml` は**手で書き換えない**（`.github/**` はリリース経由、conventions の lag が意図どおりのため。旧綴り読み替えが緑のまま保つ）。\\n2. **workflow**: `src/workflows/atomaton-check.wac.ts`。plan ジョブを 1 本にし、machinery（デフォルトブランチ）からのみ一覧を読む。一覧を secrets を持つ / 持たないで分け、**資格なしシェル**（現行 pull-request-checks のステップ、secret slots を一切持たない。`:168-175`）と**資格ありシェル**（現行 default-branch-checks の `renameSecretSlots` + `matrixSecretEnv`。`:183-194`)に分けてマトリクス化する。\\n   - PR 宣言アームの plan ジョブ、`$ATOMATON_PR_TREE`（`PR_TREE_DIR`）、`plan_checks.ts` の pull-request アームを削除する。\\n   - `environmentSetupStep()` は machinery root の設定で回る（`run_environment_setup.ts` / `loadConfig` のコード変更なし。`environment-setup.ts:25-36` のコメントテーブルを書き換える）。\\n   - required context 名 `atomaton-check` は不変 so rulesets/settings 側の変更は不要（`atomaton-check.wac.ts:60`）。\\n3. **tools ジョブ**: machinery をデフォルトブランチから checkout し `ATOMATON_MACHINERY_ROOT` を設定し、PR はワークスペース上のデータとする。起動対象が machinery 由来の tools.yaml に変わる。e2e サブステップは維持します（固定シェルが PR の suite を動かす形で原則に合致）。\\n4. **ドメイン・文言**: `src/domain/delivery/check-jobs.ts` の 2 アーム概念（`:14-40`、`NO_PULL_REQUEST_CHECKS` は統一後の計画側に移植し文言整合）、`src/domain/delivery/declared-config.ts:87-108` の型、`src/domain/machinery/machinery-layout.ts:213-219` の trust テーブル checks 行、`src/entrypoints/machinery/scan_secrets.ts:6-8` の冒頭説明、`src/domain/delivery/merge-readiness.ts:531` の差し戻し文。\\n5. **skill と docs**: `src/content/skills/delivery/pipeline-setup/SKILL.md:45-147` を 1 本の一覧に書き換え。依存追加の案内（dependency を PR で足して同じ PR で証明する現行パターンは廃り「エントリの先頭に install コマンドを書く」に）もここ。`docs/pipeline/boundaries.md:18-22`、`docs/pipeline/reference.md:53-56`、`docs/pipeline/tasks/check-a-pull-request-against-a-real-service.md`、`src/content/config.yaml`・declared-secrets.ts の `$ATOMATON_PR_TREE` 記述など、from_pull_request / ATOMATON_PR_TREE の残存表現を洗って更新する。\\n6. **テスト**: 生成 `atomaton-check.yml` に対する契約テスト追加（`tests/contract/generated-workflows.test.ts:1737` 以降の runner 用同型）: (a) machinery checkout と root setter の存在、(b) 計画・起動が machinery のみから読む（PR ツリーを根拠にする step が無い）、(c) 資格なしシェルが slots を一切持たない、(d) secrets がエントリごとに届く。unit: 旧綴り 2 キー統合の読み替え（両キーの混合、deprecation 語の 1 回）。\\n\\n## 受け入れ基準（観測可能）\\n\\n- 新形式の 1 エントリが CI で動作し、secrets を付けたことはそのエントリのジョブだけに届き、付けてないエントリのジョブは slots を一切持たない。\\n- 旧形式（両キー）の config が新コードで読み替えて動く。このリポジトリの main 上の config も読めて全部のジョブが緑である。\\n- 生成 YAML に PR ツリーを計画・起動の根拠にする経路が無い。tools ジョブの起動対象が machinery 由来である。\\n- `bun run test` / `typecheck` / `synth` / `scan_secrets` が通る。\\n\\n## Close 条件（誰が・何で）\\n\\n- 上記受け入れ基準を満たす PR がこの sub-issue のブランチから merge されたこと。契約テストが新形式と旧綴りの読み替え両方を pin した head で確認します。\\n- merge 確認は親側（#672）が行なうので、完了時は merge 後の状態を「何で確認したか」つきで報告する。\\n\\n## 制約・依存\\n\\n- **#668（マーカー巻き戻し、別 run が進行中）に触れない**: `src/entrypoints/machinery/lib/update-apply.ts`、`src/entrypoints/machinery/update_atomaton.ts`、`CONTRIBUTING.md`、`docs/runtime/boundaries.md`、`docs/runtime/tasks/move-to-a-newer-release.md`。`config.ts:34-47` の conflict-marker 診断は #668 側が管理するので触れません。\\n- 旧綴りの読み���え解除は不可。理由は窗口期です。変更が main に land しても main の machinery は旧リリースのまま.shader 新 reader が走るのはリリース適用後で、その適用は config.yaml の衝突で人に止まるので、`.github/atomaton/config.yaml` が新綴りになるのは release 後の人手の後です。その間のジョブが全部緑でいるために旧綴りの読み替えが必須です。\\n- **`package.json` version には触れない**（conventions: version はリリース宣言）。\\n- 資格なし / 資格ありの分離を担保する実装手段（2 シェルか 1 シェル + 空 slots か）は実装側の選択ですが、現行の「slots という書けない場の性質」がある構造（`atomaton-check.wac.ts:159-166` の論拠）を踏襲すること: 資格なしエントリの job に空 slots を置く形は避ける。\\n- e2e サブステップ、`plan_checks.ts` の `parseAcrossReleases` リリース先行 tolerances、runner・validate-pr には手を入れない（すでに原則に合致）。\",\"total_comments\":4,\"parent\":{\"number\":672,\"title\":\"PR 上のファイルを機械が実行・参照する設計をやめる\",\"state\":\"open\"},\"children\":[],\"pull_requests\":[{\"number\":680,\"title\":\"checks: one list, each entry with its own secrets\",\"state\":\"done\"}]}",
+      "tool_call_id": "call_4c50f4523997480ea08a076d"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"## atomaton/issue-672...origin/atomaton/issue-672\\n2e3d911 Merge pull request #680 from yuma-seno/atomaton/issue-676\\nb7c0d3d checks: a credentialed check runs in the default branch's tree\\nc991012 checks: one list, each entry with its own secrets\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":275}",
+      "tool_call_id": "call_96e53d41eb804cd9b974793c"
+    },
+    {
+      "role": "assistant",
+      "content": "子 #676 は CLOSED、#680 は `atomaton/issue-672` に merge 済みで、ローカルも遅れなしです。統一 PR を開く前に、ブランチの差分の形を確認しておきます。",
+      "tool_calls": [
+        {
+          "id": "call_81f40d969b3740b194018681",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git diff --stat origin/main...HEAD | tail -25 && echo === && git diff --name-only origin/main...HEAD | grep -E \\\"update-apply|update_atomaton|CONTRIBUTING|docs/runtime\\\" ; echo \\\"runtime/marker files touched: $?\\\"\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Child #676 is closed, PR #680 merged into `atomaton/issue-672`. Local branch is clean and up to date (`atomaton/issue-672...origin/atomaton/issue-672` with no ahead/behind markers, HEAD = 2e3d911 the merge commit of #680).\n\nNow per aggregation step 5: deliver the accumulated work — call create_pr for this issue's branch. The branch is `atomaton/issue-672`; the base is resolved by the tool (configured base branch, presumably main).\n\nBefore creating the PR, quickly sanity-check what's on the branch vs main so the PR title/body describe the real delta. The delta should be exactly the child's delivery (the merge commit). No further integration work needed — the child report says acceptance criteria all met.\n\nLet me quickly check diff stat between main and this branch to confirm the shape (one coherent change, no #668 files touched). This is worth one command to be able to assert in the PR body that update-apply/update_atomaton and runtime docs are untouched.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"===\\nruntime/marker files touched: 1\\n\",\"stderr\":\"fatal: origin/main...HEAD: no merge base\\nfatal: origin/main...HEAD: no merge base\\n\",\"output_truncated\":false,\"execution_time_ms\":170}",
+      "tool_call_id": "call_81f40d969b3740b194018681"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_1d3066259bd44e1f927ee940",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git log --oneline -1 origin/main 2>&1 | head -2; git merge-base origin/main HEAD 2>&1 | head -2; git log --oneline origin/atomaton-data -1 2>&1 | head -2\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Interesting: `origin/main...HEAD` says \"no merge base\" — fatal. That means origin/main hasn't been fetched or there's no common ancestor? Actually \"no merge base\" for origin/main...HEAD is odd. Earlier `git branch -a` showed `remotes/origin/main` exists. Maybe the local ref `origin/main` is stale or the fetch is shallow. Let me check: `git log origin/main -1` and `git merge-base origin/main HEAD`.\n\nActually it's likely the repo was cloned with a shallow fetch of just the branch? Or `origin/main` might point to a commit not sharing history in a partial clone. Let me investigate briefly.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"5669d71 Merge pull request #678 from yuma-seno/atomaton/issue-668\\n1fb9629 atomaton: metrics from 419 sessions\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":175}",
+      "tool_call_id": "call_1d3066259bd44e1f927ee940"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_8891f492890e4ce2b7fe8475",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git merge-base origin/main HEAD; echo \\\"exit=$?\\\"; git cat-file -t f34aef1 2>&1 | head -1\"}"
+          }
+        }
+      ],
+      "reasoning_content": "`git merge-base origin/main HEAD` printed nothing (fatal was caught? Actually output shows only two log lines). The merge-base output seems missing — the head -2 swallowed? Let me look: stdout block shows `5669d71 Merge pull request #678 from yuma-seno/atomaton/issue-668` then `1fb9629 atomaton: metrics from 419 sessions`. The first line is `git log --oneline -1 origin/main` (wait, that succeeded? but the earlier `git diff --stat origin/main...HEAD` said \"no merge base\"...).\n\nHmm wait — actually the first command `git log --oneline -1 origin/main` may have failed with \"no merge base\"? No, git log doesn't need a merge base. Actually looking at the output: two lines total. The first is origin/main's tip (5669d71, \"Merge pull request #678 from yuma-seno/atomaton/issue-668\"). The second line `1fb9629 atomaton: metrics from 419 sessions` — that's the output of the third command (git log origin/atomaton-data -1). The middle command `git merge-base origin/main HEAD` printed nothing to stdout — meaning it wrote to stderr, which I asked to capture into stdout via 2>&1... but head -2 of the merge-base part... hmm, the stderr section is empty. Odd.\n\nActually with 2>&1 inside the pipe: `git merge-base origin/main HEAD 2>&1 | head -2` should have shown the error if any. It showed nothing, so merge-base succeeded but printed... nothing? No — merge-base prints the SHA. Unless it failed silently? git merge-base prints fatal to stderr on no merge base. The earlier fatal messages came from that shape.\n\nLet me just run `git merge-base origin/main HEAD` alone and check exit code. The important practical question: can I create a PR from this branch to main? That's decided by GitHub, not by local merge-base. The \"no merge base\" earlier might have been about the `origin/main...HEAD` triple-dot syntax needing a merge base — and it failed, which is strange if origin/main shares history.\n\nPossibility: this working copy was cloned shallowly (`--depth`), or origin/main was fetched with a filter. The merge commit f34aef1 was \"Merge pull request #669\" — and #678 merged from atomaton/issue-668 (the marker reversal work!). Wait — #678 on main is the marker reversal PR! That's #668's undo PR merged to main already. Interesting but not mine to act on; #668's run handles it.\n\nActually wait: main's tip is \"Merge pull request #678 from yuma-seno/atomaton/issue-668\" — so the marker reversal is already merged into main. My branch `atomaton/issue-672` was cut from main earlier (at f34aef1 presumably). The PR from `atomaton/issue-672` to main will show main's #678 changes as... no wait, it won't — the PR diff is base...head (three-dot), showing only my branch's changes.\n\nThe missing merge base is concerning though — maybe the local clone just lacks the common ancestor objects because origin/main was fetched at a different time. Let me check `git merge-base` directly and `git fetch origin main` retry. Actually sync_branch could help. Or the simpler explanation: the git objects for the shared ancestor exist — HEAD's history includes f34aef1 (\"Merge pull request #669\"), and origin/main's #668 merge commit's parent chain includes f34aef1 too. So a merge base should exist...\n\nUnless origin/main in this clone is from a different lazy fetch. Let me just test.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"exit=1\\ncommit\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":171}",
+      "tool_call_id": "call_8891f492890e4ce2b7fe8475"
+    },
+    {
+      "role": "assistant",
+      "content": "創出ブランチは origin と一致していますが、ローカルで `origin/main` とのマージベースが解けません。クローンの浅さの可能性を確かめてから、base を取り込みます。",
+      "tool_calls": [
+        {
+          "id": "call_581ffc5084f4459cb3639353",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git rev-parse --is-shallow-repository; git log --oneline -3 origin/main\"}"
+          }
+        }
+      ],
+      "reasoning_content": "So `git merge-base origin/main HEAD` exits 1 with no output — meaning NO merge base between origin/main and HEAD. But both are in the same repo and f34aef1 (a commit in HEAD's ancestry, the old main tip) exists locally. That's bizarre unless origin/main's history rewritten — e.g., main was force-pushed, or the fetch of origin/main is from a different history entirely.\n\nWait — maybe `atomaton-data` (the 1fb9629 metrics commits) is a separate orphan history, and `origin/main` here... no, origin/main is 5669d71 \"Merge pull request #678\". Let me check whether 5669d71's ancestry connects to f34aef1: `git log --oneline origin/main | head -5` and `git merge-base f34aef1 origin/main`.\n\nActually — hold on. Maybe the local clone is shallow: `.git/shallow` with only recent commits of this branch. If the clone was shallow with --single-branch for atomaton/issue-672, then origin/main's history would terminate at a shallow graft boundary... but then merge-base would still resolve if the graft points overlap. If shallow, `git log` on origin/main would show \" commits\" markers.\n\nAlternatively, the origin/main fetch could have been done with commit-graph truncation... Actually simplest: maybe HEAD's ancestry reaching f34aef1 requires history beyond a shallow boundary in origin/main's side: origin/main was fetched with limited depth from its tip; the common ancestor may be deeper than both shallow cuts but the repo isn't marked shallow for it.\n\nThe merge machinery for create_pr happens on GitHub; local merge-base absence would matter for merge_base_into_branch (the tool handles bringing base in — it says it reports diverged branches). But for create_pr, local state doesn't matter; GitHub computes the diff. Still, the child's PR #680 merged cleanly into this branch, and before that... hmm, did this branch ever get merged from main? Not necessarily needed.\n\nFor PR creation, what matters: clean worktree (yes), local/remote HEAD equality (yes). I can create the PR and GitHub resolves base myself. The \"no merge base\" locally might just be a shallow-clone artifact. Let me quickly confirm shallow: `test -f .git/shallow` or `git rev-parse --is-shallow-repository`.\n\nActually wait — it matters for one thing: `merge_base_into_branch` would try to merge main into this branch, and if main has moved (its tip 5669d71 includes #678's marker-reversal work from the OTHER run), that merge might conflict... but that's not needed for creating the PR. The delivery path here: PR from atomaton/issue-672 → main. Review, then merge by the machinery/person. Whether to bring main into my branch first — the machinery's check_merge_readiness would report \"branch behind base\" as a blocker potentially. Hmm, but for the tree's sake: my branch's changes to src/** + docs/pipeline/** shouldn't conflict with #678's changes (update-apply.ts, update_atomaton.ts, CONTRIBUTING.md, docs/runtime/**, plus the #668 files and source-side config.ts diagnostics?). If both sides touched different files, a clean merge later; the PR merge machinery will handle \"branch behind base\" by merging base into branch — or I can pre-merge to make review clean. \n\nHmm wait, actually — did #678 touch src/adapters/runner/config.ts (the conflictMarker diagnosis)? #668's fix was PR #669 (NEVER_MARKED) which the person rejected → #668 asked to revert it (#678 from atomaton/issue-668). So main now has the reversal. My branch doesn't touch those files, so merging main in later should be conflict-free.\n\nDecision: don't pre-merge main locally (the merge_base_into_branch tool exists for that and the machinery may handle it check_merge_readiness → \"behind base\" blocker). Actually, better to proactively make the branch current with its base so the PR reviews the true delta and merge is unblocked at creation time: use merge_base_into_branch — it resolves the base from the tree (this run's issue branch → configured base main), merges cleanly, and pushes. If it reports 'conflicts', I resolve. That's the delivery-shape move.\n\nHmm, but one consideration: the local \"no merge base\" anomaly might break merge_base_into_branch too. Let me first check shallow-status and whether fetch from origin of main would fix it: `git fetch origin main --depth...` can't install without network? The bash tool has network? Not guaranteed. Actually `git fetch origin` is a network op — allowed? The machinery said raw git pushes/dispatch go through MCP tools; read-only git runs normally. A fetch is a mutation-ish op but sync_branch/merge_base_into_branch are the sanctioned tools. So: check shallow status, then call merge_base_into_branch (it'll fetch on its own through the machinery's git plumbing).\n\nLet me check shallow quickly, then call merge_base_into_branch.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\"true\\n5669d71 Merge pull request #678 from yuma-seno/atomaton/issue-668\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":155}",
+      "tool_call_id": "call_581ffc5084f4459cb3639353"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_791cbf7f9f45404283ae0207",
+          "type": "function",
+          "function": {
+            "name": "merge_base_into_branch",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "reasoning_content": "Shallow repository = true. So the \"no merge base\" is a shallow-clone artifact — History for origin/main was fetched at some shallow depth and my branch's history too; their common ancestor may sit beyond a shallow boundary on one side. Not something to repair by hand (no network guarantee for fetch via bash; the sanctioned tools fetch themselves).\n\nNext step: bring main into this branch via merge_base_into_branch, which is the sanctioned way and resolves the base from the tree. Then commit_and_push isn't needed if merge lands (the tool pushes itself). Then create_pr with reviewer.\n\nBody: describe the delivery. Write it in Japanese (person communicates in Japanese). Content:\n- 結論: what this PR delivers — the unified checks design per approved decisions.\n- The principle: machinery reads only from default branch; PR tree is data.\n- Decision 1 implemented: one list, per-entry secrets, credentialed/non-credentialed shells keep separation (no slots where no secret), old spelling read-translated with one deprecation warning (transition window because release applies later).\n- Decision 2: no post-merge live check — release-time check stands.\n- Tools job: runs from machinery, PR tree data; relative path resolution fix (from review).\n- Tests: contract tests pinning the shape;孩子的 acceptance criteria met (CI green on head).\n- What's NOT in this PR: #668 marker work (separate, already merged to main via #678).\n- After merge: release applies to make new workflow live; .github/atomaton/config.yaml stays old spelling until then, handled by translation.\n- Note: PR body of #680 stale — mention current design lives in docs/pipeline/boundaries.md and reference.md.\n\nAlso note for reviewer: which files changed. Let me get the diff stat against main... can't locally due to merge base. I'll rely on the child's report + the changed files list from the child description. Actually once merge_base_into_branch merges main in, `git diff origin/main...HEAD`... still three-dot with new merge base — after the merge, HEAD contains origin/main as ancestor, so merge-base resolves to origin/main tip and three-dot diff = exactly my branch's changes. Let me do that: merge first, then diff-stat to describe the PR accurately.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"merged\",\"branch\":\"atomaton/issue-672\",\"base\":\"main\",\"base_sha\":\"5669d718102542f12e5e88cdea6a9c94d86a7bd8\",\"commit\":\"4a5c0fb7a8911be4a12b0f4089e270455baeb8f5\"}",
+      "tool_call_id": "call_791cbf7f9f45404283ae0207"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_96754854506144709d12a1d9",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git diff --stat origin/main...HEAD | tail -30\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Base merged cleanly (main's #668-reversal work came in without conflicts, as expected since file sets are disjoint). Now the diff to base is exactly this issue's changes. Get the stat to describe the PR accurately.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" src/adapters/runner/config.ts                      |  33 +-\\n src/content/config.yaml                            |  38 +--\\n .../skills/delivery/pipeline-setup/SKILL.md        |  67 ++--\\n src/domain/delivery/check-jobs.test.ts             | 149 +++++++++\\n src/domain/delivery/check-jobs.ts                  | 158 ++++++---\\n src/domain/delivery/declared-config.ts             |  30 +-\\n src/domain/delivery/declared-jobs.test.ts          |  91 ++----\\n src/domain/delivery/declared-jobs.ts               |  65 ++--\\n src/domain/delivery/declared-secrets.ts            |  21 +-\\n src/domain/delivery/deliverable-integrity.test.ts  |  17 +-\\n src/domain/delivery/deliverable-integrity.ts       |  57 ++--\\n src/domain/delivery/deploy-jobs.ts                 |   8 +-\\n src/domain/delivery/merge-readiness.test.ts        |   4 +-\\n src/domain/delivery/merge-readiness.ts             |   2 +-\\n src/domain/delivery/runner-label.ts                |   2 +-\\n src/domain/machinery/machinery-layout.ts           |   8 +-\\n src/entrypoints/machinery/check_live_tools.ts      |  19 +-\\n src/entrypoints/machinery/plan_checks.ts           |  60 +---\\n src/entrypoints/machinery/scan_secrets.ts          |   2 +-\\n src/entrypoints/machinery/validate_deliverable.ts  |   6 +-\\n src/workflows/actions/declared-job.ts              |  19 +-\\n src/workflows/actions/environment-setup.ts         |  24 +-\\n src/workflows/atomaton-check.wac.ts                | 363 +++++++++++++--------\\n src/workflows/atomaton-deploy.wac.ts               |   4 +-\\n tests/contract/config-contract.test.ts             |   6 +-\\n tests/contract/config-paths.test.ts                |  11 +-\\n tests/contract/environment-setup.test.ts           |  12 +-\\n tests/contract/generated-workflows.test.ts         | 188 ++++++++++-\\n tests/contract/reserved-names.test.ts              |  16 +-\\n 42 files changed, 1127 insertions(+), 626 deletions(-)\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":164}",
+      "tool_call_id": "call_96754854506144709d12a1d9"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_ad3b0672e4914f38a3437b6e",
+          "type": "function",
+          "function": {
+            "name": "bash",
+            "arguments": "{\"command\":\"git diff --stat origin/main...HEAD | head -15\"}"
+          }
+        }
+      ],
+      "reasoning_content": "Wait — the stat shows only 29 files in tail but says \"42 files changed\". Let me see the top of the list too (docs/). Let me get the full list quickly — I want names for the docs portion for the PR body.",
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"status\":\"completed\",\"exit_code\":0,\"stdout\":\" docs/README.md                                     |   4 +-\\n docs/config/reference.md                           |   5 +-\\n docs/environment/reference.md                      |  14 +-\\n docs/pipeline/boundaries.md                        |  52 +--\\n docs/pipeline/how-it-works.md                      |  32 +-\\n docs/pipeline/overview.md                          |   4 +-\\n docs/pipeline/reference.md                         |  70 ++--\\n .../check-a-pull-request-against-a-real-service.md |  43 ++-\\n ...y-a-pipeline-an-agent-can-write-and-maintain.md |   2 +-\\n docs/pipeline/tasks/take-over-an-existing-ci-cd.md |   4 +-\\n docs/pull-requests/boundaries.md                   |  34 +-\\n docs/template/architecture.md                      |   7 +-\\n docs/tools/boundaries.md                           |   2 +-\\n src/adapters/runner/config.ts                      |  33 +-\\n src/content/config.yaml                            |  38 +--\\n\",\"stderr\":\"\",\"output_truncated\":false,\"execution_time_ms\":156}",
+      "tool_call_id": "call_ad3b0672e4914f38a3437b6e"
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_e1f5cdfc4990454fb04da83d",
+          "type": "function",
+          "function": {
+            "name": "create_pr",
+            "arguments": "{\"body\":\"## 何を変えるか\\n\\nPR ツリーの中身を機械が実行したり動作の根拠にしたりする経路をなくします。設計は #672 で承認済み（本人判断 2 点を反映）。\\n\\n**原則** — 機械が読むもの（config.yaml、agent 定義、tools.yaml、machinery スクリプト）はすべてデフォルトブランチから取る。PR ツリーは、走るコマンドが検査する対象のデータとして渡されるだけで、何を・どう走らせるかを決めない。エージェント実行（runner）と validate-pr はすでにこの形なので、この PR は PR チェック側をそこに揃えるものです。\\n\\n**決定 1 — チェックの 2 アームを 1 本の一覧に統一。** `checks.from_pull_request` と `checks.from_default_branch` を廃し、1 本の `checks` にします。各エントリは自分の `secrets` を宣言します。資格情報なしのチェックは、シークレットスロットを一切持たないジョブで動き続けます（empty slots を置く形ではなく、書ける場自体が無い形で分離を担保）。旧綴りの config は読み替えて動かし、`::warning::` を 1 回だけ出します — リリース適用までは main の config が旧綴りのままなので、その間の緑のために必須です。\\n\\n**決定 2 — マージ後の tools ライブチェックは新設しない。** リリース時の live チェックと次回 run の起動時 validation が到達点のままです。\\n\\n**atomaton-tools ジョブの改修。** このジョブはこれまで PR だけを checkout し PR が宣言した MCP サーバーを起動していました。machinery をデフォルトブランチから checkout して `ATOMATON_MACHINERY_ROOT` を据え、起動対象を machinery 由来の tools.yaml に載せ替えます。レビューで指摘された相対パスが PR 側ファイルに解決される経路も塞いでいます（資格ありジョブはデフォルトブランチを作業ツリーにし、PR は `$ATOMATON_PR_TREE` のパスとしてだけ渡す形）。\\n\\n## レビューの起点\\n\\n- 設計議論は #672 の thread。判断は yuma-seno の 2 決定（設計案への返答）です。\\n- 今の設計の記述は docs/pipeline/boundaries.md と docs/pipeline/reference.md です（子 PR の #680 の本文はレビュー前の設計のままで stale なので、そちらを参考にしないでください）。\\n\\n## 確かめていること\\n\\n- 契約テスト（tests/contract/generated-workflows.test.ts）が生成 YAML の形を pin: machinery checkout と root setter、計画・起動が machinery のみから読むこと、資格なしシェルが slots を持たないこと、secrets がエントリごとに届くこと。\\n- 旧綴り読み替えの unit テスト（src/domain/delivery/check-jobs.test.ts）: 両キー混合、警告 1 回。\\n- 子 #676 の head で `bun run test` 2696 pass / 0 fail、typecheck・synth・scan_secrets とも緑。このリポジトリ自身の CI も `verify` 1 エントリで緑でした。\\n\\n## 含まれないもの\\n\\n- 競合マーカーの一様化（NEVER_MARKED 廃止）は #668 / #678 で既に main に入っており、この PR は触れません。\\n- `package.json` の version には触れていません（リリース宣言は別判断）。\\n\\n## マージ後に起きること\\n\\n- リリースが適用されて新しい atomaton-check.yml が runner 上で初めて走ります。その時点でこのリポジトリ自身の config はまだ旧綴りですが、読み替えに乗って緑のままです。\\n- `.github/**` はこの PR の差分に出ません（リリース経由のため）。\",\"reviewer\":\"reviewer\",\"title\":\"PR ツリーを機械の実行・参照の根拠にしないチェック機構にする\"}"
+          }
+        }
+      ],
+      "finish_reason": "tool_calls"
+    },
+    {
+      "role": "tool",
+      "content": "{\"number\":681,\"url\":\"https://github.com/yuma-seno/atomaton/pull/681\",\"base\":\"\",\"validation_dispatched\":true}",
+      "tool_call_id": "call_e1f5cdfc4990454fb04da83d"
     }
   ],
   "metadata": {
     "github_context": {
       "agent": "atomaton",
-      "event_count": 3,
+      "event_count": 5,
       "session_number": "672",
-      "snapshot_hash": "89e8f03819567d002cafc8aebd6ffb92761035ca76bdd14838c9f039fb11a914",
+      "snapshot_hash": "86b93c52c4061877ca4d675d2289d89e322053ca2c6b063c245f507b5accbb9d",
       "type": "issue",
       "version": 1
     }
@@ -910,6 +1133,26 @@
         }
       },
       "started": "2026-11-28T15:00:00Z"
+    },
+    {
+      "compactions": 0,
+      "ended": "2026-11-28T16:11:11Z",
+      "ended_because": "completed",
+      "iterations": 9,
+      "loop_recoveries": 0,
+      "messages": 106,
+      "seconds": 563,
+      "server_calls": {
+        "github": {
+          "create_pr": 1,
+          "get_issue": 1,
+          "merge_base_into_branch": 1
+        },
+        "shell": {
+          "bash": 7
+        }
+      },
+      "started": "2026-11-28T16:01:48Z"
     }
   ]
 }
