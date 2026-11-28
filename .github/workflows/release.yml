@@ -645,13 +645,6 @@ jobs:
       # here the refusal would not fail loudly, it would land in the WARN branch
       # and leave the update pull request standing.
       checks: read
-      # The script's one dispatch: a plan that collides starts
-      # `agents.on_update_conflict` on the pull request it stopped at, and
-      # `workflow_dispatch` is the exception a `GITHUB_TOKEN` can still make. A job
-      # without it gets a WARN and a pull request left for a person instead of the
-      # agent this repository asked for. It widens nothing else -- `checks: write`
-      # is absent, so this token cannot produce a check result.
-      actions: write
     steps:
       # `main`, and not the dispatch's commit: the version-bump commit this run
       # merged has moved main past it, and the tree the update applies to must

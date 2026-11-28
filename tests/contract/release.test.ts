@@ -172,13 +172,7 @@ describe("Release", () => {
     // fails after doing the work that came before it: `gh workflow run` under
     // the hood is an `actions: write` call, and a job granted only reads gets
     // all the way to a red step after the release is already published.
-    //
-    // `apply-to-self` dispatches nothing from its own bash, but the script it runs
-    // does: a plan that collides starts `agents.on_update_conflict` on the pull
-    // request it stopped at, through `workflow_dispatch`. Without the permission
-    // that refusal is a WARN and a pull request left standing for a person -- the
-    // one outcome a release that asked for `pr-agent` did not ask for.
-    for (const name of ["release", "merge-release", "apply-to-self"]) {
+    for (const name of ["release", "merge-release"]) {
       expect(jobs[name]?.permissions?.["actions"], `${name} may dispatch`).toBe("write");
     }
     // And no raw dispatch hides in the step bodies. The same rule as
