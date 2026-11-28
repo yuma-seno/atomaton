@@ -14,12 +14,12 @@
  *
  * `token` is the update lane's PAT, and the notice must pass it. A workflow that
  * declares `permissions` gets `none` for every scope it does not list, and
- * `atomaton-new-release.yml` lists `contents` and `issues` only: on a private
- * repository its own token cannot list pull requests at all. The refusal would come
- * back as this function's `0` -- "no pull request is open" -- and the cron would
- * dispatch the same update every day for as long as the release is waiting. Reading
- * as the identity that may is cheaper than the alternative, which is adding
- * `pull-requests: read` to the permissions of the workflow that writes the notice.
+ * `atomaton-new-release.yml` declares no `pull-requests`: on a private repository its
+ * own token cannot list pull requests at all. The refusal would come back as this
+ * function's `0` -- "no pull request is open" -- and the cron would dispatch the same
+ * update every day for as long as the release is waiting. Reading as the identity that
+ * may is cheaper than the alternative, which is adding `pull-requests: read` to the
+ * permissions of the workflow that writes the notice.
  */
 import { ghAs, ghRead } from "../../../adapters/github/gh.ts";
 

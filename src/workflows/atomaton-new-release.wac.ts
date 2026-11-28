@@ -19,18 +19,26 @@ import { ref as notifyNewReleaseRef } from "../entrypoints/machinery/notify_new_
 // ## What it needs
 //
 // `contents: read` to read the releases and the manifest at the tag, `issues: write`
-// to open the notice -- and nothing else in the way of permissions, no GitHub App and
-// no branch protection. That is the whole reason this ships before the sync half of
-// the same problem: an upgrade nobody knows about is the first barrier, and it can be
-// removed without asking an adopter to configure anything.
+// to open the notice, and `actions: write` to start the update when the repository
+// asked for one. No GitHub App and no branch protection -- which is the whole reason
+// this ships before the sync half of the same problem: an upgrade nobody knows about
+// is the first barrier, and it can be removed without asking an adopter to configure
+// anything.
+//
+// `actions: write` is what makes the dispatch below this run's own doing rather than
+// a thing borrowed from a secret, and `workflow_dispatch` is the documented exception
+// that runs even when `GITHUB_TOKEN` is what asked for it -- the same shape as every
+// other dispatch the machinery makes. It does not widen the gate the update's merge
+// waits behind: `checks: write` is absent, so this token cannot produce a check
+// result, and the checks that gate the merge are started by the update token's push.
 //
 // One secret is READ, and only for the project that asked for it: with
 // `update.on_new_release` set to `pr` or `pr-agent` the notice dispatches the update
-// workflow, and this workflow's own token may not start a run (`actions: write` is
-// not declared here and will not be -- widening the permission of the job that
-// rewrites `.github/` is a bigger decision than carrying the PAT that already exists
-// for this lane). The secret is empty in a repository that never set it, which is
-// exactly the default mode: `issue` reads it, sees nothing, and dispatches nothing.
+// workflow, and `ATOMATON_UPDATE_TOKEN` is what that run then pushes, opens its pull
+// request and merges with -- and what this notice reads an open pull request as,
+// since no `pull-requests` is declared here. A token without `Actions` is enough for
+// all of that. The secret is empty in a repository that never set it, which is exactly
+// the default mode: `issue` reads it, sees nothing, and dispatches nothing.
 //
 // ## In this repository it is a no-op
 //
@@ -59,11 +67,12 @@ export const atomaNewRelease = new Workflow("atomaton-new-release", {
   },
   // The narrowest permission set any generated workflow here declares, and the
   // point of shipping this half first. Constant rather than `ATOMATON_WORKFLOW_-
-  // PERMISSIONS`: this run starts no agent, writes no pull request, and dispatches
-  // nothing, so none of that token can be spent by it. `actions` is here because
-  // every generated workflow declares it and removing it from one file would be a
-  // second opinion about the shape -- see the note in that module.
-  permissions: { contents: "read", issues: "write" },
+  // PERMISSIONS`: this run starts no agent and writes no pull request, so none of
+  // that token can be spent by it. `actions` is what starts the update workflow it
+  // announces, and it is in the same set every other dispatching workflow declares
+  // -- `workflow_dispatch` is the exception `GITHUB_TOKEN` can make. `checks: write`
+  // stays absent, so nothing here can produce a check result.
+  permissions: { contents: "read", issues: "write", actions: "write" },
 }).addJobs(
   startJob(
     "notify",

@@ -197,24 +197,12 @@ export function dispatchCi(branch: string): boolean {
  * reports only where the machinery reports anyway: the pull request, and the
  * notice when one stands open.
  */
-export function dispatchUpdate(
-  repo: string,
-  source: number,
-  options: {
-    /**
-     * The update's own PAT, when the caller that noticed the release has no
-     * `actions: write` to dispatch with. Passed by the new-release notice, whose
-     * workflow declares `contents: read` and `issues: write` and nothing else.
-     */
-    token?: string;
-  } = {},
-): boolean {
+export function dispatchUpdate(repo: string, source: number): boolean {
   return dispatchWorkflow(
     `dispatchUpdate: taking a newer release onto ${repo}`,
     "atomaton-update.yml",
     ["--repo", repo, "-f", `source=${source > 0 ? String(source) : ""}`],
     log,
-    options.token,
   );
 }
 
@@ -235,12 +223,7 @@ export function dispatchUpdate(
  * post-merge re-invocation does it -- tagged `include`, because it is the first
  * message the resolving agent reads and it is what tells it what to do.
  */
-export function dispatchUpdateConflictAgent(
-  repo: string,
-  prNumber: number,
-  agent: string,
-  options: { token?: string } = {},
-): boolean {
+export function dispatchUpdateConflictAgent(repo: string, prNumber: number, agent: string): boolean {
   const directive =
     `${LLM_CONTEXT_TAG.write("include")}\n${DISPATCH_TAG.write(agent)}\n` +
     "Atomaton: this pull request takes a newer release onto this tree and stopped where the two " +
@@ -264,7 +247,6 @@ export function dispatchUpdateConflictAgent(
       number: prNumber,
       repo,
       markerCommentId,
-      token: options.token,
       log,
     }) === "dispatched"
   );

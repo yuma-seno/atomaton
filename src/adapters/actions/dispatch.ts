@@ -226,16 +226,6 @@ export interface RunnerDispatch {
    */
   continuesChain?: boolean;
   /**
-   * A token to dispatch as, when the caller's own token cannot start a run.
-   *
-   * Only the update lane passes one: `atomaton-update.yml` declares no `actions:
-   * write`, so `gh workflow run` under its own token is refused, while the PAT it
-   * already holds for the push and the merge starts runs. Omitted everywhere else,
-   * which dispatches as the ambient `GH_TOKEN` -- what every other workflow here
-   * already does.
-   */
-  token?: string;
-  /**
    * The chain identity a hand-off dispatch carries, for the refusal that ends it (#194).
    *
    * A hand-off is a PROMISE: the run ended `ended=handoff answers=<ask> run=<run>`, and
@@ -766,7 +756,7 @@ export function dispatchRunner(d: RunnerDispatch): DispatchOutcome {
     // Empty when a person or the machinery started the run -- see `dispatchedBy`.
     "--field", `dispatched_by=${d.dispatchedBy ?? ""}`,
   ];
-  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log, d.token)) {
+  if (!dispatchWorkflow(d.context, runnerWorkflow(), args, d.log)) {
     // GitHub rejected the dispatch itself. For a hand-off this is the promise breaking
     // like any other refusal (#194): the marker this dispatch posted is a phantom ask
     // that nothing will ever claim, so it comes back down, and the ending goes up —

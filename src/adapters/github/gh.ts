@@ -352,25 +352,26 @@ export function ghPaginated<T = unknown>(...args: string[]): T[] {
  *
  * `context` prefixes both messages so a log line still says who was dispatching.
  *
- * ## `token`, for the one caller whose own token cannot start a run
+ * ## The identity is the calling workflow's own token
  *
- * Every caller but the release machinery dispatches as the ambient `GH_TOKEN`, which
- * is right: whichever workflow holds it, `actions: write` is declared there. The
- * update lane is the exception -- its workflow declares no `actions: write`, on
- * purpose, because widening the permission of the job that rewrites `.github/` is a
- * bigger decision than carrying a PAT for the one dispatch it needs. So the token is
- * passed, through `ghAs`, and the env assembly is the same as the ambient path's:
- * `ghAs` builds a per-process environment and lets it die with the process.
+ * No caller passes one, and none should: every workflow that dispatches declares
+ * `actions: write`, so the ambient `GH_TOKEN` it already holds can start a run —
+ * `workflow_dispatch` is the documented exception that runs when `GITHUB_TOKEN` is
+ * what asked for it, which is why it is how this system replaces the events GitHub
+ * suppressed (see `dispatch-targets.ts`). A workflow whose own token could not start
+ * one would be declaring the wrong permission, and the fix belongs in its
+ * `permissions` block rather than in a PAT threaded through here — a PAT reaches a
+ * call site and the permission reaches the job, and only the second is visible to
+ * whoever reads the workflow.
  */
 export function dispatchWorkflow(
   context: string,
   workflow: string,
   args: string[] = [],
   log: (message: string) => void = (m) => console.error(m),
-  token = "",
 ): boolean {
   const argv = ["workflow", "run", workflow, ...args];
-  const { code, stdout, stderr } = token.trim() ? ghAs(token.trim(), ...argv) : gh(...argv);
+  const { code, stdout, stderr } = gh(...argv);
   if (code) {
     log(`${context}: WARN failed to dispatch ${workflow}: ${stderr || stdout}`);
     return false;
