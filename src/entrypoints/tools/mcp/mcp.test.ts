@@ -2003,6 +2003,225 @@ describe("mcp/github.ts", () => {
     expect(r.result.content[0].text).toContain("/engineer");
   });
 
+  /**
+   * Filing a root issue starts an agent, and the rules are `agents.on_agent_issue`'s.
+   *
+   * The issue is created with the run's own `GITHUB_TOKEN`, and GitHub delivers no
+   * workflow event for an event its own token caused — so `issues.opened` never fires
+   * for it. Without the tool dispatching, a defect an agent found during a run sits
+   * open until a person asks for a run on it, which is what #653 was about; and
+   * without the title check, two agents filing one defect start two runs on one
+   * report.
+   *
+   * `off` is a project's decision, so the fixture that says `off` is the control: it
+   * holds that no directive is posted and no run is started.
+   */
+  describe("create_root_issue starting the agent that acts on it", () => {
+    /** The directive this dispatch posts, found in the fake `gh` log. */
+    function directiveIn(log: string): string {
+      const calls = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      const posted = calls.find((argv) => argv[0] === "api" && argv.some((a) => a.includes("comments")) && argv.includes("POST"));
+      return posted ? (posted[posted.indexOf("-f") + 1] ?? "") : "";
+    }
+
+    const callsIn = (log: string): string[][] =>
+      readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+
+    test("`off` files the issue and starts nobody", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-root-off-"));
+      const configDir = makeConfigDir({ agents: { on_agent_issue: "off" } });
+      const log = join(dir, "gh.log");
+      try {
+        const r = await sendRequest(
+          "github.ts",
+          { jsonrpc: "2.0", id: 50, method: "tools/call", params: { name: "create_root_issue", arguments: { title: "A defect" } } },
+          {
+            ...fakeGhSeam(),
+            NUMBER: "21",
+            NOTIFY: "octocat",
+            ATOMATON_MACHINERY_ROOT: configDir,
+            FAKE_GH_LOG: log,
+            FAKE_GH_RESPONSES: JSON.stringify([
+              { match: ["issue", "list"], stdout: "[]" },
+              { match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/13" },
+            ]),
+          },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        expect(JSON.parse(r.result.content[0].text)).toMatchObject({ number: 13, root: true });
+        expect(JSON.parse(r.result.content[0].text).auto_start).toBeUndefined();
+
+        const calls = callsIn(log);
+        expect(calls.some((argv) => argv[0] === "workflow"), "nothing was dispatched").toBe(false);
+        // A POST, not a read: the mention check reads the repository's participants
+        // on every filing, and that is not a comment being written.
+        expect(calls.some((argv) => argv.includes("POST")), "no directive was posted").toBe(false);
+      } finally {
+        removeTemp(dir);
+        removeTemp(configDir);
+      }
+    });
+
+    test("a configured agent is started on the new issue, told where it came from", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-root-start-"));
+      const configDir = makeConfigDir({ agents: { on_agent_issue: "atomaton" } });
+      const log = join(dir, "gh.log");
+      try {
+        const r = await sendRequest(
+          "github.ts",
+          { jsonrpc: "2.0", id: 51, method: "tools/call", params: { name: "create_root_issue", arguments: { title: "A defect" } } },
+          {
+            ...fakeGhSeam(),
+            TYPE: "issue",
+            NUMBER: "644",
+            AGENT: "engineer",
+            NOTIFY: "octocat",
+            ATOMATON_RUN_URL: "https://github.com/owner/repo/actions/runs/99",
+            ATOMATON_MACHINERY_ROOT: configDir,
+            FAKE_GH_LOG: log,
+            FAKE_GH_RESPONSES: JSON.stringify([
+              // Listed before the state rule: the state read's path is a substring of
+              // these, and the fake takes the first match.
+              { match: ["api", "issues/13/comments", "POST"], stdout: "900" },
+              { match: ["api", "issues/13/comments"], stdout: JSON.stringify([{ id: 900, body: "<!-- atomaton:dispatch=atomaton -->" }]) },
+              { match: ["api", "issues/13"], stdout: JSON.stringify({ state: "open" }) },
+              { match: ["issue", "list"], stdout: "[]" },
+              { match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/13" },
+              { match: ["workflow", "run"], stdout: "" },
+            ]),
+          },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        const filed = JSON.parse(r.result.content[0].text);
+        expect(filed).toMatchObject({ number: 13, auto_start: { agent: "atomaton", outcome: "dispatched" } });
+        expect(filed.auto_start.note, "nothing for the caller to do about it").toBeUndefined();
+
+        const directive = directiveIn(log);
+        // The tags are what make the comment a dispatch marker and the run's ask; the
+        // prose is what the started agent reads first, and it says the two things the
+        // run cannot infer: that nobody asked for it, and where it came from.
+        expect(directive).toContain("<!-- atomaton:llm-context=include -->");
+        expect(directive).toContain("<!-- atomaton:dispatch=atomaton -->");
+        expect(directive).toContain("@octocat");
+        expect(directive).toContain("Auto-started");
+        expect(directive).toContain("Filed from #644 by `engineer` (https://github.com/owner/repo/actions/runs/99).");
+        expect(directive).toContain("Start with the reproduction");
+
+        const dispatched = callsIn(log).find((argv) => argv[0] === "workflow") ?? [];
+        expect(dispatched.join(" "), "the run is started on the issue, by the tool").toContain("number=13");
+        // The directive is the ask this run claims, and the run reports to the person
+        // who was mentioned rather than back to the agent that filed the issue — that
+        // agent has carried on with its own run and is waiting for nothing.
+        expect(dispatched.join(" ")).toContain("ask=900");
+        expect(dispatched).toContain("dispatched_by=");
+      } finally {
+        removeTemp(dir);
+        removeTemp(configDir);
+      }
+    });
+
+    test("a dispatch failure does not undo the filing", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-root-startfail-"));
+      const configDir = makeConfigDir({ agents: { on_agent_issue: "atomaton" } });
+      const log = join(dir, "gh.log");
+      try {
+        const r = await sendRequest(
+          "github.ts",
+          { jsonrpc: "2.0", id: 52, method: "tools/call", params: { name: "create_root_issue", arguments: { title: "A defect" } } },
+          {
+            ...fakeGhSeam(),
+            NUMBER: "21",
+            ATOMATON_MACHINERY_ROOT: configDir,
+            FAKE_GH_LOG: log,
+            // No rule for the comment POST: `gh` exits 1, so the directive is never
+            // posted and nothing can be dispatched against it.
+            FAKE_GH_RESPONSES: JSON.stringify([
+              { match: ["issue", "list"], stdout: "[]" },
+              { match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/13" },
+            ]),
+          },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        const filed = JSON.parse(r.result.content[0].text);
+        expect(filed).toMatchObject({ number: 13, auto_start: { agent: "atomaton", outcome: "failed" } });
+        // The filing agent has to be able to tell "nothing is running" from "a run is
+        // on its way", and to say what a person can do about the first one.
+        expect(filed.auto_start.note).toContain("/atomaton");
+      } finally {
+        removeTemp(dir);
+        removeTemp(configDir);
+      }
+    });
+
+    test("a title an open issue already carries is linked there instead of filed", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-root-duplicate-"));
+      const configDir = makeConfigDir({ agents: { on_agent_issue: "off" } });
+      const log = join(dir, "gh.log");
+      try {
+        const r = await sendRequest(
+          "github.ts",
+          {
+            jsonrpc: "2.0", id: 53, method: "tools/call",
+            params: { name: "create_root_issue", arguments: { title: "Search server reports nothing", body: "Seen again on main." } },
+          },
+          {
+            ...fakeGhSeam(),
+            NUMBER: "21",
+            ATOMATON_MACHINERY_ROOT: configDir,
+            FAKE_GH_LOG: log,
+            FAKE_GH_RESPONSES: JSON.stringify([
+              { match: ["issue", "list"], stdout: JSON.stringify([{ number: 644, title: "search   server reports nothing" }]) },
+              { match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/999" },
+              { match: ["api", "issues/644/comments", "POST"], stdout: "901" },
+            ]),
+          },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        expect(JSON.parse(r.result.content[0].text)).toMatchObject({
+          number: 644,
+          created: false,
+          duplicate_of: 644,
+          linked: true,
+        });
+
+        const calls = callsIn(log);
+        expect(calls.some((argv) => argv[0] === "issue" && argv[1] === "create"), "nothing new was filed").toBe(false);
+        const posted = calls.find((argv) => argv[0] === "api" && argv.includes("POST")) ?? [];
+        const comment = posted[posted.indexOf("-f") + 1] ?? "";
+        // The second report is not thrown away: the run on that issue is the reader
+        // that would otherwise never see it.
+        expect(comment).toContain("Seen again on main.");
+      } finally {
+        removeTemp(dir);
+        removeTemp(configDir);
+      }
+    });
+
+    // A search GitHub could not answer is not evidence that the issue does not exist,
+    // and refusing to file would lose the defect an agent found during its run.
+    test("an unreadable duplicate search files the issue anyway, and says so", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "atomaton-root-dupunknown-"));
+      const configDir = makeConfigDir({ agents: { on_agent_issue: "off" } });
+      try {
+        const r = await sendRequest(
+          "github.ts",
+          { jsonrpc: "2.0", id: 54, method: "tools/call", params: { name: "create_root_issue", arguments: { title: "A defect" } } },
+          {
+            ...fakeGhSeam(),
+            NUMBER: "21",
+            ATOMATON_MACHINERY_ROOT: configDir,
+            FAKE_GH_RESPONSES: JSON.stringify([{ match: ["issue", "create"], stdout: "https://github.com/owner/repo/issues/13" }]),
+          },
+        );
+        expect(r.result.isError, r.result.content?.[0]?.text).toBeFalsy();
+        expect(JSON.parse(r.result.content[0].text)).toMatchObject({ number: 13, duplicate_check: "unreadable" });
+      } finally {
+        removeTemp(dir);
+        removeTemp(configDir);
+      }
+    });
+  });
+
   test("create_root_issue escapes a mention it cannot vouch for", async () => {
     const dir = mkdtempSync(join(tmpdir(), "atomaton-root-mentions-"));
     const log = join(dir, "gh.log");

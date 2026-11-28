@@ -22,6 +22,14 @@
  * the prose is a caller whose tooling atoma breaks by rewording a warning. So this
  * reads `kind=`, `severity=` and the fields beside them, and never the sentence.
  *
+ * ## Why the dispatch is direct
+ *
+ * The issue is created with this job's own `GITHUB_TOKEN`, and GitHub delivers no
+ * workflow event for an event its own token caused — so `issues.opened` never fires
+ * for it, and neither does a comment posted afterwards. The agent is started by
+ * `dispatchConfigFindingAgent`, the same bridge the rest of the machinery uses. See
+ * `adapters/actions/dispatch-targets.ts`.
+ *
  * ## Why one issue per finding, deduplicated
  *
  * A defect in the tools file is not transient: every run until somebody fixes it
@@ -37,7 +45,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { gh } from "../../adapters/github/gh.ts";
-import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { dispatchConfigFindingAgent } from "../../adapters/actions/dispatch-targets.ts";
 import { defineScript } from "./lib/script-ref.ts";
 
 export interface ReportConfigFindingsArgs {
@@ -178,22 +186,25 @@ function main(): void {
       console.error(`::warning::could not open an issue for this finding: ${created.stderr.trim()}`);
       continue;
     }
-    const number = created.stdout.trim().split("/").pop() ?? "";
+    const number = Number(created.stdout.trim().split("/").pop() ?? "");
+    // Nothing can be dispatched against a number this could not read, and a warning is
+    // the honest report: the issue exists, so the defect is on the record, and a person
+    // can put an agent on it by hand.
+    if (!Number.isInteger(number) || number <= 0) {
+      console.error(`::warning::opened an issue for this finding but could not read its number from '${created.stdout.trim()}'`);
+      continue;
+    }
     log(`opened #${number} for ${fields}`);
 
-    // The agent, on the issue, as a comment -- the same way a person asks. A
-    // dispatch here would have to name the agent in a workflow input, which is the
-    // hardcoding `agents` exists to remove; a comment is read by the entry workflow,
-    // which resolves the name from the thread like every other run.
-    //
-    // Tagged `include`: this is the request the agent is being started on, so it is
-    // the one comment on the issue it has to read.
-    const asked = gh(
-      "issue", "comment", number, "--repo", repo,
-      "--body", `${LLM_CONTEXT_TAG.write("include")}\n/${agent}\n\nRepair the configuration defect reported above.`,
-    );
-    if (asked.code !== 0) {
-      console.error(`::warning::opened #${number} but could not start ${agent} on it: ${asked.stderr.trim()}`);
+    // Dispatched, not commented. This used to post `/<agent>` and leave the entry
+    // workflow to read it — and a comment written with this job's own `GITHUB_TOKEN`
+    // fires no `issue_comment.created`, so no run ever arrived: the issue sat open
+    // carrying a command that looked like it had asked for one. A dispatch here names
+    // no agent in a workflow input either, which is the hardcoding `agents` exists to
+    // remove; the name is the one `agents.on_config_finding` supplied.
+    const outcome = dispatchConfigFindingAgent(repo, number, agent);
+    if (outcome !== "dispatched") {
+      console.error(`::warning::opened #${number} but could not start ${agent} on it (${outcome})`);
     }
   }
 }

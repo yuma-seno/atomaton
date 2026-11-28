@@ -41,6 +41,7 @@
  */
 import { CHECKS_FROM_DEFAULT_BRANCH, CHECKS_FROM_PULL_REQUEST } from "./check-jobs.ts";
 import { isControlCommand } from "../../domain/work/control-commands.ts";
+import { AGENT_ISSUE_OFF } from "../../domain/work/filed-issue.ts";
 import { resolveDeclaredSecrets, TOOL_SECRETS } from "./declared-secrets.ts";
 import { DEPLOY_ARMS, resolveDeployJobs } from "./deploy-jobs.ts";
 import { resolveDeclaredJobs } from "./declared-jobs.ts";
@@ -69,14 +70,23 @@ interface Section {
 }
 
 /**
- * The `agents` keys every config.yaml must set.
+ * The `agents` keys every config.yaml must set, and the one value each may take
+ * instead of a name.
  *
- * One list, read by both the schema above and the check below, so a key added to
- * one cannot be missing from the other. Each is a workflow that reacts to a
- * condition rather than to a request, which is why it has no thread to read a name
- * from -- see `AtomaConfig.agents`.
+ * One list, read by the check below, so a key added here is reported with the same
+ * sentence as the others. Each is a workflow that reacts to a condition rather than to
+ * a request, which is why it has no thread to read a name from -- see
+ * `AtomaConfig.agents`.
+ *
+ * `also` is the escape a key may offer instead of a name. Only `on_agent_issue` has
+ * one: an issue the machinery filed is a report nobody asked to be acted on, and
+ * starting nobody is a setting a project can mean. The rest name a run that always
+ * happens, so a value that is not a name is a name with no definition behind it.
  */
-const REQUIRED_AGENT_KEYS = ["on_config_finding"] as const;
+const REQUIRED_AGENT_KEYS: readonly { readonly key: string; readonly also?: string }[] = [
+  { key: "on_config_finding" },
+  { key: "on_agent_issue", also: AGENT_ISSUE_OFF },
+];
 
 /**
  * config.yaml's recognised keys.
@@ -136,7 +146,7 @@ const CONFIG_SCHEMA: Section = {
     // than `anyName`, because each key is a specific workflow's decision and a
     // misspelled one would silently start nobody -- the failure this whole module
     // is about. `REQUIRED_AGENT_KEYS` below is what makes an absent one a problem.
-    agents: { children: { on_config_finding: null, on_update_conflict: null } },
+    agents: { children: { on_config_finding: null, on_update_conflict: null, on_agent_issue: null } },
     // `servers` is not enumerated: every key inside a server entry is passed to the
     // core verbatim, so listing them here would refuse a setting the core accepts --
     // `url` and `headers` for a remote server, and whatever a later release adds.
@@ -347,20 +357,24 @@ export function configProblems(facts: DeliverableFacts): string[] {
   // Checked against `agentNames` as well as for presence, because a name that
   // resolves to no definition is the same failure one step later.
   const agents = isRecord(config.agents) ? config.agents : {};
-  for (const key of REQUIRED_AGENT_KEYS) {
+  for (const { key, also } of REQUIRED_AGENT_KEYS) {
     const value = agents[key];
     if (typeof value !== "string" || value.trim() === "") {
       problems.push(
         `\`agents.${key}\` is required in config.yaml. It names the agent a workflow starts when no ` +
-          `issue or pull request can name one, so there is nothing to fall back to.`,
+          `issue or pull request can name one, so there is nothing to fall back to.` +
+          (also === undefined ? "" : ` Set it to \`${also}\` to start nobody.`),
       );
       continue;
     }
+    const name = value.trim();
+    if (also !== undefined && name === also) continue;
     // Only when the definitions were found; otherwise the message above already
     // says the directory is missing and every name would be reported as unknown.
-    if (agentNames.length > 0 && !agentNames.includes(value.trim())) {
+    if (agentNames.length > 0 && !agentNames.includes(name)) {
       problems.push(
-        `\`agents.${key}\` names '${value.trim()}', which has no agent-definitions/${value.trim()}.md.`,
+        `\`agents.${key}\` names '${name}', which has no agent-definitions/${name}.md.` +
+          (also === undefined ? "" : ` Write \`${also}\` to start nobody.`),
       );
     }
   }

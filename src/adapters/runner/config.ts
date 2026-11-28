@@ -13,6 +13,7 @@ import { resolveDeclaredJobs, type DeclaredJobsResolution } from "../../domain/d
 import { resolveMergeGates, type MergeGatesResolution } from "../../domain/delivery/merge-gates.ts";
 import type { AtomaConfig, NewReleaseMode, NewReleaseScope } from "../../domain/delivery/declared-config.ts";
 import { isNewReleaseMode, isNewReleaseScope } from "../../domain/delivery/declared-config.ts";
+import { resolveAgentIssueLauncher, type AgentIssueSetting } from "../../domain/work/filed-issue.ts";
 import { CONFIG_FILE } from "../../domain/machinery/machinery-layout.ts";
 import { machineryPath } from "./machinery.ts";
 
@@ -95,6 +96,20 @@ export function getMergePolicy(fallback = "auto"): string {
 export function getNewReleaseMode(fallback: NewReleaseMode = "issue"): NewReleaseMode {
   const mode = loadConfig().update?.on_new_release;
   return isNewReleaseMode(mode) ? mode : fallback;
+}
+
+/**
+ * Whether a root issue an agent files starts a run, and which agent.
+ *
+ * Resolved here rather than at the tool, for the reason every reader in this file
+ * exists: two callers asking what the setting means cannot disagree about it.
+ * `off`, an absent key and a value that is not an agent name all answer "nobody" --
+ * `resolveAgentIssueLauncher` owns that decision, and the caller passes its `problem`
+ * on to the ops log, which is the only place somebody would look for why no run
+ * started on the issue they filed.
+ */
+export function getAgentIssueLauncher(): AgentIssueSetting {
+  return resolveAgentIssueLauncher(loadConfig().agents?.on_agent_issue);
 }
 
 /**

@@ -65,6 +65,11 @@ import {
   type StagedFile,
 } from "../../../adapters/github/base-edit.ts";
 import { commentOnWithId } from "../../../adapters/github/work-tree.ts";
+import { findOpenIssueWithTitle } from "../../../adapters/github/duplicate-issue.ts";
+import { getAgentIssueLauncher } from "../../../adapters/runner/config.ts";
+import { dispatchAgentOnFiledIssue, filedIssueStartNote } from "../../../adapters/actions/dispatch-targets.ts";
+import type { DispatchOutcome } from "../../../adapters/actions/dispatch.ts";
+import type { FilingContext } from "../../../domain/work/filed-issue.ts";
 
 function log(msg: string): void {
   console.error(`[atomaton-github] ${msg}`);
@@ -624,6 +629,17 @@ async function createRootIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<st
 
   refuseTurnLabels(labels, "A root issue");
 
+  // Before anything is created. Two agents finding one defect used to file it twice,
+  // and each filing now starts a run — so the duplicate check is what keeps that one
+  // defect and one run. `null` is a search that could not be read, and the report is
+  // filed anyway: losing a defect an agent found is worse than filing it twice, and a
+  // refusal here would be a tool failure wearing the second one's clothes.
+  const duplicate = findOpenIssueWithTitle(REPO, title);
+
+  if (duplicate !== null && duplicate > 0) {
+    return linkToExisting(duplicate, title, body);
+  }
+
   const cmd = ["issue", "create", "--repo", REPO, "--title", title];
   if (body) cmd.push("--body", body);
   for (const l of labels) cmd.push("--label", l);
@@ -633,7 +649,14 @@ async function createRootIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<st
   const num = Number(stdout.trim().split("/").pop());
   if (!Number.isFinite(num)) mcpFail(`gh issue create: unexpected output: ${stdout.slice(0, 300)}`);
 
-  logOp("create_root_issue", { number: num, title });
+  const autoStart = startAgentOn(num);
+
+  logOp("create_root_issue", {
+    number: num,
+    title,
+    duplicate_check: duplicate === null ? "unreadable" : "clear",
+    ...(autoStart === undefined ? {} : { auto_started: autoStart }),
+  });
   // `root: true` and `parent: null` both say the same thing, because the reader of a
   // result JSON should not have to infer "created as a root" from a missing field --
   // and the one-line note says it in words, since having no parent is what was asked
@@ -643,8 +666,103 @@ async function createRootIssue(a: z.infer<typeof ISSUE_ARGS_SCHEMA>): Promise<st
     url: stdout.trim(),
     parent: null,
     root: true,
+    ...(duplicate === null ? { duplicate_check: "unreadable" as const } : {}),
+    ...(autoStart === undefined ? {} : { auto_start: autoStart }),
     note: "Created as a root issue: it has no parent, by design rather than because a link failed.",
   });
+}
+
+/**
+ * What to tell the caller when an open issue already carries this title.
+ *
+ * The second report is not thrown away. Its body goes onto the issue that already
+ * exists, ahead of the run that issue will start, because the run is the reader that
+ * would otherwise never see it — and a report an agent took the trouble to write is
+ * the one thing this path could lose.
+ *
+ * `root` and `parent` are absent rather than `true`/`null`: this is an existing issue
+ * that may well be somebody's child, and answering `root: true` about it would be a
+ * claim about a node this tool did not create.
+ */
+function linkToExisting(number: number, title: string, body: string): string {
+  const comment = [
+    "Filed again by an agent, under a title this issue already carries.",
+    "",
+    "`create_root_issue` searched the open issues for this title, found this one, and opened",
+    "nothing new — a second issue would have been a second run on one report. The body the",
+    "second filing would have carried is below, and the run on this issue will read it.",
+    ...(body ? ["", "---", "", body] : []),
+  ].join("\n");
+  const posted = commentOnWithId(REPO, number, comment);
+  if (posted === null) {
+    logOp("create_root_issue_duplicate_link_failed", { number, title });
+  }
+
+  // One attempt, on the issue that will carry the work. `dispatchRunner` refuses when a
+  // request is already outstanding there, which is the ordinary case for a defect some
+  // earlier filing already started a run on -- and that refusal is reported, not worked
+  // around.
+  const autoStart = startAgentOn(number);
+
+  logOp("create_root_issue", {
+    number,
+    title,
+    duplicate_of: number,
+    ...(autoStart === undefined ? {} : { auto_started: autoStart }),
+  });
+  return JSON.stringify({
+    number,
+    url: `https://github.com/${REPO}/issues/${number}`,
+    created: false,
+    duplicate_of: number,
+    linked: posted !== null,
+    ...(autoStart === undefined ? {} : { auto_start: autoStart }),
+    note:
+      `#${number} already carries this title and is still open, so nothing new was filed: the ` +
+      "report was put on that issue as a comment. Do not file it again.",
+  });
+}
+
+/**
+ * Start the configured agent on `number`, if `agents.on_agent_issue` asks for one.
+ *
+ * The dispatch is direct rather than a `/agent` comment, because a comment this
+ * process writes carries no event for any workflow to read — see
+ * `adapters/actions/dispatch-targets.ts`. It never throws: the issue exists by the
+ * time this runs, and a failure to start a run is a fact to report, not a reason to
+ * claim the filing failed.
+ */
+function startAgentOn(
+  number: number,
+): { agent: string; outcome: DispatchOutcome; note?: string } | undefined {
+  const setting = getAgentIssueLauncher();
+  if (setting.problem !== undefined) {
+    // A value the pull request's own check refuses, which means the config was changed
+    // outside one. Said once, where this run's log will carry it: the issue is filed
+    // and nothing will start, and this line is the only account of why.
+    log(`create_root_issue filed #${number}, but ${setting.problem}, so no agent was started`);
+    logOp("auto_start_skipped", { number, problem: setting.problem });
+  }
+  if (setting.agent === "") return undefined;
+
+  const node = nodeNumber();
+  const filing: FilingContext = {
+    ...(node === undefined ? {} : { node }),
+    runUrl: (process.env.ATOMATON_RUN_URL ?? "").trim(),
+    agent: (process.env.AGENT ?? "").trim(),
+  };
+  const outcome = dispatchAgentOnFiledIssue(REPO, number, setting.agent, {
+    notify: (process.env.NOTIFY ?? "").trim(),
+    filing,
+  });
+  if (outcome !== "dispatched") {
+    // Every other outcome has already been said on the issue where it belongs — the
+    // refusal notice names the person, and `unconfirmed` is the one a person can retry
+    // with `/agent`. Logged rather than thrown, for the reason above.
+    log(`create_root_issue filed #${number}, but ${setting.agent} was not started on it (${outcome})`);
+  }
+  const note = filedIssueStartNote(outcome, setting.agent);
+  return { agent: setting.agent, outcome, ...(note === "" ? {} : { note }) };
 }
 
 /**
@@ -2486,7 +2604,7 @@ const { tools: TOOLS, dispatch: rawDispatch } = buildMcpTools([
   }),
   defineMcpTool({
     name: "create_root_issue",
-    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. Returns {number, url, parent: null, root: true} and mutates GitHub.",
+    description: "Create a GitHub issue that is nobody's child: no parent is linked, no sub-issue label is applied, and no aggregation will ever pick it up. Use this to report a defect in the tools or the environment, and to raise a decision that has to be made before there is any work to decompose. Unlike create_sub_issue it may be called on a pull request run, which is where such a report most often originates. Two things happen around the filing. An open issue that already carries the same title is not filed again: the report goes onto that issue as a comment and the result says `created: false, duplicate_of: <n>`, so do not file it again yourself. And unless the repository sets `agents.on_agent_issue: off`, an agent is started on the issue right away — the machinery's own filing produces no event any workflow would react to. The result says which agent and what happened in `auto_start`. The two turn labels (`atomaton/in-progress`, `atomaton/waiting-for-person`) are moved by the machinery alone and a newly created issue carries neither, so never pass one in `labels`. Returns {number, url, parent: null, root: true} when it filed one and {number, url, created: false, duplicate_of} when it did not, and mutates GitHub in the first case only.",
     schema: ISSUE_ARGS_SCHEMA,
     handler: createRootIssue,
   }),

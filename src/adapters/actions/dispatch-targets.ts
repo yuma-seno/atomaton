@@ -20,6 +20,8 @@
  * | `dispatchPostMergeAgent` | `pull_request.closed`, when an agent did the merging |
  * | `dispatchUpdate` | `!upgrade`, and the release the notice just announced |
  * | `dispatchUpdateConflictAgent` | `update.on_new_release: pr-agent` — nothing fires for a pull request that stopped |
+ * | `dispatchAgentOnFiledIssue` | `issues.opened`, for a root issue an agent filed with `create_root_issue` |
+ * | `dispatchConfigFindingAgent` | `issues.opened`, for the issue opened for an `ATOMA_CONFIG_FINDING` line |
  * | `dispatchRunner` (`dispatch.ts`) | every hand-off from one agent to the next |
  *
  * A pull request closed without merging dispatches nobody: the close is told to a
@@ -48,7 +50,9 @@ import { runWaitOptions, waitForDispatchRun, type WorkflowRun } from "../../adap
 import { DISPATCH_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { commentOnWithId } from "../../adapters/github/work-tree.ts";
 import { getDeploySection, getWorkflowName } from "../../adapters/runner/config.ts";
-import { dispatchRunner } from "./dispatch.ts";
+import { dispatchRunner, type DispatchOutcome } from "./dispatch.ts";
+import { filedFromLine, type FilingContext } from "../../domain/work/filed-issue.ts";
+import { mentionPrefix } from "../../domain/work/mention.ts";
 import { resolveNotify } from "../../adapters/github/notify.ts";
 import { isIssueBranch } from "../../adapters/github/branch-placement.ts";
 import { mergeMightDeploy, resolveDeployJobs, type DeployTrigger } from "../../domain/delivery/deploy-jobs.ts";
@@ -141,42 +145,20 @@ export function dispatchPrValidation(
  * pull request you opened has merged" paragraph is the other half.
  */
 export function dispatchPostMergeAgent(repo: string, subIssueNum: number, agent: string): boolean {
-  const notify = resolveNotify(repo, subIssueNum);
-  // Tagged `include`: this is the first user message the re-invoked agent reads, and
-  // it is the thing that tells it what to do. It is the one comment here that MUST
-  // reach the model -- the opposite decision from the notices addressed to a person.
-  //
-  // It is also this dispatch's marker and the run's ask: the tag that makes it a
-  // dispatch marker is written after the `include` line (the context reader takes the
-  // FIRST llm-context tag, so the directive stays included), and the comment's id is
-  // passed back rather than a second marker being posted beside it. Every restart
-  // used to leave two comments saying one thing.
-  const directive =
-    `${LLM_CONTEXT_TAG.write("include")}\n${DISPATCH_TAG.write(agent)}\n` +
-    "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
-    "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " +
-    "issue when they are met, and carry on with the work when they are not.";
-  const markerCommentId = commentOnWithId(repo, subIssueNum, directive);
-  if (markerCommentId === null) {
-    log(`dispatchPostMergeAgent: could not post the restart directive on #${subIssueNum}, so nothing was dispatched`);
-    return false;
-  }
   return (
-    dispatchRunner({
+    dispatchDirective(repo, subIssueNum, agent, {
       context: `the pull request for #${subIssueNum} was merged, so ${agent} was to judge whether it satisfies the issue`,
-      agent,
-      type: "issue",
-      number: subIssueNum,
-      notify,
-      repo,
-      markerCommentId,
+      notify: resolveNotify(repo, subIssueNum),
+      directive:
+        "Atomaton: the pull request for this issue merged. Decide whether what merged satisfies what " +
+        "this issue asked for. Say which acceptance criteria are met and which are not; conclude the " +
+        "issue when they are met, and carry on with the work when they are not.",
       // This dispatch is the merging run's own conclusion. The run sits on the pull
       // request and the run it wakes sits on this issue, so the node comparison alone
       // would log `dispatch-elsewhere` — and the merged pull request's result comment
       // would then claim no agent will run next while one has just been started. See
       // `RunnerDispatch.continuesChain`.
       continuesChain: true,
-      log,
     }) === "dispatched"
   );
 }
@@ -241,31 +223,18 @@ export function dispatchUpdateConflictAgent(
   agent: string,
   options: { token?: string } = {},
 ): boolean {
-  const directive =
-    `${LLM_CONTEXT_TAG.write("include")}\n${DISPATCH_TAG.write(agent)}\n` +
-    "Atomaton: this pull request takes a newer release onto this tree and stopped where the two " +
-    "sides disagree — the files listed above carry conflict markers naming both. Resolve them, " +
-    "keeping what this repository wrote where it was deliberate and taking what the release " +
-    "changed everywhere else, and say in your report which side you took for each file and why. " +
-    "Nothing merges from here: the repository's checks run on the resolved tree, and the merge is " +
-    "a person's.";
-  const markerCommentId = commentOnWithId(repo, prNumber, directive);
-  if (markerCommentId === null) {
-    log(
-      `dispatchUpdateConflictAgent: could not post the resolution directive on #${prNumber}, so ${agent} was not started`,
-    );
-    return false;
-  }
   return (
-    dispatchRunner({
+    dispatchDirective(repo, prNumber, agent, {
       context: `the update pull request #${prNumber} stopped on a conflict, so ${agent} was to resolve it`,
-      agent,
       type: "pr",
-      number: prNumber,
-      repo,
-      markerCommentId,
-      token: options.token,
-      log,
+      ...(options.token === undefined ? {} : { token: options.token }),
+      directive:
+        "Atomaton: this pull request takes a newer release onto this tree and stopped where the two " +
+        "sides disagree — the files listed above carry conflict markers naming both. Resolve them, " +
+        "keeping what this repository wrote where it was deliberate and taking what the release " +
+        "changed everywhere else, and say in your report which side you took for each file and why. " +
+        "Nothing merges from here: the repository's checks run on the resolved tree, and the merge is " +
+        "a person's.",
     }) === "dispatched"
   );
 }
@@ -391,4 +360,141 @@ function deployDispatch(
       ...(configured ? [] : ["-f", `trigger=${trigger}`]),
     ],
   };
+}
+
+/**
+ * Start an agent on a root issue an agent has just filed.
+ *
+ * `create_root_issue` is the one tool that files an issue with no parent — a defect in
+ * the machinery, or a decision somebody has to make — and the issue it creates with the
+ * run's own `GITHUB_TOKEN` fires no `issues.opened`. So no entry workflow ever sees it,
+ * and before this the issue waited for a person to ask for a run on it. That is the
+ * suppressed event this stands in for, and the reason it is here rather than in the
+ * creating tool.
+ *
+ * The directive comment is also this dispatch's marker and the run's ask, the way
+ * `dispatchPostMergeAgent` does it. Tagged `include`: it is the first thing the started
+ * agent reads, and it is where it learns that nobody asked for this run, where the
+ * report came from, and that the reproduction comes first.
+ *
+ * The notify login is mentioned in the comment itself. A run nobody asked for is
+ * exactly the kind a person should hear about, and the mention is the only part of this
+ * that reaches them without them opening the issue.
+ *
+ * Returns the outcome rather than a boolean because `create_root_issue` reports it: the
+ * issue exists whatever happens here, and "no run started, and which kind of no" is what
+ * the filing agent can still act on.
+ */
+export function dispatchAgentOnFiledIssue(
+  repo: string,
+  issue: number,
+  agent: string,
+  options: { notify?: string; filing?: FilingContext } = {},
+): DispatchOutcome {
+  const notify = (options.notify ?? "").trim();
+  const from = filedFromLine(options.filing ?? {});
+  return dispatchDirective(repo, issue, agent, {
+    context: `root issue #${issue} was filed during a run, so ${agent} was to start on it`,
+    notify,
+    directive:
+      `${mentionPrefix(notify)}\`${agent}\` starting on this issue.\n\n` +
+      "Auto-started: the machinery filed this issue during a run, and no person asked for a run " +
+      "on it.\n" +
+      (from === "" ? "" : `${from}\n`) +
+      "\n" +
+      "Start with the reproduction. If it no longer reproduces, or the defect is already fixed, " +
+      "comment the evidence and propose closing — the decision to close is the notifying " +
+      "person's. Otherwise take it as a normal run: investigate, fix, open a pull request, and " +
+      "let the reviewer judge it.",
+  });
+}
+
+/**
+ * What to tell the caller when the run on a just-filed issue did not start.
+ *
+ * The outcome alone is not enough for the agent that filed the issue: three of these
+ * four mean "nothing will ever happen here unless a person acts", and the fourth means
+ * "a run is already asked for". A caller that read them as one failure would either
+ * announce a retry that cannot help or offer to file the issue again.
+ */
+export function filedIssueStartNote(outcome: DispatchOutcome, agent: string): string {
+  switch (outcome) {
+    case "dispatched":
+      return "";
+    case "refused-outstanding":
+      return "A run on this issue had already been asked for, so nobody was started twice.";
+    case "refused-closed":
+      return "The issue is closed, so nothing was started on it and nothing will be.";
+    case "unconfirmed":
+      return `The start could not be confirmed, so nothing may be running: a person can start it by commenting \`/${agent}\` on the issue.`;
+    case "superseded":
+    case "failed":
+      return `GitHub did not accept the start: a person can start it by commenting \`/${agent}\` on the issue.`;
+  }
+}
+
+/**
+ * Start the agent `agents.on_config_finding` names, on the issue opened for an
+ * `ATOMA_CONFIG_FINDING` line.
+ *
+ * It used to post `/<agent>` as a comment and leave the entry workflow to read it. A
+ * comment written with the job's own `GITHUB_TOKEN` fires no `issue_comment.created`,
+ * so no run arrived: the issue sat open carrying a command that looked like it had
+ * asked for one, and `agents.on_config_finding` was required, checked, and read by
+ * nothing that started anything. `report_config_findings.ts` calls this instead.
+ */
+export function dispatchConfigFindingAgent(repo: string, issue: number, agent: string): DispatchOutcome {
+  return dispatchDirective(repo, issue, agent, {
+    context: `config finding #${issue} was opened, so ${agent} was to repair it`,
+    directive:
+      `\`${agent}\` starting on this issue.\n\n` +
+      "Repair the configuration defect described above, and say in your report which guard or " +
+      "tool name the tools file had wrong.",
+  });
+}
+
+/**
+ * The comment a dispatch like this writes, and the dispatch itself.
+ *
+ * One function because the two halves are one decision. The directive IS the marker
+ * the ordering check reads and the ask the run claims: the `include` tag comes first
+ * because the context reader takes the first one, so the directive stays in the
+ * model's context; the `dispatch` tag after it is what makes the comment a marker at
+ * all; and the comment's id is passed back rather than a second marker being posted
+ * beside it, which is what left every restart with two comments saying one thing.
+ *
+ * `notify` is empty for the dispatches nobody is waiting on, and named for the ones a
+ * person is: a comment that mentions them is how they learn a run started.
+ */
+function dispatchDirective(
+  repo: string,
+  number: number,
+  agent: string,
+  request: {
+    context: string;
+    directive: string;
+    notify?: string;
+    type?: "issue" | "pr";
+    token?: string;
+    continuesChain?: boolean;
+  },
+): DispatchOutcome {
+  const body = `${LLM_CONTEXT_TAG.write("include")}\n${DISPATCH_TAG.write(agent)}\n\n${request.directive}`;
+  const markerCommentId = commentOnWithId(repo, number, body);
+  if (markerCommentId === null) {
+    log(`${request.context}: could not post the directive on #${number}, so ${agent} was not started`);
+    return "failed";
+  }
+  return dispatchRunner({
+    context: request.context,
+    agent,
+    type: request.type ?? "issue",
+    number,
+    notify: request.notify ?? "",
+    repo,
+    markerCommentId,
+    ...(request.token === undefined ? {} : { token: request.token }),
+    ...(request.continuesChain === true ? { continuesChain: true } : {}),
+    log,
+  });
 }
