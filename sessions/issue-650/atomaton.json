@@ -1,0 +1,40 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #650: Release ワークフローに adopt フラグを追加する（印はリリース文への手書きでなくフラグで付ける）\n\n## 背景\n\n`update.detection_scope: marked` の検知は、リリース文（raw body）に文字列 `atomaton:adopt` が含まれるかで判定している（`src/entrypoints/machinery/notify_new_release.ts` の `ADOPT_MARKER`、`note.body.includes(...)`）。\n\n現状、印を付けるには公開後にリリース文を手で編集するしかなく、忘れやすい。リリース文は説明文としてただの文章を書く場所、という整理にしたい。\n\n## やること\n\nRelease ワークフロー（`.github/workflows/release.yml`）に boolean の入力 `adopt`（既定 false）を追加する。\n\n- `adopt: true` のとき、リリース公開後にリリース文へ印を機械的に付ける。付ける形は HTML コメント `<!-- atomaton:adopt -->` とし、表示上のリリース文はただの文章のままにする（検知は raw body の文字列検索なのでこの形で成立する）。\n- 付ける場所は、公開完了を待っている既存の処理（merge-release ジョブ末尾の `gh release view` ポーリング）の直後が自然。\n- 冪等にすること。再実行で印が二重に付かないこと（既に含まれていたら何もしない）。「同一バージョン・PRなし」の再実行パスでも、リリースが存在し `adopt: true` で印が無ければ付ける。\n- 検知側（`notify_new_release.ts`）は変更しない。\n- 手動の publish 経路（`atomaton-deploy.yml` の `target=publish`）にはフラグは伝わらない。今回は対象外でよいが、その経路を壊さないこと。\n\n## 注意\n\n`release.yml` は手書きの governed なファイル（`.github/**` は `merge.governed_paths`）。実装PRのマージは人が行う前提で進めること。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-650",
+        "author": "yuma-seno",
+        "created_at": "2026-11-28T01:41:40Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 7231852427,
+        "author": "yuma-seno",
+        "created_at": "2026-11-28T01:41:43Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "cf45df66dc0b6edfc6169935f8b0616a886752f2c352b6852140a3ca832ee31c",
+      "event_count": 2,
+      "agent": "atomaton"
+    }
+  }
+}
