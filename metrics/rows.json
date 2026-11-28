@@ -28414,6 +28414,46 @@
     "runs": []
   },
   {
+    "path": "sessions/issue-652/atomaton.json",
+    "agent": "atomaton",
+    "messages": 11,
+    "calls": 5,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "load_skill": 1,
+      "get_issue": 2,
+      "get_issue_comments": 1,
+      "list": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T02:56:13Z",
+        "ended_because": "completed",
+        "iterations": 2,
+        "loop_recoveries": 0,
+        "messages": 11,
+        "seconds": 707,
+        "server_calls": {
+          "files": {
+            "list": 1
+          },
+          "github": {
+            "get_issue": 2,
+            "get_issue_comments": 1
+          }
+        },
+        "started": "2026-11-28T02:44:26Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
