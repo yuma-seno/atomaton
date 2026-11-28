@@ -162,7 +162,7 @@ merge:
 # starts noticing only the releases whose notes carry `atomaton:adopt` -- to keep
 # noticing every release, set this to `all`.
 update:
-  on_new_release: issue
+  on_new_release: pr-agent
   detection_scope: all
 
 
@@ -209,9 +209,9 @@ agents:
   # Started on an update pull request that stopped on a conflict. Required when
 
   # Started on an update pull request that stopped on a conflict. Required only
-  # when `update.on_new_release` is `pr-agent` -- named here though this
-  # repository runs `issue`, because every no-thread agent name the template
-  # ships, this adoption ships too.
+  # when `update.on_new_release` is `pr-agent` -- this repository runs
+  # `pr-agent`, so it is named here, and because every no-thread agent name the
+  # template ships, this adoption ships too.
   on_update_conflict: engineer
 
 
