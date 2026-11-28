@@ -28885,29 +28885,33 @@
   {
     "path": "sessions/issue-655/reviewer.json",
     "agent": "reviewer",
-    "messages": 100,
-    "calls": 60,
+    "messages": 121,
+    "calls": 71,
     "failed": 0,
     "refused": 0,
     "skills": [
-      "conventions"
+      "conventions",
+      "japanese"
     ],
     "reported": true,
     "tools": {
-      "load_skill": 1,
-      "get_pr": 1,
+      "load_skill": 2,
+      "get_pr": 2,
       "get_pr_reviews": 1,
       "list_pr_review_comments": 1,
       "grep": 25,
-      "read": 20,
+      "read": 22,
       "delegate_readonly": 1,
-      "get_check_runs": 1,
+      "get_check_runs": 2,
       "search_code": 4,
       "glob": 1,
       "search_remote_code": 1,
       "delegate_readonly_large": 1,
-      "fetch": 1,
-      "create_root_issue": 1
+      "fetch": 3,
+      "create_root_issue": 1,
+      "get_pr_diff": 2,
+      "check_merge_readiness": 1,
+      "get_issue": 1
     },
     "acts": {},
     "runs": [
@@ -28945,6 +28949,31 @@
           }
         },
         "started": "2026-11-28T10:51:49Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T11:29:17Z",
+        "ended_because": "completed",
+        "iterations": 7,
+        "loop_recoveries": 0,
+        "messages": 121,
+        "seconds": 86,
+        "server_calls": {
+          "files_readonly": {
+            "read": 2
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue": 1,
+            "get_pr": 1,
+            "get_pr_diff": 2
+          },
+          "web": {
+            "fetch": 2
+          }
+        },
+        "started": "2026-11-28T11:27:51Z"
       }
     ]
   },
