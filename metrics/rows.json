@@ -28401,6 +28401,19 @@
     ]
   },
   {
+    "path": "sessions/issue-650/atomaton.json",
+    "agent": "atomaton",
+    "messages": 3,
+    "calls": 0,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": false,
+    "tools": {},
+    "acts": {},
+    "runs": []
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
