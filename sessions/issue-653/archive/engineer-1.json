@@ -1,0 +1,76 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Issue #653: エージェントが起票したIssueを自動でエージェント起動する（重複起票チェック付き）\n**Labels:** atomaton/in-progress\n\n## 背景\n\n- #644 のように、エージェント（bot）が run やレビュー中に起票したバグ Issue が、誰かが手でエージェントを起動するまで放置される。「見つける」と「直す」が分断されている\n- #627 も bot 起票だった\n\n## 方針（決定済み）\n\n- 区分は作らない。エージェントが起票した Issue は原則すべて自動でエージェントを起動し、対応を始める\n- 自動起動の有無を切り替える設定を1つだけ用意する（on/off）。設定名は仮でよい。config の命名の最終決定は人が行う\n- 連鎖（自動起動した run の起票がさらに自動起動する連鎖）は仕様上起きない前提とする。起きるならそれはバグとして扱うので、深さ制限のような仕組みは入れない\n\n## 必須の仕組み：重複起票チェック\n\n- 起票時（または自動起動時）に、同じ内容の open Issue が既にないか機械が確認する\n- 重複がある場合は新規起票せず、既存 Issue 側へリンクやコメントで紐づける。自動起動も既存側で1回だけにする\n\n## 自動起動のプロンプト\n\n- 自動起動時にエージェントへ渡すプロンプトを設計すること。含めたい要素：\n  - 自動起動であることと、起票元の run / PR へのリンクなどの文脈\n  - まず再現確認から始めること。再現しない、または既に直っている場合は、証拠をコメントして閉じる提案をすること\n  - それ以外は通常の run と同じ進め方（調査→修正→レビュー）\n\n## 対象範囲の調査\n\n- 「エージェントが起票した Issue」の識別方法（作者、マーカー等）を調査して提案すること\n- 新リリース検知の通知 Issue のような、作業依頼ではない通知専用の Issue まで自動起動の対象に含めるべきかも切り分けて提案すること\n\n## 依頼\n\nまず調査と設計提案から始めること。設定名と対象範囲の切り分けは、実装前に人の確認を取ること。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_opened",
+        "id": "issue-653",
+        "author": "yuma-seno",
+        "created_at": "2026-11-28T03:03:29Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n\nこのIssueの調査と設計提案をお願いします。方針（区分なし・全件自動起動・on/off切替・重複起票チェック必須・連鎖対策は入れない）は決定済みなので、その前提で識別方法と対象範囲の切り分け、自動起動プロンプト案を提案してください。設定名と対象範囲は実装前に人の確認を取ること。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 7232769679,
+        "author": "yuma-seno",
+        "created_at": "2026-11-28T03:03:49Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "**結論：設計案が定まりました。** 機構が起票する issue は GitHub の仕組み上いかなるイベントも起こさないため、実装の軸は「イベントを拾わせる」ではなく「**起票ツール自体を起動地点にする**」です。その前提で識別方法・対象範囲・重複チェック・起動プロンプトを提案します。人が確認を取るべき点は2つだけです — 設定名と、対象範囲から外す先の承認です。\n\n---\n\n## 1. なぜ「起票地点で起動」なのか\n\nエージェントの作る issue・コメント・merge はプロジェクトの `GITHUB_TOKEN` で行われ、GitHub は自トークンによるイベントでワークフローを開きません（`src/workflows/actions/github-context.ts:82`）。人の issue が通る `Atomaton Entry`（`issues.opened` → 本文の `/agent` 解決 → runner、`src/workflows/atomaton-entry.wac.ts:45-48`）は、機構起票の issue を一度も通っていません。\n\n一方、「run の最中に別 issue へエージェントを起動する」経路は既にあります。`dispatchSubAgent` が MCP ツールのプロセス内から `dispatchRunner` を呼ぶ形です（`src/entrypoints/tools/lib/dispatch_sub_agent.ts:47-54`）。これが採用する理由です。run の外から拾わせる定期スキャン（過去に削除された `atoma-auto-trigger.yml` の形）は、監視ワークフローの新設、起動までの遅延、外部起票の権限検証の追加費が重く、今回は推薦しません。\n\nなお `release-manifest.ts:13-17` の記述のとおり、テンポラリ起動は「仕事は頼まれたときだけ始まる」方針で一度削除されています。今回の変更はその判断の一部を意図的に引き戻すものなので、設計書・ドキュメントにこの経緯を残すべきです。\n\n## 2. 識別方法の提案：判断は作成側で完結し、状態は既存のマーカーで書き連ねる\n\n起動を判断するのは `create_root_issue` のプロセス内なので、「issue を読んで機構起票と判別する」処理は不要になります。分離すべきは「後から読む人（人と後続 run）に起車済みである旨を示す状態」です：\n\n| 状態 | 書き手 | 役割 |\n| --- | --- | --- |\n| `atomaton:dispatch=<agent>` マーカーコメント | 機構（起動直後） | この issue が起動済みであることの状態表現・重複起動防止の鍵 |\n| `atomaton:notify=<login>` タグ | `create_root_issue`（既に実装済み） | 完了時の通知先。ただしフィールドは3件の実例で欠けていた |\n| `atomaton:filed-from` 行（本提案の新設） | `create_root_issue` | 起票元 run/PR へのリンク。`create_pr` が PR 本文に書く `atomaton:origin-agent` と同じ形 |\n\n作者照合（`github-actions[bot]`）はقيqm的比较対象から外しています。リポジトリ内の別の Actions job と同じ識別子になり、機構以外の定期ジョブの起票まで巻き込むからです。逆に update machinery は PAT 起票のため作者が人間になります（例: #635）。どちらも誤区間に落ちるので、判断を「作成者=機構自身」という事実で確定させます。\n\n## 3. 対象範囲の切り分け提案\n\n「区分を作らない」方針からの外れ値は**起動の所有者が既にいる issue**を外すだけです。区分は「起動を持たない issue にどう入るか」だけを扱います。\n\n- **対象**: `create_root_issue` で起票した issue 全て（run 起票のバグ報告・ツール欠陥・判断待ち起票）。また `report_config_findings.ts` の壊れた起動線をここに統一して直します。現在その機構は issue を作成し `/engineer` コメントを書きますが、そのコメントが GitHub イベントを起こさないため、事実上エージェントが起動されません。機構の意図（エージェントを起動すること）はここで達成されます。\n- **対象外**: sub-issue — 起動の所有者は親（`launch_sub_agent`）であり、body に含める sibling 間の interface 文面などを親が書き終えてから起動するのが現在の流れです。毎起票即起動は parent の準備とコリジョンします。また countOpenSiblings の「未起動の子供が親を待たせてはならない」約束とも衝突します（`docs/work/how-it-works/the-labels-atomaton-applies.md:50-62`）。\n- **対象外**: 新リリース通知 issue — 仕事の依頼ではなく `findOpenNotice` が一意性と状態（1件、編集、閉じるのは人）を所有する文書です（`src/entrypoints/machinery/lib/notice-issue.ts:18,42`）。自動起動しても run は再現確認・修正のどちらも持ち得ません。\n- **対象外**: 作者照合だけで拾われる他の Actions の issue（例: renovate 自動起票）。機構は変っており、今回の変更とは無関係です。\n\n## 4. 重複起票チェックの設計\n\n「同じ内容の open issue がないか機械が確認する」は**起票ツール内の機械的底**と**run 内の判断系上**の2層で構成します：\n\n1. **機械的底（作成ツール内）**: `create_root_issue` は `gh issue create` の前に `gh issue list --state open --search \"in:title <title>\"` を1回実行します。ヒットがあれば作成を拒絶し、ヒットした番号を返します。\n2. **判断系の紐づけ（run 内）**: 拒絶を受けた run は既存 issue 側へ comment/link で紐づけ、新規起票はしません。内容が異なると判断した場合は、その根拠の1行を issue に記す `create_root_issue` を再呼び出しします（判断が机上の誤伝達にならないためです）。\n3. **「既存側で1回だけ」の鍵**: 2nd run が手動で重複起票した場合も、`dispatchRunner` の `refused-outstanding`（既に起動の要請が立っている場合の拒絶、`src/adapters/actions/dispatch.ts:305-324`）とマーカーの順序管理が二重起動を機械的に拒絶します。\n\nなお config-findings の dedupe は既に同じ形です（`report_config_findings.ts:63-66` の hash marker + `:148-154` の open 検索）。機構起票の統一対象はこの残り1件になります。\n\n## 5. 自動起動プロンプト案（機構の英文声、折りたたみ内は公開案）\n\n<details><summary>起動マーカーコメントの本文案</summary>\n\n> \\| `atomaton` starting on this issue.\n> \\|\n> \\| Auto-started: this issue was filed by the machinery (`create_root_issue`) during a run, and no person asked for a run on it.\n> \\|\n> \\| Filed from: #<number> — <run URL> by `<agent>`.\n> \\|\n> \\| Before investigating:\n> \\| 1. If an open issue on the same subject exists, work goes to that one — comment what you have there, link back, and do not re-investigate.\n> \\| 2. Try to reproduce first. If it no longer reproduces or the defect is already gone, comment the evidence and propose closing; the close decision is the notify login's.\n> \\|\n> \\| Otherwise proceed as a normal run: investigate → fix → engineer PR → reviewer. The usual chain counters apply; stop and hand the turn back when a person must decide something.\n\n</details>\n\n「まず再現確認」は issue の自記述ではなく、run の手続の最初の阶段であることを import なしで読める形にしています。run の流れ（調査→修正→レビュー）は通常 run と同一の machinery で保たれ、`after_handoffs: 5` / `after_runs_without_change: 2` もそのまま効きます。\n\n## 6. 設定名の候補（最終決定は人）\n\n| 候補 | 形 | 推薦度 |\n| --- | --- | --- |\n| `agents.on_agent_issue: atomaton \\| off` | 必須キー、値にエージェント名（off で停止送り） | 推薦 |\n| `agents.auto_launch: atomaton \\| off` | 同 | 代替候補 |\n| `agents.autostart_issues: true/false` | 真偽値のみ | **不推薦** — エージェント名が別キーに落ちる |\n\n推薦の理由：(1) `agents.on_config_finding` / `on_update_conflict` と同じ section・同じ required-key 機械（`src/domain/delivery/deliverable-integrity.ts:79`）に乗る；(2) 値がエージェント名・off の2択という手詰まりな size；(3) 判断値にデフォルトを持たせない section の原則を守る。off は明示的な語をもたせるです。\n\n## 7. 連鎖と残る残段\n\n- 二重起動は `dispatchRunner` の既存拒絶（outstanding / closed / marker未確認）で機械的に止まり、連鎖制限の仕組み外に起車しません。連鎖は本 issue の前提どおり起きたらバグとして扱います — `after_handoffs: 5` / `after_runs_without_change: 2` が連鎖の増幅を止め、それを超えるのは人の介入です。\n- 起票側 run は並走を続けます。`launch_sub_agent` と同水平なので、並列性の machinery 変更は不要です。\n\n---\n\n## 確かめられなかったこと\n\n- **#644/#627/#621 の author キーの実値**: get_issue は author を返さず、起票直後に comment した identity（`github-actions`、#644 comment 2）と記述歴から機構起票と判断しました。実値の API は確認していません。\n- **「run の外から拾わせる」案の定期評価**：今回は沒建で終え、実装後の監視コストの実醸は数字がありません。\n- **`atomaton:filed-from` 行の具体的文言**：実装側で `create_pr` の openedByLine と形式を合わせます。設計上は位置の指定のみです。\n\n## 次の一手\n\n1. 設定名を `agents.on_agent_issue` と `agents.auto_launch` から決めてください（どちらでも機構は同じ動作です）。\n2. 対象範囲の外し（sub-issue・新リリース通知・他 Actions 起票）を承認ください — 変えるならこの点の見直し収めです。\n3. 既存の未処理 issue（#644、#621 など）を自動起動の対象から外しておくか、手動で流すかを決めてください（新規起票のみを機械対象とするのが推薦です）。\n\n@yuma-seno 判断をお願いします。決まれば標記 issue の実装を分解して配します。\n\n\n---\n_Tokens: 3818849 total (3775076 prompt + 43773 completion, 3391488 of the prompt cached)_\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/46101041507) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_\n_Counted from the session: 2 refused or errored tool calls._",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 7233044431,
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-28T03:24:05Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "/atomaton\n\n判断が出たので、この内容で実装に進んでください。設定名は agents.on_agent_issue。sub-issue、新リリース通知、他Actionsの起票は対象外。既存の未処理Issueは対象に含めず、新規起票のみを対象にすること。",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 7237304864,
+        "author": "yuma-seno",
+        "created_at": "2026-11-28T09:32:24Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "`/engineer`\n\n**エージェントが起票した root issue を起票の場で自動起動する (`agents.on_agent_issue`)、重複起票チェック付き。** 4つの決定済み事項を固定し、その実装を1本のPRに収めます：設定名 `agents.on_agent_issue`(必須キー、値はエージェント名または `off`、このリポジトリの実値は `atomaton`)、対象は `create_root_issue` による**新規起票のみ**(sub-issue・新リリース通知・他 Actions 起票・既存の未処理 issue は対象外,#644/#621 は機械側から動かさない)、自動起動はイベントに依存しない直接 dispatch(起票と同一処理内)、連鎖の深さ制限は入れない(起きたらバグ)。\n\n## 受け入れ基準(観測可能な状態)\n\n1. `agents.on_agent_issue` が `REQUIRED_AGENT_KEYS` に加わり、欠けたPRは配布チェックで落ち、不正値(エージェント名でも `off` でもない)も落ちる。src/content/config.yaml と .github/atomaton/config.yaml の両方に `atomaton` で配備される。\n2. `create_root_issue` が issue 作成に成功した直後、設定値が `off` でなければ → (a) 起動指示コメント(下記フォーマット)を既存 issue に投稿し、(b) `dispatchRunner` を1回呼ぶ(そのコメントを `markerCommentId` として渡す)、(c) 呼び出し元エージェントに起動の成否を返す。起動失敗は起票を消さない。\n3. 起票前の重複チェック: 正規化したタイトル(小文字化・空白圧縮)で完全一致する open issue を1回検索する。ヒットしたら新規起票を拒否し、既存番号を返すとともに、起票予定だった本文を既存 issue への紐づけコメントとして引用投稿する。既存側への自動起動は**1回だけ**(後述の上限チェックに一部依存)を試み、`outstanding` での拒否事例はそのまま返し、個別に手を触れない。\n4. `report_config_findings.ts` はこのパス(共有ヘルパー)に移行する。現状は `gh issue create` と末期に `/engineer` コメントという実装だが、GITHUB_TOKEN でコメントしてもイベントが発生せずエンジンは unzip しない — つまり issue は誰によっても open されない。マーカーベースの重複除外(hash + open 検索)はそのまま残す。\n5. 連鎖用の深さカウンタ等は実装しない。前提を三分之一程度に文書化する(連鎖が起きたらバグ)。 Watches はラベルを新たに使わない。`atomaton/launched` は `launch_sub_agent` 記録の一環であり、ここでは使わない。\n\n## 検証\n\n新規ユニットテストを追加する: 設定値検証(on/off/名前/不正値)、重複判定の正規化、ディレクティブ文の contract、genuine outcomes マッピング、findings スクリプトの移行版、`deliverrable_integrity` 要求キーの追加。既存テストの破綻を修正する(fake-gh フィクスチャは `mcp.test.ts` / `sub-issue-report.test.ts` 形式)。リポジトリ PR チェックの4コマンド — `scan_secrets / typecheck / synth / test` — がPRツリーで exit 0。\n\n<details><summary><strong>実装の接点と細則(根拠つき)</strong></summary>\n\n**なぜイベント起点でないか。** エージェントの GitHub 操作は run 自身の `GITHUB_TOKEN` で行われ、自トークンのイベントはワークフローを起動しない(`src/workflows/actions/github-context.ts:79-90`)。人の issue が通る `Atomaton Entry` は bot 起票を通らず、定期スキャン形(削除済み `atoma-auto-trigger.yml`)は監視・遅延・外部起票権限の追加費が重い。既存の先例は `dispatchSubAgent` が示す**プロセス内からの直接 dispatch**(`src/entrypoints/tools/lib/dispatch_sub_agent.ts:36-54`)なのでこれに揃える。ただし `launched` ラベルは外す(あれは親が子供を出発させた記録で、ここではルート issue)。\n\n**共有ヘルパー1本。** 役割:エイージェント名を config から読む(MCP プロセス内で `getLabel` と同系の読み取り)、正規化タイトル検索、ディレクティブコメント投稿、`dispatchRunner` 呼び出し、結果反映。2つの呼び出し元(`create_root_issue` 内と `report_config_findings.ts` スクリプト側)と共有する。配置は engineer の裁量(dispatchRunner は `src/adapters/actions/dispatch.ts`、拒否対象判定Outcome は `:305-324`)。\n\n**ディレクティブコメント形式。** 1行目に機構が読めるタグを置く:`atomaton:dispatch=<agent>` + `llm-context=include`(起動要求はここにまとめる)。本文は機構が着色した固定英語:\n\n> `<agent>` starting on this issue.\n> Auto-started: filed by the machinery during a run; no person asked for this run.\n> Filed from: #<num>(<run URL>、origin=<agent>) — 取れる環境変数から構築し、欠けたら省略。\n> Start with the reproduction: no longer reproduces or already fixed → comment the evidence and propose closing(close は notify 先の決定)。それ以外は通常の run(調査→修正→PR→レビュー)。\n> 投稿時に notify ログインを `@mention` する(誰も頼んでいない run が始まった事実を知らせる)。\n\n**起動成否の反映。** `dispatched` を除く他の結果は起票を中止しない。結果を返却 JSON に乗せる(`dispatched / refused-closed / refused-outstanding / unconfirmed` — どの拒否も報告済みであり、`handoff` ではない)。`unconfirmed` は人が `/agent` コメントで再起動できる旨を返す。**このツール呼び出しは run の turn を終わらせない**(`session_ends` なし — `launch_sub_agent` とは別物)。\n\n**細則。** 設定値の未設定/不正値はランタイムでは `off` として振る舞い ops ログに記す(PR チェックで拒否済みのはずであり、起票を不成立にしない)。PR run からの起票でも自動起動は作用する(#644 の形 = レビュー中の起票)。ディレクティブは投稿→ランナーが順序・鮮度チェックを正しく組めるよう、`dispatchRunner` の既存パスを再利用する(自前 dispatch は書かない)。新規シークレットはなし、workflow ファイルの変更もなし。docs/work/reference.md の agents 節に on/off と対象範囲を追記、前提は連鎖に深さ制限を置かないこと。\n\n**実装前に読む根拠一覧。** `create_root_issue` 現 canopy:`src/entrypoints/tools/mcp/github.ts:597-648`(本文検証 `checkedIssueBody:438-441`、notify タグ前置は既存で `notifyTagPrefix:419-423`)。`agents` 節の設計思想(runtime のデフォルトを置かず欠落はPRで落とす):`src/domain/delivery/declared-config.ts:196-229`、要求キーの所在:`src/domain/delivery/deliverable-integrity.ts:79`。拒否 Outcome:`src/adapters/actions/dispatch.ts:305-324`。config-findingsの現状と重複除外:`src/entrypoints/machinery/report_config_findings.ts:63-66, 148-154, 184-198`。通知の意図:`src/entrypoints/machinery/lib/notice-issue.ts:18,42`(対象外と根拠)。テンプレーション起動が一度削除された経緯:`src/domain/machinery/release-manifest.ts:13-17` — 今回は引き戻す判断なので、docs に経緯を一行添ける。\n\n</details>\n\n**今後の対応：** 実装PRが上がり、レビュー後に `atomaton` への返送とマージを行う。`.github/**` や `package.json` まわりの変更は `governed_paths` に触れるためマージは人が実行する。重複時の「既存側で1回試みる」という読み(!hijack 抑止は notify mention と close 提案で担保)を PR 本文に明記する — 違和感があれば拒否事例以降1行で止められるので、レビュー時の判断に使ってください。\n\n\n\n> [!NOTE]\n> `@mention` was written as a mention and had the notification removed: this run could not confirm that account as a participant in this repository or this thread. Nobody was notified. If the mention was meant, mention them yourself.\n\n---\n_Tokens: 91415 total (78258 prompt + 13157 completion, 73728 of the prompt cached)_\n_run by [atomaton](https://github.com/yuma-seno/atomaton/actions/runs/46130947862) · [metrics](https://github.com/yuma-seno/atomaton/blob/atomaton-data/metrics/report.md)_",
+      "atoma_metadata": {
+        "source": "github",
+        "layer": "github-context",
+        "event_type": "issue_comment",
+        "id": 7237408580,
+        "author": "github-actions[bot]",
+        "created_at": "2026-11-28T09:42:01Z"
+      }
+    },
+    {
+      "role": "user",
+      "content": "The people you may call in your closing message: @yuma-seno. @yuma-seno is the one this work belongs to.\n\nA closing message calls at most one thing: one agent, as a line holding nothing but `/name`; or one of those people, as a single `@login`; or nobody, and the machinery tells the person this work belongs to. A mention of one of them is a call — write one only when you are handing the work to them. Two calls, an agent and a person or two of either, are refused: the message is posted with its mentions left as text, nothing in it is started, and the machinery makes the call itself."
+    }
+  ],
+  "metadata": {
+    "github_context": {
+      "version": 1,
+      "snapshot_hash": "5fa38ff9cdbf151285f6ce84090d6acd3f43b92f108f05d376aeb6b25c2c4411",
+      "event_count": 5,
+      "agent": "engineer"
+    }
+  }
+}
