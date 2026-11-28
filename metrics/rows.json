@@ -32294,5 +32294,85 @@
         "started": "2026-11-28T09:43:10Z"
       }
     ]
+  },
+  {
+    "path": "sessions/pr-660/reviewer.json",
+    "agent": "reviewer",
+    "messages": 85,
+    "calls": 47,
+    "failed": 0,
+    "refused": 1,
+    "skills": [
+      "japanese",
+      "conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "get_pr": 2,
+      "read": 14,
+      "grep": 23,
+      "delegate_readonly": 1,
+      "get_issue": 1,
+      "get_issue_comments": 1,
+      "check_merge_readiness": 1,
+      "glob": 2,
+      "load_skill": 2
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T11:32:31Z",
+        "ended_because": "failed",
+        "iterations": 5,
+        "loop_abort": {
+          "arguments": "{\"path\":\".github/workflows/release.yml\"}",
+          "call": 6,
+          "capped": false,
+          "count": 5,
+          "last_error": null,
+          "rule": "identical_answers",
+          "tool": "read"
+        },
+        "loop_recoveries": 1,
+        "messages": 17,
+        "seconds": 5,
+        "server_calls": {
+          "files_readonly": {
+            "read": 5
+          },
+          "github": {
+            "get_pr": 1
+          }
+        },
+        "started": "2026-11-28T11:32:26Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T11:33:47Z",
+        "ended_because": "completed",
+        "iterations": 26,
+        "loop_recoveries": 0,
+        "messages": 85,
+        "seconds": 76,
+        "server_calls": {
+          "delegate_readonly": {
+            "delegate_readonly": 1
+          },
+          "files_readonly": {
+            "glob": 2,
+            "grep": 23,
+            "read": 9
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_issue": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1
+          }
+        },
+        "started": "2026-11-28T11:32:31Z"
+      }
+    ]
   }
 ]
