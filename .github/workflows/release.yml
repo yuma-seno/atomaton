@@ -127,6 +127,11 @@ on:
         required: false
         default: true
         type: boolean
+      adopt:
+        description: 'Mark this release for prompt adoption: the `atomaton:adopt` marker is appended to its notes as an HTML comment, so repositories that notice marked releases only pick it up. The notes themselves stay plain prose.'
+        required: false
+        default: false
+        type: boolean
 
 # Read-only at the workflow level; each job grants exactly what its steps need.
 permissions:
@@ -587,6 +592,29 @@ jobs:
             echo "::error::$TAG was not published after Deploy succeeded. See https://github.com/${REPO}/actions"
             exit 1
           fi
+
+      # The marker is a flag on this dispatch, never a line a person writes
+      # into the notes by hand: a hand-written marker is a forgotten marker.
+      # It goes in as an HTML comment, so the rendered notes stay the plain
+      # prose they are written as, while the notice machinery -- which reads
+      # the raw body -- still finds it. Already marked means already done:
+      # a re-run of this workflow appends nothing twice.
+      - name: Mark the release for prompt adoption
+        if: inputs.adopt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          BODY="$(gh release view "$TAG" --repo "$REPO" --json body --jq .body)"
+          if printf '%s' "$BODY" | grep -q 'atomaton:adopt'; then
+            echo "$TAG already carries the adopt marker; nothing to do."
+            exit 0
+          fi
+          printf '%s\n\n<!-- atomaton:adopt -->\n' "$BODY" > "$RUNNER_TEMP/adopt-notes.md"
+          gh release edit "$TAG" --repo "$REPO" --notes-file "$RUNNER_TEMP/adopt-notes.md"
+          echo "Marked $TAG for prompt adoption."
 
   apply-to-self:
     name: Apply the release through the update machinery
