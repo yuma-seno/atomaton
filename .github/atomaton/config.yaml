@@ -206,8 +206,6 @@ agents:
   # whether to act on; the rest name a run that always happens.
   on_agent_issue: atomaton
 
-  # Started on an update pull request that stopped on a conflict. Required when
-
   # Started on an update pull request that stopped on a conflict. Required only
   # when `update.on_new_release` is `pr-agent` -- this repository runs
   # `pr-agent`, so it is named here, and because every no-thread agent name the
