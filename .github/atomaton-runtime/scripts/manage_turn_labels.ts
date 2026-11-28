@@ -137,17 +137,12 @@ var TOOL_SECRETS = {
   reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
 };
 var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
-var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var PR_TREE_VAR = "ATOMATON_PR_TREE";
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, MACHINERY_ROOT_VAR, PR_TREE_VAR]);
 var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
 
 // src/domain/delivery/check-jobs.ts
-var CHECKS_FROM_PULL_REQUEST = {
-  where: "checks.from_pull_request",
-  secrets: {
-    refused: "These commands come from the pull request, which may rewrite them, so a credential " + "named beside them is one the change being judged can read. Move the check to " + "`checks.from_default_branch`, where the commands come from a branch a person approved."
-  }
-};
-var NO_PULL_REQUEST_CHECKS = "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
+var NO_CHECKS = "This check verified nothing: `checks.jobs` in .github/atomaton/config.yaml is empty, " + "so a pull request satisfying it has not been tested. Add the commands that check this project, " + "or point `checks.your_workflow` at a workflow of your own.";
 
 // src/domain/work/agent-name.ts
 var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
@@ -552,7 +547,7 @@ var DEPLOY_ARMS = {
     key: "on_merge",
     rules: {
       where: "deploy.on_merge",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       extra: refsFrom({ branches: true })
     }
   },
@@ -560,7 +555,7 @@ var DEPLOY_ARMS = {
     key: "on_tag",
     rules: {
       where: "deploy.on_tag",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       extra: refsFrom({ branches: true, tags: true })
     }
   },
@@ -568,7 +563,7 @@ var DEPLOY_ARMS = {
     key: "on_demand",
     rules: {
       where: "deploy.on_demand",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       extra: { keys: [], read: () => ({ branches: [], tags: [] }) }
     }
   }

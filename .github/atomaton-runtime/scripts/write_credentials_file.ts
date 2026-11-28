@@ -75,7 +75,8 @@ var TOOL_SECRETS = {
   reserved: new Set([...RUN_CREDENTIALS, ...AGENT_ENV_NAMES, ...RUN_STEP_NAMES])
 };
 var JOB_ENV = ["ATOMATON_COMMANDS", "GH_TOKEN"];
-var CHECK_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+var PR_TREE_VAR = "ATOMATON_PR_TREE";
+var CHECK_JOB_RESERVED = new Set([...JOB_ENV, MACHINERY_ROOT_VAR, PR_TREE_VAR]);
 var DEPLOY_JOB_RESERVED = new Set([...JOB_ENV, "ATOMATON_DEPLOY_TARGET"]);
 
 // src/entrypoints/machinery/lib/script-ref.ts

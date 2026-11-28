@@ -26,6 +26,7 @@ environment:
 
 # How a change is verified. Either let Atomaton run your checks, or name
 # `your_workflow` instead. Both is a configuration error.
+<<<<<<< config.yaml (ours)
 checks:
   # The commands this pull request declares, run in this pull request's own tree.
   # No repository secret reaches them: a pull request may rewrite any command here,
@@ -50,6 +51,35 @@ checks:
   # Nothing here needs a credential yet. A check that did would go here, with the
   # commands read from the default branch and the pull request handed over as a path.
   from_default_branch: []
+=======
+#
+# Every check's commands are read from the DEFAULT BRANCH, so a pull request cannot
+# add a check, rename one, or widen what one reaches, and an entry may name its own
+# secrets.
+checks:
+  # Each entry is its own job: it picks its own runner, they run in parallel, and a
+  # failure names itself. `commands` run in order, stopping at the first failure.
+  #
+  # `secrets` is optional, and it decides which tree the commands run in.
+  #
+  # Naming none runs them in the pull request's tree, with no secret slots in the job
+  # at all — where most checks belong, because `bun test` should read the change.
+  jobs:
+    - name: secrets
+      commands:
+        - bun run "${ATOMATON_MACHINERY_ROOT:-.}/.github/atomaton-runtime/scripts/scan_secrets.ts"
+    # - name: test-macos
+    #   runs_on: macos-latest
+    #   commands: ["bun test"]
+    # Naming some runs them in the DEFAULT BRANCH's tree and hands the job those
+    # secrets and no others, so a relative path below is the file that is already
+    # merged. The pull request arrives as a path to read at $ATOMATON_PR_TREE — data,
+    # never something to execute. Add the secret to the repository first.
+    # - name: cloud-names
+    #   secrets: [AWS_ROLE_ARN]
+    #   commands:
+    #     - ./scripts/check-env-names.sh "$ATOMATON_PR_TREE"
+>>>>>>> config.yaml (theirs)
 
   # your_workflow: ci.yml
 
