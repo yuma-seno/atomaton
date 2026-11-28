@@ -479,7 +479,6 @@ function dispatchDirective(
     directive: string;
     notify?: string;
     type?: "issue" | "pr";
-    token?: string;
     continuesChain?: boolean;
   },
 ): DispatchOutcome {
@@ -497,7 +496,6 @@ function dispatchDirective(
     notify: request.notify ?? "",
     repo,
     markerCommentId,
-    ...(request.token === undefined ? {} : { token: request.token }),
     ...(request.continuesChain === true ? { continuesChain: true } : {}),
     log,
   });
