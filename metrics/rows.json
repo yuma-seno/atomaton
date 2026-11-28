@@ -29409,6 +29409,60 @@
     ]
   },
   {
+    "path": "sessions/issue-658/reviewer.json",
+    "agent": "reviewer",
+    "messages": 35,
+    "calls": 20,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "conventions"
+    ],
+    "reported": true,
+    "tools": {
+      "read": 3,
+      "grep": 9,
+      "get_pr": 1,
+      "list": 1,
+      "get_issue_comments": 1,
+      "get_pr_reviews": 1,
+      "get_check_runs": 1,
+      "search_code": 1,
+      "load_skill": 1,
+      "glob": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T12:10:04Z",
+        "ended_because": "completed",
+        "iterations": 9,
+        "loop_recoveries": 0,
+        "messages": 35,
+        "seconds": 111,
+        "server_calls": {
+          "files_readonly": {
+            "glob": 1,
+            "grep": 9,
+            "list": 1,
+            "read": 3
+          },
+          "github": {
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_reviews": 1
+          },
+          "search": {
+            "search_code": 1
+          }
+        },
+        "started": "2026-11-28T12:08:13Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-661/atomaton.json",
     "agent": "atomaton",
     "messages": 57,
