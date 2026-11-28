@@ -26,7 +26,7 @@
  * is a line; the cost of not adding one is measured in rejected pull requests.
  */
 import { describe, expect, test } from "bun:test";
-import { CHECKS_FROM_DEFAULT_BRANCH, CHECKS_FROM_PULL_REQUEST, NO_PULL_REQUEST_CHECKS } from "../../src/domain/delivery/check-jobs.ts";
+import { CHECKS, LEGACY_CHECK_KEYS, NO_CHECKS } from "../../src/domain/delivery/check-jobs.ts";
 import { knownConfigKeys } from "../../src/domain/delivery/deliverable-integrity.ts";
 import { DEPLOY_ARMS } from "../../src/domain/delivery/deploy-jobs.ts";
 
@@ -47,9 +47,10 @@ describe("paths the machinery names in its own messages", () => {
    */
   const NAMED_IN_MESSAGES: Array<{ what: string; path: string }> = [
     // `rules.where` is what every problem a list produces is prefixed with, and what
-    // `plan_checks.ts` names when an arm could not be read at all.
-    { what: "the pull request's checks", path: CHECKS_FROM_PULL_REQUEST.where },
-    { what: "the credentialed checks", path: CHECKS_FROM_DEFAULT_BRANCH.where },
+    // `plan_checks.ts` names when the list could not be read at all. The two keys
+    // `jobs` replaced are still read, so a message naming one has to stay settable.
+    { what: "the checks", path: CHECKS.where },
+    ...LEGACY_CHECK_KEYS.map((key) => ({ what: `the deprecated \`${key}\` list`, path: `checks.${key}` })),
     ...Object.values(DEPLOY_ARMS).map((arm) => ({ what: `deploy's \`${arm.key}\` list`, path: arm.rules.where })),
   ];
 
@@ -76,7 +77,7 @@ describe("paths the machinery names in its own messages", () => {
    */
   test("the empty-checks warning names only keys the validator accepts", () => {
     const settable = new Set(settableKeys());
-    const named = [...NO_PULL_REQUEST_CHECKS.matchAll(/`([a-z_]+(?:\.[a-z_]+)+)`/g)].map((m) => m[1] as string);
+    const named = [...NO_CHECKS.matchAll(/`([a-z_]+(?:\.[a-z_]+)+)`/g)].map((m) => m[1] as string);
     expect(named.length, "the warning names no key, so this checks nothing").toBeGreaterThan(0);
     expect(named.filter((path) => !settable.has(path))).toEqual([]);
   });

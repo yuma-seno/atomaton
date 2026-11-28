@@ -23,9 +23,9 @@
  * adds no opinion, it moves an existing one earlier.
  *
  * Anything that needs a run to find out is out of scope and stays out. Whether a
- * `checks.from_pull_request` entry passes, whether a deploy target's shell
- * works, whether a model answers — none of that is knowable from the files, and
- * pretending otherwise would make this a second, worse CI.
+ * `checks` entry passes, whether a deploy target's shell works, whether a model
+ * answers — none of that is knowable from the files, and pretending otherwise
+ * would make this a second, worse CI.
  *
  * ## Where the agent definitions and tools.yaml are checked
  *
@@ -39,12 +39,11 @@
  * So this module owns exactly one format: config.yaml, which is delivery's own and
  * which the core has never heard of.
  */
-import { CHECKS_FROM_DEFAULT_BRANCH, CHECKS_FROM_PULL_REQUEST } from "./check-jobs.ts";
+import { LEGACY_CHECK_KEYS, resolveChecks } from "./check-jobs.ts";
 import { isControlCommand } from "../../domain/work/control-commands.ts";
 import { AGENT_ISSUE_OFF } from "../../domain/work/filed-issue.ts";
 import { resolveDeclaredSecrets, TOOL_SECRETS } from "./declared-secrets.ts";
 import { DEPLOY_ARMS, resolveDeployJobs } from "./deploy-jobs.ts";
-import { resolveDeclaredJobs } from "./declared-jobs.ts";
 import { resolveMergeGates } from "./merge-gates.ts";
 import { NEW_RELEASE_MODES, NEW_RELEASE_SCOPES, isNewReleaseMode, isNewReleaseScope } from "./declared-config.ts";
 import { DEFAULT_CD_WORKFLOW, DEFAULT_CI_WORKFLOW } from "./shipped-workflows.ts";
@@ -107,13 +106,11 @@ const CONFIG_SCHEMA: Section = {
     environment: { children: { setup_commands: null, max_reloads: null } },
     checks: {
       children: {
-        // Both are lists, and `null` here says only that this file does not describe
-        // their interior. `resolveDeclaredJobs` does, below, including the rule that
-        // `from_pull_request` has nowhere to name a secret: those are the pull
-        // request's own commands in its own tree, so a credential declared beside one
-        // is a credential the change being judged can read.
-        from_pull_request: null,
-        from_default_branch: null,
+        // Lists, and `null` here says only that this file does not describe their
+        // interior. `resolveChecks` does, below, including the two keys `jobs`
+        // replaced: those are read into it, so an old config is not a typo.
+        jobs: null,
+        ...Object.fromEntries(LEGACY_CHECK_KEYS.map((key) => [key, null])),
         your_workflow: null,
       },
     },
@@ -160,17 +157,6 @@ const CONFIG_SCHEMA: Section = {
     },
   },
 };
-
-/**
- * The last segment of a dotted path — `from_pull_request` of
- * `checks.from_pull_request`.
- *
- * So a list's own rules stay the one place its name is written. Naming the section
- * here and the key again beside it is how the two came to disagree elsewhere.
- */
-function leafOf(path: string): string {
-  return path.slice(path.lastIndexOf(".") + 1);
-}
 
 /**
  * Every key the schema recognises, as dotted paths, with `*` for a level where
@@ -267,18 +253,19 @@ export function configProblems(facts: DeliverableFacts): string[] {
     problems.push(`\`${key}\` in config.yaml is not a setting Atomaton reads. Check the spelling.`);
   }
 
-  // ── two arms, and exactly one of them ─────────────────────────────────────
+  // ── the lists, and exactly one of them ─────────────────────────────────
   //
-  // An Atomaton arm and `your_workflow` are alternatives, and the structure says so
+  // The Atomaton lists and `your_workflow` are alternatives, and the structure says so
   // by putting them side by side. Saying it again here is what turns "both are set"
   // from a precedence puzzle -- which one wins, and does the reader remember? --
   // into a sentence naming the one to delete.
   //
-  // A section's Atomaton side is one list for `checks` and three for `deploy`, since
-  // a deployment is selected by the event that starts it. Any of them beside
+  // A section's Atomaton side is one list for `checks` -- the two keys it replaced are
+  // still lists an author may have written -- and three for `deploy`, since a
+  // deployment is selected by the event that starts it. Any of them beside
   // `your_workflow` is the same mistake.
   for (const [section, atomatonLists] of [
-    ["checks", [CHECKS_FROM_PULL_REQUEST, CHECKS_FROM_DEFAULT_BRANCH].map((rules) => leafOf(rules.where))],
+    ["checks", ["jobs", ...LEGACY_CHECK_KEYS]],
     ["deploy", Object.values(DEPLOY_ARMS).map((arm) => arm.key)],
   ] as const) {
     const value = config[section];
@@ -311,14 +298,12 @@ export function configProblems(facts: DeliverableFacts): string[] {
   // servers are always Atomaton's.
   problems.push(...resolveDeployJobs(config.deploy).problems);
 
-  // Both check arms, read here so a malformed one fails the pull request that wrote
-  // it rather than the planning job that later cannot use it. The import for this
-  // existed and nothing called it, so a `secrets:` typo or an empty `commands:`
-  // reached the default branch and failed there, where the message belongs to a job
-  // nobody was reading.
-  const checks = isRecord(config.checks) ? config.checks : {};
-  problems.push(...resolveDeclaredJobs(checks.from_pull_request, CHECKS_FROM_PULL_REQUEST).problems);
-  problems.push(...resolveDeclaredJobs(checks.from_default_branch, CHECKS_FROM_DEFAULT_BRANCH).problems);
+  // Every check, from either spelling, read here so a malformed one fails the pull
+  // request that wrote it rather than the planning job that later cannot use it. The
+  // import for this existed and nothing called it, so a `secrets:` typo or an empty
+  // `commands:` reached the default branch and failed there, where the message belongs
+  // to a job nobody was reading.
+  problems.push(...resolveChecks(config.checks).problems);
 
   const tools = isRecord(config.tools) ? config.tools : {};
   problems.push(...resolveDeclaredSecrets(tools.secrets, TOOL_SECRETS).problems);

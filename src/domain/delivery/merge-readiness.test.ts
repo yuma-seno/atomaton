@@ -315,13 +315,13 @@ describe("decideMergeReadiness", () => {
   // configuration.
   test("touching a generated workflow says where CI actually gets configured", () => {
     const { blockers } = decideMergeReadiness(signals({ governancePaths: [".github/workflows/atomaton-check.yml"] }));
-    expect(blockers[0]?.detail).toContain("checks.from_pull_request");
+    expect(blockers[0]?.detail).toContain("checks.jobs");
     expect(blockers[0]?.detail).toContain("config.yaml");
   });
 
   test("a governed change elsewhere gets no advice about CI", () => {
     const { blockers } = decideMergeReadiness(signals({ governancePaths: [".github/atomaton/agent-definitions/x.md"] }));
-    expect(blockers[0]?.detail).not.toContain("checks.from_pull_request");
+    expect(blockers[0]?.detail).not.toContain("checks.jobs");
   });
 
   test("the blocker names a few paths rather than every one", () => {

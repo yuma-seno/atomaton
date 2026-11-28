@@ -2,12 +2,13 @@ import { Workflow, type GeneratedWorkflowTypes as GWT } from "@github-actions-wo
 import { ActionsCheckoutV4 } from "@github-actions-workflow-ts/actions";
 import { DefinedJob, JobCondition, TypedOutputsStep } from "./actions/base.ts";
 import { COMMANDS_VAR, matrixJob, matrixSecretEnv, RUN_DECLARED_COMMANDS } from "./actions/declared-job.ts";
-import { MACHINERY_ROOT, scriptCommandWithArgs } from "./actions/script-call.ts";
-import { scriptCommand } from "./actions/script-call.ts";
+import { MACHINERY_ROOT, scriptCommand } from "./actions/script-call.ts";
 import { ATOMA_DEFAULT_VERSION, installAtomaCliStep } from "./actions/atoma-cli.ts";
 import { renameSecretSlots } from "./actions/secret-slots.ts";
+import { PR_TREE_VAR } from "../domain/delivery/declared-secrets.ts";
 import { SetupBunAction } from "./actions/third-party.ts";
 import { environmentSetupStep } from "./actions/environment-setup.ts";
+import { MACHINERY_ROOT_VAR } from "../domain/machinery/machinery-layout.ts";
 import { ref as checkLiveToolsRef } from "../entrypoints/machinery/check_live_tools.ts";
 import { ref as planChecksRef } from "../entrypoints/machinery/plan_checks.ts";
 
@@ -25,19 +26,24 @@ import { ref as planChecksRef } from "../entrypoints/machinery/plan_checks.ts";
 // over an empty list. The two are alternatives -- declaring both is a configuration
 // error, not a precedence rule.
 //
-// ## Two arms, and why each is a matrix
+// ## One list, read from the default branch, run in two kinds of job
 //
-// `checks.from_pull_request` runs the commands the pull request declares, in its own
-// tree. `checks.from_default_branch` runs the default branch's commands with the pull
-// request handed over as a path to read. Which arm a check belongs in is decided by
-// whose commands run, and that decides whether it may name a secret -- see
-// `domain/delivery/declared-jobs.ts`.
+// The commands always come from the default branch, and nothing here DECIDES anything
+// from the pull request's tree: a pull request cannot add a check, rename one, or
+// widen the secrets one receives. What that tree IS depends on what the entry named,
+// and the two paragraphs below are the whole of the difference.
 //
-// Both are matrices, one GitHub job per declared check. The credentialed arm has to
-// be, so a secret reaches the one check that named it. The pull request's arm was a
-// single job until the same question was asked of it: splitting it buys a per-check
-// runner, parallelism, and a failure that names itself, and the only reason it was
-// not split was that its checks have no secrets to keep apart.
+// An entry that named none becomes a job in `checks`: the pull request is its working
+// tree, so a command reads the change in place, and its step has nowhere to put a
+// credential at all -- not an empty slot list, which is a fact about today's
+// configuration rather than a property of the workflow. See `runWithoutCredentials`.
+//
+// An entry that named `secrets` becomes a job in `credentialled-checks`, and there the
+// working tree is the DEFAULT BRANCH and the pull request is a path to read at
+// `$ATOMATON_PR_TREE`. The asymmetry is the whole of the rule: a credential beside a
+// command means that command must be one a person released, so `./scripts/x.sh`
+// resolves to the released file rather than to whatever the pull request put at that
+// path. An entry that wants to execute the change is an entry that names no secret.
 //
 // ## Two triggers, because the two kinds of pull request arrive differently
 //
@@ -59,86 +65,150 @@ import { ref as planChecksRef } from "../entrypoints/machinery/plan_checks.ts";
 /** The name a required status check refers to. Pinned to the shipped ruleset by a contract test. */
 export const CHECK_JOB_NAME = "atomaton-check";
 
-/** One matrix entry per `checks.from_pull_request`. */
-const PULL_REQUEST_JOB_NAME = "pull-request-checks";
-/** One matrix entry per `checks.from_default_branch`, each with only its own secrets. */
-const DEFAULT_BRANCH_JOB_NAME = "default-branch-checks";
+/** One matrix entry per `checks` entry that names no secret. */
+const CHECKS_JOB_NAME = "checks";
+/** One matrix entry per `checks` entry that named its own secrets. */
+const CREDENTIALLED_CHECKS_JOB_NAME = "credentialled-checks";
 /** Atomaton's own check, which is nobody's configuration to remove. */
 const TOOLS_JOB_NAME = "atomaton-tools";
 
-/** Publishes each matrix. Separate jobs, because `strategy` is read before any step runs. */
-const PLAN_PULL_REQUEST_JOB = "plan-pull-request-checks";
-const PLAN_DEFAULT_BRANCH_JOB = "plan-default-branch-checks";
+/** Publishes both matrices. One job, because there is one list to read. */
+const PLAN_JOB = "plan-checks";
 const PLAN_STEP_ID = "plan";
+const SPLIT_STEP_ID = "split";
 
-/** Where the pull request is put for a default-branch command to read. */
+/** Where the machinery is checked out, before it is moved out of the work tree. */
+const MACHINERY_DIR = "atomaton-machinery";
+/** Where the pull request is put for a credentialed check's commands to read. */
 const PR_TREE_DIR = ".atomaton-pull-request";
+/** Where it ends up: outside the work tree, so a project's own commands cannot see it. */
+const MACHINERY_ABS = "\${RUNNER_TEMP}/atomaton-machinery";
 
 /**
- * A job that reads one arm and publishes it as a matrix.
+ * Read `checks` from the default branch and publish it as a step output.
  *
- * Two of these rather than one, and the difference is the checkout: an arm is planned
- * from the tree whose commands it names. The pull request may choose its own checks
- * freely, because no secret reaches them. It may not choose which credential reaches
- * which job, so that arm is read from the default branch.
+ * The planner is the machinery's, from the same checkout the config comes from: the
+ * workflow file that runs is the pull request's (a `workflow_dispatch` run takes its
+ * workflow from the ref it was dispatched at), and running the pull request's copy of
+ * the planner would be the pull request deciding what runs.
  */
-function planJob(
-  jobName: string,
-  arm: "pull-request" | "default-branch",
-  checkout: ActionsCheckoutV4,
-  run: string,
-): DefinedJob<{ jobs: string }> {
-  return new DefinedJob<{ jobs: string }>(
-    jobName,
-    {
-      "runs-on": "ubuntu-latest",
-      "timeout-minutes": 5,
-      permissions: { contents: "read" },
-      outputs: { jobs: `\${{ steps.${PLAN_STEP_ID}.outputs.jobs }}` },
+const planStep = new TypedOutputsStep<"jobs">(
+  {
+    name: "Read `checks`",
+    id: PLAN_STEP_ID,
+    shell: "bash",
+    run: [
+      `PLANNER="${MACHINERY_ROOT}/${planChecksRef.runtimePath}"`,
+      // The default branch may predate this script, and says so rather than answering
+      // as though it had looked. It happens once, in the repository that builds the
+      // deliverable: the workflow and the script arrive in one release for everyone
+      // else, but here the pull request carrying both is checked by a default branch
+      // that has neither yet.
+      //
+      // `[]` is what it publishes, because there is nothing to run and the job that
+      // collects verdicts reads a skipped matrix as a pass. The warning is what keeps
+      // that from being silent: an empty answer and an unaskable question look
+      // identical afterwards, and only one of them is a project with no such check.
+      'if [ ! -f "$PLANNER" ]; then',
+      '  echo "::warning::$PLANNER is not on the default branch yet, so no check could be planned. This is expected once, on the change that adds it."',
+      `  echo "jobs=[]" >> "\$GITHUB_OUTPUT"`,
+      "  exit 0",
+      "fi",
+      // The same window one step further on: the default branch may hold the PREVIOUS
+      // release's planner, which planned one arm per call and takes `--arm`. That
+      // planner is what this repository's own pull requests run against until the
+      // release carrying this file is applied, so the retry asks for the arm whose
+      // entries carry no credential -- where a pull request's own commands lived, and
+      // which the split below sends to the job with no secret slots. Once the release
+      // lands the first call succeeds and this is never reached.
+      'if bun run "$PLANNER"; then',
+      "  exit 0",
+      "fi",
+      'bun run "$PLANNER" --arm pull-request',
+      "",
+    ].join("\n"),
+  },
+  ["jobs"],
+);
+
+/**
+ * The one list, split by whether an entry has anywhere to put a credential.
+ *
+ * The split lives here rather than in the planner so that what a planner publishes
+ * stays one list: the same shape `deploy` publishes, read by the same `matrixJob`, and
+ * a planner from the previous release — which published one arm per call — is still
+ * something this step can read.
+ */
+const splitStep = new TypedOutputsStep<"uncredentialled" | "credentialled">(
+  {
+    name: "Split the list by whether an entry names a secret",
+    id: SPLIT_STEP_ID,
+    shell: "bash",
+    env: { JOBS: planStep.outputs.jobs },
+    run: [
+      `uncredentialled=$(jq -c '[.[] | select((.secrets // []) | length == 0)]' <<<"$JOBS")`,
+      `credentialled=$(jq -c '[.[] | select((.secrets // []) | length > 0)]' <<<"$JOBS")`,
+      `echo "uncredentialled=$uncredentialled" >> "\$GITHUB_OUTPUT"`,
+      `echo "credentialled=$credentialled" >> "\$GITHUB_OUTPUT"`,
+      'echo "$(jq length <<<"$uncredentialled") check(s) named no secret; $(jq length <<<"$credentialled") named their own"',
+      "",
+    ].join("\n"),
+  },
+  ["uncredentialled", "credentialled"],
+);
+
+/** Publishes each matrix. A separate job, because `strategy` is read before any step runs. */
+const planChecksJob = new DefinedJob<{ uncredentialled: string; credentialled: string }>(
+  PLAN_JOB,
+  {
+    "runs-on": "ubuntu-latest",
+    "timeout-minutes": 5,
+    permissions: { contents: "read" },
+    outputs: {
+      uncredentialled: `\${{ steps.${SPLIT_STEP_ID}.outputs.uncredentialled }}`,
+      credentialled: `\${{ steps.${SPLIT_STEP_ID}.outputs.credentialled }}`,
     },
-    [
-      checkout,
-      new SetupBunAction({ name: "Setup Bun" }),
-      new TypedOutputsStep({ name: `Read \`checks.from_${arm.replace("-", "_")}\``, id: PLAN_STEP_ID, shell: "bash", run }),
-    ],
-  );
-}
-
-const planPullRequestChecksJob = planJob(
-  PLAN_PULL_REQUEST_JOB,
-  "pull-request",
-  new ActionsCheckoutV4({ name: "Checkout the pull request, whose commands these are" }),
-  `${scriptCommandWithArgs(planChecksRef, { arm: "pull-request" })}\n`,
-);
-
-const planDefaultBranchChecksJob = planJob(
-  PLAN_DEFAULT_BRANCH_JOB,
-  "default-branch",
-  new ActionsCheckoutV4({
-    name: "Checkout the default branch, which decides what may hold a credential",
-    with: { ref: "${{ github.event.repository.default_branch }}" },
-  }),
-  // The default branch may predate this script, and says so rather than answering as
-  // though it had looked. It happens once, in the repository that builds the
-  // deliverable: the workflow and the script arrive in one release for everyone else,
-  // but here the pull request carrying both is checked by a default branch that has
-  // neither yet.
-  //
-  // `[]` is what it publishes, because there is nothing to run and the job that
-  // collects verdicts reads a skipped matrix as a pass. The warning is what keeps that
-  // from being silent: an empty answer and an unaskable question look identical
-  // afterwards, and only one of them is a project with no such check.
+  },
   [
-    `PLANNER="${MACHINERY_ROOT}/${planChecksRef.runtimePath}"`,
-    'if [ ! -f "$PLANNER" ]; then',
-    '  echo "::warning::$PLANNER is not on the default branch yet, so no credentialed check could be planned. This is expected once, on the change that adds it."',
-    `  echo "jobs=[]" >> "\$GITHUB_OUTPUT"`,
-    "  exit 0",
-    "fi",
-    `bun run "\$PLANNER" --arm default-branch`,
-    "",
-  ].join("\n"),
+    new ActionsCheckoutV4({
+      name: "Checkout the default branch, which decides what runs",
+      with: { ref: "${{ github.event.repository.default_branch }}" },
+    }),
+    new SetupBunAction({ name: "Setup Bun" }),
+    planStep,
+    splitStep,
+  ],
 );
+
+/**
+ * The machinery, for a job whose working tree is the pull request.
+ *
+ * Two checkouts, because the two trees play two parts: the pull request's is where the
+ * project's commands run, and the default branch's — the machinery — is what
+ * `environment.setup_commands` are read from and where the tool servers' own files
+ * live. This is the shape `atomaton-runner` already had for the same reason.
+ *
+ * It is not used by `credentialled-checks`, which needs no second checkout: there the
+ * default branch IS the working tree, and an unset `ATOMATON_MACHINERY_ROOT` resolves
+ * to it.
+ *
+ * Straight back out of the work tree, as the runner does: `actions/checkout` cannot
+ * write outside `GITHUB_WORKSPACE`, and a project's own commands (`git status`, a
+ * linter run over `.`) must see the repository and nothing else.
+ */
+function machinerySteps() {
+  return [
+    new ActionsCheckoutV4({
+      name: "Checkout the delivery machinery from the default branch",
+      with: { ref: "${{ github.event.repository.default_branch }}", path: MACHINERY_DIR },
+    }),
+    new TypedOutputsStep({
+      name: "Move the machinery out of the work tree",
+      shell: "bash",
+      run: `rm -rf "${MACHINERY_ABS}"\nmv "${MACHINERY_DIR}" "${MACHINERY_ABS}"\necho "${MACHINERY_ROOT_VAR}=${MACHINERY_ABS}" >> "\$GITHUB_ENV"\n`,
+    }),
+  ];
+}
 
 /**
  * Checks routinely need a token: `gh` for anything, a package manager reaching a
@@ -156,16 +226,16 @@ const CHECK_ENV = {
 };
 
 /**
- * The pull request's own commands, and a step with nowhere to put a credential.
+ * An entry that named no secret, and a step with nowhere to put one.
  *
- * Two steps rather than one shared by both arms, and the duplication is the point.
- * A single step carrying the secret slots would have held them empty here, because
- * `from_pull_request` entries cannot name a secret — which makes the guarantee "the
- * list happens to be empty" instead of "there is nowhere to write one". The first is
- * a fact about today's configuration; the second is a property of the workflow, and it
- * is the one `reserved-names.test.ts` holds this to.
+ * Two steps rather than one shared by both kinds of entry, and the duplication is the
+ * point. A single step carrying the secret slots would have held them empty here,
+ * because this entry named none — which makes the guarantee "the list happens to be
+ * empty" instead of "there is nowhere to write one". The first is a fact about today's
+ * configuration; the second is a property of the workflow, and it is the one
+ * `reserved-names.test.ts` holds this to.
  */
-function runPullRequestChecks() {
+function runWithoutCredentials() {
   return new TypedOutputsStep({
     name: "Run this check's commands",
     shell: "bash",
@@ -175,10 +245,12 @@ function runPullRequestChecks() {
 }
 
 /**
- * The default branch's commands, each job handed the secrets its own entry named.
+ * An entry that named secrets, handed those and no others.
  *
- * The pull request is here as a path to read — `$ATOMATON_PR_TREE` — under the rule
- * `validate_deliverable.ts` states about `--root`: data, never code.
+ * Its commands run in the default branch's tree, which is why a relative path in one of
+ * them cannot be a file the pull request wrote. The pull request is here instead — as a
+ * path, `$ATOMATON_PR_TREE`, under the same rule `validate_deliverable.ts` states about
+ * `--root`: data, never code.
  */
 function runCredentialledChecks() {
   return new TypedOutputsStep({
@@ -186,45 +258,74 @@ function runCredentialledChecks() {
     shell: "bash",
     env: {
       ...matrixSecretEnv(),
-      ATOMATON_PR_TREE: `\${{ github.workspace }}/${PR_TREE_DIR}`,
+      [PR_TREE_VAR]: `\${{ github.workspace }}/${PR_TREE_DIR}`,
       ...CHECK_ENV,
     },
     run: renameSecretSlots() + "\n" + RUN_DECLARED_COMMANDS,
   });
 }
-/** One check's problem should not hide another's, so neither arm stops at the first. */
+
+/** One check's problem should not hide another's, so neither job stops at the first. */
 const CHECK_MATRIX = { timeoutMinutes: 30, failFast: false, permissions: { contents: "read" } } as const;
 
-const pullRequestChecksJob = matrixJob(PULL_REQUEST_JOB_NAME, planPullRequestChecksJob, CHECK_MATRIX, [
-  new ActionsCheckoutV4({ name: "Checkout the pull request" }),
-  new SetupBunAction({ name: "Setup Bun" }),
-  environmentSetupStep(),
-  runPullRequestChecks(),
-]);
+/**
+ * The checks that name no secret: the pull request's tree is the working tree, so a
+ * project's own commands run against the change being judged.
+ */
+const checksJob = matrixJob(
+  CHECKS_JOB_NAME,
+  planChecksJob,
+  { ...CHECK_MATRIX, output: "uncredentialled" },
+  [
+    new ActionsCheckoutV4({ name: "Checkout the pull request" }),
+    ...machinerySteps(),
+    new SetupBunAction({ name: "Setup Bun" }),
+    environmentSetupStep(),
+    runWithoutCredentials(),
+  ],
+);
 
-const defaultBranchChecksJob = matrixJob(DEFAULT_BRANCH_JOB_NAME, planDefaultBranchChecksJob, CHECK_MATRIX, [
-  new ActionsCheckoutV4({
-    name: "Checkout the default branch, whose commands these are",
-    with: { ref: "${{ github.event.repository.default_branch }}" },
-  }),
-  new ActionsCheckoutV4({ name: "Checkout the pull request, as data", with: { path: PR_TREE_DIR } }),
-  new SetupBunAction({ name: "Setup Bun" }),
-  runCredentialledChecks(),
-]);
+/**
+ * The checks that named secrets: the default branch's tree, plus the credentials their
+ * own entry declared.
+ *
+ * The tree is the difference, and it is the one that matters. Commands here resolve
+ * against what a person released, so a pull request editing `scripts/check-cloud.sh`
+ * cannot have that edit run with a credential in the environment; the pull request is
+ * checked out beside them as data and named by `$ATOMATON_PR_TREE`.
+ */
+const credentialledChecksJob = matrixJob(
+  CREDENTIALLED_CHECKS_JOB_NAME,
+  planChecksJob,
+  { ...CHECK_MATRIX, output: "credentialled" },
+  [
+    new ActionsCheckoutV4({
+      name: "Checkout the default branch, whose commands these are",
+      with: { ref: "${{ github.event.repository.default_branch }}" },
+    }),
+    new ActionsCheckoutV4({ name: "Checkout the pull request, as data", with: { path: PR_TREE_DIR } }),
+    new SetupBunAction({ name: "Setup Bun" }),
+    environmentSetupStep(),
+    runCredentialledChecks(),
+  ],
+);
 
 /**
  * Atomaton's own check: start the tool servers this repository's agents would use and
  * ask what they offer, so a guard that has stopped guarding fails here rather than
  * going unnoticed.
  *
- * Its own job rather than a step in the pull request's matrix, and the reason is the
- * matrix: it would otherwise run once per declared check, installing the CLI each
- * time, to ask a question that has one answer. It is also not the project's check --
+ * Its own job rather than a step in the checks' matrix, and the reason is the matrix:
+ * it would otherwise run once per declared check, installing the CLI each time, to ask
+ * a question that has one answer. It is also not the project's check --
  * `validate_deliverable.ts` is separate for the same reason. A project that could
  * delete it would be a project that can stop being told.
  *
- * It may start what the pull request declares because this job holds nothing worth
- * taking: no repository secret reaches it.
+ * The servers it starts are the ones `.github/atomaton/tools/` holds on the DEFAULT
+ * BRANCH: the pull request's tools file, config and definitions are the change being
+ * judged, and starting them would be the change deciding what this check is allowed to
+ * see. The pull request's tree is checked out beside it because the end-to-end suite
+ * below runs there.
  */
 const toolsJob = new DefinedJob(
   TOOLS_JOB_NAME,
@@ -234,7 +335,8 @@ const toolsJob = new DefinedJob(
     permissions: { contents: "read" },
   },
   [
-    new ActionsCheckoutV4({ name: "Checkout the pull request" }),
+    new ActionsCheckoutV4({ name: "Checkout the pull request, as the tree under test" }),
+    ...machinerySteps(),
     new SetupBunAction({ name: "Setup Bun" }),
     environmentSetupStep(),
     installAtomaCliStep(ATOMA_DEFAULT_VERSION),
@@ -252,11 +354,10 @@ const toolsJob = new DefinedJob(
     // anywhere -- which is why #25 (a delegate that could not read a file) could only
     // be argued about from the outside.
     //
-    // Here rather than in the pull request's own matrix, and for the reason this job
-    // exists at all: it is the one job that installs the CLI, and the matrix would
-    // install it once per declared check to run the same suite against the same tree.
-    // This job holds no repository secret, so nothing here is a credential a pull
-    // request could reach.
+    // Here rather than in the checks' own matrix, and for the reason this job exists at
+    // all: it is the one job that installs the CLI, and the matrix would install it once
+    // per declared check to run the same suite against the same tree. This job holds no
+    // repository secret, so nothing here is a credential a pull request could reach.
     //
     // Guarded, because this workflow SHIPS. The suite and its `test:e2e` script are
     // this template's own, and an adopter's tree usually has neither -- Rust, Go,
@@ -299,7 +400,7 @@ const toolsJob = new DefinedJob(
  * The one job a ruleset names, and all it does is agree with the jobs before it.
  *
  * A required context has to be a fixed string, and the jobs doing the work are not:
- * a matrix entry is reported as `default-branch-checks (cloud-names)`. A required
+ * a matrix entry is reported as `credentialled-checks (cloud-names)`. A required
  * context that stops existing is not a check that fails — it is every pull request
  * waiting on a name nothing reports, and an administrator is needed to undo it. So
  * the name lives here, where nothing can rename it.
@@ -313,7 +414,10 @@ const toolsJob = new DefinedJob(
 export const checkResultJob = new DefinedJob(
   CHECK_JOB_NAME,
   {
-    needs: [pullRequestChecksJob, defaultBranchChecksJob, toolsJob],
+    // The planning job too. A list that could not be read is not a project with no
+    // checks: the two matrices are skipped either way, and a verdict that read only
+    // them would call a malformed `checks` a pass.
+    needs: [planChecksJob, checksJob, credentialledChecksJob, toolsJob],
     if: JobCondition.always(),
     "runs-on": "ubuntu-latest",
     "timeout-minutes": 5,
@@ -324,15 +428,17 @@ export const checkResultJob = new DefinedJob(
       name: "Report the verdict of every check job",
       shell: "bash",
       env: {
-        PULL_REQUEST_RESULT: `\${{ needs.${PULL_REQUEST_JOB_NAME}.result }}`,
-        DEFAULT_BRANCH_RESULT: `\${{ needs.${DEFAULT_BRANCH_JOB_NAME}.result }}`,
+        PLAN_RESULT: `\${{ needs.${PLAN_JOB}.result }}`,
+        CHECKS_RESULT: `\${{ needs.${CHECKS_JOB_NAME}.result }}`,
+        CREDENTIALLED_CHECKS_RESULT: `\${{ needs.${CREDENTIALLED_CHECKS_JOB_NAME}.result }}`,
         TOOLS_RESULT: `\${{ needs.${TOOLS_JOB_NAME}.result }}`,
       },
       run: [
-        'echo "the pull request\'s own commands: $PULL_REQUEST_RESULT"',
-        'echo "the default branch\'s commands:   $DEFAULT_BRANCH_RESULT"',
+        'echo "reading the list of checks:      $PLAN_RESULT"',
+        'echo "the checks that named no secret:  $CHECKS_RESULT"',
+        'echo "the checks that named secrets:   $CREDENTIALLED_CHECKS_RESULT"',
         'echo "Atomaton\'s own tool check:        $TOOLS_RESULT"',
-        'for result in "$PULL_REQUEST_RESULT" "$DEFAULT_BRANCH_RESULT" "$TOOLS_RESULT"; do',
+        'for result in "$PLAN_RESULT" "$CHECKS_RESULT" "$CREDENTIALLED_CHECKS_RESULT" "$TOOLS_RESULT"; do',
         '  case "$result" in',
         "    success|skipped) ;;",
         '    *) echo "::error::a check job reported \'$result\'"; exit 1 ;;',
@@ -357,11 +463,4 @@ export const atomaCheck = new Workflow("atomaton-check", {
   // GitHub: the check run a ruleset reads is written by atomaton-validate-pr, which
   // holds `checks: write` for that one purpose.
   permissions: { contents: "read" },
-}).addJobs([
-  planPullRequestChecksJob,
-  planDefaultBranchChecksJob,
-  pullRequestChecksJob,
-  defaultBranchChecksJob,
-  toolsJob,
-  checkResultJob,
-]);
+}).addJobs([planChecksJob, checksJob, credentialledChecksJob, toolsJob, checkResultJob]);

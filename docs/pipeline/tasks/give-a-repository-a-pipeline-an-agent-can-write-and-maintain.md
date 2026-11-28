@@ -4,7 +4,7 @@ Write no workflow. Describe the pipeline as commands in `config.yaml`:
 
 ```yaml
 checks:
-  from_pull_request:
+  jobs:
     - name: verify
       commands:
         - bun install --frozen-lockfile

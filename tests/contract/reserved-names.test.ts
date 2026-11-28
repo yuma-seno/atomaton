@@ -69,21 +69,21 @@ describe("reserved names match the workflows they describe", () => {
   });
 
   /**
-   * The pull request's own checks have no list to reserve against, and that is the
-   * point: their commands are the pull request's own, so a declared credential would
-   * be one the change being judged could read. What is checked instead is that
-   * nothing put one back.
+   * The check that named no secret has no list to reserve against, and that is the
+   * point: the slot variables are the transport for declared credentials, so a step
+   * with none of them has nowhere to put one. What is checked instead is that nothing
+   * put one back.
    */
-  test("the pull request's check step carries no declared credential at all", () => {
-    const keys = carrierEnvKeys("atomaton-check.yml", "pull-request-checks", "Run this check's commands");
+  test("the step for a check with no credentials carries none at all", () => {
+    const keys = carrierEnvKeys("atomaton-check.yml", "checks", "Run this check's commands");
     expect(keys.filter((key) => key.startsWith("ATOMATON_SECRET"))).toEqual([]);
   });
 
   test("the credentialed check step", () => {
     expectAllReserved(
-      "a `checks.from_default_branch` entry's `secrets`",
+      "a `checks.jobs` entry's `secrets`",
       CHECK_JOB_RESERVED,
-      carrierEnvKeys("atomaton-check.yml", "default-branch-checks", "Run this check's commands"),
+      carrierEnvKeys("atomaton-check.yml", "credentialled-checks", "Run this check's commands"),
     );
   });
 

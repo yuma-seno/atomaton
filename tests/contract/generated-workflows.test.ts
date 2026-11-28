@@ -1512,7 +1512,7 @@ describe("generated workflows", () => {
     // the thing that named them. Both are generated from `matrixSecretEnv()`, so the
     // point of checking both is that neither quietly stops using it.
     const matrixCarriers = [
-      { file: "atomaton-check.yml", job: "default-branch-checks", step: "Run this check's commands" },
+      { file: "atomaton-check.yml", job: "credentialled-checks", step: "Run this check's commands" },
       { file: "atomaton-deploy.yml", job: "deploy", step: "Run this deployment's commands" },
     ];
     for (const carrier of matrixCarriers) {
@@ -1591,7 +1591,7 @@ describe("generated workflows", () => {
     type WorkflowDocument = { jobs?: Record<string, { steps?: WorkflowStep[] }> };
 
     const planners = [
-      { file: "atomaton-check.yml", job: "plan-default-branch-checks" },
+      { file: "atomaton-check.yml", job: "plan-checks" },
       { file: "atomaton-deploy.yml", job: "plan-deploy" },
     ];
     for (const { file, job } of planners) {
@@ -1674,7 +1674,7 @@ describe("generated workflows", () => {
 
     // A check that cannot talk to GitHub is the only thing in the system that
     // cannot, and the failure reads as a broken command rather than no token.
-    const runChecks = check.jobs?.["pull-request-checks"]?.steps?.find((s) => s.name === "Run this check's commands");
+    const runChecks = check.jobs?.["checks"]?.steps?.find((s) => s.name === "Run this check's commands");
     expect(runChecks?.env?.GH_TOKEN).toBe("${{ github.token }}");
 
     const deploy = Bun.YAML.parse(readFileSync("dist/.github/workflows/atomaton-deploy.yml", "utf8")) as WorkflowDocument;
@@ -1899,8 +1899,8 @@ describe("generated workflows", () => {
     // `fromJSON` always, so one label and a self-hosted runner's several are
     // consumed the same way.
     for (const [file, workJob, planJob] of [
-      ["atomaton-check", "pull-request-checks", "plan-pull-request-checks"],
-      ["atomaton-check", "default-branch-checks", "plan-default-branch-checks"],
+      ["atomaton-check", "checks", "plan-checks"],
+      ["atomaton-check", "credentialled-checks", "plan-checks"],
       ["atomaton-deploy", "deploy", "plan-deploy"],
     ] as const) {
       const jobs = read(file);
@@ -2162,7 +2162,7 @@ describe("generated workflows", () => {
       readFileSync("dist/.github/workflows/atomaton-check.yml", "utf8"),
     ) as WorkflowDocument;
 
-    for (const job of ["pull-request-checks", "default-branch-checks"]) {
+    for (const job of ["checks", "credentialled-checks"]) {
       expect(
         workflow.jobs?.[job]?.name,
         `${job} must name itself, or GitHub names it after every field of the entry`,
@@ -2257,5 +2257,181 @@ describe("generated workflows", () => {
       `the tool merges with --${method} and the ruleset allows [${allowed}]. GitHub refuses ` +
         "a pull request whose method is not allowed, so this stops every agent merge.",
     ).toContain(method);
+  });
+});
+
+/**
+ * `atomaton-check` reads the machinery from the default branch, and runs the pull
+ * request's tree.
+ *
+ * The two are one sentence apart and worth keeping apart. What DECIDES — the list of
+ * checks, the environment setup, the definitions the tool servers are started from —
+ * comes from the default branch, so a pull request cannot change what runs against
+ * it. What RUNS is the pull request: its tree is the working directory, which is what
+ * makes a check about the change at all.
+ *
+ * The failure this pins is the one the file had: a plan job that checked the pull
+ * request out and read `checks` from it, beside a matrix that ran those commands. A
+ * pull request could then add a job, give it a secret, and be handed it.
+ */
+describe("atomaton-check reads the machinery, never the pull request", () => {
+  type Step = {
+    name?: string;
+    run?: string;
+    uses?: string;
+    with?: Record<string, string>;
+    env?: Record<string, string>;
+  };
+  type Document = { jobs?: Record<string, { steps?: Step[]; outputs?: Record<string, string> }> };
+
+  const CHECK = "dist/.github/workflows/atomaton-check.yml";
+  const doc = () => Bun.YAML.parse(readFileSync(CHECK, "utf8")) as Document;
+  const stepsOf = (job: string): Step[] => doc().jobs?.[job]?.steps ?? [];
+
+  /** The step that says where the machinery is, and moves the checkout out of the tree. */
+  function machinerySetter(job: string): Step | undefined {
+    return stepsOf(job).find((step) => /ATOMATON_MACHINERY_ROOT=[^\n]*>>\s*"?\$GITHUB_ENV/.test(step.run ?? ""));
+  }
+
+  /** An `actions/checkout` into `atomaton-machinery`, from the default branch. */
+  function machineryCheckout(job: string): Step | undefined {
+    return stepsOf(job).find((step) => step.with?.path === "atomaton-machinery");
+  }
+
+  // (a) Every job whose working tree is the pull request has the machinery beside it,
+  // and says where it is. Without this the setup step would read the pull request's
+  // `config.yaml`, which is the change under test deciding how it is set up.
+  test("every job that works in the pull request sets the machinery root", () => {
+    for (const job of ["checks", "atomaton-tools"]) {
+      const checkout = machineryCheckout(job);
+      expect(checkout, `${job}: a checkout into atomaton-machinery`).toBeDefined();
+      expect(checkout?.with?.ref, `${job}: the machinery must be the default branch`).toContain("default_branch");
+
+      const setter = machinerySetter(job);
+      expect(setter, `${job}: one step must set the machinery root`).toBeDefined();
+      expect(setter?.run, `${job}: the setter must move the checkout out of the work tree`).toContain(
+        'mv "atomaton-machinery"',
+      );
+
+      // And nothing runs a script out of the workspace, where the pull request's copy
+      // of it would be.
+      for (const step of stepsOf(job)) {
+        expect(
+          /(?<![\w/$}])\.github\/atomaton-runtime\//.test(step.run ?? ""),
+          `${job}: ${step.name} must not run a script out of the pull request's tree`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  // (b) The plan job reads the default branch and nothing else. It is the one job
+  // that decides what runs, so a checkout of the pull request here would be the pull
+  // request writing its own job list.
+  test("the job that plans the matrix checks out the default branch only", () => {
+    const steps = stepsOf("plan-checks");
+    const checkouts = steps.filter((step) => step.with?.path !== "atomaton-machinery" && step.name?.startsWith("Checkout"));
+    expect(checkouts, "the plan job checks something out").toHaveLength(1);
+    expect(checkouts[0]?.with?.ref, "and it is the default branch").toContain("default_branch");
+    for (const step of steps) {
+      expect(step.with?.path, `${step.name}: the plan job checks nothing out beside it`).toBeUndefined();
+    }
+  });
+
+  // (b2) A credentialed check runs in the DEFAULT BRANCH's tree, and sees the pull
+  // request only at a path.
+  //
+  // This is the boundary the unified list could have quietly lost: with the pull
+  // request as the working tree, `./scripts/check-cloud.sh` in a credentialed entry
+  // resolves to whatever the pull request put at that path, and runs it with the
+  // credential in the environment. A pull request could then read the secret by
+  // editing one file. So the tree those commands run in is what a person released,
+  // and the change under test arrives as data with a name.
+  test("a credentialed check's commands resolve against the default branch, not the pull request", () => {
+    const checkouts = stepsOf("credentialled-checks").filter((step) => step.uses?.startsWith("actions/checkout"));
+    expect(checkouts, "two checkouts: the tree the commands run in, and the data").toHaveLength(2);
+
+    // The one WITHOUT a `path` is the working tree, and it is the default branch.
+    const worktree = checkouts.filter((step) => step.with?.path === undefined);
+    expect(worktree, "exactly one checkout is the working tree").toHaveLength(1);
+    expect(worktree[0]?.with?.ref, "and it is the default branch").toContain("default_branch");
+
+    // The pull request goes somewhere else, and only its path reaches the commands.
+    const data = checkouts.filter((step) => step.with?.path !== undefined);
+    expect(data, "exactly one checkout is the pull request").toHaveLength(1);
+    const prDir = data[0]?.with?.path as string;
+    expect(prDir, "and it is not the workspace root").not.toBe(".");
+    expect(data[0]?.with?.ref, "the pull request's own ref, not the default branch").toBeUndefined();
+
+    const carrier = stepsOf("credentialled-checks").find((step) => step.name === "Run this check's commands");
+    expect(carrier?.env?.ATOMATON_PR_TREE, "the commands are handed it under its own name").toBe(
+      `\${{ github.workspace }}/${prDir}`,
+    );
+    // And nothing points the job's own machinery at the pull request.
+    expect(carrier?.env?.ATOMATON_MACHINERY_ROOT, "the machinery root is unset, so `.` is the default branch")
+      .toBeUndefined();
+  });
+
+  // (c) The check that named no secret runs in a step with no slots in it at all --
+  // not empty ones. Emptiness is a fact about today's configuration; the absence is a
+  // property of the workflow, and only the second survives somebody adding a secret
+  // in a later release.
+  test("the check that named no secret has nowhere to put one", () => {
+    const carrier = stepsOf("checks").find((step) => step.name === "Run this check's commands");
+    expect(carrier, "the step that runs a check's commands").toBeDefined();
+    expect(Object.keys(carrier?.env ?? {}).filter((name) => name.startsWith(SECRET_SLOT_PREFIX))).toEqual([]);
+    expect(carrier?.env?.[SECRET_NAMES_VAR], "and it does not carry the names either").toBeUndefined();
+    // `github.token` is the run's own, reduced to what the checkout used; it is not a
+    // repository secret and is not one a check can declare.
+    expect(carrier?.env?.GH_TOKEN).toBe("${{ github.token }}");
+  });
+
+  // (d) A secret reaches the job of the entry that named it, by a computed key: the
+  // generated file cannot know what a project called its token, and `secrets[NAME]`
+  // is the only way to read one by a name that arrived as data.
+  test("a check that named secrets reads them by the matrix entry that named them", () => {
+    const carrier = stepsOf("credentialled-checks").find((step) => step.name === "Run this check's commands");
+    expect(carrier, "the credentialed step").toBeDefined();
+    for (let slot = 0; slot < SECRET_SLOTS; slot++) {
+      expect(carrier?.env?.[`${SECRET_SLOT_PREFIX}${slot}`], `slot ${slot}`).toBe(
+        `\${{ secrets[matrix.secrets[${slot}]] }}`,
+      );
+    }
+    expect(carrier?.env?.[SECRET_NAMES_VAR]).toBe("${{ toJSON(matrix.secrets) }}");
+  });
+
+  // The required context is `atomaton-check`, and it reads the planning job too. The
+  // two matrices are SKIPPED when a list could not be read, and a verdict that read
+  // only them would call a malformed `checks` a pass -- the required check green over a
+  // pull request whose checks never ran.
+  test("the verdict reads the planning job, so a list that could not be read is not a pass", () => {
+    type Verdict = { needs?: unknown; steps?: Step[] };
+    const verdict = (doc().jobs ?? {})[CHECK_JOB_NAME] as Verdict | undefined;
+    expect(verdict, `a job named ${CHECK_JOB_NAME}`).toBeDefined();
+    expect(verdict?.needs, "the planning job is one of the verdict's dependencies").toContain("plan-checks");
+
+    const report = verdict?.steps?.find((step) => step.name === "Report the verdict of every check job");
+    expect(report?.env?.PLAN_RESULT, "and its result is one of the verdicts read").toBe(
+      "${{ needs.plan-checks.result }}",
+    );
+    expect(report?.run, "in the same loop as the others, where `skipped` is the only pass").toContain(
+      'for result in "$PLAN_RESULT"',
+    );
+  });
+
+  // The split is what decides which job an entry lands in, and it is the only place
+  // that decision is made. A check with `secrets: []` written out is an entry that
+  // named none: the two jobs differ on emptiness after reading, not on whether the
+  // key was typed.
+  test("the two matrices are split from one list, by whether an entry named a secret", () => {
+    const plan = doc().jobs?.["plan-checks"];
+    expect(plan?.outputs?.uncredentialled, "one output per list").toBe("${{ steps.split.outputs.uncredentialled }}");
+    expect(plan?.outputs?.credentialled).toBe("${{ steps.split.outputs.credentialled }}");
+    // And the contraction of an entry into the wrong job would be silent: the matrix
+    // is built from the output, so the output is what has to be checked.
+    const split = stepsOf("plan-checks").find((step) => step.name === "Split the list by whether an entry names a secret");
+    expect(split?.run, "no secret named").toContain(
+      "select((.secrets // []) | length == 0)",
+    );
+    expect(split?.run, "a secret named").toContain("select((.secrets // []) | length > 0)");
   });
 });

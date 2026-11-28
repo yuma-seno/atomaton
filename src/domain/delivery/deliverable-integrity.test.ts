@@ -20,7 +20,7 @@ import { DEFAULT_CD_WORKFLOW, DEFAULT_CI_WORKFLOW } from "./shipped-workflows.ts
 const SOUND = {
   base_branch: "",
   environment: { setup_commands: [] },
-  checks: { from_pull_request: [] },
+  checks: { jobs: [] },
   deploy: { on_merge: [], on_tag: [], on_demand: [] },
   merge: { policy: "auto" },
   chain: { labels: { in_progress: "atomaton/in-progress" } },
@@ -63,9 +63,9 @@ describe("keys nothing reads", () => {
   });
 
   // The nested form is exactly as silent and rather more likely: the reader asks
-  // for `checks.from_pull_request`, finds nothing, and runs no commands.
+  // for `checks.jobs`, finds nothing, and runs no commands.
   test("a misspelled nested key is reported with its path", () => {
-    const problems = problemsFor({ ...SOUND, checks: { from_pull_request: [{ name: "x", command: ["bun test"] }] } });
+    const problems = problemsFor({ ...SOUND, checks: { jobs: [{ name: "x", command: ["bun test"] }] } });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("unknown key");
   });
@@ -110,14 +110,14 @@ describe("keys nothing reads", () => {
 });
 
 /**
- * An Atomaton arm and `your_workflow` are alternatives, and the structure says so by
+ * A list and `your_workflow` are alternatives, and the structure says so by
  * putting them side by side. The check says it again in a sentence, because "both
  * are set" is otherwise a precedence puzzle: one of the two is being ignored, and
  * nothing anywhere says which.
  */
-describe("two arms, and exactly one of them", () => {
+describe("the lists, and exactly one of them", () => {
   test("declaring both is reported, in either section", () => {
-    for (const [section, arm] of [["checks", "from_pull_request"], ["deploy", "on_tag"]] as const) {
+    for (const [section, arm] of [["checks", "jobs"], ["deploy", "on_tag"]] as const) {
       const problems = problemsFor({ ...SOUND, [section]: { [arm]: [], your_workflow: DEFAULT_CI_WORKFLOW } });
       expect(problems, section).toHaveLength(1);
       expect(problems[0], section).toContain(`\`${section}\``);
@@ -183,7 +183,7 @@ describe("the resolvers, run early", () => {
       ["deploy", { deploy: { on_merge: [{ name: "p", commands: ["a"], secrets: ["GH_TOKEN"] }] } }],
       [
         "checks",
-        { checks: { from_default_branch: [{ name: "c", commands: ["a"], secrets: ["ATOMATON_PR_TREE"] }] } },
+        { checks: { jobs: [{ name: "c", commands: ["a"], secrets: ["ATOMATON_MACHINERY_ROOT"] }] } },
       ],
     ] as const) {
       const problems = problemsFor({ ...SOUND, ...declaration });
@@ -390,6 +390,9 @@ describe("knownConfigKeys", () => {
     const keys = knownConfigKeys();
     expect(keys).toContain("chain.labels.*");
     expect(keys).toContain("chain.labels.in_progress");
+    expect(keys).toContain("checks.jobs");
+    // Both keys `jobs` replaced are still recognised, so an old config is not
+    // reported as a typo while the release that renames it is in flight.
     expect(keys).toContain("checks.from_pull_request");
     expect(keys).toEqual([...keys].sort());
   });

@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_RUNNER, resolveDeclaredJobs, type DeclaredJobsRules } from "./declared-jobs.ts";
 
-const CREDENTIALLED: DeclaredJobsRules = {
-  where: "checks.from_default_branch",
-  secrets: { reserved: new Set(["GH_TOKEN"]) },
-};
-const PULL_REQUEST: DeclaredJobsRules = {
-  where: "checks.from_pull_request",
-  secrets: { refused: "These commands come from the pull request, which may rewrite them." },
+const CHECKED: DeclaredJobsRules = {
+  where: "checks.jobs",
+  secrets: new Set(["GH_TOKEN"]),
 };
 
 /**
@@ -18,7 +14,7 @@ describe("resolveDeclaredJobs", () => {
   test("a declared job keeps its name, commands and secrets", () => {
     const { jobs, problems } = resolveDeclaredJobs(
       [{ name: "cloud-names", commands: ["./check.sh"], secrets: ["AWS_ROLE_ARN"] }],
-      CREDENTIALLED,
+      CHECKED,
     );
     expect(problems).toEqual([]);
     expect(jobs).toEqual([
@@ -28,57 +24,22 @@ describe("resolveDeclaredJobs", () => {
 
   /** Declaring none is the shipped default, and it is an answer rather than a fault. */
   test("no jobs is not a problem", () => {
-    expect(resolveDeclaredJobs(undefined, CREDENTIALLED)).toEqual({ jobs: [], problems: [] });
-    expect(resolveDeclaredJobs([], CREDENTIALLED)).toEqual({ jobs: [], problems: [] });
+    expect(resolveDeclaredJobs(undefined, CHECKED)).toEqual({ jobs: [], problems: [] });
+    expect(resolveDeclaredJobs([], CHECKED)).toEqual({ jobs: [], problems: [] });
   });
 
   test("a list that is not a list says so, and names itself", () => {
-    const { problems } = resolveDeclaredJobs("cloud-names", PULL_REQUEST);
+    const { problems } = resolveDeclaredJobs("cloud-names", CHECKED);
     expect(problems[0]).toContain("must be an array");
-    expect(problems[0]).toContain("checks.from_pull_request");
+    expect(problems[0]).toContain("checks.jobs");
   });
 
-  describe("the one thing that differs between lists", () => {
-    /**
-     * The trust boundary, as a shape rather than a rule. A pull request may rewrite
-     * any command it declares, so a credential beside one is a credential the change
-     * being judged can read.
-     */
-    test("a secret named where the pull request's own commands run is refused", () => {
-      const { jobs, problems } = resolveDeclaredJobs(
-        [{ name: "lint", commands: ["bun run lint"], secrets: ["NPM_TOKEN"] }],
-        PULL_REQUEST,
-      );
-      expect(jobs).toEqual([]);
-      expect(problems[0]).toContain("cannot be named here");
-      expect(problems[0]).toContain("may rewrite them");
-    });
-
-    /**
-     * Refused rather than dropped. A credential silently ignored is a job that
-     * behaves as though it had one until the command needing it fails, and the reason
-     * is in neither the log nor the configuration.
-     */
-    test("and it is refused, not quietly discarded", () => {
-      const { jobs } = resolveDeclaredJobs(
-        [{ name: "lint", commands: ["bun run lint"], secrets: ["NPM_TOKEN"] }],
-        PULL_REQUEST,
-      );
-      expect(jobs).toEqual([]);
-    });
-
-    test("naming none is fine on either side", () => {
-      const { jobs, problems } = resolveDeclaredJobs([{ name: "lint", commands: ["x"] }], PULL_REQUEST);
+  test("naming no secret is ordinary, and writing the key out empty is the same thing", () => {
+    for (const secrets of [undefined, []]) {
+      const { jobs, problems } = resolveDeclaredJobs([{ name: "lint", commands: ["x"], secrets }], CHECKED);
       expect(problems).toEqual([]);
       expect(jobs[0]?.secrets).toEqual([]);
-    });
-
-    /** Writing the key out empty is naming none, not naming one. */
-    test("an empty list where none may be named is not a refusal", () => {
-      const { jobs, problems } = resolveDeclaredJobs([{ name: "lint", commands: ["x"], secrets: [] }], PULL_REQUEST);
-      expect(problems).toEqual([]);
-      expect(jobs).toHaveLength(1);
-    });
+    }
   });
 
   /**
@@ -90,7 +51,7 @@ describe("resolveDeclaredJobs", () => {
     test("a name the job's own environment already uses is refused", () => {
       const { jobs, problems } = resolveDeclaredJobs(
         [{ name: "ship", commands: ["x"], secrets: ["GH_TOKEN"] }],
-        CREDENTIALLED,
+        CHECKED,
       );
       expect(jobs).toEqual([]);
       expect(problems[0]).toContain("already part of the environment");
@@ -99,24 +60,24 @@ describe("resolveDeclaredJobs", () => {
     test("a problem names the entry, because that is the line to go and edit", () => {
       const { problems } = resolveDeclaredJobs(
         [{ name: "a", commands: ["x"] }, { name: "b", commands: ["x"], secrets: ["not a name"] }],
-        CREDENTIALLED,
+        CHECKED,
       );
-      expect(problems[0]).toContain("checks.from_default_branch[1].secrets");
+      expect(problems[0]).toContain("checks.jobs[1].secrets");
     });
 
     test("a secrets list that is not a list says so", () => {
-      expect(resolveDeclaredJobs([{ name: "a", commands: ["x"], secrets: "X" }], CREDENTIALLED).problems).toHaveLength(1);
+      expect(resolveDeclaredJobs([{ name: "a", commands: ["x"], secrets: "X" }], CHECKED).problems).toHaveLength(1);
     });
   });
 
   describe("where it runs", () => {
     test("omitted is the default runner, so an ordinary entry says nothing about machines", () => {
-      const { jobs } = resolveDeclaredJobs([{ name: "lint", commands: ["x"] }], PULL_REQUEST);
+      const { jobs } = resolveDeclaredJobs([{ name: "lint", commands: ["x"] }], CHECKED);
       expect(jobs[0]?.runsOn).toEqual([DEFAULT_RUNNER]);
     });
 
     test("a string is one label", () => {
-      const { jobs } = resolveDeclaredJobs([{ name: "mac", runs_on: "macos-latest", commands: ["x"] }], PULL_REQUEST);
+      const { jobs } = resolveDeclaredJobs([{ name: "mac", runs_on: "macos-latest", commands: ["x"] }], CHECKED);
       expect(jobs[0]?.runsOn).toEqual(["macos-latest"]);
     });
 
@@ -124,7 +85,7 @@ describe("resolveDeclaredJobs", () => {
     test("a list is one runner that must carry every label", () => {
       const { jobs } = resolveDeclaredJobs(
         [{ name: "gpu", runs_on: ["self-hosted", "linux", "gpu"], commands: ["x"] }],
-        PULL_REQUEST,
+        CHECKED,
       );
       expect(jobs[0]?.runsOn).toEqual(["self-hosted", "linux", "gpu"]);
     });
@@ -134,7 +95,7 @@ describe("resolveDeclaredJobs", () => {
      * workflow that cannot start reports nothing about why it could not.
      */
     test("an unusable value falls back and is reported rather than failing the list", () => {
-      const { jobs, problems } = resolveDeclaredJobs([{ name: "odd", runs_on: 7, commands: ["x"] }], PULL_REQUEST);
+      const { jobs, problems } = resolveDeclaredJobs([{ name: "odd", runs_on: 7, commands: ["x"] }], CHECKED);
       expect(jobs[0]?.runsOn).toEqual([DEFAULT_RUNNER]);
       expect(problems[0]).toContain("runs_on must be a string or a list");
     });
@@ -146,7 +107,7 @@ describe("resolveDeclaredJobs", () => {
      * every guard here has failed in: it looks like cover and is not.
      */
     test("a job with no commands is refused rather than left to pass", () => {
-      const { jobs, problems } = resolveDeclaredJobs([{ name: "empty", commands: [] }], CREDENTIALLED);
+      const { jobs, problems } = resolveDeclaredJobs([{ name: "empty", commands: [] }], CHECKED);
       expect(jobs).toEqual([]);
       expect(problems[0]).toContain("report success");
     });
@@ -158,13 +119,13 @@ describe("resolveDeclaredJobs", () => {
     test("two jobs cannot share a name", () => {
       const { problems } = resolveDeclaredJobs(
         [{ name: "same", commands: ["a"] }, { name: "same", commands: ["b"] }],
-        CREDENTIALLED,
+        CHECKED,
       );
       expect(problems[0]).toContain("declared more than once");
     });
 
     test("a name GitHub cannot show as written is refused", () => {
-      expect(resolveDeclaredJobs([{ name: "Cloud Names", commands: ["a"] }], CREDENTIALLED).problems[0]).toContain(
+      expect(resolveDeclaredJobs([{ name: "Cloud Names", commands: ["a"] }], CHECKED).problems[0]).toContain(
         "lowercase",
       );
     });
@@ -177,7 +138,7 @@ describe("resolveDeclaredJobs", () => {
     test("an unknown key is a typo, and is refused as one", () => {
       const { jobs, problems } = resolveDeclaredJobs(
         [{ name: "x", commands: ["a"], secret: ["NPM_TOKEN"] }],
-        CREDENTIALLED,
+        CHECKED,
       );
       expect(jobs).toEqual([]);
       expect(problems[0]).toContain("unknown key");
@@ -191,7 +152,7 @@ describe("resolveDeclaredJobs", () => {
     test("every problem is reported, not the first", () => {
       const { problems } = resolveDeclaredJobs(
         [{ name: "UPPER", commands: ["a"] }, { name: "fine", commands: [] }],
-        CREDENTIALLED,
+        CHECKED,
       );
       expect(problems).toHaveLength(2);
     });
@@ -204,7 +165,7 @@ describe("resolveDeclaredJobs", () => {
   describe("keys a list owns", () => {
     const WITH_BRANCHES: DeclaredJobsRules<{ branches: readonly string[] }> = {
       where: "deploy.on_merge",
-      secrets: { reserved: new Set() },
+      secrets: new Set(),
       extra: {
         keys: ["branches"],
         read: (entry, where, problems) => {

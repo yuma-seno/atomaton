@@ -41,18 +41,17 @@
  * registry that decides what is advertised. A second reading of the allowlist here
  * would answer only whether this file agrees with itself.
  *
- * ## Why this may run on a pull request
+ * ## Which tree it starts servers from
  *
- * It starts what the pull request declares, which is executing the change under
- * review. That is what this job is: the commands under `checks.from_pull_request`
- * are the pull request's own, run in its own tree, and no repository secret reaches
- * them. A credential here would be one the change being judged could read, so there
- * is nowhere in that section to name one.
+ * The DEFAULT BRANCH's, because the job that runs this checks that branch out and
+ * points `ATOMATON_MACHINERY_ROOT` at it: the tools file, the config, the agent
+ * definitions and the servers themselves are the released ones. A pull request's
+ * copy of any of them is the change under review, and starting it would be the change
+ * deciding what this check is allowed to see.
  *
- * The job that holds credentials is `checks.from_default_branch`, whose commands
- * come from the default branch and which receives the pull request as a path to
- * read. Neither job can be given both, which is why this one may start a server at
- * all.
+ * That is also why this job may start a server at all. It holds no repository secret
+ * — a check's credentials go to the entries that named them, in another job — and what
+ * it starts is what a person released rather than what a pull request wrote.
  *
  * Servers are started with no `GH_TOKEN`, since what they are asked for is what they
  * advertise. `GITHUB_REPOSITORY` is left alone: the `github` server refuses to start

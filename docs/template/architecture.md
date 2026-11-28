@@ -149,9 +149,10 @@ here and in an adopted repository. A path anywhere else would be an example
 nobody could copy.
 
 Scripts there run with whatever credentials the job declares. That is not a new
-opening: `config.yaml`'s `commands` have always been agent-writable, which is
-exactly why `checks.from_pull_request` is given no secret. Review is the gate,
-here as everywhere.
+opening: `config.yaml`'s `commands` have always been agent-writable, and the list
+they are read from is the default branch's — which is what keeps a pull request
+from naming a secret it would then be handed. Review is the gate, here as
+everywhere.
 
 **What is hand-written lives in `.github/` directly, with no mirror.** This
 repository's `release.yml` sits in `.github/workflows/` beside the generated ones,

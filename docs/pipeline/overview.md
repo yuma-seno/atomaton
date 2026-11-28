@@ -5,7 +5,7 @@ all and describe the pipeline as commands:
 
 ```yaml
 checks:
-  from_pull_request:
+  jobs:
     - name: verify
       commands:
         - bun install --frozen-lockfile
@@ -45,7 +45,7 @@ person still reviews before it merges, because
 credential is a credential in every language, so it is the one verification a
 template can hand a project it knows nothing about; everything else belongs to
 the project. What it does is in
-[its entry](reference.md#checksfrom_pull_request).
+[its entry](reference.md#checksjobs).
 
 Where each key goes is in [the reference](reference.md). What a pipeline
 described this way cannot express — and where you still need a workflow of your

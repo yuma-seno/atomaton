@@ -14,8 +14,8 @@
  * run by run, whether the pull request can work at all.
  *
  * The workaround, which this repository was itself using, is to put the setup at
- * the front of a `checks.from_pull_request` entry -- `bun install --frozen-lockfile`
- * before the tests -- and remember to keep it in step with
+ * the front of a check's own `commands` — `bun install --frozen-lockfile` before
+ * the tests — and remember to keep it in step with
  * `environment.setup_commands`. Two statements of one fact, either of which can
  * be updated alone.
  *
@@ -28,18 +28,22 @@
  *
  *   the agent's run    the default branch. A pull request must not choose how the
  *                      agent reviewing it is set up.
- *   checks             the pull request's OWN config.yaml. That is what lets an
- *                      agent add a dependency and prove the addition works in the
- *                      same pull request, rather than waiting for a merge to find
- *                      out. It grants nothing new: this job already runs
- *                      `checks.from_pull_request` from that same branch.
+ *   checks, tools      the default branch. The commands come from there because a
+ *                      pull request must not choose what runs, and the setup is part
+ *                      of what runs: an entry that added a dependency would otherwise
+ *                      install it into a tree the commands are not allowed to use.
+ *                      The one job that works IN the pull request -- the checks that
+ *                      named no secret -- points the variable at a second checkout
+ *                      instead, so the setup it runs is still the released one while
+ *                      the commands it precedes see the change.
  *   deployment         the tag or the default branch, both of them post-merge.
  *
  * ## No credentials
  *
- * Setup runs before any secret enters the environment, in every one of the three.
- * That is deliberate in the agent's case -- see the ordering in
- * `atomaton-runner.wac.ts` -- and it falls out of step order in the other two.
+ * Setup runs before any secret enters the environment, in every one of them. That
+ * is deliberate in the agent's case -- see the ordering in
+ * `atomaton-runner.wac.ts` -- and it falls out of step order in the others: the
+ * slot-renaming shell that exports a check's credentials runs after this step.
  */
 import { TypedOutputsStep } from "./base.ts";
 import { scriptCommand } from "./script-call.ts";
