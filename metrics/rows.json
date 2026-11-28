@@ -29153,6 +29153,72 @@
     ]
   },
   {
+    "path": "sessions/issue-656/reviewer.json",
+    "agent": "reviewer",
+    "messages": 30,
+    "calls": 10,
+    "failed": 0,
+    "refused": 0,
+    "skills": [],
+    "reported": true,
+    "tools": {
+      "get_pr": 1,
+      "get_pr_reviews": 1,
+      "list_pr_review_comments": 1,
+      "read": 5,
+      "check_merge_readiness": 1,
+      "merge_pr": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T11:41:40Z",
+        "ended_because": "failed",
+        "iterations": 5,
+        "loop_abort": {
+          "arguments": "{\"path\":\"src/adapters/actions/dispatch-targets.ts\"}",
+          "call": 8,
+          "capped": false,
+          "count": 5,
+          "last_error": null,
+          "rule": "identical_answers",
+          "tool": "read"
+        },
+        "loop_recoveries": 1,
+        "messages": 24,
+        "seconds": 9,
+        "server_calls": {
+          "files_readonly": {
+            "read": 5
+          },
+          "github": {
+            "get_pr": 1,
+            "get_pr_reviews": 1,
+            "list_pr_review_comments": 1
+          }
+        },
+        "started": "2026-11-28T11:41:31Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T11:42:21Z",
+        "ended_because": "completed",
+        "iterations": 3,
+        "loop_recoveries": 0,
+        "messages": 30,
+        "seconds": 41,
+        "server_calls": {
+          "github": {
+            "check_merge_readiness": 1,
+            "merge_pr": 1
+          }
+        },
+        "started": "2026-11-28T11:41:40Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
