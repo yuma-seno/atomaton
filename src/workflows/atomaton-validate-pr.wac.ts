@@ -127,6 +127,10 @@ const validateStep = new TypedOutputsStep(
       "def-dir": `${MACHINERY_ROOT}/${AGENT_DEFINITIONS_DIR}`,
       "asked-by-person": "${{ inputs.asked_by_person }}",
       "deliverable-report": DELIVERABLE_REPORT,
+      // The pull request's own tree, read here for conflict markers. A tree carrying
+      // them is waiting for somebody to resolve it rather than failing at the work, and
+      // this is where the pull request is told which of the two it is (#674).
+      "head-tree": PR_HEAD_DIR,
     })}\n`,
   },
   ["next_agent", "conclusion", "verdict_passed", "summary"] as const,

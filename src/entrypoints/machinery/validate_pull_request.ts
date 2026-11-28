@@ -76,9 +76,22 @@
  * checks and hands it back WITHOUT dispatching CI — there is nothing to learn from
  * running a pipeline against a deliverable that cannot be loaded.
  *
+ * ## A tree carrying conflict markers is waiting, not failing
+ *
+ * `--head-tree` — the pull request's own checkout — is scanned for git's
+ * conflict markers before anything is said about the verdict. Markers are what the
+ * update machinery leaves where a release and this tree both changed a file, and a
+ * pull request holding them is waiting for somebody to resolve it rather than failing
+ * at the work (#674). Where they are found, the comment posted says that, instead of
+ * the failure brief: the brief's "what CI concluded" is the markers, and the agent it
+ * offers to start is not what is missing. The check runs are NOT otherwise changed —
+ * the verdict is still CI's, and a marker tree still fails it — so what a reader of
+ * the pull request gets is the red they had, with the reason it is red.
+ *
  * Usage:
  *   validate_pull_request.ts --repo owner/name --number N --branch atomaton/issue-N
- *     --workflow ci.yml --def-dir DIR --deliverable-report FILE [--timeout-seconds 1800]
+ *     --workflow ci.yml --def-dir DIR --deliverable-report FILE --head-tree DIR
+ *     [--timeout-seconds 1800]
  */
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -90,6 +103,7 @@ import { LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts
 import type { ThreadHold } from "../../domain/work/thread.ts";
 import type { ThreadRequest } from "../../adapters/github/thread.ts";
 import { latestRequestOn } from "../../adapters/github/thread.ts";
+import { findConflictMarkers } from "./lib/conflict-markers.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -119,6 +133,15 @@ export interface ValidatePullRequestArgs {
    * reported as one that passed. Same reasoning as `required.known` below.
    */
   "deliverable-report": string;
+  /**
+   * The pull request's own checkout, which the workflow brings in as data.
+   *
+   * Read for git's conflict markers before the verdict is reported on. Required, not
+   * optional, and for the reason `deliverable-report` is: an absent tree means nothing
+   * was measured, and that must not be able to look like a tree with nothing wrong in
+   * it. The workflow always checks this tree out.
+   */
+  "head-tree": string;
   /**
    * Whether a person asked for this run, rather than an agent.
    *
@@ -306,6 +329,45 @@ function reportFailure(
     .join("\n");
   const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
   if (posted.code) log(`WARN could not post the failure comment: ${posted.stderr}`);
+}
+
+/** How many marker paths the comment names before it summarises the rest. */
+const LISTED_MARKERS = 20;
+
+/**
+ * Say the tree is waiting for its conflict markers to be resolved, and where they are.
+ *
+ * This replaces the failure brief rather than joining it. The brief says what CI
+ * concluded and offers the agent to ask for a fix; neither is the next thing here,
+ * because the verdict was decided on a half-merged file and the resolution is an edit
+ * rather than a review. The failing run's URL is carried when the verdict was red, so
+ * a person who wants to read the run still can without it being the headline.
+ *
+ * The file list is the actionable half: it is what says where to start, and the update
+ * machinery's own conflict list lives in the pull request's body — a place a later
+ * push rewrites — so this is the one on the thread that is current for this commit.
+ * Capped, because a collision can name hundreds of paths and a comment longer than the
+ * work is a comment nobody finishes.
+ */
+function reportConflictMarkers(
+  repo: string,
+  number: string,
+  markers: readonly string[],
+  failingRunUrl: string,
+): void {
+  const shown = markers.slice(0, LISTED_MARKERS);
+  const rest = markers.length - shown.length;
+  const body = [
+    LLM_CONTEXT_TAG.write("include"),
+    "Atomaton: this pull request is waiting for its conflict markers to be resolved, so the checks on this tree are not a verdict on the work. Resolve them and push — the checks run their real judgement on the resolved tree.",
+    "",
+    "Files still carrying markers:",
+    ...shown.map((marker) => `- \`${marker}\``),
+    ...(rest > 0 ? [`- ...and ${rest} more`] : []),
+    ...(failingRunUrl ? ["", `Failing run: ${failingRunUrl}`] : []),
+  ].join("\n");
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
+  if (posted.code) log(`WARN could not post the conflict-marker comment: ${posted.stderr}`);
 }
 
 /**
@@ -531,6 +593,7 @@ function main(): void {
       workflow: { type: "string" },
       "def-dir": { type: "string" },
       "deliverable-report": { type: "string" },
+      "head-tree": { type: "string" },
       "asked-by-person": { type: "string" },
       "timeout-seconds": { type: "string" },
     },
@@ -541,7 +604,10 @@ function main(): void {
   const workflow = values.workflow ?? "";
   const defDir = values["def-dir"] ?? "";
   if (!repo || !branch || !workflow || !defDir) {
-    console.error("usage: validate_pull_request.ts --repo owner/name --number N --branch B --workflow W --def-dir DIR");
+    console.error(
+      "usage: validate_pull_request.ts --repo owner/name --number N --branch B --workflow W " +
+        "--def-dir DIR --deliverable-report FILE --head-tree DIR",
+    );
     process.exit(1);
   }
 
@@ -564,6 +630,23 @@ function main(): void {
     .filter(Boolean);
   if (deliverableProblems.length > 0) {
     log(`the deliverable is inconsistent (${deliverableProblems.length} problem(s)); CI will not be dispatched`);
+  }
+
+  // Measured before anything reads CI, and an absent tree stops the run for the same
+  // reason an absent report does: "we did not look" must never be able to read as "there
+  // was nothing to find". Markers are what makes a tree unjudgeable, so they are the
+  // first thing said about it.
+  const headTree = values["head-tree"] ?? "";
+  if (!headTree || !existsSync(headTree)) {
+    log(`cannot check for conflict markers: no pull request tree at ${headTree || "(nothing given)"}`);
+    process.exit(1);
+  }
+  const conflictMarkers = findConflictMarkers(headTree);
+  if (conflictMarkers.length > 0) {
+    log(
+      `the pull request's tree carries conflict markers in ${conflictMarkers.length} file(s): ` +
+        "the checks are reporting on a half-merged tree, not on the work",
+    );
   }
 
   const githubOutput = process.env.GITHUB_OUTPUT;
@@ -685,7 +768,20 @@ function main(): void {
   // `checks.every((c) => c.conclusion === "success")`, which is `true` for the
   // empty list a base branch with no required checks produces -- so a failing
   // run posted no comment and the engineer was dispatched with no brief.
-  if (outcome.verdict !== "passed") {
+  //
+  // A tree carrying conflict markers says its own thing instead. The brief would
+  // report the markers as the conclusion (`Multiline implicit key`, a compile error
+  // inside a half-merged file) and name an agent to fix work that is not what is
+  // missing, which is the confusion the marker comment exists to end. The verdict,
+  // the check runs and the dispatch are untouched — only which comment is posted.
+  if (conflictMarkers.length > 0) {
+    reportConflictMarkers(
+      repo,
+      values.number ?? "",
+      conflictMarkers,
+      outcome.verdict !== "passed" ? runUrl : "",
+    );
+  } else if (outcome.verdict !== "passed") {
     reportFailure(repo, values.number ?? "", runUrl, outcome.summary, deliverableProblems);
   }
 
