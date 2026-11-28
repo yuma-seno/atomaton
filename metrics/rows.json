@@ -28949,6 +28949,71 @@
     ]
   },
   {
+    "path": "sessions/issue-656/atomaton.json",
+    "agent": "atomaton",
+    "messages": 64,
+    "calls": 36,
+    "failed": 0,
+    "refused": 0,
+    "skills": [
+      "japanese"
+    ],
+    "reported": true,
+    "tools": {
+      "get_issue": 4,
+      "list": 1,
+      "search_issues": 1,
+      "grep": 12,
+      "load_skill": 1,
+      "get_issue_comments": 2,
+      "read": 12,
+      "search_code": 1,
+      "glob": 1,
+      "list_issues": 1
+    },
+    "acts": {},
+    "runs": [
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T11:02:55Z",
+        "ended_because": "completed",
+        "iterations": 19,
+        "loop_recoveries": 0,
+        "messages": 62,
+        "seconds": 1795,
+        "server_calls": {
+          "files": {
+            "glob": 1,
+            "grep": 12,
+            "list": 1,
+            "read": 12
+          },
+          "github": {
+            "get_issue": 4,
+            "get_issue_comments": 2,
+            "list_issues": 1
+          },
+          "search": {
+            "search_code": 1,
+            "search_issues": 1
+          }
+        },
+        "started": "2026-11-28T10:33:00Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T11:04:29Z",
+        "ended_because": "completed",
+        "iterations": 1,
+        "loop_recoveries": 0,
+        "messages": 64,
+        "seconds": 94,
+        "server_calls": {},
+        "started": "2026-11-28T11:02:55Z"
+      }
+    ]
+  },
+  {
     "path": "sessions/issue-96/archive/engineer-1.json",
     "agent": "engineer",
     "messages": 268,
