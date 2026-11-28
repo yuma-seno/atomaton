@@ -598,67 +598,57 @@ describe("a stopped update", () => {
 });
 
 /**
- * The machinery applies a release, and `.github/atomaton/config.yaml` is the file
- * every job reads to know what to run — the checks, the setup commands, the merge
- * policy, the reach of each tool server. A collision there is still a decision only
- * a person can make, but the markers it used to be written with made the file
- * unparseable, and an unparseable config is a pull request whose checks cannot even
- * be planned and whose runs die on the way in (#668). So this file's collision is
- * reported instead of written: the tree keeps its copy, the two sides go into the
- * pull request's body, and the run still stops there.
+ * The one setting the run reads back OFF THE TREE it has just written is the
+ * collision policy: it is read at the pull request, after apply, commit and push,
+ * rather than carried in from whoever started the run. When that file is itself a
+ * path both sides changed, what the run reads is a config.yaml carrying conflict
+ * markers — and the parse used to take the run down between the push and the pull
+ * request, leaving a marker-carrying branch, no pull request and nobody told (#638).
  */
 describe("an update whose own config.yaml collided", () => {
   const CONFIG = ".github/atomaton/config.yaml";
   /**
-   * `pr-agent`, so a policy that WAS read would name an agent. This tree has no
-   * marker on its branch to resolve, so nothing is started either way — the test
-   * below pins that this is the reason, not a config nobody could read.
+   * `pr-agent`, so a policy that WAS read would dispatch `engineer`. A test tree on
+   * the default mode could not tell "could not read it" from "read it, nothing to do".
    */
   const CONFIG_BASE = "base_branch: main\ndeploy: {}\nupdate:\n  on_new_release: pr-agent\nagents:\n  on_update_conflict: engineer\n";
-  // Both sides change the same line, so `git merge-file` collides: what the body
-  // reports is a real three-way merge's output, not a hand-written fixture.
+  // Both sides change the same line, so `git merge-file` collides: the markers in
+  // the tree below are a real three-way merge's, not a hand-written fixture.
   const CONFIG_TREE = CONFIG_BASE.replace("base_branch: main", "base_branch: trunk");
   const CONFIG_TARGET = CONFIG_BASE.replace("base_branch: main", "base_branch: mainline");
 
-  test("the pull request stands with both sides reported and this tree's copy kept", () => {
-    const base: Tree = { ...BASE_FILES, [CONFIG]: CONFIG_BASE };
-    const target: Tree = { ...TARGET_FILES, [CONFIG]: CONFIG_TARGET };
+  test("the pull request is opened and a person is told, instead of the run dying on the parse", () => {
     const { dir } = fixtureRepo(BASE_FILES, "v0.1.0", CONFIG_TREE);
-    // The manifest is a shipped path too, and this test is about the config alone:
-    // standing the tree's manifest where the base release has it leaves config.yaml
-    // as the only path both sides changed.
-    writeFileSync(join(dir, RELEASE_MANIFEST), `${manifestJson("v0.1.0", Object.keys(base))}\n`);
-    gitIn(dir, ["add", "-A"]);
-    gitIn(dir, ["-c", "user.name=fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "manifest"]);
 
     const r = runWithFakeGh(scriptPath("update_atomaton.ts"), ["--repo", "owner/repo"], {
       cwd: dir,
       env: { ATOMATON_UPDATE_TOKEN: "tok" },
-      rules: [...dispatchRules(), ...rules("v0.2.0", { base, target, notice: 12 })],
+      rules: [
+        ...dispatchRules(),
+        ...rules("v0.2.0", {
+          base: { ...BASE_FILES, [CONFIG]: CONFIG_BASE },
+          target: { ...TARGET_FILES, [CONFIG]: CONFIG_TARGET },
+          notice: 12,
+        }),
+      ],
     });
     expect(r.status).toBe(0);
 
-    // The pull request exists and stops there; nothing merged itself.
+    // The pull request exists and carries the collision; nothing merged itself.
     const created = r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "create");
     expect(created).toHaveLength(1);
     expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "merge")).toEqual([]);
     expect(r.ghCalls.filter((call) => call[0] === "pr" && call[1] === "checks")).toEqual([]);
 
-    // Both sides are in the body, which is where a person reads a diff.
     const body = (created[0] ?? [])[(created[0] ?? []).indexOf("--body") + 1] ?? "";
+    expect(body).toContain(`\`${CONFIG}\``);
     expect(body).toContain("needs a decision");
-    expect(body).toContain("Kept as this tree has it");
-    expect(body).toContain(`<code>${CONFIG}</code>`);
-    expect(body).toContain("<<<<<<< config.yaml (ours)");
-    expect(body).toContain("base_branch: trunk");
-    expect(body).toContain("base_branch: mainline");
 
-    // And the committed file is the tree's own: no marker for any job to trip on.
-    const committed = readFileSync(join(dir, CONFIG), "utf8");
-    expect(committed).toBe(CONFIG_TREE);
-    expect(committed).not.toContain("<<<<<<<");
+    // The markers are in the committed file the run could not read back.
+    expect(readFileSync(join(dir, CONFIG), "utf8")).toContain("<<<<<<<");
 
-    // `pr-agent`, and nothing on the branch carries a marker: nobody is started.
+    // `pr-agent` starts `engineer` only when the policy was read; unreadable is
+    // nobody started, which is what `issue` and `pr` do.
     expect(r.ghCalls.filter((call) => call[0] === "workflow")).toEqual([]);
 
     // The thread that asked is told where the decision is, and the notice stays
@@ -667,13 +657,12 @@ describe("an update whose own config.yaml collided", () => {
     expect(comments).toHaveLength(1);
     const comment = (comments[0] ?? [])[(comments[0] ?? []).indexOf("--body") + 1] ?? "";
     expect(comment).toContain(`\`${CONFIG}\``);
-    expect(comment).toContain("kept as this tree has it");
     expect(comment).toContain("#9");
     expect(comment).toContain("nothing merges until someone does");
     expect(r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "close")).toEqual([]);
 
-    // The run's own log counts it, instead of reporting a clean apply.
-    expect(r.stderr).toContain("1 held as the tree has them");
+    // And the log says why no agent was started, rather than silently dropping it.
+    expect(r.stderr).toContain("config.yaml could not be read");
   });
 });
 
