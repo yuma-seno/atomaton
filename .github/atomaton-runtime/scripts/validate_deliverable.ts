@@ -150,6 +150,13 @@ function isControlCommand(name) {
   return CONTROL_COMMAND_NAMES.includes(name);
 }
 
+// src/domain/work/agent-name.ts
+var AGENT_NAME_PATTERN = "[a-z][a-z0-9-]*";
+var AGENT_NAME_RE = new RegExp(`^${AGENT_NAME_PATTERN}$`);
+
+// src/domain/work/filed-issue.ts
+var AGENT_ISSUE_OFF = "off";
+
 // src/domain/delivery/runner-label.ts
 var DEFAULT_RUNNER = "ubuntu-latest";
 function resolveRunsOn(configured) {
@@ -527,7 +534,10 @@ var DEFAULT_CI_WORKFLOW = "atomaton-check.yml";
 var DEFAULT_CD_WORKFLOW = "atomaton-deploy.yml";
 
 // src/domain/delivery/deliverable-integrity.ts
-var REQUIRED_AGENT_KEYS = ["on_config_finding"];
+var REQUIRED_AGENT_KEYS = [
+  { key: "on_config_finding" },
+  { key: "on_agent_issue", also: AGENT_ISSUE_OFF }
+];
 var CONFIG_SCHEMA = {
   children: {
     base_branch: null,
@@ -556,7 +566,7 @@ var CONFIG_SCHEMA = {
         labels: { children: { in_progress: null, sub_issue: null, launched: null }, anyName: null }
       }
     },
-    agents: { children: { on_config_finding: null, on_update_conflict: null } },
+    agents: { children: { on_config_finding: null, on_update_conflict: null, on_agent_issue: null } },
     tools: {
       children: {
         secrets: null,
@@ -631,14 +641,17 @@ function configProblems(facts) {
     problems.push("No agent definitions were found. `.github/atomaton/agent-definitions/*.md` is empty or missing.");
   }
   const agents = isRecord4(config.agents) ? config.agents : {};
-  for (const key of REQUIRED_AGENT_KEYS) {
+  for (const { key, also } of REQUIRED_AGENT_KEYS) {
     const value = agents[key];
     if (typeof value !== "string" || value.trim() === "") {
-      problems.push(`\`agents.${key}\` is required in config.yaml. It names the agent a workflow starts when no ` + `issue or pull request can name one, so there is nothing to fall back to.`);
+      problems.push(`\`agents.${key}\` is required in config.yaml. It names the agent a workflow starts when no ` + `issue or pull request can name one, so there is nothing to fall back to.` + (also === undefined ? "" : ` Set it to \`${also}\` to start nobody.`));
       continue;
     }
-    if (agentNames.length > 0 && !agentNames.includes(value.trim())) {
-      problems.push(`\`agents.${key}\` names '${value.trim()}', which has no agent-definitions/${value.trim()}.md.`);
+    const name = value.trim();
+    if (also !== undefined && name === also)
+      continue;
+    if (agentNames.length > 0 && !agentNames.includes(name)) {
+      problems.push(`\`agents.${key}\` names '${name}', which has no agent-definitions/${name}.md.` + (also === undefined ? "" : ` Write \`${also}\` to start nobody.`));
     }
   }
   const update = isRecord4(config.update) ? config.update : {};
