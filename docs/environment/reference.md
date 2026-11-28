@@ -18,10 +18,14 @@ already provisioned and never to spend iterations installing or configuring
 tooling themselves, so anything they need at run time belongs here. Filling it in
 is [step 4 of setup](../setup.md).
 
-**Why here rather than at the front of `checks.from_pull_request`.** That works,
-and it drifts: the agent's shell and CI then install their dependencies from two
-places, and a test that passes for the agent and fails in CI reaches an engineer
-as a defect that does not reproduce on the machine they can see.
+**Why here rather than at the front of a check's `commands`.** That works, and it
+drifts: the agent's shell and CI then install their dependencies from two places,
+and a test that passes for the agent and fails in CI reaches an engineer as a
+defect that does not reproduce on the machine they can see.
+
+A check that adds a dependency to the pull request therefore needs nothing
+special: this step runs before its commands, in the pull request's tree, from the
+default branch's `setup_commands`.
 
 This key is for the project. What a tool server of **yours** needs installed goes
 in [`tools.packages`](../tools/reference.md#toolspackages) instead.

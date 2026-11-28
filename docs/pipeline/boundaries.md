@@ -2,40 +2,42 @@
 
 ## A check that needs a credential
 
-**`checks.from_pull_request` has no `secrets`, and cannot.** The commands there
-are the pull request's own, run in its own tree, so a credential named for them
-would be a credential the change being judged can read — a pull request may
-rewrite any command it declares. A check that needs one goes in the other half.
-The values stay in GitHub either way; only the names are ever in the config.
-
-Three things differ in `checks.from_default_branch`, and they are why a
-credential is safe there.
-
-**The commands come from the default branch.** A pull request cannot change what
-runs, add a job, or widen which secret a job receives —
-[which ref a pipeline is read from](how-it-works.md).
-
-**The pull request arrives as data.** `$ATOMATON_PR_TREE` is a path to a checkout
-of it. Read it; do not execute it. That is the same rule the check on the
-deliverable holds itself to, and nothing mechanical enforces it here — an
-interpreter reads a file rather than executing it, so no filesystem flag will
-stop `bash "$ATOMATON_PR_TREE/x.sh"`. It rests on review, which is why this list
-is meant to stay short.
+**The commands come from the default branch.** A pull request cannot add a check,
+rename one, change what one runs, or widen which secret a job receives —
+[which ref a pipeline is read from](how-it-works.md). That is the one thing a
+credential rests on, and it holds for every entry in `checks.jobs` alike. The
+values stay in GitHub either way; only the names are ever in the config.
 
 **Each job names its own secrets.** A job is handed the ones its own entry named
 and no others, so a staging credential does not sit in the job that checks
-something else.
+something else. An entry that names none runs in a job with no secret slots in it
+at all — not empty ones — so "this check cannot reach a credential" is a property
+of the workflow rather than of today's configuration.
 
-What you cannot write is a pull request's own command holding a credential. There
-is no spelling for it: one half has no `secrets` key and the other takes no
-commands from the pull request. A check that genuinely needs both — integration
-tests against a real environment, say — belongs after the merge, or wants a
-credential you would not mind losing.
+**The pull request is the working tree.** Every check runs with the pull request
+checked out, reading it in place. This is the one thing that was stronger before
+the list was unified: a check that named a credential used to run in the default
+branch's tree with the pull request beside it, and now it runs in the pull
+request's. So a credentialed entry whose commands compile or test the change puts
+a credential in the environment of code the change wrote.
+
+Nothing mechanical enforces the difference, and it did not before either — an
+interpreter reads a file rather than executing it, but nothing stopped
+`bash "$ATOMATON_PR_TREE/x.sh"` when that path existed. It rests on how the entry
+is written, which is why it is worth writing patiently:
+
+- An entry that runs the project's own tests names **no** secret. It is the
+  ordinary entry, and its job has nowhere to put one.
+- An entry that names a secret is for talking to something outside the repository
+  — a service, a registry, a cloud account — and is worth keeping to that.
+
+A check that needs both at once belongs after the merge, or wants a credential you
+would not mind losing.
 
 The other direction is worth knowing: a tool that needs a credential you would
-rather not route into an agent's environment can be a step in
-`checks.from_pull_request` instead, because that list runs in its own job. What
-routing does and does not protect is
+rather not route into an agent's environment can be a step in `checks.jobs`
+instead, because that list runs in its own job. What routing does and does not
+protect is
 [what a tool can and cannot be protected from](../tools/boundaries.md#what-a-tool-can-and-cannot-be-protected-from).
 
 ## A deployment refuses a branch anyone can push to

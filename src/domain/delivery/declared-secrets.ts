@@ -277,13 +277,14 @@ export const TOOL_SECRETS: SecretDestination = {
 const JOB_ENV: readonly string[] = ["ATOMATON_COMMANDS", "GH_TOKEN"];
 
 /**
- * Names a credentialed CHECK's environment already uses.
+ * Names a CHECK's environment already uses.
  *
- * `ATOMATON_PR_TREE` is where the pull request was put for these commands to read.
- * Shadowing it would point a check at a directory of the declaration's choosing, and
- * the check would report on something other than the change.
+ * `ATOMATON_MACHINERY_ROOT` is where the default branch's checkout is put, and the
+ * setup step and every machinery script read it. Shadowing it would point a check at a
+ * tree of the declaration's choosing, and the check would report on something other
+ * than the change.
  */
-export const CHECK_JOB_RESERVED: ReadonlySet<string> = new Set([...JOB_ENV, "ATOMATON_PR_TREE"]);
+export const CHECK_JOB_RESERVED: ReadonlySet<string> = new Set([...JOB_ENV, MACHINERY_ROOT_VAR]);
 
 /**
  * Names a DEPLOYMENT's environment already uses.

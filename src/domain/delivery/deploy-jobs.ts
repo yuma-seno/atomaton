@@ -165,7 +165,7 @@ function refsFrom(keys: { branches?: boolean; tags?: boolean }): ExtraKeys<Deplo
  *
  * Every one may name credentials. A deployment runs commands read from a branch a
  * person approved, after the change has landed — the condition that makes a secret
- * safe to name at all, and the one `checks.from_pull_request` cannot meet.
+ * safe to name at all.
  */
 export const DEPLOY_ARMS: Readonly<
   Record<DeployTrigger, { readonly key: string; readonly rules: DeclaredJobsRules<DeployRefs> }>
@@ -174,7 +174,7 @@ export const DEPLOY_ARMS: Readonly<
     key: "on_merge",
     rules: {
       where: "deploy.on_merge",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       extra: refsFrom({ branches: true }),
     },
   },
@@ -182,7 +182,7 @@ export const DEPLOY_ARMS: Readonly<
     key: "on_tag",
     rules: {
       where: "deploy.on_tag",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       // Both. `tags` says which tags; `branches` says which branch those tags must
       // point into. Without the second, a tag deployment would accept a commit from
       // anywhere -- a feature branch nobody reviewed, tagged by anyone who can push.
@@ -193,7 +193,7 @@ export const DEPLOY_ARMS: Readonly<
     key: "on_demand",
     rules: {
       where: "deploy.on_demand",
-      secrets: { reserved: DEPLOY_JOB_RESERVED },
+      secrets: DEPLOY_JOB_RESERVED,
       // Neither: nothing about a ref decides whether somebody asked. The empty lists
       // on the resulting entry are never read -- the selector reaches them only for
       // the two arms an event can choose.

@@ -34,11 +34,11 @@ only: the reason behind a step is at the other end of that step's link.
 | [reach a provider the table does not list](agents/tasks/reach-a-provider-the-table-does-not-list.md) | the `OPENAI_BASE_URL` repository variable |
 | [move to a different provider](agents/tasks/move-to-a-different-provider.md) | `provider` in every agent definition, and that provider's own secret |
 | [prefer particular upstream providers](agents/tasks/prefer-particular-upstream-providers.md) | `extra_body`, in an agent definition |
-| [give a repository a pipeline an agent can write and maintain](pipeline/tasks/give-a-repository-a-pipeline-an-agent-can-write-and-maintain.md) | `checks.from_pull_request` and `deploy.on_merge` |
+| [give a repository a pipeline an agent can write and maintain](pipeline/tasks/give-a-repository-a-pipeline-an-agent-can-write-and-maintain.md) | `checks.jobs` and `deploy.on_merge` |
 | [have agents start your own CI and deployment](pipeline/tasks/have-agents-start-your-own-ci-and-deployment.md) | `checks.your_workflow` and `deploy.your_workflow` |
 | [take over an existing CI/CD](pipeline/tasks/take-over-an-existing-ci-cd.md) | `config.yaml`, then the ruleset, then `.github/workflows/` — in that order |
 | [build and publish when a tag appears](pipeline/tasks/build-and-publish-when-a-tag-appears.md) | `deploy.on_merge` for the tag, `deploy.on_tag` for the build |
-| [check a pull request against a service that needs a credential](pipeline/tasks/check-a-pull-request-against-a-real-service.md) | `checks.from_default_branch`, and that entry's own `secrets` |
+| [check a pull request against a service that needs a credential](pipeline/tasks/check-a-pull-request-against-a-real-service.md) | `checks.jobs`, and that entry's own `secrets` |
 | [make a workflow of your own work when Atomaton starts it](pipeline/tasks/make-a-workflow-of-your-own-work-when-atomaton-starts-it.md) | `workflow_dispatch`, in that workflow |
 | [check your config before pushing it](config/tasks/check-your-config-before-pushing-it.md) | nothing — one command |
 | [keep some paths for human review](pull-requests/tasks/keep-some-paths-for-human-review.md) | `merge.governed_paths` |

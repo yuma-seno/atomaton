@@ -75,7 +75,7 @@ Every pull request an agent opens is checked for one thing before your CI is ask
 to run at all: whether the `.github/atomaton/` it would merge can still start a run.
 
 This is not your pipeline and it is not configurable. It runs whether or not
-`checks.from_pull_request` is set, and it reads nothing from `checks` or `deploy`
+`checks.jobs` is set, and it reads nothing from `checks` or `deploy`
 to decide what to check — those describe what YOU verify. This one answers a
 narrower question that only has one right answer. It is not the merge gate either:
 what an agent may merge once this is green is [`merge`](reference.md).
@@ -88,7 +88,7 @@ What it checks:
   `atoma validate`, so it is the same resolution a run performs rather than an
   imitation of it.
 - `config.yaml` uses only keys Atomaton reads.
-- `checks` and `deploy` each declare one arm, rather than both —
+- `checks` and `deploy` name their own lists, or a `your_workflow`, never both —
   [have agents start your own CI and deployment](../pipeline/tasks/have-agents-start-your-own-ci-and-deployment.md)
   is where that choice is made.
 - `merge.gates`, every `deploy` list and every `secrets` list parse.
@@ -108,20 +108,22 @@ execute that pull request inside the job that decides whether it may merge. This
 one reads the pull request's `.github/atomaton/` as data and runs nothing under
 `--root`.
 
-**A second check does start them, and that is deliberate.** `atomaton-tools` is a
-job of its own in `atomaton-check.yml`, and it starts every server the pull
-request's definitions name to ask what each one advertises — whether an allowlist
-pattern still names a tool that exists, whether two `unprefixed` servers claim one
-name, whether a server starts at all. None of that is answerable from a file.
+**A second check does start servers, and that is deliberate.** `atomaton-tools` is
+a job of its own in `atomaton-check.yml`, and it starts every server the
+DEFINITIONS name to ask what each one advertises — whether an allowlist pattern
+still names a tool that exists, whether two `unprefixed` servers claim one name,
+whether a server starts at all. None of that is answerable from a file.
 
-It is safe to run there for the same reason `checks.from_pull_request` is: the job
-holds no repository secret. It declares `contents: read`, and the servers are
-started with `GH_TOKEN` removed from the environment. A pull request may rewrite
-any command in `checks.from_pull_request` too, so starting what it declares is the
-same trust level as running its tests — and with no credential in reach, there is
-nothing to take. What the two jobs differ on is what they are given, not what they
-may do: `validate_deliverable.ts` reads the pull request as data, and this one runs
-it, and neither can be handed a secret.
+The definitions, the tools file, the config and the servers themselves all come
+from the default branch: the job checks that branch out beside the pull request and
+points `ATOMATON_MACHINERY_ROOT` at it. So what it starts is what a person
+released, and the pull request decides none of it.
+
+That is also why it is safe to run there at all: the job holds no repository
+secret. It declares `contents: read`, and the servers are started with `GH_TOKEN`
+removed from the environment. The pull request is checked out beside them because
+the end-to-end suite runs there, which is the same trust level as the checks that
+run its tests, with nothing to take.
 
 **Why this exists.**
 [A name that is not a server](../tools/when-it-breaks.md#a-name-that-is-not-a-server)

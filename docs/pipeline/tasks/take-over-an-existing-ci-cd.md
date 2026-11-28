@@ -14,13 +14,13 @@ On a repository that already has a pipeline, the whole ask is this:
 ```text
 /engineer
 
-Move what `.github/workflows/ci.yml` does into `checks.from_pull_request`, and what
+Move what `.github/workflows/ci.yml` does into `checks.jobs`, and what
 `.github/workflows/release.yml` does into `deploy`. Decide between `on_merge` and
 `on_tag`, and say why in the pull request.
 ```
 
 You do not write the commands. What `ci.yml` does becomes entries under
-[`checks.from_pull_request`](../reference.md#checksfrom_pull_request), and a
+[`checks.jobs`](../reference.md#checksjobs), and a
 `release.yml` that tags a version on merge and builds that tag usually becomes two
 arms — [`on_merge`](../reference.md#deployon_merge) for the tag decision,
 [`on_tag`](../reference.md#deployon_tag) for the build and the publish. Asking for

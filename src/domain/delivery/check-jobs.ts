@@ -1,54 +1,133 @@
 /**
- * check-jobs.ts — the two lists `checks` is made of, and which one may hold a key.
+ * check-jobs.ts — the one list `checks` is made of, and the two spellings it replaced.
  *
- * Both are `domain/delivery/declared-jobs.ts` lists, and the only thing that separates them is
- * whose commands run. That single fact decides everything else, so it is stated once
- * here and read by everyone who needs it: the reader in `adapters/runner/config.ts`, the planner
- * that publishes each arm as a matrix, and the deliverable check that refuses a bad
- * one at pull-request time. Written out at each of those, the rule was three copies
- * of a string and two copies of a security decision.
+ * Every entry is a `domain/delivery/declared-jobs.ts` list entry, and which list an
+ * entry sits in no longer decides anything: a check's commands come from the default
+ * branch whether or not it names a credential, so the tree is the same tree and the
+ * only thing that differs is whether the job has any place to put one.
+ *
+ * The rule is a sentence, and it is the design: **the machinery reads the default
+ * branch; a pull request's tree is data.** A pull request cannot add a check, rename
+ * one, or widen the secrets one receives, because the list it could edit is not the
+ * list that runs. That is what makes an entry naming `secrets` safe anywhere in it.
+ *
+ * `from_pull_request` and `from_default_branch` were the two arms this replaced. They
+ * are still read, into this list, because the release that carries this reader reaches
+ * a repository through an update that stops at a conflict for a person: until that
+ * merge lands, `.github/atomaton/config.yaml` holds the old spelling and every pull
+ * request's check has to stay green against it.
  */
-import { type DeclaredJobsRules } from "./declared-jobs.ts";
+import type { DeclaredJob, DeclaredJobsResolution, DeclaredJobsRules } from "./declared-jobs.ts";
+import { resolveDeclaredJobs } from "./declared-jobs.ts";
 import { CHECK_JOB_RESERVED } from "./declared-secrets.ts";
 
 /**
- * The pull request's own commands, in its own tree.
+ * The list of checks.
  *
- * Nowhere to name a credential, because a pull request may rewrite any command below
- * it. The refusal is the message an author sees, so it says what is true of the list
- * rather than quoting a rule number.
+ * Read from the default branch, always — the planning job checks that branch out and
+ * nothing reads a pull request's copy — so an entry may name its own `secrets`.
  */
-export const CHECKS_FROM_PULL_REQUEST: DeclaredJobsRules = {
-  where: "checks.from_pull_request",
-  secrets: {
-    refused:
-      "These commands come from the pull request, which may rewrite them, so a credential " +
-      "named beside them is one the change being judged can read. Move the check to " +
-      "`checks.from_default_branch`, where the commands come from a branch a person approved.",
-  },
-};
+export const CHECKS: DeclaredJobsRules = { where: "checks.jobs", secrets: CHECK_JOB_RESERVED };
 
 /**
- * The default branch's commands, with the pull request handed over as a path to read.
+ * The two keys this list replaced, in the order they are read.
  *
- * A pull request cannot add a job here, rename one, or change which secret one
- * receives, because this list is read from the default branch — see `plan_checks.ts`.
+ * Both are read under the same rules as `checks.jobs`, including the right to name a
+ * credential: the reason `from_pull_request` refused one — its commands were the pull
+ * request's own — is the reason the arm no longer exists.
  */
-export const CHECKS_FROM_DEFAULT_BRANCH: DeclaredJobsRules = {
-  where: "checks.from_default_branch",
-  secrets: { reserved: CHECK_JOB_RESERVED },
-};
+export const LEGACY_CHECK_KEYS = ["from_pull_request", "from_default_branch"] as const;
+
+export interface ChecksResolution extends DeclaredJobsResolution {
+  /**
+   * The keys an old config used, as `checks.from_pull_request` and friends.
+   *
+   * Returned rather than printed here: this module is a pure function of a config, and
+   * the reader that talks to a person is what says so — once, however many entries the
+   * old spelling held.
+   */
+  readonly deprecated: readonly string[];
+}
 
 /**
- * Said only for the pull request's arm, because only there is an empty list
- * surprising.
+ * Every check this configuration declares, from either spelling.
  *
- * A project that declares no credentialed check is the shipped default and the common
- * case. A project that declares nothing to verify a change with has a required check
- * that passes every pull request without looking at it, which is the shape this
- * repository keeps finding: cover that is not.
+ * One list out, because that is what runs: the two arms were two shapes of one answer,
+ * and the workflow that consumes this has no use for the one they came from.
  */
-export const NO_PULL_REQUEST_CHECKS =
-  "This check verified nothing: `checks.from_pull_request` in .github/atomaton/config.yaml is empty, " +
+export function resolveChecks(section: unknown): ChecksResolution {
+  const container = typeof section === "object" && section !== null ? (section as Record<string, unknown>) : {};
+  const problems: string[] = [];
+  const jobs: DeclaredJob[] = [];
+  const declaredIn = new Map<string, string>();
+  const deprecated: string[] = [];
+
+  for (const key of ["jobs", ...LEGACY_CHECK_KEYS]) {
+    const raw = container[key];
+    if (raw === undefined) continue;
+    const rules: DeclaredJobsRules = key === "jobs" ? CHECKS : { where: `checks.${key}`, secrets: CHECK_JOB_RESERVED };
+    if (key !== "jobs") deprecated.push(rules.where);
+
+    const resolved = resolveDeclaredJobs(raw, rules);
+    problems.push(...resolved.problems);
+    // Across the keys as well as within one, because a name is a job name wherever it
+    // sits: the config most likely to hold two of them is one halfway through the move,
+    // with the entries under `jobs` and the old key not deleted yet.
+    for (const job of resolved.jobs) {
+      const already = declaredIn.get(job.name);
+      if (already !== undefined) {
+        problems.push(`\`${rules.where}\`: '${job.name}' is already declared in \`${already}\`.`);
+        continue;
+      }
+      declaredIn.set(job.name, rules.where);
+      jobs.push(job);
+    }
+  }
+
+  return { jobs, problems, deprecated };
+}
+
+/**
+ * Said once, by the reader, for a config still holding the old spelling.
+ *
+ * Names the new spelling rather than only the old one: the reader of this line is being
+ * told what to write, and "the old key is deprecated" leaves them looking for the new
+ * one. It also says the two spellings now behave alike, because the thing an author of
+ * the old config most needs to know is that nothing about their checks changed.
+ */
+export function deprecatedCheckNotice(keys: readonly string[]): string {
+  const named = keys.map((key) => `\`${key}\``).join(" and ");
+  return (
+    `${named} ${keys.length === 1 ? "is" : "are"} read into \`checks.jobs\`, the one list of checks. ` +
+    "An entry from either spelling now runs the same way: the list comes from the default branch, and " +
+    "each entry may name its own `secrets`. Move the entries under `checks.jobs` when convenient."
+  );
+}
+
+/**
+ * Whether the notice has been said in this process.
+ *
+ * Per process because that is the scope a person reads: one planning job, or one
+ * deliverable check, says it once rather than once per entry or once per call.
+ */
+let saidDeprecated = false;
+
+/** Say, once in a process, that the old spelling was read into the one list. */
+export function announceDeprecatedChecks(keys: readonly string[], log: (line: string) => void = console.error): void {
+  if (saidDeprecated || keys.length === 0) return;
+  saidDeprecated = true;
+  log(`::warning::${deprecatedCheckNotice(keys)}`);
+}
+
+/**
+ * Said when the list is empty, and only then.
+ *
+ * A project that declares nothing to verify a change with has a required check that
+ * passes every pull request without looking at it, which is the shape this repository
+ * keeps finding: cover that is not. A project that named `your_workflow` has its own
+ * check and this one is not dispatched for it, so it is not surprising there.
+ */
+export const NO_CHECKS =
+  "This check verified nothing: `checks.jobs` in .github/atomaton/config.yaml is empty, " +
   "so a pull request satisfying it has not been tested. Add the commands that check this project, " +
   "or point `checks.your_workflow` at a workflow of your own.";

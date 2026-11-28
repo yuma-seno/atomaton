@@ -25,8 +25,9 @@ everything else about the runner. This table is the one place that knows both.
 | `chain.labels.in_progress` | [work](../work/reference.md#chainlabels) |
 | `chain.labels.launched` | [work](../work/reference.md#chainlabels) |
 | `chain.labels.sub_issue` | [work](../work/reference.md#chainlabels) |
-| `checks.from_default_branch` | [pipeline](../pipeline/reference.md#checksfrom_default_branch) |
-| `checks.from_pull_request` | [pipeline](../pipeline/reference.md#checksfrom_pull_request) |
+| `checks.jobs` | [pipeline](../pipeline/reference.md#checksjobs) |
+| `checks.from_default_branch` | [pipeline](../pipeline/reference.md#checksfrom_pull_request-and-checksfrom_default_branch) |
+| `checks.from_pull_request` | [pipeline](../pipeline/reference.md#checksfrom_pull_request-and-checksfrom_default_branch) |
 | `checks.your_workflow` | [pipeline](../pipeline/reference.md#checksyour_workflow) |
 | `deploy.on_demand` | [pipeline](../pipeline/reference.md#deployon_demand) |
 | `deploy.on_merge` | [pipeline](../pipeline/reference.md#deployon_merge) |

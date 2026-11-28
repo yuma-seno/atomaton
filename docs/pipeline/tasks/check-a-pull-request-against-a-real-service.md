@@ -1,34 +1,36 @@
 # Check a pull request against a service that needs a credential
 
 A check that talks to a real service — an API you hold a token for, a staging
-environment, a registry — needs a credential to say anything. The half of
-`checks` that runs against a pull request cannot carry one:
-`checks.from_pull_request` has no `secrets` key and cannot have one, because its
-commands are the pull request's own and the change being judged can rewrite them
-into anything that reads what the job was handed.
+environment, a registry — needs a credential to say anything. Name it on the entry
+that needs it: a check that names `secrets` is handed those and no others, and one
+that names none runs in a job with nowhere to put a credential at all.
 
-So the check goes in the other half. `checks.from_default_branch` takes the same
-entry shape with `secrets` on it, runs its commands from your default branch, and
-gives those commands `$ATOMATON_PR_TREE`, a path to a checkout of the pull
-request.
+What makes that safe is not the entry but where the list comes from.
+`atomaton-check.yml` reads `checks` from your **default branch**, so a pull request
+cannot add a check, rename one, or widen the secrets one receives — it cannot edit
+the list that is reading it.
 
 ## The entry
 
 ```yaml
 checks:
-  from_default_branch:
+  jobs:
     - name: integration
       secrets: [STAGING_TOKEN]
       commands:
-        - ./scripts/check-against-staging.sh "$ATOMATON_PR_TREE"
+        - ./scripts/check-against-staging.sh
 ```
 
 `name` is the job's name, and `commands` run in order until one fails. `secrets`
 names repository secrets; add the secret to the repository first, because the
-entry names it and does not create it. The checkout the commands are handed is
-the pull request, so read it and do not execute it — the commands themselves are
-yours, read from the default branch, and cannot be edited by the change they are
-judging.
+entry names it and does not create it.
+
+The pull request is the job's working tree, so the script reads the change in
+place — no path to it is passed. It is worth knowing what that means: the code
+under test is in the same job as the credential. Keep an entry that names a
+secret to talking to something outside the repository, and let the entry that
+runs the project's own tests name none. [A check that needs a
+credential](../boundaries.md#a-check-that-needs-a-credential) is the reasoning.
 
 ## The credential belongs to that entry
 
@@ -45,6 +47,4 @@ the change adding the entry should be. Write the entry so that it is right on
 arrival, land it on its own, and let the next pull request be the first one it
 sees.
 
-Why a credential is safe in this half is [a check that needs a
-credential](../boundaries.md#a-check-that-needs-a-credential). Every key an entry
-accepts is [`checks` and `deploy`](../reference.md).
+Every key an entry accepts is [`checks` and `deploy`](../reference.md).

@@ -103,7 +103,7 @@ shell.
 
 If that matters for a particular credential, the options are to give it only to a
 server shipped here, or not to route it at all and let the tool that needs it be a
-step in [`checks.from_pull_request`](../pipeline/boundaries.md#a-check-that-needs-a-credential),
+step in [`checks`](../pipeline/boundaries.md#a-check-that-needs-a-credential),
 which runs in its own job.
 
 **The shell guard is not a boundary either.** It is a text match over a command

@@ -18,16 +18,33 @@ picks its own runner and a failure names itself.
     - ./scripts/check-env-names.sh
 ```
 
-Which list an entry goes in is what differs. `checks` has two, named for whose
-commands run. `deploy` has three, named for the event that ships it.
+Which list an entry goes in is what differs. `checks` has one. `deploy` has three,
+named for the event that ships it.
 
-## `checks.from_pull_request`
+## `checks.jobs`
 
-The commands the pull request itself declares, run in its own tree, before anyone
-reviews it.
+Every check this project runs on a pull request.
 
-This list has no `secrets` key and cannot have one — see
-[what a check may not carry](boundaries.md#a-check-that-needs-a-credential).
+```yaml
+checks:
+  jobs:
+    - name: test
+      commands: ["bun test"]
+    - name: cloud-names
+      secrets: [AWS_ROLE_ARN]
+      commands: ["./scripts/check-env-names.sh"]
+```
+
+Each entry becomes its own job. An entry that names `secrets` is handed those and
+no others; an entry that names none runs in a job with nowhere to put one, which
+is the ordinary case and the reason saying nothing is worth preferring.
+
+**The commands come from your default branch, and the tree under test is the pull
+request's.** The pull request is the job's working tree, so a command reads it in
+place; `checks` is read from the default branch. So a pull request cannot add a
+check, rename one, or widen the secrets one receives — which is what makes a
+credential safe on any entry here. See
+[what a check may reach](boundaries.md#a-check-that-needs-a-credential).
 
 **It ships with one entry**, a gitleaks scan, which is the template's only
 default check. It is safe to inherit on a repository with years of history
@@ -37,28 +54,16 @@ one teaches people to ignore the check. If it cannot reach gitleaks — a rate
 limit, an outage — it warns rather than fails, because "GitHub was busy" must not
 read as "this pull request added a credential".
 
-Your own entries go beside it, not instead of it.
-
-## `checks.from_default_branch`
-
-The same shape, with `secrets`, and the commands come from your default branch
-rather than from the pull request:
-
-```yaml
-checks:
-  from_default_branch:
-    - name: cloud-names
-      secrets: [AWS_ROLE_ARN]
-      commands:
-        - ./scripts/check-env-names.sh "$ATOMATON_PR_TREE"
-```
-
-`$ATOMATON_PR_TREE` is a path to a checkout of the pull request. Each job is
-handed the secrets its own entry named and no others.
-
-Why a credential is safe in this half and nowhere else is
+Why a credential is safe on any entry is
 [three separate facts](boundaries.md#a-check-that-needs-a-credential), and the
 list is meant to stay short for the third of them.
+
+## `checks.from_pull_request` and `checks.from_default_branch`
+
+The two keys `checks.jobs` replaced, and both still read into it: an entry from
+either spelling runs the same way, including the right to name `secrets`. They
+exist so a configuration written before the release that unified the list keeps
+working. Write `checks.jobs`.
 
 ## `deploy.on_merge`
 
@@ -102,7 +107,7 @@ at all.
 
 ```yaml
 checks:
-  from_pull_request:
+  jobs:
     - name: test-macos
       runs_on: macos-latest
       commands: ["bun test"]
