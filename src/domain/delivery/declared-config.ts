@@ -195,10 +195,12 @@ export interface AtomaConfig {
    * stale the moment somebody renames an agent.
    *
    * What is left is the handful of runs with no thread to read: a workflow that
-   * reacts to a condition rather than to a request. `on_config_finding` is the one
-   * that exists today -- `atoma` reports a defect in the tools file it was handed
-   * as an `ATOMA_CONFIG_FINDING` line and carries on, and something has to open an
-   * issue about it and put an agent on that issue.
+   * reacts to a condition rather than to a request. `on_config_finding` is one --
+   * `atoma` reports a defect in the tools file it was handed as an
+   * `ATOMA_CONFIG_FINDING` line and carries on, and something has to open an issue
+   * about it and put an agent on that issue. `on_agent_issue` is the other: an issue
+   * an agent files with `create_root_issue` carries no request, because the machinery
+   * created it with the token whose own events GitHub does not deliver.
    *
    * ## Required, or required when its mode is on
    *
@@ -215,6 +217,17 @@ export interface AtomaConfig {
   agents?: {
     /** The agent to start on an issue opened for an `ATOMA_CONFIG_FINDING`. */
     on_config_finding?: string;
+    /**
+     * The agent to start on a root issue an agent filed with `create_root_issue`, or
+     * `off` to file the issue and start nobody.
+     *
+     * Required, and the one key in this section whose value is not only a name: the
+     * machinery filing an issue is a report nobody asked to be acted on, and a project
+     * that wants to triage those itself says `off` rather than leaving the key out.
+     * `configProblems` refuses an absent key, an empty value and anything that is
+     * neither `off` nor a name with a definition behind it.
+     */
+    on_agent_issue?: string;
     /**
      * The agent to start on an update pull request that stopped on a conflict.
      *

@@ -37,6 +37,29 @@ import { configProblems } from "../../src/domain/delivery/deliverable-integrity.
 /** This repository's own config, the one the live agents run under. */
 const CONFIGS = [".github/atomaton/config.yaml"];
 
+/**
+ * The keys this source requires that this repository's own config does not set yet.
+ *
+ * A required key reaches this copy with the release that reads it, not with the pull
+ * request that adds it. Validation on every pull request runs the DEPLOYED validator
+ * (`.github/atomaton-runtime/scripts/validate_deliverable.ts`), and it refuses a key it
+ * does not know -- so writing `agents.on_agent_issue` here first fails validation for
+ * every pull request in this repository, including ones that touch nothing, until the
+ * release carrying the key arrives and the update machinery three-way merges it in.
+ * The failure is the same one this file was written for, from the other side.
+ *
+ * An entry is a state, not a decision: `a key the deployed validator knows is set here`
+ * below fails once the release that reads the key has been taken, so this list empties
+ * by itself rather than staying as a permission to skip.
+ */
+const PENDING_RELEASE = ["agents.on_agent_issue"];
+
+/** Whether the deployed validator — the one a pull request is checked against — reads `key`. */
+function deployedReads(key: string): boolean {
+  const validator = readFileSync(".github/atomaton-runtime/scripts/validate_deliverable.ts", "utf8");
+  return validator.includes(key.slice(key.lastIndexOf(".") + 1));
+}
+
 function agentNames(dir: string): string[] {
   return readdirSync(dir)
     .filter((file) => file.endsWith(".md"))
@@ -64,8 +87,11 @@ describe.each(CONFIGS)("%s", (configPath) => {
    * is added to `REQUIRED_AGENT_KEYS`.
    */
   test("is internally consistent, so CI runs on the pull requests that follow", () => {
+    const problems = problemsFor(configPath).filter(
+      (problem) => !PENDING_RELEASE.some((key) => problem.includes(`\`${key}\``)),
+    );
     expect(
-      problemsFor(configPath),
+      problems,
       `${configPath} is what this repository's agents actually run under, and what every pull ` +
         `request's validation reads. A problem here blocks CI for every pull request, not only ` +
         `the one that touched it`,
@@ -86,8 +112,31 @@ describe("the shipped template and this repository's own config", () => {
     };
     const own = Bun.YAML.parse(readFileSync(CONFIGS[0]!, "utf8")) as { agents?: Record<string, unknown> };
     for (const key of Object.keys(shipped.agents ?? {})) {
+      // A key the deployed runtime cannot read yet: the template carries it, this copy
+      // gets it with the release — see `PENDING_RELEASE`.
+      if (PENDING_RELEASE.includes(`agents.${key}`)) continue;
       expect(own.agents?.[key], `${key} is in src/content/config.yaml and missing here`).toBe(
         shipped.agents![key],
+      );
+    }
+  });
+
+  /**
+   * The other half of the deferral, so it cannot outlive its reason.
+   *
+   * Once the deployed validator reads the key, the release has arrived, the update
+   * machinery has merged the key into this copy, and a missing one is the
+   * every-pull-request failure again.
+   */
+  test("a key the deployed validator knows is set here", () => {
+    const shipped = Bun.YAML.parse(readFileSync("src/content/config.yaml", "utf8")) as {
+      agents?: Record<string, unknown>;
+    };
+    const own = Bun.YAML.parse(readFileSync(CONFIGS[0]!, "utf8")) as { agents?: Record<string, unknown> };
+    for (const key of PENDING_RELEASE) {
+      if (!deployedReads(key)) continue;
+      expect(own.agents?.[key.slice(key.lastIndexOf(".") + 1)], `${key} arrives with the release, so it is due here`).toBe(
+        shipped.agents?.[key.slice(key.lastIndexOf(".") + 1)],
       );
     }
   });
