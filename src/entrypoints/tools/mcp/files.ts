@@ -501,7 +501,7 @@ const { tools, dispatch } = buildMcpTools([
   defineMcpTool({
     name: "read",
     description:
-      "Read a range of lines from a file, numbered. Write the range into path -- `src/x.ts:120-260`, both ends included, or `src/x.ts:120` for the rest of the file -- which is one argument; offset and limit say the same thing when you want to give them. A result that stopped early names the path to continue from, so a file of any size can be read in order without guessing. A file that holds an image comes back as an image, for an agent whose definition sets vision. Prefer this over cat, head, tail or sed through the shell, which return unnumbered text and cost a round trip.",
+      "Read a range of lines from a file, numbered. Write the range into path -- `src/x.ts:120-260`, both ends included, or `src/x.ts:120` to read on from there -- which is one argument; offset and limit say the same thing when you want to give them. A result that stopped early names the path to continue from, so a file of any size can be read in order without guessing. A file that holds an image comes back as an image, for an agent whose definition sets vision. Prefer this over cat, head, tail or sed through the shell, which return unnumbered text and cost a round trip.",
     schema: READ_SCHEMA,
     handler: readFile,
   }),

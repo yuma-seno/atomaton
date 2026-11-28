@@ -4493,9 +4493,19 @@ describe("mcp/files.ts", () => {
     expect(both).toContain("5\tline 5");
     expect(both).toContain("14\tline 14");
 
-    // One line means "from here on", so a file can be paged to its end.
+    // One line means "from here on": the same bound as `offset`, so a file is paged by
+    // naming the line each time rather than by promising the end of it.
     const open = (await call(root, "read", { path: "big.txt:20" })).result.content[0].text;
     expect(open).toContain("lines 20-40 of 40");
+  });
+
+  test("an open-ended range stops where one read stops, and names what continues it", async () => {
+    const long = Array.from({ length: 900 }, (_, i) => `line ${i + 1}`).join("\n");
+    const root = fixture({ "long.txt": long });
+    const text = (await call(root, "read", { path: "long.txt:20" })).result.content[0].text;
+    expect(text).toContain(" of 900");
+    expect(text).not.toContain("900\tline 900");
+    expect(text).toContain('Continue with read(path: "long.txt:');
   });
 
   test("an offset and limit passed as arguments still win over the range in the path", async () => {

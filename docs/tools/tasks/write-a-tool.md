@@ -66,12 +66,14 @@ how big one may be, so a single comment with a log pasted into it filled the
 window while the tool reported having shown three of forty. Cap each item *and*
 the whole.
 
-When an item still has to be cut, give the caller the way back to the rest: an
-offset, named in the marker, that the next call passes to continue — the shape
-`read` uses ("Read again with offset: 15"). A marker that says how much it
-dropped but not how to get it leaves the tail of a long item reachable only by
-leaving the tool for the API underneath it, which is a second question an agent
-can get wrong.
+When an item still has to be cut, give the caller the way back to the rest: a
+marker naming the call that continues it, written into an argument the caller
+already sends. `read` names the file with the line in the path —
+`read(path: "src/x.ts:15")` — and not only the `offset` it would have to add,
+because a call that loses every optional argument still carries its first one. A
+marker that says how much it dropped but not how to get it leaves the tail of a
+long item reachable only by leaving the tool for the API underneath it, which is a
+second question an agent can get wrong.
 
 **5. Say the shape in the tool's description.**
 
