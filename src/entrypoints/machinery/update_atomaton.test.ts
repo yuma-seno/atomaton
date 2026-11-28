@@ -507,6 +507,50 @@ describe("a stopped update", () => {
   });
 
   /**
+   * The conflict the agent cannot carry through: `.github/workflows/` is a path its
+   * token may not write, so resolving those markers is a push GitHub rejects. The
+   * machinery does not pre-sort the list — the agent is started with the whole
+   * conflict and told which part is a person's — so a pull request mixing the two
+   * kinds stops half-resolved rather than not at all.
+   */
+  test("a workflow conflict is a person's, and a mixed pull request still starts the agent", () => {
+    const ORDINARY = "docs/page.md";
+    const base: Tree = { ...BASE_FILES, [ORDINARY]: "the adopter's words\n" };
+    const target: Tree = { ...TARGET_FILES, [ORDINARY]: "the release's words\n" };
+    const { dir } = fixtureRepo(
+      { ...base, [CHECK]: "customised by the adopter\n", [ORDINARY]: "the adopter's words, edited\n" },
+      "v0.1.0",
+      PR_AGENT,
+    );
+    const r = runWithFakeGh(scriptPath("update_atomaton.ts"), ["--repo", "owner/repo"], {
+      cwd: dir,
+      env: { ATOMATON_UPDATE_TOKEN: "tok" },
+      rules: [...dispatchRules(), ...rules("v0.2.0", { base, target, notice: 12 })],
+    });
+    expect(r.status).toBe(0);
+
+    // Both sides collided: one path under `.github/workflows/`, one outside it.
+    expect(readFileSync(join(dir, CHECK), "utf8")).toContain("<<<<<<<");
+    expect(readFileSync(join(dir, ORDINARY), "utf8")).toContain("<<<<<<<");
+
+    // Started anyway, on the pull request: no path is withheld from what it reads.
+    const sent = r.ghCalls.filter((call) => call[0] === "workflow");
+    expect(sent, "one run, for the agent the config names").toHaveLength(1);
+    expect(sent[0]).toContain("agent=engineer");
+
+    const directive = r.ghCalls.find((call) => call[0] === "api" && call.includes("POST")) ?? [];
+    const told = directive.find((arg) => arg.startsWith("body=")) ?? "";
+    expect(told, "the agent is told where its token stops").toContain("`.github/workflows/`");
+    expect(told).toContain("a person's");
+
+    // The pull request body and the thread that asked carry the same exception.
+    const created = r.ghCalls.find((call) => call[0] === "pr" && call[1] === "create") ?? [];
+    expect(created[created.indexOf("--body") + 1] ?? "").toContain("`.github/workflows/`");
+    const commented = r.ghCalls.filter((call) => call[0] === "issue" && call[1] === "comment")[0] ?? [];
+    expect(commented[commented.indexOf("--body") + 1] ?? "").toContain("`.github/workflows/`");
+  });
+
+  /**
    * The mode is a policy for the collision, not for the command that started the run.
    * A person's `!upgrade` on a `pr-agent` repository collides exactly like the notice's
    * dispatch does, and the repository said what should happen then.

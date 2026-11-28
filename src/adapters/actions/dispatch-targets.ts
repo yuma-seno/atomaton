@@ -216,6 +216,14 @@ export function dispatchUpdate(
  * The directive comment is this dispatch's marker AND its run's ask, the way the
  * post-merge re-invocation does it -- tagged `include`, because it is the first
  * message the resolving agent reads and it is what tells it what to do.
+ *
+ * One limit is the agent's rather than the merge's: GitHub refuses a workflow file
+ * written with a token that holds no `workflow` scope (#650), and the agent's holds
+ * none. The directive says so and the agent is started anyway -- the conflict is the
+ * whole input a resolver needs, and a pull request whose conflicts mix the two kinds
+ * is half-resolvable rather than not started at all. Withholding the workflow paths
+ * here would mean deciding, before the files are read, which collision needs a
+ * person.
  */
 export function dispatchUpdateConflictAgent(
   repo: string,
@@ -233,6 +241,12 @@ export function dispatchUpdateConflictAgent(
         "sides disagree — the files listed above carry conflict markers naming both. Resolve them, " +
         "keeping what this repository wrote where it was deliberate and taking what the release " +
         "changed everywhere else, and say in your report which side you took for each file and why. " +
+        "One limit on where you can write: a conflicted path under `.github/workflows/` is a " +
+        "person's, because GitHub refuses a workflow file written with your token and the push " +
+        "carrying it would be rejected. Leave those files' markers exactly as they are, resolve " +
+        "the others, and name the workflow paths in your report so a person can finish them. A " +
+        "conflict that mixes the two kinds is the same: the workflow files stay for the person, " +
+        "and you resolve the rest. " +
         "Nothing merges from here: the repository's checks run on the resolved tree, and the merge is " +
         "a person's.",
     }) === "dispatched"
