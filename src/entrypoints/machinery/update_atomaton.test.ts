@@ -619,7 +619,6 @@ describe("an update whose own config.yaml collided", () => {
 
   test("the pull request is opened and a person is told, instead of the run dying on the parse", () => {
     const { dir } = fixtureRepo(BASE_FILES, "v0.1.0", CONFIG_TREE);
-
     const r = runWithFakeGh(scriptPath("update_atomaton.ts"), ["--repo", "owner/repo"], {
       cwd: dir,
       env: { ATOMATON_UPDATE_TOKEN: "tok" },

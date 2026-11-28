@@ -467,9 +467,7 @@ function main(): void {
       "-m", updateTitle(targetTag), "-m",
       conflicts.length === 0
         ? `Applied by the update machinery from ${plan.base}. Nothing here collided.`
-        : `Applied by the update machinery from ${plan.base}. ` +
-          `${conflicts.length} file(s) changed on both sides are left for a person on the pull request` +
-          `${conflicts.length > 0 ? ` (${conflicts.length} carrying conflict markers)` : ""}.`,
+        : `Applied by the update machinery from ${plan.base}. ${conflicts.length} file(s) carry conflict markers for a person or an agent to resolve on the pull request.`,
     ],
     "commit the applied plan",
   );
@@ -497,13 +495,14 @@ function main(): void {
   // covered: the plan declined to decide there, and a person decides -- whatever the
   // mode says.
   //
-  // Non-throwing, because a config this run cannot read must not end the run HERE:
-  // the push has already happened, so a throw would leave a pushed branch, no pull
-  // request, and nobody told (#638).
+  // Non-throwing, because the file it reads is one this run has just written: when
+  // config.yaml is itself a path both sides changed, it carries conflict markers, and
+  // an exception here would end the run after the push and before the pull request --
+  // leaving a marker-carrying branch, no pull request, and nobody told (#638).
   const policy = tryGetUpdateConflictPolicy();
   if (!policy.readable) {
     log(
-      "WARN config.yaml could not be read after the plan was applied. " +
+      "WARN config.yaml could not be read after the plan was applied — it is one of the paths the merge left with conflict markers. " +
         "The collision policy is unknown, so no agent is started and the run stops for a person at the pull request.",
     );
   }
@@ -552,11 +551,11 @@ function main(): void {
 
   const notice = findOpenNotice(repo);
 
-  // The merge gate is conflicts AND kept paths. A clean plan with `keep` entries
-  // has applied everything but decided nothing where the plan was not sure -- and
-  // the plan's own report says "needs a decision here", so the run does not get to
-  // say so and then make it. The self-merging path below runs only when there is
-  // neither.
+  // The merge gate is conflicts AND kept paths. A clean plan with `keep`
+  // entries has applied everything but decided nothing where the plan was not
+  // sure -- and the plan's own report says "needs a decision here", so the run
+  // does not get to say so and then make it. The self-merging path below runs
+  // only when there is neither kind of stop.
   const selfMerging = conflicts.length === 0 && plan.kept.length === 0;
   let merging = false;
   if (selfMerging) {
@@ -622,9 +621,9 @@ function main(): void {
     log(`update to ${targetTag} is applied on #${prNumber}, held for a person: ${plan.kept.length} kept path(s)`);
     return;
   }
-  // Collisions stop the run the way the plan says: the pull request carries the
-  // markers, and the threads that asked are told where to resolve them. The notice
-  // stays open — no merge happened, so its promise is still unkept.
+  // Conflicts stop the run the way the plan says: the pull request carries the
+  // markers, and the threads that asked are told where to resolve them. The
+  // notice stays open — no merge happened, so its promise is still unkept.
   if (conflicts.length > 0) {
     // The agent first, so the comment below reports what actually happened to it
     // rather than what this run meant to do. A dispatch GitHub refuses leaves the
