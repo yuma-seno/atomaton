@@ -132,6 +132,42 @@ describe("the merge bucket", () => {
       cleanup(dir);
     }
   });
+  /**
+   * `config.yaml` is the machinery's own control file, and a marker in it is a state
+   * nothing recovers from: every job reads it to know what to run. So a collision
+   * there is reported instead of written — the tree keeps its copy and the release's
+   * version travels in the result, for the pull request's body (#668).
+   */
+  test("a collision on config.yaml keeps the tree's copy and reports both sides", () => {
+    const dir = tree();
+    try {
+      const path = ".github/atomaton/config.yaml";
+      const base = "update:\n  on_new_release: issue\n";
+      const ours = "update:\n  on_new_release: pr\n";
+      const theirs = "update:\n  on_new_release: pr-agent\n";
+      mkdirSync(join(dir, ".github/atomaton"), { recursive: true });
+      writeFileSync(join(dir, path), ours);
+      const baseMap = new Map([[path, base]]);
+      const theirsMap = new Map([[path, theirs]]);
+      const plan = planUpdate("v1", "v2", baseMap, theirsMap, new Map([[path, ours]]));
+      const applied = applyPlan(dir, plan, baseMap, theirsMap, new Map([[path, ours]]));
+      if (!("result" in applied)) throw new Error(applied.why);
+
+      // Kept, not conflicted: the file's content is the tree's, markers and all absent.
+      expect(applied.result.conflicts).toEqual([]);
+      expect(onDisk(dir, path)).toBe(ours);
+      expect(onDisk(dir, path) ?? "").not.toContain("<<<<<<<");
+
+      // The two sides are the result's, so the pull request can show them.
+      expect(applied.result.held.map((collision) => collision.path)).toEqual([path]);
+      const text = applied.result.held[0]?.text ?? "";
+      expect(text).toContain("<<<<<<<");
+      expect(text).toContain("pr\n");
+      expect(text).toContain("pr-agent\n");
+    } finally {
+      cleanup(dir);
+    }
+  });
 });
 
 describe("what it refuses", () => {
