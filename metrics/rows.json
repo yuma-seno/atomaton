@@ -29436,8 +29436,8 @@
   {
     "path": "sessions/issue-658/reviewer.json",
     "agent": "reviewer",
-    "messages": 35,
-    "calls": 20,
+    "messages": 54,
+    "calls": 30,
     "failed": 0,
     "refused": 0,
     "skills": [
@@ -29446,15 +29446,18 @@
     "reported": true,
     "tools": {
       "read": 3,
-      "grep": 9,
-      "get_pr": 1,
+      "grep": 11,
+      "get_pr": 2,
       "list": 1,
-      "get_issue_comments": 1,
+      "get_issue_comments": 2,
       "get_pr_reviews": 1,
-      "get_check_runs": 1,
-      "search_code": 1,
+      "get_check_runs": 2,
+      "search_code": 3,
       "load_skill": 1,
-      "glob": 1
+      "glob": 1,
+      "get_pr_diff": 1,
+      "check_merge_readiness": 1,
+      "merge_pr": 1
     },
     "acts": {},
     "runs": [
@@ -29484,6 +29487,32 @@
           }
         },
         "started": "2026-11-28T12:08:13Z"
+      },
+      {
+        "compactions": 0,
+        "ended": "2026-11-28T12:26:40Z",
+        "ended_because": "completed",
+        "iterations": 6,
+        "loop_recoveries": 0,
+        "messages": 54,
+        "seconds": 62,
+        "server_calls": {
+          "files_readonly": {
+            "grep": 2
+          },
+          "github": {
+            "check_merge_readiness": 1,
+            "get_check_runs": 1,
+            "get_issue_comments": 1,
+            "get_pr": 1,
+            "get_pr_diff": 1,
+            "merge_pr": 1
+          },
+          "search": {
+            "search_code": 2
+          }
+        },
+        "started": "2026-11-28T12:25:38Z"
       }
     ]
   },
