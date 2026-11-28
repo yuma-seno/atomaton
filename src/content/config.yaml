@@ -183,6 +183,16 @@ agents:
   # report that the tools file it was handed has a defect it carried on past.
   on_config_finding: engineer
 
+  # Started on a root issue an agent files while it works. `create_root_issue` is where
+  # a defect in the machinery and a decision a person has to make both go, and the
+  # issue it makes is created with the run's own token -- so no event starts anything
+  # on it, and the tool dispatches this run itself.
+  #
+  # `off` files the issue and starts nobody. It is the one key in this section with an
+  # off switch, because a report nobody asked to be acted on is a project's call
+  # whether to act on; the rest name a run that always happens.
+  on_agent_issue: atomaton
+
   # Started on an update pull request that stopped on a conflict. Required when
   # `update.on_new_release` is `pr-agent` -- the shipped value above is that mode,
   # so the name ships beside it: the two are checked as a pair.

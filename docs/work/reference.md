@@ -17,24 +17,78 @@ guarding; it would only remove the agent's ability to repair the configuration.
 So something has to read that line, open an issue about it, and put an agent on
 that issue. This key names that agent.
 
-**It is required, and it is the one key `config.yaml` requires outright.** Every other
-run is started by something that already knows who it wants — a person types
-`/<agent>`, an agent writes a handoff, a pull request carries the agent that
-opened it, a parent issue carries the agent that was working on it — and those are
-read from the thread at run time. This one has no thread to read: it is a workflow
-reacting to a condition. A default here would be the deliverable naming an agent,
-which is the hardcoding this section exists to remove, and a project that renamed
-its engineer would get a run for an agent that does not exist. A missing key fails
-the pull request's own check.
+**It is required.** Every other run is started by something that already knows who it
+wants — a person types `/<agent>`, an agent writes a handoff, a pull request carries
+the agent that opened it, a parent issue carries the agent that was working on it —
+and those are read from the thread at run time. This one has no thread to read: it is
+a workflow reacting to a condition. A default here would be the deliverable naming an
+agent, which is the hardcoding this section exists to remove, and a project that
+renamed its engineer would get a run for an agent that does not exist. A missing key
+fails the pull request's own check.
 
-The one other name that is ever required is
-[`agents.on_update_conflict`](#agentson_update_conflict), and a setting rather
-than the file requires it: `update.on_new_release` at `pr-agent` makes a
-configuration without it invalid, because the mode is the repository asking for a
-run nobody is watching. `issue` and `pr` owe no name.
+`on_config_finding` and [`agents.on_agent_issue`](#agentson_agent_issue) are the two
+names `config.yaml` requires outright. The third name,
+[`agents.on_update_conflict`](#agentson_update_conflict), is required by a setting
+rather than by the file: `update.on_new_release` at `pr-agent` makes a configuration
+without it invalid, because the mode is the repository asking for a run nobody is
+watching. `issue` and `pr` owe no name.
 
 Nothing else belongs in this section. A name that a thread can answer is answered
 from the thread.
+
+## `agents.on_agent_issue`
+
+```yaml
+agents:
+  on_agent_issue: atomaton
+```
+
+The agent started on a root issue an agent files while it works, or `off` to file the
+issue and start nobody.
+
+`create_root_issue` is the one tool that makes an issue with no parent: a defect in
+the machinery, or a decision somebody has to make before there is any work to
+decompose. The issue it makes is created with the run's own `GITHUB_TOKEN`, and
+GitHub delivers no workflow run for an event its own token caused — so
+`issues.opened` never fires for it, and without this key the issue sits open until a
+person asks for a run on it. That is the gap this setting closes, and it is closed in
+the tool rather than by a workflow watching for new issues: a workflow of that shape
+waits to be scheduled, and a run that already has the credential can dispatch the
+next one directly.
+
+An earlier release deleted `atoma-auto-trigger.yml`, because work should start only when
+somebody asks. This is not that workflow coming back: it starts nobody on an issue a
+person filed, and it acts only where a run has just decided that something needs doing —
+a report that run filed about its own finding, which nobody else is going to notice.
+
+Every root issue an agent files is in scope. There is no separate category for "this
+one is worth acting on": a defect an agent found and a decision it wanted a person to
+make are both reports from a run, and which of them needs work is what the started
+run finds out. Sub-issues are not in scope — a child is started by whoever decomposed
+the parent, when the parent is ready for it — and neither is the one notice a newer
+release leaves on the repository, which is a document with a person as its reader.
+
+The started run begins with the reproduction. If the report no longer reproduces, or
+the defect is already fixed, it comments the evidence and proposes closing, and the
+decision to close stays with the person who was told. Otherwise it works the issue as
+any other run does: investigate, fix, open a pull request, and let the reviewer judge
+it.
+
+`off` is the one off switch in this section. A report nobody asked to be acted on is a
+project's call whether to act on; the other keys in this section name a run that
+always happens.
+
+There is no depth limit on what this starts, and none is wanted: a run that files an
+issue starts a run, and if that run files another issue the machinery has made a loop
+rather than a chain to be capped — which is a bug to find, not a setting to add.
+[`chain.after_handoffs`](#chainafter_handoffs) and
+[`chain.after_runs_without_change`](#chainafter_runs_without_change) still bound how
+far any unattended chain drifts before a person is asked, and they are the only
+bounds.
+
+A second filing of a title an open issue already carries is not a second issue: the
+tool puts the new report on the existing issue as a comment and starts at most the one
+run that issue needs. That is what keeps one defect from becoming two runs.
 
 ## `agents.on_update_conflict`
 

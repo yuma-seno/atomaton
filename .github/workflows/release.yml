@@ -645,6 +645,7 @@ jobs:
       # here the refusal would not fail loudly, it would land in the WARN branch
       # and leave the update pull request standing.
       checks: read
+      actions: write
     steps:
       # `main`, and not the dispatch's commit: the version-bump commit this run
       # merged has moved main past it, and the tree the update applies to must

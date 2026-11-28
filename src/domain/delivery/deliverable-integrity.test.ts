@@ -24,7 +24,7 @@ const SOUND = {
   deploy: { on_merge: [], on_tag: [], on_demand: [] },
   merge: { policy: "auto" },
   chain: { labels: { in_progress: "atomaton/in-progress" } },
-  agents: { on_config_finding: "engineer" },
+  agents: { on_config_finding: "engineer", on_agent_issue: "atomaton" },
   tools: { secrets: [] },
 };
 
@@ -49,8 +49,9 @@ describe("a sound deliverable", () => {
   // absent key is a run for nobody. Everything else may be absent.
   test("an almost-empty config is sound apart from the required agents section", () => {
     const problems = problemsFor({});
-    expect(problems).toHaveLength(1);
+    expect(problems).toHaveLength(2);
     expect(problems[0]).toContain("`agents.on_config_finding`");
+    expect(problems[1]).toContain("`agents.on_agent_issue`");
   });
 });
 
@@ -215,7 +216,10 @@ describe("names that have to resolve to a file", () => {
   // turns. `agents` is a real section now, so the misspelled inner key is what is
   // reported rather than the section itself.
   test("a per-agent iteration budget is reported as a key nothing reads", () => {
-    const problems = problemsFor({ ...SOUND, agents: { on_config_finding: "engineer", engineer: { max_iterations: 200 } } });
+    const problems = problemsFor({
+      ...SOUND,
+      agents: { on_config_finding: "engineer", on_agent_issue: "atomaton", engineer: { max_iterations: 200 } },
+    });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("`agents.engineer`");
   });
@@ -224,16 +228,41 @@ describe("names that have to resolve to a file", () => {
   // this file naming an agent, which is the hardcoding `agents` exists to remove.
   test("a missing required agent key is reported", () => {
     const problems = problemsFor({ ...SOUND, agents: {} });
-    expect(problems).toHaveLength(1);
+    expect(problems).toHaveLength(2);
     expect(problems[0]).toContain("`agents.on_config_finding`");
     expect(problems[0]).toContain("required");
+    expect(problems[1]).toContain("`agents.on_agent_issue`");
+    expect(problems[1], "and names the value that starts nobody").toContain("`off`");
+  });
+
+  // The one key in this section with an off switch, and the reason it has one: an
+  // issue the machinery filed is a report nobody asked to be acted on, so a project
+  // may mean "file it and start nobody". A name is still a name, and `off` is not one.
+  test("`on_agent_issue` accepts `off`", () => {
+    expect(
+      problemsFor({ ...SOUND, agents: { on_config_finding: "engineer", on_agent_issue: "off" } }),
+      "off is a decision, not a missing name",
+    ).toEqual([]);
+  });
+
+  // And a value that is neither is reported rather than quietly read as `off`, which
+  // is what the runtime does with it: an issue filed and nobody told why no run came.
+  test("`on_agent_issue` naming neither an agent nor `off` is reported", () => {
+    const problems = problemsFor({
+      ...SOUND,
+      agents: { on_config_finding: "engineer", on_agent_issue: "start_issue" },
+    });
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain("`agents.on_agent_issue`");
+    expect(problems[0]).toContain("agent-definitions/start_issue.md");
+    expect(problems[0], "and names the edit that starts nobody").toContain("`off`");
   });
 
   // A name that resolves to no definition is the same failure one step later, and
   // it would surface on a workflow reacting to a condition -- the one place nobody
   // is watching.
   test("a required agent key naming no definition is reported", () => {
-    const problems = problemsFor({ ...SOUND, agents: { on_config_finding: "nobody" } });
+    const problems = problemsFor({ ...SOUND, agents: { on_config_finding: "nobody", on_agent_issue: "atomaton" } });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("agent-definitions/nobody.md");
   });
@@ -242,7 +271,7 @@ describe("names that have to resolve to a file", () => {
   // one that resolves to two things. `/stop` is read as a control command before the
   // agent namespace is consulted, so `stop.md` could never be invoked.
   test("an agent named after a control command is reported", () => {
-    const problems = configProblems({ ...facts(SOUND), agentNames: ["engineer", "reviewer", "stop"] });
+    const problems = configProblems({ ...facts(SOUND), agentNames: ["engineer", "atomaton", "reviewer", "stop"] });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("agent-definitions/stop.md");
     expect(problems[0]).toContain("/stop");
@@ -282,7 +311,7 @@ describe("names that have to resolve to a file", () => {
     const problems = problemsFor({
       ...SOUND,
       update: { on_new_release: "pr-agent" },
-      agents: { on_config_finding: "engineer", on_update_conflict: "nobody" },
+      agents: { on_config_finding: "engineer", on_agent_issue: "atomaton", on_update_conflict: "nobody" },
     });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("agent-definitions/nobody.md");
@@ -313,7 +342,10 @@ describe("names that have to resolve to a file", () => {
   // Checked with the mode off as well: the name is read the moment somebody turns the
   // mode on, and a name that resolves to nothing is the same failure then.
   test("an agent named for a mode that is off is still checked", () => {
-    const problems = problemsFor({ ...SOUND, agents: { on_config_finding: "engineer", on_update_conflict: "nobody" } });
+    const problems = problemsFor({
+      ...SOUND,
+      agents: { on_config_finding: "engineer", on_agent_issue: "atomaton", on_update_conflict: "nobody" },
+    });
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("`agents.on_update_conflict`");
   });

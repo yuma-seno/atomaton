@@ -25,6 +25,10 @@ describe("config.yaml", () => {
     // thread to read a name from, so an absent key is a run for nobody. The
     // template ships one so an adopter has a working example to rename.
     expect(c.agents?.on_config_finding).toBe("engineer");
+    // Shipped on, not off: an issue an agent files during a run is a defect or a
+    // decision, and arriving with nobody on it is the gap the key closes. `off` is
+    // a project's choice, and the template is the working example it starts from.
+    expect(c.agents?.on_agent_issue).toBe("atomaton");
     // Shipped default: an agent may merge when nothing else objects (#218).
     expect(c.merge?.policy).toBe("auto");
     // And the shipped release mode takes the release itself: a newer release is
