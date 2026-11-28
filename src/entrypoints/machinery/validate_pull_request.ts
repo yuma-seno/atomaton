@@ -76,20 +76,35 @@
  * checks and hands it back WITHOUT dispatching CI — there is nothing to learn from
  * running a pipeline against a deliverable that cannot be loaded.
  *
+ * ## The head tree is read for conflict markers
+ *
+ * `--root` is the pull request's own tree, which the validate workflow checks out as
+ * `pr-head` beside the machinery. A pull request that collided with its base carries
+ * git's markers in its head until somebody resolves them, and every check that reads
+ * those files fails on them -- a red that GitHub reports like any other, so what a
+ * person sees is a failed run and no reason. One comment names the paths instead, and
+ * the red, the checks and the verdict are exactly what they were without it (#671).
+ *
+ * Only the files the pull request changed are read (`markerBearingPaths` says why),
+ * and only once per commit: the notice carries the commit it was written for.
+ *
  * Usage:
  *   validate_pull_request.ts --repo owner/name --number N --branch atomaton/issue-N
- *     --workflow ci.yml --def-dir DIR --deliverable-report FILE [--timeout-seconds 1800]
+ *     --workflow ci.yml --def-dir DIR --deliverable-report FILE [--root pr-head]
+ *     [--timeout-seconds 1800]
  */
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { contextsPassed, decideValidationOutcome } from "../../domain/work/pr-validation.ts";
 import { dispatchWorkflow, gh, ghRead } from "../../adapters/github/gh.ts";
 import { readBranchRules } from "../../adapters/github/branch-rules.ts";
+import { readChangedFiles } from "../../adapters/github/merge-signals.ts";
 import { readPullRequest } from "../../adapters/github/pull-request.ts";
-import { LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
+import { CONFLICT_MARKERS_TAG, LLM_CONTEXT_TAG, ORIGIN_AGENT_TAG } from "../../adapters/github/tags.ts";
 import type { ThreadHold } from "../../domain/work/thread.ts";
 import type { ThreadRequest } from "../../adapters/github/thread.ts";
-import { latestRequestOn } from "../../adapters/github/thread.ts";
+import { commentBodies, latestRequestOn } from "../../adapters/github/thread.ts";
 import { hasAgentDefinition } from "./extract_directive.ts";
 import { isTrue } from "./lib/flags.ts";
 import { defineScript } from "./lib/script-ref.ts";
@@ -119,6 +134,16 @@ export interface ValidatePullRequestArgs {
    * reported as one that passed. Same reasoning as `required.known` below.
    */
   "deliverable-report": string;
+  /**
+   * The pull request's own tree as the validate workflow checked it out under
+   * `pr-head`, or "" when the caller passed none.
+   *
+   * Read for conflict markers and nothing else. Its absence is not "no markers" --
+   * it is a workflow older than this script, since the two ship in the same release
+   * -- so nothing is read and the log says so.
+   * See `notifyConflictMarkers`.
+   */
+  root?: string;
   /**
    * Whether a person asked for this run, rather than an agent.
    *
@@ -395,6 +420,120 @@ function notifyCiWaiting(repo: string, number: string, askedByPerson: boolean, r
   if (posted.code) log(`WARN could not post the CI-waiting comment: ${posted.stderr}`);
 }
 
+/** How many paths the conflict-marker notice names before it counts the rest. */
+const MAX_LISTED = 15;
+
+/**
+ * The paths among `files` whose content still holds an unresolved git conflict.
+ *
+ * All three of git's lines, each at column 0 and in the order it writes them:
+ * `<<<<<<<` opens a collision, `=======` splits the two sides, `>>>>>>>` closes it.
+ * Column 0 is what makes this a detector rather than a search for the word: this
+ * repository's own tests write a marker trio out inside a string literal or behind
+ * an opening quote (`mcp.test.ts`, `run_environment_setup.test.ts`), and every one
+ * of those is a sample rather than a tree that failed to merge.
+ */
+export function markerBearingPaths(files: readonly { path: string; content: string }[]): string[] {
+  return files.filter((file) => holdsConflict(file.content)).map((file) => file.path);
+}
+
+/** Whether `content` holds one of git's marker trios, at column 0 and in order. */
+function holdsConflict(content: string): boolean {
+  let opened = false;
+  let split = false;
+  for (const line of content.split(/\r?\n/)) {
+    if (!opened) {
+      if (line.startsWith("<<<<<<< ")) opened = true;
+      continue;
+    }
+    if (!split) {
+      if (line === "=======") split = true;
+      continue;
+    }
+    if (line.startsWith(">>>>>>> ")) return true;
+  }
+  return false;
+}
+
+/**
+ * The paths this pull request changes, or null when the list could not be read.
+ *
+ * The narrowing that makes the scan trustworthy, and not an optimisation. A marker
+ * reaches the head tree only through a merge of this pull request's own base into
+ * its branch, so a path this pull request does not change cannot be carrying one it
+ * introduced -- while the head tree also holds every document and test this
+ * repository already has, where a marker in the text is a sample. Scanning the tree
+ * would report those on every pull request forever.
+ *
+ * `removed` is dropped: what gets read is the file that is on disk. The read itself
+ * is `merge-signals.ts`'s -- one endpoint, one paging loop, one parse -- and only the
+ * answer to a failed read is this caller's, which is to say nothing rather than to
+ * block.
+ */
+function changedPaths(repo: string, number: string): string[] | null {
+  const changed = readChangedFiles(repo, Number(number));
+  if (changed.problem) {
+    log(`${changed.problem}; any conflict markers go unreported`);
+    return null;
+  }
+  return changed.files.filter((file) => file.status !== "removed").map((file) => file.path);
+}
+
+/**
+ * Say once, on the pull request, that its head tree still holds conflict markers.
+ *
+ * The reason for a red that no check can state about itself, and the one thing this
+ * adds: the red, the checks and the verdict are what they would be without it, which
+ * is why the caller may catch a failure from here.
+ *
+ * Once per commit: `create_pr`, `commit_and_push` and a person's `/agent` each start
+ * a validation of the same head, so the body carries the commit it was written for
+ * and the second run finds it in the thread. A resolved tree is a new commit with no
+ * markers, and posts nothing.
+ */
+function notifyConflictMarkers(repo: string, number: string, headSha: string, root: string): void {
+  if (!root) {
+    log("no --root, so the head tree was not read for conflict markers");
+    return;
+  }
+  const changed = changedPaths(repo, number);
+  if (changed === null) {
+    log("could not read the files this pull request changes; any conflict markers go unreported");
+    return;
+  }
+  const files = changed
+    .map((path) => ({ path, file: join(root, path) }))
+    .filter(({ file }) => existsSync(file) && statSync(file).isFile())
+    .map(({ path, file }) => ({ path, content: readFileSync(file, "utf8") }));
+  const paths = markerBearingPaths(files);
+  if (paths.length === 0) return;
+
+  // Whether this commit already said so. A thread that cannot be read leaves the
+  // notice off: a duplicate is the thing this check exists to prevent, and the red it
+  // would explain is red with or without it.
+  const already = commentBodies(repo, number).some((body) => CONFLICT_MARKERS_TAG.readProse(body) === headSha);
+  if (already) {
+    log(`conflict markers already reported on ${headSha.slice(0, 7)}`);
+    return;
+  }
+
+  const listed = paths.slice(0, MAX_LISTED).map((path) => `- \`${path}\``);
+  if (paths.length > MAX_LISTED) listed.push(`- and ${paths.length - MAX_LISTED} more`);
+  const body = [
+    LLM_CONTEXT_TAG.write("include"),
+    CONFLICT_MARKERS_TAG.write(headSha),
+    "Atomaton: this pull request's head still holds git conflict markers, so a red on this commit is that " +
+      "and not a verdict on the work. A check that reads these files fails on them, whatever is built from them.",
+    "",
+    ...listed,
+    "",
+    "Resolve them and push: the next validation judges the resolved tree, and this comment is written once per commit.",
+  ].join("\n");
+  const posted = gh("issue", "comment", number, "--repo", repo, "--body", body);
+  if (posted.code) log(`WARN could not post the conflict-marker comment: ${posted.stderr}`);
+  else log(`reported conflict markers in ${paths.length} path(s) on ${headSha.slice(0, 7)}`);
+}
+
 /**
  * Dispatch CI and wait for it, or reuse a run that already exists, returning what
  * it concluded.
@@ -531,6 +670,7 @@ function main(): void {
       workflow: { type: "string" },
       "def-dir": { type: "string" },
       "deliverable-report": { type: "string" },
+      root: { type: "string" },
       "asked-by-person": { type: "string" },
       "timeout-seconds": { type: "string" },
     },
@@ -615,6 +755,16 @@ function main(): void {
       `::warning::${baseRef} requires no status checks, so CI results gate nothing here. ` +
         "Import .github/atomaton/rulesets/main.json if that was not intended.",
     );
+  }
+
+  // Before CI is asked anything, because it is about the tree CI is asked to run
+  // against: a red that follows from an unresolved merge is worth explaining even to
+  // a run that will not start. Caught rather than propagated -- this notice decides no
+  // verdict, and the checks written below must not be lost to a failed read.
+  try {
+    notifyConflictMarkers(repo, values.number ?? "", headSha, values.root ?? "");
+  } catch (e) {
+    log(`could not look for conflict markers in the head tree: ${(e as Error).message}`);
   }
 
   // Not dispatched at all when the deliverable itself is inconsistent. CI would

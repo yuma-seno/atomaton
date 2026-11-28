@@ -127,6 +127,10 @@ const validateStep = new TypedOutputsStep(
       "def-dir": `${MACHINERY_ROOT}/${AGENT_DEFINITIONS_DIR}`,
       "asked-by-person": "${{ inputs.asked_by_person }}",
       "deliverable-report": DELIVERABLE_REPORT,
+      // The head branch as data, for the conflict-marker notice: a pull request whose
+      // merge collided carries the markers until somebody resolves them, and the red
+      // that follows from them is the one thing a check cannot say about itself.
+      root: PR_HEAD_DIR,
     })}\n`,
   },
   ["next_agent", "conclusion", "verdict_passed", "summary"] as const,

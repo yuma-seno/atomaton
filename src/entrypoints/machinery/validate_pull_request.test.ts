@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { FAKE_GH_IMPL } from "./testing/fake-gh-env.ts";
-import { LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
+import { CONFLICT_MARKERS_TAG, LLM_CONTEXT_TAG } from "../../adapters/github/tags.ts";
 import { parseGithubOutput, removeTemp, runWithFakeGh, scriptPath, type FakeGhRule } from "./testing/harness.ts";
-import { findExistingCiRun, pickDispatchedRun } from "./validate_pull_request.ts";
+import { findExistingCiRun, markerBearingPaths, pickDispatchedRun } from "./validate_pull_request.ts";
 
 type Run = Parameters<typeof pickDispatchedRun>[0][number];
 type CiRun = Parameters<typeof findExistingCiRun>[0][number];
@@ -479,5 +479,216 @@ describe("notifyCiWaiting, through the whole script", () => {
       expect(v.out.conclusion).toBe("success");
       expect(v.out.verdict_passed).toBe("true");
     }, WAIT);
+  });
+});
+
+// Git's three marker lines, built rather than written out: this file is itself a
+// changed path on the pull request that adds it, and the detector must not see a
+// conflict in the tests that describe one.
+const OPEN = `${"<".repeat(7)} HEAD`;
+const SPLIT = "=".repeat(7);
+const CLOSE = `${">".repeat(7)} atomaton/issue-7`;
+
+/** A merged-but-unresolved file, as git leaves it: three lines, each at column 0. */
+const trio = (ours = "ours", theirs = "theirs"): string => [OPEN, ours, SPLIT, theirs, CLOSE].join("\n") + "\n";
+
+describe("markerBearingPaths", () => {
+  test("reports a file holding git's trio", () => {
+    expect(markerBearingPaths([{ path: "src/a.ts", content: `const a = 1;\n${trio()}` }])).toEqual(["src/a.ts"]);
+  });
+
+  test("does not report markers quoted inside source text", () => {
+    const quoted = `expect(conflicted).toContain("${OPEN} ");\n  const sample = ["${OPEN}", "${SPLIT}", "${CLOSE}"];\n`;
+    expect(markerBearingPaths([{ path: "src/x.test.ts", content: quoted }])).toEqual([]);
+  });
+
+  test("does not report a closing marker with no separator before it", () => {
+    expect(markerBearingPaths([{ path: "docs/a.md", content: [OPEN, "ours", CLOSE].join("\n") }])).toEqual([]);
+  });
+
+  test("reports every file that holds one, and only those", () => {
+    const files = [
+      { path: "a.ts", content: trio("ours", "theirs") },
+      { path: "b.ts", content: "clean\n" },
+      { path: "c.md", content: trio("mine", "yours") },
+    ];
+    expect(markerBearingPaths(files)).toEqual(["a.ts", "c.md"]);
+  });
+
+  /**
+   * The same claim against the files this repository actually holds. A fixture that
+   * starts writing a trio at column 0 fails here, before it turns into a comment on
+   * every pull request that touches that file.
+   */
+  test("the marker text this repository's own tests carry is not a conflict", () => {
+    const fixtures = ["../tools/mcp/mcp.test.ts", "run_environment_setup.test.ts", "update_atomaton.test.ts"];
+    const files = fixtures.map((path) => ({ path, content: readFileSync(join(import.meta.dir, path), "utf8") }));
+    expect(markerBearingPaths(files)).toEqual([]);
+  });
+});
+
+/**
+ * The notice on the pull request, end to end: `--root` is the head tree the validate
+ * workflow checks out, the changed-file list is what narrows the scan, and the thread
+ * is what decides whether this commit has already been announced.
+ *
+ * CI has concluded on this head, so the run is reused: nothing is dispatched and no
+ * poll loop runs. What these cases turn on is the tree and the thread.
+ */
+describe("the conflict-marker notice, through the whole script", () => {
+  const HEAD = "abc123def4567890abcdef1234567890abcdef12";
+
+  interface Validation {
+    /** Every comment posted, as the `--body` each `gh issue comment` carried. */
+    comments: string[];
+    /** The script's own log, where its warnings and notices land. */
+    stderr: string;
+    out: Record<string, string>;
+  }
+
+  function validateHead(opts: {
+    /** path -> content, written into the tree `--root` names. */
+    head: Record<string, string>;
+    /** `[status, path]` as `pulls/<n>/files` reports them. */
+    changed: [string, string][];
+    /** The comments already on the pull request. */
+    thread?: { body: string }[];
+    /** Answers the changed-file list instead, for the unreadable arm. */
+    changedRead?: FakeGhRule;
+    /** false to run the script the way the workflow runs it today: with no `--root`. */
+    withRoot?: boolean;
+  }): Validation {
+    const rules: FakeGhRule[] = [
+      opts.changedRead ?? {
+        match: ["pulls/7/files"],
+        stdout: opts.changed.map(([status, path]) => JSON.stringify([status, path])).join("\n"),
+      },
+      {
+        match: ["actions/runs?head_sha="],
+        stdout: JSON.stringify({
+          total_count: 1,
+          workflow_runs: [
+            {
+              id: 4242,
+              status: "completed",
+              conclusion: "success",
+              head_sha: HEAD,
+              path: ".github/workflows/ci.yml",
+              created_at: "2099-01-01T00:00:00Z",
+              event: "workflow_dispatch",
+            },
+          ],
+        }),
+      },
+      // First-match-wins in the fake, and the comments URL contains `issues/7`.
+      { match: ["repos/o/r/issues/7/comments"], stdout: JSON.stringify(opts.thread ?? []) },
+      { match: ["repos/o/r/issues/7"], stdout: "just a body" },
+      { match: ["pr", "view", "7", "headRefOid"], stdout: JSON.stringify({ headRefOid: HEAD, baseRefName: "main" }) },
+      { match: ["pr", "view", "7", "body"], stdout: JSON.stringify({ body: "" }) },
+      { match: ["repos/o/r/rules/branches/main"], stdout: "[]" },
+    ];
+    const dir = mkdtempSync(join(tmpdir(), "atomaton-conflict-"));
+    try {
+      const root = join(dir, "pr-head");
+      for (const [path, content] of Object.entries(opts.head)) {
+        mkdirSync(dirname(join(root, path)), { recursive: true });
+        writeFileSync(join(root, path), content);
+      }
+      const report = join(dir, "deliverable-report");
+      writeFileSync(report, "");
+      const defDir = join(dir, "agent-definitions");
+      mkdirSync(defDir);
+      const outputFile = join(dir, "out");
+      writeFileSync(outputFile, "");
+      const result = runWithFakeGh(
+        scriptPath("validate_pull_request.ts"),
+        [
+          "--repo", "o/r",
+          "--number", "7",
+          "--branch", "atomaton/issue-7",
+          "--workflow", "ci.yml",
+          "--def-dir", defDir,
+          "--deliverable-report", report,
+          "--timeout-seconds", "1",
+          ...(opts.withRoot === false ? [] : ["--root", root]),
+        ],
+        { rules, env: { GITHUB_OUTPUT: outputFile } },
+      );
+      if (result.status !== 0) throw new Error(`script failed: ${result.stderr}`);
+      return {
+        comments: result.ghCalls
+          .filter((call) => call[0] === "issue" && call[1] === "comment")
+          .map((call) => call[call.indexOf("--body") + 1] ?? ""),
+        stderr: result.stderr,
+        out: parseGithubOutput(readFileSync(outputFile, "utf8")),
+      };
+    } finally {
+      removeTemp(dir);
+    }
+  }
+
+  const notice = (bodies: string[]): string => bodies.find((body) => body.includes("conflict markers")) ?? "";
+
+  test("a head holding markers gets one comment, naming the paths", () => {
+    const v = validateHead({
+      head: { "src/broken.ts": trio(), "src/fine.ts": "const a = 1;\n" },
+      changed: [["modified", "src/broken.ts"], ["modified", "src/fine.ts"]],
+    });
+    expect(v.comments.length).toBe(1);
+    expect(notice(v.comments)).toContain("`src/broken.ts`");
+    expect(notice(v.comments)).not.toContain("src/fine.ts");
+    expect(notice(v.comments)).toContain(CONFLICT_MARKERS_TAG.write(HEAD));
+    // The verdict does not move. The red is CI's; this says what caused it.
+    expect(v.out.conclusion).toBe("success");
+  });
+
+  test("the same commit is not announced twice", () => {
+    const v = validateHead({
+      head: { "src/broken.ts": trio() },
+      changed: [["modified", "src/broken.ts"]],
+      thread: [{ body: `${CONFLICT_MARKERS_TAG.write(HEAD)}\nAtomaton: this pull request's head still holds git conflict markers` }],
+    });
+    expect(v.comments).toEqual([]);
+    expect(v.stderr).toContain("already reported");
+  });
+
+  test("a resolved tree says nothing", () => {
+    const v = validateHead({ head: { "src/fixed.ts": "const a = 1;\n" }, changed: [["modified", "src/fixed.ts"]] });
+    expect(v.comments).toEqual([]);
+    expect(v.out.conclusion).toBe("success");
+  });
+
+  test("a changed file that only quotes the markers is not a conflict", () => {
+    const v = validateHead({
+      head: { "src/quoted.test.ts": `expect(text).toContain("${OPEN} ");\n` },
+      changed: [["modified", "src/quoted.test.ts"]],
+    });
+    expect(v.comments).toEqual([]);
+  });
+
+  test("a file the pull request does not change is not reported, markers or not", () => {
+    const v = validateHead({ head: { "src/broken.ts": trio() }, changed: [["modified", "src/elsewhere.ts"]] });
+    expect(v.comments).toEqual([]);
+  });
+
+  test("no --root leaves the tree unread and the run alone", () => {
+    const v = validateHead({
+      head: { "src/broken.ts": trio() },
+      changed: [["modified", "src/broken.ts"]],
+      withRoot: false,
+    });
+    expect(v.comments).toEqual([]);
+    expect(v.stderr).toContain("no --root");
+    expect(v.out.conclusion).toBe("success");
+  });
+
+  test("a changed-file list that cannot be read posts nothing and decides nothing", () => {
+    const v = validateHead({
+      head: { "src/broken.ts": trio() },
+      changed: [],
+      changedRead: { match: ["pulls/7/files"], code: 1, stdout: "HTTP 404" },
+    });
+    expect(v.comments).toEqual([]);
+    expect(v.out.conclusion).toBe("success");
   });
 });

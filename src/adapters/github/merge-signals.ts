@@ -104,7 +104,7 @@ const STATUS_MAP: Record<string, FileStatus> = {
  */
 const NOT_A_CHANGE = new Set(["unchanged"]);
 
-interface ChangedFilesRead {
+export interface ChangedFilesRead {
   readonly files: readonly ChangedFile[];
   /** Why the read cannot be trusted, or "" when it can. */
   readonly problem: string;
@@ -117,12 +117,20 @@ interface ChangedFilesRead {
  * what each failure costs. An unreadable rule list only makes a refusal less
  * specific; an unreadable file list, treated as empty, would let an agent merge
  * exactly the change the governance gate and every declared merge gate exist to
- * stop. So a failure here comes back as a problem, and a problem blocks.
+ * stop. So a failure here comes back as a problem, and the caller that gates on it
+ * blocks.
  *
- * One read serves both gates. They ask different questions of the same list, and
+ * Not this module's private read, because a second caller asks the same endpoint for
+ * a different reason: `validate_pull_request.ts` narrows its conflict-marker scan to
+ * the files the pull request changed, and two spellings of `pulls/<n>/files` would be
+ * two paging loops and two parse failures to keep in step
+ * (`tests/contract/pr-read-sites.test.ts`). The POLICY stays with each caller — here
+ * a problem blocks a merge, there it withholds a comment.
+ *
+ * One read serves both gates here. They ask different questions of the same list, and
  * two calls would be two chances for one of them to silently see nothing.
  */
-function readChangedFiles(repo: string, num: number): ChangedFilesRead {
+export function readChangedFiles(repo: string, num: number): ChangedFilesRead {
   // `--jq` rather than parsing the response: with `--paginate` the pages arrive
   // as separate JSON documents, which `JSON.parse` cannot read, and dropping
   // `--paginate` would silently stop at 100 files — a large pull request could
@@ -154,7 +162,6 @@ function readChangedFiles(repo: string, num: number): ChangedFilesRead {
     '.[] | [.status, .filename, (.previous_filename // "")] | @json',
   );
   if (code) {
-    log(`WARN could not read changed files for #${num}; treating the merge as a person's`);
     return { files: [], problem: `the changed files of #${num} could not be read` };
   }
 
@@ -322,6 +329,7 @@ export function gatherMergeSignals(
   if (!required.known) log(`WARN ${required.why}; blockers will be less specific`);
 
   const changed = readChangedFiles(repo, num);
+  if (changed.problem) log(`WARN ${changed.problem}; treating the merge as a person's`);
   const gates = getMergeGates();
   const gateProblems = [...gates.problems, ...governedPathProblems()];
   if (changed.problem) gateProblems.push(changed.problem);
