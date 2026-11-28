@@ -122,6 +122,15 @@ A project that never sets `pr-agent` never needs this key.
 path is it asking a person, and a mode decides what happens when two edits actually
 collide — not who answers a question the plan refused to answer.
 
+A conflicted path under `.github/workflows/` is a person's, not the agent's: GitHub
+refuses a workflow file written with a token that holds no `workflow` scope, and the
+agent's holds none. The agent is told this and started anyway, because the conflicts
+are the input it resolves from — it leaves those markers where they are, resolves the
+rest, and names the workflow paths in its report. A pull request whose conflicts mix
+the two kinds therefore stops half-resolved: the ordinary files for the agent, the
+workflow files for a person. Nothing here withholds a path from the agent before it
+has read the conflict.
+
 ## `base_branch`
 
 Where agent branches start from and where their pull requests target. Empty means
@@ -219,8 +228,12 @@ request with markers in the files, where resolving it is a person's; its body na
 the files.
 
 `pr-agent` is `pr` plus `agents.on_update_conflict` above, started on that pull
-request. It resolves the markers and stops there: the run that started the update has
-already ended, the checks run on the resolved tree, and the merge is a person's.
+request. It resolves the markers it can and stops there: a conflicted path under
+`.github/workflows/` cannot be written with the agent's token, so it is left for a
+person and named in the agent's report — see
+[`agents.on_update_conflict`](#agentson_update_conflict). The run that started the
+update has already ended, the checks run on the resolved tree, and the merge is a
+person's.
 
 This is the mode this template ships, the name shipped beside it as one pair.
 
