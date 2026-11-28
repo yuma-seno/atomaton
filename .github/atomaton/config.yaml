@@ -165,6 +165,7 @@ merge:
 # which ones are.
 update:
   on_new_release: issue
+  detection_scope: all
 
 
 # When a chain of runs stops and asks a person.
