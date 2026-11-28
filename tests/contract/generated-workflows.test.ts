@@ -920,6 +920,12 @@ describe("generated workflows", () => {
 
     const validate = steps.find((step) => step.run?.includes("validate_pull_request.ts"));
     expect(validate?.run, "the verdict never reaches the script that acts on it").toContain("--deliverable-report");
+    // The marker scan reads the same tree, and it must be the pull request's: a scan of
+    // the machinery checkout would find nothing on every pull request, so the "waiting
+    // for resolution" comment would never be posted and nothing would say so.
+    expect(validate?.run, "the marker scan never reads the pull request's tree").toContain(
+      `--head-tree "${headCheckout?.with?.path}"`,
+    );
   });
 
   /**
